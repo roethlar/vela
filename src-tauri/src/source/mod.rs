@@ -1,0 +1,161 @@
+//! Media-source abstraction. Each backend (Plex, Jellyfin/Emby, and a local
+//! source) implements [`MediaSource`] and is registered in the [`SourceRegistry`].
+//! Commands talk to the registry, not to any one backend, so the UI can present
+//! a unified library while still being able to scope to a single source.
+
+use async_trait::async_trait;
+use serde::Serialize;
+
+pub mod jellyfin;
+pub mod local;
+pub mod metadata;
+pub mod plex;
+
+/// A browsable library/section, tagged with the source it came from.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SectionDto {
+    /// Source-namespaced key (`"<source_id>:<raw>"`); opaque to the frontend.
+    pub key: String,
+    pub title: String,
+    pub section_type: String,
+    pub source_id: String,
+    pub source_name: String,
+}
+
+/// A playable/browsable item (movie, show, season, episode), source-tagged.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ItemDto {
+    /// Source-namespaced key (`"<source_id>:<raw>"`); opaque to the frontend.
+    pub rating_key: String,
+    pub title: String,
+    pub year: Option<u32>,
+    pub summary: Option<String>,
+    pub duration_ms: Option<u64>,
+    pub media_type: Option<String>,
+    pub poster: Option<String>,
+    pub view_offset_ms: Option<u64>,
+    pub index: Option<u32>,
+    pub parent_index: Option<u32>,
+    pub grandparent_title: Option<String>,
+    pub parent_title: Option<String>,
+    pub source_id: String,
+}
+
+/// A home-screen rail of items, source-tagged.
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct HubDto {
+    pub title: String,
+    pub hub_identifier: String,
+    pub hub_type: String,
+    pub items: Vec<ItemDto>,
+    pub source_id: String,
+    pub source_name: String,
+}
+
+/// What `resolve_stream` hands back to the playback layer: the media URL, where
+/// to resume from, and how (if at all) to report progress.
+pub struct StreamResolution {
+    pub url: String,
+    pub resume_ms: u64,
+    pub progress: crate::playback::ProgressTarget,
+}
+
+/// A configured media backend. Methods that *receive* a key get the raw
+/// (un-namespaced) key — the registry strips the `"<source_id>:"` prefix before
+/// dispatching. Methods that *emit* keys must namespace them via [`namespace_key`].
+#[async_trait]
+pub trait MediaSource: Send + Sync {
+    /// Stable, unique id used to namespace keys and route requests.
+    fn id(&self) -> String;
+    /// Human-friendly name for the UI (e.g. the server or folder name).
+    fn name(&self) -> String;
+    /// Backend kind: `"plex"`, `"jellyfin"`, `"emby"`, `"local"`.
+    fn kind(&self) -> &'static str;
+
+    async fn sections(&self) -> Result<Vec<SectionDto>, String>;
+    async fn hubs(&self) -> Result<Vec<HubDto>, String>;
+    async fn items(
+        &self,
+        section_key: &str,
+        section_type: &str,
+        sort: Option<&str>,
+        start: usize,
+        size: usize,
+    ) -> Result<Vec<ItemDto>, String>;
+    async fn search(&self, query: &str) -> Result<Vec<ItemDto>, String>;
+    async fn children(
+        &self,
+        item_key: &str,
+        start: usize,
+        size: usize,
+    ) -> Result<Vec<ItemDto>, String>;
+    async fn resolve_stream(
+        &self,
+        item_key: &str,
+        duration_ms: Option<u64>,
+    ) -> Result<StreamResolution, String>;
+}
+
+/// Build a source-namespaced key. Raw Plex/Jellyfin keys never contain `:`,
+/// so splitting on the first `:` recovers `(source_id, raw)`.
+pub fn namespace_key(source_id: &str, raw: &str) -> String {
+    format!("{source_id}:{raw}")
+}
+
+/// Split a namespaced key into `(source_id, raw_key)`.
+fn split_key(key: &str) -> Option<(&str, &str)> {
+    key.split_once(':')
+}
+
+/// Holds the configured sources and routes requests to them.
+#[derive(Default)]
+pub struct SourceRegistry {
+    sources: Vec<std::sync::Arc<dyn MediaSource>>,
+}
+
+impl SourceRegistry {
+    pub fn is_empty(&self) -> bool {
+        self.sources.is_empty()
+    }
+
+    pub fn all(&self) -> &[std::sync::Arc<dyn MediaSource>] {
+        &self.sources
+    }
+
+    /// Add a source, replacing any existing one with the same id.
+    pub fn upsert(&mut self, source: std::sync::Arc<dyn MediaSource>) {
+        let id = source.id();
+        self.sources.retain(|s| s.id() != id);
+        self.sources.push(source);
+    }
+
+    pub fn get(&self, id: &str) -> Option<std::sync::Arc<dyn MediaSource>> {
+        self.sources.iter().find(|s| s.id() == id).cloned()
+    }
+
+    pub fn remove(&mut self, id: &str) {
+        self.sources.retain(|s| s.id() != id);
+    }
+
+    /// Resolve a namespaced key to its source and the raw (un-prefixed) key.
+    pub fn route(
+        &self,
+        namespaced_key: &str,
+    ) -> Result<(std::sync::Arc<dyn MediaSource>, String), String> {
+        let (id, raw) = split_key(namespaced_key).ok_or("malformed item key")?;
+        let src = self.get(id).ok_or("unknown source for item")?;
+        Ok((src, raw.to_string()))
+    }
+
+    /// Sources to use for a request: a specific one if `source_id` is given,
+    /// else all of them (for the unified/aggregate view).
+    pub fn selected(&self, source_id: Option<&str>) -> Vec<std::sync::Arc<dyn MediaSource>> {
+        match source_id {
+            Some(id) => self.get(id).into_iter().collect(),
+            None => self.sources.clone(),
+        }
+    }
+}

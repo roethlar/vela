@@ -1,0 +1,42 @@
+[package]
+name = "vela"
+version = "0.1.0"
+description = "mpv-backed HDR media client (Plex, Jellyfin, Emby, local)"
+authors = ["Michael Coelho"]
+license = "MIT"
+edition = "2021"
+# Floor driven by std::fs::File::lock (stable 1.89); also uses is_none_or (1.82),
+# Result::inspect_err (1.76), io::Error::other (1.74).
+rust-version = "1.89"
+
+[lib]
+name = "vela_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+quick-xml = { version = "0.31.0", features = ["serialize"] }
+serde-xml-rs = "0.6.0"
+url = "2.5"
+uuid = { version = "1", features = ["v4"] }
+directories = "5.0"
+qrcode = { version = "0.14", default-features = false, features = ["svg"] }
+async-trait = "0.1"
+tauri-plugin-dialog = "2"
+base64 = "0.22"
+
+# Smaller, faster release binary for a desktop app. (Debug builds, which the
+# Tauri dev workflow uses, are unaffected.)
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

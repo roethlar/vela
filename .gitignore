@@ -1,0 +1,20 @@
+/target
+
+# Tauri + frontend
+node_modules
+/build
+/.svelte-kit
+/package
+src-tauri/target
+src-tauri/gen
+.env
+.env.*
+vite.config.js.timestamp-*
+
+# Editor/agent tool config
+.grok/
+.serena/
+
+# External code-review outputs (transient agent artifacts; ISSUES.md is the
+# curated triage queue and stays tracked)
+docs/*_review.md
