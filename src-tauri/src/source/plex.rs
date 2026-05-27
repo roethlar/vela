@@ -88,7 +88,9 @@ impl PlexSource {
             duration_ms: v.duration,
             media_type: v.media_type,
             view_offset_ms: v.view_offset,
-            played: v.view_count.map(|c| c > 0),
+            // Plex omits viewCount for unwatched items, so absent == 0 == unwatched
+            // (Some(false)), never "unknown" — the source always knows watched state.
+            played: Some(v.view_count.unwrap_or(0) > 0),
             index: v.index,
             parent_index: v.parent_index,
             grandparent_title: v.grandparent_title,
