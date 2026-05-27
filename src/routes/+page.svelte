@@ -444,7 +444,11 @@
     closeMenu();
     try {
       await invoke("set_watched", { ratingKey: item.ratingKey, played });
-      item.played = played; // reflect immediately (deep-reactive $state)
+      // Reflect immediately (deep-reactive $state). Scrobble/unscrobble both clear
+      // the resume position, so drop the in-progress bar too — leaving a clean
+      // watched (✓) or unwatched state instead of a contradictory bar + badge.
+      item.played = played;
+      item.viewOffsetMs = 0;
     } catch (e) {
       error = String(e);
     }
@@ -529,14 +533,15 @@
     <button
       class="poster"
       class:landscape={item.mediaType === "episode" || item.mediaType === "video"}
-      class:watched={item.played === true}
+      class:watched={item.played === true && pct === null}
       onclick={() => open(item)}
       oncontextmenu={(e) => openMenu(e, item)}
       title={baseName}
       aria-label={label}
     >
       <div class="art">
-        {#if item.played === true}
+        {#if item.played === true && pct === null}
+          <!-- Fully watched: marked played AND not mid-resume (pct is the resume %). -->
           <div class="watchedbadge" aria-hidden="true">✓</div>
         {/if}
         {#if item.poster && !failedPosters.has(item.ratingKey)}
@@ -655,12 +660,15 @@
   {@const mi = menu.item}
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="menubackdrop" role="presentation" onclick={closeMenu} oncontextmenu={(e) => { e.preventDefault(); closeMenu(); }}></div>
+  {@const inProgress = (mi.viewOffsetMs ?? 0) > 0}
+  {@const fullyWatched = mi.played === true && !inProgress}
   <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px;" role="menu">
     <button role="menuitem" onclick={() => { closeMenu(); play(mi); }}>Play</button>
-    {#if mi.played === true}
-      <button role="menuitem" onclick={() => setWatched(mi, false)}>Mark unwatched</button>
-    {:else if mi.played === false}
+    {#if mi.played != null && !fullyWatched}
       <button role="menuitem" onclick={() => setWatched(mi, true)}>Mark watched</button>
+    {/if}
+    {#if mi.played != null && (mi.played === true || inProgress)}
+      <button role="menuitem" onclick={() => setWatched(mi, false)}>Mark unwatched</button>
     {/if}
   </div>
 {/if}
