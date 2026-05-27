@@ -36,6 +36,7 @@
     parentTitle?: string;
     index?: number;
     parentIndex?: number;
+    played?: boolean | null;
   };
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
   type Crumb = { title: string; ratingKey: string | null };
@@ -427,6 +428,27 @@
       invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     }
   }
+
+  // Right-click context menu for per-item actions.
+  let menu = $state<{ x: number; y: number; item: Item } | null>(null);
+  function openMenu(e: MouseEvent, item: Item) {
+    e.preventDefault();
+    // Clamp so the menu stays on screen near the right/bottom edges.
+    menu = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 160), item };
+  }
+  function closeMenu() {
+    menu = null;
+  }
+
+  async function setWatched(item: Item, played: boolean) {
+    closeMenu();
+    try {
+      await invoke("set_watched", { ratingKey: item.ratingKey, played });
+      item.played = played; // reflect immediately (deep-reactive $state)
+    } catch (e) {
+      error = String(e);
+    }
+  }
 </script>
 
 <div class="app">
@@ -507,11 +529,16 @@
     <button
       class="poster"
       class:landscape={item.mediaType === "episode" || item.mediaType === "video"}
+      class:watched={item.played === true}
       onclick={() => open(item)}
+      oncontextmenu={(e) => openMenu(e, item)}
       title={baseName}
       aria-label={label}
     >
       <div class="art">
+        {#if item.played === true}
+          <div class="watchedbadge" aria-hidden="true">✓</div>
+        {/if}
         {#if item.poster && !failedPosters.has(item.ratingKey)}
           <img
             src={posterSrc(item.poster)}
@@ -621,6 +648,22 @@
     </footer>
   {/if}
 </div>
+
+<svelte:window onkeydown={(e) => e.key === "Escape" && closeMenu()} />
+
+{#if menu}
+  {@const mi = menu.item}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="menubackdrop" role="presentation" onclick={closeMenu} oncontextmenu={(e) => { e.preventDefault(); closeMenu(); }}></div>
+  <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px;" role="menu">
+    <button role="menuitem" onclick={() => { closeMenu(); play(mi); }}>Play</button>
+    {#if mi.played === true}
+      <button role="menuitem" onclick={() => setWatched(mi, false)}>Mark unwatched</button>
+    {:else if mi.played === false}
+      <button role="menuitem" onclick={() => setWatched(mi, true)}>Mark watched</button>
+    {/if}
+  </div>
+{/if}
 
 <style>
   .app {
@@ -1041,5 +1084,59 @@
     color: #ffb4b4;
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
+  }
+
+  /* Watched indicator + dimming */
+  .watchedbadge {
+    position: absolute;
+    top: 0.35rem;
+    right: 0.35rem;
+    z-index: 2;
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 50%;
+    background: #e5a00d;
+    color: #1a1205;
+    font-size: 0.8rem;
+    font-weight: 800;
+    line-height: 1.25rem;
+    text-align: center;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+  }
+  .poster.watched .art img,
+  .poster.watched .noart {
+    opacity: 0.55;
+  }
+
+  /* Right-click context menu */
+  .menubackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+  }
+  .ctxmenu {
+    position: fixed;
+    z-index: 41;
+    min-width: 11rem;
+    background: #14181f;
+    border: 1px solid #2a313c;
+    border-radius: 0.5rem;
+    padding: 0.3rem;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+    display: flex;
+    flex-direction: column;
+  }
+  .ctxmenu button {
+    background: none;
+    border: none;
+    color: #e7e9ee;
+    text-align: left;
+    padding: 0.5rem 0.7rem;
+    border-radius: 0.35rem;
+    font-size: 0.85rem;
+    cursor: pointer;
+  }
+  .ctxmenu button:hover {
+    background: #232a34;
   }
 </style>

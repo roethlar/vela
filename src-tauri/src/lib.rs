@@ -245,6 +245,7 @@ pub fn run() {
             commands::get_items,
             commands::search,
             commands::get_children,
+            commands::set_watched,
             commands::play_item,
         ])
         .build(tauri::generate_context!())

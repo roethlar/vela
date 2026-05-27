@@ -88,6 +88,7 @@ impl PlexSource {
             duration_ms: v.duration,
             media_type: v.media_type,
             view_offset_ms: v.view_offset,
+            played: v.view_count.map(|c| c > 0),
             index: v.index,
             parent_index: v.parent_index,
             grandparent_title: v.grandparent_title,
@@ -342,6 +343,24 @@ impl MediaSource for PlexSource {
             resume_ms,
             progress: ProgressTarget::Plex(info),
         })
+    }
+
+    async fn mark_played(&self, item_key: &str, played: bool) -> Result<(), String> {
+        validate_plex_id("item key", item_key)?;
+        let lib = self.ensure_ready().await?;
+        let run = |lib: PlexLibrary| async move {
+            lib.set_played(item_key, played)
+                .await
+                .map(|_| lib)
+                .map_err(|e| e.to_string())
+        };
+        match run(lib).await {
+            Ok(_) => Ok(()),
+            Err(_) => {
+                let lib = self.rediscover().await?;
+                run(lib).await.map(|_| ())
+            }
+        }
     }
 }
 

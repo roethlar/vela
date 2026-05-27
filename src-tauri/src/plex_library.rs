@@ -63,6 +63,7 @@ impl From<PlexDir> for PlexVideo {
             summary: d.summary,
             duration: None,
             view_offset: None,
+            view_count: None,
             thumb: d.thumb,
             added_at: None,
             updated_at: None,
@@ -109,6 +110,8 @@ pub struct PlexVideo {
     pub duration: Option<u64>,
     #[serde(rename = "viewOffset")]
     pub view_offset: Option<u64>,
+    #[serde(rename = "viewCount", default)]
+    pub view_count: Option<u64>,
     #[serde(rename = "thumb")]
     pub thumb: Option<String>,
     #[serde(rename = "addedAt")]
@@ -672,6 +675,27 @@ impl PlexLibrary {
         Some(url)
     }
 
+    /// Mark an item watched (`scrobble`) or unwatched (`unscrobble`) on the server.
+    pub async fn set_played(
+        &self,
+        rating_key: &str,
+        played: bool,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let action = if played { "scrobble" } else { "unscrobble" };
+        let url =
+            format!("{base}/:/{action}?identifier=com.plexapp.plugins.library&key={rating_key}");
+        self.client
+            .get(&url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn fetch_children(
         &self,
         parent_rating_key: &str,
@@ -1117,6 +1141,7 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
         summary: None,
         duration: None,
         view_offset: None,
+        view_count: None,
         thumb: None,
         added_at: None,
         updated_at: None,
@@ -1137,6 +1162,7 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
             b"summary" => v.summary = Some(av(&a)),
             b"duration" => v.duration = av(&a).parse().ok(),
             b"viewOffset" => v.view_offset = av(&a).parse().ok(),
+            b"viewCount" => v.view_count = av(&a).parse().ok(),
             b"thumb" => v.thumb = Some(av(&a)),
             b"year" => v.year = av(&a).parse().ok(),
             b"type" => v.media_type = Some(av(&a)),

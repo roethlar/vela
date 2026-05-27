@@ -136,6 +136,26 @@ impl JellyfinClient {
         resp.json::<T>().await.map_err(|e| e.to_string())
     }
 
+    /// Mark an item played (POST) or unplayed (DELETE) for the current user.
+    async fn set_played(&self, item_id: &str, played: bool) -> Result<(), String> {
+        let url = self.build_url(&["Users", &self.user_id, "PlayedItems", item_id], &[]);
+        let base = if played {
+            self.http.post(&url)
+        } else {
+            self.http.delete(&url)
+        };
+        let mut rb = base.timeout(std::time::Duration::from_secs(15));
+        for (k, v) in self.auth_headers() {
+            rb = rb.header(k, v);
+        }
+        let resp = rb.send().await.map_err(|e| e.to_string())?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(RECONNECT_REQUIRED.to_string());
+        }
+        resp.error_for_status().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Direct-play stream URL (original file, no transcode) for true HDR
     /// passthrough, using the negotiated media source + play session.
     /// NOTE: the api_key rides in the URL (and thus mpv's argv) — accepted as a
@@ -412,6 +432,7 @@ struct BaseItem {
 #[serde(rename_all = "PascalCase")]
 struct UserData {
     playback_position_ticks: Option<i64>,
+    played: Option<bool>,
 }
 
 #[derive(Deserialize)]
@@ -617,6 +638,7 @@ impl JellyfinSource {
             media_type: map_type(item.item_type.as_deref()),
             poster,
             view_offset_ms,
+            played: item.user_data.as_ref().and_then(|u| u.played),
             index: item.index_number,
             parent_index: item.parent_index_number,
             grandparent_title: item.series_name.clone(),
@@ -840,6 +862,10 @@ impl MediaSource for JellyfinSource {
                 headers: self.client.auth_headers(),
             }),
         })
+    }
+
+    async fn mark_played(&self, item_key: &str, played: bool) -> Result<(), String> {
+        self.client.set_played(item_key, played).await
     }
 }
 

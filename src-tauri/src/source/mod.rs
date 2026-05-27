@@ -36,6 +36,9 @@ pub struct ItemDto {
     pub media_type: Option<String>,
     pub poster: Option<String>,
     pub view_offset_ms: Option<u64>,
+    /// Whether the item is marked watched. `None` when the source doesn't report
+    /// it (e.g. local files), so the UI can distinguish "unwatched" from "unknown".
+    pub played: Option<bool>,
     pub index: Option<u32>,
     pub parent_index: Option<u32>,
     pub grandparent_title: Option<String>,
@@ -97,6 +100,12 @@ pub trait MediaSource: Send + Sync {
         item_key: &str,
         duration_ms: Option<u64>,
     ) -> Result<StreamResolution, String>;
+
+    /// Mark an item watched (`played = true`) or unwatched on its source.
+    /// Defaults to a no-op error; sources that support it override this.
+    async fn mark_played(&self, _item_key: &str, _played: bool) -> Result<(), String> {
+        Err("this source doesn't support marking watched state".to_string())
+    }
 }
 
 /// Build a source-namespaced key. Raw Plex/Jellyfin keys never contain `:`,

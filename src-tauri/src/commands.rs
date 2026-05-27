@@ -17,7 +17,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Monotonic build counter and the date that build was cut — bump/set both on
 /// every update (kept here, not in build.rs, since tauri_build restricts when
 /// the build script reruns, which would let a compile-time date go stale).
-const BUILD_NUMBER: u32 = 13;
+const BUILD_NUMBER: u32 = 14;
 const BUILD_DATE: &str = "2026-05-27";
 
 /// Project home, shown (and opened) from the build-info footer.
@@ -1077,6 +1077,18 @@ pub async fn get_children(
     let size = clamp_page_size(size);
     let (src, raw) = state.registry.lock().await.route(&rating_key)?;
     src.children(&raw, start, size).await
+}
+
+/// Mark an item watched/unwatched on its source. Routes by the namespaced key;
+/// the registry lock is released before the (network) call.
+#[tauri::command]
+pub async fn set_watched(
+    rating_key: String,
+    played: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let (src, raw) = state.registry.lock().await.route(&rating_key)?;
+    src.mark_played(&raw, played).await
 }
 
 // ---- playback ------------------------------------------------------------

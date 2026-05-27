@@ -249,6 +249,7 @@ fn base_item(
         media_type: Some(media_type.to_string()),
         poster: None, // local artwork/metadata is P2d
         view_offset_ms: None,
+        played: None, // local files have no server-tracked watched state
         index: None,
         parent_index: None,
         grandparent_title: None,
