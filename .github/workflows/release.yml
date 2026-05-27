@@ -1,0 +1,87 @@
+name: Release
+
+# Builds installable bundles for every target OS. Run it manually from the
+# Actions tab (workflow_dispatch) to get downloadable artifacts, or push a
+# `v*` tag to also attach them to a draft GitHub release.
+#
+# mpv is intentionally NOT bundled — Vela detects it at runtime and prompts the
+# user to install it (copyable command + "Get mpv" link), so these packages stay
+# small and the player stays user-updatable.
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  bundle:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One universal .app/.dmg that runs on both Apple Silicon and Intel.
+          - os: macos-latest
+            target: universal-apple-darwin
+            bundle_dir: src-tauri/target/universal-apple-darwin/release/bundle
+          # Older LTS for a lower glibc floor, so the .deb/.AppImage run widely.
+          - os: ubuntu-22.04
+            target: ''
+            bundle_dir: src-tauri/target/release/bundle
+          - os: windows-latest
+            target: ''
+            bundle_dir: src-tauri/target/release/bundle
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tauri system dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            librsvg2-dev \
+            libappindicator3-dev \
+            patchelf
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          # Both arches for the macOS universal build; harmless empty elsewhere.
+          targets: ${{ matrix.target == 'universal-apple-darwin' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+
+      # Builds the frontend (beforeBuildCommand) + the Rust release binary and
+      # produces the native installers. Unsigned — fine for testing; see notes.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.target && format('--target {0}', matrix.target) || '' }}
+          # Only create/attach a release when triggered by a v* tag.
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Vela {0}', github.ref_name) || '' }}
+          releaseDraft: true
+
+      - name: Upload bundles as workflow artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: vela-${{ matrix.os }}
+          if-no-files-found: ignore
+          path: |
+            ${{ matrix.bundle_dir }}/dmg/*.dmg
+            ${{ matrix.bundle_dir }}/macos/*.app
+            ${{ matrix.bundle_dir }}/appimage/*.AppImage
+            ${{ matrix.bundle_dir }}/deb/*.deb
+            ${{ matrix.bundle_dir }}/rpm/*.rpm
+            ${{ matrix.bundle_dir }}/msi/*.msi
+            ${{ matrix.bundle_dir }}/nsis/*-setup.exe
