@@ -12,12 +12,11 @@ use crate::{AppState, PLEX_SOURCE_ID};
 
 const PRODUCT: &str = "Vela";
 /// Derived from Cargo.toml's `version` so it can't drift from package metadata.
+/// Bumped on EVERY build (see scripts/bump.sh) so each build is uniquely
+/// identifiable — in the window footer and in the bundle filename.
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Monotonic build counter and the date that build was cut — bump/set both on
-/// every update (kept here, not in build.rs, since tauri_build restricts when
-/// the build script reruns, which would let a compile-time date go stale).
-const BUILD_NUMBER: u32 = 15;
+/// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
 const BUILD_DATE: &str = "2026-05-27";
 
 /// Project home, shown (and opened) from the build-info footer.
@@ -45,7 +44,6 @@ pub struct StatusDto {
 #[serde(rename_all = "camelCase")]
 pub struct AppInfoDto {
     version: String,
-    build_number: u32,
     /// UTC date the build was cut (YYYY-MM-DD), from the BUILD_DATE constant.
     build_date: String,
     repo_url: String,
@@ -109,7 +107,6 @@ pub async fn get_status(state: State<'_, AppState>) -> Result<StatusDto, String>
 pub fn get_app_info() -> AppInfoDto {
     AppInfoDto {
         version: VERSION.to_string(),
-        build_number: BUILD_NUMBER,
         build_date: BUILD_DATE.to_string(),
         repo_url: REPO_URL.to_string(),
     }

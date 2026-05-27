@@ -88,7 +88,7 @@
   let copied = $state(false);
 
   // Version/build identity for the footer.
-  type AppInfo = { version: string; buildNumber: number; buildDate: string; repoUrl: string };
+  type AppInfo = { version: string; buildDate: string; repoUrl: string };
   let appInfo = $state<AppInfo | null>(null);
 
   onMount(boot);
@@ -647,8 +647,8 @@
   {/if}
 
   {#if appInfo}
-    <footer class="buildinfo" title="Build {appInfo.buildNumber} · {appInfo.buildDate}">
-      Vela v{appInfo.version} · build {appInfo.buildNumber} · {appInfo.buildDate} ·
+    <footer class="buildinfo" title="Built {appInfo.buildDate}">
+      Vela v{appInfo.version} · {appInfo.buildDate} ·
       <button class="ghlink" onclick={() => openExternal(appInfo!.repoUrl)}>GitHub</button>
     </footer>
   {/if}
