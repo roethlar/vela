@@ -58,9 +58,13 @@ This list merges `ISSUES.md`, the GPT review, and the agent findings for
 13. `done` Fail closed on unexpected Plex link HTTP statuses.
     - `link_begin` and `link_poll` now reject unexpected non-2xx statuses instead of treating them as pending/parseable auth responses.
 
-14. `todo` Move local filesystem browsing off async worker threads.
-    - Local listing/search still performs synchronous filesystem traversal inside async trait methods.
-    - This is lower risk than the network and token issues, but large/slow local mounts can still occupy async workers.
+14. `done` Move local filesystem browsing off async worker threads.
+    - `sections`, `items`, `children`, and `search` now run their synchronous
+      directory walks and sidecar reads on the blocking pool via a `run_blocking`
+      helper (`spawn_blocking`), so slow local disks/mounts no longer occupy async
+      workers.
+    - The blocking task enters the current Tokio runtime handle so the background
+      online-metadata lookups `enrich` spawns continue to work.
 
 15. `partial` Keep token exposure policy explicit.
     - Current branch deliberately accepts token-bearing poster/stream URLs as a local-only exposure.

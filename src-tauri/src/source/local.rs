@@ -86,6 +86,33 @@ impl LocalSource {
             },
         );
     }
+
+    /// A cheap owned clone (folders Vec + cache Arc) to move into a blocking task,
+    /// so the synchronous filesystem walks below don't run on an async worker.
+    fn worker(&self) -> LocalSource {
+        LocalSource {
+            folders: self.folders.clone(),
+            meta: self.meta.clone(),
+        }
+    }
+}
+
+/// Run a synchronous local-filesystem operation on the blocking pool instead of
+/// an async worker thread (slow disks/mounts mustn't occupy the async runtime).
+/// Enters the current Tokio runtime inside the blocking thread so the background
+/// online-metadata lookups that `enrich` kicks off via `tokio::spawn` still work.
+async fn run_blocking<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+    T: Send + 'static,
+{
+    let handle = tokio::runtime::Handle::current();
+    tauri::async_runtime::spawn_blocking(move || {
+        let _enter = handle.enter();
+        f()
+    })
+    .await
+    .map_err(|e| format!("local filesystem task failed: {e}"))?
 }
 
 // ---- filename / structure parsing ---------------------------------------
@@ -266,25 +293,29 @@ impl MediaSource for LocalSource {
     }
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
-        Ok(self
-            .folders
-            .iter()
-            .map(|f| SectionDto {
-                key: namespace_key(LOCAL_SOURCE_ID, &f.path),
-                title: if f.name.is_empty() {
-                    dir_name(Path::new(&f.path))
-                } else {
-                    f.name.clone()
-                },
-                section_type: if f.kind.is_empty() {
-                    detect_kind(Path::new(&f.path)).to_string()
-                } else {
-                    f.kind.clone()
-                },
-                source_id: self.id_str(),
-                source_name: "Local".to_string(),
-            })
-            .collect())
+        let this = self.worker();
+        run_blocking(move || {
+            Ok(this
+                .folders
+                .iter()
+                .map(|f| SectionDto {
+                    key: namespace_key(LOCAL_SOURCE_ID, &f.path),
+                    title: if f.name.is_empty() {
+                        dir_name(Path::new(&f.path))
+                    } else {
+                        f.name.clone()
+                    },
+                    section_type: if f.kind.is_empty() {
+                        detect_kind(Path::new(&f.path)).to_string()
+                    } else {
+                        f.kind.clone()
+                    },
+                    source_id: this.id_str(),
+                    source_name: "Local".to_string(),
+                })
+                .collect())
+        })
+        .await
     }
 
     /// Local contributes no home rails (no resume / recently-added tracking here).
@@ -300,48 +331,57 @@ impl MediaSource for LocalSource {
         start: usize,
         size: usize,
     ) -> Result<Vec<ItemDto>, String> {
-        let root = Path::new(section_key);
-        if self.folder(section_key).is_none() || !root.is_dir() {
-            return Err("unknown local folder".into());
-        }
-        let mut items = Vec::new();
-        if section_type == "show" {
-            // Each immediate subdirectory is a show.
-            for entry in read_dir_sorted(root)
-                .into_iter()
-                .filter(|p| p.is_dir() && self.within_roots(p))
-            {
-                let (title, year) = parse_movie(&dir_name(&entry));
-                let mut item = base_item(&self.id_str(), &entry, title.clone(), year, "show");
-                self.enrich(&mut item, &entry, "show", &title, year, None, None, None);
-                items.push(item);
+        let this = self.worker();
+        let (section_key, section_type, sort) = (
+            section_key.to_string(),
+            section_type.to_string(),
+            sort.map(str::to_string),
+        );
+        run_blocking(move || {
+            let root = Path::new(&section_key);
+            if this.folder(&section_key).is_none() || !root.is_dir() {
+                return Err("unknown local folder".into());
             }
-        } else {
-            // Movies: loose video files, plus subfolders that wrap one movie.
-            for entry in read_dir_sorted(root) {
-                if !self.within_roots(&entry) {
-                    continue;
+            let mut items = Vec::new();
+            if section_type == "show" {
+                // Each immediate subdirectory is a show.
+                for entry in read_dir_sorted(root)
+                    .into_iter()
+                    .filter(|p| p.is_dir() && this.within_roots(p))
+                {
+                    let (title, year) = parse_movie(&dir_name(&entry));
+                    let mut item = base_item(&this.id_str(), &entry, title.clone(), year, "show");
+                    this.enrich(&mut item, &entry, "show", &title, year, None, None, None);
+                    items.push(item);
                 }
-                let (file, title, year) = if entry.is_file() && is_video(&entry) {
-                    let (t, y) = parse_movie(&file_stem(&entry));
-                    (entry.clone(), t, y)
-                } else if entry.is_dir() {
-                    match largest_video_in(&entry) {
-                        Some(file) => {
-                            let (t, y) = parse_movie(&dir_name(&entry));
-                            (file, t, y)
-                        }
-                        None => continue,
+            } else {
+                // Movies: loose video files, plus subfolders that wrap one movie.
+                for entry in read_dir_sorted(root) {
+                    if !this.within_roots(&entry) {
+                        continue;
                     }
-                } else {
-                    continue;
-                };
-                let mut item = self.item_movie(&file, title.clone(), year);
-                self.enrich(&mut item, &file, "movie", &title, year, None, None, None);
-                items.push(item);
+                    let (file, title, year) = if entry.is_file() && is_video(&entry) {
+                        let (t, y) = parse_movie(&file_stem(&entry));
+                        (entry.clone(), t, y)
+                    } else if entry.is_dir() {
+                        match largest_video_in(&entry) {
+                            Some(file) => {
+                                let (t, y) = parse_movie(&dir_name(&entry));
+                                (file, t, y)
+                            }
+                            None => continue,
+                        }
+                    } else {
+                        continue;
+                    };
+                    let mut item = this.item_movie(&file, title.clone(), year);
+                    this.enrich(&mut item, &file, "movie", &title, year, None, None, None);
+                    items.push(item);
+                }
             }
-        }
-        Ok(sort_and_page(items, sort, start, size))
+            Ok(sort_and_page(items, sort.as_deref(), start, size))
+        })
+        .await
     }
 
     async fn children(
@@ -350,114 +390,118 @@ impl MediaSource for LocalSource {
         start: usize,
         size: usize,
     ) -> Result<Vec<ItemDto>, String> {
-        let dir = Path::new(item_key);
-        if !self.within_roots(dir) || !dir.is_dir() {
-            return Err("not a browsable local folder".into());
-        }
-        // Figure out the show this folder belongs to (for episode lookups):
-        // if `dir` is itself a season folder, the show is its parent.
-        let dir_is_season = parse_season_dir(&dir_name(dir)).is_some();
-        let show_dir = if dir_is_season {
-            dir.parent().unwrap_or(dir)
-        } else {
-            dir
-        };
-        let show_title = parse_movie(&dir_name(show_dir)).0;
+        let this = self.worker();
+        let item_key = item_key.to_string();
+        run_blocking(move || {
+            let dir = Path::new(&item_key);
+            if !this.within_roots(dir) || !dir.is_dir() {
+                return Err("not a browsable local folder".into());
+            }
+            // Figure out the show this folder belongs to (for episode lookups):
+            // if `dir` is itself a season folder, the show is its parent.
+            let dir_is_season = parse_season_dir(&dir_name(dir)).is_some();
+            let show_dir = if dir_is_season {
+                dir.parent().unwrap_or(dir)
+            } else {
+                dir
+            };
+            let show_title = parse_movie(&dir_name(show_dir)).0;
 
-        let mut items = Vec::new();
-        for entry in read_dir_sorted(dir) {
-            if !self.within_roots(&entry) {
-                continue;
-            }
-            if entry.is_dir() {
-                // A season folder.
-                let name = dir_name(&entry);
-                let index = parse_season_dir(&name);
-                let mut item = base_item(&self.id_str(), &entry, name, None, "season");
-                item.index = index;
-                self.enrich(
-                    &mut item,
-                    &entry,
-                    "season",
-                    &show_title,
-                    None,
-                    None,
-                    None,
-                    None,
-                );
-                items.push(item);
-            } else if entry.is_file() && is_video(&entry) {
-                // An episode file.
-                let stem = file_stem(&entry);
-                let mut item =
-                    base_item(&self.id_str(), &entry, clean_title(&stem), None, "episode");
-                let parsed = parse_episode(&stem);
-                if let Some((s, e)) = parsed {
-                    item.parent_index = Some(s);
-                    item.index = Some(e);
+            let mut items = Vec::new();
+            for entry in read_dir_sorted(dir) {
+                if !this.within_roots(&entry) {
+                    continue;
                 }
-                item.grandparent_title = Some(show_title.clone());
-                let season = parsed
-                    .map(|(s, _)| s)
-                    .or_else(|| parse_season_dir(&dir_name(dir)));
-                let episode = parsed.map(|(_, e)| e);
-                self.enrich(
-                    &mut item,
-                    &entry,
-                    "episode",
-                    &stem,
-                    None,
-                    Some(&show_title),
-                    season,
-                    episode,
-                );
-                items.push(item);
+                if entry.is_dir() {
+                    // A season folder.
+                    let name = dir_name(&entry);
+                    let index = parse_season_dir(&name);
+                    let mut item = base_item(&this.id_str(), &entry, name, None, "season");
+                    item.index = index;
+                    this.enrich(
+                        &mut item, &entry, "season", &show_title, None, None, None, None,
+                    );
+                    items.push(item);
+                } else if entry.is_file() && is_video(&entry) {
+                    // An episode file.
+                    let stem = file_stem(&entry);
+                    let mut item =
+                        base_item(&this.id_str(), &entry, clean_title(&stem), None, "episode");
+                    let parsed = parse_episode(&stem);
+                    if let Some((s, e)) = parsed {
+                        item.parent_index = Some(s);
+                        item.index = Some(e);
+                    }
+                    item.grandparent_title = Some(show_title.clone());
+                    let season = parsed
+                        .map(|(s, _)| s)
+                        .or_else(|| parse_season_dir(&dir_name(dir)));
+                    let episode = parsed.map(|(_, e)| e);
+                    this.enrich(
+                        &mut item,
+                        &entry,
+                        "episode",
+                        &stem,
+                        None,
+                        Some(&show_title),
+                        season,
+                        episode,
+                    );
+                    items.push(item);
+                }
             }
-        }
-        // Natural episode/season order: by (season, episode), else name.
-        items.sort_by(|a, b| {
-            (a.parent_index, a.index, a.title.to_lowercase()).cmp(&(
-                b.parent_index,
-                b.index,
-                b.title.to_lowercase(),
-            ))
-        });
-        Ok(items.into_iter().skip(start).take(size).collect())
+            // Natural episode/season order: by (season, episode), else name.
+            items.sort_by(|a, b| {
+                (a.parent_index, a.index, a.title.to_lowercase()).cmp(&(
+                    b.parent_index,
+                    b.index,
+                    b.title.to_lowercase(),
+                ))
+            });
+            Ok(items.into_iter().skip(start).take(size).collect())
+        })
+        .await
     }
 
     async fn search(&self, query: &str) -> Result<Vec<ItemDto>, String> {
-        let needle = query.to_lowercase();
-        let mut items = Vec::new();
-        for folder in &self.folders {
-            let root = Path::new(&folder.path);
-            walk_search(root, root, &needle, &self.id_str(), &mut items, 0);
-            if items.len() >= 100 {
-                break;
+        let this = self.worker();
+        let query = query.to_string();
+        run_blocking(move || {
+            let needle = query.to_lowercase();
+            let mut items = Vec::new();
+            for folder in &this.folders {
+                let root = Path::new(&folder.path);
+                walk_search(root, root, &needle, &this.id_str(), &mut items, 0);
+                if items.len() >= 100 {
+                    break;
+                }
             }
-        }
-        items.truncate(100);
-        let prefix = format!("{LOCAL_SOURCE_ID}:");
-        for item in &mut items {
-            let path = PathBuf::from(item.rating_key.strip_prefix(&prefix).unwrap_or_default());
-            if item.media_type.as_deref() == Some("episode") {
-                let show = item.grandparent_title.clone();
-                let (season, episode) = (item.parent_index, item.index);
-                self.enrich(
-                    item,
-                    &path,
-                    "episode",
-                    "",
-                    None,
-                    show.as_deref(),
-                    season,
-                    episode,
-                );
-            } else {
-                let (title, year) = (item.title.clone(), item.year);
-                self.enrich(item, &path, "movie", &title, year, None, None, None);
+            items.truncate(100);
+            let prefix = format!("{LOCAL_SOURCE_ID}:");
+            for item in &mut items {
+                let path =
+                    PathBuf::from(item.rating_key.strip_prefix(&prefix).unwrap_or_default());
+                if item.media_type.as_deref() == Some("episode") {
+                    let show = item.grandparent_title.clone();
+                    let (season, episode) = (item.parent_index, item.index);
+                    this.enrich(
+                        item,
+                        &path,
+                        "episode",
+                        "",
+                        None,
+                        show.as_deref(),
+                        season,
+                        episode,
+                    );
+                } else {
+                    let (title, year) = (item.title.clone(), item.year);
+                    this.enrich(item, &path, "movie", &title, year, None, None, None);
+                }
             }
-        }
-        Ok(items)
+            Ok(items)
+        })
+        .await
     }
 
     async fn resolve_stream(
