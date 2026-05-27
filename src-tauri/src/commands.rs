@@ -17,7 +17,7 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// Monotonic build counter and the date that build was cut — bump/set both on
 /// every update (kept here, not in build.rs, since tauri_build restricts when
 /// the build script reruns, which would let a compile-time date go stale).
-const BUILD_NUMBER: u32 = 12;
+const BUILD_NUMBER: u32 = 13;
 const BUILD_DATE: &str = "2026-05-27";
 
 /// Project home, shown (and opened) from the build-info footer.

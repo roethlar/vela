@@ -658,8 +658,13 @@ impl PlexLibrary {
         height: u32,
     ) -> Option<String> {
         let base = self.server_base()?;
-        let abs = format!("{}{}", base, thumb_path);
-        let encoded: String = url::form_urlencoded::byte_serialize(abs.as_bytes()).collect();
+        // Pass the thumb to the transcoder as the SERVER-RELATIVE path (don't
+        // prepend the external origin). Plex then resolves it against itself
+        // locally. Prepending the public origin (plex.direct / IPv6 / HTTPS) made
+        // the server try to fetch its own public URL through the transcoder, which
+        // 500s; the relative form is what the official clients use and returns a
+        // properly sized image. A thumb that's already absolute is passed as-is.
+        let encoded: String = url::form_urlencoded::byte_serialize(thumb_path.as_bytes()).collect();
         let url = format!(
             "{}/photo/:/transcode?width={}&height={}&minSize=1&upscale=1&url={}&X-Plex-Token={}",
             base, width, height, encoded, self.auth_token
