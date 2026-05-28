@@ -212,6 +212,7 @@ pub fn play(
     progress: ProgressTarget,
     child_slot: &Arc<Mutex<Option<std::process::Child>>>,
     shutting_down: &Arc<AtomicBool>,
+    advance: &Arc<tokio::sync::Notify>,
 ) -> Result<Arc<AtomicBool>, String> {
     // mpv emulates the IPC socket with a named pipe under \\.\pipe\ on Windows.
     #[cfg(windows)]
@@ -302,6 +303,17 @@ pub fn play(
     // rather than 0 (which would clobber an existing resume point).
     let start_ms = (start_seconds.max(0.0) * 1000.0) as u64;
     let stop_flag = Arc::new(AtomicBool::new(false));
+
+    // Watch mpv's IPC for a clean EOF — that's the signal to auto-advance the
+    // queue. We do NOT advance on user-close (mpv reports reason=quit/stop),
+    // only on reason=eof, so closing the window stops playback while letting a
+    // file play to the end roll into the next item. Always-on regardless of
+    // progress target (works for local playback too). Failure to spawn the
+    // watcher is non-fatal — playback still works, just no auto-advance.
+    if let Err(e) = spawn_eof_watcher(ipc_path.clone(), stop_flag.clone(), advance.clone()) {
+        eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
+    }
+
     let tracking = match progress {
         ProgressTarget::Plex(info) => {
             start_tracking_plex(ipc_path, info, start_ms, stop_flag.clone())
@@ -335,6 +347,52 @@ pub fn play(
 
 /// Spawn the IPC reader thread. It connects to mpv's JSON IPC socket, observes
 /// `time-pos`, and continuously drains the socket (so mpv never blocks on a full
+/// Tiny IPC listener that signals the queue dispatcher when mpv finishes a file
+/// CLEANLY (mpv emits `event=end-file, reason=eof`). User-closed (`quit`),
+/// errored (`error`), or otherwise-stopped exits never fire the notifier — so
+/// closing the player stops playback, while watching to the end auto-advances.
+/// Separate from the progress reader so it runs for every backend, including
+/// local files where no progress tracker is active.
+fn spawn_eof_watcher(
+    socket_path: String,
+    stop_flag: Arc<AtomicBool>,
+    advance: Arc<tokio::sync::Notify>,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("mpv-eof-watcher".into())
+        .spawn(move || {
+            // Brief connect retries: mpv may not have opened the socket yet.
+            let mut stream = None;
+            for _ in 0..50 {
+                if stop_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+                match ipc_connect(&socket_path) {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(100)),
+                }
+            }
+            let Some(stream) = stream else { return };
+            let reader = BufReader::new(stream);
+            for line in reader.lines() {
+                if stop_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+                let Ok(line) = line else { return };
+                // mpv emits one JSON event per line. Substring match is fine here
+                // (the event/reason keys are fixed, no escaping concerns).
+                if line.contains("\"event\":\"end-file\"") && line.contains("\"reason\":\"eof\"")
+                {
+                    advance.notify_one();
+                }
+            }
+        })?;
+    Ok(())
+}
+
 /// send buffer), publishing the latest position into the returned counter. The
 /// `done` flag is set when mpv exits or the connection drops. Does NO network I/O,
 /// so it's shared by every backend's poster.

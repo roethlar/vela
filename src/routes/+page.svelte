@@ -11,6 +11,7 @@
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
+    if (queueTimer) clearInterval(queueTimer);
     linkGen++; // invalidate any in-flight link_poll so it won't reschedule after unmount
   });
 
@@ -97,6 +98,8 @@
     // Check mpv up front so we can prompt to install before the user hits play.
     invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     invoke<AppInfo>("get_app_info").then((a) => (appInfo = a)).catch(() => {});
+    refreshQueue(); // so the header chip shows the count from launch
+
     try {
       await loadSourceList();
       authenticated = sources.length > 0;
@@ -419,13 +422,111 @@
     }
   }
 
+  // Play queue (Phase B). The backend owns the queue; we just send actions and
+  // pull a snapshot for the drawer. queueItemFromItem captures the display
+  // fields the drawer needs (title/poster/subtitle), so right-clicking an item
+  // in any view enqueues the same poster we'd show in the grid.
+  type QueueItem = {
+    ratingKey: string;
+    title: string;
+    durationMs: number | null;
+    poster: string | null;
+    subtitle: string | null;
+  };
+  type QueueSnapshot = { items: QueueItem[]; currentIndex: number | null };
+
+  function queueItemFromItem(item: Item): QueueItem {
+    const subtitle = item.grandparentTitle
+      ? item.parentIndex != null && item.index != null
+        ? `S${item.parentIndex} · E${item.index}`
+        : item.title
+      : item.year != null
+        ? `${item.year}`
+        : null;
+    return {
+      ratingKey: item.ratingKey,
+      title: item.grandparentTitle ?? item.title,
+      durationMs: item.durationMs ?? null,
+      poster: item.poster ?? null,
+      subtitle,
+    };
+  }
+
+  let queue = $state<QueueSnapshot>({ items: [], currentIndex: null });
+  let queueOpen = $state(false);
+  let queueTimer: ReturnType<typeof setInterval> | undefined;
+
+  async function refreshQueue() {
+    try {
+      queue = await invoke<QueueSnapshot>("queue_list");
+    } catch {
+      // Backend unreachable mid-startup is fine to ignore here.
+    }
+  }
+  function toggleQueue() {
+    queueOpen = !queueOpen;
+    if (queueOpen) {
+      refreshQueue();
+      // While the drawer is visible, poll lightly so auto-advances (which run
+      // entirely in the backend on mpv EOF) show up without a user action.
+      queueTimer = setInterval(refreshQueue, 3000);
+    } else if (queueTimer) {
+      clearInterval(queueTimer);
+      queueTimer = undefined;
+    }
+  }
+
   async function play(item: Item) {
     try {
-      await invoke("play_item", { ratingKey: item.ratingKey, durationMs: item.durationMs ?? null });
+      await invoke("play_item", { item: queueItemFromItem(item) });
+      if (queueOpen) refreshQueue();
     } catch (e) {
       error = String(e);
       // A failure may mean mpv went missing — re-check so the install prompt shows.
       invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
+    }
+  }
+
+  async function playNext(item: Item) {
+    closeMenu();
+    try {
+      await invoke("queue_play_next", { item: queueItemFromItem(item) });
+      refreshQueue();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function addToQueue(item: Item) {
+    closeMenu();
+    try {
+      await invoke("queue_append", { item: queueItemFromItem(item) });
+      refreshQueue();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function queueJumpTo(index: number) {
+    try {
+      await invoke("queue_play_at", { index });
+      refreshQueue();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function queueRemove(index: number) {
+    try {
+      await invoke("queue_remove", { index });
+      refreshQueue();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+  async function queueClearAll() {
+    try {
+      await invoke("queue_clear");
+      refreshQueue();
+    } catch (e) {
+      error = String(e);
     }
   }
 
@@ -486,6 +587,16 @@
         onkeydown={(e) => e.key === "Enter" && runSearch()}
       />
     {/if}
+    <button
+      class="queuechip"
+      class:has-items={queue.items.length > 0}
+      class:active={queueOpen}
+      title="Play queue"
+      aria-label="Play queue ({queue.items.length} item{queue.items.length === 1 ? '' : 's'})"
+      onclick={toggleQueue}
+    >
+      ☰{#if queue.items.length > 0}<span class="qcount">{queue.items.length}</span>{/if}
+    </button>
     <button class="gear" title="Sources" aria-label="Sources" onclick={() => (showSettings = true)}>⚙</button>
   </header>
 
@@ -654,7 +765,14 @@
   {/if}
 </div>
 
-<svelte:window onkeydown={(e) => e.key === "Escape" && closeMenu()} />
+<svelte:window
+  onkeydown={(e) => {
+    if (e.key === "Escape") {
+      if (menu) closeMenu();
+      else if (queueOpen) toggleQueue();
+    }
+  }}
+/>
 
 {#if menu}
   {@const mi = menu.item}
@@ -664,6 +782,8 @@
   {@const fullyWatched = mi.played === true && !inProgress}
   <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px;" role="menu">
     <button role="menuitem" onclick={() => { closeMenu(); play(mi); }}>Play</button>
+    <button role="menuitem" onclick={() => playNext(mi)}>Play next</button>
+    <button role="menuitem" onclick={() => addToQueue(mi)}>Add to queue</button>
     {#if mi.played != null && !fullyWatched}
       <button role="menuitem" onclick={() => setWatched(mi, true)}>Mark watched</button>
     {/if}
@@ -671,6 +791,44 @@
       <button role="menuitem" onclick={() => setWatched(mi, false)}>Mark unwatched</button>
     {/if}
   </div>
+{/if}
+
+{#if queueOpen}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="drawerbackdrop" role="presentation" onclick={toggleQueue}></div>
+  <aside class="drawer" aria-label="Play queue">
+    <header class="drawerhead">
+      <div class="drawertitle">Up Next{#if queue.items.length > 0}<span class="qcount inline">{queue.items.length}</span>{/if}</div>
+      <div class="drawerhead-actions">
+        {#if queue.items.length > 0}
+          <button class="drawerlink" onclick={queueClearAll}>Clear</button>
+        {/if}
+        <button class="drawerclose" aria-label="Close queue" onclick={toggleQueue}>✕</button>
+      </div>
+    </header>
+    {#if queue.items.length === 0}
+      <div class="drawerempty">Nothing queued. Right-click an item to add it here.</div>
+    {:else}
+      <ol class="drawerlist">
+        {#each queue.items as qi, i (qi.ratingKey + ":" + i)}
+          <li class="drawerrow" class:current={i === queue.currentIndex}>
+            <button class="drawerplay" title="Play this item" onclick={() => queueJumpTo(i)}>
+              {#if qi.poster}
+                <img class="drawerthumb" src={posterSrc(qi.poster)} alt="" loading="lazy" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
+              {:else}
+                <div class="drawerthumb noart small">{qi.title}</div>
+              {/if}
+              <div class="drawerinfo">
+                <div class="drawerinfotitle">{qi.title}</div>
+                {#if qi.subtitle}<div class="drawerinfosub">{qi.subtitle}</div>{/if}
+              </div>
+            </button>
+            <button class="drawerremove" title="Remove from queue" aria-label="Remove from queue" onclick={() => queueRemove(i)}>✕</button>
+          </li>
+        {/each}
+      </ol>
+    {/if}
+  </aside>
 {/if}
 
 <style>
@@ -1146,5 +1304,201 @@
   }
   .ctxmenu button:hover {
     background: #232a34;
+  }
+
+  /* Header queue chip */
+  .queuechip {
+    background: transparent;
+    border: 1px solid transparent;
+    color: #cdd3dc;
+    font: inherit;
+    font-size: 0.9rem;
+    padding: 0.3rem 0.55rem;
+    border-radius: 0.45rem;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+  .queuechip:hover {
+    background: #1b1f26;
+  }
+  .queuechip.has-items {
+    color: #fff;
+  }
+  .queuechip.active {
+    background: #1b1f26;
+    border-color: #2a313c;
+  }
+  .qcount {
+    background: #e5a00d;
+    color: #1a1205;
+    font-size: 0.7rem;
+    font-weight: 700;
+    border-radius: 0.7rem;
+    padding: 0.05rem 0.4rem;
+    line-height: 1.1;
+  }
+  .qcount.inline {
+    margin-left: 0.5rem;
+  }
+
+  /* Queue drawer */
+  .drawerbackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 30;
+    background: rgba(0, 0, 0, 0.25);
+  }
+  .drawer {
+    position: fixed;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    width: 360px;
+    max-width: 92vw;
+    z-index: 31;
+    background: #11151b;
+    border-left: 1px solid #2a313c;
+    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
+    display: flex;
+    flex-direction: column;
+  }
+  .drawerhead {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid #1b1f26;
+  }
+  .drawertitle {
+    font-weight: 700;
+    color: #e7e9ee;
+    display: inline-flex;
+    align-items: center;
+  }
+  .drawerhead-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .drawerlink {
+    background: none;
+    border: none;
+    color: #e5a00d;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.85rem;
+    padding: 0.2rem 0.4rem;
+    border-radius: 0.35rem;
+  }
+  .drawerlink:hover {
+    background: #1b1f26;
+  }
+  .drawerclose {
+    background: none;
+    border: none;
+    color: #8a93a0;
+    cursor: pointer;
+    font-size: 1rem;
+    line-height: 1;
+    padding: 0.3rem 0.45rem;
+    border-radius: 0.35rem;
+  }
+  .drawerclose:hover {
+    color: #fff;
+    background: #1b1f26;
+  }
+  .drawerempty {
+    padding: 1.25rem 1rem;
+    color: #8a93a0;
+    font-size: 0.85rem;
+  }
+  .drawerlist {
+    list-style: none;
+    margin: 0;
+    padding: 0.5rem;
+    overflow-y: auto;
+    flex: 1;
+  }
+  .drawerrow {
+    display: flex;
+    align-items: stretch;
+    gap: 0.4rem;
+    margin: 0;
+    padding: 0;
+  }
+  .drawerrow + .drawerrow {
+    margin-top: 0.25rem;
+  }
+  .drawerplay {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 0.5rem;
+    padding: 0.4rem 0.5rem;
+    color: #e7e9ee;
+    text-align: left;
+    cursor: pointer;
+    min-width: 0;
+  }
+  .drawerplay:hover {
+    background: #1b1f26;
+  }
+  .drawerrow.current .drawerplay {
+    border-color: #e5a00d;
+    background: rgba(229, 160, 13, 0.08);
+  }
+  .drawerthumb {
+    width: 64px;
+    height: 36px;
+    object-fit: cover;
+    border-radius: 0.3rem;
+    background: #161a21;
+    flex-shrink: 0;
+  }
+  .drawerthumb.noart.small {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #8a93a0;
+    font-size: 0.65rem;
+    padding: 0.2rem;
+    text-align: center;
+    overflow: hidden;
+  }
+  .drawerinfo {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+  }
+  .drawerinfotitle {
+    font-size: 0.88rem;
+    font-weight: 600;
+    color: #e7e9ee;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .drawerinfosub {
+    font-size: 0.75rem;
+    color: #8a93a0;
+  }
+  .drawerremove {
+    background: none;
+    border: none;
+    color: #6b7480;
+    cursor: pointer;
+    font-size: 0.9rem;
+    padding: 0 0.5rem;
+    border-radius: 0.35rem;
+  }
+  .drawerremove:hover {
+    color: #ff8a8a;
+    background: #1b1f26;
   }
 </style>

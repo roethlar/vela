@@ -1,4 +1,4 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::Ordering;
 use tauri::State;
 
@@ -17,7 +17,7 @@ const PRODUCT: &str = "Vela";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
-const BUILD_DATE: &str = "2026-05-27";
+const BUILD_DATE: &str = "2026-05-28";
 
 /// Project home, shown (and opened) from the build-info footer.
 const REPO_URL: &str = "https://github.com/roethlar/vela";
@@ -1090,21 +1090,47 @@ pub async fn set_watched(
 
 // ---- playback ------------------------------------------------------------
 
-#[tauri::command]
-pub async fn play_item(
-    rating_key: String,
+/// Display-friendly snapshot of a queued item — what the drawer renders and what
+/// the dispatcher needs to drive the next play.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueItem {
+    pub rating_key: String,
+    pub title: String,
+    pub duration_ms: Option<u64>,
+    /// http(s) URL or asset path; the drawer uses convertFileSrc for non-http.
+    pub poster: Option<String>,
+    /// e.g. "S5 · E8" for episodes, "2026" for movies — what the frontend would
+    /// otherwise compute itself.
+    pub subtitle: Option<String>,
+}
+
+/// Result of `queue_list` — the queue snapshot plus the cursor, so the drawer
+/// can highlight whichever item is currently playing.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueueSnapshot {
+    pub items: Vec<QueueItem>,
+    pub current_index: Option<usize>,
+}
+
+/// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
+/// Used by `play_item` (top-level play) AND by `queue_play_at` and the auto-
+/// advance dispatcher — same lock discipline regardless of trigger.
+pub(crate) async fn play_by_key(
+    state: &AppState,
+    rating_key: &str,
     duration_ms: Option<u64>,
-    state: State<'_, AppState>,
 ) -> Result<(), String> {
-    // Serialize the whole resolve+stop-old+spawn sequence so overlapping clicks
+    // Serialize the whole resolve+stop-old+spawn sequence so overlapping triggers
     // can't both spawn an mpv and lose one of the child handles.
     let _play = state.play_lock.lock().await;
-    let (src, raw) = state.registry.lock().await.route(&rating_key)?;
+    let (src, raw) = state.registry.lock().await.route(rating_key)?;
     let resolved = src.resolve_stream(&raw, duration_ms).await?;
 
     // Cancel the prior tracker and terminate the prior mpv so we never run two
-    // players. The kill is a non-blocking syscall; the (possibly unbounded) reap
-    // runs on its own native thread (see below).
+    // players. The kill is a non-blocking syscall; the reap is handed to the
+    // periodic reaper via reap_queue.
     if let Some(prev) = state
         .tracking_stop
         .lock()
@@ -1119,12 +1145,6 @@ pub async fn play_item(
         .unwrap_or_else(|e| e.into_inner())
         .take();
     if let Some(mut child) = prev_child {
-        // Send the kill NOW, synchronously — kill() is a non-blocking syscall, so
-        // the old mpv is signalled before we spawn the replacement. Hand the
-        // killed child to the reap queue (drained by the periodic reaper) rather
-        // than spawning a per-child waiter thread: a thread spawn could fail under
-        // thread exhaustion and drop the child unreaped, and a blocking wait()
-        // could hang here if the player wedged on a hung mount.
         let _ = child.kill();
         state
             .reap_queue
@@ -1133,16 +1153,14 @@ pub async fn play_item(
             .push(child);
     }
 
-    // playback::play execs mpv (and probes `mpv --version`), so run it off the
-    // async runtime too. It publishes the child into current_child itself, the
-    // instant mpv launches, so an app-exit racing tracker setup still finds it.
     let url = resolved.url;
     let start = resolved.resume_ms as f64 / 1000.0;
     let progress = resolved.progress;
     let child_slot = state.current_child.clone();
     let shutting_down = state.shutting_down.clone();
+    let advance = state.queue_advance.clone();
     let stop = tauri::async_runtime::spawn_blocking(move || {
-        playback::play(&url, start, progress, &child_slot, &shutting_down)
+        playback::play(&url, start, progress, &child_slot, &shutting_down, &advance)
     })
     .await
     .map_err(|e| format!("playback task failed: {e}"))??;
@@ -1151,6 +1169,105 @@ pub async fn play_item(
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(stop);
     Ok(())
+}
+
+/// Top-level Play: replace the queue with just this item and play it. The user
+/// asked to start over from here, so the existing queue (if any) is cleared.
+#[tauri::command]
+pub async fn play_item(item: QueueItem, state: State<'_, AppState>) -> Result<(), String> {
+    let rating_key = item.rating_key.clone();
+    let duration_ms = item.duration_ms;
+    {
+        let mut q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+        *q = vec![item];
+    }
+    *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(0);
+    play_by_key(&state, &rating_key, duration_ms).await
+}
+
+/// Insert an item right after the currently-playing one ("Play Next"). If the
+/// queue is empty / nothing is playing, it goes to position 0 — i.e. the very
+/// next thing the dispatcher will play.
+#[tauri::command]
+pub async fn queue_play_next(item: QueueItem, state: State<'_, AppState>) -> Result<(), String> {
+    let mut q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+    let cursor = *state.queue_index.lock().unwrap_or_else(|e| e.into_inner());
+    let pos = match cursor {
+        Some(i) => (i + 1).min(q.len()),
+        None => 0,
+    };
+    q.insert(pos, item);
+    Ok(())
+}
+
+/// Append an item to the end of the queue ("Add to Queue").
+#[tauri::command]
+pub async fn queue_append(item: QueueItem, state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .queue
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(item);
+    Ok(())
+}
+
+/// Snapshot of the queue + cursor for the drawer.
+#[tauri::command]
+pub async fn queue_list(state: State<'_, AppState>) -> Result<QueueSnapshot, String> {
+    let items = state
+        .queue
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    let current_index = *state.queue_index.lock().unwrap_or_else(|e| e.into_inner());
+    Ok(QueueSnapshot { items, current_index })
+}
+
+/// Clear the queue. Does NOT stop the currently-playing item — closing the mpv
+/// window does that; "Clear" is for tidying what's queued up next.
+#[tauri::command]
+pub async fn queue_clear(state: State<'_, AppState>) -> Result<(), String> {
+    state
+        .queue
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clear();
+    *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    Ok(())
+}
+
+/// Remove the item at `index`. Adjusts the cursor: items before it shift the
+/// cursor back; removing the currently-playing one detaches the cursor (it keeps
+/// playing in mpv, but isn't tracked in the queue any more — next auto-advance
+/// will start from queue[0]).
+#[tauri::command]
+pub async fn queue_remove(index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    let mut q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+    if index >= q.len() {
+        return Err("queue index out of range".into());
+    }
+    q.remove(index);
+    let mut idx = state.queue_index.lock().unwrap_or_else(|e| e.into_inner());
+    *idx = match *idx {
+        Some(c) if c == index => None,
+        Some(c) if c > index => Some(c - 1),
+        other => other,
+    };
+    Ok(())
+}
+
+/// Jump to and play the item at `index`. Sets the cursor so subsequent advances
+/// continue from there.
+#[tauri::command]
+pub async fn queue_play_at(index: usize, state: State<'_, AppState>) -> Result<(), String> {
+    let item = {
+        let q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
+        q.get(index)
+            .cloned()
+            .ok_or_else(|| "queue index out of range".to_string())?
+    };
+    *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(index);
+    play_by_key(&state, &item.rating_key, item.duration_ms).await
 }
 
 // ---- helpers -------------------------------------------------------------
