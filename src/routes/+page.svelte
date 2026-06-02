@@ -84,9 +84,32 @@
   let pin = $state<Pin | null>(null);
 
   // mpv availability (for the install prompt). null = not checked yet.
-  type MpvInfo = { available: boolean; installCommand: string; installUrl: string };
+  type MpvInfo = {
+    available: boolean;
+    path: string | null;
+    configuredPath: string | null;
+    canAutoInstall: boolean;
+    installCommand: string;
+    installUrl: string;
+  };
   let mpvInfo = $state<MpvInfo | null>(null);
   let copied = $state(false);
+  let installingMpv = $state(false);
+
+  // One-click mpv install via the OS package manager (winget/brew). On success
+  // the backend returns refreshed status, which clears the prompt.
+  async function installMpv() {
+    if (installingMpv) return;
+    installingMpv = true;
+    error = null;
+    try {
+      mpvInfo = await invoke<MpvInfo>("install_mpv");
+    } catch (e) {
+      error = String(e);
+    } finally {
+      installingMpv = false;
+    }
+  }
 
   // Version/build identity for the footer.
   type AppInfo = { version: string; buildDate: string; repoUrl: string };
@@ -609,18 +632,30 @@
       onClose={() => (showSettings = false)}
       onChanged={onSourcesChanged}
       onLinkPlex={beginLink}
+      onMpvChanged={(m) => (mpvInfo = m)}
     />
   {/if}
 
   {#if mpvInfo && !mpvInfo.available}
     <div class="mpvbar">
       <div class="mpvtext">
-        <b>mpv is required for playback</b> and wasn't found. Install it, then restart Vela.
+        <b>mpv is required for playback</b> and wasn't found.
+        {#if mpvInfo.canAutoInstall}
+          Install it automatically, or point Vela at an existing mpv in Sources → mpv player.
+        {:else}
+          Install it, then restart Vela.
+        {/if}
         <code>{mpvInfo.installCommand}</code>
       </div>
       <div class="mpvactions">
+        {#if mpvInfo.canAutoInstall}
+          <button class="primary" disabled={installingMpv} onclick={installMpv}>
+            {installingMpv ? "Installing…" : "Install mpv"}
+          </button>
+        {/if}
         <button onclick={() => copyText(mpvInfo!.installCommand)}>{copied ? "Copied!" : "Copy"}</button>
-        <button class="primary" onclick={() => openExternal(mpvInfo!.installUrl)}>Get mpv</button>
+        <button onclick={() => (showSettings = true)}>Set path…</button>
+        <button onclick={() => openExternal(mpvInfo!.installUrl)}>Get mpv</button>
       </div>
     </div>
   {/if}

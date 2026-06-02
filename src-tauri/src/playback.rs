@@ -102,31 +102,78 @@ fn ipc_socket_path() -> Result<String, String> {
 
 /// Locate the mpv executable. We can't rely on bare `mpv` resolving via `PATH`:
 /// GUI apps launched from Finder/Explorer get a minimal `PATH` that excludes
-/// Homebrew (`/opt/homebrew/bin`), scoop, etc. So we honor an explicit override,
-/// then `PATH`, then a list of common install locations. Returns the command to
-/// run (a bare name if found on `PATH`, otherwise an absolute path).
+/// Homebrew (`/opt/homebrew/bin`), scoop, winget shims, etc. So we try, in order:
+///   1. the user's explicit path from the Settings page (`mpv_path`),
+///   2. a copy shipped alongside the app (next to our own exe),
+///   3. bare `mpv` on `PATH`,
+///   4. a generous list of real-world install locations per OS.
+/// Returns the command to run (a bare name if found on `PATH`, otherwise an
+/// absolute path).
 pub fn resolve_mpv() -> Option<String> {
-    if let Ok(p) = std::env::var("MPV_PATH") {
-        if !p.is_empty() && std::path::Path::new(&p).exists() {
+    // 1. Explicit override the user set in Settings → mpv player. Honored only
+    //    if it actually resolves to a runnable file (validated on save too).
+    if let Some(p) = crate::config::load_config().ok().and_then(|c| c.mpv_path) {
+        let p = p.trim().to_string();
+        if !p.is_empty() && mpv_usable(&p) {
             return Some(p);
         }
     }
+    // 2. A bundled copy next to the app executable (zero-config "just works").
+    if let Some(p) = bundled_mpv() {
+        return Some(p);
+    }
+    // 3. Bare `mpv` on PATH.
     if mpv_runs("mpv") {
         return Some("mpv".to_string());
     }
+    // 4. Known install locations.
     mpv_candidates()
         .into_iter()
         .find(|cand| std::path::Path::new(cand).exists())
 }
 
-/// True if `bin` can be executed (resolves on PATH and starts).
+/// True if `bin` (a bare name or path) is a *working* mpv: it must run
+/// `--version` and exit cleanly (status 0). We check `success()` rather than
+/// merely "the process started", because an mpv built for CPU features this
+/// machine lacks (e.g. an AVX2 build on a pre-Haswell CPU) launches but crashes
+/// immediately with an illegal-instruction exit — and that crash must count as
+/// "not usable", or we'd accept a build that can never actually play video.
 fn mpv_runs(bin: &str) -> bool {
     Command::new(bin)
         .arg("--version")
         .stdout(std::process::Stdio::null())
         .stderr(std::process::Stdio::null())
         .status()
-        .is_ok()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+/// Validate a user-supplied mpv path: it must exist as a file and actually run.
+/// Used both by `resolve_mpv` (config/env override) and by the `set_mpv_path`
+/// command so a saved override is known-good rather than a typo.
+pub fn mpv_usable(path: &str) -> bool {
+    let p = std::path::Path::new(path);
+    p.is_file() && mpv_runs(path)
+}
+
+/// Look for an mpv shipped alongside our own executable — e.g. a packager (or a
+/// future bundled installer) dropped `mpv.exe` next to the app or in an `mpv/`
+/// subfolder. Resolved relative to the running binary so it works from any
+/// install location.
+fn bundled_mpv() -> Option<String> {
+    let exe = std::env::current_exe().ok()?;
+    let dir = exe.parent()?;
+    #[cfg(windows)]
+    let names = ["mpv.exe", r"mpv\mpv.exe"];
+    #[cfg(not(windows))]
+    let names = ["mpv", "mpv/mpv"];
+    for name in names {
+        let cand = dir.join(name);
+        if cand.is_file() {
+            return Some(cand.to_string_lossy().into_owned());
+        }
+    }
+    None
 }
 
 /// Common absolute install locations to probe when `mpv` isn't on `PATH`.
@@ -143,13 +190,28 @@ fn mpv_candidates() -> Vec<String> {
     {
         let mut v = Vec::new();
         if let Ok(home) = std::env::var("USERPROFILE") {
+            // scoop: a shim on PATH normally, plus the real binary under apps/.
             v.push(format!(r"{home}\scoop\shims\mpv.exe"));
+            v.push(format!(r"{home}\scoop\apps\mpv\current\mpv.exe"));
+        }
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            // winget drops a per-user shim under Links, and the real payload under
+            // Packages\<id>\... — scan the latter since the id/version vary.
+            v.push(format!(r"{local}\Microsoft\WinGet\Links\mpv.exe"));
+            v.extend(scan_winget_packages(&format!(
+                r"{local}\Microsoft\WinGet\Packages"
+            )));
+            v.push(format!(r"{local}\Programs\mpv\mpv.exe"));
         }
         if let Ok(pf) = std::env::var("ProgramFiles") {
             v.push(format!(r"{pf}\mpv\mpv.exe"));
         }
-        if let Ok(local) = std::env::var("LOCALAPPDATA") {
-            v.push(format!(r"{local}\Programs\mpv\mpv.exe"));
+        if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
+            v.push(format!(r"{pf86}\mpv\mpv.exe"));
+        }
+        if let Ok(pd) = std::env::var("ProgramData") {
+            // chocolatey shim.
+            v.push(format!(r"{pd}\chocolatey\bin\mpv.exe"));
         }
         v
     }
@@ -162,6 +224,43 @@ fn mpv_candidates() -> Vec<String> {
             "/var/lib/flatpak/exports/bin/io.mpv.Mpv".into(),
         ]
     }
+}
+
+/// Scan a winget `Packages` directory for `mpv.exe`. winget names each package
+/// folder `<PackageId>_<hash>` and lays the payload out flat inside, so we check
+/// each immediate subdirectory (and one nested level, since some packages nest a
+/// versioned folder) for the binary. Best-effort: returns whatever it finds.
+#[cfg(target_os = "windows")]
+fn scan_winget_packages(root: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return out;
+    };
+    for entry in entries.flatten() {
+        let dir = entry.path();
+        if !dir.is_dir() {
+            continue;
+        }
+        // Only look at packages that look like mpv to avoid walking everything.
+        let name = entry.file_name().to_string_lossy().to_lowercase();
+        if !name.contains("mpv") {
+            continue;
+        }
+        let direct = dir.join("mpv.exe");
+        if direct.is_file() {
+            out.push(direct.to_string_lossy().into_owned());
+        }
+        // One level deeper (e.g. an extracted versioned subfolder).
+        if let Ok(sub) = std::fs::read_dir(&dir) {
+            for s in sub.flatten() {
+                let cand = s.path().join("mpv.exe");
+                if cand.is_file() {
+                    out.push(cand.to_string_lossy().into_owned());
+                }
+            }
+        }
+    }
+    out
 }
 
 /// Everything the progress tracker needs to report back to Plex.

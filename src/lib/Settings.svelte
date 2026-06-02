@@ -17,11 +17,26 @@
     mountpoint: string;
   };
 
+  type MpvInfo = {
+    available: boolean;
+    path: string | null;
+    configuredPath: string | null;
+    canAutoInstall: boolean;
+    installCommand: string;
+    installUrl: string;
+  };
+
   let {
     onClose,
     onChanged,
     onLinkPlex,
-  }: { onClose: () => void; onChanged: () => void; onLinkPlex: () => void } = $props();
+    onMpvChanged,
+  }: {
+    onClose: () => void;
+    onChanged: () => void;
+    onLinkPlex: () => void;
+    onMpvChanged?: (m: MpvInfo) => void;
+  } = $props();
 
   // Modal focus management: move focus into the dialog on open, trap Tab inside,
   // and restore focus to the trigger on close.
@@ -87,6 +102,12 @@
   // Add local folder
   let folderKind = $state<"" | "movie" | "show">("");
 
+  // mpv player location
+  let mpv = $state<MpvInfo | null>(null);
+  let mpvPathInput = $state("");
+  let mpvBusy = $state(false);
+  let installingMpv = $state(false);
+
   // Guards against a slow initial load resolving after a later add/remove
   // refresh and overwriting the panel with stale lists.
   let loadSeq = 0;
@@ -96,17 +117,20 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, f, m, ssh] = await Promise.all([
+      const [s, f, m, ssh, mp] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<LocalFolder[]>("list_local_folders"),
         invoke<SmbMount[]>("list_smb_mounts"),
         invoke<SshMount[]>("list_ssh_mounts"),
+        invoke<MpvInfo>("check_mpv"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
       folders = f;
       smbMounts = m;
       sshMounts = ssh;
+      mpv = mp;
+      mpvPathInput = mp.configuredPath ?? "";
     } catch (e) {
       if (seq === loadSeq) err = String(e);
     }
@@ -272,6 +296,67 @@
       busy = false;
     }
   }
+
+  function applyMpv(m: MpvInfo) {
+    mpv = m;
+    mpvPathInput = m.configuredPath ?? "";
+    onMpvChanged?.(m);
+  }
+
+  async function browseMpv() {
+    err = null;
+    const picked = await openDialog({
+      directory: false,
+      multiple: false,
+      title: "Locate the mpv executable",
+      // On Windows mpv is an .exe; elsewhere it has no extension, so allow all.
+      filters:
+        navigatorIsWindows()
+          ? [{ name: "mpv", extensions: ["exe"] }]
+          : undefined,
+    });
+    if (!picked || Array.isArray(picked)) return;
+    mpvPathInput = picked;
+    await saveMpvPath();
+  }
+
+  async function saveMpvPath() {
+    mpvBusy = true;
+    err = null;
+    try {
+      const m = await invoke<MpvInfo>("set_mpv_path", {
+        path: mpvPathInput.trim() || null,
+      });
+      applyMpv(m);
+    } catch (e) {
+      err = String(e);
+    } finally {
+      mpvBusy = false;
+    }
+  }
+
+  async function clearMpvPath() {
+    mpvPathInput = "";
+    await saveMpvPath();
+  }
+
+  async function installMpv() {
+    if (installingMpv) return;
+    installingMpv = true;
+    err = null;
+    try {
+      const m = await invoke<MpvInfo>("install_mpv");
+      applyMpv(m);
+    } catch (e) {
+      err = String(e);
+    } finally {
+      installingMpv = false;
+    }
+  }
+
+  function navigatorIsWindows() {
+    return typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
+  }
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
@@ -339,6 +424,51 @@
           <button class="rm" disabled={busy} onclick={() => unmountSsh(m.id)}>Unmount</button>
         </div>
       {/each}
+    </section>
+
+    <section>
+      <h3>mpv player</h3>
+      {#if mpv}
+        <p class="muted small">
+          {#if mpv.available}
+            ✓ Found mpv at <code class="path">{mpv.path}</code>
+          {:else}
+            ✗ mpv wasn't found. Install it below, or point Vela at an existing mpv.
+          {/if}
+        </p>
+      {/if}
+      <div class="form">
+        <div class="field">
+          <label for="mpv-path">mpv executable path (optional override)</label>
+          <input
+            id="mpv-path"
+            placeholder={navigatorIsWindows() ? "C:\\Program Files\\mpv\\mpv.exe" : "/usr/local/bin/mpv"}
+            bind:value={mpvPathInput}
+          />
+        </div>
+        <div class="btnrow">
+          <button class="primary" disabled={mpvBusy} onclick={saveMpvPath}>
+            {mpvBusy ? "Saving…" : "Save path"}
+          </button>
+          <button disabled={mpvBusy} onclick={browseMpv}>Browse…</button>
+          {#if mpv?.configuredPath}
+            <button class="rm" disabled={mpvBusy} onclick={clearMpvPath}>Clear</button>
+          {/if}
+        </div>
+        {#if mpv?.canAutoInstall}
+          <button class="primary" disabled={installingMpv} onclick={installMpv}>
+            {installingMpv ? "Installing mpv…" : "Install mpv automatically"}
+          </button>
+          <p class="muted small">
+            {#if navigatorIsWindows()}
+              Detects your CPU and downloads a matching mpv build.
+            {:else}
+              Uses Homebrew to install mpv.
+            {/if}
+            Needs an internet connection.
+          </p>
+        {/if}
+      </div>
     </section>
 
     <section>
@@ -600,6 +730,35 @@
   button.primary:disabled {
     opacity: 0.6;
     cursor: default;
+  }
+  .btnrow {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    align-items: center;
+  }
+  .btnrow button.primary {
+    align-self: auto;
+  }
+  /* Secondary buttons (e.g. Browse…) inside the panel. */
+  .btnrow button:not(.primary):not(.rm) {
+    background: #232730;
+    color: #eaeef5;
+    border: 1px solid #2a2e37;
+    border-radius: 6px;
+    padding: 0.55rem 1.1rem;
+    cursor: pointer;
+  }
+  .btnrow button:disabled {
+    opacity: 0.6;
+    cursor: default;
+  }
+  code.path {
+    word-break: break-all;
+    background: #0f1115;
+    border: 1px solid #2a2e37;
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
   }
   .rm {
     background: #2a1d1d;

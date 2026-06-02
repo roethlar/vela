@@ -289,6 +289,8 @@ pub fn run() {
             commands::list_ssh_mounts,
             commands::unmount_ssh,
             commands::check_mpv,
+            commands::set_mpv_path,
+            commands::install_mpv,
             commands::open_url,
             commands::link_begin,
             commands::link_poll,

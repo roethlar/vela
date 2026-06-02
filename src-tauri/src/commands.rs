@@ -84,6 +84,15 @@ pub struct PinDto {
 #[serde(rename_all = "camelCase")]
 pub struct MpvInfo {
     available: bool,
+    /// The resolved mpv command/path Vela will actually launch (bare `mpv` if
+    /// found on PATH, otherwise an absolute path), or null if none was found.
+    path: Option<String>,
+    /// The user's explicit override from config, if any (echoed back so the
+    /// settings UI can show/edit it).
+    configured_path: Option<String>,
+    /// Whether an automated installer (winget/brew) is available to install mpv
+    /// from inside the app on this OS.
+    can_auto_install: bool,
     /// Per-OS install command the user can copy (e.g. `brew install mpv`).
     install_command: String,
     /// Where to get mpv if the command doesn't apply.
@@ -876,7 +885,8 @@ pub async fn link_begin() -> Result<PinDto, String> {
     })
 }
 
-/// Whether mpv is available, plus a per-OS install hint for the UI.
+/// Whether mpv is available, where it resolved, the user's override (if any),
+/// plus a per-OS install hint for the UI.
 #[tauri::command]
 pub fn check_mpv() -> MpvInfo {
     let (install_command, install_url) = if cfg!(target_os = "macos") {
@@ -889,11 +899,234 @@ pub fn check_mpv() -> MpvInfo {
             "https://mpv.io/installation/",
         )
     };
+    let resolved = playback::resolve_mpv();
+    let configured_path = config::load_config()
+        .ok()
+        .and_then(|c| c.mpv_path)
+        .filter(|s| !s.trim().is_empty());
     MpvInfo {
-        available: playback::resolve_mpv().is_some(),
+        available: resolved.is_some(),
+        path: resolved,
+        configured_path,
+        // We can shell out to a package manager on macOS/Windows; Linux has too
+        // many package managers to pick one safely, so the user installs it.
+        can_auto_install: cfg!(any(target_os = "windows", target_os = "macos")),
         install_command: install_command.to_string(),
         install_url: install_url.to_string(),
     }
+}
+
+/// Set (or clear) the explicit mpv path override. Passing an empty/None value
+/// clears it and falls back to auto-discovery. A non-empty path is validated —
+/// it must point at a real file that runs as mpv — so a typo can't silently
+/// disable playback. Returns the refreshed mpv status.
+#[tauri::command]
+pub fn set_mpv_path(path: Option<String>) -> Result<MpvInfo, String> {
+    let trimmed = path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
+    if let Some(p) = &trimmed {
+        if !std::path::Path::new(p).is_file() {
+            return Err(format!(
+                "No file exists at that path: {p}\nPick the mpv executable (mpv.exe on Windows)."
+            ));
+        }
+        if !playback::mpv_usable(p) {
+            // The Windows community builds ship as CPU-specific variants, so a
+            // crash-on-launch there is usually a too-new build; elsewhere it's a
+            // wrong file or a non-executable bit. Keep the hint platform-apt.
+            let hint = if cfg!(target_os = "windows") {
+                "\n\nThis often means it's a build for a newer CPU (an AVX2 / \"v3\" build) than this machine supports. Use Install mpv to fetch a matching build, or get the plain \"x86_64\" (not \"v3\") build from mpv.io."
+            } else {
+                "\n\nMake sure it's the mpv binary and that it's marked executable."
+            };
+            return Err(format!("That mpv exists but won't run: {p}{hint}"));
+        }
+    }
+    let to_store = trimmed.clone();
+    config::update(move |cfg| {
+        cfg.mpv_path = to_store;
+        Ok(())
+    })?;
+    Ok(check_mpv())
+}
+
+/// Install mpv from inside the app. On Windows we assess the CPU and download the
+/// matching prebuilt mpv (the fast AVX2/"v3" build on modern CPUs, the baseline
+/// x86-64 build on older ones) so it can't hand a machine a build it can't run.
+/// On macOS we use Homebrew. Returns refreshed mpv status so the UI can clear the
+/// prompt. Linux is not handled (too many package managers); callers gate on
+/// `canAutoInstall`.
+#[tauri::command]
+pub async fn install_mpv() -> Result<MpvInfo, String> {
+    #[cfg(target_os = "windows")]
+    install_mpv_windows().await?;
+    #[cfg(not(target_os = "windows"))]
+    tauri::async_runtime::spawn_blocking(run_mpv_installer)
+        .await
+        .map_err(|e| format!("installer task failed: {e}"))??;
+    Ok(check_mpv())
+}
+
+/// Community Windows mpv builds, in two microarchitecture levels:
+/// <https://github.com/zhongfly/mpv-winbuild> (a standard source linked from the
+/// mpv wiki). `mpv-x86_64-v3-*` targets x86-64-v3 (AVX2/FMA/BMI2 — Haswell and
+/// newer); `mpv-x86_64-*` is the baseline build that runs on any 64-bit CPU.
+#[cfg(target_os = "windows")]
+const MPV_RELEASE_API: &str =
+    "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest";
+
+/// True if this CPU implements the x86-64-v3 feature level the "v3" mpv build
+/// needs. AVX2/FMA/BMI2 all arrived together with Haswell, so requiring them
+/// keeps us from installing a v3 build that would crash (illegal instruction) on
+/// an older CPU — the exact failure that makes a v3 build play nothing.
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+fn cpu_supports_v3() -> bool {
+    std::arch::is_x86_feature_detected!("avx2")
+        && std::arch::is_x86_feature_detected!("fma")
+        && std::arch::is_x86_feature_detected!("bmi2")
+}
+/// Non-x86_64 Windows (e.g. ARM): no x86 v3 build applies — use the baseline.
+#[cfg(all(target_os = "windows", not(target_arch = "x86_64")))]
+fn cpu_supports_v3() -> bool {
+    false
+}
+
+#[cfg(target_os = "windows")]
+async fn install_mpv_windows() -> Result<(), String> {
+    let want_v3 = cpu_supports_v3();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("couldn't create an HTTP client: {e}"))?;
+
+    // 1. Find the asset matching this CPU in the latest release.
+    let release: serde_json::Value = client
+        .get(MPV_RELEASE_API)
+        .header("User-Agent", "vela")
+        .header("Accept", "application/vnd.github+json")
+        .send()
+        .await
+        .map_err(|e| format!("couldn't reach GitHub to find an mpv build: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("GitHub returned an error finding an mpv build: {e}"))?
+        .json()
+        .await
+        .map_err(|e| format!("couldn't read the mpv release info: {e}"))?;
+
+    let (asset_name, asset_url) = release
+        .get("assets")
+        .and_then(|a| a.as_array())
+        .into_iter()
+        .flatten()
+        .filter_map(|a| {
+            let name = a.get("name")?.as_str()?.to_string();
+            let url = a.get("browser_download_url")?.as_str()?.to_string();
+            Some((name, url))
+        })
+        .find(|(name, _)| {
+            name.ends_with(".7z")
+                && name.starts_with("mpv-x86_64-")
+                && name.contains("-v3-") == want_v3
+        })
+        .ok_or_else(|| {
+            format!(
+                "couldn't find a {} mpv build in the latest release",
+                if want_v3 { "v3 (AVX2)" } else { "baseline" }
+            )
+        })?;
+
+    // 2. Download the archive.
+    let bytes = client
+        .get(&asset_url)
+        .header("User-Agent", "vela")
+        .send()
+        .await
+        .map_err(|e| format!("couldn't download mpv: {e}"))?
+        .error_for_status()
+        .map_err(|e| format!("mpv download failed: {e}"))?
+        .bytes()
+        .await
+        .map_err(|e| format!("couldn't read the mpv download: {e}"))?;
+
+    // 3. Extract to %LOCALAPPDATA%\Programs\mpv (a per-user location our discovery
+    //    already probes), and record the resulting path. Blocking fs/extraction
+    //    work runs off the async runtime.
+    let local = std::env::var("LOCALAPPDATA")
+        .map_err(|_| "couldn't locate %LOCALAPPDATA% to install mpv".to_string())?;
+    let dest = std::path::PathBuf::from(local).join(r"Programs\mpv");
+    let archive = std::env::temp_dir().join(&asset_name);
+
+    let dest2 = dest.clone();
+    let exe = tauri::async_runtime::spawn_blocking(move || -> Result<String, String> {
+        std::fs::write(&archive, &bytes)
+            .map_err(|e| format!("couldn't save the mpv download: {e}"))?;
+        let res = extract_7z(&archive, &dest2);
+        let _ = std::fs::remove_file(&archive); // best-effort temp cleanup
+        res?;
+        let exe = dest2.join("mpv.exe");
+        if !playback::mpv_usable(&exe.to_string_lossy()) {
+            return Err("mpv was installed but doesn't run on this PC.".to_string());
+        }
+        Ok(exe.to_string_lossy().into_owned())
+    })
+    .await
+    .map_err(|e| format!("install task failed: {e}"))??;
+
+    // 4. Point the config at the freshly installed mpv so it's used immediately
+    //    and shown in Settings.
+    config::update(move |cfg| {
+        cfg.mpv_path = Some(exe);
+        Ok(())
+    })?;
+    Ok(())
+}
+
+/// Extract a `.7z` archive into `dest` using the OS `tar` (libarchive, bundled
+/// with Windows 10 1803+), which reads 7-Zip archives. The community mpv archives
+/// lay `mpv.exe` out at the archive root, so this drops it straight into `dest`.
+#[cfg(target_os = "windows")]
+fn extract_7z(archive: &std::path::Path, dest: &std::path::Path) -> Result<(), String> {
+    std::fs::create_dir_all(dest)
+        .map_err(|e| format!("couldn't create {}: {e}", dest.display()))?;
+    let status = std::process::Command::new("tar")
+        .arg("-xf")
+        .arg(archive)
+        .arg("-C")
+        .arg(dest)
+        .status()
+        .map_err(|e| format!("couldn't run tar to extract mpv: {e}"))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err("couldn't extract the mpv archive.".to_string())
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn run_mpv_installer() -> Result<(), String> {
+    let out = std::process::Command::new("brew")
+        .args(["install", "mpv"])
+        .output()
+        .map_err(|e| {
+            if e.kind() == std::io::ErrorKind::NotFound {
+                "Homebrew isn't installed. Install it from brew.sh, then run `brew install mpv`."
+                    .to_string()
+            } else {
+                format!("couldn't launch brew: {e}")
+            }
+        })?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        Err(format!(
+            "brew couldn't install mpv:\n{}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        ))
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn run_mpv_installer() -> Result<(), String> {
+    Err("Automatic install isn't supported on Linux — install mpv with your distro's package manager.".to_string())
 }
 
 /// Open a URL in the user's default browser. Restricted to http(s) so a stray

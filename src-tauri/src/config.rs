@@ -21,6 +21,10 @@ pub struct AppConfig {
     pub last_page_start: Option<usize>,
     pub watched_threshold_percent: Option<u8>,
     pub auto_play_via_mpv: Option<bool>,
+    /// Explicit path to the mpv executable, set by the user when auto-discovery
+    /// can't find it (e.g. mpv installed somewhere unusual, or not on PATH).
+    /// Takes precedence over every other discovery step.
+    pub mpv_path: Option<String>,
     /// Non-Plex sources (Jellyfin/Emby today; more later). Kept deliberately
     /// provider-neutral so backends can diverge without a schema change.
     #[serde(default)]
