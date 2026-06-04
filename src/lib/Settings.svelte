@@ -26,6 +26,11 @@
     installUrl: string;
   };
 
+  type MpvAdvanced = {
+    extraArgs: string;
+    useOwnConfig: boolean;
+  };
+
   let {
     onClose,
     onChanged,
@@ -74,6 +79,16 @@
   let busy = $state(false);
   let err = $state<string | null>(null);
 
+  // Vertical settings tabs — split the (formerly very long) panel into sections.
+  type TabId = "connected" | "servers" | "folders" | "player";
+  const tabs: { id: TabId; label: string }[] = [
+    { id: "connected", label: "Connected" },
+    { id: "servers", label: "Servers" },
+    { id: "folders", label: "Folders" },
+    { id: "player", label: "Player" },
+  ];
+  let activeTab = $state<TabId>("connected");
+
   // Add SMB share
   let smbServer = $state("");
   let smbShare = $state("");
@@ -108,6 +123,42 @@
   let mpvBusy = $state(false);
   let installingMpv = $state(false);
 
+  // Advanced mpv options (free-form args + own-config toggle).
+  let mpvExtraArgs = $state("");
+  let mpvUseOwnConfig = $state(false);
+  let mpvAdvBusy = $state(false);
+  let showMpvHelp = $state(false);
+
+  // Canned starting points shown in the contextual help. Each "Insert" appends its
+  // options to the textarea so users can tweak from a working baseline.
+  const mpvPresets: { label: string; args: string; help: string }[] = [
+    {
+      label: "Smooth playback on older / weak GPUs",
+      args: "--vo=gpu\n--profile=fast\n--hdr-compute-peak=no",
+      help: "Drops the heavy gpu-next renderer, high-quality scaling, and per-frame peak detection. Fixes stutter on old GPUs at the cost of some image quality. Note: this disables HDR.",
+    },
+    {
+      label: "Force a specific GPU backend",
+      args: "--gpu-api=vulkan",
+      help: "Pin the graphics API (vulkan, d3d11, or opengl) when the auto-picked one misbehaves on your drivers.",
+    },
+    {
+      label: "Sharper upscaling (strong GPUs only)",
+      args: "--scale=ewa_lanczossharp\n--cscale=ewa_lanczossharp",
+      help: "Higher-quality scaling for capable GPUs. Adds GPU load — skip it if you're already dropping frames.",
+    },
+    {
+      label: "Smoother motion (reduce judder)",
+      args: "--video-sync=display-resample\n--interpolation=yes\n--tscale=oversample",
+      help: "Resamples frame timing to your display's refresh rate. Smoother panning, more GPU work, and not to everyone's taste.",
+    },
+    {
+      label: "Always show the stats overlay",
+      args: "--osd-level=3",
+      help: "Show mpv's on-screen stats from the start (codec, hwdec, dropped frames). You can also just press Shift+I during playback.",
+    },
+  ];
+
   // Guards against a slow initial load resolving after a later add/remove
   // refresh and overwriting the panel with stale lists.
   let loadSeq = 0;
@@ -117,12 +168,13 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, f, m, ssh, mp] = await Promise.all([
+      const [s, f, m, ssh, mp, adv] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<LocalFolder[]>("list_local_folders"),
         invoke<SmbMount[]>("list_smb_mounts"),
         invoke<SshMount[]>("list_ssh_mounts"),
         invoke<MpvInfo>("check_mpv"),
+        invoke<MpvAdvanced>("get_mpv_advanced"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
@@ -131,6 +183,8 @@
       sshMounts = ssh;
       mpv = mp;
       mpvPathInput = mp.configuredPath ?? "";
+      mpvExtraArgs = adv.extraArgs;
+      mpvUseOwnConfig = adv.useOwnConfig;
     } catch (e) {
       if (seq === loadSeq) err = String(e);
     }
@@ -283,6 +337,21 @@
     }
   }
 
+  async function unlinkPlex() {
+    if (!confirm("Disconnect the Plex account? You'll need to re-link to use it again.")) return;
+    busy = true;
+    err = null;
+    try {
+      await invoke("unlink_plex");
+      await load();
+      onChanged();
+    } catch (e) {
+      err = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function removeFolder(id: string) {
     busy = true;
     err = null;
@@ -354,6 +423,28 @@
     }
   }
 
+  async function saveMpvAdvanced() {
+    mpvAdvBusy = true;
+    err = null;
+    try {
+      await invoke("set_mpv_advanced", {
+        extraArgs: mpvExtraArgs,
+        useOwnConfig: mpvUseOwnConfig,
+      });
+    } catch (e) {
+      err = String(e);
+    } finally {
+      mpvAdvBusy = false;
+    }
+  }
+
+  // Append a preset's options to the textarea so the user tweaks from a baseline
+  // rather than replacing what they already typed.
+  function insertPreset(args: string) {
+    const cur = mpvExtraArgs.trimEnd();
+    mpvExtraArgs = (cur ? cur + "\n" : "") + args + "\n";
+  }
+
   function navigatorIsWindows() {
     return typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
   }
@@ -368,14 +459,14 @@
     class="panel"
     role="dialog"
     aria-modal="true"
-    aria-label="Sources"
+    aria-label="Settings"
     tabindex="-1"
     bind:this={panel}
     onclick={(e) => e.stopPropagation()}
     onkeydown={trapFocus}
   >
     <header>
-      <h2>Sources</h2>
+      <h2>Settings</h2>
       <button class="x" bind:this={closeBtn} onclick={onClose} aria-label="Close">✕</button>
     </header>
 
@@ -383,6 +474,21 @@
       <div class="err" role="alert">{err}</div>
     {/if}
 
+    <div class="tabwrap">
+      <div class="tabs" role="tablist" aria-orientation="vertical" aria-label="Settings sections">
+        {#each tabs as t}
+          <button
+            role="tab"
+            aria-selected={activeTab === t.id}
+            class:active={activeTab === t.id}
+            onclick={() => (activeTab = t.id)}
+          >{t.label}</button>
+        {/each}
+      </div>
+
+      <div class="tabcontent" role="tabpanel">
+
+    {#if activeTab === "connected"}
     <section>
       <h3>Connected</h3>
       {#if sources.length === 0 && folders.length === 0}
@@ -395,7 +501,7 @@
           <span class="badge">{s.kind}</span>
           <span class="name">{s.name}</span>
           {#if s.kind === "plex"}
-            <span class="muted small">linked</span>
+            <button class="rm" disabled={busy} onclick={unlinkPlex}>Disconnect</button>
           {:else}
             <button class="rm" disabled={busy} onclick={() => removeSource(s.id)}>Remove</button>
           {/if}
@@ -425,7 +531,9 @@
         </div>
       {/each}
     </section>
+    {/if}
 
+    {#if activeTab === "player"}
     <section>
       <h3>mpv player</h3>
       {#if mpv}
@@ -468,7 +576,73 @@
             Needs an internet connection.
           </p>
         {/if}
+
+        <div class="warn">
+          <b>⚠ Advanced — requires mpv knowledge.</b>
+          These options are passed straight to mpv, exactly as written. Wrong or
+          unsupported options can degrade quality or stop playback. If you're not
+          comfortable with mpv's command-line options, leave this blank — Vela's
+          defaults are already tuned for HDR.
+        </div>
+
+        <div class="field">
+          <label for="mpv-extra">Advanced mpv options</label>
+          <textarea
+            id="mpv-extra"
+            rows="4"
+            spellcheck="false"
+            placeholder={"One option per line, e.g.\n--vo=gpu\n--profile=fast"}
+            bind:value={mpvExtraArgs}
+          ></textarea>
+          <p class="muted small">
+            One mpv option per line, appended when launching mpv — so these override
+            Vela's defaults. Vela's playback tracking (its IPC socket) and the media
+            URL are protected and can't be overridden. Lines starting with
+            <code>#</code> are ignored. A bad option just makes mpv fail to start.
+          </p>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" bind:checked={mpvUseOwnConfig} />
+          Use my own mpv config (<code>~/.config/mpv/mpv.conf</code>)
+        </label>
+        <p class="muted small">
+          By default Vela launches mpv with <code>--no-config</code> for a predictable
+          setup. Tick this to load your own <code>mpv.conf</code> instead — it can then
+          change anything, including settings that disable HDR or break playback.
+        </p>
+
+        <div class="btnrow">
+          <button class="primary" disabled={mpvAdvBusy} onclick={saveMpvAdvanced}>
+            {mpvAdvBusy ? "Saving…" : "Save mpv options"}
+          </button>
+          <button onclick={() => (showMpvHelp = !showMpvHelp)}>
+            {showMpvHelp ? "Hide examples" : "Show examples"}
+          </button>
+        </div>
+
+        {#if showMpvHelp}
+          <div class="presets">
+            {#each mpvPresets as p}
+              <div class="preset">
+                <div class="preset-head">
+                  <b>{p.label}</b>
+                  <button class="ins" onclick={() => insertPreset(p.args)}>Insert</button>
+                </div>
+                <code class="preset-args">{p.args.split("\n").join("   ")}</code>
+                <p class="muted small">{p.help}</p>
+              </div>
+            {/each}
+          </div>
+        {/if}
       </div>
+    </section>
+    {/if}
+
+    {#if activeTab === "servers"}
+    <section>
+      <h3>Add a Plex account</h3>
+      <button class="primary" onclick={() => { onLinkPlex(); onClose(); }}>Link Plex…</button>
     </section>
 
     <section>
@@ -508,16 +682,17 @@
           <input type="checkbox" bind:checked={useApiKey} /> Use an API key instead
         </label>
         <button class="primary" disabled={busy} onclick={addServer}>
-          {busy ? "Connecting…" : "Connect"}
+          {busy ? "Adding…" : "Add"}
         </button>
+        <p class="muted small">
+          Add as many servers as you like — connect one, then fill this in again for the
+          next. Each appears under <b>Connected</b> and is browsed alongside the rest.
+        </p>
       </div>
     </section>
+    {/if}
 
-    <section>
-      <h3>Add a Plex account</h3>
-      <button class="primary" onclick={() => { onLinkPlex(); onClose(); }}>Link Plex…</button>
-    </section>
-
+    {#if activeTab === "folders"}
     <section>
       <h3>Add a local / mounted folder</h3>
       <div class="form">
@@ -613,6 +788,9 @@
         </p>
       </div>
     </section>
+    {/if}
+      </div>
+    </div>
   </div>
 </div>
 
@@ -632,10 +810,66 @@
     background: #16181d;
     border: 1px solid #2a2e37;
     border-radius: 12px;
-    width: min(560px, 100%);
+    width: min(780px, 100%);
     padding: 1.2rem 1.4rem 1.6rem;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
     cursor: default;
+  }
+  .tabwrap {
+    display: flex;
+    gap: 1.1rem;
+    align-items: flex-start;
+  }
+  .tabs {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    flex: 0 0 130px;
+    border-right: 1px solid #2a2e37;
+    padding-right: 0.6rem;
+  }
+  .tabs button {
+    text-align: left;
+    background: none;
+    border: none;
+    color: #b9c0cc;
+    padding: 0.5rem 0.7rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .tabs button:hover {
+    background: #1d2128;
+  }
+  .tabs button.active {
+    background: #232730;
+    color: #fff;
+  }
+  .tabcontent {
+    flex: 1;
+    min-width: 0;
+    max-height: 68vh;
+    overflow-y: auto;
+    padding-right: 0.4rem;
+  }
+  /* First section in a tab shouldn't show the divider line / top gap. */
+  .tabcontent section:first-child h3 {
+    border-top: none;
+    margin-top: 0;
+    padding-top: 0;
+  }
+  .warn {
+    background: #2a2410;
+    color: #f0d99a;
+    border: 1px solid #4a3f17;
+    border-radius: 6px;
+    padding: 0.5rem 0.7rem;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    margin-bottom: 0.6rem;
+  }
+  .warn b {
+    color: #ffcf66;
   }
   header {
     display: flex;
@@ -703,13 +937,57 @@
     color: #b9c0cc;
   }
   input,
-  select {
+  select,
+  textarea {
     background: #0f1115;
     border: 1px solid #2a2e37;
     border-radius: 6px;
     padding: 0.5rem 0.6rem;
     color: #eaeef5;
     font-size: 0.9rem;
+  }
+  textarea {
+    font-family: ui-monospace, monospace;
+    resize: vertical;
+    min-height: 4.5rem;
+    line-height: 1.4;
+  }
+  .presets {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    margin-top: 0.2rem;
+  }
+  .preset {
+    background: #14171d;
+    border: 1px solid #2a2e37;
+    border-radius: 6px;
+    padding: 0.5rem 0.65rem;
+  }
+  .preset-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.5rem;
+  }
+  .preset-args {
+    display: block;
+    margin: 0.3rem 0;
+    font-family: ui-monospace, monospace;
+    font-size: 0.8rem;
+    color: #9fd0ff;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  button.ins {
+    background: #232730;
+    color: #eaeef5;
+    border: 1px solid #2a2e37;
+    border-radius: 6px;
+    padding: 0.25rem 0.7rem;
+    font-size: 0.8rem;
+    cursor: pointer;
+    flex: none;
   }
   .check {
     flex-direction: row;

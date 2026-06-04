@@ -177,7 +177,7 @@
   // Make the backend's reconnect signal human-readable.
   function friendlyError(e: string): string {
     return e.includes("RECONNECT_REQUIRED")
-      ? "A server needs reconnecting — open Sources (⚙) and reconnect it."
+      ? "A server needs reconnecting — open Settings (⚙) and reconnect it."
       : e;
   }
 
@@ -620,7 +620,7 @@
     >
       ☰{#if queue.items.length > 0}<span class="qcount">{queue.items.length}</span>{/if}
     </button>
-    <button class="gear" title="Sources" aria-label="Sources" onclick={() => (showSettings = true)}>⚙</button>
+    <button class="gear" title="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>⚙</button>
   </header>
 
   {#if error}
@@ -641,7 +641,7 @@
       <div class="mpvtext">
         <b>mpv is required for playback</b> and wasn't found.
         {#if mpvInfo.canAutoInstall}
-          Install it automatically, or point Vela at an existing mpv in Sources → mpv player.
+          Install it automatically, or point Vela at an existing mpv in Settings → Player.
         {:else}
           Install it, then restart Vela.
         {/if}

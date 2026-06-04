@@ -107,6 +107,7 @@ fn ipc_socket_path() -> Result<String, String> {
 ///   2. a copy shipped alongside the app (next to our own exe),
 ///   3. bare `mpv` on `PATH`,
 ///   4. a generous list of real-world install locations per OS.
+///
 /// Returns the command to run (a bare name if found on `PATH`, otherwise an
 /// absolute path).
 pub fn resolve_mpv() -> Option<String> {
@@ -154,6 +155,17 @@ fn mpv_runs(bin: &str) -> bool {
 pub fn mpv_usable(path: &str) -> bool {
     let p = std::path::Path::new(path);
     p.is_file() && mpv_runs(path)
+}
+
+/// Split the user's advanced mpv options (Settings → Advanced mpv options) into
+/// argv. One option per line — blank lines and `#` comments ignored — so there's no
+/// shell-quoting ambiguity around values that contain spaces (paths, filter graphs).
+fn parse_extra_mpv_args(raw: &str) -> Vec<String> {
+    raw.lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+        .map(str::to_string)
+        .collect()
 }
 
 /// Look for an mpv shipped alongside our own executable — e.g. a packager (or a
@@ -329,9 +341,17 @@ pub fn play(
     let mpv_bin =
         resolve_mpv().ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
 
+    // Advanced/user mpv config (Settings → Advanced mpv options), loaded once here.
+    let cfg = crate::config::load_config().unwrap_or_default();
+    let use_own_config = cfg.mpv_use_own_config.unwrap_or(false);
+
     let mut cmd = Command::new(&mpv_bin);
-    cmd.arg("--no-config")
-        .arg("--no-ytdl")
+    // Reproducible launch by default: ignore the user's mpv.conf unless they opted
+    // in via "Use my own mpv config".
+    if !use_own_config {
+        cmd.arg("--no-config");
+    }
+    cmd.arg("--no-ytdl")
         .arg("--vo=gpu-next,gpu") // gpu-next first: best HDR passthrough
         .arg("--profile=gpu-hq")
         .arg("--hwdec=auto")
@@ -362,6 +382,17 @@ pub fn play(
         cmd.arg("--gpu-api=vulkan");
         // Enables the experimental Vulkan HDR WSI layer where present (KDE/NVIDIA).
         cmd.env("ENABLE_HDR_WSI", "1");
+    }
+
+    // User-supplied advanced options. Appended AFTER our render defaults so they
+    // override them (mpv applies the last value of a repeated option), but BEFORE
+    // the IPC server, resume seek, and `--`/URL below — those are re-asserted next so
+    // a user option can't clobber the socket Vela needs for progress/resume/
+    // auto-advance, or feed the media URL to mpv as an option.
+    if let Some(extra) = cfg.mpv_extra_args.as_deref() {
+        for arg in parse_extra_mpv_args(extra) {
+            cmd.arg(arg);
+        }
     }
 
     cmd.arg(format!("--input-ipc-server={}", ipc_path));

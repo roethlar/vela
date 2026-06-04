@@ -33,14 +33,33 @@ negotiated with the display).
 
 ## Requirements
 
-- A display with HDR enabled:
-  - **Linux:** a Wayland compositor with HDR support (e.g. KDE Plasma 6,
-    Hyprland) and GPU drivers with Vulkan HDR (NVIDIA 535+, recent Mesa for
-    AMD/Intel).
-  - **macOS:** an EDR-capable display (most modern Macs / XDR displays).
-  - **Windows:** Windows 10/11 with HDR enabled and a recent GPU driver.
-- **`mpv`** on `PATH` (0.38+ recommended for `gpu-next`/libplacebo HDR).
-  On macOS: `brew install mpv`. On Windows: install mpv and add it to `PATH`.
+Vela exists to get **HDR on Wayland**, so it targets a reasonably modern GPU and an HDR
+display. The hardware below is what the HDR experience expects. Vela won't stop you
+running it on weaker hardware — it just won't perform well, and HDR won't engage. Your
+call.
+
+**Display + session**
+- An **HDR-capable display in HDR mode** (HDR10/PQ).
+- **Linux:** a **Wayland** compositor with HDR/color-management — **KDE Plasma 6+** or a
+  recent **Hyprland**. X11 is unsupported for HDR.
+- **macOS:** an EDR-capable display (most modern Macs / XDR displays).
+- **Windows:** Windows 10/11 with HDR enabled.
+
+**GPU (working Vulkan + HDR output)**
+- **AMD:** Radeon RX 400 / Polaris or newer on the `amdgpu` driver. RDNA or newer
+  recommended for 4K HDR. Legacy `radeon`-driver GPUs, including TeraScale / HD 5000/6000
+  and older GCN cards requiring manual `amdgpu` enablement, are unsupported.
+- **NVIDIA:** Maxwell / GTX 900 or newer with proprietary driver 535+; RTX-class
+  recommended for 4K HDR.
+- **Intel:** Skylake / Gen9 or newer; Arc/Xe recommended for 4K HDR.
+
+> Note: the low end of "supported" (e.g. a 2015 iGPU) may not sustain **4K60 HDR** with
+> the full `gpu-hq` profile. 1080p HDR is the realistic floor on such parts.
+
+**Player**
+- **`mpv` 0.38+** on `PATH` (required for `gpu-next`/libplacebo HDR). Vela can install a
+  current build for you on first run. On macOS: `brew install mpv`. On Windows: install
+  mpv and add it to `PATH`.
 - Tooling to build: Rust and Node.js, plus the platform's Tauri prerequisites
   (Linux: `webkit2gtk-4.1`, `libsoup-3.0`; macOS: Xcode Command Line Tools;
   Windows: WebView2 runtime + MSVC Build Tools). See the

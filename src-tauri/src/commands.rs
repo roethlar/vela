@@ -217,6 +217,19 @@ pub async fn remove_source(id: String, state: State<'_, AppState>) -> Result<(),
     Ok(())
 }
 
+/// Unlink the Plex account: clear the stored auth token and drop the live Plex
+/// source. The client identifier is kept so a later re-link reuses the same device
+/// identity. This is the counterpart to the link flow that `remove_source` defers to.
+#[tauri::command]
+pub async fn unlink_plex(state: State<'_, AppState>) -> Result<(), String> {
+    config::update(|cfg| {
+        cfg.auth_token = None;
+        Ok(())
+    })?;
+    state.registry.lock().await.remove(PLEX_SOURCE_ID);
+    Ok(())
+}
+
 /// Persist a source config and add it to the live registry.
 async fn register_source(
     state: &State<'_, AppState>,
@@ -947,6 +960,42 @@ pub fn set_mpv_path(path: Option<String>) -> Result<MpvInfo, String> {
         Ok(())
     })?;
     Ok(check_mpv())
+}
+
+/// Advanced mpv configuration the user controls from Settings: free-form extra
+/// options and whether to load their own `mpv.conf`. Echoed back so the UI can
+/// populate the fields.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MpvAdvanced {
+    pub extra_args: String,
+    pub use_own_config: bool,
+}
+
+#[tauri::command]
+pub fn get_mpv_advanced() -> MpvAdvanced {
+    let cfg = config::load_config().unwrap_or_default();
+    MpvAdvanced {
+        extra_args: cfg.mpv_extra_args.unwrap_or_default(),
+        use_own_config: cfg.mpv_use_own_config.unwrap_or(false),
+    }
+}
+
+/// Persist the advanced mpv settings. No validation here — these are the user's own
+/// machine and their own call; a bad option just makes mpv refuse to launch, which
+/// surfaces as a normal playback error. An empty `extra_args` clears the override.
+#[tauri::command]
+pub fn set_mpv_advanced(extra_args: String, use_own_config: bool) -> Result<(), String> {
+    let trimmed = extra_args.trim().to_string();
+    config::update(move |cfg| {
+        cfg.mpv_extra_args = if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        };
+        cfg.mpv_use_own_config = Some(use_own_config);
+        Ok(())
+    })
 }
 
 /// Install mpv from inside the app. On Windows we assess the CPU and download the

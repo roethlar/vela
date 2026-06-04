@@ -25,6 +25,15 @@ pub struct AppConfig {
     /// can't find it (e.g. mpv installed somewhere unusual, or not on PATH).
     /// Takes precedence over every other discovery step.
     pub mpv_path: Option<String>,
+    /// User-supplied advanced mpv options, one per line (blank lines and `#`
+    /// comments ignored). Appended at launch so they override Vela's render
+    /// defaults; the IPC socket / resume seek / media URL are re-asserted after and
+    /// can't be overridden. Empowers power users (and weak-hardware users who want a
+    /// lighter profile) without Vela having to guess.
+    pub mpv_extra_args: Option<String>,
+    /// When true, Vela drops `--no-config` so mpv loads the user's own
+    /// `~/.config/mpv/mpv.conf`. Off by default for a reproducible launch.
+    pub mpv_use_own_config: Option<bool>,
     /// Non-Plex sources (Jellyfin/Emby today; more later). Kept deliberately
     /// provider-neutral so backends can diverge without a schema change.
     #[serde(default)]
