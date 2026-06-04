@@ -80,14 +80,47 @@
   let err = $state<string | null>(null);
 
   // Vertical settings tabs — split the (formerly very long) panel into sections.
-  type TabId = "connected" | "servers" | "folders" | "player";
+  type TabId = "connected" | "servers" | "folders" | "player" | "appearance";
   const tabs: { id: TabId; label: string }[] = [
     { id: "connected", label: "Connected" },
     { id: "servers", label: "Servers" },
     { id: "folders", label: "Folders" },
     { id: "player", label: "Player" },
+    { id: "appearance", label: "Appearance" },
   ];
   let activeTab = $state<TabId>("connected");
+
+  // Theme: persisted to localStorage and applied to <html data-theme>. app.html
+  // applies the saved value before first paint; this drives live switching.
+  type Theme = "dark" | "light" | "system";
+  const themeOptions: { id: Theme; label: string }[] = [
+    { id: "dark", label: "Dark" },
+    { id: "light", label: "Light" },
+    { id: "system", label: "System" },
+  ];
+  let theme = $state<Theme>(readTheme());
+
+  function readTheme(): Theme {
+    try {
+      const t = localStorage.getItem("vela-theme");
+      if (t === "light" || t === "dark" || t === "system") return t;
+    } catch {}
+    return "dark";
+  }
+
+  function setTheme(t: Theme) {
+    theme = t;
+    try {
+      localStorage.setItem("vela-theme", t);
+    } catch {}
+    const effective =
+      t === "system"
+        ? window.matchMedia("(prefers-color-scheme: light)").matches
+          ? "light"
+          : "dark"
+        : t;
+    document.documentElement.setAttribute("data-theme", effective);
+  }
 
   // Add SMB share
   let smbServer = $state("");
@@ -789,6 +822,20 @@
       </div>
     </section>
     {/if}
+
+    {#if activeTab === "appearance"}
+    <section>
+      <h3>Theme</h3>
+      <div class="seg" role="group" aria-label="Theme">
+        {#each themeOptions as o}
+          <button class:active={theme === o.id} onclick={() => setTheme(o.id)}>{o.label}</button>
+        {/each}
+      </div>
+      <p class="muted small">
+        Pick a color theme. “System” follows your operating system's light/dark setting.
+      </p>
+    </section>
+    {/if}
       </div>
     </div>
   </div>
@@ -807,8 +854,8 @@
     overflow-y: auto;
   }
   .panel {
-    background: #16181d;
-    border: 1px solid #2a2e37;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 12px;
     width: min(780px, 100%);
     padding: 1.2rem 1.4rem 1.6rem;
@@ -825,25 +872,25 @@
     flex-direction: column;
     gap: 0.2rem;
     flex: 0 0 130px;
-    border-right: 1px solid #2a2e37;
+    border-right: 1px solid var(--border);
     padding-right: 0.6rem;
   }
   .tabs button {
     text-align: left;
     background: none;
     border: none;
-    color: #b9c0cc;
+    color: var(--text-2);
     padding: 0.5rem 0.7rem;
     border-radius: 6px;
     cursor: pointer;
     font-size: 0.9rem;
   }
   .tabs button:hover {
-    background: #1d2128;
+    background: var(--surface-2);
   }
   .tabs button.active {
-    background: #232730;
-    color: #fff;
+    background: var(--surface-2);
+    color: var(--text-bright);
   }
   .tabcontent {
     flex: 1;
@@ -852,6 +899,27 @@
     overflow-y: auto;
     padding-right: 0.4rem;
   }
+  .seg {
+    display: inline-flex;
+    gap: 0.2rem;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.2rem;
+  }
+  .seg button {
+    background: none;
+    border: none;
+    color: var(--text-muted);
+    padding: 0.4rem 0.95rem;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  .seg button.active {
+    background: var(--surface-2);
+    color: var(--text-bright);
+  }
   /* First section in a tab shouldn't show the divider line / top gap. */
   .tabcontent section:first-child h3 {
     border-top: none;
@@ -859,9 +927,9 @@
     padding-top: 0;
   }
   .warn {
-    background: #2a2410;
-    color: #f0d99a;
-    border: 1px solid #4a3f17;
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border: 1px solid var(--warn-border);
     border-radius: 6px;
     padding: 0.5rem 0.7rem;
     font-size: 0.85rem;
@@ -869,7 +937,7 @@
     margin-bottom: 0.6rem;
   }
   .warn b {
-    color: #ffcf66;
+    color: var(--warn-text);
   }
   header {
     display: flex;
@@ -883,15 +951,15 @@
   }
   h3 {
     font-size: 0.95rem;
-    color: #b9c0cc;
+    color: var(--text-2);
     margin: 1.2rem 0 0.5rem;
-    border-top: 1px solid #2a2e37;
+    border-top: 1px solid var(--border);
     padding-top: 1rem;
   }
   .x {
     background: none;
     border: none;
-    color: #8a93a0;
+    color: var(--text-muted);
     font-size: 1rem;
     cursor: pointer;
   }
@@ -911,13 +979,13 @@
     font-size: 0.7rem;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    background: #2a2e37;
-    color: #b9c0cc;
+    background: var(--border);
+    color: var(--text-2);
     padding: 0.15rem 0.45rem;
     border-radius: 4px;
   }
   .muted {
-    color: #8a93a0;
+    color: var(--text-muted);
   }
   .small {
     font-size: 0.8rem;
@@ -934,16 +1002,16 @@
   }
   label {
     font-size: 0.8rem;
-    color: #b9c0cc;
+    color: var(--text-2);
   }
   input,
   select,
   textarea {
-    background: #0f1115;
-    border: 1px solid #2a2e37;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 0.5rem 0.6rem;
-    color: #eaeef5;
+    color: var(--text);
     font-size: 0.9rem;
   }
   textarea {
@@ -959,8 +1027,8 @@
     margin-top: 0.2rem;
   }
   .preset {
-    background: #14171d;
-    border: 1px solid #2a2e37;
+    background: var(--surface);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 0.5rem 0.65rem;
   }
@@ -975,14 +1043,14 @@
     margin: 0.3rem 0;
     font-family: ui-monospace, monospace;
     font-size: 0.8rem;
-    color: #9fd0ff;
+    color: var(--info);
     white-space: pre-wrap;
     word-break: break-word;
   }
   button.ins {
-    background: #232730;
-    color: #eaeef5;
-    border: 1px solid #2a2e37;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 0.25rem 0.7rem;
     font-size: 0.8rem;
@@ -996,8 +1064,8 @@
     display: flex;
   }
   button.primary {
-    background: #e5a00d;
-    color: #1a1205;
+    background: var(--accent);
+    color: var(--on-accent);
     border: none;
     border-radius: 6px;
     padding: 0.55rem 1.1rem;
@@ -1020,9 +1088,9 @@
   }
   /* Secondary buttons (e.g. Browse…) inside the panel. */
   .btnrow button:not(.primary):not(.rm) {
-    background: #232730;
-    color: #eaeef5;
-    border: 1px solid #2a2e37;
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
     border-radius: 6px;
     padding: 0.55rem 1.1rem;
     cursor: pointer;
@@ -1033,22 +1101,22 @@
   }
   code.path {
     word-break: break-all;
-    background: #0f1115;
-    border: 1px solid #2a2e37;
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
     border-radius: 4px;
     padding: 0.05rem 0.3rem;
   }
   .rm {
-    background: #2a1d1d;
-    color: #ffb4b4;
-    border: 1px solid #4a2a2a;
+    background: var(--danger-bg);
+    color: var(--danger-text);
+    border: 1px solid var(--danger-border);
     border-radius: 6px;
     padding: 0.3rem 0.7rem;
     cursor: pointer;
   }
   .err {
-    background: #3a1d1d;
-    color: #ffb4b4;
+    background: var(--danger-bg);
+    color: var(--danger-text);
     padding: 0.5rem 0.8rem;
     border-radius: 6px;
     font-size: 0.85rem;

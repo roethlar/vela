@@ -1,9 +1,74 @@
+/* ===== Theme tokens =====
+   Semantic colors used app-wide. Dark is the default (matches the prior look);
+   light is opt-in via <html data-theme="light">. Components reference var(--*)
+   only — no hardcoded hex — so a new theme is just another block here. */
+:root,
+:root[data-theme="dark"] {
+  --bg: #0b0d10;
+  --bg-blur: rgba(11, 13, 16, 0.9);
+  --surface: #161a21;
+  --surface-2: #20262f;
+  --surface-sunken: #11141a;
+  --border: #232833;
+  --border-subtle: #1b1f26;
+  --border-strong: #444b55;
+  --text: #e7e9ee;
+  --text-2: #cdd3dc;
+  --text-muted: #9aa3b0;
+  --text-dim: #6b7480;
+  --text-bright: #ffffff;
+  --accent: #e5a00d;
+  --accent-hover: #f2b32a;
+  --on-accent: #1a1205;
+  --danger-bg: #3a1d1d;
+  --danger-text: #ffb4b4;
+  --danger-border: #4a2a2a;
+  --warn-bg: #2a2410;
+  --warn-text: #f0d99a;
+  --warn-border: #4a3f17;
+  --info: #9fd0ff;
+  --scrollbar: #2a2f37;
+  --shadow-lg: rgba(0, 0, 0, 0.45);
+  --shadow-md: rgba(0, 0, 0, 0.35);
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+  --bg: #f3f4f6;
+  --bg-blur: rgba(243, 244, 246, 0.85);
+  --surface: #ffffff;
+  --surface-2: #e9ebef;
+  --surface-sunken: #e6e8ec;
+  --border: #d6dae1;
+  --border-subtle: #e3e6eb;
+  --border-strong: #b8bec9;
+  --text: #1b1f26;
+  --text-2: #353b45;
+  --text-muted: #5e6672;
+  --text-dim: #8a909c;
+  --text-bright: #0b0d10;
+  --accent: #c98800;
+  --accent-hover: #e5a00d;
+  --on-accent: #1a1205;
+  --danger-bg: #fdecec;
+  --danger-text: #b3261e;
+  --danger-border: #f1c2c0;
+  --warn-bg: #fff7e0;
+  --warn-text: #6b5300;
+  --warn-border: #e8d390;
+  --info: #1d6fd0;
+  --scrollbar: #c2c7d0;
+  --shadow-lg: rgba(0, 0, 0, 0.16);
+  --shadow-md: rgba(0, 0, 0, 0.1);
+  color-scheme: light;
+}
+
 html,
 body {
   margin: 0;
   height: 100%;
-  background: #0b0d10;
-  color: #e7e9ee;
+  background: var(--bg);
+  color: var(--text);
   font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
   -webkit-font-smoothing: antialiased;
 }
@@ -17,6 +82,6 @@ body {
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #2a2f37;
+  background: var(--scrollbar);
   border-radius: 5px;
 }
