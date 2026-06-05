@@ -2,6 +2,7 @@
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { onMount, onDestroy, tick } from "svelte";
   import Settings from "$lib/Settings.svelte";
+  import Icon from "$lib/Icon.svelte";
 
   // Poster URLs that 404'd; fall back to the title placeholder for these.
   let failedPosters = $state(new Set<string>());
@@ -580,6 +581,7 @@
 </script>
 
 <div class="app">
+  <div class="grain" aria-hidden="true"></div>
   <header>
     <span class="brand">Ve<b>la</b></span>
     {#if authenticated && sources.length > 1}
@@ -618,9 +620,11 @@
       aria-label="Play queue ({queue.items.length} item{queue.items.length === 1 ? '' : 's'})"
       onclick={toggleQueue}
     >
-      ☰{#if queue.items.length > 0}<span class="qcount">{queue.items.length}</span>{/if}
+      <Icon name="queue" size={17} />{#if queue.items.length > 0}<span class="qcount">{queue.items.length}</span>{/if}
     </button>
-    <button class="gear" title="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>⚙</button>
+    <button class="gear" title="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>
+      <Icon name="settings" />
+    </button>
   </header>
 
   {#if error}
@@ -660,12 +664,13 @@
     </div>
   {/if}
 
-  {#snippet poster(item: Item)}
+  {#snippet poster(item: Item, i: number)}
     {@const pct =
       item.viewOffsetMs && item.durationMs
         ? Math.round(Math.min(100, (100 * item.viewOffsetMs) / item.durationMs))
         : null}
     {@const baseName = item.grandparentTitle ?? item.title}
+    {@const playable = item.mediaType !== "show" && item.mediaType !== "season"}
     {@const parts = item.grandparentTitle
       ? [
           item.grandparentTitle,
@@ -680,6 +685,7 @@
       class="poster"
       class:landscape={item.mediaType === "episode" || item.mediaType === "video"}
       class:watched={item.played === true && pct === null}
+      style="animation-delay: {Math.min(i, 14) * 22}ms;"
       onclick={() => open(item)}
       oncontextmenu={(e) => openMenu(e, item)}
       title={baseName}
@@ -688,7 +694,7 @@
       <div class="art">
         {#if item.played === true && pct === null}
           <!-- Fully watched: marked played AND not mid-resume (pct is the resume %). -->
-          <div class="watchedbadge" aria-hidden="true">✓</div>
+          <div class="watchedbadge" aria-hidden="true"><Icon name="check" size={13} stroke={2.75} /></div>
         {/if}
         {#if item.poster && !failedPosters.has(item.ratingKey)}
           <img
@@ -702,6 +708,11 @@
           />
         {:else}
           <div class="noart">{item.title}</div>
+        {/if}
+        {#if playable}
+          <div class="playoverlay" aria-hidden="true">
+            <span class="playbtn"><Icon name="play" size={20} /></span>
+          </div>
         {/if}
         {#if pct !== null}
           <!-- Decorative: the percentage is exposed on the button's aria-label
@@ -718,6 +729,32 @@
         {/if}
       </div>
     </button>
+  {/snippet}
+
+  {#snippet skelCard()}
+    <div class="poster skel" aria-hidden="true">
+      <div class="art skel-art"></div>
+      <div class="meta"><span class="skel-line" style="width:80%"></span></div>
+    </div>
+  {/snippet}
+
+  {#snippet skelRails()}
+    <div class="home" aria-busy="true" aria-label="Loading">
+      {#each Array(3) as _, r (r)}
+        <section class="rail">
+          <span class="skel-line skel-title"></span>
+          <div class="row">
+            {#each Array(8) as _, i (i)}{@render skelCard()}{/each}
+          </div>
+        </section>
+      {/each}
+    </div>
+  {/snippet}
+
+  {#snippet skelGrid()}
+    <div class="grid skelgrid" aria-busy="true" aria-label="Loading">
+      {#each Array(18) as _, i (i)}{@render skelCard()}{/each}
+    </div>
   {/snippet}
 
   {#if pin}
@@ -740,12 +777,16 @@
     </div>
   {:else if !authenticated}
     <div class="empty">
-      <h2>No sources connected</h2>
-      <button class="primary" onclick={() => (showSettings = true)}>Add Source</button>
+      <div class="empty-icon" aria-hidden="true"><Icon name="film" size={46} stroke={1.5} /></div>
+      <h2>Welcome to Vela</h2>
+      <p class="muted empty-sub">
+        Connect Plex, Jellyfin, Emby, or a local folder to start browsing your library in HDR.
+      </p>
+      <button class="primary" onclick={() => (showSettings = true)}>Add a source</button>
     </div>
   {:else if mode === "home"}
     {#if loading && hubs.length === 0}
-      <div class="muted center">Loading…</div>
+      {@render skelRails()}
     {:else if hubs.length === 0}
       <div class="muted center">Nothing on your home screen yet — pick a library above.</div>
     {:else}
@@ -754,8 +795,8 @@
           <section class="rail">
             <h2>{hub.title}{#if activeSource === null && sources.length > 1 && hub.sourceName}<span class="srctag"> · {hub.sourceName}</span>{/if}</h2>
             <div class="row">
-              {#each hub.items as item (item.ratingKey)}
-                {@render poster(item)}
+              {#each hub.items as item, i (item.ratingKey)}
+                {@render poster(item, i)}
               {/each}
             </div>
           </section>
@@ -763,12 +804,12 @@
       </div>
     {/if}
   {:else if loading && items.length === 0}
-    <div class="muted center">Loading…</div>
+    {@render skelGrid()}
   {:else}
     <div class="crumbs">
-      <button class="back" onclick={back}>← Back</button>
+      <button class="back" onclick={back}><Icon name="back" size={15} /> Back</button>
       {#each crumbs as c, i (i)}
-        {#if i > 0}<span class="sep">/</span>{/if}
+        {#if i > 0}<span class="sep"><Icon name="chevron" size={13} /></span>{/if}
         <button class="crumb" class:current={i === crumbs.length - 1} onclick={() => goCrumb(i)}>{c.title}</button>
       {/each}
       {#if active && crumbs.length === 1}
@@ -785,8 +826,8 @@
       </div>
     {:else}
       <main class="grid" bind:this={gridEl} onscroll={onScroll}>
-        {#each items as item (item.ratingKey)}
-          {@render poster(item)}
+        {#each items as item, i (item.ratingKey)}
+          {@render poster(item, i)}
         {/each}
       </main>
     {/if}
@@ -838,7 +879,7 @@
         {#if queue.items.length > 0}
           <button class="drawerlink" onclick={queueClearAll}>Clear</button>
         {/if}
-        <button class="drawerclose" aria-label="Close queue" onclick={toggleQueue}>✕</button>
+        <button class="drawerclose" aria-label="Close queue" onclick={toggleQueue}><Icon name="close" size={16} /></button>
       </div>
     </header>
     {#if queue.items.length === 0}
@@ -858,7 +899,7 @@
                 {#if qi.subtitle}<div class="drawerinfosub">{qi.subtitle}</div>{/if}
               </div>
             </button>
-            <button class="drawerremove" title="Remove from queue" aria-label="Remove from queue" onclick={() => queueRemove(i)}>✕</button>
+            <button class="drawerremove" title="Remove from queue" aria-label="Remove from queue" onclick={() => queueRemove(i)}><Icon name="close" size={15} /></button>
           </li>
         {/each}
       </ol>
@@ -913,12 +954,14 @@
     z-index: 10;
   }
   .brand {
+    font-family: var(--font-display);
+    font-size: 1.3rem;
     font-weight: 700;
-    letter-spacing: 0.5px;
+    letter-spacing: -0.02em;
   }
   .brand b {
     color: var(--accent);
-    font-weight: 800;
+    font-weight: 700;
   }
   nav {
     display: flex;
@@ -980,20 +1023,27 @@
     font-size: 0.85em;
   }
   .gear {
-    margin-left: auto;
     background: transparent;
     border: none;
     color: var(--text-muted);
-    font-size: 1.1rem;
     cursor: pointer;
-    padding: 0.2rem 0.4rem;
+    padding: 0.35rem;
+    border-radius: 0.45rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      color 0.15s var(--ease),
+      background 0.15s var(--ease);
   }
   .gear:hover {
     color: var(--text-bright);
+    background: var(--border-subtle);
   }
   .search:focus {
     outline: none;
     border-color: var(--accent);
+    box-shadow: 0 0 0 3px rgba(229, 160, 13, 0.15);
   }
   .crumbs {
     display: flex;
@@ -1016,11 +1066,14 @@
     background: var(--surface);
     border: none;
     color: var(--text-2);
-    padding: 0.3rem 0.7rem;
+    padding: 0.3rem 0.7rem 0.3rem 0.55rem;
     border-radius: 7px;
     cursor: pointer;
     margin-right: 0.5rem;
     font-size: 0.85rem;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
   }
   .crumbs .back:hover {
     background: var(--surface-2);
@@ -1043,7 +1096,9 @@
     cursor: default;
   }
   .crumbs .sep {
-    color: var(--border-strong);
+    color: var(--text-dim);
+    display: inline-flex;
+    align-items: center;
   }
   .grid {
     flex: 1;
@@ -1073,7 +1128,8 @@
     width: 100%;
     max-width: 150px;
     min-width: 0;
-    transition: transform 0.15s ease;
+    transition: transform 0.15s var(--ease);
+    animation: vela-rise 0.4s var(--ease) backwards;
   }
   .poster.landscape {
     max-width: 210px;
@@ -1081,14 +1137,64 @@
   .poster:hover {
     transform: translateY(-4px);
   }
+  .poster:hover .art {
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--border-strong);
+    transform: scale(1.03);
+  }
+  .poster:focus-visible {
+    outline: none;
+  }
+  .poster:focus-visible .art {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-card), 0 0 0 2px var(--accent);
+  }
   .art {
     position: relative;
     width: 100%;
     aspect-ratio: 2 / 3;
-    border-radius: 7px;
+    border-radius: var(--radius);
     overflow: hidden;
     background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-card);
+    transition:
+      box-shadow 0.18s var(--ease),
+      border-color 0.18s var(--ease),
+      transform 0.2s var(--ease);
+  }
+  .playoverlay {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: linear-gradient(to top, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.05) 55%);
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.18s var(--ease);
+  }
+  .playbtn {
+    width: 2.9rem;
+    height: 2.9rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: var(--on-accent);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-left: 0.15rem;
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    transform: scale(0.82);
+    transition: transform 0.18s var(--ease);
+  }
+  .poster:hover .playoverlay,
+  .poster:focus-visible .playoverlay {
+    opacity: 1;
+  }
+  .poster:hover .playbtn,
+  .poster:focus-visible .playbtn {
+    transform: scale(1);
   }
   .poster.landscape .art {
     aspect-ratio: 16 / 9;
@@ -1105,22 +1211,25 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    padding: 0.5rem;
-    font-size: 0.85rem;
-    color: var(--text-dim);
+    padding: 0.6rem;
+    font-size: 0.82rem;
+    font-weight: 600;
+    line-height: 1.3;
+    color: var(--text-2);
     text-align: center;
+    background: linear-gradient(150deg, var(--surface-2), var(--surface-sunken));
   }
   .progress {
     position: absolute;
     left: 0;
     right: 0;
     bottom: 0;
-    height: 4px;
-    background: rgba(0, 0, 0, 0.55);
+    height: 5px;
+    background: rgba(0, 0, 0, 0.5);
   }
   .progress .bar {
     height: 100%;
-    background: var(--accent);
+    background: linear-gradient(90deg, var(--accent), var(--accent-hover));
   }
   /* Home rails */
   .home {
@@ -1132,9 +1241,10 @@
     margin-top: 1.6rem;
   }
   .rail h2 {
-    font-size: 1.05rem;
-    font-weight: 600;
-    margin: 0 0 0.7rem;
+    font-size: 1.24rem;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 0.85rem;
   }
   .row {
     display: flex;
@@ -1142,6 +1252,20 @@
     overflow-x: auto;
     padding-bottom: 0.6rem;
     scrollbar-width: thin;
+    scrollbar-color: transparent transparent;
+  }
+  .row:hover {
+    scrollbar-color: var(--border-strong) transparent;
+  }
+  .row::-webkit-scrollbar {
+    height: 6px;
+  }
+  .row::-webkit-scrollbar-thumb {
+    background: transparent;
+    border-radius: 3px;
+  }
+  .row:hover::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
   }
   .row .poster {
     width: 118px;
@@ -1163,6 +1287,7 @@
   }
   .meta .t {
     font-size: 0.85rem;
+    font-weight: 600;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1187,10 +1312,49 @@
     align-items: center;
     gap: 0.9rem;
   }
+  .empty-icon {
+    color: var(--accent);
+    line-height: 0;
+    margin-bottom: 0.2rem;
+  }
   .empty h2 {
     margin: 0;
-    color: var(--text-2);
-    font-size: 1.2rem;
+    color: var(--text);
+    font-size: 1.5rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  .empty-sub {
+    margin: 0;
+    max-width: 24rem;
+    line-height: 1.5;
+  }
+
+  /* Loading skeletons */
+  .skel-art {
+    border: 1px solid var(--border);
+    background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%);
+    background-size: 200% 100%;
+    animation: vela-shimmer 1.3s linear infinite;
+  }
+  .skel-line {
+    display: block;
+    height: 0.72rem;
+    border-radius: 4px;
+    background: linear-gradient(90deg, var(--surface) 25%, var(--surface-2) 37%, var(--surface) 63%);
+    background-size: 200% 100%;
+    animation: vela-shimmer 1.3s linear infinite;
+  }
+  .skel-title {
+    width: 150px;
+    height: 1.05rem;
+    margin-bottom: 0.7rem;
+  }
+  .poster.skel {
+    cursor: default;
+  }
+  .poster.skel:hover {
+    transform: none;
   }
   .qr {
     background: #fff;
@@ -1234,9 +1398,15 @@
     padding: 0.55rem 1.1rem;
     font-weight: 700;
     cursor: pointer;
+    transition:
+      background 0.15s var(--ease),
+      transform 0.08s var(--ease);
   }
   button.primary:hover {
     background: var(--accent-hover);
+  }
+  button.primary:active {
+    transform: translateY(1px);
   }
   .mpvbar {
     display: flex;
@@ -1249,6 +1419,7 @@
     padding: 0.6rem 1rem;
     font-size: 0.9rem;
     border-bottom: 1px solid var(--warn-border);
+    animation: vela-slide-down 0.2s var(--ease);
   }
   .mpvbar code {
     display: inline-block;
@@ -1285,6 +1456,7 @@
     color: var(--danger-text);
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
+    animation: vela-slide-down 0.2s var(--ease);
   }
 
   /* Watched indicator + dimming */
@@ -1298,10 +1470,9 @@
     border-radius: 50%;
     background: var(--accent);
     color: var(--on-accent);
-    font-size: 0.8rem;
-    font-weight: 800;
-    line-height: 1.25rem;
-    text-align: center;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
   }
   .poster.watched .art img,
@@ -1326,6 +1497,8 @@
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
     display: flex;
     flex-direction: column;
+    transform-origin: top left;
+    animation: vela-pop 0.13s var(--ease);
   }
   .ctxmenu button {
     background: none;
@@ -1384,6 +1557,7 @@
     inset: 0;
     z-index: 30;
     background: rgba(0, 0, 0, 0.25);
+    animation: vela-fade 0.16s var(--ease);
   }
   .drawer {
     position: fixed;
@@ -1398,6 +1572,7 @@
     box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
     display: flex;
     flex-direction: column;
+    animation: vela-slide-right 0.22s var(--ease);
   }
   .drawerhead {
     display: flex;
@@ -1435,10 +1610,11 @@
     border: none;
     color: var(--text-muted);
     cursor: pointer;
-    font-size: 1rem;
-    line-height: 1;
-    padding: 0.3rem 0.45rem;
+    padding: 0.35rem;
     border-radius: 0.35rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .drawerclose:hover {
     color: var(--text-bright);
@@ -1528,9 +1704,10 @@
     border: none;
     color: var(--text-dim);
     cursor: pointer;
-    font-size: 0.9rem;
-    padding: 0 0.5rem;
+    padding: 0 0.45rem;
     border-radius: 0.35rem;
+    display: inline-flex;
+    align-items: center;
   }
   .drawerremove:hover {
     color: var(--danger-text);

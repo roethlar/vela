@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { onMount, onDestroy } from "svelte";
+  import Icon from "$lib/Icon.svelte";
 
   type Source = { id: string; name: string; kind: string };
   type LocalFolder = { id: string; name: string; path: string; kind: string };
@@ -90,36 +91,39 @@
   ];
   let activeTab = $state<TabId>("connected");
 
-  // Theme: persisted to localStorage and applied to <html data-theme>. app.html
-  // applies the saved value before first paint; this drives live switching.
-  type Theme = "dark" | "light" | "system";
-  const themeOptions: { id: Theme; label: string }[] = [
-    { id: "dark", label: "Dark" },
-    { id: "light", label: "Light" },
-    { id: "system", label: "System" },
+  // Theme catalog (mirrors the blocks in app.css). Persisted to localStorage and
+  // applied to <html data-theme>; app.html applies the saved value before paint.
+  type ThemeMode = "dark" | "light";
+  type ThemeDef = { id: string; label: string; mode: ThemeMode; swatch: [string, string, string] };
+  const THEMES: ThemeDef[] = [
+    { id: "dark", label: "Vela Dark", mode: "dark", swatch: ["#0b0d10", "#e5a00d", "#20262f"] },
+    { id: "dracula", label: "Dracula", mode: "dark", swatch: ["#282a36", "#bd93f9", "#50fa7b"] },
+    { id: "nord", label: "Nord", mode: "dark", swatch: ["#2e3440", "#88c0d0", "#a3be8c"] },
+    { id: "solarized-dark", label: "Solarized Dark", mode: "dark", swatch: ["#002b36", "#268bd2", "#859900"] },
+    { id: "gruvbox-dark", label: "Gruvbox Dark", mode: "dark", swatch: ["#282828", "#fabd2f", "#b8bb26"] },
+    { id: "solarized-light", label: "Solarized Light", mode: "light", swatch: ["#fdf6e3", "#268bd2", "#cb4b16"] },
+    { id: "gruvbox-light", label: "Gruvbox Light", mode: "light", swatch: ["#fbf1c7", "#d79921", "#98971a"] },
+    { id: "catppuccin-latte", label: "Catppuccin Latte", mode: "light", swatch: ["#eff1f5", "#1e66f5", "#8839ef"] },
+    { id: "rose-pine-dawn", label: "Rosé Pine Dawn", mode: "light", swatch: ["#faf4ed", "#286983", "#d7827e"] },
+    { id: "one-light", label: "One Light", mode: "light", swatch: ["#fafafa", "#4078f2", "#50a14f"] },
   ];
-  let theme = $state<Theme>(readTheme());
+  const themeModes: ThemeMode[] = ["dark", "light"];
+  let theme = $state<string>(readTheme());
 
-  function readTheme(): Theme {
+  function readTheme(): string {
     try {
       const t = localStorage.getItem("vela-theme");
-      if (t === "light" || t === "dark" || t === "system") return t;
+      if (t && THEMES.some((x) => x.id === t)) return t;
     } catch {}
     return "dark";
   }
 
-  function setTheme(t: Theme) {
-    theme = t;
+  function setTheme(id: string) {
+    theme = id;
     try {
-      localStorage.setItem("vela-theme", t);
+      localStorage.setItem("vela-theme", id);
     } catch {}
-    const effective =
-      t === "system"
-        ? window.matchMedia("(prefers-color-scheme: light)").matches
-          ? "light"
-          : "dark"
-        : t;
-    document.documentElement.setAttribute("data-theme", effective);
+    document.documentElement.setAttribute("data-theme", id);
   }
 
   // Add SMB share
@@ -500,7 +504,7 @@
   >
     <header>
       <h2>Settings</h2>
-      <button class="x" bind:this={closeBtn} onclick={onClose} aria-label="Close">✕</button>
+      <button class="x" bind:this={closeBtn} onclick={onClose} aria-label="Close"><Icon name="close" size={17} /></button>
     </header>
 
     {#if err}
@@ -826,14 +830,25 @@
     {#if activeTab === "appearance"}
     <section>
       <h3>Theme</h3>
-      <div class="seg" role="group" aria-label="Theme">
-        {#each themeOptions as o}
-          <button class:active={theme === o.id} onclick={() => setTheme(o.id)}>{o.label}</button>
-        {/each}
-      </div>
-      <p class="muted small">
-        Pick a color theme. “System” follows your operating system's light/dark setting.
-      </p>
+      {#each themeModes as mode (mode)}
+        <div class="themegroup">{mode === "dark" ? "Dark" : "Light"}</div>
+        <div class="themegrid">
+          {#each THEMES.filter((t) => t.mode === mode) as t (t.id)}
+            <button
+              class="themecard"
+              class:active={theme === t.id}
+              aria-pressed={theme === t.id}
+              onclick={() => setTheme(t.id)}
+            >
+              <span class="swatch" aria-hidden="true">
+                {#each t.swatch as c}<span style="background:{c}"></span>{/each}
+              </span>
+              <span class="themename">{t.label}</span>
+            </button>
+          {/each}
+        </div>
+      {/each}
+      <p class="muted small">Color themes from popular open-source palettes.</p>
     </section>
     {/if}
       </div>
@@ -852,6 +867,7 @@
     padding: 4vh 1rem;
     z-index: 50;
     overflow-y: auto;
+    animation: vela-fade 0.16s var(--ease);
   }
   .panel {
     background: var(--surface);
@@ -861,6 +877,7 @@
     padding: 1.2rem 1.4rem 1.6rem;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
     cursor: default;
+    animation: vela-pop 0.18s var(--ease);
   }
   .tabwrap {
     display: flex;
@@ -899,26 +916,55 @@
     overflow-y: auto;
     padding-right: 0.4rem;
   }
-  .seg {
-    display: inline-flex;
-    gap: 0.2rem;
+  .themegroup {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-dim);
+    margin: 0.7rem 0 0.45rem;
+  }
+  .themegrid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 0.5rem;
+  }
+  .themecard {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
     background: var(--surface-sunken);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 0.2rem;
-  }
-  .seg button {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    padding: 0.4rem 0.95rem;
-    border-radius: 6px;
+    padding: 0.5rem 0.6rem;
     cursor: pointer;
-    font-size: 0.9rem;
+    color: var(--text);
+    text-align: left;
+    transition: border-color 0.15s var(--ease);
   }
-  .seg button.active {
-    background: var(--surface-2);
-    color: var(--text-bright);
+  .themecard:hover {
+    border-color: var(--border-strong);
+  }
+  .themecard.active {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .swatch {
+    display: inline-flex;
+    border-radius: 5px;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    flex: none;
+  }
+  .swatch span {
+    width: 14px;
+    height: 22px;
+    display: block;
+  }
+  .themename {
+    font-size: 0.85rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   /* First section in a tab shouldn't show the divider line / top gap. */
   .tabcontent section:first-child h3 {
@@ -960,8 +1006,19 @@
     background: none;
     border: none;
     color: var(--text-muted);
-    font-size: 1rem;
     cursor: pointer;
+    padding: 0.3rem;
+    border-radius: 0.4rem;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition:
+      color 0.15s var(--ease),
+      background 0.15s var(--ease);
+  }
+  .x:hover {
+    color: var(--text-bright);
+    background: var(--surface-2);
   }
   .row {
     display: flex;
@@ -1072,6 +1129,15 @@
     font-weight: 700;
     cursor: pointer;
     align-self: flex-start;
+    transition:
+      background 0.15s var(--ease),
+      transform 0.08s var(--ease);
+  }
+  button.primary:hover {
+    background: var(--accent-hover);
+  }
+  button.primary:active {
+    transform: translateY(1px);
   }
   button.primary:disabled {
     opacity: 0.6;

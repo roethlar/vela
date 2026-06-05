@@ -7,13 +7,13 @@
     <title>Vela</title>
     <script>
       // Apply the saved theme before first paint to avoid a flash of the wrong one.
+      // Validate against known theme ids so a stale/removed value (e.g. the old
+      // "light"/"system") falls back to dark instead of applying a dead data-theme.
       (function () {
         try {
-          var t = localStorage.getItem("vela-theme") || "dark";
-          if (t === "system") {
-            t = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-          }
-          document.documentElement.setAttribute("data-theme", t);
+          var ids = ["dark", "dracula", "nord", "solarized-dark", "gruvbox-dark", "solarized-light", "gruvbox-light", "catppuccin-latte", "rose-pine-dawn", "one-light"];
+          var t = localStorage.getItem("vela-theme");
+          document.documentElement.setAttribute("data-theme", ids.indexOf(t) >= 0 ? t : "dark");
         } catch (e) {
           document.documentElement.setAttribute("data-theme", "dark");
         }

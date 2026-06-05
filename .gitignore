@@ -16,6 +16,11 @@ vite.config.js.timestamp-*
 .serena/
 .antigravitycli/
 
+# Playwright MCP browser artifacts (UI screenshots taken during design iteration)
+.playwright-mcp/
+/vela-*.png
+/hdr-*.png
+
 # External code-review outputs (transient agent artifacts; ISSUES.md is the
 # curated triage queue and stays tracked)
 docs/*_review.md
