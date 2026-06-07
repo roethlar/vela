@@ -24,3 +24,9 @@ vite.config.js.timestamp-*
 # External code-review outputs (transient agent artifacts; ISSUES.md is the
 # curated triage queue and stays tracked)
 docs/*_review.md
+
+# OS Trash
+.DS_Store
+Thumbs.db
+Desktop.ini
+*.tmp
