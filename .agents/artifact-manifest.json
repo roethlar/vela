@@ -1,0 +1,48 @@
+{
+  "validated_against": {
+    "commit": "f0c48009adb78b0f4456b98bb19981a1dc416dd5",
+    "date": "2026-06-10"
+  },
+  "artifacts": [
+    {
+      "path": "AGENTS.md",
+      "purpose": "Canonical agent guidance for process, repo-specific rules, operator requests, and verification policy.",
+      "custody": "tracked"
+    },
+    {
+      "path": "CODEX.md",
+      "purpose": "Best-effort Codex harness shim pointing back to AGENTS.md.",
+      "custody": "tracked"
+    },
+    {
+      "path": ".agents/state.md",
+      "purpose": "Current repo state, active work, blockers, next actions, and unrecorded repo memory.",
+      "custody": "tracked"
+    },
+    {
+      "path": ".agents/decisions.md",
+      "purpose": "Durable decisions and supersessions.",
+      "custody": "tracked"
+    },
+    {
+      "path": ".agents/repo-map.json",
+      "purpose": "Repo shape, fact-bearing paths, and current verification commands.",
+      "custody": "tracked"
+    },
+    {
+      "path": ".agents/artifact-manifest.json",
+      "purpose": "Inventory of durable agent-governance artifacts.",
+      "custody": "tracked"
+    },
+    {
+      "path": ".review/deduped_action_list.md",
+      "purpose": "Historical review/action-list artifact retained for evidence only after supersession banner approval.",
+      "custody": "tracked"
+    },
+    {
+      "path": ".review/gpt_review.md",
+      "purpose": "Historical GPT review artifact retained for evidence only after supersession banner approval.",
+      "custody": "tracked"
+    }
+  ]
+}

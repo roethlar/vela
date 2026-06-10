@@ -1,0 +1,30 @@
+# Maintainer: Michael Coelho
+pkgname=vela
+pkgver=0.1.0
+pkgrel=1
+pkgdesc='mpv-backed HDR media client for Plex, Jellyfin, Emby, and local libraries'
+arch=('x86_64')
+license=('MIT')
+depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme')
+optdepends=(
+  'gvfs-smb: browse SMB shares through GNOME/GVfs mounts'
+  'kio-fuse: browse SMB shares through KDE/KIO mounts'
+  'sshfs: browse SSH/SFTP sources'
+)
+source=()
+sha256sums=()
+
+package() {
+  local repo
+  repo="$(realpath "$startdir/../..")"
+
+  install -Dm755 "$repo/src-tauri/target/release/vela" "$pkgdir/usr/bin/vela"
+  install -Dm644 "$repo/packaging/arch/vela.desktop" "$pkgdir/usr/share/applications/Vela.desktop"
+
+  install -Dm644 "$repo/src-tauri/icons/32x32.png" "$pkgdir/usr/share/icons/hicolor/32x32/apps/vela.png"
+  install -Dm644 "$repo/src-tauri/icons/128x128.png" "$pkgdir/usr/share/icons/hicolor/128x128/apps/vela.png"
+  install -Dm644 "$repo/src-tauri/icons/128x128@2x.png" "$pkgdir/usr/share/icons/hicolor/256x256@2/apps/vela.png"
+  install -Dm644 "$repo/src-tauri/icons/icon.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/vela.png"
+
+  install -Dm644 "$repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+}

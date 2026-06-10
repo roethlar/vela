@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Vela
+GenericName=Media Client
+Comment=HDR media client for Plex, Jellyfin, Emby, and local libraries
+Exec=vela %U
+Icon=vela
+Terminal=false
+Categories=AudioVideo;Video;Player;
+Keywords=video;media;movie;tv;hdr;mpv;plex;jellyfin;emby;
+StartupNotify=true
+StartupWMClass=vela
+DBusActivatable=false

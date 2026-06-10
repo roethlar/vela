@@ -69,6 +69,29 @@ Click a movie to play, or drill into a show → season → episode.
 npm run tauri build
 ```
 
+Linux release installers can be built directly:
+
+```bash
+npm run build:linux
+```
+
+The Linux build emits `.deb` and `.rpm` artifacts under
+`src-tauri/target/release/bundle/`. These installers register Vela through the
+freedesktop application database, installing the desktop entry under
+`/usr/share/applications` and icons under `/usr/share/icons/hicolor`, so GNOME
+and KDE show Vela in their application launchers after install.
+
+On Arch Linux, build a native pacman package instead:
+
+```bash
+npm run build:arch
+```
+
+This emits `packaging/arch/vela-0.1.0-1-x86_64.pkg.tar.zst` from the local
+checkout using the PKGBUILD in `packaging/arch/`. It installs the same desktop
+entry and hicolor icons, and pacman's desktop/icon hooks refresh the launchers
+when the package is installed.
+
 ## Configuration
 
 Config (including the Plex auth token) is stored in the platform config dir:

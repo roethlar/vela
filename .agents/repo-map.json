@@ -1,0 +1,100 @@
+{
+  "validated_against": {
+    "commit": "f0c48009adb78b0f4456b98bb19981a1dc416dd5",
+    "date": "2026-06-10"
+  },
+  "projects": [
+    {
+      "name": "Vela desktop app",
+      "type": "Tauri 2 application",
+      "paths": ["src/", "src-tauri/"],
+      "notes": [
+        "Frontend is SvelteKit/TypeScript configured as a static SPA.",
+        "Backend is Rust and owns media sources, config persistence, source mounting, and mpv playback."
+      ]
+    },
+    {
+      "name": "Linux packaging",
+      "type": "Tauri bundle files and Arch package files",
+      "paths": ["src-tauri/bundle/linux/", "packaging/arch/"],
+      "notes": [
+        "Tauri Linux bundle scripts install desktop database and icon cache refresh hooks.",
+        "Arch packaging expects a built release binary under src-tauri/target/release/vela."
+      ]
+    }
+  ],
+  "verification": {
+    "status": "confirmed from package.json and .github/workflows/ci.yml",
+    "commands": [
+      {
+        "command": "npm run check",
+        "working_directory": ".",
+        "when": "Frontend type and Svelte validation."
+      },
+      {
+        "command": "npm run build",
+        "working_directory": ".",
+        "when": "Production frontend build or any change that can affect the Tauri frontend bundle."
+      },
+      {
+        "command": "cargo check --locked",
+        "working_directory": "src-tauri",
+        "when": "Rust compile validation."
+      },
+      {
+        "command": "cargo clippy --all-targets --locked -- -D warnings",
+        "working_directory": "src-tauri",
+        "when": "Rust lint validation."
+      },
+      {
+        "command": "cargo test --locked",
+        "working_directory": "src-tauri",
+        "when": "Rust unit tests."
+      }
+    ],
+    "packaging_commands": [
+      {
+        "command": "npm run build:linux",
+        "working_directory": ".",
+        "when": "Linux .deb/.rpm bundle changes, when the local system has Tauri Linux prerequisites."
+      },
+      {
+        "command": "npm run build:arch",
+        "working_directory": ".",
+        "when": "Arch packaging changes, when makepkg and package prerequisites are available."
+      }
+    ],
+    "policy": {
+      "code_changes": "Run current automated verification before claiming completion.",
+      "docs_only": "Code verification is not required unless docs affect setup, commands, runtime behavior, generated files, or user-visible behavior.",
+      "manual_behavior": "Run the relevant manual check, smoke test, or playtest for behavior not covered by automation, or state clearly that it was not run."
+    }
+  },
+  "fact_bearing_paths": [
+    "README.md",
+    "ISSUES.md",
+    ".github/workflows/ci.yml",
+    "package.json",
+    "src-tauri/Cargo.toml",
+    "src-tauri/tauri.conf.json",
+    "src-tauri/src/",
+    "src/",
+    "packaging/arch/",
+    "src-tauri/bundle/linux/",
+    ".review/deduped_action_list.md",
+    ".review/gpt_review.md"
+  ],
+  "guidance_paths": [
+    "AGENTS.md",
+    "CODEX.md",
+    ".agents/state.md",
+    ".agents/decisions.md",
+    ".agents/repo-map.json",
+    ".agents/artifact-manifest.json"
+  ],
+  "notes": [
+    "CI installs Tauri WebKitGTK/libsoup/GTK dependencies before Rust checks on Linux.",
+    "README says live integration for Jellyfin/Emby, local, and SMB paths is still pending even where unit-tested.",
+    "The current known deferred issue is local filesystem traversal inside async source methods."
+  ]
+}

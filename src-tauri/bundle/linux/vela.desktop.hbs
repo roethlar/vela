@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name={{name}}
+GenericName=Media Client
+{{#if comment}}
+Comment={{comment}}
+{{/if}}
+Exec={{exec}} %U
+Icon={{icon}}
+Terminal=false
+Categories={{categories}}Player;
+Keywords=video;media;movie;tv;hdr;mpv;plex;jellyfin;emby;
+StartupNotify=true
+StartupWMClass={{exec}}
+DBusActivatable=false
+{{#if mime_type}}
+MimeType={{mime_type}}
+{{/if}}
