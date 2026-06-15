@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master, vela-foundation]
+    branches: [main, master, vela-foundation]
   pull_request:
 
 jobs:
