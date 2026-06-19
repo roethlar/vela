@@ -134,8 +134,10 @@ Verification note: Plex is exercised end-to-end. The Jellyfin/Emby, local, and
 SMB paths are implemented and unit-tested where logic allows, but live
 integration against real servers/shares is still pending.
 
-Known limitations: multi-version items play the first available part (no
-HDR/bitrate scoring yet). Server stream/poster URLs carry the access token
+Known limitations: Plex/Jellyfin/Emby media-version selection is heuristic: Vela
+prefers direct-play/direct-stream candidates, HDR, higher resolution, and higher
+bitrate where the source exposes that metadata, but it does not yet offer a
+manual version picker. Server stream/poster URLs carry the access token
 (Plex/Jellyfin/Emby), so the token is visible locally — in the webview DOM and
 in mpv's process arguments. This is an accepted **local-only** exposure (your
 own machine, not the network); there is no token proxy. SMB credentials are
