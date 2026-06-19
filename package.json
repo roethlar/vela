@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
+    "build:arch": "npm run tauri -- build --no-bundle && cd packaging/arch && makepkg -f",
+    "build:linux": "tauri build --bundles deb,rpm",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "tauri": "tauri"

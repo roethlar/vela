@@ -30,12 +30,29 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "category": "Video",
+    "shortDescription": "HDR media client for Plex, Jellyfin, Emby, and local libraries",
+    "longDescription": "Vela is a native, HDR-capable media client for Plex, Jellyfin, Emby, SMB, and local libraries. It browses media in a unified desktop UI and plays video through mpv for reliable HDR passthrough.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
+      "icons/icon.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "linux": {
+      "deb": {
+        "section": "video",
+        "desktopTemplate": "bundle/linux/vela.desktop.hbs",
+        "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
+        "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"
+      },
+      "rpm": {
+        "desktopTemplate": "bundle/linux/vela.desktop.hbs",
+        "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
+        "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"
+      }
+    }
   }
 }

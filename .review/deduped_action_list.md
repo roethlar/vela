@@ -1,3 +1,8 @@
+> **Superseded (2026-06-10).** Current review action status now lives in
+> `.agents/state.md`, and durable decisions from this file live in
+> `.agents/decisions.md`. This file is retained as history and is no longer
+> updated.
+
 # Deduped Action List - vela-foundation
 
 Status key: `todo`, `in-progress`, `done`, `partial`.

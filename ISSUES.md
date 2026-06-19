@@ -100,6 +100,10 @@ where the original claim was overstated.
   Server and online poster URLs should fall back to the no-art placeholder on
   load failure.
 
+- Add a playback option for borderless mpv windows.
+  Expose a Vela setting that passes `--border=no` / `--no-border` when spawning
+  mpv, so users can remove window-manager decorations from the playback window.
+
 - Add CI.
   Minimum checks: `cargo check`, `cargo clippy --all-targets`, `cargo test`,
   `npm run check`, and dependency auditing once tooling is installed.

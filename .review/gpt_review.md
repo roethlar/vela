@@ -1,3 +1,7 @@
+> **Superseded (2026-06-10).** Current implementation status and durable review
+> decisions now live in `.agents/state.md` and `.agents/decisions.md`. This file
+> is retained as history and is no longer updated.
+
 # GPT Review - vela-foundation
 
 Review target: `vela-foundation` at `da45bd1` after fetching `origin`.
