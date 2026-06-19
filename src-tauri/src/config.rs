@@ -41,7 +41,8 @@ pub struct AppConfig {
     /// Local (and mounted remote) folders browsed by the built-in local source.
     #[serde(default)]
     pub local_folders: Vec<LocalFolder>,
-    /// SMB shares Vela mounts itself (each feeds a `local_folders` entry).
+    /// SMB shares Vela mounts itself; selected folders inside each share feed
+    /// the local source.
     #[serde(default)]
     pub smb_mounts: Vec<SmbMount>,
     /// SSH/SFTP folders mounted through sshfs (each feeds a `local_folders` entry).
@@ -63,12 +64,27 @@ pub struct SmbMount {
     pub password: String,
     #[serde(default)]
     pub domain: String,
+    /// Where the OS mounts it.
+    pub mountpoint: String,
+    /// Selected folders inside this share, each with its own media type.
+    #[serde(default)]
+    pub folders: Vec<SmbFolder>,
+    #[serde(default, skip_serializing)]
+    pub kind: String,
+    #[serde(default, skip_serializing)]
+    pub local_folder_id: String,
+}
+
+/// One selected folder inside an SMB share. `path` is relative to the mounted
+/// share root, using `/` as the separator; empty means the share root itself.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SmbFolder {
+    pub id: String,
+    pub name: String,
+    pub path: String,
     #[serde(default)]
     pub kind: String,
-    /// Where the OS mounts it (and the path the local folder points at).
-    pub mountpoint: String,
-    /// The `local_folders` entry this mount feeds, removed on unmount.
-    pub local_folder_id: String,
 }
 
 /// An SSH/SFTP folder mounted with sshfs, then browsed through the local source.
@@ -136,6 +152,54 @@ impl AppConfig {
     pub fn upsert_source(&mut self, src: SourceConfig) {
         self.sources.retain(|s| s.id != src.id);
         self.sources.push(src);
+    }
+
+    fn normalize_legacy_smb_mounts(&mut self) {
+        let mut legacy_folder_ids = std::collections::HashSet::new();
+        {
+            let local_folders = &self.local_folders;
+            for mount in &mut self.smb_mounts {
+                if !mount.local_folder_id.is_empty() {
+                    legacy_folder_ids.insert(mount.local_folder_id.clone());
+                }
+                if !mount.folders.is_empty() || mount.local_folder_id.is_empty() {
+                    continue;
+                }
+
+                let legacy_folder = local_folders
+                    .iter()
+                    .find(|folder| folder.id == mount.local_folder_id);
+                let fallback_name = if mount.name.trim().is_empty() {
+                    mount.share.as_str()
+                } else {
+                    mount.name.as_str()
+                };
+                let name = legacy_folder
+                    .map(|folder| folder.name.trim())
+                    .filter(|name| !name.is_empty())
+                    .unwrap_or(fallback_name)
+                    .to_string();
+                let kind = if mount.kind.trim().is_empty() {
+                    legacy_folder
+                        .map(|folder| folder.kind.clone())
+                        .unwrap_or_default()
+                } else {
+                    mount.kind.clone()
+                };
+
+                mount.folders.push(SmbFolder {
+                    id: mount.local_folder_id.clone(),
+                    name,
+                    path: String::new(),
+                    kind,
+                });
+            }
+        }
+
+        if !legacy_folder_ids.is_empty() {
+            self.local_folders
+                .retain(|folder| !legacy_folder_ids.contains(&folder.id));
+        }
     }
 }
 
@@ -205,7 +269,10 @@ pub fn load_config() -> io::Result<AppConfig> {
         }
         Err(e) => return Err(e),
     };
-    serde_json::from_str(&s).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    let mut cfg: AppConfig =
+        serde_json::from_str(&s).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    cfg.normalize_legacy_smb_mounts();
+    Ok(cfg)
 }
 
 pub fn save_config(cfg: &AppConfig) -> io::Result<()> {
@@ -249,4 +316,45 @@ pub fn save_config(cfg: &AppConfig) -> io::Result<()> {
         f.sync_all()?;
     }
     fs::rename(&tmp, &path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn legacy_smb_mount_becomes_selected_folder() {
+        let mut cfg = AppConfig {
+            local_folders: vec![LocalFolder {
+                id: "legacy-folder".to_string(),
+                name: "Movies".to_string(),
+                path: "/Volumes/media".to_string(),
+                kind: "movie".to_string(),
+            }],
+            smb_mounts: vec![SmbMount {
+                id: "mount".to_string(),
+                name: "Media".to_string(),
+                server: "nas".to_string(),
+                share: "media".to_string(),
+                username: "user".to_string(),
+                password: "pass".to_string(),
+                domain: String::new(),
+                mountpoint: "/Volumes/media".to_string(),
+                folders: Vec::new(),
+                kind: String::new(),
+                local_folder_id: "legacy-folder".to_string(),
+            }],
+            ..Default::default()
+        };
+
+        cfg.normalize_legacy_smb_mounts();
+
+        assert!(cfg.local_folders.is_empty());
+        assert_eq!(cfg.smb_mounts[0].folders.len(), 1);
+        let folder = &cfg.smb_mounts[0].folders[0];
+        assert_eq!(folder.id, "legacy-folder");
+        assert_eq!(folder.name, "Movies");
+        assert_eq!(folder.path, "");
+        assert_eq!(folder.kind, "movie");
+    }
 }

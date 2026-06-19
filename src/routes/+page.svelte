@@ -90,15 +90,16 @@
     path: string | null;
     configuredPath: string | null;
     canAutoInstall: boolean;
-    installCommand: string;
+    installCommand: string | null;
+    installDescription: string;
     installUrl: string;
   };
   let mpvInfo = $state<MpvInfo | null>(null);
   let copied = $state(false);
   let installingMpv = $state(false);
 
-  // One-click mpv install via the OS package manager (winget/brew). On success
-  // the backend returns refreshed status, which clears the prompt.
+  // One-click mpv install. The backend chooses the concrete method for this OS.
+  // On success it returns refreshed status, which clears the prompt.
   async function installMpv() {
     if (installingMpv) return;
     installingMpv = true;
@@ -645,11 +646,13 @@
       <div class="mpvtext">
         <b>mpv is required for playback</b> and wasn't found.
         {#if mpvInfo.canAutoInstall}
-          Install it automatically, or point Vela at an existing mpv in Settings → Player.
+          Install it automatically ({mpvInfo.installDescription}), or point Vela at an existing mpv in Settings → Player.
         {:else}
           Install it, then restart Vela.
         {/if}
-        <code>{mpvInfo.installCommand}</code>
+        {#if mpvInfo.installCommand}
+          <code>{mpvInfo.installCommand}</code>
+        {/if}
       </div>
       <div class="mpvactions">
         {#if mpvInfo.canAutoInstall}
@@ -657,7 +660,9 @@
             {installingMpv ? "Installing…" : "Install mpv"}
           </button>
         {/if}
-        <button onclick={() => copyText(mpvInfo!.installCommand)}>{copied ? "Copied!" : "Copy"}</button>
+        {#if mpvInfo.installCommand}
+          <button onclick={() => copyText(mpvInfo!.installCommand!)}>{copied ? "Copied!" : "Copy"}</button>
+        {/if}
         <button onclick={() => (showSettings = true)}>Set path…</button>
         <button onclick={() => openExternal(mpvInfo!.installUrl)}>Get mpv</button>
       </div>

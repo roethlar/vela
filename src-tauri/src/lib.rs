@@ -7,6 +7,7 @@ mod smb;
 mod source;
 mod sshfs;
 
+use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
@@ -162,7 +163,11 @@ pub fn run() {
             let handle_for_advance = app.handle().clone();
             let (advance_notify, queue_arc, queue_idx_arc) = {
                 let s = handle_for_advance.state::<AppState>();
-                (s.queue_advance.clone(), s.queue.clone(), s.queue_index.clone())
+                (
+                    s.queue_advance.clone(),
+                    s.queue.clone(),
+                    s.queue_index.clone(),
+                )
             };
             tauri::async_runtime::spawn(async move {
                 loop {
@@ -199,30 +204,33 @@ pub fn run() {
             }
             if smb::remount_on_startup() {
                 // Re-establish SMB mounts off the main thread so a slow/offline share
-                // can't stall launch — each share's local folder is already registered
-                // from config, the mount just repopulates it. Uses the bounded blocking
-                // pool (one task per share, so a slow one doesn't block the others, and
-                // no unbounded native threads / spawn panics). Each task re-checks the
-                // share is still configured before mounting, and undoes the mount if it
-                // was removed while mounting — so a remove/remount race can't leave an
-                // OS mount with no config record.
+                // can't stall launch. Once a share mounts, refresh the local source so
+                // selected folders inside that share become browsable in this running
+                // app. Uses the bounded blocking pool (one task per share, so a slow
+                // one doesn't block the others, and no unbounded native threads /
+                // spawn panics). Each task re-checks the share is still configured
+                // before mounting, and undoes the mount if it was removed while
+                // mounting — so a remove/remount race can't leave an OS mount with no
+                // config record.
                 // Cap concurrency so a large/pathological config can't queue a huge
                 // number of blocking mount attempts at once.
                 let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
+                let app_handle = app.handle().clone();
                 for m in smb_mounts {
                     let sem = sem.clone();
+                    let app_handle = app_handle.clone();
                     tauri::async_runtime::spawn(async move {
                         let Ok(_permit) = sem.acquire_owned().await else {
                             return;
                         };
-                        let _ = tauri::async_runtime::spawn_blocking(move || {
+                        let mounted = tauri::async_runtime::spawn_blocking(move || {
                             let cfg_now = || config::load_config().ok();
                             // Mount only if this specific record is *definitely* still
                             // configured (read error / removed → skip).
                             let still_configured =
                                 cfg_now().map(|c| c.smb_mounts.iter().any(|x| x.id == m.id));
                             if still_configured != Some(true) {
-                                return;
+                                return false;
                             }
                             if smb::mount(&m).is_ok() {
                                 // Undo only if the mountpoint is *definitely* no longer
@@ -234,10 +242,17 @@ pub fn run() {
                                 });
                                 if mp_referenced == Some(false) {
                                     smb::unmount_for_removal(&m.mountpoint);
+                                    return false;
                                 }
+                                return true;
                             }
+                            false
                         })
-                        .await;
+                        .await
+                        .unwrap_or(false);
+                        if mounted {
+                            refresh_local_source(&app_handle).await;
+                        }
                     });
                 }
             }
@@ -285,6 +300,9 @@ pub fn run() {
             commands::remove_local_folder,
             commands::mount_smb,
             commands::list_smb_mounts,
+            commands::list_smb_directories,
+            commands::add_smb_folder,
+            commands::remove_smb_folder,
             commands::unmount_smb,
             commands::mount_ssh,
             commands::list_ssh_mounts,
@@ -373,11 +391,6 @@ async fn refresh_local_source(app_handle: &tauri::AppHandle) {
 }
 
 fn runtime_local_folders(cfg: &config::AppConfig) -> Vec<config::LocalFolder> {
-    let smb_folder_ids: std::collections::HashSet<_> = cfg
-        .smb_mounts
-        .iter()
-        .map(|m| m.local_folder_id.as_str())
-        .collect();
     let ssh_folder_ids: std::collections::HashSet<_> = cfg
         .ssh_mounts
         .iter()
@@ -386,23 +399,27 @@ fn runtime_local_folders(cfg: &config::AppConfig) -> Vec<config::LocalFolder> {
     let mut folders: Vec<_> = cfg
         .local_folders
         .iter()
-        .filter(|f| !smb_folder_ids.contains(f.id.as_str()))
         .filter(|f| !ssh_folder_ids.contains(f.id.as_str()))
         .cloned()
         .collect();
-    folders.extend(cfg.smb_mounts.iter().filter_map(smb_runtime_folder));
+    folders.extend(cfg.smb_mounts.iter().flat_map(smb_runtime_folders));
     folders.extend(cfg.ssh_mounts.iter().filter_map(ssh_runtime_folder));
     folders
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_runtime_folder(m: &config::SmbMount) -> Option<config::LocalFolder> {
-    smb::resolved_mountpoint(m).map(|path| config::LocalFolder {
-        id: m.local_folder_id.clone(),
-        name: m.name.clone(),
-        path,
-        kind: m.kind.clone(),
-    })
+fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
+    let Some(root) = smb_mount_root(m) else {
+        return Vec::new();
+    };
+    m.folders
+        .iter()
+        .map(|folder| config::LocalFolder {
+            id: folder.id.clone(),
+            name: folder.name.clone(),
+            path: smb_path_string_for_relative(&root, &folder.path),
+            kind: folder.kind.clone(),
+        })
+        .collect()
 }
 
 fn ssh_runtime_folder(m: &config::SshMount) -> Option<config::LocalFolder> {
@@ -417,14 +434,26 @@ fn ssh_runtime_folder(m: &config::SshMount) -> Option<config::LocalFolder> {
     })
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
+    smb::resolved_mountpoint(m).filter(|path| Path::new(path).is_dir())
+}
+
 #[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_runtime_folder(m: &config::SmbMount) -> Option<config::LocalFolder> {
-    Some(config::LocalFolder {
-        id: m.local_folder_id.clone(),
-        name: m.name.clone(),
-        path: m.mountpoint.clone(),
-        kind: m.kind.clone(),
-    })
+fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
+    if Path::new(&m.mountpoint).is_dir() {
+        Some(m.mountpoint.clone())
+    } else {
+        None
+    }
+}
+
+fn smb_path_string_for_relative(root: &str, relative: &str) -> String {
+    let mut path = PathBuf::from(root);
+    for part in relative.split('/').filter(|part| !part.is_empty()) {
+        path.push(part);
+    }
+    path.to_string_lossy().to_string()
 }
 
 fn safe_user_media_root(path: &str) -> bool {

@@ -120,7 +120,7 @@ pub fn resolve_mpv() -> Option<String> {
         }
     }
     // 2. A bundled copy next to the app executable (zero-config "just works").
-    if let Some(p) = bundled_mpv() {
+    if let Some(p) = bundled_mpv().filter(|p| mpv_usable(p)) {
         return Some(p);
     }
     // 3. Bare `mpv` on PATH.
@@ -128,9 +128,7 @@ pub fn resolve_mpv() -> Option<String> {
         return Some("mpv".to_string());
     }
     // 4. Known install locations.
-    mpv_candidates()
-        .into_iter()
-        .find(|cand| std::path::Path::new(cand).exists())
+    mpv_candidates().into_iter().find(|cand| mpv_usable(cand))
 }
 
 /// True if `bin` (a bare name or path) is a *working* mpv: it must run
@@ -192,11 +190,17 @@ fn bundled_mpv() -> Option<String> {
 fn mpv_candidates() -> Vec<String> {
     #[cfg(target_os = "macos")]
     {
-        vec![
-            "/opt/homebrew/bin/mpv".into(), // Apple Silicon Homebrew
-            "/usr/local/bin/mpv".into(),    // Intel Homebrew
-            "/opt/local/bin/mpv".into(),    // MacPorts
-        ]
+        let mut v = vec![
+            "/opt/homebrew/bin/mpv".into(),          // Apple Silicon Homebrew
+            "/usr/local/bin/mpv".into(),             // Intel Homebrew
+            "/opt/local/bin/mpv".into(),             // MacPorts
+            "/run/current-system/sw/bin/mpv".into(), // NixOS/nix-darwin
+            "/nix/var/nix/profiles/default/bin/mpv".into(),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            v.push(format!("{home}/.nix-profile/bin/mpv"));
+        }
+        v
     }
     #[cfg(target_os = "windows")]
     {
@@ -229,12 +233,23 @@ fn mpv_candidates() -> Vec<String> {
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        vec![
+        let mut v = vec![
             "/usr/bin/mpv".into(),
+            "/bin/mpv".into(),
             "/usr/local/bin/mpv".into(),
+            "/home/linuxbrew/.linuxbrew/bin/mpv".into(),
             "/snap/bin/mpv".into(),
             "/var/lib/flatpak/exports/bin/io.mpv.Mpv".into(),
-        ]
+            "/run/current-system/sw/bin/mpv".into(),
+            "/nix/var/nix/profiles/default/bin/mpv".into(),
+        ];
+        if let Ok(home) = std::env::var("HOME") {
+            v.push(format!(
+                "{home}/.local/share/flatpak/exports/bin/io.mpv.Mpv"
+            ));
+            v.push(format!("{home}/.nix-profile/bin/mpv"));
+        }
+        v
     }
 }
 
@@ -514,8 +529,7 @@ fn spawn_eof_watcher(
                 let Ok(line) = line else { return };
                 // mpv emits one JSON event per line. Substring match is fine here
                 // (the event/reason keys are fixed, no escaping concerns).
-                if line.contains("\"event\":\"end-file\"") && line.contains("\"reason\":\"eof\"")
-                {
+                if line.contains("\"event\":\"end-file\"") && line.contains("\"reason\":\"eof\"") {
                     advance.notify_one();
                 }
             }

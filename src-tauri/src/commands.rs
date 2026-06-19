@@ -1,8 +1,10 @@
 use serde::{Deserialize, Serialize};
+use std::path::{Component, Path, PathBuf};
+use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use tauri::State;
 
-use crate::config::{self, AppConfig, LocalFolder, SmbMount, SourceConfig, SshMount};
+use crate::config::{self, AppConfig, LocalFolder, SmbFolder, SmbMount, SourceConfig, SshMount};
 use crate::playback;
 use crate::plex_library::PlexLibrary;
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
@@ -90,11 +92,15 @@ pub struct MpvInfo {
     /// The user's explicit override from config, if any (echoed back so the
     /// settings UI can show/edit it).
     configured_path: Option<String>,
-    /// Whether an automated installer (winget/brew) is available to install mpv
-    /// from inside the app on this OS.
+    /// Whether an automated installer is available to install mpv from inside
+    /// the app on this machine.
     can_auto_install: bool,
-    /// Per-OS install command the user can copy (e.g. `brew install mpv`).
-    install_command: String,
+    /// Detected/manual install command the user can copy (e.g. `brew install mpv`),
+    /// when the install method has a useful shell equivalent.
+    install_command: Option<String>,
+    /// What the automatic installer will do on this machine, or a manual hint if
+    /// no supported automatic installer was found.
+    install_description: String,
     /// Where to get mpv if the command doesn't apply.
     install_url: String,
 }
@@ -338,9 +344,6 @@ pub async fn remove_local_folder(id: String, state: State<'_, AppState>) -> Resu
     mutate_then_rebuild_local(&state, move |cfg| {
         // A folder backing a remote mount must be removed via its mount row, or
         // we'd leave an orphaned mount that still remounts on launch with no source.
-        if cfg.smb_mounts.iter().any(|m| m.local_folder_id == id2) {
-            return Err("this folder is provided by an SMB mount — unmount it instead".to_string());
-        }
         if cfg.ssh_mounts.iter().any(|m| m.local_folder_id == id2) {
             return Err(
                 "this folder is provided by an SSH/SFTP mount — unmount it instead".to_string(),
@@ -366,6 +369,26 @@ pub struct SmbMountDto {
     server: String,
     share: String,
     mountpoint: String,
+    folders: Vec<SmbFolderDto>,
+}
+
+/// A selected SMB folder, for the settings UI.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmbFolderDto {
+    id: String,
+    name: String,
+    path: String,
+    relative_path: String,
+    kind: String,
+}
+
+/// One directory inside a mounted SMB share, for the settings browser.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SmbDirectoryDto {
+    name: String,
+    path: String,
 }
 
 /// A configured SSH/SFTP mount, for the settings UI.
@@ -382,9 +405,8 @@ pub struct SshMountDto {
     mountpoint: String,
 }
 
-/// Mount an SMB share via the OS, then register its mountpoint as a local
-/// folder so the local source browses it. Persists the mount for remount on
-/// next launch.
+/// Mount an SMB share via the OS and persist it for browsing/selection. Library
+/// folders are added separately with `add_smb_folder`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface; each is a distinct field.
 pub async fn mount_smb(
@@ -393,17 +415,12 @@ pub async fn mount_smb(
     username: String,
     password: String,
     domain: Option<String>,
-    kind: Option<String>,
     name: Option<String>,
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<SourceDto, String> {
     if server.trim().is_empty() || share.trim().is_empty() {
         return Err("server and share are required".into());
-    }
-    let kind = kind.unwrap_or_default();
-    if !kind.is_empty() && kind != "movie" && kind != "show" {
-        return Err("kind must be 'movie', 'show', or empty".into());
     }
     // Reject a duplicate up front, before doing the (blocking, credentialed) OS
     // mount. Fail if config can't even be read, so we don't mount on an
@@ -415,7 +432,6 @@ pub async fn mount_smb(
     }) {
         return Err("that share is already added".into());
     }
-    let folder_id = uuid::Uuid::new_v4().to_string();
     let mut mount = SmbMount {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.unwrap_or_else(|| format!("{}/{}", server.trim(), share.trim())),
@@ -424,9 +440,10 @@ pub async fn mount_smb(
         username,
         password,
         domain: domain.unwrap_or_default(),
-        kind: kind.clone(),
         mountpoint: String::new(),
-        local_folder_id: folder_id.clone(),
+        folders: Vec::new(),
+        kind: String::new(),
+        local_folder_id: String::new(),
     };
     // Hold source_lock across the whole mount→persist→rollback. Otherwise a
     // concurrent unmount_smb could, between our OS mount and our persist, see no
@@ -453,12 +470,6 @@ pub async fn mount_smb(
             .allow_directory(&mount.mountpoint, true);
     }
 
-    let folder = LocalFolder {
-        id: folder_id,
-        name: mount.name.clone(),
-        path: mount.mountpoint.clone(),
-        kind,
-    };
     // Roll back the OS mount if we can't persist it, so we don't leave a live
     // mount with no app-managed record. rebuild_local_locked assumes source_lock
     // is held (it is, above) — so the persist and the rollback both run inside the
@@ -473,7 +484,6 @@ pub async fn mount_smb(
         }) {
             return Err("that share is already added".to_string());
         }
-        cfg.local_folders.push(folder);
         cfg.smb_mounts.push(mount);
         Ok(())
     })
@@ -507,6 +517,7 @@ pub async fn list_smb_mounts() -> Result<Vec<SmbMountDto>, String> {
         .smb_mounts
         .into_iter()
         .map(|m| SmbMountDto {
+            folders: smb_folders_for_ui(&m),
             id: m.id,
             name: m.name,
             server: m.server,
@@ -516,7 +527,248 @@ pub async fn list_smb_mounts() -> Result<Vec<SmbMountDto>, String> {
         .collect())
 }
 
-/// Unmount an SMB share and drop the local folder it fed.
+/// List directories inside a configured SMB share, relative to the mounted
+/// share root. Used by Settings to choose one or more library folders after the
+/// share is mounted.
+#[tauri::command]
+pub async fn list_smb_directories(
+    id: String,
+    path: Option<String>,
+) -> Result<Vec<SmbDirectoryDto>, String> {
+    let relative = normalize_smb_relative_path(path.as_deref().unwrap_or(""))?;
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    let mount = cfg
+        .smb_mounts
+        .into_iter()
+        .find(|m| m.id == id)
+        .ok_or("no such SMB mount")?;
+    let root = smb_mount_root(&mount).ok_or_else(|| {
+        format!(
+            "SMB share //{}/{} is not mounted or readable",
+            mount.server, mount.share
+        )
+    })?;
+    let dir = smb_pathbuf_for_relative(&root, &relative);
+    if !dir.is_dir() {
+        return Err("that SMB folder is not readable".into());
+    }
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut dirs = Vec::new();
+        for entry in std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))? {
+            let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
+            if !entry.path().is_dir() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            dirs.push(SmbDirectoryDto {
+                path: append_smb_relative_path(&relative, &name),
+                name,
+            });
+        }
+        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        Ok::<_, String>(dirs)
+    })
+    .await
+    .map_err(|e| format!("SMB browse task failed: {e}"))?
+}
+
+/// Add one selected folder inside a mounted SMB share to the local source.
+#[tauri::command]
+pub async fn add_smb_folder(
+    id: String,
+    path: String,
+    kind: Option<String>,
+    name: Option<String>,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<SourceDto, String> {
+    let kind = kind.unwrap_or_default();
+    if !kind.is_empty() && kind != "movie" && kind != "show" {
+        return Err("kind must be 'movie', 'show', or empty".into());
+    }
+    let relative = normalize_smb_relative_path(&path)?;
+    let _ops = state.source_lock.lock().await;
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    let mount = cfg
+        .smb_mounts
+        .iter()
+        .find(|m| m.id == id)
+        .ok_or("no such SMB mount")?;
+    let root = smb_mount_root(mount).ok_or_else(|| {
+        format!(
+            "SMB share //{}/{} is not mounted or readable",
+            mount.server, mount.share
+        )
+    })?;
+    let folder_path = smb_path_string_for_relative(&root, &relative);
+    if !Path::new(&folder_path).is_dir() {
+        return Err("that SMB folder is not readable".into());
+    }
+    if !safe_user_media_root(&folder_path) {
+        return Err("choose a specific media folder, not a filesystem or home root".into());
+    }
+    {
+        use tauri::Manager;
+        let _ = app
+            .asset_protocol_scope()
+            .allow_directory(&folder_path, true);
+    }
+    let folder = SmbFolder {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: name.unwrap_or_else(|| smb_folder_display_name(mount, &relative)),
+        path: relative.clone(),
+        kind,
+    };
+    let mount_id = id.clone();
+    let relative_for_check = relative.clone();
+    rebuild_local_locked(&state, move |cfg| {
+        let mount = cfg
+            .smb_mounts
+            .iter_mut()
+            .find(|m| m.id == mount_id)
+            .ok_or_else(|| "no such SMB mount".to_string())?;
+        if selected_smb_folders(mount)
+            .iter()
+            .any(|existing| existing.path == relative_for_check)
+        {
+            return Err("that SMB folder is already added".to_string());
+        }
+        mount.folders.push(folder);
+        Ok(())
+    })
+    .await?;
+    Ok(SourceDto {
+        id: LOCAL_SOURCE_ID.to_string(),
+        name: "Local".to_string(),
+        kind: "local".to_string(),
+    })
+}
+
+/// Remove one selected folder from an SMB share without unmounting the share.
+#[tauri::command]
+pub async fn remove_smb_folder(
+    id: String,
+    folder_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    mutate_then_rebuild_local(&state, move |cfg| {
+        let mount = cfg
+            .smb_mounts
+            .iter_mut()
+            .find(|m| m.id == id)
+            .ok_or_else(|| "no such SMB mount".to_string())?;
+        let before = mount.folders.len();
+        mount.folders.retain(|folder| folder.id != folder_id);
+        let removed = mount.folders.len() != before;
+        if !removed {
+            return Err("no such SMB folder".to_string());
+        }
+        Ok(())
+    })
+    .await
+}
+
+fn smb_folders_for_ui(m: &SmbMount) -> Vec<SmbFolderDto> {
+    let root = smb_mount_root(m);
+    selected_smb_folders(m)
+        .iter()
+        .map(|folder| {
+            let relative_path = folder.path.clone();
+            let path = root
+                .as_ref()
+                .map(|root| smb_path_string_for_relative(root, &relative_path))
+                .unwrap_or_else(|| relative_path.clone());
+            SmbFolderDto {
+                id: folder.id.clone(),
+                name: folder.name.clone(),
+                path,
+                relative_path,
+                kind: folder.kind.clone(),
+            }
+        })
+        .collect()
+}
+
+fn selected_smb_folders(m: &SmbMount) -> &[SmbFolder] {
+    &m.folders
+}
+
+fn normalize_smb_relative_path(path: &str) -> Result<String, String> {
+    let raw = path.trim();
+    if raw.is_empty() {
+        return Ok(String::new());
+    }
+    if raw.starts_with('/') || raw.starts_with('\\') || Path::new(raw).is_absolute() {
+        return Err("SMB folder path must be relative to the share".into());
+    }
+    let normalized = raw.replace('\\', "/");
+    let trimmed = normalized.trim_matches('/');
+    if trimmed.is_empty() {
+        return Ok(String::new());
+    }
+    let mut parts = Vec::new();
+    for component in Path::new(trimmed).components() {
+        match component {
+            Component::Normal(part) => {
+                let part = part
+                    .to_str()
+                    .ok_or_else(|| "SMB folder path must be valid UTF-8".to_string())?;
+                if !part.is_empty() {
+                    parts.push(part.to_string());
+                }
+            }
+            Component::CurDir => {}
+            _ => return Err("SMB folder path must stay inside the share".into()),
+        }
+    }
+    Ok(parts.join("/"))
+}
+
+fn append_smb_relative_path(base: &str, name: &str) -> String {
+    if base.is_empty() {
+        name.to_string()
+    } else {
+        format!("{base}/{name}")
+    }
+}
+
+fn smb_pathbuf_for_relative(root: &str, relative: &str) -> PathBuf {
+    let mut path = PathBuf::from(root);
+    for part in relative.split('/').filter(|part| !part.is_empty()) {
+        path.push(part);
+    }
+    path
+}
+
+fn smb_path_string_for_relative(root: &str, relative: &str) -> String {
+    smb_pathbuf_for_relative(root, relative)
+        .to_string_lossy()
+        .to_string()
+}
+
+fn smb_folder_display_name(m: &SmbMount, relative: &str) -> String {
+    relative
+        .rsplit('/')
+        .find(|part| !part.is_empty())
+        .unwrap_or(&m.name)
+        .to_string()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_mount_root(m: &SmbMount) -> Option<String> {
+    crate::smb::resolved_mountpoint(m).filter(|path| Path::new(path).is_dir())
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn smb_mount_root(m: &SmbMount) -> Option<String> {
+    if Path::new(&m.mountpoint).is_dir() {
+        Some(m.mountpoint.clone())
+    } else {
+        None
+    }
+}
+
+/// Unmount an SMB share and drop its selected folders from the local source.
 #[tauri::command]
 pub async fn unmount_smb(id: String, state: State<'_, AppState>) -> Result<(), String> {
     // Remove the config records and rebuild the local source FIRST, then tear down
@@ -535,7 +787,6 @@ pub async fn unmount_smb(id: String, state: State<'_, AppState>) -> Result<(), S
     // a failure just means the connection lingers until closed/rebooted, but we
     // never leave a record pointing at an unmounted folder, never force-close an
     // in-use mount, and never resurrect one.
-    let folder_id = m.local_folder_id.clone();
     // Remove records + rebuild the live source atomically BEFORE the (possibly
     // slow/hung) OS teardown, so playback can't route through the now-removed
     // folder meanwhile. The lock-held existence check means two concurrent
@@ -545,7 +796,6 @@ pub async fn unmount_smb(id: String, state: State<'_, AppState>) -> Result<(), S
             return Err("no such mount".to_string());
         }
         cfg.smb_mounts.retain(|x| x.id != id);
-        cfg.local_folders.retain(|f| f.id != folder_id);
         Ok(())
     })
     .await?;
@@ -743,11 +993,6 @@ fn ssh_mountpoint_referenced(mountpoint: &str) -> Option<bool> {
 }
 
 fn live_local_folders(cfg: &AppConfig) -> Vec<LocalFolder> {
-    let smb_folder_ids: std::collections::HashSet<_> = cfg
-        .smb_mounts
-        .iter()
-        .map(|m| m.local_folder_id.as_str())
-        .collect();
     let ssh_folder_ids: std::collections::HashSet<_> = cfg
         .ssh_mounts
         .iter()
@@ -756,42 +1001,34 @@ fn live_local_folders(cfg: &AppConfig) -> Vec<LocalFolder> {
     let mut folders: Vec<_> = cfg
         .local_folders
         .iter()
-        .filter(|f| !smb_folder_ids.contains(f.id.as_str()))
         .filter(|f| !ssh_folder_ids.contains(f.id.as_str()))
         .filter(|f| safe_user_media_root(&f.path))
         .cloned()
         .collect();
-    folders.extend(cfg.smb_mounts.iter().filter_map(smb_live_folder));
+    folders.extend(cfg.smb_mounts.iter().flat_map(smb_live_folders));
     folders.extend(cfg.ssh_mounts.iter().filter_map(ssh_live_folder));
     folders
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_live_folder(m: &SmbMount) -> Option<LocalFolder> {
-    crate::smb::resolved_mountpoint(m).and_then(|path| {
-        if !safe_user_media_root(&path) {
-            return None;
-        }
-        Some(LocalFolder {
-            id: m.local_folder_id.clone(),
-            name: m.name.clone(),
-            path,
-            kind: m.kind.clone(),
+fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
+    let Some(root) = smb_mount_root(m) else {
+        return Vec::new();
+    };
+    selected_smb_folders(m)
+        .iter()
+        .filter_map(|folder| {
+            let path = smb_path_string_for_relative(&root, &folder.path);
+            if !safe_user_media_root(&path) {
+                return None;
+            }
+            Some(LocalFolder {
+                id: folder.id.clone(),
+                name: folder.name.clone(),
+                path,
+                kind: folder.kind.clone(),
+            })
         })
-    })
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_live_folder(m: &SmbMount) -> Option<LocalFolder> {
-    if !safe_user_media_root(&m.mountpoint) {
-        return None;
-    }
-    Some(LocalFolder {
-        id: m.local_folder_id.clone(),
-        name: m.name.clone(),
-        path: m.mountpoint.clone(),
-        kind: m.kind.clone(),
-    })
+        .collect()
 }
 
 fn ssh_live_folder(m: &SshMount) -> Option<LocalFolder> {
@@ -898,20 +1135,40 @@ pub async fn link_begin() -> Result<PinDto, String> {
     })
 }
 
+const MPV_INSTALL_URL: &str = "https://mpv.io/installation/";
+
+#[derive(Clone)]
+struct MpvInstallInfo {
+    can_auto_install: bool,
+    install_command: Option<String>,
+    install_description: String,
+    install_url: String,
+}
+
+#[derive(Clone)]
+struct CommandInstaller {
+    program: String,
+    args: Vec<String>,
+    display_command: String,
+    description: String,
+}
+
+impl CommandInstaller {
+    fn info(self) -> MpvInstallInfo {
+        MpvInstallInfo {
+            can_auto_install: true,
+            install_command: Some(self.display_command),
+            install_description: self.description,
+            install_url: MPV_INSTALL_URL.to_string(),
+        }
+    }
+}
+
 /// Whether mpv is available, where it resolved, the user's override (if any),
-/// plus a per-OS install hint for the UI.
+/// plus the install method/hint for this machine.
 #[tauri::command]
 pub fn check_mpv() -> MpvInfo {
-    let (install_command, install_url) = if cfg!(target_os = "macos") {
-        ("brew install mpv", "https://mpv.io/installation/")
-    } else if cfg!(target_os = "windows") {
-        ("winget install mpv", "https://mpv.io/installation/")
-    } else {
-        (
-            "sudo apt install mpv   # or your distro's package manager",
-            "https://mpv.io/installation/",
-        )
-    };
+    let install = mpv_install_info();
     let resolved = playback::resolve_mpv();
     let configured_path = config::load_config()
         .ok()
@@ -921,12 +1178,217 @@ pub fn check_mpv() -> MpvInfo {
         available: resolved.is_some(),
         path: resolved,
         configured_path,
-        // We can shell out to a package manager on macOS/Windows; Linux has too
-        // many package managers to pick one safely, so the user installs it.
-        can_auto_install: cfg!(any(target_os = "windows", target_os = "macos")),
-        install_command: install_command.to_string(),
-        install_url: install_url.to_string(),
+        can_auto_install: install.can_auto_install,
+        install_command: install.install_command,
+        install_description: install.install_description,
+        install_url: install.install_url,
     }
+}
+
+#[cfg(target_os = "windows")]
+fn mpv_install_info() -> MpvInstallInfo {
+    MpvInstallInfo {
+        can_auto_install: true,
+        install_command: None,
+        install_description: "Downloads a CPU-compatible mpv build into your user profile"
+            .to_string(),
+        install_url: MPV_INSTALL_URL.to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn mpv_install_info() -> MpvInstallInfo {
+    if let Some(installer) = mpv_command_installer() {
+        return installer.info();
+    }
+
+    MpvInstallInfo {
+        can_auto_install: false,
+        install_command: Some(macos_manual_install_command()),
+        install_description: "Install mpv with Homebrew or MacPorts, then restart Vela".to_string(),
+        install_url: MPV_INSTALL_URL.to_string(),
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn mpv_install_info() -> MpvInstallInfo {
+    if let Some(installer) = mpv_command_installer() {
+        return installer.info();
+    }
+
+    MpvInstallInfo {
+        can_auto_install: false,
+        install_command: Some(linux_manual_install_command()),
+        install_description: "Install mpv with your distro's package manager, then restart Vela"
+            .to_string(),
+        install_url: MPV_INSTALL_URL.to_string(),
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn mpv_command_installer() -> Option<CommandInstaller> {
+    let brew = find_executable(&["/opt/homebrew/bin/brew", "/usr/local/bin/brew", "brew"])?;
+    Some(CommandInstaller {
+        program: brew,
+        args: strings(&["install", "mpv"]),
+        display_command: "brew install mpv".to_string(),
+        description: "Uses Homebrew to install mpv".to_string(),
+    })
+}
+
+#[cfg(target_os = "macos")]
+fn macos_manual_install_command() -> String {
+    if find_executable(&["/opt/local/bin/port", "port"]).is_some() {
+        "sudo port install mpv".to_string()
+    } else {
+        "brew install mpv".to_string()
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+#[derive(Clone, Copy)]
+struct LinuxPackageManager {
+    candidates: &'static [&'static str],
+    args: &'static [&'static str],
+    display_command: &'static str,
+    description: &'static str,
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+const LINUX_PACKAGE_MANAGERS: &[LinuxPackageManager] = &[
+    LinuxPackageManager {
+        candidates: &["/usr/bin/apt-get", "apt-get"],
+        args: &["install", "-y", "mpv"],
+        display_command: "pkexec apt-get install -y mpv",
+        description: "Uses apt through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/usr/bin/dnf", "dnf"],
+        args: &["install", "-y", "mpv"],
+        display_command: "pkexec dnf install -y mpv",
+        description: "Uses dnf through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/usr/bin/yum", "yum"],
+        args: &["install", "-y", "mpv"],
+        display_command: "pkexec yum install -y mpv",
+        description: "Uses yum through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/usr/bin/pacman", "pacman"],
+        args: &["-S", "--noconfirm", "mpv"],
+        display_command: "pkexec pacman -S --noconfirm mpv",
+        description: "Uses pacman through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/usr/bin/zypper", "zypper"],
+        args: &["--non-interactive", "install", "mpv"],
+        display_command: "pkexec zypper --non-interactive install mpv",
+        description: "Uses zypper through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/sbin/apk", "/usr/sbin/apk", "apk"],
+        args: &["add", "mpv"],
+        display_command: "pkexec apk add mpv",
+        description: "Uses apk through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/usr/bin/xbps-install", "xbps-install"],
+        args: &["-Sy", "mpv"],
+        display_command: "pkexec xbps-install -Sy mpv",
+        description: "Uses xbps through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/usr/bin/eopkg", "eopkg"],
+        args: &["install", "-y", "mpv"],
+        display_command: "pkexec eopkg install -y mpv",
+        description: "Uses eopkg through PolicyKit to install mpv",
+    },
+    LinuxPackageManager {
+        candidates: &["/usr/bin/snap", "snap"],
+        args: &["install", "mpv"],
+        display_command: "pkexec snap install mpv",
+        description: "Uses snap through PolicyKit to install mpv",
+    },
+];
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn mpv_command_installer() -> Option<CommandInstaller> {
+    if let Some(brew) = find_executable(&["/home/linuxbrew/.linuxbrew/bin/brew", "brew"]) {
+        return Some(CommandInstaller {
+            program: brew,
+            args: strings(&["install", "mpv"]),
+            display_command: "brew install mpv".to_string(),
+            description: "Uses Homebrew on Linux to install mpv".to_string(),
+        });
+    }
+
+    if let Some(nix) = find_executable(&["/usr/bin/nix", "nix"]) {
+        return Some(CommandInstaller {
+            program: nix,
+            args: strings(&["profile", "install", "nixpkgs#mpv"]),
+            display_command: "nix profile install nixpkgs#mpv".to_string(),
+            description: "Uses a per-user Nix profile to install mpv".to_string(),
+        });
+    }
+
+    let pkexec = find_executable(&["/usr/bin/pkexec", "pkexec"])?;
+    for manager in LINUX_PACKAGE_MANAGERS {
+        if let Some(program) = find_executable(manager.candidates) {
+            let mut args = Vec::with_capacity(manager.args.len() + 1);
+            args.push(program);
+            args.extend(strings(manager.args));
+            return Some(CommandInstaller {
+                program: pkexec,
+                args,
+                display_command: manager.display_command.to_string(),
+                description: manager.description.to_string(),
+            });
+        }
+    }
+
+    None
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn linux_manual_install_command() -> String {
+    if find_executable(&["/home/linuxbrew/.linuxbrew/bin/brew", "brew"]).is_some() {
+        return "brew install mpv".to_string();
+    }
+    if find_executable(&["/usr/bin/nix", "nix"]).is_some() {
+        return "nix profile install nixpkgs#mpv".to_string();
+    }
+
+    for manager in LINUX_PACKAGE_MANAGERS {
+        if find_executable(manager.candidates).is_some() {
+            return manager.display_command.replacen("pkexec", "sudo", 1);
+        }
+    }
+
+    "Install mpv with your distro's package manager".to_string()
+}
+
+fn strings(values: &[&str]) -> Vec<String> {
+    values.iter().map(|value| (*value).to_string()).collect()
+}
+
+fn find_executable(candidates: &[&str]) -> Option<String> {
+    for candidate in candidates {
+        if candidate.contains(std::path::MAIN_SEPARATOR) {
+            if Path::new(candidate).is_file() {
+                return Some((*candidate).to_string());
+            }
+        } else if Command::new(candidate)
+            .arg("--version")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .is_ok()
+        {
+            return Some((*candidate).to_string());
+        }
+    }
+    None
 }
 
 /// Set (or clear) the explicit mpv path override. Passing an empty/None value
@@ -998,12 +1460,10 @@ pub fn set_mpv_advanced(extra_args: String, use_own_config: bool) -> Result<(), 
     })
 }
 
-/// Install mpv from inside the app. On Windows we assess the CPU and download the
-/// matching prebuilt mpv (the fast AVX2/"v3" build on modern CPUs, the baseline
-/// x86-64 build on older ones) so it can't hand a machine a build it can't run.
-/// On macOS we use Homebrew. Returns refreshed mpv status so the UI can clear the
-/// prompt. Linux is not handled (too many package managers); callers gate on
-/// `canAutoInstall`.
+/// Install mpv from inside the app. On Windows we assess the CPU and download a
+/// matching prebuilt mpv. On macOS/Linux we run the concrete package-manager
+/// method detected for this machine. Returns refreshed mpv status so the UI can
+/// clear the prompt.
 #[tauri::command]
 pub async fn install_mpv() -> Result<MpvInfo, String> {
     #[cfg(target_os = "windows")]
@@ -1020,8 +1480,7 @@ pub async fn install_mpv() -> Result<MpvInfo, String> {
 /// mpv wiki). `mpv-x86_64-v3-*` targets x86-64-v3 (AVX2/FMA/BMI2 — Haswell and
 /// newer); `mpv-x86_64-*` is the baseline build that runs on any 64-bit CPU.
 #[cfg(target_os = "windows")]
-const MPV_RELEASE_API: &str =
-    "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest";
+const MPV_RELEASE_API: &str = "https://api.github.com/repos/zhongfly/mpv-winbuild/releases/latest";
 
 /// True if this CPU implements the x86-64-v3 feature level the "v3" mpv build
 /// needs. AVX2/FMA/BMI2 all arrived together with Haswell, so requiring them
@@ -1150,32 +1609,41 @@ fn extract_7z(archive: &std::path::Path, dest: &std::path::Path) -> Result<(), S
     }
 }
 
-#[cfg(target_os = "macos")]
+#[cfg(not(target_os = "windows"))]
 fn run_mpv_installer() -> Result<(), String> {
-    let out = std::process::Command::new("brew")
-        .args(["install", "mpv"])
+    let installer = mpv_command_installer().ok_or_else(|| {
+        "No supported mpv installer was found on this system. Install mpv manually, or point Vela at an existing mpv in Settings -> Player.".to_string()
+    })?;
+    run_command_installer(installer)
+}
+
+#[cfg(not(target_os = "windows"))]
+fn run_command_installer(installer: CommandInstaller) -> Result<(), String> {
+    let out = Command::new(&installer.program)
+        .args(&installer.args)
         .output()
-        .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                "Homebrew isn't installed. Install it from brew.sh, then run `brew install mpv`."
-                    .to_string()
-            } else {
-                format!("couldn't launch brew: {e}")
-            }
-        })?;
+        .map_err(|e| format!("couldn't launch {}: {e}", installer.display_command))?;
     if out.status.success() {
         Ok(())
     } else {
         Err(format!(
-            "brew couldn't install mpv:\n{}",
-            String::from_utf8_lossy(&out.stderr).trim()
+            "{} failed:\n{}",
+            installer.display_command,
+            command_output(&out)
         ))
     }
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn run_mpv_installer() -> Result<(), String> {
-    Err("Automatic install isn't supported on Linux — install mpv with your distro's package manager.".to_string())
+#[cfg(not(target_os = "windows"))]
+fn command_output(out: &std::process::Output) -> String {
+    let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+    let stdout = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    match (stderr.is_empty(), stdout.is_empty()) {
+        (false, false) => format!("{stderr}\n{stdout}"),
+        (false, true) => stderr,
+        (true, false) => stdout,
+        (true, true) => format!("process exited with status {}", out.status),
+    }
 }
 
 /// Open a URL in the user's default browser. Restricted to http(s) so a stray
@@ -1502,7 +1970,10 @@ pub async fn queue_list(state: State<'_, AppState>) -> Result<QueueSnapshot, Str
         .unwrap_or_else(|e| e.into_inner())
         .clone();
     let current_index = *state.queue_index.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(QueueSnapshot { items, current_index })
+    Ok(QueueSnapshot {
+        items,
+        current_index,
+    })
 }
 
 /// Clear the queue. Does NOT stop the currently-playing item — closing the mpv
@@ -1688,6 +2159,26 @@ mod tests {
         assert!(validate_section_type("show").is_ok());
         assert!(validate_section_type("video").is_ok());
         assert!(validate_section_type("photo").is_err());
+    }
+
+    #[test]
+    fn smb_relative_paths_are_normalized() {
+        assert_eq!(normalize_smb_relative_path("").unwrap(), "");
+        assert_eq!(
+            normalize_smb_relative_path("Movies\\4K").unwrap(),
+            "Movies/4K"
+        );
+        assert_eq!(
+            normalize_smb_relative_path("Shows/Season 01").unwrap(),
+            "Shows/Season 01"
+        );
+    }
+
+    #[test]
+    fn smb_relative_paths_cannot_escape_share() {
+        assert!(normalize_smb_relative_path("/Movies").is_err());
+        assert!(normalize_smb_relative_path("../Movies").is_err());
+        assert!(normalize_smb_relative_path("Movies/../Shows").is_err());
     }
 
     #[test]

@@ -57,9 +57,9 @@ call.
 > the full `gpu-hq` profile. 1080p HDR is the realistic floor on such parts.
 
 **Player**
-- **`mpv` 0.38+** on `PATH` (required for `gpu-next`/libplacebo HDR). Vela can install a
-  current build for you on first run. On macOS: `brew install mpv`. On Windows: install
-  mpv and add it to `PATH`.
+- **`mpv` 0.38+** (required for `gpu-next`/libplacebo HDR). Vela can install a
+  current build for you on first run, auto-detects common install locations, and
+  lets you point Settings → Player at a custom mpv executable.
 - Tooling to build: Rust and Node.js, plus the platform's Tauri prerequisites
   (Linux: `webkit2gtk-4.1`, `libsoup-3.0`; macOS: Xcode Command Line Tools;
   Windows: WebView2 runtime + MSVC Build Tools). See the

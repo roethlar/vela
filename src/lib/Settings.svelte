@@ -6,7 +6,22 @@
 
   type Source = { id: string; name: string; kind: string };
   type LocalFolder = { id: string; name: string; path: string; kind: string };
-  type SmbMount = { id: string; name: string; server: string; share: string; mountpoint: string };
+  type SmbFolder = {
+    id: string;
+    name: string;
+    path: string;
+    relativePath: string;
+    kind: string;
+  };
+  type SmbMount = {
+    id: string;
+    name: string;
+    server: string;
+    share: string;
+    mountpoint: string;
+    folders: SmbFolder[];
+  };
+  type SmbDirectory = { name: string; path: string };
   type SshMount = {
     id: string;
     name: string;
@@ -23,7 +38,8 @@
     path: string | null;
     configuredPath: string | null;
     canAutoInstall: boolean;
-    installCommand: string;
+    installCommand: string | null;
+    installDescription: string;
     installUrl: string;
   };
 
@@ -132,7 +148,11 @@
   let smbUser = $state("");
   let smbPass = $state("");
   let smbDomain = $state("");
-  let smbKind = $state<"" | "movie" | "show">("");
+  let smbBrowseMountId = $state("");
+  let smbBrowsePath = $state("");
+  let smbDirectories = $state<SmbDirectory[]>([]);
+  let smbFolderKind = $state<"" | "movie" | "show">("");
+  let smbBrowseBusy = $state(false);
 
   // Add SSH/SFTP folder
   let sshHost = $state("");
@@ -218,6 +238,14 @@
       folders = f;
       smbMounts = m;
       sshMounts = ssh;
+      if (smbBrowseMountId && !m.some((mount) => mount.id === smbBrowseMountId)) {
+        smbBrowseMountId = "";
+        smbBrowsePath = "";
+        smbDirectories = [];
+      }
+      if (!smbBrowseMountId && m.length > 0) {
+        smbBrowseMountId = m[0].id;
+      }
       mpv = mp;
       mpvPathInput = mp.configuredPath ?? "";
       mpvExtraArgs = adv.extraArgs;
@@ -228,13 +256,15 @@
   }
 
   // Local folders fed by remote mounts are managed via the mount, not directly.
-  let remoteFolderIds = $derived(new Set([...smbMounts, ...sshMounts].map((m) => m.mountpoint)));
+  let remoteFolderIds = $derived(new Set(sshMounts.map((m) => m.mountpoint)));
 
   async function mountSmb() {
     if (!smbServer.trim() || !smbShare.trim()) {
       err = "Server and share are required.";
       return;
     }
+    const mountedServer = smbServer.trim();
+    const mountedShare = smbShare.trim();
     busy = true;
     err = null;
     try {
@@ -244,9 +274,71 @@
         username: smbUser,
         password: smbPass,
         domain: smbDomain.trim() || null,
-        kind: smbKind || null,
       });
       smbServer = smbShare = smbUser = smbPass = smbDomain = "";
+      await load();
+      const mounted = smbMounts.find(
+        (mount) =>
+          mount.server.toLowerCase() === mountedServer.toLowerCase() &&
+          mount.share.toLowerCase() === mountedShare.toLowerCase()
+      );
+      if (mounted) {
+        await loadSmbDirectories(mounted.id, "");
+      }
+      onChanged();
+    } catch (e) {
+      err = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function loadSmbDirectories(id = smbBrowseMountId, path = smbBrowsePath) {
+    if (!id) return;
+    smbBrowseBusy = true;
+    err = null;
+    try {
+      smbDirectories = await invoke<SmbDirectory[]>("list_smb_directories", {
+        id,
+        path: path || null,
+      });
+      smbBrowseMountId = id;
+      smbBrowsePath = path;
+    } catch (e) {
+      smbDirectories = [];
+      err = String(e);
+    } finally {
+      smbBrowseBusy = false;
+    }
+  }
+
+  async function addSmbFolder() {
+    if (!smbBrowseMountId) {
+      err = "Mount an SMB share first.";
+      return;
+    }
+    busy = true;
+    err = null;
+    try {
+      await invoke("add_smb_folder", {
+        id: smbBrowseMountId,
+        path: smbBrowsePath,
+        kind: smbFolderKind || null,
+      });
+      await load();
+      onChanged();
+    } catch (e) {
+      err = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  async function removeSmbFolder(id: string, folderId: string) {
+    busy = true;
+    err = null;
+    try {
+      await invoke("remove_smb_folder", { id, folderId });
       await load();
       onChanged();
     } catch (e) {
@@ -485,6 +577,16 @@
   function navigatorIsWindows() {
     return typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
   }
+
+  function parentSmbPath(path: string) {
+    const parts = path.split("/").filter(Boolean);
+    parts.pop();
+    return parts.join("/");
+  }
+
+  function smbPathLabel(path: string) {
+    return path || "Share root";
+  }
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
@@ -557,6 +659,13 @@
           <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
           <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Unmount</button>
         </div>
+        {#each m.folders as f (f.id)}
+          <div class="row subrow">
+            <span class="badge">{f.kind || "auto"}</span>
+            <span class="name">{f.name}<span class="muted small"> · {smbPathLabel(f.relativePath)}</span></span>
+            <button class="rm" disabled={busy} onclick={() => removeSmbFolder(m.id, f.id)}>Remove</button>
+          </div>
+        {/each}
       {/each}
       {#each sshMounts as m (m.id)}
         <div class="row">
@@ -605,12 +714,7 @@
             {installingMpv ? "Installing mpv…" : "Install mpv automatically"}
           </button>
           <p class="muted small">
-            {#if navigatorIsWindows()}
-              Detects your CPU and downloads a matching mpv build.
-            {:else}
-              Uses Homebrew to install mpv.
-            {/if}
-            Needs an internet connection.
+            {mpv.installDescription}. Needs an internet connection.
           </p>
         {/if}
 
@@ -768,21 +872,74 @@
           <label for="smb-domain">Domain (optional)</label>
           <input id="smb-domain" bind:value={smbDomain} />
         </div>
-        <div class="field">
-          <label for="smb-kind">Contains</label>
-          <select id="smb-kind" bind:value={smbKind}>
-            <option value="">Auto-detect</option>
-            <option value="movie">Movies</option>
-            <option value="show">TV Shows</option>
-          </select>
-        </div>
         <button class="primary" disabled={busy} onclick={mountSmb}>
-          {busy ? "Mounting…" : "Mount & add"}
+          {busy ? "Mounting…" : "Mount share"}
         </button>
         <p class="muted small">
           On Linux, Vela uses your desktop's user-space SMB mount from KIO-FUSE or GVfs.
           Open the share in your file manager first if setup cannot find a readable path.
         </p>
+
+        {#if smbMounts.length > 0}
+          <div class="field">
+            <label for="smb-mounted">Mounted share</label>
+            <select
+              id="smb-mounted"
+              bind:value={smbBrowseMountId}
+              onchange={(e) => loadSmbDirectories((e.currentTarget as HTMLSelectElement).value, "")}
+            >
+              {#each smbMounts as mount (mount.id)}
+                <option value={mount.id}>//{mount.server}/{mount.share}</option>
+              {/each}
+            </select>
+          </div>
+
+          <div class="smb-browser">
+            <div class="browser-head">
+              <div>
+                <b>{smbPathLabel(smbBrowsePath)}</b>
+                {#if smbBrowseMountId}
+                  <span class="muted small"> · {smbMounts.find((mount) => mount.id === smbBrowseMountId)?.name}</span>
+                {/if}
+              </div>
+              <div class="btnrow compact">
+                {#if smbBrowsePath}
+                  <button disabled={smbBrowseBusy} onclick={() => loadSmbDirectories(smbBrowseMountId, parentSmbPath(smbBrowsePath))}>
+                    Up
+                  </button>
+                {/if}
+                <button disabled={smbBrowseBusy || !smbBrowseMountId} onclick={() => loadSmbDirectories(smbBrowseMountId, smbBrowsePath)}>
+                  {smbBrowseBusy ? "Loading…" : "Refresh"}
+                </button>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="smb-folder-kind">Contains</label>
+              <select id="smb-folder-kind" bind:value={smbFolderKind}>
+                <option value="">Auto-detect</option>
+                <option value="movie">Movies</option>
+                <option value="show">TV Shows</option>
+              </select>
+            </div>
+            <button class="primary" disabled={busy || !smbBrowseMountId} onclick={addSmbFolder}>
+              Add this folder
+            </button>
+
+            <div class="dirlist">
+              {#if smbDirectories.length === 0}
+                <p class="muted small">No child folders loaded.</p>
+              {:else}
+                {#each smbDirectories as dir (dir.path)}
+                  <div class="dirrow">
+                    <span>{dir.name}</span>
+                    <button disabled={smbBrowseBusy} onclick={() => loadSmbDirectories(smbBrowseMountId, dir.path)}>Open</button>
+                  </div>
+                {/each}
+              {/if}
+            </div>
+          </div>
+        {/if}
       </div>
     </section>
 
@@ -1032,6 +1189,9 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+  .subrow {
+    padding-left: 1.6rem;
+  }
   .badge {
     font-size: 0.7rem;
     text-transform: uppercase;
@@ -1051,6 +1211,51 @@
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
+  }
+  .smb-browser {
+    background: var(--surface-sunken);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.65rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .browser-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+  }
+  .btnrow.compact {
+    gap: 0.35rem;
+  }
+  .btnrow.compact button:not(.primary):not(.rm),
+  .dirrow button {
+    background: var(--surface-2);
+    color: var(--text);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.35rem 0.65rem;
+    cursor: pointer;
+  }
+  .dirlist {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+  }
+  .dirrow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.6rem;
+    padding: 0.35rem 0;
+    border-top: 1px solid var(--border);
+  }
+  .dirrow span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
   .field {
     display: flex;
@@ -1160,6 +1365,9 @@
     border-radius: 6px;
     padding: 0.55rem 1.1rem;
     cursor: pointer;
+  }
+  .btnrow.compact button:not(.primary):not(.rm) {
+    padding: 0.35rem 0.65rem;
   }
   .btnrow button:disabled {
     opacity: 0.6;
