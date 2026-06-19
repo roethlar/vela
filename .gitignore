@@ -28,8 +28,21 @@ vite.config.js.timestamp-*
 # curated triage queue and stays tracked)
 docs/*_review.md
 
-# OS Trash
+# OS-generated files
 .DS_Store
+.AppleDouble
+.LSOverride
+Icon?
+._*
+.Spotlight-V100/
+.Trashes/
+.fseventsd/
+.TemporaryItems/
+.apdisk
 Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
 Desktop.ini
+$RECYCLE.BIN/
+*.lnk
 *.tmp
