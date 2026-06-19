@@ -565,7 +565,7 @@ pub async fn list_smb_directories(
                 name,
             });
         }
-        dirs.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+        dirs.sort_by_key(|dir| dir.name.to_lowercase());
         Ok::<_, String>(dirs)
     })
     .await
