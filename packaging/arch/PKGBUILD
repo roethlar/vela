@@ -1,10 +1,13 @@
 # Maintainer: Michael Coelho
 pkgname=vela
-pkgver=0.1.0
+pkgver=0.1.3
 pkgrel=1
 pkgdesc='mpv-backed HDR media client for Plex, Jellyfin, Emby, and local libraries'
 arch=('x86_64')
 license=('MIT')
+# Vela's release profile already strips the binary, so the makepkg debug split
+# finds no symbols — skip it (no empty -debug package, no gdb-add-index warning).
+options=('!debug')
 depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme')
 optdepends=(
   'gvfs-smb: browse SMB shares through GNOME/GVfs mounts'

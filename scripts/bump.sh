@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
-# Bump Vela's version on EVERY build so each build is uniquely identifiable —
-# in the window footer AND in the bundle filename (e.g. Vela_0.1.7_aarch64.dmg).
+# Bump Vela's version whenever the CODE changes — as part of making a code
+# change, NOT at build time. A build is only meaningfully unique when the
+# source is, so the version (shown in the window footer AND in the bundle
+# filename, e.g. Vela_0.1.7_aarch64.dmg) tracks code edits, not builds.
 #
 # Usage:
 #   scripts/bump.sh           # increment the patch (0.1.6 -> 0.1.7)
 #   scripts/bump.sh 0.2.0     # set an explicit version
 #
 # Updates: src-tauri/Cargo.toml, package.json, src-tauri/tauri.conf.json,
-# the BUILD_DATE constant, and the vela entry in src-tauri/Cargo.lock (so
-# `cargo build --locked` / CI stays green). Run this right before tauri build.
+# the BUILD_DATE constant, the vela entry in src-tauri/Cargo.lock (so
+# `cargo build --locked` / CI stays green), and packaging/arch/PKGBUILD's
+# pkgver (pkgrel reset to 1). Run it as part of a code change.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -20,6 +23,7 @@ lock = pathlib.Path("src-tauri/Cargo.lock")
 pkg = pathlib.Path("package.json")
 conf = pathlib.Path("src-tauri/tauri.conf.json")
 cmds = pathlib.Path("src-tauri/src/commands.rs")
+pkgbuild = pathlib.Path("packaging/arch/PKGBUILD")
 
 cargo_text = cargo.read_text()
 cur = re.search(r'(?m)^version\s*=\s*"([^"]+)"', cargo_text).group(1)
@@ -45,6 +49,13 @@ if lock.exists():
     lock.write_text(
         re.sub(r'(name = "vela"\nversion = ")[^"]+(")', rf'\g<1>{new}\g<2>', lock.read_text())
     )
+
+# Arch PKGBUILD — pkgver tracks the app version; pkgrel resets to 1 on a bump.
+if pkgbuild.exists():
+    pb = pkgbuild.read_text()
+    pb = re.sub(r'(?m)^pkgver=.*', f'pkgver={new}', pb)
+    pb = re.sub(r'(?m)^pkgrel=.*', 'pkgrel=1', pb)
+    pkgbuild.write_text(pb)
 
 # BUILD_DATE (UTC) shown in the footer.
 today = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d")

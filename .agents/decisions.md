@@ -90,3 +90,22 @@ so future work does not reconstruct state from historical review documents.
 
 Supersedes:
 Current-state use of `.review/deduped_action_list.md` and `.review/gpt_review.md`.
+
+### 2026-06-20 - Bump version on code change, not on build
+
+Status: Active
+
+Decision:
+Vela's version is bumped (via `scripts/bump.sh`) as part of a code change, not
+at build time. `scripts/build.sh` builds the host platform's installable bundle
+and must not change the version.
+
+Reason:
+A build is only meaningfully unique when the source is. Tying the version to
+builds produces version churn with no code difference; tying it to code edits
+makes each version correspond to a real change. The version is shown in the
+window footer and the bundle filename.
+
+Supersedes:
+The prior "bump on every build" rule previously stated in the `scripts/bump.sh`
+header comment.
