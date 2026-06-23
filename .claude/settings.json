@@ -1,0 +1,8 @@
+{
+  "hooks": {
+    "SessionStart": [
+      { "matcher": "compact",
+        "hooks": [ { "type": "command", "command": "echo 'Context was compacted or the session restarted. Before continuing, re-read AGENTS.md from disk, especially the Prime Invariants block. Treat AGENTS.md, not this message, as authoritative.'" } ] }
+    ]
+  }
+}
