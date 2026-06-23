@@ -15,9 +15,7 @@ packaging/arch/*.pkg.tar*
 vite.config.js.timestamp-*
 
 # Editor/agent tool config
-.grok/
-.serena/
-.antigravitycli/
+.claude/settings.local.json
 
 # Playwright MCP browser artifacts (UI screenshots taken during design iteration)
 .playwright-mcp/
