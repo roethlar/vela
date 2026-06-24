@@ -1870,6 +1870,7 @@ pub struct QueueSnapshot {
 pub(crate) async fn play_by_key(
     state: &AppState,
     rating_key: &str,
+    title: &str,
     duration_ms: Option<u64>,
 ) -> Result<(), String> {
     // Serialize the whole resolve+stop-old+spawn sequence so overlapping triggers
@@ -1904,13 +1905,14 @@ pub(crate) async fn play_by_key(
     }
 
     let url = resolved.url;
+    let title = title.to_string();
     let start = resolved.resume_ms as f64 / 1000.0;
     let progress = resolved.progress;
     let child_slot = state.current_child.clone();
     let shutting_down = state.shutting_down.clone();
     let advance = state.queue_advance.clone();
     let stop = tauri::async_runtime::spawn_blocking(move || {
-        playback::play(&url, start, progress, &child_slot, &shutting_down, &advance)
+        playback::play(&url, &title, start, progress, &child_slot, &shutting_down, &advance)
     })
     .await
     .map_err(|e| format!("playback task failed: {e}"))??;
@@ -1926,13 +1928,14 @@ pub(crate) async fn play_by_key(
 #[tauri::command]
 pub async fn play_item(item: QueueItem, state: State<'_, AppState>) -> Result<(), String> {
     let rating_key = item.rating_key.clone();
+    let title = item.title.clone();
     let duration_ms = item.duration_ms;
     {
         let mut q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
         *q = vec![item];
     }
     *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(0);
-    play_by_key(&state, &rating_key, duration_ms).await
+    play_by_key(&state, &rating_key, &title, duration_ms).await
 }
 
 /// Insert an item right after the currently-playing one ("Play Next"). If the
@@ -2020,7 +2023,7 @@ pub async fn queue_play_at(index: usize, state: State<'_, AppState>) -> Result<(
             .ok_or_else(|| "queue index out of range".to_string())?
     };
     *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(index);
-    play_by_key(&state, &item.rating_key, item.duration_ms).await
+    play_by_key(&state, &item.rating_key, &item.title, item.duration_ms).await
 }
 
 // ---- helpers -------------------------------------------------------------

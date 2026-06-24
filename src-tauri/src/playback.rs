@@ -334,6 +334,7 @@ pub enum ProgressTarget {
 /// child, since this overwrites the slot.
 pub fn play(
     url: &str,
+    title: &str,
     start_seconds: f64,
     progress: ProgressTarget,
     child_slot: &Arc<Mutex<Option<std::process::Child>>>,
@@ -411,6 +412,19 @@ pub fn play(
     }
 
     cmd.arg(format!("--input-ipc-server={}", ipc_path));
+    // Drive mpv's window title and OSD media-title from the human title, NOT the
+    // URL. Plex direct-stream URLs carry `?X-Plex-Token=…`, and mpv's default
+    // title template derives from the URL — so without this the auth token leaks
+    // into the title bar (and the on-screen media name). Asserted here, after the
+    // user's extra args, so it can't be clobbered back into a leak. Fall back to a
+    // neutral label rather than letting mpv reach for the URL when title is empty.
+    let display_title = if title.trim().is_empty() {
+        "Vela"
+    } else {
+        title
+    };
+    cmd.arg(format!("--force-media-title={}", display_title));
+    cmd.arg(format!("--title={}", display_title));
     if start_seconds > 0.0 {
         cmd.arg(format!("--start={}", start_seconds));
     }

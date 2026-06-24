@@ -191,7 +191,8 @@ pub fn run() {
                     let Some(item) = next else { continue };
                     let state = handle_for_advance.state::<AppState>();
                     if let Err(e) =
-                        commands::play_by_key(&state, &item.rating_key, item.duration_ms).await
+                        commands::play_by_key(&state, &item.rating_key, &item.title, item.duration_ms)
+                            .await
                     {
                         eprintln!("vela: auto-advance to {:?} failed: {e}", item.title);
                     }
