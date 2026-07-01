@@ -16,6 +16,7 @@ vite.config.js.timestamp-*
 
 # Editor/agent tool config
 .claude/settings.local.json
+.serena/
 
 # Playwright MCP browser artifacts (UI screenshots taken during design iteration)
 .playwright-mcp/
