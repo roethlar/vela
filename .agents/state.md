@@ -16,9 +16,12 @@ Keep it short and update it when important repo facts change.
   that selected-folder shape on load.
 - mpv discovery now validates runnable candidates, supports a configured custom
   executable, and reports the detected installer path/description to the UI.
-- Token-bearing poster/stream URLs and SMB mount credential process arguments
-  are an accepted local-only exposure. Avoid adding any new logs, errors, or UI
-  copy that reveal token-bearing URLs or credentials.
+- Token-bearing poster URLs (all backends), Jellyfin/Emby stream URLs, and SMB
+  mount credential process arguments are an accepted local-only exposure. Plex
+  stream URLs are credential-free as of 2026-07-03: the token rides as an
+  `X-Plex-Token` header delivered to mpv via an owner-only include file. Avoid
+  adding any new logs, errors, or UI copy that reveal token-bearing URLs or
+  credentials.
 - README status now reflects heuristic media-version/source selection and the
   lack of a manual version picker.
 - Manual/live integration is still pending for Jellyfin/Emby, local folders, and
@@ -34,10 +37,12 @@ Keep it short and update it when important repo facts change.
   the render-zoom safety spike (needs the owner at the machine — it plays video
   on the real HDR stack and probes the known D-state wedge), then an approved
   design plan, then code. Draft plan: `.agents/plans/letterbox-crop.md`.
-- d35cfe3 resolved 2026-07-03: keep, and additionally move Plex stream auth
-  from URL query param to the `X-Plex-Token` header via a per-launch mpv
-  include file (see `.agents/decisions.md`, 2026-07-03). Implementation in
-  progress this session; Jellyfin/Emby stream parity is a follow-up.
+- Plex stream header auth landed 2026-07-03 (decision and implementation, see
+  `.agents/decisions.md`). Verified live: header-authed HEAD on a real part
+  URL 200, no-auth 401, and a windowless 10-frame mpv decode over header auth
+  passed. Remaining: owner eyeball check on the next real play (title bar and
+  `Shift+I` stats should show no token), EDL split-file media exercised only
+  by unit tests, and Jellyfin/Emby stream-URL parity as a follow-up.
 
 ## Blockers
 

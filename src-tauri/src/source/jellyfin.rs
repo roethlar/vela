@@ -861,6 +861,9 @@ impl MediaSource for JellyfinSource {
                 play_session_id,
                 headers: self.client.auth_headers(),
             }),
+            // Jellyfin/Emby stream URLs still carry their token; header parity
+            // is a recorded follow-up (`.agents/decisions.md`, 2026-07-03).
+            http_headers: Vec::new(),
         })
     }
 

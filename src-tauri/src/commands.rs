@@ -19,7 +19,7 @@ const PRODUCT: &str = "Vela";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
-const BUILD_DATE: &str = "2026-05-28";
+const BUILD_DATE: &str = "2026-07-03";
 
 /// Project home, shown (and opened) from the build-info footer.
 const REPO_URL: &str = "https://github.com/roethlar/vela";
@@ -1904,15 +1904,18 @@ pub(crate) async fn play_by_key(
             .push(child);
     }
 
-    let url = resolved.url;
-    let title = title.to_string();
-    let start = resolved.resume_ms as f64 / 1000.0;
+    let spec = playback::PlaySpec {
+        url: resolved.url,
+        title: title.to_string(),
+        http_headers: resolved.http_headers,
+        start_seconds: resolved.resume_ms as f64 / 1000.0,
+    };
     let progress = resolved.progress;
     let child_slot = state.current_child.clone();
     let shutting_down = state.shutting_down.clone();
     let advance = state.queue_advance.clone();
     let stop = tauri::async_runtime::spawn_blocking(move || {
-        playback::play(&url, &title, start, progress, &child_slot, &shutting_down, &advance)
+        playback::play(&spec, progress, &child_slot, &shutting_down, &advance)
     })
     .await
     .map_err(|e| format!("playback task failed: {e}"))??;

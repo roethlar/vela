@@ -283,6 +283,11 @@ impl MediaSource for PlexSource {
             }
         };
 
+        // The part URL is credential-free; the token travels as a header
+        // instead — on this preflight and on mpv's own requests (threaded
+        // through `StreamResolution`). See `.agents/decisions.md`, 2026-07-03.
+        let stream_headers = vec![("X-Plex-Token".to_string(), lib.auth_token_clone())];
+
         // Preflight: a stale Plex DB entry can point at a file that no longer
         // exists, which would otherwise launch an mpv window that silently fails.
         // For split-file media the play URL is an `edl://` wrapper, so check each
@@ -302,7 +307,11 @@ impl MediaSource for PlexSource {
                 .build()
                 .map_err(|e| format!("couldn't initialize the HTTP client: {e}"))?;
             for u in &part_urls {
-                let resp = client.head(u).send().await.map_err(|e| {
+                let mut req = client.head(u);
+                for (name, value) in &stream_headers {
+                    req = req.header(name.as_str(), value.as_str());
+                }
+                let resp = req.send().await.map_err(|e| {
                     format!("couldn't reach the media server to start playback: {e}")
                 })?;
                 let status = resp.status();
@@ -344,6 +353,7 @@ impl MediaSource for PlexSource {
             url,
             resume_ms,
             progress: ProgressTarget::Plex(info),
+            http_headers: stream_headers,
         })
     }
 

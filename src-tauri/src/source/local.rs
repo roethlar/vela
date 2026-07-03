@@ -519,6 +519,7 @@ impl MediaSource for LocalSource {
             url: item_key.to_string(),
             resume_ms: 0,
             progress: ProgressTarget::None,
+            http_headers: Vec::new(),
         })
     }
 }

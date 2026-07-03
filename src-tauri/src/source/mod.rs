@@ -64,6 +64,12 @@ pub struct StreamResolution {
     pub url: String,
     pub resume_ms: u64,
     pub progress: crate::playback::ProgressTarget,
+    /// HTTP headers mpv must send when fetching `url` — e.g. `X-Plex-Token`,
+    /// which travels as a header so the URL stays clean of credentials
+    /// (mpv renders `${path}` in its title, stats overlay, and playlist).
+    /// Empty when the stream needs none (local files) or the backend still
+    /// carries auth in the URL (Jellyfin/Emby, pending parity).
+    pub http_headers: Vec<(String, String)>,
 }
 
 /// A configured media backend. Methods that *receive* a key get the raw

@@ -843,29 +843,7 @@ impl PlexLibrary {
                     } else if name.as_slice() == b"Part" || name.as_slice() == b"part" {
                         for a in e.attributes().flatten() {
                             if a.key.as_ref() == b"key" {
-                                let k = av(&a);
-                                let mut rel_path = k.clone();
-                                if let Ok(u) = url::Url::parse(&k) {
-                                    rel_path = u.path().to_string();
-                                    if let Some(q) = u.query() {
-                                        rel_path.push('?');
-                                        rel_path.push_str(q);
-                                    }
-                                }
-                                let mut full = if rel_path.starts_with('/') {
-                                    format!("{base}{rel_path}")
-                                } else {
-                                    format!("{base}/{rel_path}")
-                                };
-                                if full.contains('?') {
-                                    full.push('&');
-                                } else {
-                                    full.push('?');
-                                }
-                                full.push_str("X-Plex-Token=");
-                                full.push_str(&self.auth_token);
-                                full.push_str("&download=1");
-                                cur_parts.push(full);
+                                cur_parts.push(part_url(&base, &av(&a)));
                                 break;
                             }
                         }
@@ -1179,6 +1157,35 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
     v
 }
 
+/// Build the playable URL for a Plex part key. An absolute part URL is reduced
+/// to its path+query and re-rooted onto `base` (our chosen connection origin).
+/// Auth deliberately travels as the `X-Plex-Token` HEADER — threaded to mpv by
+/// the playback layer — never as a query parameter: mpv renders `${path}` in
+/// its title bar, stats overlay, and playlist, so a token-bearing URL would
+/// surface the credential there. (See `.agents/decisions.md`, 2026-07-03.)
+fn part_url(base: &str, part_key: &str) -> String {
+    let mut rel_path = part_key.to_string();
+    if let Ok(u) = url::Url::parse(part_key) {
+        rel_path = u.path().to_string();
+        if let Some(q) = u.query() {
+            rel_path.push('?');
+            rel_path.push_str(q);
+        }
+    }
+    let mut full = if rel_path.starts_with('/') {
+        format!("{base}{rel_path}")
+    } else {
+        format!("{base}/{rel_path}")
+    };
+    if full.contains('?') {
+        full.push('&');
+    } else {
+        full.push('?');
+    }
+    full.push_str("download=1");
+    full
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1195,6 +1202,31 @@ mod tests {
             machine_identifier: format!("{name}-id"),
             version: "1.0".to_string(),
         }
+    }
+
+    #[test]
+    fn part_urls_carry_no_token_and_keep_download_flag() {
+        // Server-relative part key, no existing query.
+        assert_eq!(
+            part_url("https://plex.example:32400", "/library/parts/42/file.mkv"),
+            "https://plex.example:32400/library/parts/42/file.mkv?download=1"
+        );
+        // A part key that already has a query keeps it and appends with '&'.
+        assert_eq!(
+            part_url("https://plex.example:32400", "/library/parts/42/file.mkv?x=1"),
+            "https://plex.example:32400/library/parts/42/file.mkv?x=1&download=1"
+        );
+        // An absolute part URL is re-rooted onto our chosen server origin.
+        let u = part_url(
+            "https://plex.example:32400",
+            "https://other.host:12345/library/parts/7/file.mkv?y=2",
+        );
+        assert_eq!(
+            u,
+            "https://plex.example:32400/library/parts/7/file.mkv?y=2&download=1"
+        );
+        // The credential must never ride in the URL; it travels as a header.
+        assert!(!u.contains("X-Plex-Token"));
     }
 
     #[test]

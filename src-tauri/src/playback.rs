@@ -31,13 +31,14 @@ fn ipc_connect(path: &str) -> std::io::Result<IpcStream> {
         .open(path)
 }
 
-/// Path for mpv's JSON IPC socket. Lives in a process-private, owner-only (0700)
-/// directory with an unpredictable name, so a local user can't pre-create
-/// (symlink) the socket the way they could in world-writable `/tmp`. The base
-/// stays under `/tmp` so the full path keeps well under the unix socket-path
-/// limit (notably macOS's 104 bytes), unlike the long per-user config dir.
+/// Process-private, owner-only (0700) runtime directory with an unpredictable
+/// name, so a local user can't pre-create (symlink) the files we put here the
+/// way they could in world-writable `/tmp`. Holds mpv's IPC socket and the
+/// auth-header include file. The base stays under `/tmp` so socket paths keep
+/// well under the unix socket-path limit (notably macOS's 104 bytes), unlike
+/// the long per-user config dir.
 #[cfg(not(windows))]
-fn ipc_socket_path() -> Result<String, String> {
+fn private_runtime_dir() -> Result<std::path::PathBuf, String> {
     use std::sync::OnceLock;
     // Cache the *result* of the one-time creation: the path is random per
     // process and the directory is created exactly once, so a creation failure
@@ -90,6 +91,13 @@ fn ipc_socket_path() -> Result<String, String> {
             return Err("IPC path is not a directory".to_string());
         }
     }
+    Ok(dir.clone())
+}
+
+/// Path for mpv's JSON IPC socket, inside [`private_runtime_dir`].
+#[cfg(not(windows))]
+fn ipc_socket_path() -> Result<String, String> {
+    let dir = private_runtime_dir()?;
     let ts = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis())
@@ -98,6 +106,89 @@ fn ipc_socket_path() -> Result<String, String> {
         .join(format!("mpv-{}-{}.sock", std::process::id(), ts))
         .to_string_lossy()
         .into_owned())
+}
+
+/// Where the per-launch mpv auth include lives. Unix: inside the same
+/// process-private 0700 runtime dir as the IPC socket. Windows: the per-user
+/// temp dir, which sits inside the user profile (private by default ACLs) —
+/// the same protection class as Vela's config file, which stores this token
+/// durably anyway.
+fn header_conf_path() -> Result<std::path::PathBuf, String> {
+    #[cfg(not(windows))]
+    {
+        Ok(private_runtime_dir()?.join(format!("mpv-headers-{}.conf", std::process::id())))
+    }
+    #[cfg(windows)]
+    {
+        Ok(std::env::temp_dir().join(format!("vela-mpv-headers-{}.conf", std::process::id())))
+    }
+}
+
+/// Write the mpv include file that carries stream auth headers
+/// (`http-header-fields`). An include file — not a command-line option —
+/// because argv is world-readable (`/proc/<pid>/cmdline`) while this file is
+/// owner-only; and not the URL, because mpv renders `${path}` in its title,
+/// stats overlay (Shift+I), and playlist. mpv honors `--include` even under
+/// `--no-config`, and an include asserted after the user's extra args
+/// overrides any `--http-header-fields` they set — both verified against
+/// mpv 0.41 (the header reaches the wire exactly once). One file per Vela
+/// process, overwritten on each launch; the previous mpv (killed before a new
+/// play starts) has long finished reading its config by then.
+fn write_header_include(headers: &[(String, String)]) -> Result<String, String> {
+    let path = header_conf_path()?;
+    write_header_include_at(&path, headers)?;
+    Ok(path.to_string_lossy().into_owned())
+}
+
+/// The testable core of [`write_header_include`]: validates and writes to an
+/// explicit path. Header names/values are restricted to characters that cannot
+/// escape mpv's quoted conf value or smuggle extra list entries or config
+/// lines — anything else fails closed, and the error text never echoes the
+/// offending value (it may be a credential).
+fn write_header_include_at(
+    path: &std::path::Path,
+    headers: &[(String, String)],
+) -> Result<(), String> {
+    for (name, value) in headers {
+        if name.is_empty()
+            || !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        {
+            return Err("invalid stream auth header name".to_string());
+        }
+        // `"` would close mpv's value quoting, `,` separates list entries, and
+        // control characters could inject config lines. `#` (mpv's comment
+        // marker) is excluded defensively too.
+        if !value
+            .chars()
+            .all(|c| (c.is_ascii_graphic() || c == ' ') && !['"', ',', '#'].contains(&c))
+        {
+            return Err("invalid stream auth header value".to_string());
+        }
+    }
+    let joined = headers
+        .iter()
+        .map(|(name, value)| format!("{name}: {value}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let content = format!("http-header-fields=\"{joined}\"\n");
+    // Remove the previous launch's file, then create exclusively with
+    // owner-only permissions from the first byte (never chmod-after-write).
+    let _ = std::fs::remove_file(path);
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut f = opts
+        .open(path)
+        .map_err(|e| format!("couldn't write the mpv auth config: {e}"))?;
+    f.write_all(content.as_bytes())
+        .map_err(|e| format!("couldn't write the mpv auth config: {e}"))?;
+    Ok(())
 }
 
 /// Locate the mpv executable. We can't rely on bare `mpv` resolving via `PATH`:
@@ -326,16 +417,24 @@ pub enum ProgressTarget {
     None,
 }
 
-/// Spawn mpv for `url`, optionally seeking to `start_seconds`, and start
-/// background progress reporting that runs until mpv exits. Publishes the child
-/// into `child_slot` the instant it's launched (so an app-exit that races tracker
-/// setup can still find and kill it), and returns the stop flag so a later play
-/// can cancel this one. The caller must have already cleared/killed any previous
-/// child, since this overwrites the slot.
+/// What to play, as opposed to the supervision plumbing `play` also takes:
+/// the stream URL, the human title for mpv's window/OSD, the auth headers the
+/// stream needs (see [`write_header_include`]), and the resume offset.
+pub struct PlaySpec {
+    pub url: String,
+    pub title: String,
+    pub http_headers: Vec<(String, String)>,
+    pub start_seconds: f64,
+}
+
+/// Spawn mpv for `spec.url`, optionally seeking to `spec.start_seconds`, and
+/// start background progress reporting that runs until mpv exits. Publishes the
+/// child into `child_slot` the instant it's launched (so an app-exit that races
+/// tracker setup can still find and kill it), and returns the stop flag so a
+/// later play can cancel this one. The caller must have already cleared/killed
+/// any previous child, since this overwrites the slot.
 pub fn play(
-    url: &str,
-    title: &str,
-    start_seconds: f64,
+    spec: &PlaySpec,
     progress: ProgressTarget,
     child_slot: &Arc<Mutex<Option<std::process::Child>>>,
     shutting_down: &Arc<AtomicBool>,
@@ -418,21 +517,28 @@ pub fn play(
     // into the title bar (and the on-screen media name). Asserted here, after the
     // user's extra args, so it can't be clobbered back into a leak. Fall back to a
     // neutral label rather than letting mpv reach for the URL when title is empty.
-    let display_title = if title.trim().is_empty() {
+    let display_title = if spec.title.trim().is_empty() {
         "Vela"
     } else {
-        title
+        spec.title.as_str()
     };
     cmd.arg(format!("--force-media-title={}", display_title));
     cmd.arg(format!("--title={}", display_title));
-    if start_seconds > 0.0 {
-        cmd.arg(format!("--start={}", start_seconds));
+    // Stream auth (e.g. Plex's X-Plex-Token) rides in an owner-only include
+    // file — see write_header_include for why neither argv nor the URL may
+    // carry it. Asserted after the user's extra args so a user-set
+    // --http-header-fields can't silently drop the auth the stream needs.
+    if !spec.http_headers.is_empty() {
+        cmd.arg(format!("--include={}", write_header_include(&spec.http_headers)?));
+    }
+    if spec.start_seconds > 0.0 {
+        cmd.arg(format!("--start={}", spec.start_seconds));
     }
     // `--` terminates option parsing so a URL/path that begins with `-` (e.g. a
     // hostile filename from a local folder or server) can't be read as an mpv
     // option. In practice our URLs are absolute paths / http(s) / edl://, but
     // this closes the option-injection vector regardless.
-    cmd.arg("--").arg(url);
+    cmd.arg("--").arg(&spec.url);
 
     // Launch mpv and publish it into the shared slot while still holding the
     // lock, so launch+register is atomic w.r.t. the app-exit handler: it can
@@ -460,7 +566,7 @@ pub fn play(
     // Seed the tracked position with the resume point, so if mpv exits before
     // IPC reports a time-pos the final check-in reports the resume position
     // rather than 0 (which would clobber an existing resume point).
-    let start_ms = (start_seconds.max(0.0) * 1000.0) as u64;
+    let start_ms = (spec.start_seconds.max(0.0) * 1000.0) as u64;
     let stop_flag = Arc::new(AtomicBool::new(false));
 
     // Watch mpv's IPC for a clean EOF — that's the signal to auto-advance the
@@ -798,4 +904,64 @@ fn start_tracking_jellyfin(
             post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
         })?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp(name: &str) -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn header_include_writes_quoted_fields_owner_only() {
+        let path = tmp("headers-ok.conf");
+        let headers = vec![("X-Plex-Token".to_string(), "abc123".to_string())];
+        write_header_include_at(&path, &headers).expect("write include");
+        let content = std::fs::read_to_string(&path).expect("read back");
+        assert_eq!(content, "http-header-fields=\"X-Plex-Token: abc123\"\n");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path)
+                .expect("stat include")
+                .permissions()
+                .mode();
+            assert_eq!(mode & 0o777, 0o600, "auth include must be owner-only");
+        }
+        // A later launch replaces the previous launch's file in place.
+        let headers = vec![("X-Plex-Token".to_string(), "second".to_string())];
+        write_header_include_at(&path, &headers).expect("overwrite include");
+        let content = std::fs::read_to_string(&path).expect("read back after overwrite");
+        assert_eq!(content, "http-header-fields=\"X-Plex-Token: second\"\n");
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn header_include_fails_closed_on_conf_escaping_input() {
+        let path = tmp("headers-bad.conf");
+        for bad in [
+            "with\"quote",
+            "with,comma",
+            "with#hash",
+            "with\nnewline",
+            "with\rreturn",
+        ] {
+            let headers = vec![("X-Plex-Token".to_string(), bad.to_string())];
+            let err = write_header_include_at(&path, &headers).expect_err("must fail closed");
+            assert!(
+                !err.contains("with"),
+                "error text must not echo the header value"
+            );
+        }
+        for bad_name in ["", "X Token", "X:Token", "Tok\nen"] {
+            let headers = vec![(bad_name.to_string(), "value".to_string())];
+            write_header_include_at(&path, &headers).expect_err("bad name must fail");
+        }
+        assert!(
+            !path.exists(),
+            "nothing may be written when validation fails"
+        );
+    }
 }
