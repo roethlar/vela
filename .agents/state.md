@@ -34,12 +34,10 @@ Keep it short and update it when important repo facts change.
   the render-zoom safety spike (needs the owner at the machine — it plays video
   on the real HDR stack and probes the known D-state wedge), then an approved
   design plan, then code. Draft plan: `.agents/plans/letterbox-crop.md`.
-- Resolve the WIP commit `d35cfe3` (Plex token in mpv title bar) keep-vs-rollback
-  against the 2026-05-23 token-exposure decision. Note discovered this session:
-  the `--force-media-title`/`--title` args fix the title bar/OSD, but mpv's stats
-  overlay (`Shift+I`) still renders the token-bearing stream URL in its `File:`
-  line, since that reads `${path}` independently. Folding that into the same
-  decision is worth considering.
+- d35cfe3 resolved 2026-07-03: keep, and additionally move Plex stream auth
+  from URL query param to the `X-Plex-Token` header via a per-launch mpv
+  include file (see `.agents/decisions.md`, 2026-07-03). Implementation in
+  progress this session; Jellyfin/Emby stream parity is a follow-up.
 
 ## Blockers
 

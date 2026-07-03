@@ -194,3 +194,32 @@ Supersedes:
 The open question in the 2026-06-28 entry, and that entry's "single static
 crop applied once at launch" target model for the first-ever play of a file
 (later plays still match it via the cache).
+
+### 2026-07-03 - Keep human titles in mpv; move Plex stream auth out of the URL
+
+Status: Active
+
+Decision:
+Commit `d35cfe3` (mpv `--force-media-title`/`--title` driven by the human
+title) is kept; it is no longer WIP. The remaining token surface is closed
+rather than accepted: Plex stream URLs handed to mpv no longer carry
+`X-Plex-Token` as a query parameter. The token is supplied as the
+`X-Plex-Token` HTTP header via a per-launch mpv include file with owner-only
+permissions — never on the mpv command line, which would expose it in the
+process argument list. Jellyfin/Emby stream-URL parity is a recorded
+follow-up, not part of this change.
+
+Reason:
+Window titles leak passively off the machine (taskbars, window lists,
+screen-share pickers), which justifies keeping d35cfe3. mpv renders `${path}`
+in more surfaces than the title (the `Shift+I` stats overlay's `File:` line,
+playlist display), so suppressing the title alone leaves residuals; removing
+the token from the URL cleans every mpv surface at once and extends the
+existing "backend-only Plex calls use header auth where practical" stance
+(2026-05-23) to the stream itself.
+
+Supersedes:
+Refines the 2026-05-23 "Accept token-bearing media URLs as local-only
+exposure" entry: Plex stream URLs are no longer token-bearing once this
+lands; poster/photo-transcode URLs and SMB mount-argument exposure remain
+accepted local-only exposures.
