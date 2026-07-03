@@ -34,9 +34,6 @@ Keep it short and update it when important repo facts change.
   displays (see `.agents/decisions.md`, 2026-06-28, Status: Open). Owner has
   rejected whole-file scan strategies; choice is pending between a manual
   per-file crop and dropping the feature. No code until decided.
-- Decide and commit the uncommitted `scripts/build.sh` change in the working
-  tree (reinstall JS deps when `package-lock.json` is newer than
-  `node_modules/.package-lock.json`). Finished but not yet committed.
 - Resolve the WIP commit `d35cfe3` (Plex token in mpv title bar) keep-vs-rollback
   against the 2026-05-23 token-exposure decision. Note discovered this session:
   the `--force-media-title`/`--title` args fix the title bar/OSD, but mpv's stats

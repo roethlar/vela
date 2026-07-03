@@ -100,9 +100,14 @@ case "$os" in
     ;;
 esac
 
-# --- Ensure JS deps exist (tauri CLI lives in node_modules) ------------------
-if [ ! -d node_modules ]; then
-  echo "==> node_modules missing; running npm install"
+# --- Ensure JS deps exist and are current (tauri CLI lives in node_modules) ---
+# npm writes node_modules/.package-lock.json on every install, so it's a faithful
+# marker of what's actually installed. Reinstall when node_modules is absent OR
+# when package-lock.json is newer than that marker — otherwise a dependency added
+# after the last install (e.g. a new @fontsource font) is silently missing and
+# the frontend build fails to resolve its import.
+if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
+  echo "==> JS deps missing or stale; running npm install"
   npm install
 fi
 
