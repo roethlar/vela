@@ -109,3 +109,52 @@ window footer and the bundle filename.
 Supersedes:
 The prior "bump on every build" rule previously stated in the `scripts/bump.sh`
 header comment.
+
+### 2026-06-28 - Letterbox/IMAX black-bar cropping on ultrawide (OPEN)
+
+Status: Open (no implementation until resolved)
+
+Problem:
+On a screen wider than the content, video mastered narrower than its container
+shows black on all four sides. Example: a 2:1 picture baked into a 16:9 container
+with hardcoded top/bottom bars, played on a 2.37:1 (5120x2160) ultrawide. mpv
+fills the height with the 16:9 frame and pillarboxes left/right, so the baked
+top/bottom bars plus mpv's side bars produce a four-sided border. Vela passes mpv
+no fullscreen/scaling/crop args and runs `--no-config` by default, so this is the
+source geometry, not a Vela launch-arg bug. Confirmed on a Plex 4K HDR file
+(3840x2160 container, true picture 3840x1920 / 2:1, 120px baked bars top and
+bottom; correct crop `3840x1920+0+120`).
+
+Confirmed facts and constraints (treat as durable evidence):
+- Detection: stock mpv `cropdetect` (limit=24) and the `osd-dimensions` property
+  both gave misleading readings on HDR/PQ content. `osd-dimensions` only reports
+  mpv's own window padding, never bars baked into the frame. The reliable signal
+  was per-decoded-row pixel brightness on an extracted frame.
+- Safety: applying the `video-crop` property live over the mpv IPC socket
+  (observed while paused) on the gpu-next / Vulkan / Wayland / HDR stack wedged
+  mpv into uninterruptible (D-state) I/O twice; even SIGKILL could not reap it
+  until the blocked I/O returned. Therefore any crop must be applied at mpv
+  launch, not mid-stream. Dynamic per-scene re-cropping is considered unsafe on
+  this setup unless a future spike proves a live mechanism (e.g. render-only
+  `video-zoom`/`panscan`, which avoid a VO reconfigure) does not wedge.
+
+Owner requirements gathered so far:
+- Must work for any video.
+- No dynamic per-scene cropping (rejected: it changes the zoom/bars per scene).
+- Target model: a single static crop equal to the bounding box of the
+  largest-picture scene (maximum picture / minimum bars across the whole file),
+  applied once at launch. Narrower scenes keep their own bars; real picture is
+  never clipped. For uniform-aspect files this reduces to the obvious crop.
+- That model needs whole-file lookahead (a pre-scan) or a per-file cache, because
+  frame 0 cannot know which scene is widest.
+
+Open question (undecided):
+Owner rejected all three first-time scan-timing strategies offered
+(fast sampled scan + background refine; first play uncropped + cache for next;
+block until full scan). The live choices are: (a) a no-scan manual per-file crop
+(user sets the aspect/crop, Vela remembers it and applies it at the next launch);
+(b) drop the feature; (c) another approach not yet framed. Resolve before any
+design or code.
+
+Supersedes:
+None.
