@@ -30,10 +30,10 @@ Keep it short and update it when important repo facts change.
   servers/shares, or keep the live-integration caveat explicit.
 - If updating broader governance metadata, refresh `.agents/repo-map.json` and
   `.agents/artifact-manifest.json` from their old `validated_against` commit.
-- Resolve the open decision on letterbox/IMAX black-bar cropping for ultrawide
-  displays (see `.agents/decisions.md`, 2026-06-28, Status: Open). Owner has
-  rejected whole-file scan strategies; choice is pending between a manual
-  per-file crop and dropping the feature. No code until decided.
+- Letterbox crop (decided 2026-07-03, see `.agents/decisions.md`): next step is
+  the render-zoom safety spike (needs the owner at the machine — it plays video
+  on the real HDR stack and probes the known D-state wedge), then an approved
+  design plan, then code. Draft plan: `.agents/plans/letterbox-crop.md`.
 - Resolve the WIP commit `d35cfe3` (Plex token in mpv title bar) keep-vs-rollback
   against the 2026-05-23 token-exposure decision. Note discovered this session:
   the `--force-media-title`/`--title` args fix the title bar/OSD, but mpv's stats

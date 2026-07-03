@@ -112,7 +112,8 @@ header comment.
 
 ### 2026-06-28 - Letterbox/IMAX black-bar cropping on ultrawide (OPEN)
 
-Status: Open (no implementation until resolved)
+Status: Resolved by the 2026-07-03 crop decision below; the confirmed facts,
+constraints, and owner requirements recorded here remain valid evidence.
 
 Problem:
 On a screen wider than the content, video mastered narrower than its container
@@ -158,3 +159,38 @@ design or code.
 
 Supersedes:
 None.
+
+### 2026-07-03 - Letterbox crop: detect during first playback, correct once
+
+Status: Active (direction decided; render-zoom spike gates the mechanism;
+design plan approval still required before code)
+
+Decision:
+First-ever play of a file launches immediately, uncropped. A sampled
+bar-detection scan runs concurrently against the same stream; when it
+completes, Vela applies exactly one correction to the running player and
+caches the crop per file. Every later launch of that file applies the cached
+crop in mpv's launch arguments (static, never changes mid-play). The
+correction mechanism is gated on a safety spike: prove whether render-only
+`video-zoom`/`panscan`/`video-align-y` adjustments avoid the VO-reconfigure
+D-state wedge on the gpu-next/Vulkan/Wayland/HDR stack. If the spike passes,
+the one-time correction happens in place via render-space properties; if it
+fails, Vela relaunches mpv at the current position with the crop in launch
+arguments (a fresh launch avoids the live `video-crop` path entirely).
+
+Non-goals: no per-scene dynamic cropping (still rejected), no detail-page or
+library prefetch scanning, no external metadata (IMDb/TMDb aspect-ratio)
+lookup, no manual crop UI unless the automatic path proves insufficient.
+
+Reason:
+Owner requirements: works for any video; never clip real picture (crop equals
+the bounding box of the largest-picture scene); nothing may repeatedly change
+during playback. All scan timings that delay or degrade launch were rejected;
+the owner explicitly chose one early correction on first play (option "3/5")
+over a manual per-file crop and over dropping the feature. Live `video-crop`
+over IPC is unsafe on this stack (see the 2026-06-28 entry).
+
+Supersedes:
+The open question in the 2026-06-28 entry, and that entry's "single static
+crop applied once at launch" target model for the first-ever play of a file
+(later plays still match it via the cache).
