@@ -11,6 +11,7 @@ pub mod listing_cache;
 pub mod local;
 pub mod metadata;
 pub mod plex;
+pub mod vfs;
 
 /// A browsable library/section, tagged with the source it came from.
 #[derive(Serialize, Clone)]
