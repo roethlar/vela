@@ -246,6 +246,8 @@ mod tests {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            provider_ids: vec![],
+            backing: None,
             source_id: "local".into(),
         }
     }

@@ -47,6 +47,7 @@
     parentIndex?: number;
     played?: boolean | null;
     sourceId?: string;
+    backing?: { sourceId: string; ratingKey: string }[];
   };
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
   type Crumb = { title: string; ratingKey: string | null };
@@ -852,8 +853,12 @@
           <span class="y">{item.year}</span>
         {/if}
         {#if activeType && mode === "browse" && item.sourceId}
-          <!-- Merged listings carry duplicates until dedup (Phase C); tag them honestly. -->
-          <span class="y srctag">· {sourceNameOf(item.sourceId)}</span>
+          <!-- Merged entries: name the source, or the count when several back it. -->
+          <span class="y srctag"
+            >· {(item.backing?.length ?? 0) > 1
+              ? `${item.backing!.length} sources`
+              : sourceNameOf(item.backing?.[0]?.sourceId ?? item.sourceId)}</span
+          >
         {/if}
       </div>
     </button>

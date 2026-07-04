@@ -52,6 +52,22 @@ pub struct ItemDto {
     pub grandparent_title: Option<String>,
     pub parent_title: Option<String>,
     pub source_id: String,
+    /// Cross-source identity hints, normalized as `"scheme:value"`
+    /// (e.g. `"imdb:tt0133093"`). Used by the merged All view's dedup.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_ids: Vec<String>,
+    /// Present only on merged (deduped) listing entries: every source
+    /// backing this title, display entry first.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backing: Option<Vec<BackingRef>>,
+}
+
+/// One source's copy of a merged title.
+#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackingRef {
+    pub source_id: String,
+    pub rating_key: String,
 }
 
 /// A home-screen rail of items, source-tagged.
@@ -262,6 +278,8 @@ mod tests {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            provider_ids: vec![],
+            backing: None,
             source_id: "local".into(),
         };
         let json = serde_json::to_string(&dto).expect("serialize");

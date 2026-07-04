@@ -443,6 +443,7 @@ struct BaseItem {
     backdrop_image_tags: Option<Vec<String>>,
     image_tags: Option<ImageTags>,
     collection_type: Option<String>,
+    provider_ids: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -674,6 +675,18 @@ impl JellyfinSource {
             grandparent_title: item.series_name.clone(),
             parent_title: item.season_name.clone(),
             source_id: self.id.clone(),
+            // {"Imdb": "tt0133093"} → "imdb:tt0133093", matching Plex's form.
+            provider_ids: item
+                .provider_ids
+                .as_ref()
+                .map(|m| {
+                    m.iter()
+                        .filter(|(_, v)| !v.is_empty())
+                        .map(|(k, v)| format!("{}:{v}", k.to_lowercase()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            backing: None,
         }
     }
 
@@ -733,7 +746,7 @@ impl MediaSource for JellyfinSource {
                     ("Limit", "12".to_string()),
                     ("Recursive", "true".to_string()),
                     ("MediaTypes", "Video".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                 ],
             )
             .await?;
@@ -755,7 +768,7 @@ impl MediaSource for JellyfinSource {
                 &format!("/Users/{uid}/Items/Latest"),
                 &[
                     ("Limit", "20".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                     // Keep mixed libraries from surfacing audio/photos/books here.
                     (
                         "IncludeItemTypes",
@@ -793,7 +806,7 @@ impl MediaSource for JellyfinSource {
             ("Recursive", "true".to_string()),
             ("SortBy", by),
             ("SortOrder", order),
-            ("Fields", "Overview".to_string()),
+            ("Fields", "Overview,ProviderIds".to_string()),
         ];
         match section_type {
             "movie" => query.push(("IncludeItemTypes", "Movie".to_string())),
@@ -822,7 +835,7 @@ impl MediaSource for JellyfinSource {
                         "Movie,Series,Episode,Video,MusicVideo".to_string(),
                     ),
                     ("Limit", "50".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                 ],
             )
             .await?;
@@ -848,7 +861,7 @@ impl MediaSource for JellyfinSource {
                         "ParentIndexNumber,IndexNumber,SortName".to_string(),
                     ),
                     ("SortOrder", "Ascending".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                 ],
             )
             .await?;

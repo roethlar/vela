@@ -125,6 +125,16 @@ Goal: one card per title, backed by every source that carries it.
   cuts sharing title+year can false-merge; provider ids prevent this
   wherever a server exposes them.
 
+Phase C implemented 2026-07-04: Plex section listings request
+`includeGuids=1` and capture `<Guid>` children; Jellyfin/Emby item queries
+request `Fields=ProviderIds`; both normalize to `"scheme:value"` on the new
+`ItemDto.provider_ids`. `dedup_across_sources` groups by any shared
+provider id, else normalized title + exact year (missing year only matches
+missing year), accumulates a `backing` list (display entry first — the
+default play target until Phase D), upgrades display fields to the richest
+backing, and adopts watch state from the first server-backed entry. Merged
+cards show "N sources" when multi-backed.
+
 ### Phase D — playback source ranking + per-title override
 
 Goal: play the best source by default; let the owner pick per title.

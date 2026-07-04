@@ -76,6 +76,7 @@ impl From<PlexDir> for PlexVideo {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            guids: vec![],
         }
     }
 }
@@ -137,6 +138,15 @@ pub struct PlexVideo {
     pub grandparent_title: Option<String>,
     #[serde(rename = "parentTitle")]
     pub parent_title: Option<String>,
+    /// `<Guid id="imdb://tt…"/>` children (present in section listings when
+    /// requested with `includeGuids=1`); the cross-source dedup identity.
+    #[serde(rename = "Guid", default)]
+    pub guids: Vec<PlexGuid>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PlexGuid {
+    pub id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -738,6 +748,7 @@ impl PlexLibrary {
         let base_url = format!("{base}/library/sections/{section_key}/all");
 
         let mut params = vec![
+            ("includeGuids".to_string(), "1".to_string()),
             ("type".to_string(), type_filter.to_string()),
             ("X-Plex-Container-Start".to_string(), start.to_string()),
             ("X-Plex-Container-Size".to_string(), size.to_string()),
@@ -768,6 +779,7 @@ impl PlexLibrary {
         let base_url = format!("{base}/library/sections/{section_key}/all");
 
         let mut params = vec![
+            ("includeGuids".to_string(), "1".to_string()),
             ("type".to_string(), type_filter.to_string()),
             ("X-Plex-Container-Start".to_string(), start.to_string()),
             ("X-Plex-Container-Size".to_string(), size.to_string()),
@@ -1138,6 +1150,7 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
         parent_index: None,
         grandparent_title: None,
         parent_title: None,
+        guids: vec![],
     };
     for a in e.attributes().flatten() {
         match a.key.as_ref() {

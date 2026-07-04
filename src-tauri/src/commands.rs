@@ -1829,7 +1829,115 @@ pub async fn get_type_listing(
             }
         }
     }
-    Ok(merge_sort_page(merged, &sort, start, size))
+    let deduped = dedup_across_sources(merged);
+    Ok(merge_sort_page(deduped, &sort, start, size))
+}
+
+/// Collapse the same title carried by several sources into one entry backed
+/// by all of them (rework Phase C). Identity: any shared provider id
+/// ("imdb:tt…"), else normalized title + exact year (a missing year only
+/// matches another missing year, so remakes and unparsed files don't
+/// false-merge). Display fields come from the richest backing — an entry
+/// with server metadata (summary + artwork) replaces a bare filename parse —
+/// and watch state comes from the first backing that reports any.
+fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
+    use std::collections::HashMap;
+    let mut groups: Vec<ItemDto> = Vec::new();
+    let mut by_provider: HashMap<String, usize> = HashMap::new();
+    let mut by_title: HashMap<String, usize> = HashMap::new();
+
+    fn title_key(item: &ItemDto) -> String {
+        let norm: String = item
+            .title
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        format!("{norm}|{:?}", item.year)
+    }
+    fn richer(candidate: &ItemDto, current: &ItemDto) -> bool {
+        let score = |i: &ItemDto| {
+            i.summary.is_some() as u8 + i.poster.is_some() as u8 + i.year.is_some() as u8
+        };
+        score(candidate) > score(current)
+    }
+
+    for item in items {
+        let tkey = title_key(&item);
+        let hit = item
+            .provider_ids
+            .iter()
+            .find_map(|p| by_provider.get(p).copied())
+            .or_else(|| by_title.get(&tkey).copied());
+        match hit {
+            Some(gi) => {
+                for p in &item.provider_ids {
+                    by_provider.entry(p.clone()).or_insert(gi);
+                }
+                by_title.entry(tkey).or_insert(gi);
+                let group = &mut groups[gi];
+                let backing = group.backing.get_or_insert_with(Vec::new);
+                let item_ref = crate::source::BackingRef {
+                    source_id: item.source_id.clone(),
+                    rating_key: item.rating_key.clone(),
+                };
+                if !backing.contains(&item_ref) {
+                    backing.push(item_ref.clone());
+                }
+                // Adopt missing watch state before a possible display swap.
+                if group.played.is_none() && item.played.is_some() {
+                    group.played = item.played;
+                    group.view_offset_ms = item.view_offset_ms;
+                }
+                if richer(&item, group) {
+                    // The richer entry becomes the face (and default play
+                    // target): move it to the front of the backing list and
+                    // take its display fields, keeping the accumulated
+                    // backing/provider state and any adopted watch state.
+                    let keep_backing = group.backing.take();
+                    let keep_played = group.played.take();
+                    let keep_offset = group.view_offset_ms.take();
+                    let mut ids = std::mem::take(&mut group.provider_ids);
+                    for p in &item.provider_ids {
+                        if !ids.contains(p) {
+                            ids.push(p.clone());
+                        }
+                    }
+                    *group = item;
+                    group.provider_ids = ids;
+                    group.backing = keep_backing.map(|mut b| {
+                        b.retain(|r| *r != item_ref);
+                        b.insert(0, item_ref.clone());
+                        b
+                    });
+                    if group.played.is_none() && keep_played.is_some() {
+                        group.played = keep_played;
+                        group.view_offset_ms = keep_offset;
+                    }
+                } else {
+                    for p in &item.provider_ids {
+                        if !group.provider_ids.contains(p) {
+                            group.provider_ids.push(p.clone());
+                        }
+                    }
+                }
+            }
+            None => {
+                let gi = groups.len();
+                for p in &item.provider_ids {
+                    by_provider.insert(p.clone(), gi);
+                }
+                by_title.insert(tkey, gi);
+                let mut group = item;
+                group.backing = Some(vec![crate::source::BackingRef {
+                    source_id: group.source_id.clone(),
+                    rating_key: group.rating_key.clone(),
+                }]);
+                groups.push(group);
+            }
+        }
+    }
+    groups
 }
 
 /// Order the merged union and cut the requested window. Title comparisons
@@ -1869,6 +1977,8 @@ mod merge_tests {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            provider_ids: vec![],
+            backing: None,
             source_id: source.into(),
         }
     }
@@ -1909,6 +2019,61 @@ mod merge_tests {
         let page = merge_sort_page(merged, "year:desc", 0, 10);
         let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(titles, vec!["a-new", "z-new", "older"]);
+    }
+
+    fn with_ids(mut i: ItemDto, ids: &[&str]) -> ItemDto {
+        i.provider_ids = ids.iter().map(|s| s.to_string()).collect();
+        i
+    }
+
+    #[test]
+    fn dedup_merges_by_provider_id_despite_title_differences() {
+        let a = with_ids(item("The Matrix", Some(1999), "plex"), &["imdb:tt0133093"]);
+        let b = with_ids(
+            item("Matrix, The", Some(1999), "jf"),
+            &["imdb:tt0133093", "tmdb:603"],
+        );
+        let out = dedup_across_sources(vec![a, b]);
+        assert_eq!(out.len(), 1);
+        let backing = out[0].backing.as_ref().unwrap();
+        assert_eq!(backing.len(), 2);
+        // The union of provider ids is retained for later joins.
+        assert!(out[0].provider_ids.contains(&"tmdb:603".to_string()));
+    }
+
+    #[test]
+    fn dedup_merges_by_normalized_title_and_exact_year() {
+        let a = item("The Matrix", Some(1999), "plex");
+        let b = item("the  matrix!", Some(1999), "smb-1"); // punctuation/case folded
+        let c = item("The Matrix", Some(2021), "plex"); // remake: different year
+        let out = dedup_across_sources(vec![a, b, c]);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].backing.as_ref().unwrap().len(), 2);
+        assert_eq!(out[1].backing.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dedup_prefers_richer_display_and_keeps_watch_state() {
+        // Bare local parse first, then the server copy with metadata.
+        let mut local = item("Dune", Some(2021), "smb-1");
+        local.rating_key = "smb-1:/x/dune.mkv".into();
+        let mut server = item("Dune", Some(2021), "plex");
+        server.rating_key = "plex:42".into();
+        server.summary = Some("desert".into());
+        server.poster = Some("p".into());
+        server.played = Some(false);
+        server.view_offset_ms = Some(1234);
+
+        let out = dedup_across_sources(vec![local, server]);
+        assert_eq!(out.len(), 1);
+        let g = &out[0];
+        // Server copy is the face and the first backing (default play target).
+        assert_eq!(g.rating_key, "plex:42");
+        assert_eq!(g.summary.as_deref(), Some("desert"));
+        assert_eq!(g.view_offset_ms, Some(1234));
+        let backing = g.backing.as_ref().unwrap();
+        assert_eq!(backing.len(), 2);
+        assert_eq!(backing[0].rating_key, "plex:42");
     }
 }
 

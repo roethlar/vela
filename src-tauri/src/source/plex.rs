@@ -105,6 +105,18 @@ impl PlexSource {
             grandparent_title: v.grandparent_title,
             parent_title: v.parent_title,
             source_id: self.id.clone(),
+            // "imdb://tt0133093" → "imdb:tt0133093"; includes plex:// ids,
+            // which are stable across Plex servers on the new agents.
+            provider_ids: v
+                .guids
+                .iter()
+                .filter_map(|g| {
+                    let (scheme, rest) = g.id.split_once("://")?;
+                    let rest = rest.split('?').next().unwrap_or(rest);
+                    (!rest.is_empty()).then(|| format!("{}:{rest}", scheme.to_lowercase()))
+                })
+                .collect(),
+            backing: None,
         }
     }
 }
