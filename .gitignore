@@ -45,3 +45,4 @@ Desktop.ini
 $RECYCLE.BIN/
 *.lnk
 *.tmp
+.agents/review/*.local.json

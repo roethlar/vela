@@ -77,6 +77,8 @@ Keep it short and update it when important repo facts change.
   `Shift+I` stats should show no token), EDL split-file media exercised only
   by unit tests, and Jellyfin/Emby stream-URL parity as a follow-up.
 
+- Active review loop: see `.agents/review/index.md`.
+
 ## Blockers
 
 - None recorded.
