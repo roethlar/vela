@@ -64,3 +64,18 @@ rev-5), each reviewed against its own pinned base.
   returning less than asked means nothing more exists anywhere), so no
   absolute ceiling is needed. Termination-under-total-duplication covered by
   a new test.
+- **Round 2** — codex (codex-cli 0.142.5), reviewed `2064526` against base
+  `5d2e2b9`, guard_confirmed=true, verdict **reopened**, 2026-07-04 (UTC).
+  Comment: stopping at `deduped.len() >= want` still leaves the window's
+  *contents* unstable: a unique title hidden behind duplicates beyond one
+  section's fetched prefix can surface on a later page's deeper fetch,
+  re-sort ahead of the window, and be skipped by the start offset forever,
+  while a later title duplicates across pages.
+  Coder response: correct — any count-based early stop is wrong by
+  construction (window stability, not window size, is the requirement; the
+  same mechanism also bites when a source's collation diverges from the
+  merged comparator). Fix-up: fetch exhaustively (deepen until `!any_full`,
+  no early stop) and page from a per-(type, sort) in-memory snapshot held in
+  `AppState`, rebuilt whenever a listing is entered (`start == 0`) and
+  reused verbatim for continuation pages — pages window one immutable list,
+  so skip/duplicate across pages is structurally impossible.

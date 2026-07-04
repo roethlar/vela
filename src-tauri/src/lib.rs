@@ -68,6 +68,10 @@ pub struct AppState {
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
+    /// The materialized merged All-view listing: built in full when a type
+    /// listing is entered, windowed immutably by continuation pages so
+    /// paging can never skip or duplicate titles (see `get_type_listing`).
+    pub merged_snapshot: AsyncMutex<Option<commands::MergedSnapshot>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -125,6 +129,7 @@ pub fn run() {
         queue_index: Arc::new(Mutex::new(None)),
         queue_advance: Arc::new(tokio::sync::Notify::new()),
         app_handle: std::sync::OnceLock::new(),
+        merged_snapshot: AsyncMutex::new(None),
     };
 
     let asset_folders: Vec<String> = local_family

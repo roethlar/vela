@@ -1789,6 +1789,18 @@ pub async fn get_items(
 /// `start+size` items (already source-sorted), so the merged window is
 /// correct; cost grows with scroll depth, acceptable at library scale.
 /// No dedup yet — that's the rework's Phase C.
+/// The materialized merged listing pages are served from. Pagination over a
+/// dynamically re-fetched, deduped, re-sorted union is unstable by
+/// construction (review rounds 1–2: titles can be skipped forever or
+/// duplicated across pages whenever a deeper fetch re-orders the union), so
+/// the listing is built once, in full, and continuation pages window this
+/// immutable snapshot.
+pub struct MergedSnapshot {
+    pub section_type: String,
+    pub sort: String,
+    pub items: Vec<ItemDto>,
+}
+
 #[tauri::command]
 pub async fn get_type_listing(
     section_type: String,
@@ -1806,7 +1818,21 @@ pub async fn get_type_listing(
         Some(_) => return Err("merged listings sort by title or year".into()),
     };
     let size = clamp_page_size(size);
-    let fetch = start.saturating_add(size);
+
+    // Continuation pages (start > 0) must window the same immutable snapshot
+    // the listing started with; entering a listing (start == 0) rebuilds.
+    if start > 0 {
+        let snap = state.merged_snapshot.lock().await;
+        if let Some(s) = snap
+            .as_ref()
+            .filter(|s| s.section_type == section_type && s.sort == sort)
+        {
+            return Ok(s.items.iter().skip(start).take(size).cloned().collect());
+        }
+        // No matching snapshot (e.g. app restarted mid-scroll): fall through
+        // and rebuild — the windowed result is still correct, merely fresher.
+    }
+
     let sources = state.registry.lock().await.selected(None);
     // source id → kind, for the default playback ranking of merged backings.
     let kinds: std::collections::HashMap<String, &'static str> =
@@ -1835,31 +1861,36 @@ pub async fn get_type_listing(
             section_refs.push((src.clone(), raw));
         }
     }
-    let deduped = fetch_merged(&section_refs, &section_type, &sort, fetch).await;
+    let deduped = fetch_all_merged(&section_refs, &section_type, &sort).await;
     let ranked = rank_backings(deduped, &kinds, &overrides);
-    Ok(merge_sort_page(ranked, &sort, start, size))
+    let items = merge_sort_page(ranked, &sort, 0, usize::MAX);
+    let page = items.iter().skip(start).take(size).cloned().collect();
+    *state.merged_snapshot.lock().await = Some(MergedSnapshot {
+        section_type,
+        sort,
+        items,
+    });
+    Ok(page)
 }
 
-/// Fetch per-section items at increasing depth until the deduped union can
-/// fill the requested window or no section has more to give. Without the
-/// deepening, duplicates collapsing inside the fetch window under-fill the
-/// page and the frontend reads the short page as "end of library" — later
-/// titles would become unreachable (rev-1). There is deliberately no
-/// absolute depth cap: a cap recreates the same cliff at its own depth
-/// (review round 1); termination is guaranteed because depth doubles and
-/// once every section returns fewer items than asked (`!any_full`), nothing
-/// more exists anywhere.
-async fn fetch_merged(
+/// Fetch EVERY item of the type across the given sections: per-section depth
+/// doubles until no section returns a full window (`!any_full` — nothing
+/// more exists anywhere), then the union is deduped. There is deliberately
+/// no early stop and no depth cap: any count-based stop leaves the window's
+/// contents unstable across pages (review rounds 1–2), and a cap recreates
+/// the paging cliff at its own depth. The full-library fetch cost is paid
+/// once per listing entry and amortized by the snapshot above.
+async fn fetch_all_merged(
     section_refs: &[(std::sync::Arc<dyn crate::source::MediaSource>, String)],
     section_type: &str,
     sort: &str,
-    want: usize,
 ) -> Vec<ItemDto> {
-    let mut depth = want.max(1);
+    // Start deep enough that typical libraries resolve in one round trip.
+    let mut depth: usize = 512;
     loop {
         let mut merged: Vec<ItemDto> = Vec::new();
         // Whether any section returned a full window — i.e. deepening could
-        // still surface more unique titles somewhere.
+        // still surface more items somewhere.
         let mut any_full = false;
         for (src, raw) in section_refs {
             if let Ok(items) = src.items(raw, section_type, Some(sort), 0, depth).await {
@@ -1867,9 +1898,8 @@ async fn fetch_merged(
                 merged.extend(items);
             }
         }
-        let deduped = dedup_across_sources(merged);
-        if deduped.len() >= want || !any_full {
-            return deduped;
+        if !any_full {
+            return dedup_across_sources(merged);
         }
         depth = depth.saturating_mul(2);
     }
@@ -2197,33 +2227,36 @@ mod merge_tests {
         }
     }
 
-    // rev-1 guard: duplicates collapsing inside the fetch window must deepen
-    // the fetch, not end the page early (a short page means end-of-library
-    // to the frontend's infinite scroll).
+    // rev-1 guard: the merged fetch must be EXHAUSTIVE — every unique title
+    // is present regardless of duplicates or section size, because pages
+    // window an immutable snapshot of this result (any early stop makes
+    // pagination skip or duplicate titles across pages; review rounds 1–2).
     #[test]
-    fn merged_fetch_deepens_past_dedup_collapse_to_fill_the_window() {
-        let items = vec![
+    fn merged_fetch_is_exhaustive_past_the_initial_depth() {
+        // Two duplicates up front, then more items than the initial fetch
+        // depth (512), so exhaustiveness requires actually deepening.
+        let mut items = vec![
             with_ids(item("Alpha", Some(2020), "fake"), &["imdb:tt1"]),
             with_ids(item("Alpha copy", Some(2020), "fake"), &["imdb:tt1"]),
-            item("Bravo", Some(2021), "fake"),
-            item("Charlie", Some(2022), "fake"),
         ];
+        for i in 0..600 {
+            items.push(item(&format!("Title {i:04}"), Some(2000), "fake"));
+        }
         let refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
             vec![(std::sync::Arc::new(FakeItems { items }), "sec".into())];
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let out = rt.block_on(fetch_merged(&refs, "movie", "titleSort:asc", 3));
-        assert!(
-            out.len() >= 3,
-            "deepening must surface titles beyond the collapsed window, got {}",
-            out.len()
+        let out = rt.block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"));
+        assert_eq!(
+            out.len(),
+            601,
+            "601 unique titles (600 + merged Alpha) must all be present"
         );
     }
 
-    // Round-1 fix-up guard: with every entry a duplicate of one title the
-    // window can never fill — the capless loop must still terminate (every
-    // section exhausted → !any_full) and return the one real title.
+    // With every entry a duplicate of one title the loop must terminate
+    // (every section exhausted → !any_full) and return the one real title.
     #[test]
     fn merged_fetch_terminates_when_everything_duplicates() {
         let items = vec![
@@ -2236,7 +2269,7 @@ mod merge_tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let out = rt.block_on(fetch_merged(&refs, "movie", "titleSort:asc", 3));
+        let out = rt.block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"));
         assert_eq!(out.len(), 1, "one unique title; loop must not hang or drop it");
     }
 
