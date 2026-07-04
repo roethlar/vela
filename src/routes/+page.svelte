@@ -1089,8 +1089,9 @@
       <button role="menuitem" onclick={() => setWatched(mi, false)}>Mark unwatched</button>
     {/if}
     {#if (mi.backing?.length ?? 0) > 1 && mi.canonicalId}
-      <!-- Merged title: pick which source plays it (persists for this title). -->
-      {#each mi.backing! as b (b.sourceId)}
+      <!-- Merged title: pick which source plays it (persists for this title).
+           Keyed by the full backing identity — sourceId alone can collide. -->
+      {#each mi.backing! as b (b.sourceId + ":" + b.ratingKey)}
         <button role="menuitem" onclick={() => playFrom(mi, b)}>
           Play from {sourceNameOf(b.sourceId)}
         </button>

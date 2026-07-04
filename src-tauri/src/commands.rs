@@ -2022,7 +2022,17 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
             .provider_ids
             .iter()
             .find_map(|p| by_provider.get(p).copied())
-            .or_else(|| by_title.get(&tkey).copied());
+            .or_else(|| by_title.get(&tkey).copied())
+            // Dedup is a cross-source merge only: a colliding item from a
+            // source already backing the group stays its own card (rev-2 —
+            // same-source versions must remain individually reachable, and
+            // duplicate source_ids would make the backing list ambiguous).
+            .filter(|gi| {
+                groups[*gi]
+                    .backing
+                    .as_ref()
+                    .is_none_or(|b| b.iter().all(|r| r.source_id != item.source_id))
+            });
         match hit {
             Some(gi) => {
                 for p in &item.provider_ids {
@@ -2248,15 +2258,14 @@ mod merge_tests {
             .build()
             .unwrap();
         let out = rt.block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"));
-        assert_eq!(
-            out.len(),
-            601,
-            "601 unique titles (600 + merged Alpha) must all be present"
-        );
+        // 602: same-source versions stay separate cards (rev-2), and every
+        // item past the initial depth must be present.
+        assert_eq!(out.len(), 602, "every title must be fetched");
     }
 
-    // With every entry a duplicate of one title the loop must terminate
-    // (every section exhausted → !any_full) and return the one real title.
+    // The exhaustive loop must terminate once every section is exhausted
+    // (!any_full). Same-source versions stay separate cards (rev-2), so all
+    // three survive dedup.
     #[test]
     fn merged_fetch_terminates_when_everything_duplicates() {
         let items = vec![
@@ -2270,7 +2279,7 @@ mod merge_tests {
             .build()
             .unwrap();
         let out = rt.block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"));
-        assert_eq!(out.len(), 1, "one unique title; loop must not hang or drop it");
+        assert_eq!(out.len(), 3, "same-source versions all kept; loop terminates");
     }
 
     #[test]
@@ -2286,6 +2295,39 @@ mod merge_tests {
         assert_eq!(backing.len(), 2);
         // The union of provider ids is retained for later joins.
         assert!(out[0].provider_ids.contains(&"tmdb:603".to_string()));
+    }
+
+    // rev-2 guard: same-source versions stay separate cards (dedup is a
+    // cross-source merge only); other sources' copies still merge into the
+    // first group.
+    #[test]
+    fn dedup_keeps_same_source_versions_as_separate_cards() {
+        let mut a = item("Dune", Some(2021), "smb-1");
+        a.rating_key = "smb-1:/dune.1080p.mkv".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/dune.2160p.mkv".into();
+        let mut c = item("Dune", Some(2021), "plex");
+        c.rating_key = "plex:42".into();
+
+        let out = dedup_across_sources(vec![a, b, c]);
+        assert_eq!(out.len(), 2, "two cards: merged cross-source + solo version");
+        let merged = out
+            .iter()
+            .find(|g| g.backing.as_ref().unwrap().len() == 2)
+            .expect("cross-source merge must still happen");
+        assert!(merged
+            .backing
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|r| r.source_id == "plex"));
+        // Which of the two smb versions the plex copy attaches to is not
+        // pinned; the guarantee is that the other stays its own card.
+        let solo = out
+            .iter()
+            .find(|g| g.backing.as_ref().unwrap().len() == 1)
+            .expect("second same-source version stays its own card");
+        assert_eq!(solo.source_id, "smb-1");
     }
 
     #[test]
