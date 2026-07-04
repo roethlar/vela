@@ -1,7 +1,7 @@
 # rev-4: All-view type listing hides total source failure as an empty grid
 
 **Severity**: LOW — a blank library with no error message when every source is offline/unreadable; misleading but recoverable.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `fix/rev-4-surface-total-failure` (stacked on rev-3)
 **Commit**: `a1239b2722afe6f418bed8c72459713e6ec6cd81`
 
@@ -51,4 +51,8 @@ None.
 Stacked on rev-3's branch; same function as rev-1.
 
 ## Reviewer comments
-(pending)
+- **Round 1** — codex (codex-cli 0.142.5), reviewed `7de4e57` against base
+  `93ffd60` (stacked increment), guard_confirmed=true (FAIL-then-PASS
+  observed in its own worktree), verdict **accepted**, 2026-07-04 (UTC).
+  Comments: no findings — minimal, consistent with aggregate()'s stance;
+  empty-refs case verified. Branch ready for owner-gated merge.
