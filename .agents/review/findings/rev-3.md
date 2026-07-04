@@ -1,7 +1,7 @@
 # rev-3: Watched-state actions on merged cards route to a watch-incapable source
 
 **Severity**: MEDIUM — a visible action (Mark watched/unwatched) errors every time for the common local+server merged title.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `fix/rev-3-watch-routing` (stacked on rev-2)
 **Commit**: `59770c2ef20e071106439c46ab5c49b23bed1b11`
 
@@ -52,4 +52,9 @@ None.
 Stacked on rev-2's branch; merge order rev-1 → rev-5.
 
 ## Reviewer comments
-(pending)
+- **Round 1** — codex (codex-cli 0.142.5), reviewed `a8ae213` against base
+  `21e4dda` (stacked increment), guard_confirmed=true (FAIL-then-PASS
+  observed in its own worktree), verdict **accepted**, 2026-07-04 (UTC).
+  Comments: serialization (camelCase `watchKey`) and constructor defaults
+  verified; the optimistic UI update remains sound (runs only after the
+  backend call succeeds). Branch ready for owner-gated merge.
