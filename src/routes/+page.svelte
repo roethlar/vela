@@ -11,11 +11,13 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let unlistenPlaybackEnded: (() => void) | undefined;
+  let unlistenListings: (() => void) | undefined;
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     if (queueTimer) clearInterval(queueTimer);
     unlistenPlaybackEnded?.();
+    unlistenListings?.();
     linkGen++; // invalidate any in-flight link_poll so it won't reschedule after unmount
   });
 
@@ -140,6 +142,11 @@
         else resetAndLoad();
       }
     }).then((un) => (unlistenPlaybackEnded = un));
+    // A background listing revalidation found filesystem changes (local/SMB
+    // sources serve from cache and re-walk behind the scenes).
+    listen("listings-updated", () => {
+      if (mode === "browse" && !searchTerm) resetAndLoad();
+    }).then((un) => (unlistenListings = un));
   });
 
   async function boot() {

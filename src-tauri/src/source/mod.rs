@@ -4,9 +4,10 @@
 //! a unified library while still being able to scope to a single source.
 
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub mod jellyfin;
+pub mod listing_cache;
 pub mod local;
 pub mod metadata;
 pub mod plex;
@@ -24,7 +25,8 @@ pub struct SectionDto {
 }
 
 /// A playable/browsable item (movie, show, season, episode), source-tagged.
-#[derive(Serialize, Clone)]
+/// `Deserialize` exists for the listing cache's persistence round-trip.
+#[derive(Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDto {
     /// Source-namespaced key (`"<source_id>:<raw>"`); opaque to the frontend.

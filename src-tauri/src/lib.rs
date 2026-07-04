@@ -6,6 +6,7 @@ mod plex_library;
 mod smb;
 mod source;
 mod sshfs;
+mod ui_events;
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
@@ -173,6 +174,9 @@ pub fn run() {
                 .state::<AppState>()
                 .app_handle
                 .set(app.handle().clone());
+            // Same handle for fire-and-forget background signals (the listing
+            // cache's `listings-updated`).
+            ui_events::set_app_handle(app.handle().clone());
 
             // Auto-advance dispatcher: when the mpv EOF watcher notifies a clean
             // file end, walk the queue cursor forward and play the next item.

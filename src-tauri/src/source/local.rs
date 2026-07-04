@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 
+use super::listing_cache::{self, ListingCache};
 use super::metadata::{self, Hint, MetaCache};
 use super::{namespace_key, HubDto, ItemDto, MediaSource, SectionDto, StreamResolution};
 use crate::config::{AppConfig, LocalFolder, SmbMount, SshMount};
@@ -132,6 +133,7 @@ pub struct LocalSource {
     kind: &'static str,
     folders: Vec<LocalFolder>,
     meta: Arc<MetaCache>,
+    listings: Arc<ListingCache>,
 }
 
 impl LocalSource {
@@ -142,6 +144,7 @@ impl LocalSource {
             kind,
             folders,
             meta: metadata::shared(),
+            listings: listing_cache::shared(),
         }
     }
 
@@ -206,8 +209,204 @@ impl LocalSource {
             kind: self.kind,
             folders: self.folders.clone(),
             meta: self.meta.clone(),
+            listings: self.listings.clone(),
         }
     }
+}
+
+/// What a cached level contains, and how to (re-)walk it. Part of the cache
+/// key so a directory that is simultaneously a section root and a container
+/// (nested roots) can't cross-serve the wrong shape.
+enum LevelKind {
+    Items { section_type: String },
+    Children,
+}
+
+impl LevelKind {
+    fn cache_key(&self, source_id: &str, path: &str) -> String {
+        match self {
+            LevelKind::Items { section_type } => {
+                format!("{source_id}|items:{section_type}:{path}")
+            }
+            LevelKind::Children => format!("{source_id}|children:{path}"),
+        }
+    }
+}
+
+fn walk_level(this: &LocalSource, path: &str, kind: &LevelKind) -> Result<Vec<ItemDto>, String> {
+    match kind {
+        LevelKind::Items { section_type } => walk_items_level(this, path, section_type),
+        LevelKind::Children => walk_children_level(this, path),
+    }
+}
+
+/// Full (unsorted, unpaged) listing of a section root. Both the interactive
+/// path and the background revalidation walk through here, so the guards
+/// re-apply even when the config changed since the level was cached.
+fn walk_items_level(
+    this: &LocalSource,
+    path: &str,
+    section_type: &str,
+) -> Result<Vec<ItemDto>, String> {
+    let root = Path::new(path);
+    if this.folder(path).is_none() || !root.is_dir() {
+        return Err("unknown local folder".into());
+    }
+    let mut items = Vec::new();
+    if section_type == "show" {
+        // Each immediate subdirectory is a show.
+        for entry in read_dir_sorted(root)
+            .into_iter()
+            .filter(|p| p.is_dir() && this.within_roots(p))
+        {
+            let (title, year) = parse_movie(&dir_name(&entry));
+            let mut item = base_item(&this.id_str(), &entry, title.clone(), year, "show");
+            this.enrich(&mut item, &entry, "show", &title, year, None, None, None);
+            items.push(item);
+        }
+    } else {
+        // Movies: loose video files, plus subfolders that wrap one movie.
+        for entry in read_dir_sorted(root) {
+            if !this.within_roots(&entry) {
+                continue;
+            }
+            let (file, title, year) = if entry.is_file() && is_video(&entry) {
+                let (t, y) = parse_movie(&file_stem(&entry));
+                (entry.clone(), t, y)
+            } else if entry.is_dir() {
+                match largest_video_in(&entry) {
+                    Some(file) => {
+                        let (t, y) = parse_movie(&dir_name(&entry));
+                        (file, t, y)
+                    }
+                    None => continue,
+                }
+            } else {
+                continue;
+            };
+            let mut item = this.item_movie(&file, title.clone(), year);
+            this.enrich(&mut item, &file, "movie", &title, year, None, None, None);
+            items.push(item);
+        }
+    }
+    Ok(items)
+}
+
+/// Full (sorted, unpaged) listing of a container (show or season folder).
+fn walk_children_level(this: &LocalSource, path: &str) -> Result<Vec<ItemDto>, String> {
+    let dir = Path::new(path);
+    if !this.within_roots(dir) || !dir.is_dir() {
+        return Err("not a browsable local folder".into());
+    }
+    // Figure out the show this folder belongs to (for episode lookups):
+    // if `dir` is itself a season folder, the show is its parent.
+    let dir_is_season = parse_season_dir(&dir_name(dir)).is_some();
+    let show_dir = if dir_is_season {
+        dir.parent().unwrap_or(dir)
+    } else {
+        dir
+    };
+    let show_title = parse_movie(&dir_name(show_dir)).0;
+
+    let mut items = Vec::new();
+    for entry in read_dir_sorted(dir) {
+        if !this.within_roots(&entry) {
+            continue;
+        }
+        if entry.is_dir() {
+            // A season folder.
+            let name = dir_name(&entry);
+            let index = parse_season_dir(&name);
+            let mut item = base_item(&this.id_str(), &entry, name, None, "season");
+            item.index = index;
+            this.enrich(
+                &mut item, &entry, "season", &show_title, None, None, None, None,
+            );
+            items.push(item);
+        } else if entry.is_file() && is_video(&entry) {
+            // An episode file.
+            let stem = file_stem(&entry);
+            let mut item = base_item(&this.id_str(), &entry, clean_title(&stem), None, "episode");
+            let parsed = parse_episode(&stem);
+            if let Some((s, e)) = parsed {
+                item.parent_index = Some(s);
+                item.index = Some(e);
+            }
+            item.grandparent_title = Some(show_title.clone());
+            let season = parsed
+                .map(|(s, _)| s)
+                .or_else(|| parse_season_dir(&dir_name(dir)));
+            let episode = parsed.map(|(_, e)| e);
+            this.enrich(
+                &mut item,
+                &entry,
+                "episode",
+                &stem,
+                None,
+                Some(&show_title),
+                season,
+                episode,
+            );
+            items.push(item);
+        }
+    }
+    // Natural episode/season order: by (season, episode), else name.
+    items.sort_by(|a, b| {
+        (a.parent_index, a.index, a.title.to_lowercase()).cmp(&(
+            b.parent_index,
+            b.index,
+            b.title.to_lowercase(),
+        ))
+    });
+    Ok(items)
+}
+
+/// Re-walk a cached level in the background; on change, store and ping the
+/// UI (`listings-updated`). At most one revalidation per level in flight.
+/// Requires an ambient Tokio runtime (present under `run_blocking`) so the
+/// enrichment's online lookups can spawn.
+fn spawn_revalidate(this: LocalSource, path: String, kind: LevelKind) {
+    let key = kind.cache_key(&this.id, &path);
+    if !this.listings.begin_revalidate(&key) {
+        return;
+    }
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        this.listings.finish_revalidate(&key);
+        return;
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let _enter = handle.enter();
+        let walked = walk_level(&this, &path, &kind);
+        let changed = match walked {
+            Ok(items) => this.listings.store_level(&key, items),
+            Err(_) => false, // root vanished mid-walk; serve nothing new
+        };
+        this.listings.finish_revalidate(&key);
+        if changed {
+            crate::ui_events::listings_updated();
+        }
+    });
+}
+
+/// Background re-detection of a root's section kind (cheap directory probe).
+fn spawn_redetect_kind(this: LocalSource, root: String) {
+    let key = format!("kind:{root}");
+    if !this.listings.begin_revalidate(&key) {
+        return;
+    }
+    let Ok(handle) = tokio::runtime::Handle::try_current() else {
+        this.listings.finish_revalidate(&key);
+        return;
+    };
+    tauri::async_runtime::spawn_blocking(move || {
+        let _enter = handle.enter();
+        let kind = detect_kind(Path::new(&root)).to_string();
+        let changed = this.listings.store_kind(&root, &kind);
+        this.listings.finish_revalidate(&key);
+        if changed {
+            crate::ui_events::listings_updated();
+        }
+    });
 }
 
 /// Run a synchronous local-filesystem operation on the blocking pool instead of
@@ -421,8 +620,20 @@ impl MediaSource for LocalSource {
                     } else {
                         f.name.clone()
                     },
+                    // Detection probes the filesystem (slow over SMB/SSH), so
+                    // serve the cached kind and re-detect in the background.
                     section_type: if f.kind.is_empty() {
-                        detect_kind(Path::new(&f.path)).to_string()
+                        match this.listings.kind(&f.path) {
+                            Some(k) => {
+                                spawn_redetect_kind(this.worker(), f.path.clone());
+                                k
+                            }
+                            None => {
+                                let k = detect_kind(Path::new(&f.path)).to_string();
+                                this.listings.store_kind(&f.path, &k);
+                                k
+                            }
+                        }
                     } else {
                         f.kind.clone()
                     },
@@ -458,44 +669,25 @@ impl MediaSource for LocalSource {
             if this.folder(&section_key).is_none() || !root.is_dir() {
                 return Err("unknown local folder".into());
             }
-            let mut items = Vec::new();
-            if section_type == "show" {
-                // Each immediate subdirectory is a show.
-                for entry in read_dir_sorted(root)
-                    .into_iter()
-                    .filter(|p| p.is_dir() && this.within_roots(p))
-                {
-                    let (title, year) = parse_movie(&dir_name(&entry));
-                    let mut item = base_item(&this.id_str(), &entry, title.clone(), year, "show");
-                    this.enrich(&mut item, &entry, "show", &title, year, None, None, None);
-                    items.push(item);
+            let kind = LevelKind::Items {
+                section_type: section_type.clone(),
+            };
+            // Cache hit serves instantly; the level re-walks in the background
+            // and pings the UI if anything changed. A miss walks inline (as
+            // every browse did before the cache) and seeds the cache.
+            let full = match this.listings.level(&kind.cache_key(&this.id, &section_key)) {
+                Some(hit) => {
+                    spawn_revalidate(this.worker(), section_key.clone(), kind);
+                    hit
                 }
-            } else {
-                // Movies: loose video files, plus subfolders that wrap one movie.
-                for entry in read_dir_sorted(root) {
-                    if !this.within_roots(&entry) {
-                        continue;
-                    }
-                    let (file, title, year) = if entry.is_file() && is_video(&entry) {
-                        let (t, y) = parse_movie(&file_stem(&entry));
-                        (entry.clone(), t, y)
-                    } else if entry.is_dir() {
-                        match largest_video_in(&entry) {
-                            Some(file) => {
-                                let (t, y) = parse_movie(&dir_name(&entry));
-                                (file, t, y)
-                            }
-                            None => continue,
-                        }
-                    } else {
-                        continue;
-                    };
-                    let mut item = this.item_movie(&file, title.clone(), year);
-                    this.enrich(&mut item, &file, "movie", &title, year, None, None, None);
-                    items.push(item);
+                None => {
+                    let walked = walk_level(&this, &section_key, &kind)?;
+                    this.listings
+                        .store_level(&kind.cache_key(&this.id, &section_key), walked.clone());
+                    walked
                 }
-            }
-            Ok(sort_and_page(items, sort.as_deref(), start, size))
+            };
+            Ok(sort_and_page(full, sort.as_deref(), start, size))
         })
         .await
     }
@@ -513,68 +705,20 @@ impl MediaSource for LocalSource {
             if !this.within_roots(dir) || !dir.is_dir() {
                 return Err("not a browsable local folder".into());
             }
-            // Figure out the show this folder belongs to (for episode lookups):
-            // if `dir` is itself a season folder, the show is its parent.
-            let dir_is_season = parse_season_dir(&dir_name(dir)).is_some();
-            let show_dir = if dir_is_season {
-                dir.parent().unwrap_or(dir)
-            } else {
-                dir
+            let kind = LevelKind::Children;
+            let full = match this.listings.level(&kind.cache_key(&this.id, &item_key)) {
+                Some(hit) => {
+                    spawn_revalidate(this.worker(), item_key.clone(), kind);
+                    hit
+                }
+                None => {
+                    let walked = walk_level(&this, &item_key, &kind)?;
+                    this.listings
+                        .store_level(&kind.cache_key(&this.id, &item_key), walked.clone());
+                    walked
+                }
             };
-            let show_title = parse_movie(&dir_name(show_dir)).0;
-
-            let mut items = Vec::new();
-            for entry in read_dir_sorted(dir) {
-                if !this.within_roots(&entry) {
-                    continue;
-                }
-                if entry.is_dir() {
-                    // A season folder.
-                    let name = dir_name(&entry);
-                    let index = parse_season_dir(&name);
-                    let mut item = base_item(&this.id_str(), &entry, name, None, "season");
-                    item.index = index;
-                    this.enrich(
-                        &mut item, &entry, "season", &show_title, None, None, None, None,
-                    );
-                    items.push(item);
-                } else if entry.is_file() && is_video(&entry) {
-                    // An episode file.
-                    let stem = file_stem(&entry);
-                    let mut item =
-                        base_item(&this.id_str(), &entry, clean_title(&stem), None, "episode");
-                    let parsed = parse_episode(&stem);
-                    if let Some((s, e)) = parsed {
-                        item.parent_index = Some(s);
-                        item.index = Some(e);
-                    }
-                    item.grandparent_title = Some(show_title.clone());
-                    let season = parsed
-                        .map(|(s, _)| s)
-                        .or_else(|| parse_season_dir(&dir_name(dir)));
-                    let episode = parsed.map(|(_, e)| e);
-                    this.enrich(
-                        &mut item,
-                        &entry,
-                        "episode",
-                        &stem,
-                        None,
-                        Some(&show_title),
-                        season,
-                        episode,
-                    );
-                    items.push(item);
-                }
-            }
-            // Natural episode/season order: by (season, episode), else name.
-            items.sort_by(|a, b| {
-                (a.parent_index, a.index, a.title.to_lowercase()).cmp(&(
-                    b.parent_index,
-                    b.index,
-                    b.title.to_lowercase(),
-                ))
-            });
-            Ok(items.into_iter().skip(start).take(size).collect())
+            Ok(full.into_iter().skip(start).take(size).collect())
         })
         .await
     }

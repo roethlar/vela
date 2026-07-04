@@ -61,6 +61,15 @@ background.
   `metadata_cache.json` writes atomic via the same temp+rename pattern —
   closes the open P1 "bound and decouple metadata cache writes" remainder.
 
+Phase A implemented 2026-07-04 with one deviation: the cache fills lazily
+per browsed level (a full-tree pre-scan over network mounts was rejected as
+the slow thing this phase removes), so it cannot answer search correctly —
+search keeps the live walk unchanged. Everything else landed as planned:
+`source/listing_cache.rs` (atomic owner-only persistence, 512-level oldest-
+first eviction, change detection), stale-while-revalidate serving in
+`LocalSource` sections/items/children with per-level in-flight guards, and
+the `listings-updated` signal via `ui_events`.
+
 ### Phase B — consolidated Library nav (reference-shaped)
 
 Goal: navigation stops listing (library × source) and takes the reference
