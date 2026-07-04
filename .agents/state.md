@@ -6,80 +6,74 @@ Keep it short and update it when important repo facts change.
 ## Now
 
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
-  Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays media
-  through the system `mpv` binary for HDR passthrough.
-- Local filesystem browsing/search traversal has been moved off async source
-  workers through `spawn_blocking`; older governance notes that list this as
-  deferred are stale.
-- SMB shares are mounted first, then one or more selected folders inside the
-  share can feed the local source. Legacy SMB config records are normalized into
-  that selected-folder shape on load.
-- mpv discovery now validates runnable candidates, supports a configured custom
-  executable, and reports the detected installer path/description to the UI.
-- Token-bearing poster URLs (all backends), Jellyfin/Emby stream URLs, and SMB
-  mount credential process arguments are an accepted local-only exposure. Plex
-  stream URLs are credential-free as of 2026-07-03: the token rides as an
-  `X-Plex-Token` header delivered to mpv via an owner-only include file. Avoid
-  adding any new logs, errors, or UI copy that reveal token-bearing URLs or
-  credentials.
-- README status now reflects heuristic media-version/source selection and the
-  lack of a manual version picker.
-- Live smoke tests 2026-07-04: Jellyfin passed against a real server; SMB
-  connected but surfaces labeled "Local"; the SSH add failure was diagnosed —
-  `sshfs` was not actually installed (Homebrew core's formula depends on
-  Linux-only libfuse, so `brew install sshfs` cannot work on macOS). The tap
-  route (macFUSE + sshfs-mac 2.10) installs and runs but segfaults or acts
-  oddly in use, so macOS SSH live testing is parked; decided 2026-07-04:
-  handle macOS SSH with in-UI setup guidance (see `.agents/decisions.md`).
-  Findings queued in `ISSUES.md`, alongside an owner-direction
-  rework of the library list and "All" view (consolidated, deduped,
-  cross-source, metadata caching for SMB/local first). Still pending live:
-  Emby, local folders, and SMB browse/playback depth.
+  Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
+  media through the system `mpv` binary for HDR passthrough.
+- Version 0.1.9 at `864bdd0`. Remote `github` is current; remote `origin`
+  (q:3000) is 3 commits behind — the owner pushes manually (push policy:
+  ask, `.agents/push-policy.md`).
+- 2026-07-04 landed a large batch, all owner-approved and verified:
+  - All five approved plans implemented (see `.agents/plans/*`): post-playback
+    watch-state refresh (`playback-ended` event); platform-aware sshfs
+    guidance in the add-SSH UI; each SMB/SSH mount registered as its own
+    named source; split artwork policy (16:9 resume surfaces, 2:3 catalog
+    rows with series posters); library rework phases A-D (persistent listing
+    cache for local/SMB, consolidated type-based All nav, cross-source dedup
+    via provider ids with backing lists, kind-ranked playback with per-title
+    override persisted in `merged_overrides`).
+  - The batch then passed a cross-harness review loop (playbook
+    `reviewloop`, reviewer codex): 5 findings fixed, guard-proven,
+    independently verified, merged. Durable trail:
+    `.agents/review/index.md` + `findings/`. Notable outcome: the merged
+    All view pages from an immutable `MergedSnapshot` in `AppState`
+    (stateless merged pagination was proven unsound in review).
+  - Post-review owner-directed UI changes (decisions recorded 2026-07-04 in
+    `.agents/decisions.md`): the Continue Watching hero is a cover-flow
+    (~30% window height, older items fanned behind-left, newer behind-right,
+    always-visible arrows) fed by Vela's OWN recents — semantic: "recently
+    played and not finished = Continue Watching", any source, any duration
+    (`src-tauri/src/recents.rs`; snapshot at play, position stamped at mpv
+    exit via `EndNotify(u64)`, finished entries dropped at
+    `watched_threshold_percent`, default 95%). Library nav moved to a left
+    sidebar (Home / Library / Sources groups, Infuse reference
+    `reference_screens/infuse-home-reference.png`).
+- Token/credential stance unchanged: poster URLs (all backends),
+  Jellyfin/Emby stream URLs, and SMB mount arguments are accepted local-only
+  exposures; Plex stream auth rides as an `X-Plex-Token` header via an
+  owner-only mpv include file. Add nothing new that logs or displays
+  token-bearing URLs. Recents snapshots in `config.json` carry poster URLs —
+  same exposure class as the config's stored tokens.
+- macOS SSH live testing is parked (brew macFUSE/sshfs-mac unstable on the
+  owner's machine); the shipped in-UI guidance is the decided handling.
+- Known accepted v1 gaps: backend queue auto-advance plays are not
+  snapshotted into recents; local-source series artwork deferred (portrait
+  cards fall back to episode still/no-art); a merged card's progress bar can
+  reflect server state while the ranked play target is a local copy (the
+  per-title override is the escape hatch).
+- `scripts/build.sh` takes ~2.5 min cold on macOS; the session's `!`
+  foreground runner kills at 2 min mid-DMG (leaves a mounted staging volume
+  and no final dmg) — run builds via the agent (no cap) or a real terminal.
+  The `.app` exists only transiently during bundling; the DMG is the
+  artifact.
 
 ## Next
 
-- All five plans were approved by the owner on 2026-07-04, with each plan's
-  "proposed" defaults adopted. Implementation order: watch-state-refresh →
-  ssh-macos-guidance → smb-source-labeling → row-artwork-consistency →
-  library-all-view-rework (phases A-D). The plans:
-  `.agents/plans/watch-state-refresh.md`,
-  `.agents/plans/row-artwork-consistency.md`,
-  `.agents/plans/smb-source-labeling.md`,
-  `.agents/plans/library-all-view-rework.md` (phased A-D; largest; its
-  ranking phase depends on smb-source-labeling landing first), and
-  `.agents/plans/ssh-macos-guidance.md` (implements the 2026-07-04
-  macOS-SSH decision; live mount testing stays parked). Progress: all four
-  smaller plans are implemented — watch-state-refresh, ssh-macos-guidance,
-  smb-source-labeling, row-artwork-consistency (hero carousel + split
-  artwork policy; local series art deferred) — 2026-07-04, full CI set
-  green, owner playtest pending. All rework phases A-D are implemented
-  (persistent listing cache; consolidated type-based All nav with merged
-  listings; cross-source dedup via provider ids / title+year with backing
-  lists; kind ranking with per-title override from the context menu), plus
-  the metadata-cache atomic-write hardening. Every approved plan is now
-  implemented; the remaining work is the owner playtest sweep. A 2026-07-04
-  design-language decision (Infuse reference,
-  `reference_screens/infuse-home-reference.png`) resolved the artwork
-  plan's poster-vs-content question as the split policy and shapes the
-  rework's nav phase.
-- Finish live smoke tests: Emby, local folders, SMB browse/playback; or keep
-  the live-integration caveat explicit.
-- If updating broader governance metadata, refresh `.agents/repo-map.json` and
-  `.agents/artifact-manifest.json` from their old `validated_against` commit.
-- Letterbox crop (decided 2026-07-03, see `.agents/decisions.md`): next step is
-  the render-zoom safety spike (needs the owner at the machine — it plays video
-  on the real HDR stack and probes the known D-state wedge), then an approved
-  design plan, then code. Draft plan: `.agents/plans/letterbox-crop.md`.
-- Plex stream header auth landed 2026-07-03 (decision and implementation, see
-  `.agents/decisions.md`). Verified live: header-authed HEAD on a real part
-  URL 200, no-auth 401, and a windowless 10-frame mpv decode over header auth
-  passed. Remaining: owner eyeball check on the next real play (title bar and
-  `Shift+I` stats should show no token), EDL split-file media exercised only
-  by unit tests, and Jellyfin/Emby stream-URL parity as a follow-up.
-
-- The 2026-07-04 batch passed a cross-harness review loop (playbook
-  `reviewloop`, reviewer codex): 5 findings admitted, fixed, guard-proven,
-  independently verified, merged to main. Trail: `.agents/review/index.md`.
+- Owner playtest sweep of the whole 2026-07-04 batch (v0.1.9 dmg is built):
+  sidebar nav; cover-flow hero — a few-seconds play should appear centered
+  after mpv closes (recents semantic), and a >60s Plex play should also
+  reach the server hub; watch-state refresh without restart; named SMB
+  share in Sources; merged All view listing (scroll depth, "N sources"
+  cards, context-menu "Play from" persisting an override); sshfs panel
+  guidance.
+- Finish live smoke tests: Emby, local folders, SMB browse/playback depth.
+- Letterbox crop (decided 2026-07-03): next is the render-zoom safety spike
+  (owner at the machine), then design approval, then code. Draft:
+  `.agents/plans/letterbox-crop.md`.
+- Plex stream header auth residuals: owner eyeball check on a real play
+  (title bar / Shift+I clean), EDL split-file exercised only by unit tests,
+  Jellyfin/Emby stream-URL parity follow-up.
+- If updating broader governance metadata, refresh `.agents/repo-map.json`
+  and `.agents/artifact-manifest.json` from their old `validated_against`
+  commit.
 
 ## Blockers
 
@@ -87,15 +81,20 @@ Keep it short and update it when important repo facts change.
 
 ## Verification
 
-- See `.agents/repo-map.json` for the current automated verification commands.
-- Rust verification on Linux needs the Tauri/WebKitGTK system dependencies used
-  by CI.
+- See `.agents/repo-map.json` for the current automated verification
+  commands (npm check/build; cargo check/clippy/test from `src-tauri/`).
+  Rust suite is at 56 tests, clippy `-D warnings` clean.
+- Rust verification on Linux needs the Tauri/WebKitGTK system dependencies
+  used by CI.
 
 ## Active Sources
 
 - `AGENTS.md`
+- `.agents/repo-guidance.md`
 - `.agents/repo-map.json`
 - `.agents/decisions.md`
+- `.agents/plans/` (all five 2026-07-04 plans carry implementation notes)
+- `.agents/review/index.md` (completed review loop, durable trail)
 - `README.md`
 - `ISSUES.md`
 - `.review/deduped_action_list.md` and `.review/gpt_review.md` as historical
