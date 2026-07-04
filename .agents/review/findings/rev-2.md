@@ -1,7 +1,7 @@
 # rev-2: Same-source duplicates collapse into one card (and crash the context menu)
 
 **Severity**: MEDIUM — one version becomes unreachable from the All view, and opening the card's context menu throws (duplicate Svelte each-keys).
-**Status**: In progress
+**Status**: Verified
 **Branch**: `fix/rev-2-same-source-collapse` (stacked on rev-1)
 **Commit**: `5d6e7ffa13c49296f1d155d8cf029e952c83e79b`
 
@@ -54,4 +54,9 @@ versions should stay separate cards as they were pre-batch.
 Stacked on rev-1's branch (shared file); merge order rev-1 → rev-5.
 
 ## Reviewer comments
-(pending)
+- **Round 1** — codex (codex-cli 0.142.5), reviewed `5de424a` against base
+  `dfe252e` (stacked increment), guard_confirmed=true (FAIL-then-PASS
+  observed in its own worktree), verdict **accepted**, 2026-07-04 (UTC).
+  Comments: no material issues in the increment; the two updated pre-existing
+  test expectations are legitimate consequences of the same-source-separate
+  semantics, not test weakening. Branch ready for owner-gated merge.
