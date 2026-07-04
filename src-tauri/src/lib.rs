@@ -100,16 +100,16 @@ pub fn run() {
             registry.upsert(src);
         }
     }
-    let safe_local_folders: Vec<_> = runtime_local_folders(&cfg)
-        .iter()
-        .filter(|f| safe_user_media_root(&f.path))
-        .cloned()
-        .collect();
-    // Restore the local source if any safe folders are configured.
-    if !safe_local_folders.is_empty() {
-        registry.upsert(Arc::new(source::local::LocalSource::new(
-            safe_local_folders.clone(),
-        )));
+    // Restore the local family: plain folders as "Local", plus one named
+    // source per SMB/SSH mount so shares aren't presented as "Local".
+    let local_family = source::local::local_family(
+        &cfg,
+        smb_runtime_folders,
+        ssh_runtime_folder,
+        safe_user_media_root,
+    );
+    for member in &local_family {
+        registry.upsert(member.build());
     }
 
     let state = AppState {
@@ -126,7 +126,11 @@ pub fn run() {
         app_handle: std::sync::OnceLock::new(),
     };
 
-    let asset_folders: Vec<String> = safe_local_folders.iter().map(|f| f.path.clone()).collect();
+    let asset_folders: Vec<String> = local_family
+        .iter()
+        .flat_map(|m| &m.folders)
+        .map(|f| f.path.clone())
+        .collect();
     let smb_mounts = cfg.smb_mounts.clone();
     let ssh_mounts = cfg.ssh_mounts.clone();
 
@@ -387,39 +391,24 @@ async fn refresh_local_source(app_handle: &tauri::AppHandle) {
     let Ok(cfg) = config::load_config() else {
         return;
     };
-    let folders: Vec<_> = runtime_local_folders(&cfg)
-        .into_iter()
-        .filter(|f| safe_user_media_root(&f.path))
-        .collect();
-    for folder in &folders {
+    let family = source::local::local_family(
+        &cfg,
+        smb_runtime_folders,
+        ssh_runtime_folder,
+        safe_user_media_root,
+    );
+    for folder in family.iter().flat_map(|m| &m.folders) {
         let _ = app_handle
             .asset_protocol_scope()
             .allow_directory(&folder.path, true);
     }
     let state = app_handle.state::<AppState>();
     let mut reg = state.registry.lock().await;
-    if folders.is_empty() {
-        reg.remove(source::local::LOCAL_SOURCE_ID);
-    } else {
-        reg.upsert(Arc::new(source::local::LocalSource::new(folders)));
+    // Replace the whole family: a mount that went away must drop its source.
+    reg.remove_kinds(source::local::LOCAL_FAMILY_KINDS);
+    for member in &family {
+        reg.upsert(member.build());
     }
-}
-
-fn runtime_local_folders(cfg: &config::AppConfig) -> Vec<config::LocalFolder> {
-    let ssh_folder_ids: std::collections::HashSet<_> = cfg
-        .ssh_mounts
-        .iter()
-        .map(|m| m.local_folder_id.as_str())
-        .collect();
-    let mut folders: Vec<_> = cfg
-        .local_folders
-        .iter()
-        .filter(|f| !ssh_folder_ids.contains(f.id.as_str()))
-        .cloned()
-        .collect();
-    folders.extend(cfg.smb_mounts.iter().flat_map(smb_runtime_folders));
-    folders.extend(cfg.ssh_mounts.iter().filter_map(ssh_runtime_folder));
-    folders
 }
 
 fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {

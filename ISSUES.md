@@ -38,7 +38,10 @@ Source setup:
   the nav lists the share's folders as "movies · Local" and
   "skippy/video/archive/tv · Local". Confirmed 2026-07-04: SMB/SSH folders
   are flattened into the single hardcoded "Local" source. Plan:
-  `.agents/plans/smb-source-labeling.md`.
+  `.agents/plans/smb-source-labeling.md`. Implemented 2026-07-04: each
+  SMB/SSH mount now registers as its own source (`smb-<id>`/`ssh-<id>`)
+  carrying the mount's human name; chips and nav tags pick it up
+  automatically. Unit-tested (guard-proven); owner playtest pending.
 
 - The `sshfs` requirement surfaces too late, and its install guidance is a
   dead end on macOS. Diagnosed 2026-07-04 on the owner's machine: the

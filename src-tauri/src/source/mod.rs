@@ -81,7 +81,8 @@ pub trait MediaSource: Send + Sync {
     fn id(&self) -> String;
     /// Human-friendly name for the UI (e.g. the server or folder name).
     fn name(&self) -> String;
-    /// Backend kind: `"plex"`, `"jellyfin"`, `"emby"`, `"local"`.
+    /// Backend kind: `"plex"`, `"jellyfin"`, `"emby"`, or a local-family kind
+    /// (`"local"` for plain folders, `"smb"`/`"ssh"` for per-mount sources).
     fn kind(&self) -> &'static str;
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String>;
@@ -155,6 +156,13 @@ impl SourceRegistry {
         self.sources.retain(|s| s.id() != id);
     }
 
+    /// Remove every source whose kind is one of `kinds`. Used to replace the
+    /// whole local family (plain folders + SMB/SSH mounts) on rebuild, since
+    /// `upsert` alone can't drop a source whose mount went away.
+    pub fn remove_kinds(&mut self, kinds: &[&str]) {
+        self.sources.retain(|s| !kinds.contains(&s.kind()));
+    }
+
     /// Resolve a namespaced key to its source and the raw (un-prefixed) key.
     pub fn route(
         &self,
@@ -172,5 +180,73 @@ impl SourceRegistry {
             Some(id) => self.get(id).into_iter().collect(),
             None => self.sources.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Fake {
+        id: &'static str,
+        kind: &'static str,
+    }
+
+    #[async_trait]
+    impl MediaSource for Fake {
+        fn id(&self) -> String {
+            self.id.to_string()
+        }
+        fn name(&self) -> String {
+            self.id.to_string()
+        }
+        fn kind(&self) -> &'static str {
+            self.kind
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            _: usize,
+            _: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn search(&self, _: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(&self, _: &str, _: usize, _: usize) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            _: &str,
+            _: Option<u64>,
+        ) -> Result<StreamResolution, String> {
+            Err("fake source".into())
+        }
+    }
+
+    // Rebuilds replace the whole local family: stale mount sources must drop
+    // while non-family sources survive untouched.
+    #[test]
+    fn remove_kinds_drops_only_the_local_family() {
+        let mut reg = SourceRegistry::default();
+        reg.upsert(std::sync::Arc::new(Fake { id: "plex", kind: "plex" }));
+        reg.upsert(std::sync::Arc::new(Fake { id: "local", kind: "local" }));
+        reg.upsert(std::sync::Arc::new(Fake { id: "smb-old", kind: "smb" }));
+        reg.upsert(std::sync::Arc::new(Fake { id: "ssh-old", kind: "ssh" }));
+
+        reg.remove_kinds(&["local", "smb", "ssh"]);
+
+        let ids: Vec<_> = reg.all().iter().map(|s| s.id()).collect();
+        assert_eq!(ids, vec!["plex".to_string()]);
     }
 }

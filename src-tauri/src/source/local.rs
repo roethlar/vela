@@ -13,23 +13,133 @@ use async_trait::async_trait;
 
 use super::metadata::{self, Hint, MetaCache};
 use super::{namespace_key, HubDto, ItemDto, MediaSource, SectionDto, StreamResolution};
-use crate::config::LocalFolder;
+use crate::config::{AppConfig, LocalFolder, SmbMount, SshMount};
 use crate::playback::ProgressTarget;
 
 pub const LOCAL_SOURCE_ID: &str = "local";
+
+/// The source kinds that make up the "local family": plain configured
+/// folders plus SMB/SSH mounts, each registered as its own source so the UI
+/// can tell a share from a plain folder. Rebuilds replace the whole family.
+pub const LOCAL_FAMILY_KINDS: &[&str] = &["local", "smb", "ssh"];
+
+pub fn smb_source_id(mount_id: &str) -> String {
+    format!("smb-{mount_id}")
+}
+
+pub fn ssh_source_id(mount_id: &str) -> String {
+    format!("ssh-{mount_id}")
+}
+
+/// True for ids owned by the local family (the plain local source or a
+/// per-mount SMB/SSH source). These are managed via folder/mount entries,
+/// never removed as free-standing sources.
+pub fn is_local_family_id(id: &str) -> bool {
+    id == LOCAL_SOURCE_ID || id.starts_with("smb-") || id.starts_with("ssh-")
+}
+
+/// One member of the local family, ready to register.
+pub struct LocalFamilyMember {
+    pub id: String,
+    pub name: String,
+    pub kind: &'static str,
+    pub folders: Vec<LocalFolder>,
+}
+
+impl LocalFamilyMember {
+    pub fn build(&self) -> std::sync::Arc<dyn MediaSource> {
+        std::sync::Arc::new(LocalSource::new(
+            self.id.clone(),
+            self.name.clone(),
+            self.kind,
+            self.folders.clone(),
+        ))
+    }
+}
+
+/// Group the config into local-family members: plain folders (minus the ones
+/// owned by SSH mounts) under the "local"/"Local" source, then one source per
+/// SMB mount and per SSH mount carrying the mount's human name. Folder
+/// resolution is injected because boot and live rebuild derive mount folders
+/// differently; `safe_root` is applied uniformly to every member's folders.
+/// Members that end up with no folders are omitted entirely.
+pub fn local_family<FS, FH, SR>(
+    cfg: &AppConfig,
+    smb_folders: FS,
+    ssh_folder: FH,
+    safe_root: SR,
+) -> Vec<LocalFamilyMember>
+where
+    FS: Fn(&SmbMount) -> Vec<LocalFolder>,
+    FH: Fn(&SshMount) -> Option<LocalFolder>,
+    SR: Fn(&str) -> bool,
+{
+    let ssh_folder_ids: std::collections::HashSet<_> = cfg
+        .ssh_mounts
+        .iter()
+        .map(|m| m.local_folder_id.as_str())
+        .collect();
+    let mut members = Vec::new();
+    let plain: Vec<_> = cfg
+        .local_folders
+        .iter()
+        .filter(|f| !ssh_folder_ids.contains(f.id.as_str()))
+        .filter(|f| safe_root(&f.path))
+        .cloned()
+        .collect();
+    if !plain.is_empty() {
+        members.push(LocalFamilyMember {
+            id: LOCAL_SOURCE_ID.to_string(),
+            name: "Local".to_string(),
+            kind: "local",
+            folders: plain,
+        });
+    }
+    for m in &cfg.smb_mounts {
+        let folders: Vec<_> = smb_folders(m)
+            .into_iter()
+            .filter(|f| safe_root(&f.path))
+            .collect();
+        if !folders.is_empty() {
+            members.push(LocalFamilyMember {
+                id: smb_source_id(&m.id),
+                name: m.name.clone(),
+                kind: "smb",
+                folders,
+            });
+        }
+    }
+    for m in &cfg.ssh_mounts {
+        if let Some(f) = ssh_folder(m).filter(|f| safe_root(&f.path)) {
+            members.push(LocalFamilyMember {
+                id: ssh_source_id(&m.id),
+                name: m.name.clone(),
+                kind: "ssh",
+                folders: vec![f],
+            });
+        }
+    }
+    members
+}
 
 const VIDEO_EXTS: &[&str] = &[
     "mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "webm", "wmv", "flv", "mpg", "mpeg",
 ];
 
 pub struct LocalSource {
+    id: String,
+    name: String,
+    kind: &'static str,
     folders: Vec<LocalFolder>,
     meta: Arc<MetaCache>,
 }
 
 impl LocalSource {
-    pub fn new(folders: Vec<LocalFolder>) -> Self {
+    pub fn new(id: String, name: String, kind: &'static str, folders: Vec<LocalFolder>) -> Self {
         Self {
+            id,
+            name,
+            kind,
             folders,
             meta: metadata::shared(),
         }
@@ -56,7 +166,7 @@ impl LocalSource {
     }
 
     fn id_str(&self) -> String {
-        LOCAL_SOURCE_ID.to_string()
+        self.id.clone()
     }
 
     /// Overlay cached/sidecar/online metadata onto an item (online runs async).
@@ -91,6 +201,9 @@ impl LocalSource {
     /// so the synchronous filesystem walks below don't run on an async worker.
     fn worker(&self) -> LocalSource {
         LocalSource {
+            id: self.id.clone(),
+            name: self.name.clone(),
+            kind: self.kind,
             folders: self.folders.clone(),
             meta: self.meta.clone(),
         }
@@ -287,10 +400,10 @@ impl MediaSource for LocalSource {
         self.id_str()
     }
     fn name(&self) -> String {
-        "Local".to_string()
+        self.name.clone()
     }
     fn kind(&self) -> &'static str {
-        "local"
+        self.kind
     }
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
@@ -300,7 +413,7 @@ impl MediaSource for LocalSource {
                 .folders
                 .iter()
                 .map(|f| SectionDto {
-                    key: namespace_key(LOCAL_SOURCE_ID, &f.path),
+                    key: namespace_key(&this.id, &f.path),
                     title: if f.name.is_empty() {
                         dir_name(Path::new(&f.path))
                     } else {
@@ -312,7 +425,7 @@ impl MediaSource for LocalSource {
                         f.kind.clone()
                     },
                     source_id: this.id_str(),
-                    source_name: "Local".to_string(),
+                    source_name: this.name.clone(),
                 })
                 .collect())
         })
@@ -478,7 +591,7 @@ impl MediaSource for LocalSource {
                 }
             }
             items.truncate(100);
-            let prefix = format!("{LOCAL_SOURCE_ID}:");
+            let prefix = format!("{}:", this.id);
             for item in &mut items {
                 let path =
                     PathBuf::from(item.rating_key.strip_prefix(&prefix).unwrap_or_default());
@@ -650,5 +763,77 @@ mod tests {
         assert!(is_video(Path::new("/x/a.MP4")));
         assert!(!is_video(Path::new("/x/a.nfo")));
         assert!(!is_video(Path::new("/x/a")));
+    }
+
+    fn folder(id: &str, name: &str, path: &str) -> LocalFolder {
+        LocalFolder {
+            id: id.into(),
+            name: name.into(),
+            path: path.into(),
+            kind: String::new(),
+        }
+    }
+
+    #[test]
+    fn local_family_groups_plain_smb_ssh_with_identity() {
+        let mut cfg = AppConfig::default();
+        cfg.local_folders.push(folder("f1", "Movies", "/media/movies"));
+        // Owned by the SSH mount below: must not also appear under "Local".
+        cfg.local_folders.push(folder("sshfld", "remote", "/mnt/ssh"));
+        cfg.smb_mounts.push(SmbMount {
+            id: "m1".into(),
+            name: "nagatha/media".into(),
+            ..SmbMount::default()
+        });
+        cfg.ssh_mounts.push(SshMount {
+            id: "s1".into(),
+            name: "skippy:/video".into(),
+            local_folder_id: "sshfld".into(),
+            ..SshMount::default()
+        });
+
+        let fam = local_family(
+            &cfg,
+            |_m| vec![folder("smbf", "movies", "/mnt/smb/movies")],
+            |_m| Some(folder("sshfld", "remote", "/mnt/ssh")),
+            |_p| true,
+        );
+
+        let ids: Vec<_> = fam.iter().map(|m| m.id.as_str()).collect();
+        assert_eq!(ids, vec!["local", "smb-m1", "ssh-s1"]);
+        assert_eq!(
+            fam[0].folders.len(),
+            1,
+            "SSH-owned folder must be excluded from the plain local member"
+        );
+        assert_eq!(fam[0].name, "Local");
+        assert_eq!(fam[1].name, "nagatha/media");
+        assert_eq!(fam[1].kind, "smb");
+        assert_eq!(fam[2].name, "skippy:/video");
+        assert_eq!(fam[2].kind, "ssh");
+    }
+
+    #[test]
+    fn local_family_omits_empty_members_and_unsafe_roots() {
+        let mut cfg = AppConfig::default();
+        cfg.local_folders.push(folder("f1", "Movies", "/"));
+        cfg.smb_mounts.push(SmbMount {
+            id: "m1".into(),
+            name: "empty share".into(),
+            ..SmbMount::default()
+        });
+
+        // The SMB mount resolves no folders and the plain folder fails the
+        // safe-root check, so no member survives at all.
+        let fam = local_family(&cfg, |_m| Vec::new(), |_m| None, |p| p != "/");
+        assert!(fam.is_empty());
+    }
+
+    #[test]
+    fn local_family_id_prefixes_route_and_classify() {
+        assert!(is_local_family_id(LOCAL_SOURCE_ID));
+        assert!(is_local_family_id(&smb_source_id("abc")));
+        assert!(is_local_family_id(&ssh_source_id("abc")));
+        assert!(!is_local_family_id("plex"));
     }
 }

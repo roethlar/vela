@@ -8,7 +8,7 @@ use crate::config::{self, AppConfig, LocalFolder, SmbFolder, SmbMount, SourceCon
 use crate::playback;
 use crate::plex_library::PlexLibrary;
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
-use crate::source::local::{LocalSource, LOCAL_SOURCE_ID};
+use crate::source::local::LOCAL_SOURCE_ID;
 use crate::source::{plex::PlexSource, HubDto, ItemDto, SectionDto};
 use crate::{AppState, PLEX_SOURCE_ID};
 
@@ -208,8 +208,8 @@ pub async fn remove_source(id: String, state: State<'_, AppState>) -> Result<(),
     if id == PLEX_SOURCE_ID {
         return Err("the Plex source can't be removed here".into());
     }
-    if id == LOCAL_SOURCE_ID {
-        return Err("manage local media via its folder and SMB entries".into());
+    if crate::source::local::is_local_family_id(&id) {
+        return Err("manage local media via its folder and mount entries".into());
     }
     let id2 = id.clone();
     config::update(move |cfg| {
@@ -475,6 +475,8 @@ pub async fn mount_smb(
     // is held (it is, above) — so the persist and the rollback both run inside the
     // same critical section as the mount.
     let mountpoint = mount.mountpoint.clone();
+    let mount_id = mount.id.clone();
+    let mount_name = mount.name.clone();
     if let Err(e) = rebuild_local_locked(&state, move |cfg| {
         // Reject a duplicate of an already-configured share (same server/share),
         // so we never persist two records over one shared connection/mountpoint.
@@ -503,9 +505,9 @@ pub async fn mount_smb(
         return Err(e);
     }
     Ok(SourceDto {
-        id: LOCAL_SOURCE_ID.to_string(),
-        name: "Local".to_string(),
-        kind: "local".to_string(),
+        id: crate::source::local::smb_source_id(&mount_id),
+        name: mount_name,
+        kind: "smb".to_string(),
     })
 }
 
@@ -619,6 +621,7 @@ pub async fn add_smb_folder(
         path: relative.clone(),
         kind,
     };
+    let mount_name = mount.name.clone();
     let mount_id = id.clone();
     let relative_for_check = relative.clone();
     rebuild_local_locked(&state, move |cfg| {
@@ -638,9 +641,9 @@ pub async fn add_smb_folder(
     })
     .await?;
     Ok(SourceDto {
-        id: LOCAL_SOURCE_ID.to_string(),
-        name: "Local".to_string(),
-        kind: "local".to_string(),
+        id: crate::source::local::smb_source_id(&id),
+        name: mount_name,
+        kind: "smb".to_string(),
     })
 }
 
@@ -894,6 +897,8 @@ pub async fn mount_ssh(
         kind,
     };
     let mountpoint = mount.mountpoint.clone();
+    let ssh_mount_id = mount.id.clone();
+    let ssh_mount_name = mount.name.clone();
     if let Err(e) = rebuild_local_locked(&state, move |cfg| {
         if cfg.ssh_mounts.iter().any(|x| {
             x.host.eq_ignore_ascii_case(&mount.host)
@@ -916,9 +921,9 @@ pub async fn mount_ssh(
         return Err(e);
     }
     Ok(SourceDto {
-        id: LOCAL_SOURCE_ID.to_string(),
-        name: "Local".to_string(),
-        kind: "local".to_string(),
+        id: crate::source::local::ssh_source_id(&ssh_mount_id),
+        name: ssh_mount_name,
+        kind: "ssh".to_string(),
     })
 }
 
@@ -992,22 +997,10 @@ fn ssh_mountpoint_referenced(mountpoint: &str) -> Option<bool> {
         .map(|c| c.ssh_mounts.iter().any(|x| x.mountpoint == mountpoint))
 }
 
-fn live_local_folders(cfg: &AppConfig) -> Vec<LocalFolder> {
-    let ssh_folder_ids: std::collections::HashSet<_> = cfg
-        .ssh_mounts
-        .iter()
-        .map(|m| m.local_folder_id.as_str())
-        .collect();
-    let mut folders: Vec<_> = cfg
-        .local_folders
-        .iter()
-        .filter(|f| !ssh_folder_ids.contains(f.id.as_str()))
-        .filter(|f| safe_user_media_root(&f.path))
-        .cloned()
-        .collect();
-    folders.extend(cfg.smb_mounts.iter().flat_map(smb_live_folders));
-    folders.extend(cfg.ssh_mounts.iter().filter_map(ssh_live_folder));
-    folders
+fn live_local_family(cfg: &AppConfig) -> Vec<crate::source::local::LocalFamilyMember> {
+    crate::source::local::local_family(cfg, smb_live_folders, ssh_live_folder, |p| {
+        safe_user_media_root(p)
+    })
 }
 
 fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
@@ -1066,15 +1059,15 @@ async fn rebuild_local_locked<F>(state: &State<'_, AppState>, f: F) -> Result<()
 where
     F: FnOnce(&mut AppConfig) -> Result<(), String>,
 {
-    let folders = config::update(|cfg| {
+    let family = config::update(|cfg| {
         f(cfg)?;
-        Ok(live_local_folders(cfg))
+        Ok(live_local_family(cfg))
     })?;
     let mut reg = state.registry.lock().await;
-    if folders.is_empty() {
-        reg.remove(LOCAL_SOURCE_ID);
-    } else {
-        reg.upsert(std::sync::Arc::new(LocalSource::new(folders)));
+    // Replace the whole family: a mount that went away must drop its source.
+    reg.remove_kinds(crate::source::local::LOCAL_FAMILY_KINDS);
+    for member in &family {
+        reg.upsert(member.build());
     }
     Ok(())
 }
