@@ -111,13 +111,36 @@ impl MetaCache {
     /// Persist the cache. The `write_lock` serializes writers so a slower one
     /// can't write an older snapshot after a newer one, while the (brief)
     /// snapshot is the only thing taken under the map lock — the disk write
-    /// happens without holding it.
+    /// happens without holding it. The write itself is defensive like the
+    /// config's: owner-only temp file, fsync, atomic rename — a crash mid-
+    /// write can never truncate the existing cache file.
     fn persist(&self) {
         let Some(path) = &self.file else { return };
         let _w = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = self.map.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        if let Ok(s) = serde_json::to_string(&snapshot) {
-            let _ = std::fs::write(path, s);
+        let Ok(json) = serde_json::to_string(&snapshot) else {
+            return;
+        };
+        let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
+        let write = || -> std::io::Result<()> {
+            {
+                let mut opts = std::fs::OpenOptions::new();
+                opts.write(true).create(true).truncate(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.mode(0o600);
+                }
+                use std::io::Write;
+                let mut f = opts.open(&tmp)?;
+                f.write_all(json.as_bytes())?;
+                f.sync_all()?;
+            }
+            std::fs::rename(&tmp, path)
+        };
+        if let Err(e) = write() {
+            let _ = std::fs::remove_file(&tmp);
+            eprintln!("vela: metadata cache write failed (kept in memory): {e}");
         }
     }
 }
