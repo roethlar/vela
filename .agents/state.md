@@ -25,10 +25,11 @@ Keep it short and update it when important repo facts change.
 - README status now reflects heuristic media-version/source selection and the
   lack of a manual version picker.
 - Live smoke tests 2026-07-04: Jellyfin passed against a real server; SMB
-  connected but surfaces labeled "Local"; the SSH add failure is diagnosed —
-  `sshfs` was never actually installed (Homebrew core's formula depends on
-  Linux-only libfuse, so `brew install sshfs` cannot work on macOS; macFUSE
-  route needed). Findings queued in `ISSUES.md`, alongside an owner-direction
+  connected but surfaces labeled "Local"; the SSH add failure was diagnosed —
+  `sshfs` was not actually installed (Homebrew core's formula depends on
+  Linux-only libfuse, so `brew install sshfs` cannot work on macOS). macFUSE
+  plus sshfs-mac 2.10 are now installed and the binary runs; Vela retest
+  pending. Findings queued in `ISSUES.md`, alongside an owner-direction
   rework of the library list and "All" view (consolidated, deduped,
   cross-source, metadata caching for SMB/local first). Still pending live:
   Emby, local folders, and SMB browse/playback depth.
@@ -38,10 +39,12 @@ Keep it short and update it when important repo facts change.
 - Triage the owner-reported issues recorded 2026-07-04 in `ISSUES.md`
   ("Open - Owner-Reported"): watch-state staleness, artwork-ratio mixing,
   SMB "Local" labeling, and the SSH add failure.
-- SSH retest is an owner call: install macFUSE (`brew install --cask
-  macfuse`, approve the extension) plus a compatible sshfs build
-  (`gromgit/fuse/sshfs-mac`), or decide macOS SSH should not depend on
-  macFUSE (see `ISSUES.md`).
+- Retest the SSH source in Vela: macFUSE and sshfs-mac 2.10 are installed on
+  the owner's machine (2026-07-04) and `sshfs --version` runs. Possible
+  remaining blockers at mount time: macFUSE extension approval (Apple Silicon
+  may need the Recovery reduced-security step plus a restart) and first-time
+  host key trust (mounts run `BatchMode=yes`, so trust the host via plain
+  `ssh` once first).
 - When the owner calls for it, draft the library/"All"-view rework plan
   (persistent SMB/local metadata caching, cross-source title dedup, source
   ranking, per-title source override) — direction queued in `ISSUES.md`.
