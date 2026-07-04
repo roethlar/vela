@@ -130,9 +130,10 @@ search, mpv HDR playback, Plex progress/resume, local-folder indexing with
 keyless metadata, and an in-app source manager (Jellyfin/Emby connect, local
 folders, SMB mounting).
 
-Verification note: Plex is exercised end-to-end. The Jellyfin/Emby, local, and
-SMB paths are implemented and unit-tested where logic allows, but live
-integration against real servers/shares is still pending.
+Verification note: Plex is exercised end-to-end, and Jellyfin has been
+smoke-tested against a real server. The Emby, local, and SMB paths are
+implemented and unit-tested where logic allows, but live integration against
+real servers/shares is still pending.
 
 Known limitations: Plex/Jellyfin/Emby media-version selection is heuristic: Vela
 prefers direct-play/direct-stream candidates, HDR, higher resolution, and higher

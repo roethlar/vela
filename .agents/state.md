@@ -24,8 +24,9 @@ Keep it short and update it when important repo facts change.
   credentials.
 - README status now reflects heuristic media-version/source selection and the
   lack of a manual version picker.
-- Manual/live integration is still pending for Jellyfin/Emby, local folders, and
-  SMB shares against real servers/shares.
+- Jellyfin passed an owner smoke test against a real server on 2026-07-04.
+  Manual/live integration is still pending for Emby, local folders, and SMB
+  shares against real servers/shares.
 
 ## Next
 
@@ -33,8 +34,8 @@ Keep it short and update it when important repo facts change.
   ("Open - Owner-Reported"): watch state stale until app restart (Continue
   Watching hub, progress bars, played badges) and rows mixing poster/episode
   artwork aspect ratios.
-- Smoke-test Jellyfin/Emby, local folders, and SMB shares against real
-  servers/shares, or keep the live-integration caveat explicit.
+- Smoke-test Emby, local folders, and SMB shares against real servers/shares,
+  or keep the live-integration caveat explicit.
 - If updating broader governance metadata, refresh `.agents/repo-map.json` and
   `.agents/artifact-manifest.json` from their old `validated_against` commit.
 - Letterbox crop (decided 2026-07-03, see `.agents/decisions.md`): next step is

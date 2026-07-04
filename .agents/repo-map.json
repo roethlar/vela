@@ -96,7 +96,7 @@
   ],
   "notes": [
     "CI installs Tauri WebKitGTK/libsoup/GTK dependencies before Rust checks on Linux.",
-    "README says live integration for Jellyfin/Emby, local, and SMB paths is still pending even where unit-tested.",
+    "README says live integration for Emby, local, and SMB paths is still pending even where unit-tested; Jellyfin was smoke-tested live on 2026-07-04.",
     "The current known deferred issue is local filesystem traversal inside async source methods."
   ]
 }
