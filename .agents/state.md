@@ -25,9 +25,10 @@ Keep it short and update it when important repo facts change.
 - README status now reflects heuristic media-version/source selection and the
   lack of a manual version picker.
 - Live smoke tests 2026-07-04: Jellyfin passed against a real server; SMB
-  connected but surfaces labeled "Local"; SSH still fails even after
-  installing `sshfs` via Homebrew and restarting (exact error not yet
-  captured). Findings queued in `ISSUES.md`, alongside an owner-direction
+  connected but surfaces labeled "Local"; the SSH add failure is diagnosed —
+  `sshfs` was never actually installed (Homebrew core's formula depends on
+  Linux-only libfuse, so `brew install sshfs` cannot work on macOS; macFUSE
+  route needed). Findings queued in `ISSUES.md`, alongside an owner-direction
   rework of the library list and "All" view (consolidated, deduped,
   cross-source, metadata caching for SMB/local first). Still pending live:
   Emby, local folders, and SMB browse/playback depth.
@@ -37,8 +38,10 @@ Keep it short and update it when important repo facts change.
 - Triage the owner-reported issues recorded 2026-07-04 in `ISSUES.md`
   ("Open - Owner-Reported"): watch-state staleness, artwork-ratio mixing,
   SMB "Local" labeling, and the SSH add failure.
-- Capture the exact SSH add-failure error now that `sshfs` is installed
-  (triage leads are in `ISSUES.md`), then debug.
+- SSH retest is an owner call: install macFUSE (`brew install --cask
+  macfuse`, approve the extension) plus a compatible sshfs build
+  (`gromgit/fuse/sshfs-mac`), or decide macOS SSH should not depend on
+  macFUSE (see `ISSUES.md`).
 - When the owner calls for it, draft the library/"All"-view rework plan
   (persistent SMB/local metadata caching, cross-source title dedup, source
   ranking, per-title source override) — direction queued in `ISSUES.md`.

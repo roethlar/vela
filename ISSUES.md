@@ -34,17 +34,23 @@ Source setup:
   the nav lists the share's folders as "movies · Local" and
   "skippy/video/archive/tv · Local".
 
-- SSH sources still fail with `sshfs` installed, and the requirement
-  surfaces too late. The add flow only reveals the `sshfs` dependency when it
-  fails to find the binary mid-add; surface it (and an install hint) up front
-  in the add-SSH UI. After installing sshfs via Homebrew and restarting Vela
-  (macOS, 2026-07-04), adding an SSH source still fails — exact error not yet
-  captured. Triage leads, all unverified: whether discovery actually finds
-  the brew binary (`src-tauri/src/sshfs.rs` checks PATH candidates plus
-  `/usr/local/bin/sshfs` and `/opt/homebrew/bin/sshfs`); macFUSE missing or
-  its system extension unapproved (brew's sshfs needs it); untrusted host key
-  or missing key auth — the mount runs ssh with `BatchMode=yes`, so nothing
-  can prompt, and Vela deliberately has no SSH password support.
+- The `sshfs` requirement surfaces too late, and its install guidance is a
+  dead end on macOS. Diagnosed 2026-07-04 on the owner's machine: the
+  attempted `brew install sshfs` installed nothing — Homebrew core's `sshfs`
+  depends on `libfuse`, which is Linux-only, so it cannot succeed on macOS.
+  No sshfs binary exists in any checked location and macFUSE is absent;
+  Vela's detection and its "sshfs was not found" error were correct.
+  Remaining work: surface the dependency up front in the add-SSH UI rather
+  than at add-failure time, and make the guidance platform-aware — on macOS
+  the working route is the `macfuse` cask plus a macFUSE-compatible sshfs
+  build (e.g. `gromgit/fuse/sshfs-mac`), including approving the macFUSE
+  kernel/system extension (on Apple Silicon that means allowing third-party
+  kexts via Recovery). Bare "install sshfs" sends macOS users into exactly
+  this dead end. Open product question for the owner: whether macOS SSH
+  support should depend on macFUSE at all, or switch to an in-app SFTP
+  client. Also note for eventual retest: mounts run ssh with `BatchMode=yes`
+  and no password support, so first-time hosts need their host key trusted
+  via plain `ssh` before Vela can mount them.
 
 Library navigation and the "All" view (owner direction, 2026-07-04):
 
