@@ -882,7 +882,10 @@
   {#snippet heroCard(hub: Hub)}
     {@const idx = heroAt(hub)}
     {@const item = hub.items[idx]}
-    {@const art = artFor(item, true)}
+    <!-- The hero renders at window width, so prefer the hero-resolution
+         backdrop (episodes get their scene still there too) over the
+         grid-sized poster/thumb that artFor picks for small cards. -->
+    {@const art = item.backdrop ?? artFor(item, true)}
     {@const pct =
       item.viewOffsetMs && item.durationMs
         ? Math.round(Math.min(100, (100 * item.viewOffsetMs) / item.durationMs))
@@ -1461,7 +1464,12 @@
   /* Continue Watching hero carousel: one large 16:9 card, arrows overlaid on
      the artwork (hover/focus-revealed), meta caption below. */
   .hero {
-    max-width: min(620px, 100%);
+    /* Heroic: fill the window width. The only cap keeps the 16:9 art plus
+       its caption on screen in short/wide (ultrawide) windows — centered
+       when it kicks in. */
+    width: 100%;
+    max-width: min(100%, calc((100vh - 14rem) * 16 / 9));
+    margin-inline: auto;
     display: flex;
     flex-direction: column;
     gap: 0.38rem;

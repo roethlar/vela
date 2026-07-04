@@ -205,14 +205,28 @@ impl JellyfinClient {
         )
     }
 
-    /// Landscape backdrop, sized for the hero/resume rendering (larger than
-    /// grid posters). Same token-in-URL exposure as `poster_url`.
+    /// Landscape backdrop at hero resolution (the hero renders at window
+    /// width). Same token-in-URL exposure as `poster_url`.
     fn backdrop_url(&self, item_id: &str, tag: &str) -> String {
         self.build_url(
             &["Items", item_id, "Images", "Backdrop", "0"],
             &[
-                ("fillHeight", "720"),
-                ("fillWidth", "1280"),
+                ("fillHeight", "1080"),
+                ("fillWidth", "1920"),
+                ("tag", tag),
+                ("api_key", self.token.as_str()),
+            ],
+        )
+    }
+
+    /// An episode's Primary image (its 16:9 scene still) at hero resolution,
+    /// for hero rendering when no backdrop exists on the item itself.
+    fn hero_still_url(&self, item_id: &str, tag: &str) -> String {
+        self.build_url(
+            &["Items", item_id, "Images", "Primary"],
+            &[
+                ("fillHeight", "1080"),
+                ("fillWidth", "1920"),
                 ("tag", tag),
                 ("api_key", self.token.as_str()),
             ],
@@ -651,7 +665,19 @@ impl JellyfinSource {
             .backdrop_image_tags
             .as_ref()
             .and_then(|tags| tags.first())
-            .map(|tag| self.client.backdrop_url(&item.id, tag));
+            .map(|tag| self.client.backdrop_url(&item.id, tag))
+            .or_else(|| {
+                // Episodes rarely carry backdrops; their Primary image IS the
+                // 16:9 scene still — request it at hero resolution.
+                if item.item_type.as_deref() == Some("Episode") {
+                    item.image_tags
+                        .as_ref()
+                        .and_then(|t| t.primary.as_ref())
+                        .map(|tag| self.client.hero_still_url(&item.id, tag))
+                } else {
+                    None
+                }
+            });
         let view_offset_ms = item
             .user_data
             .as_ref()
@@ -964,10 +990,16 @@ mod tests {
         let c = test_client();
         let bd = c.backdrop_url("item1", "tag/1");
         assert!(bd.starts_with("http://jf.example:8096/Items/item1/Images/Backdrop/0?"));
-        assert!(bd.contains("fillHeight=720"));
-        assert!(bd.contains("fillWidth=1280"));
+        assert!(bd.contains("fillHeight=1080"));
+        assert!(bd.contains("fillWidth=1920"));
         // The tag rides percent-encoded so it can't malform the query.
         assert!(bd.contains("tag=tag%2F1"));
+
+        // Episode hero stills come from Primary at the same hero resolution.
+        let hs = c.hero_still_url("ep7", "t7");
+        assert!(hs.contains("/Items/ep7/Images/Primary"));
+        assert!(hs.contains("fillHeight=1080"));
+        assert!(hs.contains("fillWidth=1920"));
 
         // The series poster reuses the primary-image shape at grid size.
         let sp = c.poster_url("series9", "t9");

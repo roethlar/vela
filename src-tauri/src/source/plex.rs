@@ -85,11 +85,15 @@ impl PlexSource {
                 .grandparent_thumb
                 .as_deref()
                 .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
-            // Hero/landscape art renders much larger than grid posters.
-            backdrop: v
-                .art
-                .as_deref()
-                .and_then(|t| lib.poster_transcode_url(t, 1280, 720)),
+            // Hero art renders at window width, so request it big. Episodes
+            // use their own scene still (thumb) there; other types use the
+            // backdrop/fanart.
+            backdrop: if v.media_type.as_deref() == Some("episode") {
+                v.thumb.as_deref()
+            } else {
+                v.art.as_deref()
+            }
+            .and_then(|t| lib.poster_transcode_url(t, 1920, 1080)),
             rating_key: namespace_key(&self.id, &v.rating_key),
             title: v.title,
             year: v.year,
