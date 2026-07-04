@@ -72,20 +72,28 @@ mod tests {
 
     #[test]
     fn std_fs_reads_sorted_and_tolerates_missing_dirs() {
-        let dir = std::env::temp_dir().join(format!("vela-vfs-test-{}", std::process::id()));
-        let _ = std::fs::create_dir_all(&dir);
-        std::fs::write(dir.join("b.txt"), b"x").unwrap();
-        std::fs::write(dir.join("a.txt"), b"x").unwrap();
+        // Scratch space on the crate's own filesystem, NOT temp_dir(): tmpfs
+        // on some kernels returns readdir entries already name-sorted, which
+        // silently neuters this test as a guard for the explicit sort. The
+        // checkout's filesystem (ext4/btrfs/xfs) uses creation/hash order,
+        // so files created in reverse-sorted order below arrive unsorted.
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("target")
+            .join(format!("vela-vfs-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let names: Vec<String> = (0..24).rev().map(|i| format!("f{i:02}.txt")).collect();
+        for n in &names {
+            std::fs::write(dir.join(n), b"x").unwrap();
+        }
         let listed = StdFs.read_dir_sorted(&dir);
-        assert_eq!(
-            listed,
-            vec![dir.join("a.txt"), dir.join("b.txt")],
-            "sorted by name"
-        );
-        assert!(StdFs.is_file(&dir.join("a.txt")));
+        let mut expect: Vec<_> = names.iter().map(|n| dir.join(n)).collect();
+        expect.sort();
+        assert_eq!(listed, expect, "sorted by name regardless of creation order");
+        assert!(StdFs.is_file(&dir.join("f00.txt")));
         assert!(StdFs.is_dir(&dir));
-        assert_eq!(StdFs.file_len(&dir.join("a.txt")), 1);
-        assert_eq!(StdFs.read_to_string(&dir.join("a.txt")).as_deref(), Some("x"));
+        assert_eq!(StdFs.file_len(&dir.join("f00.txt")), 1);
+        assert_eq!(StdFs.read_to_string(&dir.join("f00.txt")).as_deref(), Some("x"));
         let _ = std::fs::remove_dir_all(&dir);
         assert!(
             StdFs.read_dir_sorted(&dir).is_empty(),
