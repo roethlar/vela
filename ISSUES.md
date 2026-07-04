@@ -32,6 +32,27 @@ unchecked for these):
   fields from Plex and Jellyfin/Emby; local series art deferred).
   Unit-tested (guard-proven); owner playtest pending.
 
+- Hero carousel reads as static/broken (reported 2026-07-04, v0.1.7: ignored
+  the hero, played another video ~seconds, stopped — hero unchanged, "no
+  arrows", no replacement). Diagnosis (code-traced): three stacked causes.
+  (a) UX defect, real: the prev/next arrows are hover-revealed
+  (`+page.svelte` `.heroarrow` opacity 0 until `.heroframe:hover`), so a
+  single visible hero card shows no affordance at all — the approved plan's
+  "proposed hover-reveal" default fails in practice. Fix direction: arrows
+  (or an equivalent position indicator) always visible.
+  (b) Not a Vela defect: the post-playback refresh did run (`playback-ended`
+  fires even on early quit; hubs are refetched live), but Plex does not
+  create a resume point for only a few seconds of playback (server-side
+  minimum, ~60s — assumption from observed Plex behavior), so Continue
+  Watching legitimately did not change. A >60s partial play is the correct
+  retest.
+  (c) By design (recorded in the artwork plan): if the played item was
+  local/SMB, it can never enter Continue Watching — local items carry no
+  watch state.
+  Open product option, owner call: a Vela-side "recently played" recency
+  (client-tracked, source-agnostic) if hero-reflects-what-I-just-played is
+  the desired semantic rather than Plex's hub rules.
+
 Source setup:
 
 - SMB shares surface labeled "Local" on the main screen. The share connects
