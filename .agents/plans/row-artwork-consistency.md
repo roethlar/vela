@@ -100,6 +100,21 @@ nav/sidebar work (that's `.agents/plans/library-all-view-rework.md`).
   catalog row degrades to uniform 2:3 `.noart` boxes without layout
   breakage.
 
+## Amendment 2026-07-04 (owner direction; supersedes the hero shape above)
+
+Owner playtest found the hover-revealed arrows invisible in practice and the
+server-fed hub unable to reflect a short play. Per the cover-flow decision in
+`.agents/decisions.md` (2026-07-04): the hero becomes a cover-flow capped at
+~30% of window height — older items fanned behind-left, newer behind-right
+(foobar2000 reference), side cards clickable, arrows always visible — fed by
+recents ∪ server continue hubs, newest first, deduped, rendered as ONE
+consolidated hero. Vela records recents itself: the frontend snapshots the
+item at play time (`record_recent`), the playback end notifier stamps the
+final mpv position (`EndNotify` now carries it) and drops entries past the
+watched threshold (`watched_threshold_percent`, default 95%). Known gap,
+accepted: backend auto-advance plays (queue) are not snapshotted in v1 —
+they typically run long enough to enter the server hub anyway.
+
 ## Open points to settle at approval
 
 1. On Deck presentation: keep it as a 16:9 landscape row under the hero

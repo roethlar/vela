@@ -2355,8 +2355,7 @@ mod merge_tests {
             vec![(std::sync::Arc::new(FailingSource), "sec".into())];
         let err = rt
             .block_on(fetch_all_merged(&all_down, "movie", "titleSort:asc"))
-            .err()
-            .expect("total failure must surface as an error");
+            .expect_err("total failure must surface as an error");
         assert!(err.contains("offline"));
 
         let mixed: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> = vec![
@@ -2689,6 +2688,25 @@ pub fn sshfs_status() -> SshfsStatus {
     }
 }
 
+/// Snapshot an item into Vela's recents as playback starts (frontend passes
+/// the full card it played, artwork included). The end notifier stamps the
+/// final position and drops finished entries.
+#[tauri::command]
+pub async fn record_recent(item: ItemDto) -> Result<(), String> {
+    config::update(move |cfg| {
+        crate::recents::record(cfg, item);
+        Ok(())
+    })
+}
+
+/// Vela's "recently played and not finished" list, newest first — the hero
+/// cover-flow's primary feed.
+#[tauri::command]
+pub async fn get_recents() -> Result<Vec<ItemDto>, String> {
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    Ok(crate::recents::list(&cfg))
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSnapshot {
@@ -2750,7 +2768,19 @@ pub(crate) async fn play_by_key(
         let app = app.clone();
         let source_id = src.id().to_string();
         let item_key = rating_key.to_string();
-        std::sync::Arc::new(move || {
+        std::sync::Arc::new(move |position_ms: u64| {
+            // Stamp Vela's recents BEFORE emitting, so the refresh the event
+            // triggers reads the updated list. Runs on the tracker thread —
+            // synchronous config I/O is fine there.
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let key = item_key.clone();
+            let _ = config::update(move |cfg| {
+                crate::recents::finish(cfg, &key, position_ms, now_ms);
+                Ok(())
+            });
             let _ = app.emit(
                 "playback-ended",
                 serde_json::json!({ "sourceId": source_id, "itemKey": item_key }),

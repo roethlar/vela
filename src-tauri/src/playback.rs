@@ -428,10 +428,11 @@ pub struct PlaySpec {
 }
 
 /// Fired exactly once when a playback session ends — after the final server
-/// check-in for tracked sessions, or at mpv exit for untracked ones. The
-/// caller wires this to UI notification (a `playback-ended` Tauri event);
-/// this module stays UI-framework-free.
-pub type EndNotify = Arc<dyn Fn() + Send + Sync>;
+/// check-in for tracked sessions, or at mpv exit for untracked ones — with
+/// the last observed playback position in ms (0 when none was read). The
+/// caller wires this to recents recording + UI notification (a
+/// `playback-ended` Tauri event); this module stays UI-framework-free.
+pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
 
 /// Spawn mpv for `spec.url`, optionally seeking to `spec.start_seconds`, and
 /// start background progress reporting that runs until mpv exits. Publishes the
@@ -837,7 +838,7 @@ fn start_tracking_plex(
                 }
             })();
             if let Some(on_end) = on_end {
-                on_end();
+                on_end(last_t_ms.load(Ordering::Relaxed));
             }
         })?;
     Ok(())
@@ -925,16 +926,17 @@ fn start_tracking_jellyfin(
                 post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
             })();
             if let Some(on_end) = on_end {
-                on_end();
+                on_end(last_t_ms.load(Ordering::Relaxed));
             }
         })?;
     Ok(())
 }
 
 /// For sessions with no progress tracker (local/SMB files, or a degenerate
-/// track target): watch the IPC socket and fire the end notifier when mpv
-/// exits (socket EOF). Tracked sessions instead notify from their tracker
-/// tail, after the final server write. No-op without a notifier.
+/// track target): observe mpv's position over IPC and fire the end notifier
+/// with the last seen position when mpv exits (or the session is replaced).
+/// Tracked sessions instead notify from their tracker tail, after the final
+/// server write. No-op without a notifier.
 fn spawn_end_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
@@ -943,36 +945,19 @@ fn spawn_end_watcher(
     let Some(on_end) = on_end else {
         return Ok(());
     };
+    // Reuse the shared position reader: its `done` flag doubles as the EOF
+    // signal (set when mpv exits / the socket drops).
+    let (last_t_ms, done) = spawn_position_reader(socket_path, 0, stop_flag.clone())?;
     std::thread::Builder::new()
         .name("mpv-end-watcher".into())
         .spawn(move || {
-            // Brief connect retries: mpv may not have opened the socket yet.
-            let mut stream = None;
-            for _ in 0..50 {
-                if stop_flag.load(Ordering::Relaxed) {
-                    break;
-                }
-                match ipc_connect(&socket_path) {
-                    Ok(s) => {
-                        stream = Some(s);
-                        break;
-                    }
-                    Err(_) => std::thread::sleep(Duration::from_millis(100)),
-                }
+            while !done.load(Ordering::Relaxed) && !stop_flag.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(100));
             }
-            if let Some(stream) = stream {
-                // Drain until EOF or error — either means mpv is gone.
-                let reader = BufReader::new(stream);
-                for line in reader.lines() {
-                    if stop_flag.load(Ordering::Relaxed) || line.is_err() {
-                        break;
-                    }
-                }
-            }
-            // Fire even if the socket never connected (mpv may have exited
-            // instantly) or the session was replaced: it is over either way,
+            // Fire even when the session was replaced or mpv exited before a
+            // position arrived (position 0): the session is over either way,
             // and a spurious refresh is harmless.
-            on_end();
+            on_end(last_t_ms.load(Ordering::Relaxed));
         })?;
     Ok(())
 }

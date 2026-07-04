@@ -25,8 +25,8 @@ pub struct SectionDto {
 }
 
 /// A playable/browsable item (movie, show, season, episode), source-tagged.
-/// `Deserialize` exists for the listing cache's persistence round-trip.
-#[derive(Serialize, Deserialize, Clone)]
+/// `Deserialize` exists for the listing-cache/recents persistence round-trips.
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDto {
     /// Source-namespaced key (`"<source_id>:<raw>"`); opaque to the frontend.
@@ -72,7 +72,7 @@ pub struct ItemDto {
 }
 
 /// One source's copy of a merged title.
-#[derive(Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct BackingRef {
     pub source_id: String,

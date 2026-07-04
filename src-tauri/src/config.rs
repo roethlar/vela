@@ -53,6 +53,11 @@ pub struct AppConfig {
     /// menu; titles without an entry follow the default kind ranking.
     #[serde(default)]
     pub merged_overrides: std::collections::HashMap<String, String>,
+    /// Vela's own "recently played" history feeding the Continue Watching
+    /// hero (see `recents.rs`): item snapshots at play time, final position
+    /// stamped at mpv exit, finished entries dropped.
+    #[serde(default)]
+    pub recents: Vec<crate::recents::RecentEntry>,
 }
 
 /// An SMB/CIFS share Vela exposes through the local source. On macOS/Windows

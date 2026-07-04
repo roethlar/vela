@@ -292,3 +292,34 @@ The "poster-uniform hub rows" primary proposal in
 `.agents/plans/row-artwork-consistency.md` (updated to the split policy) and
 that plan's poster-vs-landscape open point. Informs, not replaces, the nav
 phases of `.agents/plans/library-all-view-rework.md`.
+
+### 2026-07-04 - Hero is a cover-flow fed by Vela's own recency
+
+Status: Active
+
+Decision:
+The Continue Watching hero becomes a cover-flow (owner reference: foobar2000
+album wall): the current item front-and-center capped at ~30% of the window
+height, older items fanned behind-left, newer behind-right, side cards and
+always-visible arrows both navigate — hover-revealed controls are dropped
+(they read as no controls at all). Its content follows the owner's semantic
+"recently played and not finished = Continue Watching": Vela records its own
+recents at play time (item snapshot; final position stamped at mpv exit) and
+the hero shows recents merged with the server continue-watching hubs, newest
+first, deduped. Entries past the watched threshold (config
+`watched_threshold_percent`, default 95%) drop out as finished. This makes
+the hero source-agnostic (local/SMB plays appear) and independent of Plex's
+server-side ~60s resume threshold. Home renders ONE consolidated hero;
+per-source scoping filters it.
+
+Reason:
+Owner playtest 2026-07-04 (v0.1.7): played a video for a few seconds,
+stopped — the hero never changed and showed no controls. Two real causes:
+Plex never registered the short play (server threshold), and with a
+one-item hub the hover-revealed arrows rendered nothing. The owner's stated
+expectation is recency semantics, which only a client-side record satisfies.
+
+Supersedes:
+The hero-carousel shape in the 2026-07-04 design-language decision (single
+centered card, hover-revealed overlay arrows). The split artwork policy and
+the rest of that decision stand.

@@ -49,9 +49,14 @@ unchecked for these):
   (c) By design (recorded in the artwork plan): if the played item was
   local/SMB, it can never enter Continue Watching — local items carry no
   watch state.
-  Open product option, owner call: a Vela-side "recently played" recency
-  (client-tracked, source-agnostic) if hero-reflects-what-I-just-played is
-  the desired semantic rather than Plex's hub rules.
+  Owner direction 2026-07-04: recency IS the desired semantic, and the hero
+  becomes a cover-flow (foobar2000 reference; see `.agents/decisions.md`).
+  Implemented same day: Vela-side recents (snapshot at play, position
+  stamped at mpv exit, finished entries dropped at the watched threshold),
+  ONE consolidated hero fed by recents ∪ server hubs, cover-flow capped at
+  30% of window height with older items fanned behind-left / newer
+  behind-right, side cards clickable, arrows always visible. Unit-tested
+  (guard-proven); owner playtest pending.
 
 Source setup:
 

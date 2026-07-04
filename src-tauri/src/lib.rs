@@ -3,6 +3,7 @@ mod config;
 mod playback;
 mod plex_api;
 mod plex_library;
+mod recents;
 mod smb;
 mod source;
 mod sshfs;
@@ -348,6 +349,8 @@ pub fn run() {
             commands::get_items,
             commands::get_type_listing,
             commands::set_merged_override,
+            commands::record_recent,
+            commands::get_recents,
             commands::search,
             commands::get_children,
             commands::set_watched,

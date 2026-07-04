@@ -148,6 +148,7 @@
   // is live and uncached).
   onMount(() => {
     listen("playback-ended", () => {
+      heroPos = 0; // the just-played item is the newest — center it
       if (mode === "home") {
         loadHome(++homeGen);
       } else {
@@ -274,23 +275,27 @@
     return isEpisodic(item) ? (item.seriesPoster ?? item.poster) : item.poster;
   }
 
-  // Hero carousel position per hub (keyed by source+hub so All view can hold
-  // one hero per server). Reset naturally when hubs reload: indices are
-  // clamped to the hub's current length at render time.
-  let heroIndex = $state<Record<string, number>>({});
-  function heroKey(h: Hub): string {
-    return h.sourceId + ":" + h.hubIdentifier;
-  }
-  function heroAt(h: Hub): number {
-    const n = h.items.length;
-    if (n === 0) return 0;
-    const raw = heroIndex[heroKey(h)] ?? 0;
-    return Math.min(Math.max(raw, 0), n - 1);
-  }
-  function heroStep(h: Hub, delta: number) {
-    const n = h.items.length;
-    if (n === 0) return;
-    heroIndex[heroKey(h)] = (heroAt(h) + delta + n) % n;
+  // Continue Watching cover-flow (design decision 2026-07-04): ONE hero fed
+  // by Vela's own recents ("recently played and not finished") merged with
+  // the server continue hubs, newest first, deduped. Index 0 = newest;
+  // higher indices are older and fan behind-left of the centered card.
+  let recents = $state<Item[]>([]);
+  let heroPos = $state(0);
+  let heroItems = $derived.by(() => {
+    const scoped = activeSource ? recents.filter((r) => r.sourceId === activeSource) : recents;
+    const hubItems = hubs.filter((h) => hubPolicy(h) === "hero").flatMap((h) => h.items);
+    const seen = new Set<string>();
+    const out: Item[] = [];
+    for (const it of [...scoped, ...hubItems]) {
+      if (!seen.has(it.ratingKey)) {
+        seen.add(it.ratingKey);
+        out.push(it);
+      }
+    }
+    return out;
+  });
+  function heroClamp(i: number): number {
+    return Math.min(Math.max(i, 0), Math.max(heroItems.length - 1, 0));
   }
 
   // Section (nav) loads are invalidated only by a source switch (`sourceGen`);
@@ -326,8 +331,15 @@
     loading = true;
     error = null;
     try {
-      const h = await invoke<Hub[]>("get_hubs", { sourceId: activeSource });
-      if (gen === homeGen) hubs = h;
+      const [h, r] = await Promise.all([
+        invoke<Hub[]>("get_hubs", { sourceId: activeSource }),
+        // Recents failing must not blank Home; the hero degrades to hub data.
+        invoke<Item[]>("get_recents").catch(() => [] as Item[]),
+      ]);
+      if (gen === homeGen) {
+        hubs = h;
+        recents = r;
+      }
     } catch (e) {
       if (gen === homeGen) error = String(e);
     } finally {
@@ -613,6 +625,8 @@
 
   async function play(item: Item) {
     try {
+      // Snapshot into Vela's recents (fire-and-forget; hero feed).
+      invoke("record_recent", { item }).catch(() => {});
       await invoke("play_item", { item: queueItemFromItem(item) });
       if (queueOpen) refreshQueue();
     } catch (e) {
@@ -882,71 +896,81 @@
     </button>
   {/snippet}
 
-  {#snippet heroCard(hub: Hub)}
-    {@const idx = heroAt(hub)}
-    {@const item = hub.items[idx]}
-    <!-- The hero renders at window width, so prefer the hero-resolution
-         backdrop (episodes get their scene still there too) over the
-         grid-sized poster/thumb that artFor picks for small cards. -->
-    {@const art = item.backdrop ?? artFor(item, true)}
-    {@const pct =
-      item.viewOffsetMs && item.durationMs
-        ? Math.round(Math.min(100, (100 * item.viewOffsetMs) / item.durationMs))
-        : null}
-    {@const epLine =
-      item.parentIndex != null && item.index != null
-        ? `S${item.parentIndex} · E${item.index} – ${item.title}`
-        : item.title}
-    {@const label = `${item.grandparentTitle ?? item.title}${item.grandparentTitle ? ` — ${epLine}` : ""}${pct !== null ? ` — ${pct}% watched` : ""}`}
-    <div class="hero">
-      <div class="heroframe">
-        <button
-          class="herocard"
-          onclick={() => open(item)}
-          oncontextmenu={(e) => openMenu(e, item)}
-          title={item.grandparentTitle ?? item.title}
-          aria-label={label}
-        >
-          <div class="art">
-            {#if art && !failedPosters.has(art)}
-              <img
-                src={posterSrc(art)}
-                alt={item.title}
-                onerror={() => {
-                  failedPosters.add(art);
-                  failedPosters = failedPosters;
-                }}
-              />
-            {:else}
-              <div class="noart">{item.grandparentTitle ?? item.title}</div>
-            {/if}
-            <div class="playoverlay" aria-hidden="true">
-              <span class="playbtn"><Icon name="play" size={24} /></span>
-            </div>
-            {#if pct !== null}
-              <div class="progress" aria-hidden="true"><div class="bar" style="width:{pct}%"></div></div>
-            {/if}
-          </div>
-        </button>
-        {#if hub.items.length > 1}
-          <!-- Overlaid on the artwork per the design decision; revealed on hover/focus. -->
-          <button class="heroarrow left" aria-label="Previous" onclick={() => heroStep(hub, -1)}>
+  {#snippet heroFlow()}
+    {@const idx = heroClamp(heroPos)}
+    {@const center = heroItems[idx]}
+    {@const centerEp =
+      center.parentIndex != null && center.index != null
+        ? `S${center.parentIndex} · E${center.index} – ${center.title}`
+        : center.title}
+    <section class="rail">
+      <h2>Continue Watching</h2>
+      <div class="flow" role="group" aria-label="Continue watching">
+        {#each heroItems as it, i (it.ratingKey)}
+          {@const d = i - idx}
+          {@const art = it.backdrop ?? artFor(it, true)}
+          {@const pct =
+            d === 0 && it.viewOffsetMs && it.durationMs
+              ? Math.round(Math.min(100, (100 * it.viewOffsetMs) / it.durationMs))
+              : null}
+          {#if Math.abs(d) <= 4}
+            <!-- Older items (higher index) fan behind-left, newer behind-right. -->
+            <button
+              class="flowcard"
+              class:center={d === 0}
+              style="z-index:{30 - Math.abs(d)}; transform: translateX(calc(-50% + {d * -17}%)) rotateY({d === 0 ? 0 : d > 0 ? 18 : -18}deg) scale({d === 0 ? 1 : Math.max(0.6, 0.86 - (Math.abs(d) - 1) * 0.06)}); filter: brightness({d === 0 ? 1 : Math.max(0.35, 0.6 - (Math.abs(d) - 1) * 0.12)});"
+              onclick={() => (d === 0 ? open(it) : (heroPos = i))}
+              oncontextmenu={(e) => openMenu(e, it)}
+              title={it.grandparentTitle ?? it.title}
+              aria-label={d === 0 ? `Play ${it.grandparentTitle ?? it.title}` : `Show ${it.grandparentTitle ?? it.title}`}
+            >
+              <div class="art">
+                {#if art && !failedPosters.has(art)}
+                  <img
+                    src={posterSrc(art)}
+                    alt=""
+                    onerror={() => {
+                      failedPosters.add(art);
+                      failedPosters = failedPosters;
+                    }}
+                  />
+                {:else}
+                  <div class="noart">{it.grandparentTitle ?? it.title}</div>
+                {/if}
+                {#if d === 0}
+                  <div class="playoverlay" aria-hidden="true">
+                    <span class="playbtn"><Icon name="play" size={24} /></span>
+                  </div>
+                {/if}
+                {#if pct !== null}
+                  <div class="progress" aria-hidden="true"><div class="bar" style="width:{pct}%"></div></div>
+                {/if}
+              </div>
+            </button>
+          {/if}
+        {/each}
+        {#if heroItems.length > 1}
+          <!-- Always visible (hover-reveal read as "no controls" in playtest). -->
+          <button class="heroarrow left" aria-label="Older" disabled={idx >= heroItems.length - 1} onclick={() => (heroPos = heroClamp(idx + 1))}>
             <Icon name="back" size={18} />
           </button>
-          <button class="heroarrow right" aria-label="Next" onclick={() => heroStep(hub, 1)}>
+          <button class="heroarrow right" aria-label="Newer" disabled={idx <= 0} onclick={() => (heroPos = heroClamp(idx - 1))}>
             <Icon name="chevron" size={18} />
           </button>
         {/if}
       </div>
-      <div class="meta">
-        <span class="t">{item.grandparentTitle ?? item.title}</span>
-        {#if item.grandparentTitle}
-          <span class="y">{epLine}</span>
-        {:else if item.year}
-          <span class="y">{item.year}</span>
+      <div class="meta flowmeta">
+        <span class="t">{center.grandparentTitle ?? center.title}</span>
+        {#if center.grandparentTitle}
+          <span class="y">{centerEp}</span>
+        {:else if center.year}
+          <span class="y">{center.year}</span>
+        {/if}
+        {#if activeSource === null && sources.length > 1 && center.sourceId}
+          <span class="y srctag">· {sourceNameOf(center.sourceId)}</span>
         {/if}
       </div>
-    </div>
+    </section>
   {/snippet}
 
   {#snippet skelCard()}
@@ -1009,19 +1033,19 @@
       <div class="muted center">Nothing on your home screen yet — pick a library above.</div>
     {:else}
       <div class="home">
-        {#each hubs as hub (hub.sourceId + ":" + hub.hubIdentifier)}
+        {#if heroItems.length > 0}
+          {@render heroFlow()}
+        {/if}
+        <!-- Hero-policy hubs feed the cover-flow above; the rest stay rows. -->
+        {#each hubs.filter((h) => hubPolicy(h) !== "hero") as hub (hub.sourceId + ":" + hub.hubIdentifier)}
           {@const policy = hubPolicy(hub)}
           <section class="rail">
             <h2>{hub.title}{#if activeSource === null && sources.length > 1 && hub.sourceName}<span class="srctag"> · {hub.sourceName}</span>{/if}</h2>
-            {#if policy === "hero" && hub.items.length > 0}
-              {@render heroCard(hub)}
-            {:else}
-              <div class="row">
-                {#each hub.items as item, i (item.ratingKey)}
-                  {@render poster(item, i, policy === "landscape" ? "landscape" : "portrait")}
-                {/each}
-              </div>
-            {/if}
+            <div class="row">
+              {#each hub.items as item, i (item.ratingKey)}
+                {@render poster(item, i, policy === "landscape" ? "landscape" : "portrait")}
+              {/each}
+            </div>
           </section>
         {/each}
       </div>
@@ -1465,65 +1489,66 @@
     height: 100%;
     background: linear-gradient(90deg, var(--accent), var(--accent-hover));
   }
-  /* Continue Watching hero carousel: one large 16:9 card, arrows overlaid on
-     the artwork (hover/focus-revealed), meta caption below. */
-  .hero {
-    /* Heroic: fill the window width. The only cap keeps the 16:9 art plus
-       its caption on screen in short/wide (ultrawide) windows — centered
-       when it kicks in. */
-    width: 100%;
-    max-width: min(100%, calc((100vh - 14rem) * 16 / 9));
-    margin-inline: auto;
-    display: flex;
-    flex-direction: column;
-    gap: 0.38rem;
-    animation: vela-rise 0.4s var(--ease) backwards;
-  }
-  .heroframe {
+  /* Continue Watching cover-flow: the centered card is capped at ~30% of the
+     window height; older items fan behind-left, newer behind-right
+     (foobar2000 reference). Arrows are ALWAYS visible — hover-reveal read as
+     "no controls" in the owner playtest. */
+  .flow {
     position: relative;
+    /* 30vh cap, but a 16:9 card must also fit narrow windows. */
+    height: min(30vh, 46vw);
+    perspective: 1200px;
+    overflow: hidden;
   }
-  .herocard {
+  .flowcard {
     appearance: none;
     background: transparent;
     border: none;
     padding: 0;
     cursor: pointer;
-    text-align: left;
     color: inherit;
     font: inherit;
-    display: block;
-    width: 100%;
-  }
-  .herocard .art {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    height: 100%;
     aspect-ratio: 16 / 9;
+    transition:
+      transform 0.32s var(--ease),
+      filter 0.32s var(--ease);
   }
-  .herocard .progress {
+  .flowcard .art {
+    width: 100%;
+    height: 100%;
+    aspect-ratio: auto;
+  }
+  .flowcard .progress {
     height: 6px;
   }
-  .herocard:hover .art {
-    box-shadow: var(--shadow-card-hover);
-    border-color: var(--border-strong);
-  }
-  .herocard:focus-visible {
+  .flowcard:focus-visible {
     outline: none;
   }
-  .herocard:focus-visible .art {
+  .flowcard:focus-visible .art {
     border-color: var(--accent);
     box-shadow: var(--shadow-card), 0 0 0 2px var(--accent);
   }
-  .herocard:hover .playoverlay,
-  .herocard:focus-visible .playoverlay {
+  .flowcard.center:hover .art {
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--border-strong);
+  }
+  .flowcard.center:hover .playoverlay,
+  .flowcard.center:focus-visible .playoverlay {
     opacity: 1;
   }
-  .herocard:hover .playbtn,
-  .herocard:focus-visible .playbtn {
+  .flowcard.center:hover .playbtn,
+  .flowcard.center:focus-visible .playbtn {
     transform: scale(1);
   }
   .heroarrow {
     position: absolute;
     top: 50%;
     transform: translateY(-50%);
-    z-index: 2;
+    z-index: 40;
     width: 2.3rem;
     height: 2.3rem;
     border-radius: 50%;
@@ -1535,10 +1560,7 @@
     color: #fff;
     cursor: pointer;
     padding: 0;
-    opacity: 0;
-    transition:
-      opacity 0.15s var(--ease),
-      background 0.15s var(--ease);
+    transition: background 0.15s var(--ease);
   }
   .heroarrow.left {
     left: 0.6rem;
@@ -1546,12 +1568,17 @@
   .heroarrow.right {
     right: 0.6rem;
   }
-  .heroframe:hover .heroarrow,
-  .heroarrow:focus-visible {
-    opacity: 1;
-  }
   .heroarrow:hover {
     background: rgba(0, 0, 0, 0.75);
+  }
+  .heroarrow:disabled {
+    opacity: 0.35;
+    cursor: default;
+  }
+  .flowmeta {
+    align-items: center;
+    text-align: center;
+    margin-top: 0.5rem;
   }
   /* Home rails */
   .home {
