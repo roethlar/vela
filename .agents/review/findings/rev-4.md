@@ -3,7 +3,7 @@
 **Severity**: LOW — a blank library with no error message when every source is offline/unreadable; misleading but recoverable.
 **Status**: In progress
 **Branch**: `fix/rev-4-surface-total-failure` (stacked on rev-3)
-**Commit**: (pending)
+**Commit**: `a1239b2722afe6f418bed8c72459713e6ec6cd81`
 
 ## Evidence
 `src-tauri/src/commands.rs` `get_type_listing`: `let Ok(sections) = ... else
