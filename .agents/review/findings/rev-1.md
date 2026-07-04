@@ -1,7 +1,7 @@
 # rev-1: Dedup can end infinite scroll before all titles are loaded
 
 **Severity**: MEDIUM — silent content omission: later library titles become unreachable in the All view.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `fix/rev-1-dedup-page-underflow`
 **Commit**: `60f62590b97a714489928b27b3a41142fd5f3627`
 
@@ -79,3 +79,10 @@ rev-5), each reviewed against its own pinned base.
   `AppState`, rebuilt whenever a listing is entered (`start == 0`) and
   reused verbatim for continuation pages — pages window one immutable list,
   so skip/duplicate across pages is structurally impossible.
+- **Round 3** — codex (codex-cli 0.142.5), reviewed `6b44731` against base
+  `5d2e2b9`, guard_confirmed=true (FAIL-then-PASS observed in its own
+  isolated worktree), verdict **accepted**, 2026-07-04 (UTC). Comments:
+  round-2 concern closed (immutable snapshot makes cross-page
+  skip/duplication impossible); snapshot lifecycle sound (start==0 rebuild,
+  type+sort keying, fallthrough rebuild); no new blocking defects.
+  Branch ready for owner-gated merge.
