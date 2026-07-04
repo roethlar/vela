@@ -714,6 +714,7 @@ impl JellyfinSource {
                 .unwrap_or_default(),
             backing: None,
             canonical_id: None,
+            watch_key: None,
         }
     }
 

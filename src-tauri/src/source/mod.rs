@@ -64,6 +64,11 @@ pub struct ItemDto {
     /// title+year) — the key the per-title source override persists under.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub canonical_id: Option<String>,
+    /// Where watched-state actions should route when the play identity
+    /// cannot take them (merged card fronted by a local file while a server
+    /// backing owns the watch state). Absent when the play key works.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_key: Option<String>,
 }
 
 /// One source's copy of a merged title.
@@ -285,6 +290,7 @@ mod tests {
             provider_ids: vec![],
             backing: None,
             canonical_id: None,
+            watch_key: None,
             source_id: "local".into(),
         };
         let json = serde_json::to_string(&dto).expect("serialize");

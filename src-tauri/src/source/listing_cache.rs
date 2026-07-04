@@ -249,6 +249,7 @@ mod tests {
             provider_ids: vec![],
             backing: None,
             canonical_id: None,
+            watch_key: None,
             source_id: "local".into(),
         }
     }

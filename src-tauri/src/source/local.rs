@@ -572,6 +572,7 @@ fn base_item(
         provider_ids: vec![], // local identity is parsed title+year only
         backing: None,
         canonical_id: None,
+        watch_key: None,
     }
 }
 

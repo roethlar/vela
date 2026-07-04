@@ -1962,6 +1962,19 @@ fn rank_backings(
             group.rating_key = face.rating_key.clone();
             group.source_id = face.source_id.clone();
         }
+        // Watched-state actions can't route to a local-family face (those
+        // sources have no watch state); point them at the first server
+        // backing instead (rev-3). Absent when the face itself can take them.
+        group.watch_key = backing
+            .iter()
+            .find(|b| {
+                matches!(
+                    kinds.get(&b.source_id).copied(),
+                    Some("plex" | "jellyfin" | "emby")
+                )
+            })
+            .map(|b| b.rating_key.clone())
+            .filter(|k| *k != group.rating_key);
         group.canonical_id = Some(canonical);
     }
     groups
@@ -2144,6 +2157,7 @@ mod merge_tests {
             provider_ids: vec![],
             backing: None,
             canonical_id: None,
+            watch_key: None,
             source_id: source.into(),
         }
     }
@@ -2389,6 +2403,32 @@ mod merge_tests {
         assert_eq!(g.source_id, "smb-1");
         assert_eq!(g.backing.as_ref().unwrap()[0].source_id, "smb-1");
         assert!(g.canonical_id.is_some());
+    }
+
+    // rev-3 guard: when the ranked face is a local-family backing (no watch
+    // state support), watched-state actions must route to a server backing.
+    #[test]
+    fn merged_watch_key_routes_to_a_server_backing() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let ranked = rank_backings(groups, &kinds(), &Default::default());
+        let g = &ranked[0];
+        // smb wins playback; watch actions must go to the plex copy.
+        assert_eq!(g.rating_key, "smb-1:/x.mkv");
+        assert_eq!(g.watch_key.as_deref(), Some("plex:42"));
+
+        // When the face itself is a server backing, no separate watch key.
+        let mut only = item("Solo", Some(2020), "plex");
+        only.rating_key = "plex:7".into();
+        let ranked = rank_backings(
+            dedup_across_sources(vec![only]),
+            &kinds(),
+            &Default::default(),
+        );
+        assert_eq!(ranked[0].watch_key, None);
     }
 
     #[test]

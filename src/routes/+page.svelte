@@ -49,6 +49,7 @@
     sourceId?: string;
     backing?: { sourceId: string; ratingKey: string }[];
     canonicalId?: string;
+    watchKey?: string;
   };
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
   type Crumb = { title: string; ratingKey: string | null };
@@ -692,7 +693,9 @@
   async function setWatched(item: Item, played: boolean) {
     closeMenu();
     try {
-      await invoke("set_watched", { ratingKey: item.ratingKey, played });
+      // Merged cards may front a local file while a server backing owns the
+      // watch state — route the action where it can actually be recorded.
+      await invoke("set_watched", { ratingKey: item.watchKey ?? item.ratingKey, played });
       // Reflect immediately (deep-reactive $state). Scrobble/unscrobble both clear
       // the resume position, so drop the in-progress bar too — leaving a clean
       // watched (✓) or unwatched state instead of a contradictory bar + badge.

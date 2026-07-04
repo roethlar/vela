@@ -122,6 +122,7 @@ impl PlexSource {
                 .collect(),
             backing: None,
             canonical_id: None,
+            watch_key: None,
         }
     }
 }
