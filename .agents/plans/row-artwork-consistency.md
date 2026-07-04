@@ -1,6 +1,6 @@
 # Plan: Uniform artwork shape within a row
 
-Status: DRAFT — not approved for implementation. Covers the `ISSUES.md` entry
+Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Covers the `ISSUES.md` entry
 (Open - Owner-Reported 2026-07-04): "Rows mix poster and content-frame
 artwork" — 2:3 posters next to 16:9 episode stills at different heights in
 the same Home row. The poster-vs-content-view question was resolved by the

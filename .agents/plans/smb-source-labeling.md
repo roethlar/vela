@@ -1,6 +1,6 @@
 # Plan: SMB/SSH mounts as named sources (stop labeling them "Local")
 
-Status: DRAFT — not approved for implementation. Covers the `ISSUES.md` entry
+Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Covers the `ISSUES.md` entry
 (Open - Owner-Reported 2026-07-04): SMB shares surface labeled "Local" in the
 source chips and nav instead of being identified as SMB.
 

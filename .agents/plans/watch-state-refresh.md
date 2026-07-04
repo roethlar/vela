@@ -1,6 +1,6 @@
 # Plan: Post-playback watch-state refresh
 
-Status: DRAFT — not approved for implementation. Covers two `ISSUES.md`
+Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Covers two `ISSUES.md`
 entries (Open - Owner-Reported 2026-07-04): "Continue Watching does not
 refresh after playback" and "Card watch state is stale after playback".
 

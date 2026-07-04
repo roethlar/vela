@@ -38,9 +38,11 @@ Keep it short and update it when important repo facts change.
 
 ## Next
 
-- Five draft plans await owner review/approval before any code (drafted
-  2026-07-04, root causes confirmed by code reading; each lists its open
-  points): `.agents/plans/watch-state-refresh.md`,
+- All five plans were approved by the owner on 2026-07-04, with each plan's
+  "proposed" defaults adopted. Implementation order: watch-state-refresh →
+  ssh-macos-guidance → smb-source-labeling → row-artwork-consistency →
+  library-all-view-rework (phases A-D). The plans:
+  `.agents/plans/watch-state-refresh.md`,
   `.agents/plans/row-artwork-consistency.md`,
   `.agents/plans/smb-source-labeling.md`,
   `.agents/plans/library-all-view-rework.md` (phased A-D; largest; its

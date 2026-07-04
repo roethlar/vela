@@ -1,6 +1,6 @@
 # Plan: Library nav + "All" view rework (consolidated, deduped, cross-source)
 
-Status: DRAFT — not approved for implementation. Covers the `ISSUES.md`
+Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Covers the `ISSUES.md`
 owner-direction entry (2026-07-04): the "All" view must become a consolidated
 listing by content type — one entry per title backed by every source that
 carries it, playback defaulting to the best source with a per-title override

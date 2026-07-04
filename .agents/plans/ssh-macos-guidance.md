@@ -1,6 +1,6 @@
 # Plan: SSH source setup guidance in the UI (macOS-aware)
 
-Status: DRAFT — not approved for implementation. Implements the 2026-07-04
+Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Implements the 2026-07-04
 decision (`.agents/decisions.md`): keep the sshfs dependency; handle macOS
 with in-UI setup help/hint text. Covers the remaining work in the `ISSUES.md`
 SSH entry. macOS live mount testing stays parked; this plan is UI/message
