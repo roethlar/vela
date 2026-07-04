@@ -725,34 +725,6 @@
   <div class="grain" aria-hidden="true"></div>
   <header>
     <span class="brand">Ve<b>la</b></span>
-    {#if authenticated && sources.length > 1}
-      <div class="srcswitch">
-        <button class:active={activeSource === null} onclick={() => selectSource(null)}>All</button>
-        {#each sources as src (src.id)}
-          <button class:active={activeSource === src.id} onclick={() => selectSource(src.id)}>{src.name}</button>
-        {/each}
-      </div>
-    {/if}
-    <nav>
-      {#if authenticated}
-        <button class:active={mode === "home"} onclick={goHome}>Home</button>
-        {#if activeSource === null && sources.length > 1}
-          <!-- All view: a consolidated Library by content type (rework Phase B).
-               Per-connection browsing lives on the source chips above. -->
-          {#each typeTabs as t (t)}
-            <button class:active={mode === "browse" && activeType === t} onclick={() => selectType(t)}>
-              {TYPE_LABELS[t] ?? t}
-            </button>
-          {/each}
-        {:else}
-          {#each sections as s (s.key)}
-            <button class:active={mode === "browse" && active?.key === s.key} onclick={() => select(s)}>
-              {s.title}
-            </button>
-          {/each}
-        {/if}
-      {/if}
-    </nav>
     {#if authenticated}
       <input
         class="search"
@@ -999,6 +971,39 @@
     </div>
   {/snippet}
 
+  <div class="shell">
+    {#if authenticated && !pin}
+      <!-- Library navigation lives in a left sidebar (Infuse reference):
+           Home, the Library entries for the current scope, and the source
+           scopes — freeing the vertical space the top nav used to take. -->
+      <aside class="sidebar">
+        <nav class="sidenav" aria-label="Library">
+          <button class="sideitem" class:active={mode === "home"} onclick={goHome}>Home</button>
+          <div class="sidegroup">Library</div>
+          {#if activeSource === null && sources.length > 1}
+            {#each typeTabs as t (t)}
+              <button class="sideitem" class:active={mode === "browse" && activeType === t} onclick={() => selectType(t)}>
+                {TYPE_LABELS[t] ?? t}
+              </button>
+            {/each}
+          {:else}
+            {#each sections as s (s.key)}
+              <button class="sideitem" class:active={mode === "browse" && active?.key === s.key} onclick={() => select(s)}>
+                {s.title}
+              </button>
+            {/each}
+          {/if}
+          {#if sources.length > 1}
+            <div class="sidegroup">Sources</div>
+            <button class="sideitem" class:active={activeSource === null} onclick={() => selectSource(null)}>All</button>
+            {#each sources as src (src.id)}
+              <button class="sideitem" class:active={activeSource === src.id} onclick={() => selectSource(src.id)}>{src.name}</button>
+            {/each}
+          {/if}
+        </nav>
+      </aside>
+    {/if}
+    <div class="content">
   {#if pin}
     <div class="link">
       <h2>Link this device</h2>
@@ -1030,7 +1035,7 @@
     {#if loading && hubs.length === 0}
       {@render skelRails()}
     {:else if hubs.length === 0}
-      <div class="muted center">Nothing on your home screen yet — pick a library above.</div>
+      <div class="muted center">Nothing on your home screen yet — pick a library from the sidebar.</div>
     {:else}
       <div class="home">
         {#if heroItems.length > 0}
@@ -1081,6 +1086,9 @@
       </main>
     {/if}
   {/if}
+
+    </div>
+  </div>
 
   {#if appInfo}
     <footer class="buildinfo" title="Built {appInfo.buildDate}">
@@ -1221,25 +1229,59 @@
     color: var(--accent);
     font-weight: 700;
   }
-  nav {
+  /* Left library sidebar (Infuse reference): Home / Library / Sources. */
+  .shell {
     display: flex;
-    gap: 0.25rem;
-    flex-wrap: wrap;
+    flex: 1;
+    min-height: 0;
   }
-  nav button {
+  .sidebar {
+    flex: 0 0 212px;
+    width: 212px;
+    overflow-y: auto;
+    border-right: 1px solid var(--border-subtle);
+    padding: 0.8rem 0.55rem 1.2rem;
+  }
+  .content {
+    flex: 1;
+    min-width: 0;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .sidenav {
+    display: flex;
+    flex-direction: column;
+    gap: 0.12rem;
+  }
+  .sidegroup {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-dim);
+    margin: 0.95rem 0.65rem 0.3rem;
+    user-select: none;
+  }
+  .sideitem {
     background: transparent;
     border: none;
     color: var(--text-muted);
-    padding: 0.4rem 0.8rem;
+    text-align: left;
+    width: 100%;
+    padding: 0.42rem 0.65rem;
     border-radius: 8px;
     cursor: pointer;
     font-size: 0.92rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
-  nav button:hover {
+  .sideitem:hover {
     color: var(--text-bright);
     background: var(--surface);
   }
-  nav button.active {
+  .sideitem.active {
     color: var(--text-bright);
     background: var(--surface-2);
   }
@@ -1252,28 +1294,6 @@
     border-radius: 8px;
     font-size: 0.9rem;
     width: 200px;
-  }
-  .srcswitch {
-    display: flex;
-    gap: 0.2rem;
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 0.15rem;
-  }
-  .srcswitch button {
-    background: transparent;
-    border: none;
-    color: var(--text-muted);
-    padding: 0.25rem 0.6rem;
-    border-radius: 6px;
-    cursor: pointer;
-    font-size: 0.85rem;
-  }
-  .srcswitch button.active {
-    color: var(--on-accent);
-    background: var(--accent);
-    font-weight: 700;
   }
   .srctag {
     color: var(--text-dim);

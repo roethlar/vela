@@ -94,10 +94,10 @@ per-connection Files entries.
   restyles the existing top nav first (structure identical either way).
 
 Phase B implemented 2026-07-04. Decisions made at implementation: the
-structure landed in the existing top nav (Home | Movies | TV Shows | Videos
-when viewing All with multiple sources; the named source chips are the
-per-connection "Files" role) — the true left-sidebar rendering is deferred
-to a design-language pass. Paging is stateless-but-exact: each section
+structure landed in the existing top nav first; on 2026-07-04 the owner
+called the vertical stacking and the nav moved to a true left sidebar
+(Home / Library / Sources groups, Infuse reference) with the header keeping
+brand, search, queue, and settings. Paging is stateless-but-exact: each section
 contributes its first start+size source-sorted items and the union is
 re-sorted and windowed in Rust (cost grows with scroll depth; fine at
 library scale). Merged listings sort by title or year only (items don't
