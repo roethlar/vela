@@ -53,4 +53,14 @@ Touches the same function as rev-4; branches are stacked (merge order rev-1 →
 rev-5), each reviewed against its own pinned base.
 
 ## Reviewer comments
-(pending)
+- **Round 1** — codex (codex-cli 0.142.5), reviewed `562302ae` against base
+  `5d2e2b9`, guard_confirmed=true, verdict **reopened**, 2026-07-04 (UTC).
+  Comment: `src-tauri/src/commands.rs:1871` — the absolute `MAX_MERGE_FETCH`
+  stop can still return a short page while a section returned a full window;
+  once `start+size` is at or near 4096, duplicates before the window again
+  end paging early, leaving later titles unreachable.
+  Coder response: correct — the cap recreated the bug at depth. Fix-up:
+  remove the cap; the loop already terminates via `!any_full` (every section
+  returning less than asked means nothing more exists anywhere), so no
+  absolute ceiling is needed. Termination-under-total-duplication covered by
+  a new test.

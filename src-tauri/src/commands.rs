@@ -1840,15 +1840,15 @@ pub async fn get_type_listing(
     Ok(merge_sort_page(ranked, &sort, start, size))
 }
 
-/// Upper bound on how deep the merged fetch will dig per section while
-/// filling a window — a runaway-dedup backstop, far above any real page.
-const MAX_MERGE_FETCH: usize = 4096;
-
 /// Fetch per-section items at increasing depth until the deduped union can
-/// fill the requested window, no section has more to give, or the depth cap
-/// is hit. Without the deepening, duplicates collapsing inside the fetch
-/// window under-fill the page and the frontend reads the short page as "end
-/// of library" — later titles would become unreachable (rev-1).
+/// fill the requested window or no section has more to give. Without the
+/// deepening, duplicates collapsing inside the fetch window under-fill the
+/// page and the frontend reads the short page as "end of library" — later
+/// titles would become unreachable (rev-1). There is deliberately no
+/// absolute depth cap: a cap recreates the same cliff at its own depth
+/// (review round 1); termination is guaranteed because depth doubles and
+/// once every section returns fewer items than asked (`!any_full`), nothing
+/// more exists anywhere.
 async fn fetch_merged(
     section_refs: &[(std::sync::Arc<dyn crate::source::MediaSource>, String)],
     section_type: &str,
@@ -1868,10 +1868,10 @@ async fn fetch_merged(
             }
         }
         let deduped = dedup_across_sources(merged);
-        if deduped.len() >= want || !any_full || depth >= MAX_MERGE_FETCH {
+        if deduped.len() >= want || !any_full {
             return deduped;
         }
-        depth = depth.saturating_mul(2).min(MAX_MERGE_FETCH);
+        depth = depth.saturating_mul(2);
     }
 }
 
@@ -2219,6 +2219,25 @@ mod merge_tests {
             "deepening must surface titles beyond the collapsed window, got {}",
             out.len()
         );
+    }
+
+    // Round-1 fix-up guard: with every entry a duplicate of one title the
+    // window can never fill — the capless loop must still terminate (every
+    // section exhausted → !any_full) and return the one real title.
+    #[test]
+    fn merged_fetch_terminates_when_everything_duplicates() {
+        let items = vec![
+            with_ids(item("Alpha", Some(2020), "fake"), &["imdb:tt1"]),
+            with_ids(item("Alpha 4K", Some(2020), "fake"), &["imdb:tt1"]),
+            with_ids(item("Alpha DC", Some(2020), "fake"), &["imdb:tt1"]),
+        ];
+        let refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+            vec![(std::sync::Arc::new(FakeItems { items }), "sec".into())];
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let out = rt.block_on(fetch_merged(&refs, "movie", "titleSort:asc", 3));
+        assert_eq!(out.len(), 1, "one unique title; loop must not hang or drop it");
     }
 
     #[test]
