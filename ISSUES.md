@@ -23,14 +23,18 @@ Reported on Linux against a live Plex server; code-traced same day.
   (Plex exposes this in its API; Jellyfin/Emby equivalents need
   investigation). Until the server side is wired, removal must at least
   stick locally (recents) and survive the merge with server hubs.
-- Owner confusion, not a defect (explained 2026-07-04): "On Deck" and the
-  Continue Watching hero are different lists by design — the hero is Vela's
-  recents merged with the servers' continue/resume hubs (in-progress
-  items), while On Deck is Plex's own "what's next" hub (next-up episodes,
-  including after a finished episode) rendered as a 16:9 row per the
-  2026-07-04 split-artwork decision. Overlap for in-progress episodes is
-  expected. If the duplication annoys in practice, options are hiding the
-  On Deck row or deduping hero items out of it — owner call, not queued.
+- QUEUED (owner direction 2026-07-04): collapse On Deck into the Continue
+  Watching hero so both feed ONE cover-flow interface — no separate On Deck
+  row. Background: the two are different lists by design (hero = Vela's
+  recents ∪ the servers' continue/resume hubs; On Deck = Plex's "what's
+  next" hub with next-up episodes) and overlap for in-progress episodes;
+  the owner wants them merged rather than stacked. Direction: fold
+  `hubPolicy`'s "landscape" (ondeck) bucket into "hero", dedupe by rating
+  key against recents/continue items (recents-first ordering as today),
+  and drop the 16:9 On Deck row. This refines the 2026-07-04 split-artwork
+  decision's On Deck treatment; record the supersession when implemented.
+  Needs a plan + owner approval of ordering semantics (where next-up
+  episodes rank against in-progress items in the flow).
 
 ## Open - Owner-Reported (2026-07-04)
 
