@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — one version becomes unreachable from the All view, and opening the card's context menu throws (duplicate Svelte each-keys).
 **Status**: In progress
 **Branch**: `fix/rev-2-same-source-collapse` (stacked on rev-1)
-**Commit**: (filled after commit)
+**Commit**: `5d6e7ffa13c49296f1d155d8cf029e952c83e79b`
 
 ## Evidence
 `src-tauri/src/commands.rs` `dedup_across_sources`: grouping ignores whether
