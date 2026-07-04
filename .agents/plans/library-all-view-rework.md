@@ -6,7 +6,9 @@ listing by content type — one entry per title backed by every source that
 carries it, playback defaulting to the best source with a per-title override
 — with persistent metadata caching for SMB/local as the performance
 prerequisite. Related: `.agents/plans/smb-source-labeling.md` (gives mounts
-real source identity; its ranking phase depends on that landing first).
+real source identity; the ranking phase depends on it landing first). Design
+north star: the 2026-07-04 design-language decision (`.agents/decisions.md`)
+with `reference_screens/infuse-home-reference.png`.
 
 ## Facts (confirmed by code reading, 2026-07-04)
 
@@ -59,21 +61,28 @@ background.
   `metadata_cache.json` writes atomic via the same temp+rename pattern —
   closes the open P1 "bound and decouple metadata cache writes" remainder.
 
-### Phase B — content-type nav for the All view
+### Phase B — consolidated Library nav (reference-shaped)
 
-Goal: All view nav stops listing (library × source) and shows content types.
+Goal: navigation stops listing (library × source) and takes the reference
+shape: Home, a consolidated Library split by content type, and
+per-connection Files entries.
 
 - New aggregated listing command (e.g. `get_type_listing(content_type,
   page)`): fan out `items()` across every section of that `section_type`
   over all sources, tag items with their source, and return a merged,
-  title-sorted page. Per-source views keep today's behavior.
-- Frontend: when `activeSource === null`, nav renders `Home | Movies |
-  TV Shows | Videos` (types present in the union); selecting one renders the
-  merged grid. No dedup yet — duplicates appear once per source until
-  Phase C, tagged so the change is honest.
-- Open point: paging strategy (merged infinite scroll needs either
+  title-sorted page.
+- Frontend: replace the source-chip row + flat section tabs with the
+  reference structure — `Home`; `Library` with content-type entries
+  (Movies / TV Shows / Videos as present in the union); `Files` with one
+  entry per connection (each server, each named mount from
+  `smb-source-labeling.md`) preserving today's per-source sections for
+  direct browsing.
+- No dedup yet — duplicates appear once per source until Phase C, tagged so
+  the change is honest.
+- Open points: paging strategy (merged infinite scroll needs either
   per-source cursors merged server-side — proposed — or fetch-N-per-source
-  and client merge).
+  and client merge); whether Phase B renders a true left sidebar or
+  restyles the existing top nav first (structure identical either way).
 
 ### Phase C — cross-source identity and dedup
 

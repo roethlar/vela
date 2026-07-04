@@ -46,7 +46,11 @@ Keep it short and update it when important repo facts change.
   `.agents/plans/library-all-view-rework.md` (phased A-D; largest; its
   ranking phase depends on smb-source-labeling landing first), and
   `.agents/plans/ssh-macos-guidance.md` (implements the 2026-07-04
-  macOS-SSH decision; live mount testing stays parked).
+  macOS-SSH decision; live mount testing stays parked). A 2026-07-04
+  design-language decision (Infuse reference,
+  `reference_screens/infuse-home-reference.png`) resolved the artwork
+  plan's poster-vs-content question as the split policy and shapes the
+  rework's nav phase.
 - Finish live smoke tests: Emby, local folders, SMB browse/playback; or keep
   the live-integration caveat explicit.
 - If updating broader governance metadata, refresh `.agents/repo-map.json` and
