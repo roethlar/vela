@@ -266,8 +266,9 @@ Concrete direction (refined by the owner the same day):
 - Continue Watching is a single hero carousel, not a card row: one large
   centered 16:9 card showing the most recently watched item — scene still
   for episodes, backdrop art for movies — with the progress bar and a
-  title + S·E/episode-name caption; prev/next controls ("<< HEROIC >>")
-  swap the hero through the other recent items.
+  title + S·E/episode-name caption. Prev/next arrows float overlaid on the
+  hero image's left/right edges (not separate side controls) and swap the
+  hero through the other recent items.
 - Other resume-style content (e.g. On Deck) uses the same landscape artwork
   rules; whether it folds into the hero rotation or stays a row is settled
   in the artwork plan.

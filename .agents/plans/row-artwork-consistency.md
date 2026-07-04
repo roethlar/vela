@@ -40,10 +40,12 @@ internally uniform.
    - Continue Watching: a single hero carousel replaces the card row — one
      large centered 16:9 card showing the most recently watched item (scene
      still for episodes, backdrop for movies), with the progress bar and
-     title + S·E/episode-name caption; prev/next controls swap the hero
-     through the hub's other items in recency order (arrows are the
-     baseline; swipe/trackpad is a nicety). The hero requests larger
-     transcode dimensions than grid artwork.
+     title + S·E/episode-name caption. Prev/next arrows float overlaid on
+     the hero image's left/right edges — not separate side controls — and
+     swap the hero through the hub's other items in recency order (arrows
+     are the baseline, proposed hover/focus-revealed to keep the artwork
+     clean; swipe/trackpad is a nicety). The hero requests larger transcode
+     dimensions than grid artwork.
    - On Deck: same 16:9 artwork rules (stills for episodes, backdrops for
      movies); whether it stays a landscape row under the hero or folds into
      the hero rotation is an open point below.
