@@ -18,6 +18,12 @@ Intake 2026-07-04: codex generation pass returned 4 candidates; the coder
 contributed 2. Triage: 5 admitted (4 codex + 1 coder), 1 declined. Fix
 branches are STACKED (shared files); merge order is rev-1 → rev-5.
 
+Loop review phase COMPLETE 2026-07-04: all five findings verified (rev-1
+took three rounds — two codex reopens drove the fix from window-deepening to
+an immutable pagination snapshot; rev-2..5 accepted in one round each).
+Awaiting owner-gated merge: `fix/rev-5-adopt-most-progressed` contains the
+whole verified stack (rev-1 → rev-5) on top of main.
+
 ## Findings
 
 | ID | Severity | Impact (one line) | Status | Branch |
@@ -26,5 +32,5 @@ branches are STACKED (shared files); merge order is rev-1 → rev-5.
 | rev-2 | MEDIUM | Same-source versions collapse to one card; context menu crashes on duplicate keys | `[x]` | `fix/rev-2-same-source-collapse` |
 | rev-3 | MEDIUM | Mark watched on merged cards routes to watch-incapable source, always errors | `[x]` | `fix/rev-3-watch-routing` |
 | rev-4 | LOW | All-source failure renders as empty grid with no error | `[x]` | `fix/rev-4-surface-total-failure` |
-| rev-5 | LOW | Merged card hides real progress when first backing reported unwatched | `[~]` | `fix/rev-5-adopt-most-progressed` |
+| rev-5 | LOW | Merged card hides real progress when first backing reported unwatched | `[x]` | `fix/rev-5-adopt-most-progressed` |
 | rev-6 | — | (declined at intake: scroll reset on listings-updated is designed refresh-on-change) | `[-]` | |

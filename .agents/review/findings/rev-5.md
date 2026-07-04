@@ -1,7 +1,7 @@
 # rev-5: Merged watch state adopts the first server's state, hiding real progress
 
 **Severity**: LOW — an in-progress title can show no progress bar in the merged view when another backing reported "unwatched" first.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `fix/rev-5-adopt-most-progressed` (stacked on rev-4)
 **Commit**: `49bfe87` (code); doc recorded in a follow-up commit
 
@@ -48,4 +48,8 @@ None (coder-originated finding).
 Stacked on rev-4's branch; same function as rev-2.
 
 ## Reviewer comments
-(pending)
+- **Round 1** — codex (codex-cli 0.142.5), reviewed `a0c7e59` against base
+  `40338cf` (stacked increment), guard_confirmed=true (FAIL-then-PASS
+  observed in its own isolated worktree), verdict **accepted**, 2026-07-04
+  (UTC). Comments: no material defects; the swap-site running-max invariant
+  verified. Branch ready for owner-gated merge.
