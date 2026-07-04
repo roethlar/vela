@@ -21,8 +21,9 @@ branches are STACKED (shared files); merge order is rev-1 → rev-5.
 Loop review phase COMPLETE 2026-07-04: all five findings verified (rev-1
 took three rounds — two codex reopens drove the fix from window-deepening to
 an immutable pagination snapshot; rev-2..5 accepted in one round each).
-Awaiting owner-gated merge: `fix/rev-5-adopt-most-progressed` contains the
-whole verified stack (rev-1 → rev-5) on top of main.
+MERGED to main 2026-07-04 (owner go; fast-forward to `3310446`, content
+verified identical). Loop CLOSED; fix branches deleted. This file and
+`findings/` remain as the durable review trail.
 
 ## Findings
 

@@ -77,7 +77,9 @@ Keep it short and update it when important repo facts change.
   `Shift+I` stats should show no token), EDL split-file media exercised only
   by unit tests, and Jellyfin/Emby stream-URL parity as a follow-up.
 
-- Active review loop: see `.agents/review/index.md`.
+- The 2026-07-04 batch passed a cross-harness review loop (playbook
+  `reviewloop`, reviewer codex): 5 findings admitted, fixed, guard-proven,
+  independently verified, merged to main. Trail: `.agents/review/index.md`.
 
 ## Blockers
 
