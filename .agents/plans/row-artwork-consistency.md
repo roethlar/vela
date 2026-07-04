@@ -3,7 +3,10 @@
 Status: DRAFT — not approved for implementation. Covers the `ISSUES.md` entry
 (Open - Owner-Reported 2026-07-04): "Rows mix poster and content-frame
 artwork" — 2:3 posters next to 16:9 episode stills at different heights in
-the same Home row.
+the same Home row. The poster-vs-content-view question was resolved by the
+owner on 2026-07-04 as the split policy below (design-language decision,
+`.agents/decisions.md`; reference
+`reference_screens/infuse-home-reference.png`).
 
 ## Facts (confirmed by code reading, 2026-07-04)
 
@@ -21,61 +24,76 @@ the same Home row.
   episodes get a TVmaze episode still (`src-tauri/src/source/metadata.rs:
   393-427`). So an episode card cannot show its series poster today, and a
   movie card has no 16:9 art.
-- Mixing only happens in hub rows (Continue Watching, On Deck, Recently
-  Added TV): they interleave movies/shows (2:3) with episodes (16:9). Browse
-  grids are naturally uniform (a season's episode list is all-16:9).
+- Mixing only happens in hub rows: they interleave movies/shows (2:3) with
+  episodes (16:9). Browse grids are naturally uniform.
+- Local items never appear in resume hubs: the local source has no watch
+  state (`played: None`, `local.rs:252`; `ProgressTarget::None`,
+  `local.rs:508-524`), so Continue Watching / On Deck entries are always
+  server-backed.
 
-## Design (proposed: poster-uniform hub rows)
+## Design (split policy — decided 2026-07-04, Infuse reference)
 
-Hub rows render every card 2:3; episodes use their series poster. Browse
-grids, season episode lists, and the queue drawer keep today's behavior.
-Poster-uniform is proposed over landscape-uniform because portrait artwork
-exists for every media type on every backend, while 16:9 art for movies is
-not captured anywhere and is weakest for local files; the episode caption
-(S·E line, `grandparentTitle`) already identifies the episode.
+Resume rows show scenes; catalog rows and grids show posters; every row is
+internally uniform.
 
-1. Backend — carry series artwork for episodes as a new optional field
-   `ItemDto.series_poster` (`seriesPoster`, `src-tauri/src/source/mod.rs`):
-   - Plex: parse `grandparentThumb` into `PlexVideo` (parser arms at
-     `plex_library.rs:1134-1151`) and transcode it exactly like `poster`
-     (`source/plex.rs:80-83`).
-   - Jellyfin/Emby: capture `SeriesId` + `SeriesPrimaryImageTag` on
-     `BaseItem` (`jellyfin.rs:414-429`) and build the series-primary URL with
-     the existing `poster_url` shape (`jellyfin.rs:196-206`).
-   - Local: reuse the show-level TVmaze lookup in `metadata.rs` to cache one
-     show poster per series; if unavailable, leave `series_poster` empty.
+1. Row policy:
+   - Resume rows (Continue Watching, On Deck): every card 16:9 — episodes
+     keep their scene stills (current behavior), movies/shows use backdrop
+     art. Progress bar and the title + S·E/episode-name caption stay.
+   - Catalog rows (Recently Added Movies/TV, similar hubs) and library
+     grids: every card 2:3 — episodic entries render series artwork, not
+     episode stills (the reference shows exactly this: a series poster for
+     an episodic entry in Recently Added).
+   - Season/episode drill-down lists and the queue drawer keep today's
+     behavior (already uniform in context).
+   - The movie-backdrop gap for local files does not bite: local items
+     cannot appear in resume rows (no watch state), and catalog rows never
+     use backdrops.
+2. Backend — two new optional `ItemDto` fields
+   (`src-tauri/src/source/mod.rs`):
+   - `series_poster` (`seriesPoster`): Plex `grandparentThumb` (parser arms
+     at `plex_library.rs:1134-1151`), Jellyfin/Emby `SeriesId` +
+     `SeriesPrimaryImageTag` (`jellyfin.rs:414-429`; URL via the existing
+     `poster_url` shape, `jellyfin.rs:196-206`), local via the show-level
+     TVmaze lookup in `metadata.rs` where available.
+   - `backdrop`: Plex `art` attribute (same parser and photo-transcode
+     mechanism as `poster`, landscape dimensions), Jellyfin/Emby
+     `BackdropImageTags[0]`. Not populated for local items.
    - Token exposure is unchanged in kind: these are the same
      poster-transcode URL forms already accepted as local-only exposure.
-2. Frontend (`src/routes/+page.svelte`):
-   - In hub-row rendering only: drop the `.landscape` class and render
-     `item.seriesPoster ?? item.poster` for episode/video items; all hub
-     cards use the 118px 2:3 geometry. The `.noart` fallback then inherits a
-     uniform 2:3 box in rows too.
-   - Browse grid (`:833-837`), episode lists, and the queue drawer thumb
-     (`:897-901`) are untouched.
+3. Frontend (`src/routes/+page.svelte`): the shape choice at `:691` becomes
+   row-policy-driven instead of mediaType-driven. Resume rows render
+   landscape for all items (`backdrop ?? poster` for movies/shows, stills
+   for episodes); catalog rows/grids render portrait for all items
+   (`seriesPoster ?? poster` for episodes). The `.noart` fallback inherits
+   the row's box shape either way.
 
-Non-goals: no backdrop/16:9 art capture for movies, no per-row "smart"
-shape voting, no changes to image failure handling (`failedPosters`), no
-detail-page artwork work.
+Non-goals: no true position frames (Plex BIF / Jellyfin trickplay preview
+images — server-generated, a separate feature if ever), no per-row "smart"
+shape voting, no change to image failure handling (`failedPosters`), no
+nav/sidebar work (that's `.agents/plans/library-all-view-rework.md`).
 
 ## Verification
 
 - Full CI set: `npm run check`, `npm run build`; from `src-tauri/`:
   `cargo check --locked`, `cargo clippy --all-targets --locked -- -D
   warnings`, `cargo test --locked`.
-- Rust unit tests: Plex XML parsing picks up `grandparentThumb`;
-  Jellyfin series-primary URL assembly; ItemDto serialization field name.
-- Owner playtest: Home with the known mixed row (movie + episode in Continue
-  Watching) shows equal-height 2:3 cards; episode cards show series art with
-  the S·E caption; a local-source episode row degrades to `.noart` (or show
-  art if the lookup lands) without layout breakage.
+- Rust unit tests: Plex XML parsing picks up `grandparentThumb` and `art`;
+  Jellyfin series-primary and backdrop URL assembly; ItemDto serialization
+  field names.
+- Owner playtest against the reference screenshot: Continue Watching/On Deck
+  render equal-height 16:9 cards including an in-progress movie (backdrop);
+  Recently Added rows render equal-height 2:3 posters including episodic
+  entries (series art); a local-source catalog row degrades to uniform 2:3
+  `.noart` boxes without layout breakage.
 
 ## Open points to settle at approval
 
-1. Confirm poster-uniform over landscape-uniform (landscape would need
-   movie/show backdrop capture on all backends — larger, weaker for local).
+1. Resume-row card size: adopt larger, reference-like hero cards in this
+   change, or keep current row heights and treat sizing as a later
+   design-language pass (proposed: sizing later, shape now).
 2. Whether local-source series art ships in v1 or `series_poster` stays
-   backend-server-only at first (local rows would show 2:3 `.noart` boxes).
+   server-backend-only at first.
 3. Whether "Recently Added TV" should list shows/seasons instead of episodes
-   (sidesteps stills entirely for that row) — product call, separate from
+   (the reference shows series-level entries) — product call, separate from
    this plan's mechanics.
