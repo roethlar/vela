@@ -22,8 +22,8 @@ use std::sync::{Mutex, OnceLock};
 
 use pavao_sys::{
     libsmb_file_info, smbc_closedir_fn, smbc_free_context, smbc_getFunctionClosedir,
-    smbc_getFunctionOpendir, smbc_getFunctionReaddirPlus, smbc_init_context,
-    smbc_new_context, smbc_setFunctionAuthDataWithContext,
+    smbc_getFunctionOpendir, smbc_getFunctionReaddirPlus, smbc_getFunctionStat,
+    smbc_init_context, smbc_new_context, smbc_setFunctionAuthDataWithContext,
     smbc_setOptionNoAutoAnonymousLogin, smbc_setTimeout, SMBCCTX,
 };
 
@@ -35,12 +35,13 @@ fn is_dir_attrs(attrs: u16) -> bool {
     attrs & DOS_ATTR_DIRECTORY != 0
 }
 
-/// One directory entry. (Size/mtime and positioned reads arrive with
-/// their first users: the native listing provider and the stream proxy.)
+/// One directory entry or stat result. (Positioned reads arrive with their
+/// first user, the stream proxy.)
 #[derive(Debug, Clone)]
 pub struct SmbEntry {
     pub name: String,
     pub is_dir: bool,
+    pub size: u64,
 }
 
 struct Creds {
@@ -269,12 +270,41 @@ impl SmbConnection {
                 out.push(SmbEntry {
                     name,
                     is_dir: is_dir_attrs((*info).attrs),
+                    size: (*info).size as u64,
                 });
             }
             Ok(out)
         }
     }
 
+    /// Stat one share-relative path. Blocking; run under spawn_blocking.
+    pub fn stat(&self, relative: &str) -> Result<SmbEntry, String> {
+        let url = CString::new(self.url(relative))
+            .map_err(|_| "SMB path contains a NUL byte".to_string())?;
+        let name = relative
+            .rsplit('/')
+            .find(|p| !p.is_empty())
+            .unwrap_or(&self.share)
+            .to_string();
+        let guard = self
+            .ctx
+            .lock()
+            .map_err(|_| "SMB connection lock poisoned".to_string())?;
+        let ctx = guard.0;
+        unsafe {
+            let stat_fn =
+                smbc_getFunctionStat(ctx).ok_or("libsmbclient has no stat function")?;
+            let mut st: libc::stat = std::mem::zeroed();
+            if stat_fn(ctx, url.as_ptr(), &mut st) != 0 {
+                return Err(last_error("could not stat SMB path"));
+            }
+            Ok(SmbEntry {
+                name,
+                is_dir: (st.st_mode & libc::S_IFMT) == libc::S_IFDIR,
+                size: st.st_size.max(0) as u64,
+            })
+        }
+    }
 }
 
 impl Drop for SmbConnection {

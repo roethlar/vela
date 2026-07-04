@@ -11,6 +11,7 @@ mod source;
 mod sshfs;
 mod ui_events;
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -113,6 +114,7 @@ pub fn run() {
     let local_family = source::local::local_family(
         &cfg,
         smb_runtime_folders,
+        smb_runtime_vfs,
         ssh_runtime_folder,
         safe_user_media_root,
     );
@@ -410,10 +412,17 @@ async fn refresh_local_source(app_handle: &tauri::AppHandle) {
     let family = source::local::local_family(
         &cfg,
         smb_runtime_folders,
+        smb_runtime_vfs,
         ssh_runtime_folder,
         safe_user_media_root,
     );
-    for folder in family.iter().flat_map(|m| &m.folders) {
+    // Native-provider members' folder paths are share-relative, not local
+    // paths — allow-listing them would grant unrelated local directories.
+    for folder in family
+        .iter()
+        .filter(|m| m.vfs.is_none())
+        .flat_map(|m| &m.folders)
+    {
         let _ = app_handle
             .asset_protocol_scope()
             .allow_directory(&folder.path, true);
@@ -427,6 +436,22 @@ async fn refresh_local_source(app_handle: &tauri::AppHandle) {
     }
 }
 
+/// Linux-family: native SMB — folders live in the provider's namespace
+/// (share-relative, leading slash); no mount lookup at all.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
+    m.folders
+        .iter()
+        .map(|folder| config::LocalFolder {
+            id: folder.id.clone(),
+            name: folder.name.clone(),
+            path: crate::source::smb_vfs_path(&folder.path),
+            kind: folder.kind.clone(),
+        })
+        .collect()
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
     let Some(root) = smb_mount_root(m) else {
         return Vec::new();
@@ -442,6 +467,22 @@ fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
         .collect()
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_runtime_vfs(
+    m: &config::SmbMount,
+) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    Some(std::sync::Arc::new(crate::source::smb_vfs::SmbVfs::new(
+        m.clone(),
+    )))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn smb_runtime_vfs(
+    _m: &config::SmbMount,
+) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    None
+}
+
 fn ssh_runtime_folder(m: &config::SshMount) -> Option<config::LocalFolder> {
     if !sshfs::is_active_mount(m) {
         return None;
@@ -454,11 +495,6 @@ fn ssh_runtime_folder(m: &config::SshMount) -> Option<config::LocalFolder> {
     })
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
-    smb::resolved_mountpoint(m).filter(|path| Path::new(path).is_dir())
-}
-
 #[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
     if Path::new(&m.mountpoint).is_dir() {
@@ -468,6 +504,7 @@ fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
     }
 }
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_path_string_for_relative(root: &str, relative: &str) -> String {
     let mut path = PathBuf::from(root);
     for part in relative.split('/').filter(|part| !part.is_empty()) {

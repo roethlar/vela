@@ -46,16 +46,28 @@ pub struct LocalFamilyMember {
     pub name: String,
     pub kind: &'static str,
     pub folders: Vec<LocalFolder>,
+    /// A native remote provider (e.g. SMB over libsmbclient). `None` means
+    /// the member's folders are real local paths served through std::fs.
+    pub vfs: Option<std::sync::Arc<dyn Vfs>>,
 }
 
 impl LocalFamilyMember {
     pub fn build(&self) -> std::sync::Arc<dyn MediaSource> {
-        std::sync::Arc::new(LocalSource::new(
-            self.id.clone(),
-            self.name.clone(),
-            self.kind,
-            self.folders.clone(),
-        ))
+        match &self.vfs {
+            Some(vfs) => std::sync::Arc::new(LocalSource::with_vfs(
+                self.id.clone(),
+                self.name.clone(),
+                self.kind,
+                self.folders.clone(),
+                vfs.clone(),
+            )),
+            None => std::sync::Arc::new(LocalSource::new(
+                self.id.clone(),
+                self.name.clone(),
+                self.kind,
+                self.folders.clone(),
+            )),
+        }
     }
 }
 
@@ -65,14 +77,16 @@ impl LocalFamilyMember {
 /// resolution is injected because boot and live rebuild derive mount folders
 /// differently; `safe_root` is applied uniformly to every member's folders.
 /// Members that end up with no folders are omitted entirely.
-pub fn local_family<FS, FH, SR>(
+pub fn local_family<FS, FV, FH, SR>(
     cfg: &AppConfig,
     smb_folders: FS,
+    smb_vfs: FV,
     ssh_folder: FH,
     safe_root: SR,
 ) -> Vec<LocalFamilyMember>
 where
     FS: Fn(&SmbMount) -> Vec<LocalFolder>,
+    FV: Fn(&SmbMount) -> Option<std::sync::Arc<dyn Vfs>>,
     FH: Fn(&SshMount) -> Option<LocalFolder>,
     SR: Fn(&str) -> bool,
 {
@@ -95,12 +109,17 @@ where
             name: "Local".to_string(),
             kind: "local",
             folders: plain,
+            vfs: None,
         });
     }
     for m in &cfg.smb_mounts {
+        let vfs = smb_vfs(m);
+        // Native members' folders are share-relative, scoped by the
+        // provider itself (logical normalization, no `..`, no symlinks
+        // client-side) — the local-filesystem root heuristics don't apply.
         let folders: Vec<_> = smb_folders(m)
             .into_iter()
-            .filter(|f| safe_root(&f.path))
+            .filter(|f| vfs.is_some() || safe_root(&f.path))
             .collect();
         if !folders.is_empty() {
             members.push(LocalFamilyMember {
@@ -108,6 +127,7 @@ where
                 name: m.name.clone(),
                 kind: "smb",
                 folders,
+                vfs,
             });
         }
     }
@@ -118,6 +138,7 @@ where
                 name: m.name.clone(),
                 kind: "ssh",
                 folders: vec![f],
+                vfs: None,
             });
         }
     }
@@ -138,13 +159,29 @@ pub struct LocalSource {
     /// Filesystem access for walking/sidecars — std::fs for plain folders;
     /// injectable so native remote providers reuse the whole pipeline.
     vfs: Arc<dyn Vfs>,
+    /// True when `vfs` is a native remote provider: item keys are provider
+    /// paths, not playable local files, so resolve_stream must not hand
+    /// them to mpv directly.
+    native_remote: bool,
 }
 
 impl LocalSource {
     pub fn new(id: String, name: String, kind: &'static str, folders: Vec<LocalFolder>) -> Self {
-        Self::with_vfs(id, name, kind, folders, Arc::new(StdFs))
+        Self {
+            id,
+            name,
+            kind,
+            folders,
+            meta: metadata::shared(),
+            listings: listing_cache::shared(),
+            vfs: Arc::new(StdFs),
+            native_remote: false,
+        }
     }
 
+    /// A member served by a native remote provider (e.g. SMB): the whole
+    /// listing/cache/metadata pipeline runs over `vfs`; playback resolution
+    /// is provider-specific and NOT a local file path.
     pub fn with_vfs(
         id: String,
         name: String,
@@ -160,6 +197,7 @@ impl LocalSource {
             meta: metadata::shared(),
             listings: listing_cache::shared(),
             vfs,
+            native_remote: true,
         }
     }
 
@@ -228,6 +266,7 @@ impl LocalSource {
             meta: self.meta.clone(),
             listings: self.listings.clone(),
             vfs: self.vfs.clone(),
+            native_remote: self.native_remote,
         }
     }
 }
@@ -785,6 +824,13 @@ impl MediaSource for LocalSource {
         if !self.within_roots(path) || !self.vfs.is_file(path) {
             return Err("file is not inside a configured local folder".into());
         }
+        if self.native_remote {
+            // Provider paths aren't playable files. The loopback stream
+            // proxy (next slice of the smb-native plan) resolves these.
+            return Err(
+                "SMB playback over the native connection lands in the next update".into(),
+            );
+        }
         // mpv plays the path directly; no token, no network, no resume tracking.
         Ok(StreamResolution {
             url: item_key.to_string(),
@@ -957,6 +1003,7 @@ mod tests {
         let fam = local_family(
             &cfg,
             |_m| vec![folder("smbf", "movies", "/mnt/smb/movies")],
+            |_m| None,
             |_m| Some(folder("sshfld", "remote", "/mnt/ssh")),
             |_p| true,
         );
@@ -987,7 +1034,7 @@ mod tests {
 
         // The SMB mount resolves no folders and the plain folder fails the
         // safe-root check, so no member survives at all.
-        let fam = local_family(&cfg, |_m| Vec::new(), |_m| None, |p| p != "/");
+        let fam = local_family(&cfg, |_m| Vec::new(), |_m| None, |_m| None, |p| p != "/");
         assert!(fam.is_empty());
     }
 

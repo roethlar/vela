@@ -643,20 +643,38 @@ pub async fn add_smb_folder(
         .iter()
         .find(|m| m.id == id)
         .ok_or("no such SMB mount")?;
-    let root = smb_mount_root(mount).ok_or_else(|| {
-        format!(
-            "SMB share //{}/{} is not mounted or readable",
-            mount.server, mount.share
-        )
-    })?;
-    let folder_path = smb_path_string_for_relative(&root, &relative);
-    if !Path::new(&folder_path).is_dir() {
-        return Err("that SMB folder is not readable".into());
-    }
-    if !safe_user_media_root(&folder_path) {
-        return Err("choose a specific media folder, not a filesystem or home root".into());
-    }
+    // Linux-family: validate over the native connection — the share is
+    // never OS-mounted, so there is no local path to probe or allow.
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
+        let _ = &app; // asset protocol is unused for native SMB folders
+        let probe = mount.clone();
+        let rel = relative.clone();
+        let is_dir = tauri::async_runtime::spawn_blocking(move || {
+            crate::smb_client::connect_mount(&probe).and_then(|c| c.stat(&rel))
+        })
+        .await
+        .map_err(|e| format!("SMB probe task failed: {e}"))??
+        .is_dir;
+        if !is_dir {
+            return Err("that SMB folder is not readable".into());
+        }
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let root = smb_mount_root(mount).ok_or_else(|| {
+            format!(
+                "SMB share //{}/{} is not mounted or readable",
+                mount.server, mount.share
+            )
+        })?;
+        let folder_path = smb_path_string_for_relative(&root, &relative);
+        if !Path::new(&folder_path).is_dir() {
+            return Err("that SMB folder is not readable".into());
+        }
+        if !safe_user_media_root(&folder_path) {
+            return Err("choose a specific media folder, not a filesystem or home root".into());
+        }
         use tauri::Manager;
         let _ = app
             .asset_protocol_scope()
@@ -1045,11 +1063,30 @@ fn ssh_mountpoint_referenced(mountpoint: &str) -> Option<bool> {
 }
 
 fn live_local_family(cfg: &AppConfig) -> Vec<crate::source::local::LocalFamilyMember> {
-    crate::source::local::local_family(cfg, smb_live_folders, ssh_live_folder, |p| {
-        safe_user_media_root(p)
-    })
+    crate::source::local::local_family(
+        cfg,
+        smb_live_folders,
+        smb_live_vfs,
+        ssh_live_folder,
+        safe_user_media_root,
+    )
 }
 
+/// Linux-family: native SMB — mirror of boot's `smb_runtime_folders`.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
+    selected_smb_folders(m)
+        .iter()
+        .map(|folder| LocalFolder {
+            id: folder.id.clone(),
+            name: folder.name.clone(),
+            path: crate::source::smb_vfs_path(&folder.path),
+            kind: folder.kind.clone(),
+        })
+        .collect()
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
     let Some(root) = smb_mount_root(m) else {
         return Vec::new();
@@ -1069,6 +1106,18 @@ fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
             })
         })
         .collect()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_live_vfs(m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    Some(std::sync::Arc::new(crate::source::smb_vfs::SmbVfs::new(
+        m.clone(),
+    )))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn smb_live_vfs(_m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    None
 }
 
 fn ssh_live_folder(m: &SshMount) -> Option<LocalFolder> {
