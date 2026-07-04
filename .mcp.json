@@ -1,8 +1,0 @@
-{
-  "mcpServers": {
-    "ptk": {
-      "command": "dotnet",
-      "args": ["run", "-v", "q", "--project", "../Powershell-Token-Killer/server/PtkMcpServer"]
-    }
-  }
-}
