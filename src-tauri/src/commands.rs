@@ -2026,6 +2026,19 @@ pub async fn set_merged_override(
     })
 }
 
+/// Rank a watch state for merged adoption: finished > in-progress (deeper
+/// offset wins the tie) > known-unwatched > unknown. Local-family items are
+/// unknown (`played: None`), so any server-reported state outranks them.
+/// First-Some-wins was order-dependent and hid real progress (rev-5).
+fn watch_rank(played: Option<bool>, offset: Option<u64>) -> (u8, u64) {
+    match (played, offset) {
+        (Some(true), _) => (3, 0),
+        (_, Some(o)) if o > 0 => (2, o),
+        (Some(false), _) => (1, 0),
+        _ => (0, 0),
+    }
+}
+
 /// Collapse the same title carried by several sources into one entry backed
 /// by all of them (rework Phase C). Identity: any shared provider id
 /// ("imdb:tt…"), else normalized title + exact year (a missing year only
@@ -2087,8 +2100,11 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
                 if !backing.contains(&item_ref) {
                     backing.push(item_ref.clone());
                 }
-                // Adopt missing watch state before a possible display swap.
-                if group.played.is_none() && item.played.is_some() {
+                // Adopt the most-progressed watch state across backings
+                // before a possible display swap (rev-5).
+                if watch_rank(item.played, item.view_offset_ms)
+                    > watch_rank(group.played, group.view_offset_ms)
+                {
                     group.played = item.played;
                     group.view_offset_ms = item.view_offset_ms;
                 }
@@ -2113,7 +2129,12 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
                         b.insert(0, item_ref.clone());
                         b
                     });
-                    if group.played.is_none() && keep_played.is_some() {
+                    // `keep_*` already holds the most-progressed state seen
+                    // (the adopt above ran first); restore it if it outranks
+                    // the new face's own state (rev-5).
+                    if watch_rank(keep_played, keep_offset)
+                        > watch_rank(group.played, group.view_offset_ms)
+                    {
                         group.played = keep_played;
                         group.view_offset_ms = keep_offset;
                     }
@@ -2535,6 +2556,34 @@ mod merge_tests {
             &Default::default(),
         );
         assert_eq!(ranked[0].watch_key, None);
+    }
+
+    // rev-5 guard: merged watch state is the most-progressed across
+    // backings — real progress must survive an earlier plain-unwatched
+    // report, and finished beats in-progress.
+    #[test]
+    fn dedup_adopts_the_most_progressed_watch_state() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.played = Some(false); // plain unwatched, reported first
+        let mut b = item("Dune", Some(2021), "jf");
+        b.played = Some(false);
+        b.view_offset_ms = Some(30 * 60 * 1000); // real progress
+        let out = dedup_across_sources(vec![a, b]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].view_offset_ms,
+            Some(30 * 60 * 1000),
+            "progress must not be hidden by an earlier unwatched report"
+        );
+
+        let mut c = item("Alien", Some(1979), "jf");
+        c.played = Some(false);
+        c.view_offset_ms = Some(1000); // barely started, reported first
+        let mut d = item("Alien", Some(1979), "plex");
+        d.played = Some(true); // finished elsewhere
+        let out = dedup_across_sources(vec![c, d]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].played, Some(true), "finished beats in-progress");
     }
 
     #[test]
