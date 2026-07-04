@@ -88,7 +88,11 @@ Library navigation and the "All" view (owner direction, 2026-07-04):
   slowly; likely needs persistent local metadata caching first (confirmed
   2026-07-04: the existing `metadata_cache.json` caches online-lookup results
   only; directory listings are re-walked live on every call). Plan, phased:
-  `.agents/plans/library-all-view-rework.md`.
+  `.agents/plans/library-all-view-rework.md`. All four phases implemented
+  2026-07-04 (listing cache; consolidated type nav with merged listings;
+  provider-id/title+year dedup with backing lists; kind ranking + per-title
+  override via context menu). Unit-tested throughout (guard-proven); owner
+  playtest pending.
 
 ## Kimi-K2.6 Review Triage (2026-05-23)
 

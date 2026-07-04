@@ -48,6 +48,11 @@ pub struct AppConfig {
     /// SSH/SFTP folders mounted through sshfs (each feeds a `local_folders` entry).
     #[serde(default)]
     pub ssh_mounts: Vec<SshMount>,
+    /// Per-title playback-source overrides for the merged All view: canonical
+    /// title identity → preferred source id. Set from the card's context
+    /// menu; titles without an entry follow the default kind ranking.
+    #[serde(default)]
+    pub merged_overrides: std::collections::HashMap<String, String>,
 }
 
 /// An SMB/CIFS share Vela exposes through the local source. On macOS/Windows

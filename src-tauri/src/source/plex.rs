@@ -117,6 +117,7 @@ impl PlexSource {
                 })
                 .collect(),
             backing: None,
+            canonical_id: None,
         }
     }
 }

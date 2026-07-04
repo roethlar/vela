@@ -342,6 +342,7 @@ pub fn run() {
             commands::get_sections,
             commands::get_items,
             commands::get_type_listing,
+            commands::set_merged_override,
             commands::search,
             commands::get_children,
             commands::set_watched,

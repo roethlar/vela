@@ -52,11 +52,12 @@ Keep it short and update it when important repo facts change.
   smaller plans are implemented — watch-state-refresh, ssh-macos-guidance,
   smb-source-labeling, row-artwork-consistency (hero carousel + split
   artwork policy; local series art deferred) — 2026-07-04, full CI set
-  green, owner playtest pending. Rework Phases A-C are implemented
+  green, owner playtest pending. All rework phases A-D are implemented
   (persistent listing cache; consolidated type-based All nav with merged
   listings; cross-source dedup via provider ids / title+year with backing
-  lists), plus the metadata-cache atomic-write hardening; next: Phase D
-  (source ranking + per-title override). A 2026-07-04
+  lists; kind ranking with per-title override from the context menu), plus
+  the metadata-cache atomic-write hardening. Every approved plan is now
+  implemented; the remaining work is the owner playtest sweep. A 2026-07-04
   design-language decision (Infuse reference,
   `reference_screens/infuse-home-reference.png`) resolved the artwork
   plan's poster-vs-content question as the split policy and shapes the

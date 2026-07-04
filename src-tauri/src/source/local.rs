@@ -571,6 +571,7 @@ fn base_item(
         source_id: source_id.to_string(),
         provider_ids: vec![], // local identity is parsed title+year only
         backing: None,
+        canonical_id: None,
     }
 }
 

@@ -48,6 +48,7 @@
     played?: boolean | null;
     sourceId?: string;
     backing?: { sourceId: string; ratingKey: string }[];
+    canonicalId?: string;
   };
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
   type Crumb = { title: string; ratingKey: string | null };
@@ -620,6 +621,20 @@
     }
   }
 
+  // Play a merged title from a specific backing source and remember the
+  // choice for this title (it wins over the default ranking from now on).
+  async function playFrom(item: Item, b: { sourceId: string; ratingKey: string }) {
+    closeMenu();
+    try {
+      if (item.canonicalId) {
+        await invoke("set_merged_override", { canonicalId: item.canonicalId, sourceId: b.sourceId });
+      }
+      await play({ ...item, ratingKey: b.ratingKey, sourceId: b.sourceId });
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
   async function playNext(item: Item) {
     closeMenu();
     try {
@@ -1069,6 +1084,14 @@
     {/if}
     {#if mi.played != null && (mi.played === true || inProgress)}
       <button role="menuitem" onclick={() => setWatched(mi, false)}>Mark unwatched</button>
+    {/if}
+    {#if (mi.backing?.length ?? 0) > 1 && mi.canonicalId}
+      <!-- Merged title: pick which source plays it (persists for this title). -->
+      {#each mi.backing! as b (b.sourceId)}
+        <button role="menuitem" onclick={() => playFrom(mi, b)}>
+          Play from {sourceNameOf(b.sourceId)}
+        </button>
+      {/each}
     {/if}
   </div>
 {/if}

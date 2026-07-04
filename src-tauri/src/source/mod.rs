@@ -57,9 +57,13 @@ pub struct ItemDto {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub provider_ids: Vec<String>,
     /// Present only on merged (deduped) listing entries: every source
-    /// backing this title, display entry first.
+    /// backing this title, play target first (override, else kind rank).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub backing: Option<Vec<BackingRef>>,
+    /// Stable identity of a merged title (first provider id, else
+    /// title+year) — the key the per-title source override persists under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_id: Option<String>,
 }
 
 /// One source's copy of a merged title.
@@ -280,6 +284,7 @@ mod tests {
             parent_title: None,
             provider_ids: vec![],
             backing: None,
+            canonical_id: None,
             source_id: "local".into(),
         };
         let json = serde_json::to_string(&dto).expect("serialize");

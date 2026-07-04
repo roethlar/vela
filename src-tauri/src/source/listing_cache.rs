@@ -248,6 +248,7 @@ mod tests {
             parent_title: None,
             provider_ids: vec![],
             backing: None,
+            canonical_id: None,
             source_id: "local".into(),
         }
     }

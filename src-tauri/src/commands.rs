@@ -1808,6 +1808,13 @@ pub async fn get_type_listing(
     let size = clamp_page_size(size);
     let fetch = start.saturating_add(size);
     let sources = state.registry.lock().await.selected(None);
+    // source id → kind, for the default playback ranking of merged backings.
+    let kinds: std::collections::HashMap<String, &'static str> =
+        sources.iter().map(|s| (s.id(), s.kind())).collect();
+    // Owner's per-title source choices (set via the card's context menu).
+    let overrides = config::load_config()
+        .map(|c| c.merged_overrides)
+        .unwrap_or_default();
     let mut merged: Vec<ItemDto> = Vec::new();
     for src in sources {
         // A failing source drops out rather than failing the whole view,
@@ -1830,7 +1837,90 @@ pub async fn get_type_listing(
         }
     }
     let deduped = dedup_across_sources(merged);
-    Ok(merge_sort_page(deduped, &sort, start, size))
+    let ranked = rank_backings(deduped, &kinds, &overrides);
+    Ok(merge_sort_page(ranked, &sort, start, size))
+}
+
+/// Default playback preference for merged titles: a direct file beats a
+/// network mount beats a server stream. A policy constant, not a heuristic —
+/// the per-title override wins over all of it.
+fn kind_rank(kind: &str) -> u8 {
+    match kind {
+        "local" => 0,
+        "smb" | "ssh" => 1,
+        "plex" => 2,
+        "jellyfin" | "emby" => 3,
+        _ => 4,
+    }
+}
+
+/// Stable identity a per-title override persists under: the first provider
+/// id (sorted, so the same set always yields the same key), else the
+/// normalized title + year.
+fn canonical_id_of(item: &ItemDto) -> String {
+    if let Some(id) = item.provider_ids.iter().min() {
+        return id.clone();
+    }
+    let norm: String = item
+        .title
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
+    match item.year {
+        Some(y) => format!("title:{norm}|{y}"),
+        None => format!("title:{norm}|"),
+    }
+}
+
+/// Order each merged entry's backing list — owner override first, then the
+/// kind ranking (registry order breaks ties via stable sort) — and point the
+/// entry's play identity (rating_key/source_id) at the winner. Display
+/// fields keep whatever the dedup pass chose as richest.
+fn rank_backings(
+    mut groups: Vec<ItemDto>,
+    kinds: &std::collections::HashMap<String, &'static str>,
+    overrides: &std::collections::HashMap<String, String>,
+) -> Vec<ItemDto> {
+    for group in &mut groups {
+        let canonical = canonical_id_of(group);
+        let Some(backing) = group.backing.as_mut() else {
+            group.canonical_id = Some(canonical);
+            continue;
+        };
+        let override_sid = overrides.get(&canonical);
+        backing.sort_by_key(|b| {
+            let overridden = Some(&b.source_id) == override_sid;
+            let rank = kinds.get(&b.source_id).map(|k| kind_rank(k)).unwrap_or(4);
+            (!overridden, rank)
+        });
+        if let Some(face) = backing.first() {
+            group.rating_key = face.rating_key.clone();
+            group.source_id = face.source_id.clone();
+        }
+        group.canonical_id = Some(canonical);
+    }
+    groups
+}
+
+/// Persist (or clear, with `source_id: None`) the owner's preferred playback
+/// source for a merged title.
+#[tauri::command]
+pub async fn set_merged_override(
+    canonical_id: String,
+    source_id: Option<String>,
+) -> Result<(), String> {
+    config::update(move |cfg| {
+        match source_id {
+            Some(sid) => {
+                cfg.merged_overrides.insert(canonical_id.clone(), sid);
+            }
+            None => {
+                cfg.merged_overrides.remove(&canonical_id);
+            }
+        }
+        Ok(())
+    })
 }
 
 /// Collapse the same title carried by several sources into one entry backed
@@ -1979,6 +2069,7 @@ mod merge_tests {
             parent_title: None,
             provider_ids: vec![],
             backing: None,
+            canonical_id: None,
             source_id: source.into(),
         }
     }
@@ -2074,6 +2165,46 @@ mod merge_tests {
         let backing = g.backing.as_ref().unwrap();
         assert_eq!(backing.len(), 2);
         assert_eq!(backing[0].rating_key, "plex:42");
+    }
+
+    fn kinds() -> std::collections::HashMap<String, &'static str> {
+        [
+            ("plex".to_string(), "plex"),
+            ("smb-1".to_string(), "smb"),
+            ("local".to_string(), "local"),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn ranking_prefers_direct_files_and_points_play_identity_at_winner() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let ranked = rank_backings(groups, &kinds(), &Default::default());
+        let g = &ranked[0];
+        // smb outranks a server stream by default.
+        assert_eq!(g.rating_key, "smb-1:/x.mkv");
+        assert_eq!(g.source_id, "smb-1");
+        assert_eq!(g.backing.as_ref().unwrap()[0].source_id, "smb-1");
+        assert!(g.canonical_id.is_some());
+    }
+
+    #[test]
+    fn per_title_override_beats_the_default_ranking() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let canonical = canonical_id_of(&groups[0]);
+        let overrides = [(canonical, "plex".to_string())].into_iter().collect();
+        let ranked = rank_backings(groups, &kinds(), &overrides);
+        assert_eq!(ranked[0].rating_key, "plex:42");
+        assert_eq!(ranked[0].source_id, "plex");
     }
 }
 

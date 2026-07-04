@@ -150,6 +150,17 @@ Goal: play the best source by default; let the owner pick per title.
 - Existing `play_by_key` routing works unchanged once the backing key is
   chosen.
 
+Phase D implemented 2026-07-04: the kind ranking is a policy constant
+(local > smb/ssh > plex > jellyfin/emby; registry order breaks ties), each
+merged entry's backing list is reordered override-first-then-rank and its
+play identity points at the winner. Overrides persist in the config's
+`merged_overrides` map keyed by canonical id (first provider id, else
+normalized title+year) via the `set_merged_override` command; the card's
+context menu offers "Play from <source>" per backing, which plays that copy
+and remembers the choice. Note: a merged card's progress bar reflects
+server-side watch state even when the ranked play target is a local copy
+(which starts from the beginning) — the override is the escape hatch.
+
 ## Verification
 
 - Per phase: full CI set (`npm run check`, `npm run build`; from
