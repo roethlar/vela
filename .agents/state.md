@@ -38,15 +38,15 @@ Keep it short and update it when important repo facts change.
 
 ## Next
 
-- Triage the owner-reported issues recorded 2026-07-04 in `ISSUES.md`
-  ("Open - Owner-Reported"): watch-state staleness, artwork-ratio mixing,
-  SMB "Local" labeling, and the SSH add failure.
-- macOS SSH live testing is parked (brew macFUSE/sshfs-mac unstable on the
-  owner's machine). The decided path is in-UI setup guidance in the add-SSH
-  flow — see `.agents/decisions.md` 2026-07-04.
-- When the owner calls for it, draft the library/"All"-view rework plan
-  (persistent SMB/local metadata caching, cross-source title dedup, source
-  ranking, per-title source override) — direction queued in `ISSUES.md`.
+- Five draft plans await owner review/approval before any code (drafted
+  2026-07-04, root causes confirmed by code reading; each lists its open
+  points): `.agents/plans/watch-state-refresh.md`,
+  `.agents/plans/row-artwork-consistency.md`,
+  `.agents/plans/smb-source-labeling.md`,
+  `.agents/plans/library-all-view-rework.md` (phased A-D; largest; its
+  ranking phase depends on smb-source-labeling landing first), and
+  `.agents/plans/ssh-macos-guidance.md` (implements the 2026-07-04
+  macOS-SSH decision; live mount testing stays parked).
 - Finish live smoke tests: Emby, local folders, SMB browse/playback; or keep
   the live-integration caveat explicit.
 - If updating broader governance metadata, refresh `.agents/repo-map.json` and

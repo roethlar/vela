@@ -14,14 +14,16 @@ unchecked for these):
 
 - Card watch state is stale after playback. Progress bars and played
   checkmarks do not update after a video is finished or its resume position
-  moves in either direction, until restart. Plausibly the same root cause as
-  the hub-refresh item (no metadata refresh after playback ends) — unverified;
-  both recorded as observed.
+  moves in either direction, until restart. Root cause confirmed 2026-07-04:
+  the server is updated correctly on mpv exit; the frontend never re-fetches.
+  Plan for this and the previous item:
+  `.agents/plans/watch-state-refresh.md`.
 
 - Rows mix poster and content-frame artwork. The same row renders 2:3 posters
   next to 16:9 episode thumbnails at different heights (e.g. a movie poster
   beside an episode thumb in Continue Watching). The owner finds this
-  distracting; a row should present one consistent artwork shape.
+  distracting; a row should present one consistent artwork shape. Plan:
+  `.agents/plans/row-artwork-consistency.md`.
 
 Source setup:
 
@@ -32,7 +34,9 @@ Source setup:
   `.agents/state.md`) — unverified — but as presented it is confusing.
   Screenshot evidence: source chips read "All | Plex | Nagatha | Local" and
   the nav lists the share's folders as "movies · Local" and
-  "skippy/video/archive/tv · Local".
+  "skippy/video/archive/tv · Local". Confirmed 2026-07-04: SMB/SSH folders
+  are flattened into the single hardcoded "Local" source. Plan:
+  `.agents/plans/smb-source-labeling.md`.
 
 - The `sshfs` requirement surfaces too late, and its install guidance is a
   dead end on macOS. Diagnosed 2026-07-04 on the owner's machine: the
@@ -53,7 +57,7 @@ Source setup:
   segfault or act oddly on the owner's machine. Note for any eventual retest:
   mounts run ssh with `BatchMode=yes` and no password support, so first-time
   hosts need their host key trusted via plain `ssh` before Vela can mount
-  them.
+  them. Plan: `.agents/plans/ssh-macos-guidance.md`.
 
 Library navigation and the "All" view (owner direction, 2026-07-04):
 
@@ -68,9 +72,10 @@ Library navigation and the "All" view (owner direction, 2026-07-04):
   by every source that carries it, defaulting playback to the most
   performant/reliable source, with an override to pick the source per title.
   Prerequisite: SMB/local metadata is not cached today, so those sources load
-  slowly; likely needs persistent local metadata caching first (a metadata
-  cache already exists — see the P1 cache-bounding item — reconcile its scope
-  at triage). Sizable, multi-part; needs an approved plan before code.
+  slowly; likely needs persistent local metadata caching first (confirmed
+  2026-07-04: the existing `metadata_cache.json` caches online-lookup results
+  only; directory listings are re-walked live on every call). Plan, phased:
+  `.agents/plans/library-all-view-rework.md`.
 
 ## Kimi-K2.6 Review Triage (2026-05-23)
 
