@@ -25,11 +25,6 @@ pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
     Ok(mp.to_string_lossy().to_string())
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
-    Ok(resolve_user_mountpoint(m).unwrap_or_else(|| gvfs_candidates(m).remove(0)))
-}
-
 #[cfg(windows)]
 pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
     Ok(format!(r"\\{}\{}", m.server, m.share))
@@ -43,22 +38,6 @@ pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
 pub fn prepare_mount(m: &mut SmbMount) -> Result<(), String> {
     m.mountpoint = default_mountpoint(m)?;
     mount(m)
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-pub fn prepare_mount(m: &mut SmbMount) -> Result<(), String> {
-    m.mountpoint = default_mountpoint(m)?;
-    match mount(m) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            if let Some(path) = resolve_user_mountpoint(m) {
-                m.mountpoint = path;
-                mount(m)
-            } else {
-                Err(e)
-            }
-        }
-    }
 }
 
 /// Mount the share at `m.mountpoint` (which the caller has set).

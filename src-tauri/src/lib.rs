@@ -5,6 +5,8 @@ mod plex_api;
 mod plex_library;
 mod recents;
 mod smb;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod smb_client;
 mod source;
 mod sshfs;
 mod ui_events;

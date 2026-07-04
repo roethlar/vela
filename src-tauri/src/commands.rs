@@ -432,7 +432,7 @@ pub async fn mount_smb(
     }) {
         return Err("that share is already added".into());
     }
-    let mut mount = SmbMount {
+    let mount = SmbMount {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.unwrap_or_else(|| format!("{}/{}", server.trim(), share.trim())),
         server: server.trim().to_string(),
@@ -453,17 +453,9 @@ pub async fn mount_smb(
     // browsing and playback proceed while the (possibly slow) mount runs.
     let _ops = state.source_lock.lock().await;
 
-    // The OS mount can block for seconds (or hang), so run it off the async runtime.
-    let m_for_mount = mount.clone();
-    mount = tauri::async_runtime::spawn_blocking(move || {
-        let mut mounted = m_for_mount;
-        crate::smb::prepare_mount(&mut mounted)?;
-        Ok::<SmbMount, String>(mounted)
-    })
-    .await
-    .map_err(|e| format!("mount task failed: {e}"))??;
+    let mount = establish_smb_share(mount).await?;
 
-    {
+    if !mount.mountpoint.is_empty() {
         use tauri::Manager;
         let _ = app
             .asset_protocol_scope()
@@ -497,8 +489,9 @@ pub async fn mount_smb(
         // it. We still hold source_lock, so no concurrent op can persist this
         // mountpoint between the check and the unmount. On a read error we still
         // clean up: dropping our just-created mount beats orphaning a credentialed
-        // mount with no record. Run the unmount off the async runtime.
-        if mountpoint_referenced(&mountpoint) != Some(true) {
+        // mount with no record. Run the unmount off the async runtime. An empty
+        // mountpoint means a native (mountless) connection: nothing to roll back.
+        if !mountpoint.is_empty() && mountpoint_referenced(&mountpoint) != Some(true) {
             let mp = mountpoint.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || crate::smb::unmount(&mp)).await;
         }
@@ -509,6 +502,32 @@ pub async fn mount_smb(
         name: mount_name,
         kind: "smb".to_string(),
     })
+}
+
+/// Establish a newly added share. Linux-family: verify server/share/
+/// credentials with an in-process libsmbclient connection — no OS mount, and
+/// `mountpoint` stays empty as the marker of a native record. macOS/Windows:
+/// perform the OS mount and fill `mountpoint`. Blocking work runs off the
+/// async runtime either way.
+async fn establish_smb_share(mount: SmbMount) -> Result<SmbMount, String> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let probe = mount.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::smb_client::verify_mount(&probe))
+            .await
+            .map_err(|e| format!("SMB connect task failed: {e}"))??;
+        Ok(mount)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut mounted = mount;
+            crate::smb::prepare_mount(&mut mounted)?;
+            Ok::<SmbMount, String>(mounted)
+        })
+        .await
+        .map_err(|e| format!("mount task failed: {e}"))?
+    }
 }
 
 /// List configured SMB mounts (for the settings UI).
@@ -544,34 +563,62 @@ pub async fn list_smb_directories(
         .into_iter()
         .find(|m| m.id == id)
         .ok_or("no such SMB mount")?;
-    let root = smb_mount_root(&mount).ok_or_else(|| {
-        format!(
-            "SMB share //{}/{} is not mounted or readable",
-            mount.server, mount.share
-        )
-    })?;
-    let dir = smb_pathbuf_for_relative(&root, &relative);
-    if !dir.is_dir() {
-        return Err("that SMB folder is not readable".into());
+
+    // Linux-family: list natively over an in-process SMB connection, so
+    // browsing works with no OS mount present at all.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let conn = crate::smb_client::connect_mount(&mount)?;
+            let mut dirs: Vec<SmbDirectoryDto> = conn
+                .list_dir(&relative)?
+                .into_iter()
+                .filter(|entry| entry.is_dir)
+                .map(|entry| SmbDirectoryDto {
+                    path: append_smb_relative_path(&relative, &entry.name),
+                    name: entry.name,
+                })
+                .collect();
+            dirs.sort_by_key(|dir| dir.name.to_lowercase());
+            Ok(dirs)
+        })
+        .await
+        .map_err(|e| format!("SMB browse task failed: {e}"))?
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut dirs = Vec::new();
-        for entry in std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))? {
-            let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            dirs.push(SmbDirectoryDto {
-                path: append_smb_relative_path(&relative, &name),
-                name,
-            });
+
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let root = smb_mount_root(&mount).ok_or_else(|| {
+            format!(
+                "SMB share //{}/{} is not mounted or readable",
+                mount.server, mount.share
+            )
+        })?;
+        let dir = smb_pathbuf_for_relative(&root, &relative);
+        if !dir.is_dir() {
+            return Err("that SMB folder is not readable".into());
         }
-        dirs.sort_by_key(|dir| dir.name.to_lowercase());
-        Ok::<_, String>(dirs)
-    })
-    .await
-    .map_err(|e| format!("SMB browse task failed: {e}"))?
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut dirs = Vec::new();
+            for entry in
+                std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))?
+            {
+                let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                dirs.push(SmbDirectoryDto {
+                    path: append_smb_relative_path(&relative, &name),
+                    name,
+                });
+            }
+            dirs.sort_by_key(|dir| dir.name.to_lowercase());
+            Ok::<_, String>(dirs)
+        })
+        .await
+        .map_err(|e| format!("SMB browse task failed: {e}"))?
+    }
 }
 
 /// Add one selected folder inside a mounted SMB share to the local source.
