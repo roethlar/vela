@@ -1,5 +1,28 @@
 # Issue Queue
 
+## Open - Owner-Reported (2026-07-04)
+
+Owner-observed on macOS against a live Plex server, with screenshot evidence.
+Recorded as reported; untriaged, no code investigation yet. Other backends
+unchecked.
+
+- Continue Watching does not refresh after playback. A video watched to
+  completion or partway is only reflected in the Home hubs after an app
+  restart.
+
+- Card watch state is stale after playback. Progress bars and played
+  checkmarks do not update after a video is finished or its resume position
+  moves in either direction, until restart. Plausibly the same root cause as
+  the hub-refresh item (no metadata refresh after playback ends) — unverified;
+  both recorded as observed.
+
+- Rows mix poster and content-frame artwork. The same row renders 2:3 posters
+  next to 16:9 episode thumbnails at different heights (e.g. a movie poster
+  beside an episode thumb in Continue Watching). The owner finds this
+  distracting; a row should present one consistent artwork shape.
+
+## Kimi-K2.6 Review Triage (2026-05-23)
+
 Review triage from the Kimi-K2.6 report against `vela-foundation` on 2026-05-23.
 Items here are verified or worth tracking. Severity is adjusted from the report
 where the original claim was overstated.
@@ -13,7 +36,7 @@ where the original claim was overstated.
 > and CI enforces it. Not-runtime-verified: the CSP needs confirming against a
 > release build (it doesn't apply to the Vite dev server).
 
-## P0 - Fix Before Merge
+### P0 - Fix Before Merge
 
 - Move blocking OS/process work out of async command bodies.
   `mount_smb`, `unmount_smb`, and `play_item` call OS mount/unmount or child
@@ -47,7 +70,7 @@ where the original claim was overstated.
   XSS blast radius with stricter command validation or a narrower file-serving
   strategy.
 
-## P1 - Security and Reliability Hardening
+### P1 - Security and Reliability Hardening
 
 - Put mpv IPC sockets in a private runtime directory.
   The Unix IPC path is predictable under `/tmp`. Use a per-app private directory
@@ -86,7 +109,7 @@ where the original claim was overstated.
   The current SVG is backend-generated, so this is low risk, but an `<img>` data
   URI or sanitized SVG keeps the UI safer if the data path changes later.
 
-## P2 - UX, Accessibility, and Maintenance
+### P2 - UX, Accessibility, and Maintenance
 
 - Fix Settings modal accessibility.
   Remove `role="button"` from the backdrop, move focus into the dialog on open,
@@ -108,7 +131,7 @@ where the original claim was overstated.
   Minimum checks: `cargo check`, `cargo clippy --all-targets`, `cargo test`,
   `npm run check`, and dependency auditing once tooling is installed.
 
-## Not Queued From The Report
+### Not Queued From The Report
 
 - SMB credentials in process arguments: already documented and accepted as a
   local-only exposure for this branch. Reopen only if the threat model changes.

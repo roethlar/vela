@@ -29,6 +29,10 @@ Keep it short and update it when important repo facts change.
 
 ## Next
 
+- Triage the owner-reported UI issues recorded 2026-07-04 in `ISSUES.md`
+  ("Open - Owner-Reported"): watch state stale until app restart (Continue
+  Watching hub, progress bars, played badges) and rows mixing poster/episode
+  artwork aspect ratios.
 - Smoke-test Jellyfin/Emby, local folders, and SMB shares against real
   servers/shares, or keep the live-integration caveat explicit.
 - If updating broader governance metadata, refresh `.agents/repo-map.json` and
