@@ -1,7 +1,7 @@
 {
   "validated_against": {
-    "commit": "1597526cc20e6708a33c93d01e819a38031286d5",
-    "date": "2026-07-03"
+    "commit": "e7178982774b2dc2a06b687e46f0db5575ece7e1",
+    "date": "2026-07-04"
   },
   "projects": [
     {
@@ -24,7 +24,7 @@
     }
   ],
   "verification": {
-    "status": "local-only. Commands below are confirmed present in package.json scripts and .github/workflows/ci.yml, but that workflow is NOT confirmed to execute: the repo's only remote (`git remote -v`) is a self-hosted Gitea instance (http://q.internal:3000/michael/vela.git); that instance's repo API reports `has_actions: true`, but its Actions runs API (repos/michael/vela/actions/tasks) returned zero workflow runs (`total_count: 0`) despite a push to main as recently as commit 1597526 (2026-07-01), which should have fired the `on: push: branches: [main]` trigger in ci.yml if it were being picked up. No `.gitea/workflows/` directory exists (Gitea's own documented trigger path), only `.github/workflows/`. Treat .github/workflows/ci.yml and release.yml as dead/inactive CI files until this repo is actually hosted or mirrored on GitHub, or the workflows are moved to .gitea/workflows/ and a run is observed. Run these commands locally before claiming completion; do not rely on CI to catch failures.",
+    "status": "Commands below are confirmed present in package.json scripts and .github/workflows/ci.yml. CI execution is split across two remotes (`git remote -v`): `origin` (self-hosted Gitea, http://q:3000/michael/vela.git) does NOT run .github/workflows/* - no `.gitea/workflows/` directory exists (Gitea's actual trigger path), and Gitea's Actions runs API previously returned zero runs. `github` (https://github.com/roethlar/vela.git) DOES run it: `gh api repos/roethlar/vela/actions/runs` on 2026-07-04 showed 7 completed runs, the most recent (2026-07-03) concluding `success` on `main` - GitHub Actions is confirmed ACTIVE there. This corrects an earlier record that called ci.yml/release.yml dead; that conclusion only checked the Gitea origin and missed the github remote. Still run these commands locally before claiming completion - do not rely on CI alone, since it only covers pushes that reach the github remote.",
     "commands": [
       {
         "command": "npm run check",
