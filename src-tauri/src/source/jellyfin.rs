@@ -205,6 +205,20 @@ impl JellyfinClient {
         )
     }
 
+    /// Landscape backdrop, sized for the hero/resume rendering (larger than
+    /// grid posters). Same token-in-URL exposure as `poster_url`.
+    fn backdrop_url(&self, item_id: &str, tag: &str) -> String {
+        self.build_url(
+            &["Items", item_id, "Images", "Backdrop", "0"],
+            &[
+                ("fillHeight", "720"),
+                ("fillWidth", "1280"),
+                ("tag", tag),
+                ("api_key", self.token.as_str()),
+            ],
+        )
+    }
+
     /// Build a URL from path segments + query pairs, percent-encoding both so an
     /// id/tag/token containing `&`, `?`, `#`, or a space can't malform the URL
     /// or leak a token into an adjacent parameter.
@@ -424,6 +438,9 @@ struct BaseItem {
     parent_index_number: Option<u32>,
     series_name: Option<String>,
     season_name: Option<String>,
+    series_id: Option<String>,
+    series_primary_image_tag: Option<String>,
+    backdrop_image_tags: Option<Vec<String>>,
     image_tags: Option<ImageTags>,
     collection_type: Option<String>,
 }
@@ -623,6 +640,17 @@ impl JellyfinSource {
             .as_ref()
             .and_then(|t| t.primary.as_ref())
             .map(|tag| self.client.poster_url(&item.id, tag));
+        // An episode's series poster (portrait art for catalog rows).
+        let series_poster = item
+            .series_id
+            .as_ref()
+            .zip(item.series_primary_image_tag.as_ref())
+            .map(|(sid, tag)| self.client.poster_url(sid, tag));
+        let backdrop = item
+            .backdrop_image_tags
+            .as_ref()
+            .and_then(|tags| tags.first())
+            .map(|tag| self.client.backdrop_url(&item.id, tag));
         let view_offset_ms = item
             .user_data
             .as_ref()
@@ -637,6 +665,8 @@ impl JellyfinSource {
             duration_ms: item.run_time_ticks.map(ticks_to_ms),
             media_type: map_type(item.item_type.as_deref()),
             poster,
+            series_poster,
+            backdrop,
             view_offset_ms,
             played: item.user_data.as_ref().and_then(|u| u.played),
             index: item.index_number,
@@ -902,6 +932,34 @@ mod tests {
                 height: Some(height),
             }],
         }
+    }
+
+    fn test_client() -> JellyfinClient {
+        JellyfinClient {
+            flavor: Flavor::Jellyfin,
+            base_url: "http://jf.example:8096".into(),
+            device_id: "dev".into(),
+            token: "tok".into(),
+            user_id: "u1".into(),
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn artwork_urls_are_sized_and_encoded() {
+        let c = test_client();
+        let bd = c.backdrop_url("item1", "tag/1");
+        assert!(bd.starts_with("http://jf.example:8096/Items/item1/Images/Backdrop/0?"));
+        assert!(bd.contains("fillHeight=720"));
+        assert!(bd.contains("fillWidth=1280"));
+        // The tag rides percent-encoded so it can't malform the query.
+        assert!(bd.contains("tag=tag%2F1"));
+
+        // The series poster reuses the primary-image shape at grid size.
+        let sp = c.poster_url("series9", "t9");
+        assert!(sp.contains("/Items/series9/Images/Primary"));
+        assert!(sp.contains("fillHeight=450"));
+        assert!(sp.contains("fillWidth=300"));
     }
 
     #[test]

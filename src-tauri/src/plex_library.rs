@@ -65,6 +65,8 @@ impl From<PlexDir> for PlexVideo {
             view_offset: None,
             view_count: None,
             thumb: d.thumb,
+            grandparent_thumb: None,
+            art: None,
             added_at: None,
             updated_at: None,
             media: vec![],
@@ -114,6 +116,10 @@ pub struct PlexVideo {
     pub view_count: Option<u64>,
     #[serde(rename = "thumb")]
     pub thumb: Option<String>,
+    #[serde(rename = "grandparentThumb")]
+    pub grandparent_thumb: Option<String>,
+    #[serde(rename = "art")]
+    pub art: Option<String>,
     #[serde(rename = "addedAt")]
     pub added_at: Option<u64>,
     #[serde(rename = "updatedAt")]
@@ -1121,6 +1127,8 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
         view_offset: None,
         view_count: None,
         thumb: None,
+        grandparent_thumb: None,
+        art: None,
         added_at: None,
         updated_at: None,
         media: vec![],
@@ -1142,6 +1150,8 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
             b"viewOffset" => v.view_offset = av(&a).parse().ok(),
             b"viewCount" => v.view_count = av(&a).parse().ok(),
             b"thumb" => v.thumb = Some(av(&a)),
+            b"grandparentThumb" => v.grandparent_thumb = Some(av(&a)),
+            b"art" => v.art = Some(av(&a)),
             b"year" => v.year = av(&a).parse().ok(),
             b"type" => v.media_type = Some(av(&a)),
             b"index" => v.index = av(&a).parse().ok(),
@@ -1227,6 +1237,24 @@ mod tests {
         );
         // The credential must never ride in the URL; it travels as a header.
         assert!(!u.contains("X-Plex-Token"));
+    }
+
+    #[test]
+    fn video_attrs_capture_series_poster_and_backdrop_art() {
+        let mut e = quick_xml::events::BytesStart::new("Video");
+        e.push_attribute(("ratingKey", "42"));
+        e.push_attribute(("title", "Fallen Angel"));
+        e.push_attribute(("thumb", "/library/metadata/42/thumb/1"));
+        e.push_attribute(("grandparentThumb", "/library/metadata/7/thumb/9"));
+        e.push_attribute(("art", "/library/metadata/7/art/9"));
+
+        let v = video_from_attrs(&e);
+        assert_eq!(v.thumb.as_deref(), Some("/library/metadata/42/thumb/1"));
+        assert_eq!(
+            v.grandparent_thumb.as_deref(),
+            Some("/library/metadata/7/thumb/9")
+        );
+        assert_eq!(v.art.as_deref(), Some("/library/metadata/7/art/9"));
     }
 
     #[test]

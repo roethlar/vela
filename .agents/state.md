@@ -48,10 +48,11 @@ Keep it short and update it when important repo facts change.
   `.agents/plans/library-all-view-rework.md` (phased A-D; largest; its
   ranking phase depends on smb-source-labeling landing first), and
   `.agents/plans/ssh-macos-guidance.md` (implements the 2026-07-04
-  macOS-SSH decision; live mount testing stays parked). Progress:
-  watch-state-refresh, ssh-macos-guidance, and smb-source-labeling are
-  implemented (2026-07-04, full CI set green, owner playtest/visual check
-  pending); next up: row-artwork-consistency, then the rework phases. A
+  macOS-SSH decision; live mount testing stays parked). Progress: all four
+  smaller plans are implemented — watch-state-refresh, ssh-macos-guidance,
+  smb-source-labeling, row-artwork-consistency (hero carousel + split
+  artwork policy; local series art deferred) — 2026-07-04, full CI set
+  green, owner playtest pending. Next: library-all-view-rework phases A-D. A
   2026-07-04
   design-language decision (Infuse reference,
   `reference_screens/infuse-home-reference.png`) resolved the artwork

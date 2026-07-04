@@ -25,7 +25,12 @@ unchecked for these):
   next to 16:9 episode thumbnails at different heights (e.g. a movie poster
   beside an episode thumb in Continue Watching). The owner finds this
   distracting; a row should present one consistent artwork shape. Plan:
-  `.agents/plans/row-artwork-consistency.md`.
+  `.agents/plans/row-artwork-consistency.md`. Implemented 2026-07-04 per the
+  split policy: Continue Watching renders as the hero carousel (overlay
+  arrows, backdrops for movies), On Deck as a uniform 16:9 row, catalog rows
+  as uniform 2:3 with series posters for episodes (new seriesPoster/backdrop
+  fields from Plex and Jellyfin/Emby; local series art deferred).
+  Unit-tested (guard-proven); owner playtest pending.
 
 Source setup:
 

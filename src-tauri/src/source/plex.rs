@@ -81,6 +81,15 @@ impl PlexSource {
                 .thumb
                 .as_deref()
                 .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+            series_poster: v
+                .grandparent_thumb
+                .as_deref()
+                .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+            // Hero/landscape art renders much larger than grid posters.
+            backdrop: v
+                .art
+                .as_deref()
+                .and_then(|t| lib.poster_transcode_url(t, 1280, 720)),
             rating_key: namespace_key(&self.id, &v.rating_key),
             title: v.title,
             year: v.year,

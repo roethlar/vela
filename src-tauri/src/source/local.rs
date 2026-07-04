@@ -361,6 +361,8 @@ fn base_item(
         duration_ms: None,
         media_type: Some(media_type.to_string()),
         poster: None, // local artwork/metadata is P2d
+        series_poster: None, // local series art deferred (see artwork plan)
+        backdrop: None,      // local items never reach resume rows
         view_offset_ms: None,
         played: None, // local files have no server-tracked watched state
         index: None,

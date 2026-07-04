@@ -34,6 +34,8 @@
     title: string;
     year?: number;
     poster?: string;
+    seriesPoster?: string;
+    backdrop?: string;
     mediaType?: string;
     durationMs?: number;
     viewOffsetMs?: number;
@@ -222,6 +224,49 @@
     } catch {
       /* clipboard may be unavailable; the text is visible to copy manually */
     }
+  }
+
+  // Row policy per hub (design decision 2026-07-04, Infuse reference): the
+  // continue-watching hub renders as a single hero carousel; On Deck stays a
+  // 16:9 row; every other hub is a uniform 2:3 poster row (episodes show
+  // series art there). Keyed on hub identifiers: Plex passes its own through
+  // (e.g. "home.continue", "home.ondeck"), Jellyfin/Emby use "resume".
+  function hubPolicy(h: Hub): "hero" | "landscape" | "portrait" {
+    const id = h.hubIdentifier.toLowerCase();
+    if (id.includes("continue") || id === "resume") return "hero";
+    if (id.includes("ondeck")) return "landscape";
+    return "portrait";
+  }
+
+  // Which artwork a card shows, given its row's shape: landscape cards keep
+  // episode stills but use backdrops for movies/shows; portrait cards use the
+  // series poster for episodes. Falls back to `poster` when the richer field
+  // is missing.
+  function isEpisodic(item: Item): boolean {
+    return item.mediaType === "episode" || item.mediaType === "video";
+  }
+  function artFor(item: Item, landscape: boolean): string | undefined {
+    if (landscape) return isEpisodic(item) ? item.poster : (item.backdrop ?? item.poster);
+    return isEpisodic(item) ? (item.seriesPoster ?? item.poster) : item.poster;
+  }
+
+  // Hero carousel position per hub (keyed by source+hub so All view can hold
+  // one hero per server). Reset naturally when hubs reload: indices are
+  // clamped to the hub's current length at render time.
+  let heroIndex = $state<Record<string, number>>({});
+  function heroKey(h: Hub): string {
+    return h.sourceId + ":" + h.hubIdentifier;
+  }
+  function heroAt(h: Hub): number {
+    const n = h.items.length;
+    if (n === 0) return 0;
+    const raw = heroIndex[heroKey(h)] ?? 0;
+    return Math.min(Math.max(raw, 0), n - 1);
+  }
+  function heroStep(h: Hub, delta: number) {
+    const n = h.items.length;
+    if (n === 0) return;
+    heroIndex[heroKey(h)] = (heroAt(h) + delta + n) % n;
   }
 
   // Section (nav) loads are invalidated only by a source switch (`sourceGen`);
@@ -690,7 +735,9 @@
     </div>
   {/if}
 
-  {#snippet poster(item: Item, i: number)}
+  {#snippet poster(item: Item, i: number, shape: "auto" | "portrait" | "landscape" = "auto")}
+    {@const landscape = shape === "landscape" || (shape === "auto" && isEpisodic(item))}
+    {@const art = artFor(item, landscape)}
     {@const pct =
       item.viewOffsetMs && item.durationMs
         ? Math.round(Math.min(100, (100 * item.viewOffsetMs) / item.durationMs))
@@ -709,7 +756,7 @@
     {@const label = `${parts.join(" — ")}${pct !== null ? ` — ${pct}% watched` : ""}`}
     <button
       class="poster"
-      class:landscape={item.mediaType === "episode" || item.mediaType === "video"}
+      class:landscape
       class:watched={item.played === true && pct === null}
       style="animation-delay: {Math.min(i, 14) * 22}ms;"
       onclick={() => open(item)}
@@ -722,13 +769,13 @@
           <!-- Fully watched: marked played AND not mid-resume (pct is the resume %). -->
           <div class="watchedbadge" aria-hidden="true"><Icon name="check" size={13} stroke={2.75} /></div>
         {/if}
-        {#if item.poster && !failedPosters.has(item.ratingKey)}
+        {#if art && !failedPosters.has(art)}
           <img
-            src={posterSrc(item.poster)}
+            src={posterSrc(art)}
             alt={item.title}
             loading="lazy"
             onerror={() => {
-              failedPosters.add(item.ratingKey);
+              failedPosters.add(art);
               failedPosters = failedPosters; // trigger reactivity → show placeholder
             }}
           />
@@ -755,6 +802,70 @@
         {/if}
       </div>
     </button>
+  {/snippet}
+
+  {#snippet heroCard(hub: Hub)}
+    {@const idx = heroAt(hub)}
+    {@const item = hub.items[idx]}
+    {@const art = artFor(item, true)}
+    {@const pct =
+      item.viewOffsetMs && item.durationMs
+        ? Math.round(Math.min(100, (100 * item.viewOffsetMs) / item.durationMs))
+        : null}
+    {@const epLine =
+      item.parentIndex != null && item.index != null
+        ? `S${item.parentIndex} · E${item.index} – ${item.title}`
+        : item.title}
+    {@const label = `${item.grandparentTitle ?? item.title}${item.grandparentTitle ? ` — ${epLine}` : ""}${pct !== null ? ` — ${pct}% watched` : ""}`}
+    <div class="hero">
+      <div class="heroframe">
+        <button
+          class="herocard"
+          onclick={() => open(item)}
+          oncontextmenu={(e) => openMenu(e, item)}
+          title={item.grandparentTitle ?? item.title}
+          aria-label={label}
+        >
+          <div class="art">
+            {#if art && !failedPosters.has(art)}
+              <img
+                src={posterSrc(art)}
+                alt={item.title}
+                onerror={() => {
+                  failedPosters.add(art);
+                  failedPosters = failedPosters;
+                }}
+              />
+            {:else}
+              <div class="noart">{item.grandparentTitle ?? item.title}</div>
+            {/if}
+            <div class="playoverlay" aria-hidden="true">
+              <span class="playbtn"><Icon name="play" size={24} /></span>
+            </div>
+            {#if pct !== null}
+              <div class="progress" aria-hidden="true"><div class="bar" style="width:{pct}%"></div></div>
+            {/if}
+          </div>
+        </button>
+        {#if hub.items.length > 1}
+          <!-- Overlaid on the artwork per the design decision; revealed on hover/focus. -->
+          <button class="heroarrow left" aria-label="Previous" onclick={() => heroStep(hub, -1)}>
+            <Icon name="back" size={18} />
+          </button>
+          <button class="heroarrow right" aria-label="Next" onclick={() => heroStep(hub, 1)}>
+            <Icon name="chevron" size={18} />
+          </button>
+        {/if}
+      </div>
+      <div class="meta">
+        <span class="t">{item.grandparentTitle ?? item.title}</span>
+        {#if item.grandparentTitle}
+          <span class="y">{epLine}</span>
+        {:else if item.year}
+          <span class="y">{item.year}</span>
+        {/if}
+      </div>
+    </div>
   {/snippet}
 
   {#snippet skelCard()}
@@ -818,13 +929,18 @@
     {:else}
       <div class="home">
         {#each hubs as hub (hub.sourceId + ":" + hub.hubIdentifier)}
+          {@const policy = hubPolicy(hub)}
           <section class="rail">
             <h2>{hub.title}{#if activeSource === null && sources.length > 1 && hub.sourceName}<span class="srctag"> · {hub.sourceName}</span>{/if}</h2>
-            <div class="row">
-              {#each hub.items as item, i (item.ratingKey)}
-                {@render poster(item, i)}
-              {/each}
-            </div>
+            {#if policy === "hero" && hub.items.length > 0}
+              {@render heroCard(hub)}
+            {:else}
+              <div class="row">
+                {#each hub.items as item, i (item.ratingKey)}
+                  {@render poster(item, i, policy === "landscape" ? "landscape" : "portrait")}
+                {/each}
+              </div>
+            {/if}
           </section>
         {/each}
       </div>
@@ -853,7 +969,9 @@
     {:else}
       <main class="grid" bind:this={gridEl} onscroll={onScroll}>
         {#each items as item, i (item.ratingKey)}
-          {@render poster(item, i)}
+          <!-- Search results can mix movies and episodes; force one shape there.
+               Container drill-downs are naturally uniform, so "auto" stands. -->
+          {@render poster(item, i, searchTerm ? "portrait" : "auto")}
         {/each}
       </main>
     {/if}
@@ -1256,6 +1374,89 @@
   .progress .bar {
     height: 100%;
     background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+  }
+  /* Continue Watching hero carousel: one large 16:9 card, arrows overlaid on
+     the artwork (hover/focus-revealed), meta caption below. */
+  .hero {
+    max-width: min(620px, 100%);
+    display: flex;
+    flex-direction: column;
+    gap: 0.38rem;
+    animation: vela-rise 0.4s var(--ease) backwards;
+  }
+  .heroframe {
+    position: relative;
+  }
+  .herocard {
+    appearance: none;
+    background: transparent;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-align: left;
+    color: inherit;
+    font: inherit;
+    display: block;
+    width: 100%;
+  }
+  .herocard .art {
+    aspect-ratio: 16 / 9;
+  }
+  .herocard .progress {
+    height: 6px;
+  }
+  .herocard:hover .art {
+    box-shadow: var(--shadow-card-hover);
+    border-color: var(--border-strong);
+  }
+  .herocard:focus-visible {
+    outline: none;
+  }
+  .herocard:focus-visible .art {
+    border-color: var(--accent);
+    box-shadow: var(--shadow-card), 0 0 0 2px var(--accent);
+  }
+  .herocard:hover .playoverlay,
+  .herocard:focus-visible .playoverlay {
+    opacity: 1;
+  }
+  .herocard:hover .playbtn,
+  .herocard:focus-visible .playbtn {
+    transform: scale(1);
+  }
+  .heroarrow {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    width: 2.3rem;
+    height: 2.3rem;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.55);
+    color: #fff;
+    cursor: pointer;
+    padding: 0;
+    opacity: 0;
+    transition:
+      opacity 0.15s var(--ease),
+      background 0.15s var(--ease);
+  }
+  .heroarrow.left {
+    left: 0.6rem;
+  }
+  .heroarrow.right {
+    right: 0.6rem;
+  }
+  .heroframe:hover .heroarrow,
+  .heroarrow:focus-visible {
+    opacity: 1;
+  }
+  .heroarrow:hover {
+    background: rgba(0, 0, 0, 0.75);
   }
   /* Home rails */
   .home {

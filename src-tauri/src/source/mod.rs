@@ -35,6 +35,12 @@ pub struct ItemDto {
     pub duration_ms: Option<u64>,
     pub media_type: Option<String>,
     pub poster: Option<String>,
+    /// The series (grandparent) poster for episodic items, when the backend
+    /// exposes one — lets catalog rows render portrait art for episodes.
+    pub series_poster: Option<String>,
+    /// Landscape backdrop/fanart, when the backend exposes one — used by the
+    /// resume-row/hero rendering for movies and shows.
+    pub backdrop: Option<String>,
     pub view_offset_ms: Option<u64>,
     /// Whether the item is marked watched. `None` when the source doesn't report
     /// it (e.g. local files), so the UI can distinguish "unwatched" from "unknown".
@@ -232,6 +238,33 @@ mod tests {
         ) -> Result<StreamResolution, String> {
             Err("fake source".into())
         }
+    }
+
+    // The frontend reads these camelCase names; a serde rename regression
+    // would silently blank all card artwork.
+    #[test]
+    fn item_dto_serializes_artwork_fields_camel_case() {
+        let dto = ItemDto {
+            rating_key: "local:/x".into(),
+            title: "T".into(),
+            year: None,
+            summary: None,
+            duration_ms: None,
+            media_type: Some("episode".into()),
+            poster: Some("p".into()),
+            series_poster: Some("sp".into()),
+            backdrop: Some("bd".into()),
+            view_offset_ms: None,
+            played: None,
+            index: None,
+            parent_index: None,
+            grandparent_title: None,
+            parent_title: None,
+            source_id: "local".into(),
+        };
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert!(json.contains("\"seriesPoster\":\"sp\""));
+        assert!(json.contains("\"backdrop\":\"bd\""));
     }
 
     // Rebuilds replace the whole local family: stale mount sources must drop
