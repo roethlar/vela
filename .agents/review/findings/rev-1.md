@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — silent content omission: later library titles become unreachable in the All view.
 **Status**: In progress
 **Branch**: `fix/rev-1-dedup-page-underflow`
-**Commit**: (filled after commit)
+**Commit**: `60f62590b97a714489928b27b3a41142fd5f3627`
 
 ## Evidence
 `src-tauri/src/commands.rs` `get_type_listing`: fetches `start+size` items per
