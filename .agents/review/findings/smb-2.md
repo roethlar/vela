@@ -1,9 +1,9 @@
 # smb-2: Vfs provider-trait refactor of the local-family source
 
 **Severity**: — (planned slice 2 of `.agents/plans/smb-native-client.md`, not a defect)
-**Status**: In progress (pending review)
+**Status**: Verified (accepted round 2; awaiting owner-gated merge)
 **Branch**: `smb-native` (stacked; commit 2)
-**Commit**: `fc4203a55b7db4c3aedba39a1e18b3e166740355` (base `fde07aae0efeef6f1449ee0217a2be0987d072f9`, the reviewed smb-1 head)
+**Commit**: `a904eb26442b76bd837f4e9061a9c94924ac3550` (refactor `fc4203a` + guard fix-up; base `fde07aae0efeef6f1449ee0217a2be0987d072f9`)
 
 ## Evidence
 Approved plan slice 2 (design §2): the local-family pipeline (sections,
@@ -59,4 +59,28 @@ None.
   it is app state, not media filesystem.
 
 ## Reviewer comments
-(pending)
+Round 1 — reopened.
+- Reviewer: codex (codex-cli 0.142.5), headless one-shot, JSON schema-forced.
+- Reviewed SHA `fc4203a55b7db4c3aedba39a1e18b3e166740355`, base
+  `fde07aae0efeef6f1449ee0217a2be0987d072f9`. 2026-07-04 (UTC).
+- Verdict: **reopened**; guard_confirmed: **false**.
+- Comments: no semantic drift found in the refactor itself; reopened solely
+  because the guard mutation (deleting `entries.sort()` in
+  `StdFs::read_dir_sorted`) still passed 64/64 in the reviewer's isolated
+  clone — the vfs parity test does not reliably detect loss of sorted
+  listing semantics.
+- Coder follow-up: reproducing the mutation independently to distinguish a
+  genuinely vacuous test from a stale-build artifact of the shared
+  CARGO_TARGET_DIR; strengthening the test either way.
+
+Round 2 — accepted.
+- Reviewed SHA `a904eb26442b76bd837f4e9061a9c94924ac3550`, same base. 2026-07-04 (UTC).
+- Verdict: **accepted**; guard_confirmed: **true** (clone on the repo
+  filesystem; sort-removal failed exactly the vfs parity test, restore
+  passed 64).
+- Comments: no semantic drift; StdFs preserves prior std::fs behavior;
+  canonicalize/read_dir_sorted/sidecar order/meta_base all verified
+  unchanged.
+- Root cause of round 1 recorded for posterity: tmpfs readdir on this
+  kernel is pre-sorted; sort guards must run on a creation/hash-order
+  filesystem.
