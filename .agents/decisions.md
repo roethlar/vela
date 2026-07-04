@@ -323,3 +323,29 @@ Supersedes:
 The hero-carousel shape in the 2026-07-04 design-language decision (single
 centered card, hover-revealed overlay arrows). The split artwork policy and
 the rest of that decision stand.
+
+### 2026-07-04 - Linux SMB goes native: in-process client + loopback stream proxy
+
+Status: Active
+
+Decision:
+On Linux, Vela speaks SMB itself: browsing/listing/search through an
+in-process libsmbclient-backed client (`pavao` crate), and playback through a
+localhost-only HTTP Range proxy that translates mpv byte-range requests into
+SMB reads. The GVfs/KIO-FUSE mount-resolution path, `gio mount` nudge, and
+boot remount are removed on Linux. macOS (`mount_smbfs`) and Windows
+(`net use`) keep their OS-mount flows; taking those native is a separate
+future decision. Plan: `.agents/plans/smb-native-client.md`.
+
+Reason:
+Owner rejected the mount dependency outright (2026-07-04, hit on Arch/KDE
+with no gvfs and no active KIO mapping): "if Vela cannot make the connection
+itself without the underlying OS mount, it's worthless." mpv on the owner's
+system has no smb:// protocol support, so playback requires the proxy, not
+just native browsing.
+
+Supersedes:
+The *mechanism* of the 2026-05-23 "Keep Linux SMB user-space only by
+default" entry (resolving desktop-session GVfs/KIO-FUSE mounts). Its
+*constraint* stands: no root, no privileged CIFS mounts. The SSH/sshfs
+stance in that entry is unchanged.

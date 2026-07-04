@@ -1,6 +1,9 @@
 # Plan: Native SMB client + loopback streaming proxy (drop Linux mount dependency)
 
-Status: DRAFT 2026-07-04 — awaiting owner approval.
+Status: APPROVED 2026-07-04 (owner), as drafted. Process: implement via
+`.agents/playbooks/reviewloop.md` with `codex` as the reviewer harness — one
+slice ↔ one review unit ↔ one recorded verdict; merge to main stays
+owner-gated.
 
 Owner direction (2026-07-04): the GVfs/KIO-FUSE dependency is unacceptable —
 "if Vela cannot make the connection itself without the underlying OS mount,

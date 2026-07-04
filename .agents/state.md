@@ -5,6 +5,11 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- ACTIVE: implementing `.agents/plans/smb-native-client.md` (approved
+  2026-07-04) — native Linux SMB client + loopback stream proxy, replacing
+  the GVfs/KIO-FUSE mount dependency. Work happens in six stacked slices on
+  branch `smb-native`; each slice is codex-reviewed. Active review loop:
+  see `.agents/review/index.md`. Merge to `main` is owner-gated.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.

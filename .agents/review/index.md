@@ -1,37 +1,36 @@
 # Review status
 
-Workflow: see `.agents/playbooks/reviewloop.md`.
+Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harness: `codex`
+(codex-cli 0.142.5, verified headless via `codex exec --json`, 2026-07-04).
 Per-finding detail: see `.agents/review/findings/<id>.md`.
+Closed prior loop: `.agents/review/2026-07-04-feature-batch-closed.md`
+(rev-1..rev-6, merged to main).
 
-Loop opened 2026-07-04. Scope: the 2026-07-04 feature batch,
-`784677e..e717898` (five implemented plans + hero sizing; v0.1.4 → v0.1.6).
-Reviewer harness: `codex` (codex-cli 0.142.5), dispatched headless one-shot.
+Loop opened 2026-07-04. Scope: implementation of the approved plan
+`.agents/plans/smb-native-client.md`. Adaptation, owner-directed ("go with
+reviewloop codex", 2026-07-04): the review units are the plan's six slices,
+not defect findings — the intake gate (evidence / predicted observable
+failure) is satisfied by the approved plan itself, so Severity is `—`.
+Slices are sequential and stacked; they land as consecutive commits on one
+feature branch `smb-native`, and each slice is dispatched for review pinned
+at (base = previous slice's reviewed head, head = this slice's commit). One
+slice ↔ one review ↔ one recorded verdict. Merge of `smb-native` into
+`main` stays owner-gated.
 
 ## Legend
-- `[ ]` Admitted, open (passed intake triage; not yet started)
+- `[ ]` Admitted, open (not yet started)
 - `[~]` In progress / pending review
 - `[x]` Verified (awaiting owner-gated merge)
-- `[!]` Contested — declined, disputed, or ruled invalid; awaiting owner adjudication
-- `[-]` Declined at intake (kept for the record; no work)
-
-Intake 2026-07-04: codex generation pass returned 4 candidates; the coder
-contributed 2. Triage: 5 admitted (4 codex + 1 coder), 1 declined. Fix
-branches are STACKED (shared files); merge order is rev-1 → rev-5.
-
-Loop review phase COMPLETE 2026-07-04: all five findings verified (rev-1
-took three rounds — two codex reopens drove the fix from window-deepening to
-an immutable pagination snapshot; rev-2..5 accepted in one round each).
-MERGED to main 2026-07-04 (owner go; fast-forward to `3310446`, content
-verified identical). Loop CLOSED; fix branches deleted. This file and
-`findings/` remain as the durable review trail.
+- `[!]` Contested — awaiting owner adjudication
+- `[-]` Declined at intake
 
 ## Findings
 
-| ID | Severity | Impact (one line) | Status | Branch |
-|----|----------|-------------------|--------|--------|
-| rev-1 | MEDIUM | Dedup under-fills pages; infinite scroll ends early, titles unreachable | `[x]` | `fix/rev-1-dedup-page-underflow` |
-| rev-2 | MEDIUM | Same-source versions collapse to one card; context menu crashes on duplicate keys | `[x]` | `fix/rev-2-same-source-collapse` |
-| rev-3 | MEDIUM | Mark watched on merged cards routes to watch-incapable source, always errors | `[x]` | `fix/rev-3-watch-routing` |
-| rev-4 | LOW | All-source failure renders as empty grid with no error | `[x]` | `fix/rev-4-surface-total-failure` |
-| rev-5 | LOW | Merged card hides real progress when first backing reported unwatched | `[x]` | `fix/rev-5-adopt-most-progressed` |
-| rev-6 | — | (declined at intake: scroll reset on listings-updated is designed refresh-on-change) | `[-]` | |
+| ID    | Severity | Impact (one line)                                      | Status | Branch |
+|-------|----------|--------------------------------------------------------|--------|--------|
+| smb-1 | —        | Native client wrapper + share browsing without mounts  | `[ ]`  | `smb-native` |
+| smb-2 | —        | Provider-trait refactor of local source (no behavior)  | `[ ]`  | `smb-native` |
+| smb-3 | —        | Native SMB listing via provider + listing cache        | `[ ]`  | `smb-native` |
+| smb-4 | —        | Loopback Range proxy + SMB playback via mpv            | `[ ]`  | `smb-native` |
+| smb-5 | —        | Remove Linux mount machinery + UI error copy           | `[ ]`  | `smb-native` |
+| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[ ]`  | `smb-native` |
