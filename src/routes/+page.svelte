@@ -46,6 +46,7 @@
     index?: number;
     parentIndex?: number;
     played?: boolean | null;
+    sourceId?: string;
   };
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
   type Crumb = { title: string; ratingKey: string | null };
@@ -60,6 +61,18 @@
   let sections = $state<Section[]>([]);
   let hubs = $state<Hub[]>([]);
   let active = $state<Section | null>(null);
+  // The All view's consolidated Library: a content-type listing merged across
+  // sources (rework Phase B). Mutually exclusive with `active`.
+  let activeType = $state<string | null>(null);
+  const TYPE_LABELS: Record<string, string> = { movie: "Movies", show: "TV Shows", video: "Videos" };
+  let typeTabs = $derived(
+    ["movie", "show", "video"].filter((t) => sections.some((s) => s.sectionType === t))
+  );
+  // Merged listings only honor globally sortable fields.
+  const TYPE_SORTS = new Set(["titleSort:asc", "year:desc"]);
+  function sourceNameOf(id: string): string {
+    return sources.find((s) => s.id === id)?.name ?? "";
+  }
   let crumbs = $state<Crumb[]>([]);
   let items = $state<Item[]>([]);
   let loading = $state(false);
@@ -201,6 +214,7 @@
       items = [];
       crumbs = [];
       active = null;
+      activeType = null;
       mode = "home";
       loading = false;
     }
@@ -324,6 +338,7 @@
     loading = false; // a stale browse load won't clear this (its gen is stale); do it here
     error = null; // don't carry a browse/search error banner onto Home
     searchTerm = "";
+    activeType = null;
     mode = "home";
     // Entering a browse earlier may have discarded an in-flight hub load (via the
     // homeGen bump). If we have no hubs, re-fetch so Home isn't stuck empty.
@@ -382,7 +397,19 @@
     mode = "browse";
     searchTerm = "";
     active = section;
+    activeType = null;
     crumbs = [{ title: section.title, ratingKey: null }];
+    await resetAndLoad();
+  }
+
+  // Open a consolidated content-type listing (All view's Library).
+  async function selectType(t: string) {
+    mode = "browse";
+    searchTerm = "";
+    active = null;
+    activeType = t;
+    if (!TYPE_SORTS.has(sort)) sort = "titleSort:asc";
+    crumbs = [{ title: TYPE_LABELS[t] ?? t, ratingKey: null }];
     await resetAndLoad();
   }
 
@@ -408,18 +435,25 @@
   async function loadMore(myGen: number = loadGen) {
     if (loadingMore || !hasMore || myGen !== loadGen) return;
     const here = crumbs[crumbs.length - 1];
-    if (!here || (!here.ratingKey && !active)) return;
+    if (!here || (!here.ratingKey && !active && !activeType)) return;
     loadingMore = true;
     try {
       const page = here.ratingKey
         ? await invoke<Item[]>("get_children", { ratingKey: here.ratingKey, start: offset, size: PAGE })
-        : await invoke<Item[]>("get_items", {
-            sectionKey: active!.key,
-            sectionType: active!.sectionType,
-            sort,
-            start: offset,
-            size: PAGE,
-          });
+        : activeType
+          ? await invoke<Item[]>("get_type_listing", {
+              sectionType: activeType,
+              sort,
+              start: offset,
+              size: PAGE,
+            })
+          : await invoke<Item[]>("get_items", {
+              sectionKey: active!.key,
+              sectionType: active!.sectionType,
+              sort,
+              start: offset,
+              size: PAGE,
+            });
       if (myGen !== loadGen) return; // navigated away while awaiting; drop these
       items = [...items, ...page];
       offset += page.length;
@@ -669,11 +703,21 @@
     <nav>
       {#if authenticated}
         <button class:active={mode === "home"} onclick={goHome}>Home</button>
-        {#each sections as s (s.key)}
-          <button class:active={mode === "browse" && active?.key === s.key} onclick={() => select(s)}>
-            {s.title}{#if activeSource === null && sources.length > 1 && s.sourceName}<span class="srctag"> · {s.sourceName}</span>{/if}
-          </button>
-        {/each}
+        {#if activeSource === null && sources.length > 1}
+          <!-- All view: a consolidated Library by content type (rework Phase B).
+               Per-connection browsing lives on the source chips above. -->
+          {#each typeTabs as t (t)}
+            <button class:active={mode === "browse" && activeType === t} onclick={() => selectType(t)}>
+              {TYPE_LABELS[t] ?? t}
+            </button>
+          {/each}
+        {:else}
+          {#each sections as s (s.key)}
+            <button class:active={mode === "browse" && active?.key === s.key} onclick={() => select(s)}>
+              {s.title}
+            </button>
+          {/each}
+        {/if}
       {/if}
     </nav>
     {#if authenticated}
@@ -806,6 +850,10 @@
           <span class="y">{item.parentIndex != null && item.index != null ? `S${item.parentIndex} · E${item.index}` : item.title}</span>
         {:else if item.year}
           <span class="y">{item.year}</span>
+        {/if}
+        {#if activeType && mode === "browse" && item.sourceId}
+          <!-- Merged listings carry duplicates until dedup (Phase C); tag them honestly. -->
+          <span class="y srctag">· {sourceNameOf(item.sourceId)}</span>
         {/if}
       </div>
     </button>
@@ -961,9 +1009,9 @@
         {#if i > 0}<span class="sep"><Icon name="chevron" size={13} /></span>{/if}
         <button class="crumb" class:current={i === crumbs.length - 1} onclick={() => goCrumb(i)}>{c.title}</button>
       {/each}
-      {#if active && crumbs.length === 1}
+      {#if (active || activeType) && crumbs.length === 1}
         <select class="sort" bind:value={sort} onchange={changeSort}>
-          {#each SORTS as s (s.key)}
+          {#each activeType ? SORTS.filter((s) => TYPE_SORTS.has(s.key)) : SORTS as s (s.key)}
             <option value={s.key}>{s.label}</option>
           {/each}
         </select>

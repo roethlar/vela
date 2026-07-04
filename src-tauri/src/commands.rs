@@ -1783,6 +1783,135 @@ pub async fn get_items(
         .await
 }
 
+/// Merged listing for the All view's consolidated Library: every section of
+/// `section_type` across every source contributes, sorted and windowed here.
+/// Paging is stateless-but-exact: each section supplies its first
+/// `start+size` items (already source-sorted), so the merged window is
+/// correct; cost grows with scroll depth, acceptable at library scale.
+/// No dedup yet — that's the rework's Phase C.
+#[tauri::command]
+pub async fn get_type_listing(
+    section_type: String,
+    sort: Option<String>,
+    start: usize,
+    size: usize,
+    state: State<'_, AppState>,
+) -> Result<Vec<ItemDto>, String> {
+    validate_section_type(&section_type)?;
+    // Merged ordering can only honor fields items carry globally (title,
+    // year); the richer per-source sorts stay available in per-source views.
+    let sort = match validate_sort(sort)?.as_deref() {
+        None => "titleSort:asc".to_string(),
+        Some(s @ ("titleSort:asc" | "year:desc")) => s.to_string(),
+        Some(_) => return Err("merged listings sort by title or year".into()),
+    };
+    let size = clamp_page_size(size);
+    let fetch = start.saturating_add(size);
+    let sources = state.registry.lock().await.selected(None);
+    let mut merged: Vec<ItemDto> = Vec::new();
+    for src in sources {
+        // A failing source drops out rather than failing the whole view,
+        // matching aggregate()'s stance for multi-source requests.
+        let Ok(sections) = src.sections().await else {
+            continue;
+        };
+        for sec in sections
+            .into_iter()
+            .filter(|s| s.section_type == section_type)
+        {
+            let raw = sec
+                .key
+                .split_once(':')
+                .map(|(_, r)| r.to_string())
+                .unwrap_or(sec.key);
+            if let Ok(items) = src.items(&raw, &section_type, Some(&sort), 0, fetch).await {
+                merged.extend(items);
+            }
+        }
+    }
+    Ok(merge_sort_page(merged, &sort, start, size))
+}
+
+/// Order the merged union and cut the requested window. Title comparisons
+/// fold case; year sorting is newest-first with title tiebreak. (Plex's
+/// per-source titleSort strips leading articles; the merged re-sort uses the
+/// display title, a small known divergence.)
+fn merge_sort_page(mut items: Vec<ItemDto>, sort: &str, start: usize, size: usize) -> Vec<ItemDto> {
+    match sort {
+        "year:desc" => items.sort_by(|a, b| {
+            b.year
+                .cmp(&a.year)
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        }),
+        _ => items.sort_by_key(|i| i.title.to_lowercase()),
+    }
+    items.into_iter().skip(start).take(size).collect()
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn item(title: &str, year: Option<u32>, source: &str) -> ItemDto {
+        ItemDto {
+            rating_key: format!("{source}:{title}"),
+            title: title.into(),
+            year,
+            summary: None,
+            duration_ms: None,
+            media_type: Some("movie".into()),
+            poster: None,
+            series_poster: None,
+            backdrop: None,
+            view_offset_ms: None,
+            played: None,
+            index: None,
+            parent_index: None,
+            grandparent_title: None,
+            parent_title: None,
+            source_id: source.into(),
+        }
+    }
+
+    #[test]
+    fn merged_page_interleaves_sources_by_title_case_folded() {
+        let merged = vec![
+            item("delta", Some(2020), "plex"),
+            item("Alpha", Some(2021), "plex"),
+            item("charlie", Some(2019), "smb-1"),
+            item("Bravo", Some(2022), "smb-1"),
+        ];
+        let page = merge_sort_page(merged, "titleSort:asc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["Alpha", "Bravo", "charlie", "delta"]);
+    }
+
+    #[test]
+    fn merged_page_windows_after_sorting() {
+        let merged = vec![
+            item("c", None, "a"),
+            item("a", None, "a"),
+            item("d", None, "b"),
+            item("b", None, "b"),
+        ];
+        let page = merge_sort_page(merged, "titleSort:asc", 1, 2);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn merged_page_year_desc_with_title_tiebreak() {
+        let merged = vec![
+            item("older", Some(1999), "a"),
+            item("z-new", Some(2024), "b"),
+            item("a-new", Some(2024), "a"),
+        ];
+        let page = merge_sort_page(merged, "year:desc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["a-new", "z-new", "older"]);
+    }
+}
+
 #[tauri::command]
 pub async fn search(
     query: String,

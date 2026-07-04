@@ -93,6 +93,19 @@ per-connection Files entries.
   and client merge); whether Phase B renders a true left sidebar or
   restyles the existing top nav first (structure identical either way).
 
+Phase B implemented 2026-07-04. Decisions made at implementation: the
+structure landed in the existing top nav (Home | Movies | TV Shows | Videos
+when viewing All with multiple sources; the named source chips are the
+per-connection "Files" role) — the true left-sidebar rendering is deferred
+to a design-language pass. Paging is stateless-but-exact: each section
+contributes its first start+size source-sorted items and the union is
+re-sorted and windowed in Rust (cost grows with scroll depth; fine at
+library scale). Merged listings sort by title or year only (items don't
+carry the other sort fields globally); per-source views keep the full sort
+list. Single-source setups keep per-library tabs — consolidation activates
+with more than one source. Merged cards carry a source tag until Phase C
+dedups them.
+
 ### Phase C — cross-source identity and dedup
 
 Goal: one card per title, backed by every source that carries it.

@@ -341,6 +341,7 @@ pub fn run() {
             commands::get_hubs,
             commands::get_sections,
             commands::get_items,
+            commands::get_type_listing,
             commands::search,
             commands::get_children,
             commands::set_watched,
