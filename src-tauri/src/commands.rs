@@ -1857,6 +1857,27 @@ pub struct QueueItem {
 
 /// Result of `queue_list` — the queue snapshot plus the cursor, so the drawer
 /// can highlight whichever item is currently playing.
+/// Availability of the `sshfs` binary for the add-SSH UI: whether it was
+/// found and where, plus the platform so the frontend can show the right
+/// install guidance up front instead of only failing at mount time.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshfsStatus {
+    pub found: bool,
+    pub path: Option<String>,
+    pub platform: &'static str,
+}
+
+#[tauri::command]
+pub fn sshfs_status() -> SshfsStatus {
+    let path = crate::sshfs::locate();
+    SshfsStatus {
+        found: path.is_some(),
+        path,
+        platform: std::env::consts::OS,
+    }
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSnapshot {

@@ -49,8 +49,8 @@ Keep it short and update it when important repo facts change.
   ranking phase depends on smb-source-labeling landing first), and
   `.agents/plans/ssh-macos-guidance.md` (implements the 2026-07-04
   macOS-SSH decision; live mount testing stays parked). Progress:
-  watch-state-refresh is implemented (2026-07-04, full CI set green, owner
-  playtest pending). A 2026-07-04
+  watch-state-refresh and ssh-macos-guidance are implemented (2026-07-04,
+  full CI set green, owner playtest/visual check pending). A 2026-07-04
   design-language decision (Infuse reference,
   `reference_screens/infuse-home-reference.png`) resolved the artwork
   plan's poster-vs-content question as the split policy and shapes the

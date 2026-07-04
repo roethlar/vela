@@ -59,7 +59,10 @@ Source setup:
   segfault or act oddly on the owner's machine. Note for any eventual retest:
   mounts run ssh with `BatchMode=yes` and no password support, so first-time
   hosts need their host key trusted via plain `ssh` before Vela can mount
-  them. Plan: `.agents/plans/ssh-macos-guidance.md`.
+  them. Plan: `.agents/plans/ssh-macos-guidance.md`. Implemented 2026-07-04:
+  `sshfs_status` command + upfront platform-aware guidance in the add-SSH
+  panel, platform-aware mount error (unit-tested), host-key note in the form
+  footer. Automated checks pass; owner visual check pending.
 
 Library navigation and the "All" view (owner direction, 2026-07-04):
 

@@ -33,6 +33,8 @@
     mountpoint: string;
   };
 
+  type SshfsStatus = { found: boolean; path: string | null; platform: string };
+
   type MpvInfo = {
     available: boolean;
     path: string | null;
@@ -93,6 +95,7 @@
   let folders = $state<LocalFolder[]>([]);
   let smbMounts = $state<SmbMount[]>([]);
   let sshMounts = $state<SshMount[]>([]);
+  let sshfs = $state<SshfsStatus | null>(null);
   let busy = $state(false);
   let err = $state<string | null>(null);
 
@@ -225,19 +228,21 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, f, m, ssh, mp, adv] = await Promise.all([
+      const [s, f, m, ssh, mp, adv, sfs] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<LocalFolder[]>("list_local_folders"),
         invoke<SmbMount[]>("list_smb_mounts"),
         invoke<SshMount[]>("list_ssh_mounts"),
         invoke<MpvInfo>("check_mpv"),
         invoke<MpvAdvanced>("get_mpv_advanced"),
+        invoke<SshfsStatus>("sshfs_status"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
       folders = f;
       smbMounts = m;
       sshMounts = ssh;
+      sshfs = sfs;
       if (smbBrowseMountId && !m.some((mount) => mount.id === smbBrowseMountId)) {
         smbBrowseMountId = "";
         smbBrowsePath = "";
@@ -945,6 +950,25 @@
 
     <section>
       <h3>Add an SSH / SFTP folder</h3>
+      {#if sshfs && !sshfs.found}
+        <div class="warn">
+          <b>sshfs is not installed</b> — SSH folders need it.
+          {#if sshfs.platform === "macos"}
+            Plain <code>brew install sshfs</code> does not work on macOS. The working
+            route: <code>brew install --cask macfuse</code>, approve its system
+            extension in System Settings (Apple Silicon Macs must first allow
+            third-party kernel extensions via Recovery) and restart, then
+            <code>brew install gromgit/fuse/sshfs-mac</code>. Heads-up: these builds
+            can be unstable on recent macOS.
+          {:else if sshfs.platform === "linux"}
+            Install <code>sshfs</code> with your package manager (apt, dnf, pacman, …).
+          {:else}
+            SSH/SFTP folders currently require sshfs on Linux or macOS.
+          {/if}
+        </div>
+      {:else if sshfs?.found && sshfs.path}
+        <p class="muted small">sshfs detected: {sshfs.path}</p>
+      {/if}
       <div class="form">
         <div class="field">
           <label for="ssh-host">Host</label>
@@ -978,7 +1002,9 @@
           {busy ? "Mounting…" : "Mount & add"}
         </button>
         <p class="muted small">
-          SSH/SFTP uses sshfs with your SSH keys, agent, and ~/.ssh/config. Vela does not store SSH passwords.
+          SSH/SFTP uses sshfs with your SSH keys, agent, and ~/.ssh/config. Vela does not
+          store SSH passwords. Connect to new hosts once with plain <code>ssh</code>
+          first so the host key is trusted — mounts can't answer that prompt.
         </p>
       </div>
     </section>

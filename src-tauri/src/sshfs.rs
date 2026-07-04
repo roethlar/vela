@@ -3,6 +3,36 @@
 
 use crate::config::SshMount;
 
+/// Locate the sshfs binary Vela would use: PATH (via `which`) plus the
+/// well-known install locations. Shared by `mount` and the add-SSH UI's
+/// status check (`sshfs_status` command).
+pub fn locate() -> Option<String> {
+    find_program(
+        "sshfs",
+        &[
+            "/usr/bin/sshfs",
+            "/usr/local/bin/sshfs",
+            "/opt/homebrew/bin/sshfs",
+        ],
+    )
+}
+
+/// Platform-aware "sshfs missing" message. On macOS the generic "install
+/// sshfs" advice is a dead end (Homebrew core's formula needs Linux-only
+/// libfuse), so spell out the macFUSE route instead.
+#[cfg(unix)]
+fn not_found_message() -> String {
+    if cfg!(target_os = "macos") {
+        "sshfs was not found. On macOS: install macFUSE (brew install --cask macfuse), \
+         approve its system extension, then install a macFUSE-compatible sshfs build \
+         (brew install gromgit/fuse/sshfs-mac) and try again."
+            .to_string()
+    } else {
+        "sshfs was not found. Install sshfs with your package manager, then try again."
+            .to_string()
+    }
+}
+
 pub fn default_mountpoint(m: &SshMount) -> Result<String, String> {
     let base = crate::config::config_dir_file("mounts").map_err(|e| e.to_string())?;
     let mp = base.join(format!(
@@ -28,15 +58,7 @@ pub fn mount(m: &SshMount) -> Result<(), String> {
     std::fs::create_dir_all(&m.mountpoint)
         .map_err(|e| format!("could not create mountpoint: {e}"))?;
 
-    let sshfs = find_program(
-        "sshfs",
-        &[
-            "/usr/bin/sshfs",
-            "/usr/local/bin/sshfs",
-            "/opt/homebrew/bin/sshfs",
-        ],
-    )
-    .ok_or("sshfs was not found. Install sshfs, then try again.")?;
+    let sshfs = locate().ok_or_else(not_found_message)?;
     let mut args = vec![
         remote_spec(m),
         m.mountpoint.clone(),
@@ -308,5 +330,20 @@ mod tests {
         let mut m = mount();
         m.host = "2001:db8::10".into();
         assert_eq!(remote_spec(&m), "michael@[2001:db8::10]:/srv/media");
+    }
+
+    // Bare "install sshfs" advice is a dead end on macOS (Homebrew core's
+    // formula needs Linux-only libfuse), so the message must name the actual
+    // macFUSE route there and package-manager advice elsewhere.
+    #[cfg(unix)]
+    #[test]
+    fn not_found_message_is_platform_aware() {
+        let msg = not_found_message();
+        if cfg!(target_os = "macos") {
+            assert!(msg.contains("macfuse"), "macOS message must name macFUSE: {msg}");
+            assert!(msg.contains("sshfs-mac"), "macOS message must name the tap build: {msg}");
+        } else {
+            assert!(msg.contains("package manager"), "non-mac message: {msg}");
+        }
     }
 }

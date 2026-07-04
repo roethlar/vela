@@ -321,6 +321,7 @@ pub fn run() {
             commands::mount_ssh,
             commands::list_ssh_mounts,
             commands::unmount_ssh,
+            commands::sshfs_status,
             commands::check_mpv,
             commands::set_mpv_path,
             commands::get_mpv_advanced,
