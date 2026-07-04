@@ -1,9 +1,9 @@
 # rev-1: Dedup can end infinite scroll before all titles are loaded
 
 **Severity**: MEDIUM — silent content omission: later library titles become unreachable in the All view.
-**Status**: Open
+**Status**: In progress
 **Branch**: `fix/rev-1-dedup-page-underflow`
-**Commit**: (pending)
+**Commit**: (filled after commit)
 
 ## Evidence
 `src-tauri/src/commands.rs` `get_type_listing`: fetches `start+size` items per
@@ -25,13 +25,25 @@ under-fills the window and the short page is indistinguishable from "end of
 library".
 
 ## Approach
-(pending)
+`get_type_listing` now collects the contributing sections once and delegates
+to a new `fetch_merged` helper that fetches per-section items at increasing
+depth (doubling from `start+size`, capped at `MAX_MERGE_FETCH = 4096`) until
+the deduped union can fill the requested window, no section returned a full
+window (nothing more exists anywhere), or the cap is hit. A short page now
+genuinely means end-of-library, which is exactly the signal the frontend's
+`hasMore` logic reads. Root cause (window arithmetic ignoring collapse), not
+symptom (frontend heuristics), is what changed.
 
 ## Files changed
-(pending)
+- `src-tauri/src/commands.rs` — `get_type_listing` restructured;
+  new `fetch_merged` + `MAX_MERGE_FETCH`; `FakeItems` test source and the
+  guard test in `merge_tests`.
 
 ## Guard proof
-(pending)
+- `commands::merge_tests::merged_fetch_deepens_past_dedup_collapse_to_fill_the_window`
+  — a duplicate pair inside the initial window with unique titles beyond it;
+  the deduped result must still fill the window. Reverting the deepening to a
+  single pass makes it FAIL (verified); restoring makes it PASS (verified).
 
 ## Coder dispute (if any)
 None — confirmed against the code.

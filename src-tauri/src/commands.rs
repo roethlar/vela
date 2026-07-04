@@ -1815,10 +1815,11 @@ pub async fn get_type_listing(
     let overrides = config::load_config()
         .map(|c| c.merged_overrides)
         .unwrap_or_default();
-    let mut merged: Vec<ItemDto> = Vec::new();
-    for src in sources {
-        // A failing source drops out rather than failing the whole view,
-        // matching aggregate()'s stance for multi-source requests.
+    // Collect the contributing sections once; a failing source drops out
+    // rather than failing the whole view, matching aggregate()'s stance.
+    let mut section_refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+        Vec::new();
+    for src in &sources {
         let Ok(sections) = src.sections().await else {
             continue;
         };
@@ -1831,14 +1832,47 @@ pub async fn get_type_listing(
                 .split_once(':')
                 .map(|(_, r)| r.to_string())
                 .unwrap_or(sec.key);
-            if let Ok(items) = src.items(&raw, &section_type, Some(&sort), 0, fetch).await {
+            section_refs.push((src.clone(), raw));
+        }
+    }
+    let deduped = fetch_merged(&section_refs, &section_type, &sort, fetch).await;
+    let ranked = rank_backings(deduped, &kinds, &overrides);
+    Ok(merge_sort_page(ranked, &sort, start, size))
+}
+
+/// Upper bound on how deep the merged fetch will dig per section while
+/// filling a window — a runaway-dedup backstop, far above any real page.
+const MAX_MERGE_FETCH: usize = 4096;
+
+/// Fetch per-section items at increasing depth until the deduped union can
+/// fill the requested window, no section has more to give, or the depth cap
+/// is hit. Without the deepening, duplicates collapsing inside the fetch
+/// window under-fill the page and the frontend reads the short page as "end
+/// of library" — later titles would become unreachable (rev-1).
+async fn fetch_merged(
+    section_refs: &[(std::sync::Arc<dyn crate::source::MediaSource>, String)],
+    section_type: &str,
+    sort: &str,
+    want: usize,
+) -> Vec<ItemDto> {
+    let mut depth = want.max(1);
+    loop {
+        let mut merged: Vec<ItemDto> = Vec::new();
+        // Whether any section returned a full window — i.e. deepening could
+        // still surface more unique titles somewhere.
+        let mut any_full = false;
+        for (src, raw) in section_refs {
+            if let Ok(items) = src.items(raw, section_type, Some(sort), 0, depth).await {
+                any_full |= items.len() >= depth;
                 merged.extend(items);
             }
         }
+        let deduped = dedup_across_sources(merged);
+        if deduped.len() >= want || !any_full || depth >= MAX_MERGE_FETCH {
+            return deduped;
+        }
+        depth = depth.saturating_mul(2).min(MAX_MERGE_FETCH);
     }
-    let deduped = dedup_across_sources(merged);
-    let ranked = rank_backings(deduped, &kinds, &overrides);
-    Ok(merge_sort_page(ranked, &sort, start, size))
 }
 
 /// Default playback preference for merged titles: a direct file beats a
@@ -2115,6 +2149,76 @@ mod merge_tests {
     fn with_ids(mut i: ItemDto, ids: &[&str]) -> ItemDto {
         i.provider_ids = ids.iter().map(|s| s.to_string()).collect();
         i
+    }
+
+    struct FakeItems {
+        items: Vec<ItemDto>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for FakeItems {
+        fn id(&self) -> String {
+            "fake".into()
+        }
+        fn name(&self) -> String {
+            "Fake".into()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _key: &str,
+            _ty: &str,
+            _sort: Option<&str>,
+            start: usize,
+            size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(self.items.iter().skip(start).take(size).cloned().collect())
+        }
+        async fn search(&self, _q: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(&self, _k: &str, _s: usize, _z: usize) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            _k: &str,
+            _d: Option<u64>,
+        ) -> Result<crate::source::StreamResolution, String> {
+            Err("fake source".into())
+        }
+    }
+
+    // rev-1 guard: duplicates collapsing inside the fetch window must deepen
+    // the fetch, not end the page early (a short page means end-of-library
+    // to the frontend's infinite scroll).
+    #[test]
+    fn merged_fetch_deepens_past_dedup_collapse_to_fill_the_window() {
+        let items = vec![
+            with_ids(item("Alpha", Some(2020), "fake"), &["imdb:tt1"]),
+            with_ids(item("Alpha copy", Some(2020), "fake"), &["imdb:tt1"]),
+            item("Bravo", Some(2021), "fake"),
+            item("Charlie", Some(2022), "fake"),
+        ];
+        let refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+            vec![(std::sync::Arc::new(FakeItems { items }), "sec".into())];
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let out = rt.block_on(fetch_merged(&refs, "movie", "titleSort:asc", 3));
+        assert!(
+            out.len() >= 3,
+            "deepening must surface titles beyond the collapsed window, got {}",
+            out.len()
+        );
     }
 
     #[test]
