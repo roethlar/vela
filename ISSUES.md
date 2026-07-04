@@ -2,9 +2,11 @@
 
 ## Open - Owner-Reported (2026-07-04)
 
-Owner-observed on macOS against a live Plex server, with screenshot evidence.
-Recorded as reported; untriaged, no code investigation yet. Other backends
-unchecked.
+Owner-observed on macOS during live smoke testing. Recorded as reported;
+untriaged, no code investigation yet.
+
+Home screen, against a live Plex server (screenshot evidence; other backends
+unchecked for these):
 
 - Continue Watching does not refresh after playback. A video watched to
   completion or partway is only reflected in the Home hubs after an app
@@ -20,6 +22,19 @@ unchecked.
   next to 16:9 episode thumbnails at different heights (e.g. a movie poster
   beside an episode thumb in Continue Watching). The owner finds this
   distracting; a row should present one consistent artwork shape.
+
+Source setup:
+
+- SMB shares surface labeled "Local" on the main screen. The share connects
+  fine, but the UI presents it as "Local" instead of identifying it as an SMB
+  source/share. Plausibly a consequence of the SMB-feeds-the-local-source
+  design (selected share folders feed the local source; see
+  `.agents/state.md`) — unverified — but as presented it is confusing.
+
+- The `sshfs` requirement for SSH sources surfaces too late. Adding an SSH
+  source needs `sshfs`, but the add flow only reveals that when it fails to
+  find the binary mid-add. Surface the dependency (and an install hint) up
+  front in the add-SSH UI instead.
 
 ## Kimi-K2.6 Review Triage (2026-05-23)
 
