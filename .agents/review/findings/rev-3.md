@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — a visible action (Mark watched/unwatched) errors every time for the common local+server merged title.
 **Status**: In progress
 **Branch**: `fix/rev-3-watch-routing` (stacked on rev-2)
-**Commit**: (pending)
+**Commit**: `59770c2ef20e071106439c46ab5c49b23bed1b11`
 
 ## Evidence
 `src-tauri/src/commands.rs` `rank_backings`: the merged entry's
