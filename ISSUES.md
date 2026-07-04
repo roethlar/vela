@@ -1,5 +1,37 @@
 # Issue Queue
 
+## Open - Owner-Reported (2026-07-04, Continue Watching curation)
+
+Reported on Linux against a live Plex server; code-traced same day.
+
+- Mark watched/unwatched does not remove an item from the Continue Watching
+  hero, and the owner expects it to. Root causes (both required):
+  (a) `setWatched` (`src/routes/+page.svelte:707`) updates the card
+  in place and never re-fetches hubs, so the server-side continue hub row
+  keeps its stale copy until the next full refresh; (b) the hero also merges
+  Vela's own recents (`recents.rs`), and a recents entry only leaves via the
+  playback-end path (`finish()` past the watched threshold) — a right-click
+  mark-watched never touches `cfg.recents`, so the item persists in the hero
+  from the recents half even after the server drops it. Fix direction:
+  `set_watched` should also drop the key from recents (backend) and trigger
+  the same hub+recents re-fetch the `playback-ended` path uses (frontend).
+- No "Remove from Continue Watching" action exists. Owner wants an explicit
+  context-menu option on hero cards that removes the entry without changing
+  watched state. Needs: a `remove_recent(rating_key)` command clearing the
+  Vela recents entry, plus — for Plex-backed items — the server's
+  remove-from-continue-watching action so the server hub copy goes too
+  (Plex exposes this in its API; Jellyfin/Emby equivalents need
+  investigation). Until the server side is wired, removal must at least
+  stick locally (recents) and survive the merge with server hubs.
+- Owner confusion, not a defect (explained 2026-07-04): "On Deck" and the
+  Continue Watching hero are different lists by design — the hero is Vela's
+  recents merged with the servers' continue/resume hubs (in-progress
+  items), while On Deck is Plex's own "what's next" hub (next-up episodes,
+  including after a finished episode) rendered as a 16:9 row per the
+  2026-07-04 split-artwork decision. Overlap for in-progress episodes is
+  expected. If the duplication annoys in practice, options are hiding the
+  On Deck row or deduping hero items out of it — owner call, not queued.
+
 ## Open - Owner-Reported (2026-07-04)
 
 Owner-observed on macOS during live smoke testing. Recorded as reported;
