@@ -261,17 +261,23 @@ Status: Active
 Decision:
 Vela's browsing UI moves toward the design language of the owner-supplied
 Infuse screenshot at `reference_screens/infuse-home-reference.png`
-(committed with this entry). Concrete direction:
-- Resume rows (Continue Watching / On Deck) are large, uniform 16:9 cards —
-  scene stills for episodes, backdrop art for movies/shows — with the
-  progress bar and a title + S·E/episode-name caption.
+(committed with this entry) — a direction, explicitly not a pixel clone.
+Concrete direction (refined by the owner the same day):
+- Continue Watching is a single hero carousel, not a card row: one large
+  centered 16:9 card showing the most recently watched item — scene still
+  for episodes, backdrop art for movies — with the progress bar and a
+  title + S·E/episode-name caption; prev/next controls ("<< HEROIC >>")
+  swap the hero through the other recent items.
+- Other resume-style content (e.g. On Deck) uses the same landscape artwork
+  rules; whether it folds into the hero rotation or stays a row is settled
+  in the artwork plan.
 - Catalog rows and library grids are uniform 2:3 posters; episodic entries
   show series artwork there, not episode stills.
 - Navigation trends toward a sidebar structure: Home, a consolidated
   Library, and per-connection Files entries (matches the library/All-view
   rework direction).
-This is a direction to move toward, not a pixel clone; specifics land only
-through approved plans.
+Explicitly excluded from the reference: the Favorites tile row (superfluous
+per owner). Specifics land only through approved plans.
 
 Reason:
 Reviewing the artwork plan's open question (in-progress movies: poster or

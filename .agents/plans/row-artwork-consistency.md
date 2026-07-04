@@ -37,9 +37,16 @@ Resume rows show scenes; catalog rows and grids show posters; every row is
 internally uniform.
 
 1. Row policy:
-   - Resume rows (Continue Watching, On Deck): every card 16:9 — episodes
-     keep their scene stills (current behavior), movies/shows use backdrop
-     art. Progress bar and the title + S·E/episode-name caption stay.
+   - Continue Watching: a single hero carousel replaces the card row — one
+     large centered 16:9 card showing the most recently watched item (scene
+     still for episodes, backdrop for movies), with the progress bar and
+     title + S·E/episode-name caption; prev/next controls swap the hero
+     through the hub's other items in recency order (arrows are the
+     baseline; swipe/trackpad is a nicety). The hero requests larger
+     transcode dimensions than grid artwork.
+   - On Deck: same 16:9 artwork rules (stills for episodes, backdrops for
+     movies); whether it stays a landscape row under the hero or folds into
+     the hero rotation is an open point below.
    - Catalog rows (Recently Added Movies/TV, similar hubs) and library
      grids: every card 2:3 — episodic entries render series artwork, not
      episode stills (the reference shows exactly this: a series poster for
@@ -62,11 +69,12 @@ internally uniform.
    - Token exposure is unchanged in kind: these are the same
      poster-transcode URL forms already accepted as local-only exposure.
 3. Frontend (`src/routes/+page.svelte`): the shape choice at `:691` becomes
-   row-policy-driven instead of mediaType-driven. Resume rows render
-   landscape for all items (`backdrop ?? poster` for movies/shows, stills
-   for episodes); catalog rows/grids render portrait for all items
+   row-policy-driven instead of mediaType-driven, plus a new hero-carousel
+   block for the Continue Watching hub (hero-index state, prev/next
+   handlers, landscape art selection `backdrop ?? poster` for movies vs the
+   episode still). Catalog rows/grids render portrait for all items
    (`seriesPoster ?? poster` for episodes). The `.noart` fallback inherits
-   the row's box shape either way.
+   the box shape of its context.
 
 Non-goals: no true position frames (Plex BIF / Jellyfin trickplay preview
 images — server-generated, a separate feature if ever), no per-row "smart"
@@ -81,17 +89,20 @@ nav/sidebar work (that's `.agents/plans/library-all-view-rework.md`).
 - Rust unit tests: Plex XML parsing picks up `grandparentThumb` and `art`;
   Jellyfin series-primary and backdrop URL assembly; ItemDto serialization
   field names.
-- Owner playtest against the reference screenshot: Continue Watching/On Deck
-  render equal-height 16:9 cards including an in-progress movie (backdrop);
-  Recently Added rows render equal-height 2:3 posters including episodic
-  entries (series art); a local-source catalog row degrades to uniform 2:3
-  `.noart` boxes without layout breakage.
+- Owner playtest against the reference screenshot: Continue Watching renders
+  as the hero carousel with the last-watched item centered, prev/next
+  cycling through the other recents (movie hero shows backdrop, episode
+  hero shows its still, progress bar correct on each); On Deck and any
+  16:9 row render equal heights; Recently Added rows render equal-height
+  2:3 posters including episodic entries (series art); a local-source
+  catalog row degrades to uniform 2:3 `.noart` boxes without layout
+  breakage.
 
 ## Open points to settle at approval
 
-1. Resume-row card size: adopt larger, reference-like hero cards in this
-   change, or keep current row heights and treat sizing as a later
-   design-language pass (proposed: sizing later, shape now).
+1. On Deck presentation: keep it as a 16:9 landscape row under the hero
+   (proposed — its "next up" set is distinct from in-progress recents) or
+   fold its items into the hero rotation.
 2. Whether local-source series art ships in v1 or `series_poster` stays
    server-backend-only at first.
 3. Whether "Recently Added TV" should list shows/seasons instead of episodes
