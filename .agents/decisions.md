@@ -253,3 +253,35 @@ The open product question in `ISSUES.md` ("Open - Owner-Reported
 (2026-07-04)", SSH entry) about whether macOS SSH should depend on macFUSE
 or switch to an in-app SFTP client. The Linux sshfs stance from 2026-05-23
 is unchanged.
+
+### 2026-07-04 - UI design language: steer toward the Infuse reference
+
+Status: Active
+
+Decision:
+Vela's browsing UI moves toward the design language of the owner-supplied
+Infuse screenshot at `reference_screens/infuse-home-reference.png`
+(committed with this entry). Concrete direction:
+- Resume rows (Continue Watching / On Deck) are large, uniform 16:9 cards —
+  scene stills for episodes, backdrop art for movies/shows — with the
+  progress bar and a title + S·E/episode-name caption.
+- Catalog rows and library grids are uniform 2:3 posters; episodic entries
+  show series artwork there, not episode stills.
+- Navigation trends toward a sidebar structure: Home, a consolidated
+  Library, and per-connection Files entries (matches the library/All-view
+  rework direction).
+This is a direction to move toward, not a pixel clone; specifics land only
+through approved plans.
+
+Reason:
+Reviewing the artwork plan's open question (in-progress movies: poster or
+content view?), the owner supplied Infuse as the reference and asked that
+Vela get closer to its design language (2026-07-04). The split policy keeps
+every row internally uniform — the original complaint — while resume rows
+read as scenes in progress.
+
+Supersedes:
+The "poster-uniform hub rows" primary proposal in
+`.agents/plans/row-artwork-consistency.md` (updated to the split policy) and
+that plan's poster-vs-landscape open point. Informs, not replaces, the nav
+phases of `.agents/plans/library-all-view-rework.md`.
