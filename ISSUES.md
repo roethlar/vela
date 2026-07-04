@@ -30,11 +30,38 @@ Source setup:
   source/share. Plausibly a consequence of the SMB-feeds-the-local-source
   design (selected share folders feed the local source; see
   `.agents/state.md`) — unverified — but as presented it is confusing.
+  Screenshot evidence: source chips read "All | Plex | Nagatha | Local" and
+  the nav lists the share's folders as "movies · Local" and
+  "skippy/video/archive/tv · Local".
 
-- The `sshfs` requirement for SSH sources surfaces too late. Adding an SSH
-  source needs `sshfs`, but the add flow only reveals that when it fails to
-  find the binary mid-add. Surface the dependency (and an install hint) up
-  front in the add-SSH UI instead.
+- SSH sources still fail with `sshfs` installed, and the requirement
+  surfaces too late. The add flow only reveals the `sshfs` dependency when it
+  fails to find the binary mid-add; surface it (and an install hint) up front
+  in the add-SSH UI. After installing sshfs via Homebrew and restarting Vela
+  (macOS, 2026-07-04), adding an SSH source still fails — exact error not yet
+  captured. Triage leads, all unverified: whether discovery actually finds
+  the brew binary (`src-tauri/src/sshfs.rs` checks PATH candidates plus
+  `/usr/local/bin/sshfs` and `/opt/homebrew/bin/sshfs`); macFUSE missing or
+  its system extension unapproved (brew's sshfs needs it); untrusted host key
+  or missing key auth — the mount runs ssh with `BatchMode=yes`, so nothing
+  can prompt, and Vela deliberately has no SSH password support.
+
+Library navigation and the "All" view (owner direction, 2026-07-04):
+
+- The "All" view is not useful in its current form, and the library list
+  needs rework. Per-source views break down by content type, but "All" breaks
+  down by connection/share — as segregated as per-source browsing, only
+  busier and sloppier. The nav sprawls one flat entry per library per source
+  ("Movies · Plex", "Movies Archive · Plex", "TV Shows · Plex", "TV Shows
+  Archive · Plex", "Shows · Nagatha", "movies · Local",
+  "skippy/video/archive/tv · Local"). Owner direction: "All" should be a
+  consolidated, deduped listing by content type — one entry per title backed
+  by every source that carries it, defaulting playback to the most
+  performant/reliable source, with an override to pick the source per title.
+  Prerequisite: SMB/local metadata is not cached today, so those sources load
+  slowly; likely needs persistent local metadata caching first (a metadata
+  cache already exists — see the P1 cache-bounding item — reconcile its scope
+  at triage). Sizable, multi-part; needs an approved plan before code.
 
 ## Kimi-K2.6 Review Triage (2026-05-23)
 

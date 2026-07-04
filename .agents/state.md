@@ -25,19 +25,25 @@ Keep it short and update it when important repo facts change.
 - README status now reflects heuristic media-version/source selection and the
   lack of a manual version picker.
 - Live smoke tests 2026-07-04: Jellyfin passed against a real server; SMB
-  connected but surfaces labeled "Local"; adding an SSH source reveals the
-  `sshfs` requirement only when the add fails (both queued in `ISSUES.md`).
-  Still pending live: Emby, local folders, and SMB browse/playback depth.
+  connected but surfaces labeled "Local"; SSH still fails even after
+  installing `sshfs` via Homebrew and restarting (exact error not yet
+  captured). Findings queued in `ISSUES.md`, alongside an owner-direction
+  rework of the library list and "All" view (consolidated, deduped,
+  cross-source, metadata caching for SMB/local first). Still pending live:
+  Emby, local folders, and SMB browse/playback depth.
 
 ## Next
 
-- Triage the owner-reported UI issues recorded 2026-07-04 in `ISSUES.md`
-  ("Open - Owner-Reported"): watch state stale until app restart (Continue
-  Watching hub, progress bars, played badges) and rows mixing poster/episode
-  artwork aspect ratios.
-- Finish live smoke tests: Emby, local folders, SMB browse/playback, and SSH
-  (needs `sshfs` installed on the test machine); or keep the live-integration
-  caveat explicit.
+- Triage the owner-reported issues recorded 2026-07-04 in `ISSUES.md`
+  ("Open - Owner-Reported"): watch-state staleness, artwork-ratio mixing,
+  SMB "Local" labeling, and the SSH add failure.
+- Capture the exact SSH add-failure error now that `sshfs` is installed
+  (triage leads are in `ISSUES.md`), then debug.
+- When the owner calls for it, draft the library/"All"-view rework plan
+  (persistent SMB/local metadata caching, cross-source title dedup, source
+  ranking, per-title source override) — direction queued in `ISSUES.md`.
+- Finish live smoke tests: Emby, local folders, SMB browse/playback; or keep
+  the live-integration caveat explicit.
 - If updating broader governance metadata, refresh `.agents/repo-map.json` and
   `.agents/artifact-manifest.json` from their old `validated_against` commit.
 - Letterbox crop (decided 2026-07-03, see `.agents/decisions.md`): next step is
