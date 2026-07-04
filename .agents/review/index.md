@@ -28,7 +28,7 @@ slice ↔ one review ↔ one recorded verdict. Merge of `smb-native` into
 
 | ID    | Severity | Impact (one line)                                      | Status | Branch |
 |-------|----------|--------------------------------------------------------|--------|--------|
-| smb-1 | —        | Native client wrapper + share browsing without mounts  | `[~]`  | `smb-native` |
+| smb-1 | —        | Native client wrapper + share browsing without mounts  | `[x]`  | `smb-native` |
 | smb-2 | —        | Provider-trait refactor of local source (no behavior)  | `[ ]`  | `smb-native` |
 | smb-3 | —        | Native SMB listing via provider + listing cache        | `[ ]`  | `smb-native` |
 | smb-4 | —        | Loopback Range proxy + SMB playback via mpv            | `[ ]`  | `smb-native` |

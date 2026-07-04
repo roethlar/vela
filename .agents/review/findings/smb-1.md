@@ -1,7 +1,7 @@
 # smb-1: Native SMB client wrapper; share add/browse without OS mounts
 
 **Severity**: — (planned slice 1 of `.agents/plans/smb-native-client.md`, not a defect)
-**Status**: In progress (pending review)
+**Status**: Verified (accepted by reviewer; awaiting owner-gated merge)
 **Branch**: `smb-native` (stacked slices; this is commit 1)
 **Commit**: `fde07aae0efeef6f1449ee0217a2be0987d072f9` (base `21e950cd297a92682563eba94a9e5b4234318c97`)
 
@@ -76,4 +76,13 @@ None.
   recorded here rather than re-opening the plan.
 
 ## Reviewer comments
-(pending)
+- Reviewer: codex (codex-cli 0.142.5), headless one-shot, JSON schema-forced.
+- Reviewed SHA `fde07aae0efeef6f1449ee0217a2be0987d072f9`, base
+  `21e950cd297a92682563eba94a9e5b4234318c97`. 2026-07-04 (UTC).
+- Verdict: **accepted**; guard_confirmed: **true**.
+- Comments: "No material defects found in the pinned diff." Guard proof
+  held (baseline pass → documented mutation produced the expected 2
+  `smb_client` failures → restored pass). Note: the sandbox blocked
+  `git worktree add` (read-only `.git/worktrees`), so the reviewer used an
+  independent disposable clone at the reviewed SHA instead — the coder's
+  working tree was not modified, satisfying the isolation rule's intent.
