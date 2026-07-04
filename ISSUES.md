@@ -46,11 +46,14 @@ Source setup:
   build (e.g. `gromgit/fuse/sshfs-mac`), including approving the macFUSE
   kernel/system extension (on Apple Silicon that means allowing third-party
   kexts via Recovery). Bare "install sshfs" sends macOS users into exactly
-  this dead end. Open product question for the owner: whether macOS SSH
-  support should depend on macFUSE at all, or switch to an in-app SFTP
-  client. Also note for eventual retest: mounts run ssh with `BatchMode=yes`
-  and no password support, so first-time hosts need their host key trusted
-  via plain `ssh` before Vela can mount them.
+  this dead end. Decided 2026-07-04 (see `.agents/decisions.md`): keep the
+  sshfs dependency and handle macOS with in-UI setup help/hint text (upfront
+  requirement, platform-aware install route, known instability caveats);
+  macOS SSH live testing is parked because the brew macFUSE/sshfs-mac builds
+  segfault or act oddly on the owner's machine. Note for any eventual retest:
+  mounts run ssh with `BatchMode=yes` and no password support, so first-time
+  hosts need their host key trusted via plain `ssh` before Vela can mount
+  them.
 
 Library navigation and the "All" view (owner direction, 2026-07-04):
 

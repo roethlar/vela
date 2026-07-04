@@ -223,3 +223,33 @@ Refines the 2026-05-23 "Accept token-bearing media URLs as local-only
 exposure" entry: Plex stream URLs are no longer token-bearing once this
 lands; poster/photo-transcode URLs and SMB mount-argument exposure remain
 accepted local-only exposures.
+
+### 2026-07-04 - macOS SSH: keep sshfs, add in-UI setup guidance; live testing parked
+
+Status: Active
+
+Decision:
+SSH/SFTP sources keep the `sshfs` dependency on macOS (no in-app SFTP client
+for now). Vela's add-SSH UI must carry platform-aware help: state the sshfs
+requirement up front rather than at add-failure time, and on macOS describe
+the actual working route — the `macfuse` cask plus a macFUSE-compatible sshfs
+build (e.g. `gromgit/fuse/sshfs-mac`), including system-extension approval
+and, on Apple Silicon, the Recovery reduced-security step — with a caution
+that these builds can be unstable. macOS SSH live smoke testing is parked:
+the brew macFUSE/sshfs-mac builds segfault or act oddly on the owner's
+machine (2026-07-04), so Vela documents that stack rather than owning it.
+
+Reason:
+Homebrew core's `sshfs` cannot install on macOS (Linux-only libfuse
+dependency), so the app's bare "Install sshfs, then try again" error sends
+macOS users into a dead end the owner hit verbatim; the working tap route
+then proved unstable on the owner's machine and carries real friction
+(closed-source kext, extension approval, Recovery step, restart). An in-app
+SFTP client is more scope than the feature currently justifies. Honest
+in-UI guidance is the supportable stance.
+
+Supersedes:
+The open product question in `ISSUES.md` ("Open - Owner-Reported
+(2026-07-04)", SSH entry) about whether macOS SSH should depend on macFUSE
+or switch to an in-app SFTP client. The Linux sshfs stance from 2026-05-23
+is unchanged.
