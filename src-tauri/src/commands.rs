@@ -1842,12 +1842,18 @@ pub async fn get_type_listing(
         .map(|c| c.merged_overrides)
         .unwrap_or_default();
     // Collect the contributing sections once; a failing source drops out
-    // rather than failing the whole view, matching aggregate()'s stance.
+    // rather than failing the whole view, matching aggregate()'s stance —
+    // but TOTAL failure surfaces as an error, not an empty library (rev-4).
     let mut section_refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
         Vec::new();
+    let mut sections_err: Option<String> = None;
     for src in &sources {
-        let Ok(sections) = src.sections().await else {
-            continue;
+        let sections = match src.sections().await {
+            Ok(s) => s,
+            Err(e) => {
+                sections_err = Some(e);
+                continue;
+            }
         };
         for sec in sections
             .into_iter()
@@ -1861,7 +1867,15 @@ pub async fn get_type_listing(
             section_refs.push((src.clone(), raw));
         }
     }
-    let deduped = fetch_all_merged(&section_refs, &section_type, &sort).await;
+    if section_refs.is_empty() {
+        if let Some(e) = sections_err {
+            // Nothing contributed AND something failed: report it rather
+            // than rendering a blank library.
+            return Err(e);
+        }
+        // No sections of this type anywhere: legitimately empty.
+    }
+    let deduped = fetch_all_merged(&section_refs, &section_type, &sort).await?;
     let ranked = rank_backings(deduped, &kinds, &overrides);
     let items = merge_sort_page(ranked, &sort, 0, usize::MAX);
     let page = items.iter().skip(start).take(size).cloned().collect();
@@ -1884,7 +1898,7 @@ async fn fetch_all_merged(
     section_refs: &[(std::sync::Arc<dyn crate::source::MediaSource>, String)],
     section_type: &str,
     sort: &str,
-) -> Vec<ItemDto> {
+) -> Result<Vec<ItemDto>, String> {
     // Start deep enough that typical libraries resolve in one round trip.
     let mut depth: usize = 512;
     loop {
@@ -1892,14 +1906,26 @@ async fn fetch_all_merged(
         // Whether any section returned a full window — i.e. deepening could
         // still surface more items somewhere.
         let mut any_full = false;
+        // A partially failing view stays useful, but when EVERY section
+        // failed the caller gets the error, not an empty library (rev-4).
+        let mut any_ok = section_refs.is_empty();
+        let mut last_err: Option<String> = None;
         for (src, raw) in section_refs {
-            if let Ok(items) = src.items(raw, section_type, Some(sort), 0, depth).await {
-                any_full |= items.len() >= depth;
-                merged.extend(items);
+            match src.items(raw, section_type, Some(sort), 0, depth).await {
+                Ok(items) => {
+                    any_ok = true;
+                    any_full |= items.len() >= depth;
+                    merged.extend(items);
+                }
+                Err(e) => last_err = Some(e),
             }
         }
         if !any_full {
-            return dedup_across_sources(merged);
+            return if any_ok {
+                Ok(dedup_across_sources(merged))
+            } else {
+                Err(last_err.unwrap_or_else(|| "no sources available".into()))
+            };
         }
         depth = depth.saturating_mul(2);
     }
@@ -2251,6 +2277,82 @@ mod merge_tests {
         }
     }
 
+    struct FailingSource;
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for FailingSource {
+        fn id(&self) -> String {
+            "down".into()
+        }
+        fn name(&self) -> String {
+            "Down".into()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Err("server offline".into())
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Err("server offline".into())
+        }
+        async fn items(
+            &self,
+            _k: &str,
+            _t: &str,
+            _s: Option<&str>,
+            _st: usize,
+            _sz: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Err("server offline".into())
+        }
+        async fn search(&self, _q: &str) -> Result<Vec<ItemDto>, String> {
+            Err("server offline".into())
+        }
+        async fn children(&self, _k: &str, _s: usize, _z: usize) -> Result<Vec<ItemDto>, String> {
+            Err("server offline".into())
+        }
+        async fn resolve_stream(
+            &self,
+            _k: &str,
+            _d: Option<u64>,
+        ) -> Result<crate::source::StreamResolution, String> {
+            Err("server offline".into())
+        }
+    }
+
+    // rev-4 guard: when EVERY contributing section fails, the merged fetch
+    // reports the failure instead of masquerading as an empty library; a
+    // partially failing view still serves the healthy sources.
+    #[test]
+    fn merged_fetch_surfaces_total_failure_but_tolerates_partial() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let all_down: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+            vec![(std::sync::Arc::new(FailingSource), "sec".into())];
+        let err = rt
+            .block_on(fetch_all_merged(&all_down, "movie", "titleSort:asc"))
+            .err()
+            .expect("total failure must surface as an error");
+        assert!(err.contains("offline"));
+
+        let mixed: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> = vec![
+            (std::sync::Arc::new(FailingSource), "sec".into()),
+            (
+                std::sync::Arc::new(FakeItems {
+                    items: vec![item("Alpha", Some(2020), "fake")],
+                }),
+                "sec".into(),
+            ),
+        ];
+        let out = rt
+            .block_on(fetch_all_merged(&mixed, "movie", "titleSort:asc"))
+            .expect("partial failure still serves healthy sources");
+        assert_eq!(out.len(), 1);
+    }
+
     // rev-1 guard: the merged fetch must be EXHAUSTIVE — every unique title
     // is present regardless of duplicates or section size, because pages
     // window an immutable snapshot of this result (any early stop makes
@@ -2271,7 +2373,9 @@ mod merge_tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let out = rt.block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"));
+        let out = rt
+            .block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"))
+            .expect("fetch succeeds");
         // 602: same-source versions stay separate cards (rev-2), and every
         // item past the initial depth must be present.
         assert_eq!(out.len(), 602, "every title must be fetched");
@@ -2292,7 +2396,9 @@ mod merge_tests {
         let rt = tokio::runtime::Builder::new_current_thread()
             .build()
             .unwrap();
-        let out = rt.block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"));
+        let out = rt
+            .block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"))
+            .expect("fetch succeeds");
         assert_eq!(out.len(), 3, "same-source versions all kept; loop terminates");
     }
 
