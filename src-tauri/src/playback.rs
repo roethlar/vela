@@ -427,6 +427,12 @@ pub struct PlaySpec {
     pub start_seconds: f64,
 }
 
+/// Fired exactly once when a playback session ends — after the final server
+/// check-in for tracked sessions, or at mpv exit for untracked ones. The
+/// caller wires this to UI notification (a `playback-ended` Tauri event);
+/// this module stays UI-framework-free.
+pub type EndNotify = Arc<dyn Fn() + Send + Sync>;
+
 /// Spawn mpv for `spec.url`, optionally seeking to `spec.start_seconds`, and
 /// start background progress reporting that runs until mpv exits. Publishes the
 /// child into `child_slot` the instant it's launched (so an app-exit that races
@@ -439,6 +445,7 @@ pub fn play(
     child_slot: &Arc<Mutex<Option<std::process::Child>>>,
     shutting_down: &Arc<AtomicBool>,
     advance: &Arc<tokio::sync::Notify>,
+    on_end: Option<EndNotify>,
 ) -> Result<Arc<AtomicBool>, String> {
     // mpv emulates the IPC socket with a named pipe under \\.\pipe\ on Windows.
     #[cfg(windows)]
@@ -579,14 +586,19 @@ pub fn play(
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
 
+    // Route the end-of-session notifier: tracked sessions fire it from their
+    // tracker tail (after the final server write, so a refresh triggered by it
+    // sees the new state); untracked sessions fire it when mpv exits. The match
+    // guards keep degenerate track targets (empty server base) on the untracked
+    // path so the notifier still fires exactly once per session.
     let tracking = match progress {
-        ProgressTarget::Plex(info) => {
-            start_tracking_plex(ipc_path, info, start_ms, stop_flag.clone())
+        ProgressTarget::Plex(info) if !info.server_base.is_empty() => {
+            start_tracking_plex(ipc_path, info, start_ms, stop_flag.clone(), on_end)
         }
-        ProgressTarget::Jellyfin(track) => {
-            start_tracking_jellyfin(ipc_path, track, start_ms, stop_flag.clone())
+        ProgressTarget::Jellyfin(track) if !track.base_url.is_empty() => {
+            start_tracking_jellyfin(ipc_path, track, start_ms, stop_flag.clone(), on_end)
         }
-        ProgressTarget::None => Ok(()),
+        _ => spawn_end_watcher(ipc_path, stop_flag.clone(), on_end),
     };
     if let Err(e) = tracking {
         // mpv launched but we couldn't spawn its tracker threads (e.g. the OS is
@@ -742,166 +754,225 @@ fn wait_tick(stop_flag: &AtomicBool, done: &AtomicBool) -> bool {
 }
 
 /// Plex: report position on a timer, then post the authoritative final position
-/// when mpv exits (this is what makes resume work).
+/// when mpv exits (this is what makes resume work). The caller guarantees a
+/// non-empty `info.server_base` (see the match guards in [`play`]).
 fn start_tracking_plex(
     socket_path: String,
     info: TrackInfo,
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
+    on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    if info.server_base.is_empty() {
-        return Ok(());
-    }
     let (last_t_ms, done) = spawn_position_reader(socket_path, start_ms, stop_flag.clone())?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-plex".into())
         .spawn(move || {
-            // A single current-thread runtime: the tracker only does sequential
-            // block_on HTTP posts, so a full multi-thread runtime (its own thread
-            // pool) per playback session would be wasteful.
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(r) => r,
-                Err(_) => return,
-            };
-            // Bail rather than fall back to a default client with no timeout — a hung
-            // check-in post would otherwise pin this tracker thread indefinitely.
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
+            // Every exit funnels past the notifier below, so it fires exactly
+            // once per session even on early bails inside this closure.
+            (|| {
+                // A single current-thread runtime: the tracker only does sequential
+                // block_on HTTP posts, so a full multi-thread runtime (its own thread
+                // pool) per playback session would be wasteful.
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(r) => r,
+                    Err(_) => return,
+                };
+                // Bail rather than fall back to a default client with no timeout — a hung
+                // check-in post would otherwise pin this tracker thread indefinitely.
+                let client = match reqwest::Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(_) => return,
+                };
 
-            while wait_tick(&stop_flag, &done) {
+                while wait_tick(&stop_flag, &done) {
+                    let t = last_t_ms.load(Ordering::Relaxed);
+                    if let Err(e) = rt.block_on(crate::plex_api::update_timeline(
+                        &client,
+                        &info.server_base,
+                        &info.token,
+                        &info.client_identifier,
+                        &info.rating_key,
+                        &info.key,
+                        "playing",
+                        t,
+                        info.duration_ms,
+                    )) {
+                        eprintln!("plex: timeline update failed: {}", e);
+                    }
+                }
+
+                // Authoritative final position. Skip if we never read a real position
+                // (mpv failed to start / exited immediately) so we don't clobber an
+                // existing resume point with 0.
                 let t = last_t_ms.load(Ordering::Relaxed);
-                if let Err(e) = rt.block_on(crate::plex_api::update_timeline(
-                    &client,
-                    &info.server_base,
-                    &info.token,
-                    &info.client_identifier,
-                    &info.rating_key,
-                    &info.key,
-                    "playing",
-                    t,
-                    info.duration_ms,
-                )) {
-                    eprintln!("plex: timeline update failed: {}", e);
+                if t > 0 {
+                    let _ = rt.block_on(crate::plex_api::update_timeline(
+                        &client,
+                        &info.server_base,
+                        &info.token,
+                        &info.client_identifier,
+                        &info.rating_key,
+                        &info.key,
+                        "stopped",
+                        t,
+                        info.duration_ms,
+                    ));
+                    if let Err(e) = rt.block_on(crate::plex_api::update_progress(
+                        &client,
+                        &info.server_base,
+                        &info.token,
+                        &info.client_identifier,
+                        &info.rating_key,
+                        t,
+                    )) {
+                        eprintln!("plex: final progress update failed: {}", e);
+                    }
                 }
-            }
-
-            // Authoritative final position. Skip if we never read a real position
-            // (mpv failed to start / exited immediately) so we don't clobber an
-            // existing resume point with 0.
-            let t = last_t_ms.load(Ordering::Relaxed);
-            if t > 0 {
-                let _ = rt.block_on(crate::plex_api::update_timeline(
-                    &client,
-                    &info.server_base,
-                    &info.token,
-                    &info.client_identifier,
-                    &info.rating_key,
-                    &info.key,
-                    "stopped",
-                    t,
-                    info.duration_ms,
-                ));
-                if let Err(e) = rt.block_on(crate::plex_api::update_progress(
-                    &client,
-                    &info.server_base,
-                    &info.token,
-                    &info.client_identifier,
-                    &info.rating_key,
-                    t,
-                )) {
-                    eprintln!("plex: final progress update failed: {}", e);
-                }
+            })();
+            if let Some(on_end) = on_end {
+                on_end();
             }
         })?;
     Ok(())
 }
 
 /// Jellyfin/Emby: POST to the `/Sessions/Playing*` endpoints — Start on the first
-/// tick, Progress on each tick, Stopped (authoritative) when mpv exits.
+/// tick, Progress on each tick, Stopped (authoritative) when mpv exits. The
+/// caller guarantees a non-empty `track.base_url` (see the match guards in
+/// [`play`]).
 fn start_tracking_jellyfin(
     socket_path: String,
     track: JellyfinTrack,
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
+    on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    if track.base_url.is_empty() {
-        return Ok(());
-    }
     let (last_t_ms, done) = spawn_position_reader(socket_path, start_ms, stop_flag.clone())?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-jellyfin".into())
         .spawn(move || {
-            // A single current-thread runtime: the tracker only does sequential
-            // block_on HTTP posts, so a full multi-thread runtime (its own thread
-            // pool) per playback session would be wasteful.
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(r) => r,
-                Err(_) => return,
-            };
-            // Bail rather than fall back to a default client with no timeout — a hung
-            // check-in post would otherwise pin this tracker thread indefinitely.
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-
-            // Build a PlaybackProgressInfo-shaped body (Emby/Jellyfin check-in model)
-            // so history/dashboard/resume all tie to the right session.
-            let post = |endpoint: &str, position_ms: u64, event: Option<&str>| {
-                let url = format!("{}/Sessions/Playing{}", track.base_url, endpoint);
-                let mut body = serde_json::json!({
-                    "ItemId": track.item_id,
-                    "MediaSourceId": track.media_source_id,
-                    "PositionTicks": position_ms.saturating_mul(10_000),
-                    "PlayMethod": "DirectPlay",
-                    "CanSeek": true,
-                    "IsPaused": false,
-                });
-                if let Some(ps) = &track.play_session_id {
-                    body["PlaySessionId"] = serde_json::Value::String(ps.clone());
-                }
-                if let Some(ev) = event {
-                    body["EventName"] = serde_json::Value::String(ev.to_string());
-                }
-                let mut rb = client.post(&url).json(&body);
-                for (k, v) in &track.headers {
-                    rb = rb.header(k, v);
-                }
-                if let Err(e) =
-                    rt.block_on(async { rb.send().await.and_then(|r| r.error_for_status()) })
+            // Every exit funnels past the notifier below, so it fires exactly
+            // once per session even on early bails inside this closure.
+            (|| {
+                // A single current-thread runtime: the tracker only does sequential
+                // block_on HTTP posts, so a full multi-thread runtime (its own thread
+                // pool) per playback session would be wasteful.
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
                 {
-                    eprintln!("jellyfin: progress update failed: {}", e);
-                }
-            };
+                    Ok(r) => r,
+                    Err(_) => return,
+                };
+                // Bail rather than fall back to a default client with no timeout — a hung
+                // check-in post would otherwise pin this tracker thread indefinitely.
+                let client = match reqwest::Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(_) => return,
+                };
 
-            post("", last_t_ms.load(Ordering::Relaxed), None); // Start
-            while wait_tick(&stop_flag, &done) {
-                post(
-                    "/Progress",
-                    last_t_ms.load(Ordering::Relaxed),
-                    Some("TimeUpdate"),
-                );
+                // Build a PlaybackProgressInfo-shaped body (Emby/Jellyfin check-in model)
+                // so history/dashboard/resume all tie to the right session.
+                let post = |endpoint: &str, position_ms: u64, event: Option<&str>| {
+                    let url = format!("{}/Sessions/Playing{}", track.base_url, endpoint);
+                    let mut body = serde_json::json!({
+                        "ItemId": track.item_id,
+                        "MediaSourceId": track.media_source_id,
+                        "PositionTicks": position_ms.saturating_mul(10_000),
+                        "PlayMethod": "DirectPlay",
+                        "CanSeek": true,
+                        "IsPaused": false,
+                    });
+                    if let Some(ps) = &track.play_session_id {
+                        body["PlaySessionId"] = serde_json::Value::String(ps.clone());
+                    }
+                    if let Some(ev) = event {
+                        body["EventName"] = serde_json::Value::String(ev.to_string());
+                    }
+                    let mut rb = client.post(&url).json(&body);
+                    for (k, v) in &track.headers {
+                        rb = rb.header(k, v);
+                    }
+                    if let Err(e) =
+                        rt.block_on(async { rb.send().await.and_then(|r| r.error_for_status()) })
+                    {
+                        eprintln!("jellyfin: progress update failed: {}", e);
+                    }
+                };
+
+                post("", last_t_ms.load(Ordering::Relaxed), None); // Start
+                while wait_tick(&stop_flag, &done) {
+                    post(
+                        "/Progress",
+                        last_t_ms.load(Ordering::Relaxed),
+                        Some("TimeUpdate"),
+                    );
+                }
+                // Always post Stopped — including at position 0 — since we posted Start.
+                // Otherwise a fast mpv exit (before any IPC position arrives) would leave
+                // a stale "now playing" session on the server.
+                post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
+            })();
+            if let Some(on_end) = on_end {
+                on_end();
             }
-            // Always post Stopped — including at position 0 — since we posted Start.
-            // Otherwise a fast mpv exit (before any IPC position arrives) would leave
-            // a stale "now playing" session on the server.
-            post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
+        })?;
+    Ok(())
+}
+
+/// For sessions with no progress tracker (local/SMB files, or a degenerate
+/// track target): watch the IPC socket and fire the end notifier when mpv
+/// exits (socket EOF). Tracked sessions instead notify from their tracker
+/// tail, after the final server write. No-op without a notifier.
+fn spawn_end_watcher(
+    socket_path: String,
+    stop_flag: Arc<AtomicBool>,
+    on_end: Option<EndNotify>,
+) -> std::io::Result<()> {
+    let Some(on_end) = on_end else {
+        return Ok(());
+    };
+    std::thread::Builder::new()
+        .name("mpv-end-watcher".into())
+        .spawn(move || {
+            // Brief connect retries: mpv may not have opened the socket yet.
+            let mut stream = None;
+            for _ in 0..50 {
+                if stop_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+                match ipc_connect(&socket_path) {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(100)),
+                }
+            }
+            if let Some(stream) = stream {
+                // Drain until EOF or error — either means mpv is gone.
+                let reader = BufReader::new(stream);
+                for line in reader.lines() {
+                    if stop_flag.load(Ordering::Relaxed) || line.is_err() {
+                        break;
+                    }
+                }
+            }
+            // Fire even if the socket never connected (mpv may have exited
+            // instantly) or the session was replaced: it is over either way,
+            // and a spurious refresh is harmless.
+            on_end();
         })?;
     Ok(())
 }

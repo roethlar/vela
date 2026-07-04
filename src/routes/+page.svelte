@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
+  import { listen } from "@tauri-apps/api/event";
   import { onMount, onDestroy, tick } from "svelte";
   import Settings from "$lib/Settings.svelte";
   import Icon from "$lib/Icon.svelte";
@@ -9,10 +10,12 @@
   // Tracked timers, cleared on destroy / when superseded.
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
+  let unlistenPlaybackEnded: (() => void) | undefined;
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     if (queueTimer) clearInterval(queueTimer);
+    unlistenPlaybackEnded?.();
     linkGen++; // invalidate any in-flight link_poll so it won't reschedule after unmount
   });
 
@@ -118,6 +121,24 @@
   let appInfo = $state<AppInfo | null>(null);
 
   onMount(boot);
+
+  // Refresh watch state the moment a playback session ends. The backend emits
+  // `playback-ended` after its final server check-in, so the re-fetch below is
+  // guaranteed to see the updated progress/played state (the hubs fetch itself
+  // is live and uncached).
+  onMount(() => {
+    listen("playback-ended", () => {
+      if (mode === "home") {
+        loadHome(++homeGen);
+      } else {
+        // The hidden Home hubs are stale now; empty them so goHome() re-fetches.
+        hubs = [];
+        // Refresh the visible listing so its progress bars / played badges update.
+        if (searchTerm) runSearch(searchTerm);
+        else resetAndLoad();
+      }
+    }).then((un) => (unlistenPlaybackEnded = un));
+  });
 
   async function boot() {
     // Check mpv up front so we can prompt to install before the user hits play.

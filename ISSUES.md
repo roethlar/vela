@@ -17,7 +17,9 @@ unchecked for these):
   moves in either direction, until restart. Root cause confirmed 2026-07-04:
   the server is updated correctly on mpv exit; the frontend never re-fetches.
   Plan for this and the previous item:
-  `.agents/plans/watch-state-refresh.md`.
+  `.agents/plans/watch-state-refresh.md`. Implemented 2026-07-04 (backend
+  `playback-ended` event after the final server check-in + frontend
+  re-fetch); automated checks pass, owner playtest pending.
 
 - Rows mix poster and content-frame artwork. The same row renders 2:3 posters
   next to 16:9 episode thumbnails at different heights (e.g. a movie poster

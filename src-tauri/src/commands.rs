@@ -1910,12 +1910,27 @@ pub(crate) async fn play_by_key(
         http_headers: resolved.http_headers,
         start_seconds: resolved.resume_ms as f64 / 1000.0,
     };
+    // End-of-session notifier → the `playback-ended` UI event, emitted after
+    // the final server check-in so a re-fetch it triggers sees the new watch
+    // state. Payload carries ids only — never URLs or tokens.
+    let on_end: Option<playback::EndNotify> = state.app_handle.get().map(|app| {
+        use tauri::Emitter;
+        let app = app.clone();
+        let source_id = src.id().to_string();
+        let item_key = rating_key.to_string();
+        std::sync::Arc::new(move || {
+            let _ = app.emit(
+                "playback-ended",
+                serde_json::json!({ "sourceId": source_id, "itemKey": item_key }),
+            );
+        }) as playback::EndNotify
+    });
     let progress = resolved.progress;
     let child_slot = state.current_child.clone();
     let shutting_down = state.shutting_down.clone();
     let advance = state.queue_advance.clone();
     let stop = tauri::async_runtime::spawn_blocking(move || {
-        playback::play(&spec, progress, &child_slot, &shutting_down, &advance)
+        playback::play(&spec, progress, &child_slot, &shutting_down, &advance, on_end)
     })
     .await
     .map_err(|e| format!("playback task failed: {e}"))??;

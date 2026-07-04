@@ -64,6 +64,9 @@ pub struct AppState {
     /// plays the next queued item, so closing mpv stops playback while watching
     /// to the end continues to the next.
     pub queue_advance: Arc<tokio::sync::Notify>,
+    /// The Tauri app handle, set once at setup. Lets non-command code (the
+    /// playback tracker tails) emit UI events such as `playback-ended`.
+    pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -120,6 +123,7 @@ pub fn run() {
         queue: Arc::new(Mutex::new(Vec::new())),
         queue_index: Arc::new(Mutex::new(None)),
         queue_advance: Arc::new(tokio::sync::Notify::new()),
+        app_handle: std::sync::OnceLock::new(),
     };
 
     let asset_folders: Vec<String> = safe_local_folders.iter().map(|f| f.path.clone()).collect();
@@ -156,6 +160,15 @@ pub fn run() {
         .manage(state)
         .setup(move |app| {
             use tauri::Manager;
+
+            // Publish the app handle so playback threads can emit UI events
+            // (`playback-ended`). Set-once; a second set can't happen (setup
+            // runs once) but would be harmlessly ignored.
+            let _ = app
+                .handle()
+                .state::<AppState>()
+                .app_handle
+                .set(app.handle().clone());
 
             // Auto-advance dispatcher: when the mpv EOF watcher notifies a clean
             // file end, walk the queue cursor forward and play the next item.
