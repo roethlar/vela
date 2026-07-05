@@ -1,9 +1,9 @@
 # cw-3: A failed play still clears the Continue Watching tombstone
 
 **Severity**: LOW — wrong hero content after an error path; no data loss.
-**Status**: In progress
+**Status**: Verified
 **Branch**: n/a — single fix commit on `main`.
-**Commit**: (pending)
+**Commit**: `f767ae4`
 
 ## Evidence
 `src/routes/+page.svelte` `play()`: `invoke("record_recent", …)` fires
@@ -43,4 +43,13 @@ None.
 not this function; reviewed — they don't share the defect.
 
 ## Reviewer comments
-(pending)
+- Reviewer: codex (codex-cli 0.142.5), verdict recorded 2026-07-05T10:50:48Z
+- reviewed_sha `f767ae467e54341092e092749c01d8e34dc1e13d`, base_sha `bef25005a3828ac0baf6ca097c155f1070af0bf9`
+- guard_confirmed: true (manual-check mode per finding doc: reviewer
+  inspected ordering, error path, snapshot semantic, and sibling play
+  paths in its own worktree)
+- Verdict: **accepted** — no comments.
+- Process note: the first dispatch hit the coder-side 900s timeout before
+  returning an envelope; treated as not-accepted per the fail-closed
+  contract and re-dispatched once (inspection-only), which returned this
+  verdict.

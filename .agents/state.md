@@ -5,7 +5,11 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
-- Active review loop: see `.agents/review/index.md` (cw-1..cw-3, opened 2026-07-05).
+- Review loop cw-1..cw-3 (2026-07-05) CLOSED: codex batch pass over
+  `ec94715..a055556` found 3 real defects (merged-key miss in curation
+  actions; registry lock across network await; failed play clearing
+  tombstones), all fixed as single commits on `main` and independently
+  verified. Trail: `.agents/review/index.md` + `findings/cw-*.md`.
 - OWNER DELEGATION 2026-07-04 (decision recorded): progress must not block
   on the owner. The two locked-choice plans were approved via that
   decision and are now IMPLEMENTED, one commit per slice, all

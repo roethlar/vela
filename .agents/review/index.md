@@ -7,6 +7,8 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
+
 Loop opened 2026-07-05 (owner: "playbook reviewloop codex"). Scope: the
 2026-07-04 delegation batch, committed directly to `main` —
 `ec94715..a055556`: SMB share-root auto-add (`f05919e`) and Continue
@@ -31,7 +33,7 @@ commit) per finding.
 |----|----------|-------------------|--------|------------|
 | cw-1 | MEDIUM | Merged items (local front, server watch key) survive mark-watched/remove in the hero | `[x]` | `5ce26db` |
 | cw-2 | LOW | Registry lock held across Plex removal await stalls unrelated UI up to 15s | `[x]` | `07167f1` |
-| cw-3 | LOW | Failed play clears a removal tombstone; item wrongly returns to hero | `[~]` | |
+| cw-3 | LOW | Failed play clears a removal tombstone; item wrongly returns to hero | `[x]` | `f767ae4` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
