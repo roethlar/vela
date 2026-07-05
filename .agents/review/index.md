@@ -9,10 +9,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop e2e-3 opened 2026-07-05 (standing instruction: reviewloop codex per
-slice). Scope: E2E slice 3, single commit — base `ca0e9da`, head
-`ee01101` (curation scenario + ctx.restart in the runner). Same
-no-branches adaptation.
+Loop e2e-3 CLOSED 2026-07-05: eh-8..eh-9 verified `[x]`. Scope was E2E
+slice 3 — base `ca0e9da`, head `ee01101` (curation scenario + ctx.restart
+in the runner); codex admitted 2 guard-strength findings, both fixed and
+verified. Same no-branches adaptation.
 
 Review pass 2026-07-05 (codex, read-only, base `ca0e9da` head `ee01101`,
 loop e2e-3): 2 candidates, 2 admitted (eh-8, eh-9), 0 declined.
@@ -62,8 +62,8 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-5 | HIGH | Local-only setups never see the Continue Watching hero (hub-gated render path) | `[x]` | `b4b4ebb` |
 | eh-6 | MEDIUM | Playback scenario races the seeded source render — flaky false-red | `[x]` | `4f5abd9` |
 | eh-7 | MEDIUM | Quit-vs-EOF indistinguishable in the playback guard — false-green | `[x]` | `dd5cec9` |
-| eh-8 | LOW | Curation restart leg passes without exercising tombstone application | `[ ]` | |
-| eh-9 | LOW | PID restart guard: overlap false-green, foreign-Vela false-red | `[ ]` | |
+| eh-8 | LOW | Curation restart leg passes without exercising tombstone application | `[x]` | `ebf8162` |
+| eh-9 | LOW | PID restart guard: overlap false-green, foreign-Vela false-red | `[x]` | `4b24550` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.

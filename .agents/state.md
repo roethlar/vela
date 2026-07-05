@@ -5,6 +5,15 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 3 landed 2026-07-05 (`ee01101`) + review loop e2e-3 CLOSED
+  (eh-8, eh-9 verified): the curation scenario drives
+  remove-from-continue via the hero's real context menu, proves tombstone
+  APPLICATION across a true app restart (session recycle; recents entry
+  reinserted while the app is down so only the tombstone can keep the
+  hero empty; environ-scoped pid guard immune to the owner's own Vela),
+  and replay-restore. This live-verifies the cw-3 semantics that were on
+  the owner-check list. Mark-watched stays server-gated (local items have
+  `played: null` — no menu entry).
 - Review loop e2e-2 (2026-07-05) CLOSED: 3 findings verified — eh-5 (the
   app bug below), eh-6 (scenario raced the seeded source render), eh-7
   (the guard couldn't tell IPC quit from natural EOF; now a socket

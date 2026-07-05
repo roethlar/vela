@@ -1,9 +1,9 @@
 # eh-9: PID restart guard accepts old+new overlap and foreign Vela processes
 
 **Severity**: LOW — false-green on a teardown leak (two apps sharing one throwaway config) and false-red whenever the owner's own Vela is running
-**Status**: Open
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `4b24550`
 
 ## Evidence
 `tests/e2e/scenarios/curation.mjs:121-129` — the restart check compares
@@ -56,4 +56,11 @@ None — admitted as filed.
 None.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~09:50 UTC.
+Reviewed `4b24550abd9015f9eab2cd8737a3f80a9daeebc6` against base
+`ebf81625a5ac38a57288fa04d3b10bb2cf2fdcd6`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: the environ match (exact
+XDG_CONFIG_HOME entry + trailing NUL) includes same-config processes and
+excludes foreign ones; exactly-one-before plus old-gone+exactly-one-after
+closes both the overlap false-green and the foreign false-red; residuals
+(unreadable environ, pid reuse) fail toward false-red, not missed leaks.
