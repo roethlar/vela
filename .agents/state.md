@@ -5,6 +5,35 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- OWNER DELEGATION 2026-07-04 (decision recorded): progress must not block
+  on the owner. The two locked-choice plans were approved via that
+  decision and are now IMPLEMENTED, one commit per slice, all
+  guard-proven, full suite green (78 Rust tests; svelte-check + build
+  clean):
+  - SMB share-root auto-add (`f05919e`): adding a share auto-selects its
+    root as a library folder — the zero-folder invisible-share trap is
+    closed. Existing zero-folder shares (owner's `zoey`) are NOT
+    migrated by design; re-add the share or add a folder once.
+  - Continue Watching curation (`d2ea1a7`, `cf5af95`, `d259213`): On
+    Deck folds into the hero cover-flow via Vela's own
+    `/library/onDeck` fetch (synthetic hub `vela.ondeck`), everything
+    interleaved by recency (`lastWatchedAtMs`); mark-watched drops the
+    recents entry and re-fetches; "Remove from Continue Watching"
+    (hero context menu) tombstones the key (`hidden_from_continue`,
+    FIFO cap 200, cleared on replay) + best-effort Plex server-side
+    removal. Implementation notes + deviations in the plan file.
+  - Open verification residual: the Plex removal route's real-item
+    effect is unverified (permissions layer correctly refused a live
+    mutating probe); route existence IS live-verified. Non-fatal by
+    design. Also: hero merge ORDERING is frontend-only and has no unit
+    test (no JS runner in repo) — E2E harness covers it later.
+  - E2E harness plan drafted (`.agents/plans/e2e-harness.md`,
+    approved-in-principle via the delegation decision): tauri-driver +
+    WebdriverIO UI driving, mpv-IPC playback probes, env-gated live
+    smoke, throwaway config dir, creds via env only. NOT yet built.
+  - Version bump for this batch: pending — the auto-permissions layer
+    treats `scripts/bump.sh` as an owner release call. Owner: run
+    `scripts/bump.sh` (or say the word) before the next build.
 - MERGED to `main` 2026-07-04 (owner go; merge commit `e9f6029`; the
   `smb-native` branch is deleted — owner direction: no branches without
   his explicit word in future). `.agents/plans/smb-native-client.md` is
@@ -76,6 +105,15 @@ Keep it short and update it when important repo facts change.
 
 ## Next
 
+- Build the E2E harness (`.agents/plans/e2e-harness.md`) — first slice:
+  tauri-driver + WDIO skeleton, throwaway config dir, one SMB
+  add→browse→play scenario + screenshot set. This replaces most of the
+  owner playtest list below with automated runs; the owner keeps only
+  visual flip-throughs and HDR judgment.
+- Owner (or harness, once built) checks for the new batch: share-root
+  auto-add against the real NAS; On Deck item (*Blood and Bone* class)
+  appearing in the flow; mark-watched dropping an item live;
+  remove-from-continue sticking across restart and replay restoring it.
 - Owner playtest sweep of the whole 2026-07-04 batch (v0.1.9 dmg is built):
   sidebar nav; cover-flow hero — a few-seconds play should appear centered
   after mpv closes (recents semantic), and a >60s Plex play should also
