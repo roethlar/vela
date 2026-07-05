@@ -838,11 +838,20 @@ impl MediaSource for LocalSource {
             return Err("file is not inside a configured local folder".into());
         }
         if self.native_remote {
-            // Provider paths aren't playable files. The loopback stream
-            // proxy (next slice of the smb-native plan) resolves these.
-            return Err(
-                "SMB playback over the native connection lands in the next update".into(),
-            );
+            // Provider paths aren't playable files: mpv gets a loopback
+            // proxy URL that translates Range requests into native reads.
+            // Same progress semantics as local files (recents track resume
+            // client-side; no server watch state to update).
+            let url = self
+                .vfs
+                .resolve_stream_url(path)
+                .unwrap_or_else(|| Err("this source cannot stream".into()))?;
+            return Ok(StreamResolution {
+                url,
+                resume_ms: 0,
+                progress: ProgressTarget::None,
+                http_headers: Vec::new(),
+            });
         }
         // mpv plays the path directly; no token, no network, no resume tracking.
         Ok(StreamResolution {

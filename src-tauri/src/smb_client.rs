@@ -21,11 +21,14 @@ use std::os::raw::{c_char, c_int};
 use std::sync::{Mutex, OnceLock};
 
 use pavao_sys::{
-    libsmb_file_info, smbc_closedir_fn, smbc_free_context, smbc_getFunctionClosedir,
-    smbc_getFunctionOpendir, smbc_getFunctionReaddirPlus, smbc_getFunctionStat,
-    smbc_init_context, smbc_new_context, smbc_setFunctionAuthDataWithContext,
-    smbc_setOptionNoAutoAnonymousLogin, smbc_setTimeout, SMBCCTX,
+    libsmb_file_info, smbc_close_fn, smbc_closedir_fn, smbc_free_context,
+    smbc_getFunctionClose, smbc_getFunctionClosedir, smbc_getFunctionLseek,
+    smbc_getFunctionOpen, smbc_getFunctionOpendir, smbc_getFunctionRead,
+    smbc_getFunctionReaddirPlus, smbc_getFunctionStat, smbc_init_context,
+    smbc_new_context, smbc_setFunctionAuthDataWithContext,
+    smbc_setOptionNoAutoAnonymousLogin, smbc_setTimeout, SMBCCTX, SMBCFILE,
 };
+use std::os::raw::c_void;
 
 /// FILE_ATTRIBUTE_DIRECTORY bit in `libsmb_file_info.attrs` (DOS attributes).
 const DOS_ATTR_DIRECTORY: u16 = 0x10;
@@ -303,6 +306,121 @@ impl SmbConnection {
                 is_dir: (st.st_mode & libc::S_IFMT) == libc::S_IFDIR,
                 size: st.st_size.max(0) as u64,
             })
+        }
+    }
+
+    /// Open a share-relative file for positioned reads (streaming). The
+    /// length comes from a URL stat (pavao-sys binds no fstat). Blocking;
+    /// run off async workers.
+    pub fn open_read(&self, relative: &str) -> Result<SmbReadHandle<'_>, String> {
+        let len = self.stat(relative)?.size;
+        let url = CString::new(self.url(relative))
+            .map_err(|_| "SMB path contains a NUL byte".to_string())?;
+        let guard = self
+            .ctx
+            .lock()
+            .map_err(|_| "SMB connection lock poisoned".to_string())?;
+        let ctx = guard.0;
+        unsafe {
+            let open_fn =
+                smbc_getFunctionOpen(ctx).ok_or("libsmbclient has no open function")?;
+            let file = open_fn(ctx, url.as_ptr(), libc::O_RDONLY, 0);
+            if file.is_null() {
+                return Err(last_error("could not open SMB file"));
+            }
+            drop(guard);
+            Ok(SmbReadHandle {
+                conn: self,
+                file,
+                len,
+            })
+        }
+    }
+
+    /// Read a whole small file (sidecars), refusing anything over `cap`
+    /// bytes so a mislabeled path can't balloon memory.
+    pub fn read_small(&self, relative: &str, cap: u64) -> Result<Vec<u8>, String> {
+        let handle = self.open_read(relative)?;
+        if handle.is_empty() {
+            return Ok(Vec::new());
+        }
+        if handle.len() > cap {
+            return Err("file too large for a sidecar read".into());
+        }
+        let mut out = vec![0u8; handle.len() as usize];
+        let mut filled = 0usize;
+        while filled < out.len() {
+            let n = handle.read_at(filled as u64, &mut out[filled..])?;
+            if n == 0 {
+                out.truncate(filled); // shrank mid-read; serve what exists
+                break;
+            }
+            filled += n;
+        }
+        Ok(out)
+    }
+}
+
+/// Best-effort close, used while holding the ctx lock.
+unsafe fn close_quiet(ctx: *mut SMBCCTX, file: *mut SMBCFILE) {
+    let close_fn: smbc_close_fn = smbc_getFunctionClose(ctx);
+    if let Some(f) = close_fn {
+        f(ctx, file);
+    }
+}
+
+/// An open SMB file supporting positioned reads. Borrows its connection, so
+/// the context outlives every handle by construction; each read serializes
+/// on the connection mutex.
+pub struct SmbReadHandle<'a> {
+    conn: &'a SmbConnection,
+    file: *mut SMBCFILE,
+    len: u64,
+}
+
+// SAFETY: `file` is only used under the owning connection's mutex.
+unsafe impl Send for SmbReadHandle<'_> {}
+
+impl SmbReadHandle<'_> {
+    pub fn len(&self) -> u64 {
+        self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+
+    /// Read up to `buf.len()` bytes at absolute `offset`. Returns bytes
+    /// read (0 at EOF). Blocking; run off async workers.
+    pub fn read_at(&self, offset: u64, buf: &mut [u8]) -> Result<usize, String> {
+        let guard = self
+            .conn
+            .ctx
+            .lock()
+            .map_err(|_| "SMB connection lock poisoned".to_string())?;
+        let ctx = guard.0;
+        unsafe {
+            let lseek_fn =
+                smbc_getFunctionLseek(ctx).ok_or("libsmbclient has no lseek function")?;
+            let read_fn =
+                smbc_getFunctionRead(ctx).ok_or("libsmbclient has no read function")?;
+            let off = libc::off_t::try_from(offset).map_err(|_| "offset too large")?;
+            if lseek_fn(ctx, self.file, off, libc::SEEK_SET) < 0 {
+                return Err(last_error("could not seek SMB file"));
+            }
+            let n = read_fn(ctx, self.file, buf.as_mut_ptr() as *mut c_void, buf.len());
+            if n < 0 {
+                return Err(last_error("could not read SMB file"));
+            }
+            Ok(n as usize)
+        }
+    }
+}
+
+impl Drop for SmbReadHandle<'_> {
+    fn drop(&mut self) {
+        if let Ok(guard) = self.conn.ctx.lock() {
+            unsafe { close_quiet(guard.0, self.file) };
         }
     }
 }

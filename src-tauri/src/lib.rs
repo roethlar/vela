@@ -7,6 +7,8 @@ mod recents;
 mod smb;
 #[cfg(all(unix, not(target_os = "macos")))]
 mod smb_client;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod stream_proxy;
 mod source;
 mod sshfs;
 mod ui_events;

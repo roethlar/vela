@@ -27,6 +27,13 @@ pub trait Vfs: Send + Sync {
     /// Read a small sidecar text file (e.g. `.nfo`). `None` if absent or
     /// unreadable.
     fn read_to_string(&self, p: &Path) -> Option<String>;
+
+    /// URL an external consumer (mpv, the webview) can fetch this file
+    /// from. `None` (the default) means the path IS a local file usable
+    /// as-is; native remote providers return a loopback proxy URL instead.
+    fn resolve_stream_url(&self, _p: &Path) -> Option<Result<String, String>> {
+        None
+    }
 }
 
 /// The real filesystem: exactly the std::fs calls the local source has

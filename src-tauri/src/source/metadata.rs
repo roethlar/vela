@@ -220,7 +220,13 @@ fn read_sidecar(vfs: &dyn crate::source::vfs::Vfs, file: &Path) -> Option<Cached
         meta.year = xml_text(&nfo, "year").and_then(|y| y.trim().parse().ok());
         meta.summary = xml_text(&nfo, "plot");
     }
-    meta.poster = local_artwork(vfs, file).map(|p| p.to_string_lossy().to_string());
+    meta.poster = local_artwork(vfs, file).and_then(|p| match vfs.resolve_stream_url(&p) {
+        // Native provider: only a fetchable URL is usable as artwork.
+        Some(Ok(url)) => Some(url),
+        Some(Err(_)) => None,
+        // Local file: the path itself is served via the asset protocol.
+        None => Some(p.to_string_lossy().to_string()),
+    });
     if meta.is_empty() {
         None
     } else {

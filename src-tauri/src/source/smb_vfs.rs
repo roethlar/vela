@@ -180,11 +180,22 @@ impl Vfs for SmbVfs {
         self.meta(p).map(|m| m.size).unwrap_or(0)
     }
 
-    fn read_to_string(&self, _p: &Path) -> Option<String> {
-        // Sidecar (.nfo) reading over SMB arrives with positioned reads in
-        // the stream-proxy slice; until then SMB items enrich from
-        // filenames and the online cache only.
-        None
+    fn read_to_string(&self, p: &Path) -> Option<String> {
+        // Sidecars only (.nfo): bounded so a mislabeled path can't balloon
+        // memory; absent/unreadable is a normal miss.
+        const SIDECAR_CAP: u64 = 1024 * 1024;
+        let rel = Self::relative(p)?;
+        let bytes = self
+            .with_conn(|conn| conn.read_small(&rel, SIDECAR_CAP))
+            .ok()?;
+        Some(String::from_utf8_lossy(&bytes).to_string())
+    }
+
+    fn resolve_stream_url(&self, p: &Path) -> Option<Result<String, String>> {
+        let Some(rel) = Self::relative(p) else {
+            return Some(Err("path escapes the share".into()));
+        };
+        Some(crate::stream_proxy::register_smb(&self.mount, &rel))
     }
 }
 
