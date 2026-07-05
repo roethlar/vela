@@ -67,9 +67,19 @@ pub fn finish(cfg: &mut AppConfig, rating_key: &str, position_ms: u64, now_ms: u
     cfg.recents.insert(0, entry);
 }
 
-/// The hero feed: item snapshots, newest first.
+/// The hero feed: item snapshots, newest first. Each snapshot carries its
+/// session-end stamp so the frontend can interleave recents with server
+/// hub items by recency. A still-open session (`ended_at_ms == 0`) has no
+/// stamp yet; the stamp lands at mpv exit.
 pub fn list(cfg: &AppConfig) -> Vec<ItemDto> {
-    cfg.recents.iter().map(|r| r.item.clone()).collect()
+    cfg.recents
+        .iter()
+        .map(|r| {
+            let mut item = r.item.clone();
+            item.last_watched_at_ms = (r.ended_at_ms > 0).then_some(r.ended_at_ms);
+            item
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -89,6 +99,7 @@ mod tests {
             backdrop: None,
             view_offset_ms: None,
             played: None,
+            last_watched_at_ms: None,
             index: None,
             parent_index: None,
             grandparent_title: None,
@@ -132,6 +143,25 @@ mod tests {
         );
         assert_eq!(cfg.recents[0].item.view_offset_ms, Some(30_000));
         assert_eq!(cfg.recents[0].ended_at_ms, 1111);
+    }
+
+    #[test]
+    fn list_stamps_recency_only_on_ended_sessions() {
+        let mut cfg = AppConfig::default();
+        record(&mut cfg, item("movie", Some(100_000)));
+        record(&mut cfg, item("playing", None)); // session still open
+        finish(&mut cfg, "movie", 30_000, 1111);
+        let listed = list(&cfg);
+        assert_eq!(listed[0].rating_key, "movie");
+        assert_eq!(
+            listed[0].last_watched_at_ms,
+            Some(1111),
+            "ended session carries its stamp for recency interleaving"
+        );
+        assert_eq!(
+            listed[1].last_watched_at_ms, None,
+            "open session has no stamp yet"
+        );
     }
 
     #[test]

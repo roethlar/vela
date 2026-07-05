@@ -61,6 +61,12 @@ pub struct ItemDto {
     /// Whether the item is marked watched. `None` when the source doesn't report
     /// it (e.g. local files), so the UI can distinguish "unwatched" from "unknown".
     pub played: Option<bool>,
+    /// Unix ms of the last watch activity, when known (Plex `lastViewedAt`;
+    /// Vela recents stamp their `ended_at_ms`). Drives the Continue Watching
+    /// flow's interleave-by-recency ordering. Jellyfin/Emby: not populated
+    /// yet (needs ISO-8601 parsing; recorded follow-up).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_watched_at_ms: Option<u64>,
     pub index: Option<u32>,
     pub parent_index: Option<u32>,
     pub grandparent_title: Option<String>,
@@ -297,6 +303,7 @@ mod tests {
             backdrop: Some("bd".into()),
             view_offset_ms: None,
             played: None,
+            last_watched_at_ms: None,
             index: None,
             parent_index: None,
             grandparent_title: None,

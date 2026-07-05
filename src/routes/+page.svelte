@@ -46,6 +46,7 @@
     index?: number;
     parentIndex?: number;
     played?: boolean | null;
+    lastWatchedAtMs?: number;
     sourceId?: string;
     backing?: { sourceId: string; ratingKey: string }[];
     canonicalId?: string;
@@ -251,15 +252,15 @@
     }
   }
 
-  // Row policy per hub (design decision 2026-07-04, Infuse reference): the
-  // continue-watching hub renders as a single hero carousel; On Deck stays a
-  // 16:9 row; every other hub is a uniform 2:3 poster row (episodes show
-  // series art there). Keyed on hub identifiers: Plex passes its own through
-  // (e.g. "home.continue", "home.ondeck"), Jellyfin/Emby use "resume".
+  // Row policy per hub (curation decision 2026-07-04): continue-watching AND
+  // On Deck hubs fold into the hero cover-flow, interleaved by recency; every
+  // other hub is a uniform 2:3 poster row (episodes show series art there).
+  // Keyed on hub identifiers: Plex passes its own through (e.g.
+  // "home.continue", plus Vela's synthetic "vela.ondeck"), Jellyfin/Emby use
+  // "resume".
   function hubPolicy(h: Hub): "hero" | "landscape" | "portrait" {
     const id = h.hubIdentifier.toLowerCase();
-    if (id.includes("continue") || id === "resume") return "hero";
-    if (id.includes("ondeck")) return "landscape";
+    if (id.includes("continue") || id === "resume" || id.includes("ondeck")) return "hero";
     return "portrait";
   }
 
@@ -286,13 +287,18 @@
     const hubItems = hubs.filter((h) => hubPolicy(h) === "hero").flatMap((h) => h.items);
     const seen = new Set<string>();
     const out: Item[] = [];
+    // Recents iterate first so the local copy wins the dedup — it carries the
+    // freshest position and its own recency stamp.
     for (const it of [...scoped, ...hubItems]) {
       if (!seen.has(it.ratingKey)) {
         seen.add(it.ratingKey);
         out.push(it);
       }
     }
-    return out;
+    // Interleave by recency (curation decision 2026-07-04): newest watch
+    // activity first, from either feed. Unstamped items keep their relative
+    // order after all stamped ones (sort() is stable; missing = -1).
+    return out.sort((a, b) => (b.lastWatchedAtMs ?? -1) - (a.lastWatchedAtMs ?? -1));
   });
   function heroClamp(i: number): number {
     return Math.min(Math.max(i, 0), Math.max(heroItems.length - 1, 0));

@@ -68,6 +68,7 @@ impl From<PlexDir> for PlexVideo {
             grandparent_thumb: None,
             art: None,
             added_at: None,
+            last_viewed_at: None,
             updated_at: None,
             media: vec![],
             year: d.year,
@@ -123,6 +124,9 @@ pub struct PlexVideo {
     pub art: Option<String>,
     #[serde(rename = "addedAt")]
     pub added_at: Option<u64>,
+    /// Unix seconds of the user's last watch activity on this item.
+    #[serde(rename = "lastViewedAt")]
+    pub last_viewed_at: Option<u64>,
     #[serde(rename = "updatedAt")]
     pub updated_at: Option<u64>,
     #[serde(rename = "Media", default)]
@@ -509,6 +513,26 @@ impl PlexLibrary {
             }
         }
         Ok(out)
+    }
+
+    /// `/library/onDeck` — the server's next-up/in-progress list. Vela builds
+    /// its own On Deck hub from this endpoint because the `/hubs` On Deck hub
+    /// is server-controlled and often absent (decision 2026-07-04: On Deck
+    /// folds into the Continue Watching flow).
+    pub async fn get_on_deck(&self) -> Result<Vec<PlexVideo>, Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let url = format!("{base}/library/onDeck");
+        let resp = self
+            .client
+            .get(&url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .send()
+            .await?
+            .error_for_status()?;
+        let body = resp.text().await?;
+        Ok(videos_from_xml(&body))
     }
 
     /// Search across libraries. Returns playable/browsable results (movies,
@@ -1128,6 +1152,28 @@ fn hub_from_attrs(e: &quick_xml::events::BytesStart) -> PlexHub {
     hub
 }
 
+/// Collect every item element from a flat MediaContainer body (no Hub
+/// grouping), preserving server order.
+fn videos_from_xml(body: &str) -> Vec<PlexVideo> {
+    let mut reader = quick_xml::Reader::from_str(body);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                if matches!(e.name().as_ref(), b"Video" | b"Directory" | b"Metadata") {
+                    out.push(video_from_attrs(&e));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        buf.clear();
+    }
+    out
+}
+
 fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
     let mut v = PlexVideo {
         key: String::new(),
@@ -1142,6 +1188,7 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
         grandparent_thumb: None,
         art: None,
         added_at: None,
+        last_viewed_at: None,
         updated_at: None,
         media: vec![],
         year: None,
@@ -1162,6 +1209,7 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
             b"duration" => v.duration = av(&a).parse().ok(),
             b"viewOffset" => v.view_offset = av(&a).parse().ok(),
             b"viewCount" => v.view_count = av(&a).parse().ok(),
+            b"lastViewedAt" => v.last_viewed_at = av(&a).parse().ok(),
             b"thumb" => v.thumb = Some(av(&a)),
             b"grandparentThumb" => v.grandparent_thumb = Some(av(&a)),
             b"art" => v.art = Some(av(&a)),
@@ -1268,6 +1316,25 @@ mod tests {
             Some("/library/metadata/7/thumb/9")
         );
         assert_eq!(v.art.as_deref(), Some("/library/metadata/7/art/9"));
+    }
+
+    #[test]
+    fn on_deck_body_parses_items_with_last_viewed_stamp() {
+        let xml = r#"
+            <MediaContainer size="2">
+              <Video ratingKey="101" key="/library/metadata/101" title="Blood and Bone"
+                     type="movie" viewOffset="1200000" lastViewedAt="1751500000" />
+              <Video ratingKey="202" key="/library/metadata/202" title="Next Up"
+                     type="episode" grandparentTitle="Show" index="3" parentIndex="1" />
+            </MediaContainer>
+        "#;
+        let items = videos_from_xml(xml);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].rating_key, "101");
+        assert_eq!(items[0].last_viewed_at, Some(1_751_500_000));
+        assert_eq!(items[0].view_offset, Some(1_200_000));
+        assert_eq!(items[1].media_type.as_deref(), Some("episode"));
+        assert_eq!(items[1].last_viewed_at, None);
     }
 
     #[test]

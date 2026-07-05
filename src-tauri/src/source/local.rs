@@ -627,6 +627,7 @@ fn base_item(
         backdrop: None,      // local items never reach resume rows
         view_offset_ms: None,
         played: None, // local files have no server-tracked watched state
+        last_watched_at_ms: None, // recents::list stamps this for local plays
         index: None,
         parent_index: None,
         grandparent_title: None,

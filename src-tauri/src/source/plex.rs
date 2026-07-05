@@ -104,6 +104,7 @@ impl PlexSource {
             // Plex omits viewCount for unwatched items, so absent == 0 == unwatched
             // (Some(false)), never "unknown" — the source always knows watched state.
             played: Some(v.view_count.unwrap_or(0) > 0),
+            last_watched_at_ms: v.last_viewed_at.map(|s| s.saturating_mul(1000)),
             index: v.index,
             parent_index: v.parent_index,
             grandparent_title: v.grandparent_title,
@@ -179,7 +180,7 @@ impl MediaSource for PlexSource {
                 (lib2, h)
             }
         };
-        Ok(hubs
+        let mut out: Vec<HubDto> = hubs
             .into_iter()
             .map(|h| HubDto {
                 title: h.title,
@@ -197,7 +198,29 @@ impl MediaSource for PlexSource {
                 source_name: self.name.clone(),
             })
             .filter(|h: &HubDto| !h.items.is_empty())
-            .collect())
+            .collect();
+        // On Deck folds into the Continue Watching flow (decision 2026-07-04):
+        // built from /library/onDeck because the /hubs On Deck hub is
+        // server-controlled and often absent. A fetch failure degrades to no
+        // hub, matching the per-hub resilience stance.
+        if let Ok(deck) = lib.get_on_deck().await.map_err(|e| e.to_string()) {
+            let items: Vec<_> = deck
+                .into_iter()
+                .filter(|v| is_playable_video(v.media_type.as_deref()))
+                .map(|v| self.to_item(&lib, v))
+                .collect();
+            if !items.is_empty() {
+                out.push(HubDto {
+                    title: "On Deck".to_string(),
+                    hub_identifier: "vela.ondeck".to_string(),
+                    hub_type: "mixed".to_string(),
+                    items,
+                    source_id: self.id.clone(),
+                    source_name: self.name.clone(),
+                });
+            }
+        }
+        Ok(out)
     }
 
     async fn items(

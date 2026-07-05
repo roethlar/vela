@@ -696,6 +696,9 @@ impl JellyfinSource {
             backdrop,
             view_offset_ms,
             played: item.user_data.as_ref().and_then(|u| u.played),
+            // Jellyfin reports LastPlayedDate as an ISO-8601 string; parsing
+            // it without a date dependency isn't worth it yet (follow-up).
+            last_watched_at_ms: None,
             index: item.index_number,
             parent_index: item.parent_index_number,
             grandparent_title: item.series_name.clone(),

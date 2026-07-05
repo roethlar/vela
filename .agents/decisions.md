@@ -384,3 +384,29 @@ before this entry; only the approval formality was pending.
 Supersedes:
 Nothing structural. Narrows the per-plan approval wait for the named items
 and for future owner-locked plans.
+
+### 2026-07-04 - On Deck folds into the Continue Watching flow
+
+Status: Active
+
+Decision:
+Plex On Deck items are part of the hero cover-flow, interleaved with
+recents and continue-watching items by last watch activity (Plex
+`lastViewedAt`; Vela recents' `ended_at_ms`), newest first; items with no
+timestamp follow the timestamped ones in feed order. Vela builds its own
+On Deck hub from `/library/onDeck` (synthetic id `vela.ondeck`) because
+the `/hubs` On Deck hub is server-controlled and often absent. There is
+no separate On Deck row. Jellyfin `/Shows/NextUp` and Emby equivalents,
+and Jellyfin/Emby last-watched timestamps, are recorded follow-ups.
+
+Reason:
+Owner choices locked 2026-07-04 (plan
+`.agents/plans/continue-watching-curation.md`): fold in, no row,
+interleave by recency. On the owner's server, `/hubs` returns no On Deck
+hub, so an in-progress movie was invisible in the flow.
+
+Supersedes:
+The "On Deck ... uses the same landscape artwork rules" 16:9-row
+treatment in the 2026-07-04 "UI design language" decision; the hero
+cover-flow decision's merge ordering (was: recents then hub order — now
+recency-interleaved across both feeds).
