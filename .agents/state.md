@@ -5,6 +5,13 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 6 landed 2026-07-05 (`fc902f4`) + review loop e2e-6 CLOSED
+  (clean pass, no findings): search scenario — short-query validation
+  error, hit/miss result filtering, play-from-results over mpv IPC.
+  Suite: 6 scenarios. The harness's locally-testable backlog is now
+  EXHAUSTED — remaining scenarios (SMB, merged All view, server-gated
+  mark-watched/watch-state/Plex-removal) are blocked on owner-provided
+  creds/test-server env (see Next).
 - E2E slice 5 landed 2026-07-05 (`9274ac2`) + review loop e2e-5 CLOSED
   (eh-11 verified): the queue scenario proves backend auto-advance live —
   clip A to natural EOF over IPC, "Play next"-queued clip B spawns in a
