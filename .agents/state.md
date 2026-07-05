@@ -5,8 +5,10 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
-- READY FOR OWNER: `.agents/plans/smb-native-client.md` is IMPLEMENTED on
-  branch `smb-native` (code slices, fix-ups, and per-slice review-trail records; `git rev-list --count main..smb-native` for the live number). All six slices codex-verified
+- MERGED to `main` 2026-07-04 (owner go; merge commit `e9f6029`; the
+  `smb-native` branch is deleted — owner direction: no branches without
+  his explicit word in future). `.agents/plans/smb-native-client.md` is
+  IMPLEMENTED. All six slices codex-verified
   (`.agents/review/index.md`; smb-2/3/4/5 took 2-3 rounds each — every
   reopen was a real finding, recorded in the finding docs). Linux SMB is
   now native and mountless: libsmbclient in-process (via pavao-sys, one
@@ -18,11 +20,7 @@ Keep it short and update it when important repo facts change.
   on `libsmbclient`.
   NEXT: (1) owner playtest on the real NAS — add share 10.1.10.206/media
   with credentials in Settings (native, no mount), browse, add a folder,
-  play/seek/resume, check hero recents and posters; (2) owner-gated merge
-  of `smb-native` into `main` — NOT a fast-forward: `main` gained the two
-  Continue-Watching ISSUES commits after the branch was cut, so this is a
-  regular merge commit (no rebase without an explicit owner go); (3)
-  version bump at merge
+  play/seek/resume, check hero recents and posters; (2) version bump
   (not done on the branch — owner's release call). Env-gated live probe:
   `VELA_SMB_LIVE=server/share cargo test --lib live_probe -- --nocapture`.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
@@ -59,7 +57,7 @@ Keep it short and update it when important repo facts change.
 - Token/credential stance: poster URLs (all backends) and Jellyfin/Emby
   stream URLs are accepted local-only exposures; SMB mount arguments remain
   one only on macOS/Windows (Linux credentials never leave the process —
-  libsmbclient auth callback, branch `smb-native`); Plex stream auth rides as an `X-Plex-Token` header via an
+  libsmbclient auth callback); Plex stream auth rides as an `X-Plex-Token` header via an
   owner-only mpv include file. Add nothing new that logs or displays
   token-bearing URLs. Recents snapshots in `config.json` carry poster URLs —
   same exposure class as the config's stored tokens.
@@ -104,8 +102,7 @@ Keep it short and update it when important repo facts change.
 
 - See `.agents/repo-map.json` for the current automated verification
   commands (npm check/build; cargo check/clippy/test from `src-tauri/`).
-  Rust suite: 56 tests on `main`, 71 on `smb-native`; clippy `-D warnings`
-  clean on both.
+  Rust suite: 71 tests; clippy `-D warnings` clean.
 - Rust verification on Linux needs the Tauri/WebKitGTK system dependencies
   used by CI.
 

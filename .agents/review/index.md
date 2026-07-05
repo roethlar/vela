@@ -10,9 +10,10 @@ Loop review phase COMPLETE 2026-07-04: all six slices verified `[x]`
 (smb-1 in one round; smb-2/3 in two; smb-4 in two plus a recorded coder
 process incident; smb-5 in three; smb-6 in three with one dispute
 resolved in the coder's favor — every reopen was a real finding, see
-the finding docs). Awaiting owner playtest + owner-gated merge of
-`smb-native` (regular merge commit, not fast-forward); the loop closes
-when the branch lands on `main`.
+the finding docs). MERGED to `main` 2026-07-04 (owner go; merge commit `e9f6029`, content
+verified arrived; branch deleted). Loop CLOSED — this file and
+`findings/` remain as the durable review trail. Owner playtest against
+the real NAS is still pending.
 
 Loop opened 2026-07-04. Scope: implementation of the approved plan
 `.agents/plans/smb-native-client.md`. Adaptation, owner-directed ("go with
