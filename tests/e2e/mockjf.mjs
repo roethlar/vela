@@ -110,7 +110,9 @@ export function startMockJellyfin({
           start = Number(m[1]);
           if (m[2] !== '') end = Math.min(Number(m[2]), size - 1);
         }
-        if (start >= size) {
+        if (start >= size || start > end) {
+          // start>end covers reversed ranges like bytes=50-40 — unsatisfiable
+          // per stream_proxy.rs (which tests exactly that shape).
           res.writeHead(416, { 'Content-Range': `bytes */${size}` });
           return res.end();
         }
