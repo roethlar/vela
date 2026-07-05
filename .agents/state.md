@@ -53,9 +53,10 @@ Keep it short and update it when important repo facts change.
     `watched_threshold_percent`, default 95%). Library nav moved to a left
     sidebar (Home / Library / Sources groups, Infuse reference
     `reference_screens/infuse-home-reference.png`).
-- Token/credential stance unchanged: poster URLs (all backends),
-  Jellyfin/Emby stream URLs, and SMB mount arguments are accepted local-only
-  exposures; Plex stream auth rides as an `X-Plex-Token` header via an
+- Token/credential stance: poster URLs (all backends) and Jellyfin/Emby
+  stream URLs are accepted local-only exposures; SMB mount arguments remain
+  one only on macOS/Windows (Linux credentials never leave the process —
+  libsmbclient auth callback, branch `smb-native`); Plex stream auth rides as an `X-Plex-Token` header via an
   owner-only mpv include file. Add nothing new that logs or displays
   token-bearing URLs. Recents snapshots in `config.json` carry poster URLs —
   same exposure class as the config's stored tokens.
@@ -100,7 +101,8 @@ Keep it short and update it when important repo facts change.
 
 - See `.agents/repo-map.json` for the current automated verification
   commands (npm check/build; cargo check/clippy/test from `src-tauri/`).
-  Rust suite is at 56 tests, clippy `-D warnings` clean.
+  Rust suite: 56 tests on `main`, 71 on `smb-native`; clippy `-D warnings`
+  clean on both.
 - Rust verification on Linux needs the Tauri/WebKitGTK system dependencies
   used by CI.
 
