@@ -37,4 +37,4 @@ slice ↔ one review ↔ one recorded verdict. Merge of `smb-native` into
 | smb-3 | —        | Native SMB listing via provider + listing cache        | `[x]`  | `smb-native` |
 | smb-4 | —        | Loopback Range proxy + SMB playback via mpv            | `[x]`  | `smb-native` |
 | smb-5 | —        | Remove Linux mount machinery + UI error copy           | `[x]`  | `smb-native` |
-| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[ ]`  | `smb-native` |
+| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[~]`  | `smb-native` |
