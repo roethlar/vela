@@ -5,6 +5,14 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 4 landed 2026-07-05 (`2f5bba8`) + review loop e2e-4 CLOSED:
+  the resume scenario caught eh-10 (`4527613`), a HIGH app bug —
+  **Continue Watching restarted local/SMB/SSH items from 0:00** (local
+  provider resolves resume_ms 0; play_by_key ignored Vela's own stamp).
+  play_by_key now falls back to `recents::resume_stamp_ms` when the
+  provider resolves 0; server positions still win. Queue auto-advance
+  inherits the fallback (routes through play_by_key). Codex batch pass on
+  the slice itself: clean, no findings.
 - E2E slice 3 landed 2026-07-05 (`ee01101`) + review loop e2e-3 CLOSED
   (eh-8, eh-9 verified): the curation scenario drives
   remove-from-continue via the hero's real context menu, proves tombstone
