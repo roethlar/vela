@@ -78,7 +78,11 @@ async function runScenario(scenario, tauriDriverBin) {
     ['--native-driver', path.join(e2eDir, 'wkdriver-wrapper.sh'), '--port', String(driverPort)],
     {
       cwd: repoRoot,
-      env: { ...process.env, XDG_CONFIG_HOME: path.join(configRoot, 'config') },
+      env: {
+        ...process.env,
+        ...displayEnv,
+        XDG_CONFIG_HOME: path.join(configRoot, 'config'),
+      },
       stdio: ['ignore', logFd, logFd],
       detached: true,
     },
@@ -144,6 +148,29 @@ for (const file of fs.readdirSync(scenarioDir).filter((f) => f.endsWith('.mjs'))
 if (scenarios.length === 0) {
   console.error(`e2e: no scenarios match [${nameFilter.join(', ')}]`);
   process.exit(1);
+}
+
+// Default to a private Xvfb display: on the live Wayland session a test
+// window that opens unfocused/occluded stops getting frame callbacks and
+// WebKit's snapshot then hangs — screenshots only render reliably when
+// nothing contends for visibility. VELA_E2E_HEADED=1 runs on the real
+// desktop instead (watchable, but screenshot timing depends on focus).
+let displayEnv = {};
+if (!process.env.VELA_E2E_HEADED) {
+  const display = process.env.VELA_E2E_DISPLAY ?? ':97';
+  if (fs.existsSync(`/tmp/.X${display.slice(1)}-lock`)) {
+    console.error(`e2e: display ${display} is taken — set VELA_E2E_DISPLAY or remove the stale lock`);
+    process.exit(1);
+  }
+  const xvfb = spawn('Xvfb', [display, '-screen', '0', '1920x1080x24'], { stdio: 'ignore' });
+  xvfb.on('error', () => {
+    console.error('e2e: Xvfb not found — install it (xorg-server-xvfb) or set VELA_E2E_HEADED=1');
+    process.exit(1);
+  });
+  process.on('exit', () => xvfb.kill());
+  activeKills.add(() => xvfb.kill());
+  await waitUntil(() => fs.existsSync(`/tmp/.X11-unix/X${display.slice(1)}`), `Xvfb on ${display}`);
+  displayEnv = { GDK_BACKEND: 'x11', DISPLAY: display, WAYLAND_DISPLAY: '' };
 }
 
 const tauriDriverBin = resolveTauriDriver();

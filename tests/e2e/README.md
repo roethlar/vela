@@ -11,8 +11,13 @@ npm run e2e -- --skip-build    # reuse the existing debug binary
 npm run e2e -- smoke           # run one scenario by name
 ```
 
-- Requires a graphical session (Linux), `tauri-driver`
-  (`cargo install tauri-driver`), `bsdtar`, and `curl`.
+- Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
+  (`xorg-server-xvfb`), `bsdtar`, and `curl`.
+- Runs headless on a private Xvfb display by default — screenshots on the
+  live Wayland desktop hang whenever the test window is occluded/unfocused
+  (no frame callbacks). `VELA_E2E_HEADED=1` opts into the real desktop to
+  watch a run; `VELA_E2E_DISPLAY=:N` picks the Xvfb display;
+  `VELA_E2E_DEBUG=1` logs each WebDriver call with timing.
 - First run downloads the vendored driver via `fetch-driver.sh` into
   `vendor/` (gitignored, sha256-pinned).
 - Screenshots and driver logs land in `artifacts/` (gitignored) for owner
