@@ -137,11 +137,7 @@ pub fn run() {
         merged_snapshot: AsyncMutex::new(None),
     };
 
-    let asset_folders: Vec<String> = local_family
-        .iter()
-        .flat_map(|m| &m.folders)
-        .map(|f| f.path.clone())
-        .collect();
+    let asset_folders: Vec<String> = source::local::asset_folder_paths(&local_family);
     let smb_mounts = cfg.smb_mounts.clone();
     let ssh_mounts = cfg.ssh_mounts.clone();
 
@@ -416,16 +412,10 @@ async fn refresh_local_source(app_handle: &tauri::AppHandle) {
         ssh_runtime_folder,
         safe_user_media_root,
     );
-    // Native-provider members' folder paths are share-relative, not local
-    // paths — allow-listing them would grant unrelated local directories.
-    for folder in family
-        .iter()
-        .filter(|m| m.vfs.is_none())
-        .flat_map(|m| &m.folders)
-    {
+    for path in source::local::asset_folder_paths(&family) {
         let _ = app_handle
             .asset_protocol_scope()
-            .allow_directory(&folder.path, true);
+            .allow_directory(&path, true);
     }
     let state = app_handle.state::<AppState>();
     let mut reg = state.registry.lock().await;

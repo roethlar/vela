@@ -79,4 +79,14 @@ None.
   real NAS anonymously (friendly access-denied).
 
 ## Reviewer comments
-(pending)
+Round 1 — reopened.
+- Reviewer: codex (codex-cli 0.142.5); reviewed `bef25e2…`, base `a904eb2…`.
+  2026-07-04 (UTC). Verdict: **reopened**; guard_confirmed: **true**
+  (normalize `..` mutation failed the test in its clone, restore passed 66).
+- Finding: `src-tauri/src/lib.rs:140` — boot builds `asset_folders` from
+  EVERY local_family member and setup allow-lists them (~line 235); on
+  Linux, native SMB members carry provider paths (`/movies`, even `/`), so
+  startup would allow-list same-named LOCAL directories — the exact hole
+  the slice closed in refresh_local_source, missed at boot. Accepted as
+  correct; fixing via a shared, unit-tested `asset_folder_paths` helper
+  used by both boot and refresh.

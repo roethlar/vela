@@ -145,6 +145,19 @@ where
     members
 }
 
+/// Folder paths eligible for asset-protocol allow-listing: only members
+/// backed by the real filesystem. Native providers' paths are
+/// share-relative (e.g. `/movies`, even `/` for a share root) — allow-
+/// listing those would grant access to same-named LOCAL directories.
+pub fn asset_folder_paths(members: &[LocalFamilyMember]) -> Vec<String> {
+    members
+        .iter()
+        .filter(|m| m.vfs.is_none())
+        .flat_map(|m| &m.folders)
+        .map(|f| f.path.clone())
+        .collect()
+}
+
 const VIDEO_EXTS: &[&str] = &[
     "mkv", "mp4", "m4v", "mov", "avi", "ts", "m2ts", "webm", "wmv", "flv", "mpg", "mpeg",
 ];
@@ -1036,6 +1049,54 @@ mod tests {
         // safe-root check, so no member survives at all.
         let fam = local_family(&cfg, |_m| Vec::new(), |_m| None, |_m| None, |p| p != "/");
         assert!(fam.is_empty());
+    }
+
+    #[test]
+    fn asset_folder_paths_excludes_native_provider_members() {
+        struct NullVfs;
+        impl Vfs for NullVfs {
+            fn read_dir_sorted(&self, _d: &Path) -> Vec<PathBuf> {
+                Vec::new()
+            }
+            fn is_dir(&self, _p: &Path) -> bool {
+                false
+            }
+            fn is_file(&self, _p: &Path) -> bool {
+                false
+            }
+            fn canonicalize(&self, _p: &Path) -> Option<PathBuf> {
+                None
+            }
+            fn file_len(&self, _p: &Path) -> u64 {
+                0
+            }
+            fn read_to_string(&self, _p: &Path) -> Option<String> {
+                None
+            }
+        }
+        let members = vec![
+            LocalFamilyMember {
+                id: "local".into(),
+                name: "Local".into(),
+                kind: "local",
+                folders: vec![folder("f1", "Movies", "/data/movies")],
+                vfs: None,
+            },
+            LocalFamilyMember {
+                id: "smb-m1".into(),
+                name: "nas".into(),
+                kind: "smb",
+                // Provider-namespace paths: allow-listing "/" would grant
+                // the entire real filesystem to the asset protocol.
+                folders: vec![folder("f2", "movies", "/movies"), folder("f3", "root", "/")],
+                vfs: Some(std::sync::Arc::new(NullVfs)),
+            },
+        ];
+        assert_eq!(
+            asset_folder_paths(&members),
+            vec!["/data/movies".to_string()],
+            "native provider paths must never be allow-listed"
+        );
     }
 
     #[test]
