@@ -96,10 +96,19 @@ frees/creates a context at all.
      sub-chunk interruption of a blocking libsmbclient read — a stuck read is
      bounded by `OP_TIMEOUT_MS` (10s), which is already today's worst case, so the
      model never makes it worse and removes it in the common case.
-   - **Cleanup hook:** wire teardown from the resolved-stream URL/token into the
-     play path and playback-end (`commands.rs:2939-2961`; the mpv `on_end`), so
-     the cached session is freed when playback ends or the target is replaced —
-     not left until registry eviction/app exit (codex r1, finding 2: leak).
+   - **Cleanup hook + ownership guard:** associate each play with a fresh
+     monotonic **session generation** and tag the cached session with the
+     generation that created it. Wire teardown from the resolved-stream URL/token
+     into the play path and playback-end (`commands.rs:2882-2977`; mpv `on_end`),
+     but make cleanup a **compare-and-remove**: free the cached session only if it
+     still owns the current generation. The proxy reuses the same token for the
+     same SMB path and `play_by_key` resolves the new stream URL BEFORE the old
+     playback signals end (codex r2, finding 1), so a replay/replace starts the
+     new stream and bumps the generation first — the prior play's late `on_end`
+     then finds it no longer owns the generation and is a no-op, and cannot free
+     the session the new stream is using. (Equivalent alternative: mint a fresh
+     token per play.) This also avoids leaking to registry eviction/app exit
+     (codex r1, finding 2).
    Highest complexity; lands after slices 1-2 so the cheap wins ship first.
 
 Keep-alive (dropping `Connection: close`) is **out of scope**: the per-token
@@ -120,6 +129,9 @@ with a fake backend whose per-op read incurs an artificial delay:
   deadline. Fails today (full session rebuild per connection).
 - **No session leak** (slice 3): assert the cached session is freed on
   playback-end/target-replace, not left to registry eviction.
+- **Replay ownership** (slice 3, codex r2): replay the same SMB URL so the prior
+  play's `on_end` fires AFTER the new stream has begun; assert the new stream's
+  session is NOT freed (compare-and-remove still owns the current generation).
 - **Owner playtest** on the NAS confirms the felt freeze is gone.
 
 ### Risk
@@ -240,14 +252,25 @@ Two code constraints the design MUST satisfy (codex r1, finding 4):
   collide across mounts, and a **stale cached root kind would preserve the old
   flat classification after upgrade**. Key the kind/category cache by
   **source/mount id + path** and bump/ignore the old cache schema.
+- **The expansion is blocking VFS work and MUST run off-lock** (codex r2, finding
+  2). Registry rebuilds run inside `config::update` and under `source_lock`
+  (`commands.rs:1179`), so doing `detect_kind`/`read_dir` there would hold the
+  config lock, the cross-process config lock, and/or `source_lock` across
+  network-priced SMB/sshfs I/O — the exact lock-across-blocking invariant slice 7
+  (`e7c5231`) was landed to honor. Run effective-root expansion on the blocking
+  pool OUTSIDE those locks: clone a config snapshot, expand from it without shared
+  locks, then briefly swap the registry only if the snapshot is still current — or
+  compute effective roots lazily inside `LocalSource` under `run_blocking` with an
+  effective-root cache.
 
 ### Verification
 Rust unit tests (hermetic, local fs, no NAS): category-root vs single-library-root
 vs mixed; **a generated `/Movies` section resolves through `items()` without
 "unknown local folder"**; **a stale root-kind cache entry does not preserve the
 flat classification**; **two mounts sharing a provider path (both `/Movies`) do
-not collide**. E2E for the merged-dedup path if a nested local fixture is
-practical.
+not collide**; **effective-root VFS expansion is not performed while
+`config::update`/`source_lock` are held** (codex r2). E2E for the merged-dedup
+path if a nested local fixture is practical.
 
 ### Risk
 Medium. Changes listing/classification semantics; must not regress existing
@@ -340,4 +363,11 @@ code slice (routine).
   server-source Home is not regressed, with a mock-hubs regression guard; Bug 4:
   expand kind-auto roots into configured per-category folder roots to satisfy the
   `items()` guard, key the kind cache by mount id + path with a schema bump.
-- **r2** (pending) re-dispatched to `codex`.
+- **r2** 2026-07-05 `codex`, reviewed `9b9ea86` base `05f9594`: **reopened**, 2
+  new majors (r1 blockers confirmed resolved) — (1) cached-session cleanup race
+  under token reuse + resolve-before-end ordering; (2) Bug 4 root expansion would
+  run blocking VFS I/O under `config::update`/`source_lock`. Both admitted and
+  addressed: Bug 1 cleanup is now a generation-owned compare-and-remove (+ replay
+  test); Bug 4 expansion is pinned to run off-lock on the blocking pool via a
+  config snapshot (+ a no-lock-across-expansion check).
+- **r3** (pending) re-dispatched to `codex`.
