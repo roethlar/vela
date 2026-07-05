@@ -109,9 +109,12 @@ async function runScenario(scenario, tauriDriverBin) {
       screenshot: (name) =>
         driver.screenshotTo(path.join(artifactsDir, `${scenario.name}-${name}.png`)),
       // Relaunch the app on the same throwaway config (restart-persistence
-      // scenarios). WebKitWebDriver spawns a fresh app per session.
-      restart: async () => {
+      // scenarios). WebKitWebDriver spawns a fresh app per session. The
+      // optional `between` hook runs while the app is down — the only safe
+      // window to edit the seeded config without racing its lock.
+      restart: async (between) => {
         await driver.deleteSession();
+        if (between) await between();
         await driver.newSession(appBinary);
       },
     });

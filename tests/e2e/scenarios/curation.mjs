@@ -83,6 +83,9 @@ export default {
     await openLibraryGrid(driver);
     await playClipAndQuit(driver);
     await pollUntil(stampedRecent, 'the recents position stamp');
+    // Kept for the restart leg: removal will drop this entry, and proving
+    // tombstone APPLICATION needs a feed item carrying the hidden key.
+    const stampedEntry = readCfg().recents[0];
     await goHome(driver);
     await driver.waitFor(`return !!document.querySelector('${HERO_CLIP}')`, 'clip in the hero');
 
@@ -115,13 +118,21 @@ export default {
     );
     await screenshot('01-removed');
 
-    // The removal survives an app restart (recents entry still exists, so
-    // only the tombstone keeps it out of the hero).
+    // Restart leg. Reinserting the stamped entry next to the surviving
+    // tombstone (app down, so no config-lock race) makes the post-restart
+    // assertions depend on tombstone APPLICATION — the hero must suppress a
+    // feed item that is actually present (both-feeds suppression,
+    // +page.svelte heroItems) — not merely on the entry having been removed.
     const { execSync } = await import('node:child_process');
     const appPid = () => execSync('pgrep -x vela || true').toString().trim();
     const pidBefore = appPid();
     assert.ok(pidBefore, 'app process should be findable before restart');
-    await restart();
+    await restart(() => {
+      const cfg = readCfg();
+      assert.equal(cfg.recents?.length ?? 0, 0, 'removal should have dropped the recents entry');
+      cfg.recents = [stampedEntry];
+      fs.writeFileSync(configFile, JSON.stringify(cfg));
+    });
     const pidAfter = appPid();
     assert.ok(
       pidAfter && pidAfter !== pidBefore,

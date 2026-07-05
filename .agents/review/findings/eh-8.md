@@ -41,7 +41,13 @@ the existing hero-absent assertion now genuinely exercises.
 Deterministic red/green: with the between-hook ALSO clearing
 `hidden_from_continue` (entry present, no tombstone), the post-restart
 hero-absent assertion must FAIL — proving it depends on the tombstone;
-with the tombstone kept, it must PASS. Executed results transcribed below.
+with the tombstone kept, it must PASS.
+
+Executed 2026-07-05: green — scenario PASS with the entry reinserted and
+the tombstone kept (hero stays empty across restart). Red — with the
+between-hook also clearing `hidden_from_continue`, the run FAILS at
+"empty home after restart" (exit 1): the reinserted entry brings the hero
+back, proving the assertion depends on tombstone application.
 
 ## Coder dispute (if any)
 None — admitted as filed. (The recents-side reinsertion is valid: the
