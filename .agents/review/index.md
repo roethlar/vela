@@ -9,6 +9,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
+Loop docs-1 CLOSED 2026-07-05: clean pass, no findings. Scope was the
+README test-workflow section — base `b6063e8`, head `36b0a6f` (docs only;
+every documented command was live-verified the same day).
+
 Loop app-1 CLOSED 2026-07-05: clean pass, no findings. Scope was slice 7
 — base `24de4ee`, head `e7c5231` (resolve_stream onto the blocking pool +
 repo-map P0-audit note). Same no-branches adaptation.
