@@ -70,6 +70,9 @@ async function waitUntil(fn, what, timeoutMs = 10000) {
 
 async function runScenario(scenario, tauriDriverBin) {
   const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), `vela-e2e-${scenario.name}-`));
+  // The app reads XDG_CONFIG_HOME=<configRoot>/config, so a seeded config
+  // file belongs at <configRoot>/config/vela/config.json.
+  if (scenario.seed) await scenario.seed({ configRoot, repoRoot });
   const logFd = fs.openSync(path.join(artifactsDir, `${scenario.name}-driver.log`), 'w');
   // detached ⇒ own process group, so killing -pid also takes down the
   // WebKitWebDriver child tauri-driver spawns.

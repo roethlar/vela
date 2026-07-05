@@ -12,7 +12,8 @@ npm run e2e -- smoke           # run one scenario by name
 ```
 
 - Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
-  (`xorg-server-xvfb`), `bsdtar`, and `curl`.
+  (`xorg-server-xvfb`), `bsdtar`, `curl`, and — for the playback
+  scenario — `ffmpeg` and `mpv`.
 - Runs headless on a private Xvfb display by default — screenshots on the
   live Wayland desktop hang whenever the test window is occluded/unfocused
   (no frame callbacks). `VELA_E2E_HEADED=1` opts into the real desktop to
