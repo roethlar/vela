@@ -94,17 +94,39 @@ export function startMockJellyfin({
       return;
     }
     if (path === '/Videos/m1/stream' && mediaFile) {
-      // Minimal Range support: mpv seeks over HTTP with byte ranges.
+      // Range support matching the app's own loopback proxy semantics
+      // (stream_proxy.rs): bytes=a-b / bytes=a- / bytes=-suffix, end clamped
+      // to EOF, 416 for unsatisfiable starts (eh-13 — mpv probes MP4 with
+      // suffix/EOF ranges, and an edge must not crash the runner).
       const size = fs.statSync(mediaFile).size;
-      const range = /bytes=(\d+)-(\d*)/.exec(req.headers.range ?? '');
-      const start = range ? Number(range[1]) : 0;
-      const end = range && range[2] ? Number(range[2]) : size - 1;
-      res.writeHead(range ? 206 : 200, {
-        'Content-Type': 'video/mp4',
-        'Accept-Ranges': 'bytes',
-        'Content-Length': end - start + 1,
-        ...(range ? { 'Content-Range': `bytes ${start}-${end}/${size}` } : {}),
-      });
+      const m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+      let start = 0;
+      let end = size - 1;
+      if (m && (m[1] !== '' || m[2] !== '')) {
+        if (m[1] === '') {
+          // suffix: last N bytes
+          start = Math.max(0, size - Number(m[2]));
+        } else {
+          start = Number(m[1]);
+          if (m[2] !== '') end = Math.min(Number(m[2]), size - 1);
+        }
+        if (start >= size) {
+          res.writeHead(416, { 'Content-Range': `bytes */${size}` });
+          return res.end();
+        }
+        res.writeHead(206, {
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+          'Content-Length': end - start + 1,
+          'Content-Range': `bytes ${start}-${end}/${size}`,
+        });
+      } else {
+        res.writeHead(200, {
+          'Content-Type': 'video/mp4',
+          'Accept-Ranges': 'bytes',
+          'Content-Length': size,
+        });
+      }
       fs.createReadStream(mediaFile, { start, end }).pipe(res);
       return;
     }
