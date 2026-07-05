@@ -108,6 +108,12 @@ async function runScenario(scenario, tauriDriverBin) {
       configRoot,
       screenshot: (name) =>
         driver.screenshotTo(path.join(artifactsDir, `${scenario.name}-${name}.png`)),
+      // Relaunch the app on the same throwaway config (restart-persistence
+      // scenarios). WebKitWebDriver spawns a fresh app per session.
+      restart: async () => {
+        await driver.deleteSession();
+        await driver.newSession(appBinary);
+      },
     });
     return null;
   } catch (err) {
