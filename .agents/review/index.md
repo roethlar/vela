@@ -9,6 +9,9 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
+Loop docs-2 CLOSED 2026-07-05: clean pass, no findings. Scope was the
+artifact-manifest refresh — base `c1f2b65`, head `7e08272` (docs only).
+
 Loop docs-1 CLOSED 2026-07-05: clean pass, no findings. Scope was the
 README test-workflow section — base `b6063e8`, head `36b0a6f` (docs only;
 every documented command was live-verified the same day).
