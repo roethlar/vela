@@ -319,7 +319,7 @@
 
   async function addSmbFolder() {
     if (!smbBrowseMountId) {
-      err = "Mount an SMB share first.";
+      err = "Add an SMB share first.";
       return;
     }
     busy = true;

@@ -74,3 +74,11 @@ commands.rs:408 mount_smb doc; commands.rs:551 list_smb_directories doc;
 packaging/arch/PKGBUILD:13 stale gvfs-smb/kio-fuse optdepends. Fix-up
 round 2 rewrites each and moves the PKGBUILD dependency correction
 (smbclient into depends) forward from slice 6.
+
+Round 2 — reopened again (nine further drift spots, exhaustive sweep):
+Settings.svelte:322 error copy; config.rs:44/63/77/88 (smb_mounts field,
+SmbMount, mountpoint, SmbFolder.path docs); commands.rs:386/626
+(SmbDirectoryDto, add_smb_folder); local.rs:1 module header;
+decisions.md:62 (2026-05-23 entry still "Active" — now marked partially
+superseded, preserving the no-root constraint and SSH stance). All
+accepted and fixed in the round-3 head.

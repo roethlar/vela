@@ -1,10 +1,13 @@
-//! Local (and OS-mounted SMB) folder backend. Indexes files by name/structure
-//! and direct-plays them in mpv. No metadata lookup (that's P2d) and no resume
-//! tracking — local playback uses `ProgressTarget::None` by design.
+//! Local-family folder backend: plain folders, SSH mounts, and SMB shares
+//! (native `Vfs` provider on Linux; OS mounts on macOS/Windows). Indexes
+//! files by name/structure and plays them in mpv — local paths directly,
+//! native SMB via the loopback stream proxy. No resume tracking: local
+//! playback uses `ProgressTarget::None` by design.
 //!
-//! Item keys are the absolute filesystem path. The registry splits a namespaced
-//! key on the *first* `:` only, so a Windows `C:\…` path survives intact as the
-//! raw key — no encoding or id↔path map needed.
+//! Item keys are the absolute filesystem path (or share-relative provider
+//! path for native SMB). The registry splits a namespaced key on the
+//! *first* `:` only, so a Windows `C:\…` path survives intact as the raw
+//! key — no encoding or id↔path map needed.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;

@@ -59,7 +59,10 @@ The local asset scope concerns in `ISSUES.md` and `.review/gpt_review.md`.
 
 ### 2026-05-23 - Keep Linux SMB user-space only by default
 
-Status: Active
+Status: Partially superseded (2026-07-04). The GVfs/KIO-FUSE resolution
+mechanism is replaced by the native in-process client — see "Linux SMB
+goes native" (2026-07-04). Still active from this entry: the no-root /
+no-privileged-CIFS constraint and the entire SSH/sshfs stance.
 
 Decision:
 On Linux, Vela resolves readable GVfs/KIO-FUSE SMB mounts created by the user's

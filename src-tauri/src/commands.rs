@@ -383,7 +383,7 @@ pub struct SmbFolderDto {
     kind: String,
 }
 
-/// One directory inside a mounted SMB share, for the settings browser.
+/// One directory inside a configured SMB share, for the settings browser.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmbDirectoryDto {
@@ -623,7 +623,9 @@ pub async fn list_smb_directories(
     }
 }
 
-/// Add one selected folder inside a mounted SMB share to the local source.
+/// Add one selected folder inside a configured SMB share to its source.
+/// Linux validates the folder over the native client; macOS/Windows probe
+/// the mounted path.
 #[tauri::command]
 pub async fn add_smb_folder(
     id: String,
