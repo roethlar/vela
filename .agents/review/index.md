@@ -6,10 +6,13 @@ Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loop: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6, merged to main).
 
-Slices smb-1..smb-5 verified `[x]`; smb-6 is in review (flips on its
-recorded verdict — this header must never run ahead of the table).
-After all six verify: owner playtest + owner-gated merge of
-`smb-native`; the loop closes when the branch lands on `main`.
+Loop review phase COMPLETE 2026-07-04: all six slices verified `[x]`
+(smb-1 in one round; smb-2/3 in two; smb-4 in two plus a recorded coder
+process incident; smb-5 in three; smb-6 in three with one dispute
+resolved in the coder's favor — every reopen was a real finding, see
+the finding docs). Awaiting owner playtest + owner-gated merge of
+`smb-native` (regular merge commit, not fast-forward); the loop closes
+when the branch lands on `main`.
 
 Loop opened 2026-07-04. Scope: implementation of the approved plan
 `.agents/plans/smb-native-client.md`. Adaptation, owner-directed ("go with
@@ -38,4 +41,4 @@ slice ↔ one review ↔ one recorded verdict. Merge of `smb-native` into
 | smb-3 | —        | Native SMB listing via provider + listing cache        | `[x]`  | `smb-native` |
 | smb-4 | —        | Loopback Range proxy + SMB playback via mpv            | `[x]`  | `smb-native` |
 | smb-5 | —        | Remove Linux mount machinery + UI error copy           | `[x]`  | `smb-native` |
-| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[~]`  | `smb-native` |
+| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[x]`  | `smb-native` |

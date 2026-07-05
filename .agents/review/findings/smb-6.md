@@ -1,9 +1,9 @@
 # smb-6: Packaging, docs, plan status, and handoff
 
 **Severity**: — (planned slice 6 of `.agents/plans/smb-native-client.md`, not a defect)
-**Status**: In progress (pending review)
+**Status**: Verified (accepted round 3; awaiting owner-gated merge)
 **Branch**: `smb-native` (stacked; final slice)
-**Commit**: `d869c9165c1c6ff0ac50ac019d8d50e4d75fba61` (base `a213cb21e3822c396c9ec44091f03e5645119286`, the accepted smb-5 head)
+**Commit**: `e71eb4ee3a279889f5d7157458c9ed0f9efe4b2e` (slice + fix-ups; base `a213cb21e3822c396c9ec44091f03e5645119286`)
 
 ## Evidence
 Approved plan slice 6 (design §5). PKGBUILD's dependency correction was
@@ -83,3 +83,7 @@ Round 2 — reopened (one finding) + dispute resolved in coder's favor.
   remaining state.md/repo-guidance hits are accurate negative statements
   documenting the deleted machinery. Finding withdrawn, no owner
   adjudication needed.
+
+Round 3 — accepted. Reviewed `e71eb4e…`, same base. 2026-07-04 (UTC).
+guard_confirmed: **true** (clippy, 71 tests, JSON dependency-shape check
+green in the reviewer's isolated checkout). deb/rpm depends confirmed.
