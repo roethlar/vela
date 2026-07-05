@@ -220,6 +220,14 @@ Keep it short and update it when important repo facts change.
 
 ## Next
 
+- AWAITING OWNER APPROVAL: `.agents/plans/smb-ssh-playtest-fixes.md` — five bugs
+  from the 2026-07-05 NAS playtest of 0.1.21 (SMB seek hang, SSH seek hang,
+  source-click dead-end, share-root mis-classification starving the merged view,
+  Connected-tab triplication + erroring Remove + URL-as-name). Plan is codex-
+  reviewloop **converged** (3 rounds, accepted at r3; trail in the plan's Review
+  log). NOT yet approved for implementation — do not start coding until the owner
+  approves and answers the plan's open decisions.
+
 - E2E harness next slices (skeleton is done): (a) SMB add→browse→play
   scenario — needs owner NAS creds via `VELA_E2E_SMB`/`_USER`/`_PASS` env
   at run time; (b) the mpv-IPC playback probe leg; (c) hero/curation

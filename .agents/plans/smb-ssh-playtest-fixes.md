@@ -2,8 +2,10 @@
 
 ## Status
 
-Draft — under `reviewloop codex` (plan-review mode). NOT approved for
-implementation. Surface to owner only after the loop converges.
+**Converged** — `reviewloop codex` **accepted** at r3 (2026-07-05, 3 rounds).
+Awaiting **owner approval to implement**: an accepted review verdict is not
+implement authority (owner-gated per the reviewloop playbook). Ordered slices
+below; open decisions still need owner answers.
 
 ## Origin
 
@@ -370,4 +372,8 @@ code slice (routine).
   addressed: Bug 1 cleanup is now a generation-owned compare-and-remove (+ replay
   test); Bug 4 expansion is pinned to run off-lock on the blocking pool via a
   config snapshot (+ a no-lock-across-expansion check).
-- **r3** (pending) re-dispatched to `codex`.
+- **r3** 2026-07-05 `codex`, reviewed `27f97c5` base `05f9594`: **accepted**, no
+  findings (`checked_against_code: true`) — both r2 majors resolved
+  (generation-owned cleanup race-free under token reuse/`play_by_key` ordering;
+  category-root expansion moved off `config`/`source` locks with stale-snapshot
+  protection). **Plan converged.** Awaiting owner approval to implement.
