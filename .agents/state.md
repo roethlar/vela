@@ -5,6 +5,21 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 11 landed 2026-07-05 (`7c899be`) + review loop e2e-10 CLOSED
+  (eh-15 verified, fix `6db391c`): the markwatched scenario now round-trips
+  mark-unwatched (DELETE PlayedItems, server flip, badge clears). eh-15
+  then hardened BOTH badge legs — each assertion gates on a later
+  `/Users/{u}/Items` server refetch and asserts a PRESENT card, so a
+  refetch that drops the card or serves stale state can no longer pass on
+  the optimistic mutation or the empty-grid refresh gap (the old
+  `!card?...watched` unwatch wait was vacuously true while the card was
+  missing). Guard-proven with a drop-after-unwatch mock (pre-fix scenario
+  GREEN on the dropped card, fixed scenario RED) and codex-accepted; a
+  3-lens adversarial pre-review (all `refuted:false`) confirmed the
+  optimistic *watched* card never paints (batched Svelte flush), so the
+  unwatch leg was the load-bearing hole. Suite: 9 scenarios. The
+  locally-testable backlog stays EXHAUSTED; SMB + live scenarios remain
+  owner-cred-gated (see Next).
 - E2E slice 10 landed 2026-07-05 (`5742789`) + review loop e2e-9 CLOSED
   (eh-14 verified): the merged All view scenario machine-verifies the
   library-rework owner checks — mock JF + local folder dedup to ONE
@@ -156,9 +171,8 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.10 (bumped 2026-07-05). Remote `github` is current; remote `origin`
-  (q:3000) is 3 commits behind — the owner pushes manually (push policy:
-  ask, `.agents/push-policy.md`).
+- Version 0.1.21 (bumped 2026-07-05). The owner pushes manually (push policy:
+  ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
   - All five approved plans implemented (see `.agents/plans/*`): post-playback
     watch-state refresh (`playback-ended` event); platform-aware sshfs

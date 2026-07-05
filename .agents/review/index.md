@@ -9,10 +9,17 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop e2e-10 opened 2026-07-05 (standing instruction: reviewloop codex per
-slice). Scope: E2E slice 11, single commit — base `d307494`, head
-`7c899be` (mark-unwatched round-trip in the markwatched scenario). Same
-no-branches adaptation.
+Loop e2e-10 CLOSED 2026-07-05: eh-15 verified `[x]`. Scope was E2E slice
+11 (mark-unwatched round-trip; base `d307494`, head `7c899be`); codex
+admitted 1 guard-strength finding (eh-15) at intake, extended to both
+badge legs. Fix `6db391c` gates each badge assertion on a later
+`/Users/{u}/Items` refetch then asserts a present card; guard-proven with
+a `drop-after-unwatch` mock (old scenario PASSES the dropped card, fixed
+scenario FAILS), and accepted by codex (analytical guard-confirm). An
+independent 3-lens adversarial pre-review (all `refuted:false`) refined
+the rationale: the optimistic *watched* card never paints (batched Svelte
+flush), so the load-bearing hole is the unwatch leg's missing-card wait.
+Same no-branches adaptation.
 
 Loop e2e-9 CLOSED 2026-07-05: eh-14 verified `[x]`. Scope was E2E slice
 10 — base `7c7a394`, head `5742789` (merged All view scenario); codex
@@ -117,7 +124,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-12 | MEDIUM | Mock Jellyfin ignores the query contract — client regressions pass silently | `[x]` | `32c01e2` |
 | eh-13 | MEDIUM | Mock stream Range edges crash the runner / send invalid 206s | `[x]` | `526f511`+`d5e1b04` |
 | eh-14 | LOW | Merged-view override assertion accepts any key/value — wrong persist stays green | `[x]` | `2b8becb` |
-| eh-15 | MEDIUM | Watched-badge waits satisfied by optimistic UI, not post-refetch state | `[ ]` | |
+| eh-15 | MEDIUM | Watched-badge waits satisfied by optimistic UI, not post-refetch state | `[x]` | `6db391c` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
