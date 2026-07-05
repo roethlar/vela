@@ -1069,9 +1069,12 @@
       <button class="primary" onclick={() => (showSettings = true)}>Add a source</button>
     </div>
   {:else if mode === "home"}
-    {#if loading && hubs.length === 0}
+    {#if loading && hubs.length === 0 && heroItems.length === 0}
       {@render skelRails()}
-    {:else if hubs.length === 0}
+    {:else if hubs.length === 0 && heroItems.length === 0}
+      <!-- The hero is fed by Vela's own recents, independent of hubs: a
+           local-only setup with an unfinished play must still show
+           Continue Watching (2026-07-04 hero decision). -->
       <div class="muted center">Nothing on your home screen yet — pick a library from the sidebar.</div>
     {:else}
       <div class="home">
