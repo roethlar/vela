@@ -5,11 +5,23 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
-- ACTIVE: implementing `.agents/plans/smb-native-client.md` (approved
-  2026-07-04) — native Linux SMB client + loopback stream proxy, replacing
-  the GVfs/KIO-FUSE mount dependency. Work happens in six stacked slices on
-  branch `smb-native`; each slice is codex-reviewed. Active review loop:
-  see `.agents/review/index.md`. Merge to `main` is owner-gated.
+- READY FOR OWNER: `.agents/plans/smb-native-client.md` is IMPLEMENTED on
+  branch `smb-native` (13 commits over main). All six slices codex-verified
+  (`.agents/review/index.md`; smb-2/3/4/5 took 2-3 rounds each — every
+  reopen was a real finding, recorded in the finding docs). Linux SMB is
+  now native and mountless: libsmbclient in-process (via pavao-sys, one
+  context per connection), share browsing/listing/search through the
+  local-family Vfs provider, playback via a loopback HTTP Range proxy
+  (127.0.0.1, tokenized), sidecar posters via the stable `velasmb:`
+  scheme, .nfo enrichment over the wire. gvfs/kio machinery deleted;
+  macOS/Windows keep OS mounts. PKGBUILD depends on `smbclient`; deb/rpm
+  on `libsmbclient`.
+  NEXT: (1) owner playtest on the real NAS — add share 10.1.10.206/media
+  with credentials in Settings (native, no mount), browse, add a folder,
+  play/seek/resume, check hero recents and posters; (2) owner-gated merge
+  of `smb-native` into `main` (fast-forward); (3) version bump at merge
+  (not done on the branch — owner's release call). Env-gated live probe:
+  `VELA_SMB_LIVE=server/share cargo test --lib live_probe -- --nocapture`.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
