@@ -49,11 +49,13 @@ export default {
   },
 
   async run({ driver, screenshot, configRoot }) {
+    // Seeded config ⇒ authenticated view with the folder as a sidebar
+    // section. Wait for that specific button: boot loads sections async,
+    // and the pre-boot Welcome screen would satisfy any generic render wait.
     await driver.waitFor(
-      `return document.readyState === 'complete' && !!document.querySelector('.sidenav, h1, h2')`,
-      'app render',
+      `return document.readyState === 'complete' && [...document.querySelectorAll('button.sideitem')].some(b => b.textContent.trim() === 'E2E Media')`,
+      'seeded source in the sidebar',
     );
-    // Seeded config ⇒ authenticated view with the folder as a sidebar section.
     const section = await driver.find('xpath', `//button[contains(@class,'sideitem') and normalize-space(.)='E2E Media']`);
     const socketsBefore = mpvSocketSnapshot();
     await driver.click(section);
