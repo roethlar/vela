@@ -86,6 +86,30 @@ Click a movie to play, or drill into a show → season → episode.
 > (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) at startup to avoid a known webview crash.
 > This has no effect on macOS (WKWebView) or Windows (WebView2).
 
+## Test
+
+```bash
+npm run check   # svelte-check (frontend types)
+cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings
+```
+
+End-to-end tests drive the real debug app (Linux only) — WebDriver for the
+UI, mpv's JSON IPC for playback — headless on a private Xvfb display, with
+a throwaway config so your real `~/.config/vela` is never touched:
+
+```bash
+npm run e2e                    # build the debug app, run all scenarios
+npm run e2e -- --skip-build    # reuse the existing debug binary
+npm run e2e -- playback        # one scenario by name
+```
+
+Requires `tauri-driver` (`cargo install tauri-driver`), `Xvfb`, `ffmpeg`,
+`mpv`, `bsdtar`, and `curl`; the first run downloads a pinned
+WebKitWebDriver into a gitignored vendor dir. Screenshots and driver logs
+land in `tests/e2e/artifacts/`. Knobs: `VELA_E2E_HEADED=1` runs on the
+real desktop, `VELA_E2E_DEBUG=1` logs each WebDriver call with timing.
+Details: `tests/e2e/README.md`.
+
 ## Build (release)
 
 ```bash
