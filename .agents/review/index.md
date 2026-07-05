@@ -104,6 +104,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-10 | HIGH | Continue Watching restarted local-family items from 0:00 | `[x]` | `4527613` |
 | eh-11 | MEDIUM | Queue scenario: clip A's EOF races the UI window — flaky false-red | `[x]` | `2eabf26` |
 | eh-12 | MEDIUM | Mock Jellyfin ignores the query contract — client regressions pass silently | `[x]` | `32c01e2` |
+| eh-13 | MEDIUM | Mock stream Range edges crash the runner / send invalid 206s | `[ ]` | |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
