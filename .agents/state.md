@@ -36,9 +36,9 @@ Keep it short and update it when important repo facts change.
     approved-in-principle via the delegation decision): tauri-driver +
     WebdriverIO UI driving, mpv-IPC playback probes, env-gated live
     smoke, throwaway config dir, creds via env only. NOT yet built.
-  - Version bump for this batch: pending — the auto-permissions layer
-    treats `scripts/bump.sh` as an owner release call. Owner: run
-    `scripts/bump.sh` (or say the word) before the next build.
+  - Versioning clarified by the owner 2026-07-05: bumping is routine —
+    just run `scripts/bump.sh` when code lands (per the 2026-06-20
+    decision); it is NOT an owner gate. Bumped to 0.1.10.
 - MERGED to `main` 2026-07-04 (owner go; merge commit `e9f6029`; the
   `smb-native` branch is deleted — owner direction: no branches without
   his explicit word in future). `.agents/plans/smb-native-client.md` is
@@ -60,7 +60,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.9 at `864bdd0`. Remote `github` is current; remote `origin`
+- Version 0.1.10 (bumped 2026-07-05). Remote `github` is current; remote `origin`
   (q:3000) is 3 commits behind — the owner pushes manually (push policy:
   ask, `.agents/push-policy.md`).
 - 2026-07-04 landed a large batch, all owner-approved and verified:
