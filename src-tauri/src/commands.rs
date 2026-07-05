@@ -455,7 +455,7 @@ pub async fn mount_smb(
     // browsing and playback proceed while the (possibly slow) mount runs.
     let _ops = state.source_lock.lock().await;
 
-    let mount = establish_smb_share(mount).await?;
+    let mount = with_default_root_folder(establish_smb_share(mount).await?);
 
     if !mount.mountpoint.is_empty() {
         use tauri::Manager;
@@ -504,6 +504,21 @@ pub async fn mount_smb(
         name: mount_name,
         kind: "smb".to_string(),
     })
+}
+
+/// A newly added share starts with its root selected as a library folder,
+/// so media appears without the separate folder-selection step (a share
+/// with zero folders produces no source at all — the trap this closes).
+/// The user can remove the root or add narrower subfolders afterwards.
+/// Empty `path` is the share root; empty `kind` means auto-detect.
+fn with_default_root_folder(mut mount: SmbMount) -> SmbMount {
+    mount.folders.push(SmbFolder {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: mount.name.clone(),
+        path: String::new(),
+        kind: String::new(),
+    });
+    mount
 }
 
 /// Establish a newly added share. Linux-family: verify server/share/
@@ -3164,6 +3179,24 @@ mod tests {
         assert!(normalize_smb_relative_path("/Movies").is_err());
         assert!(normalize_smb_relative_path("../Movies").is_err());
         assert!(normalize_smb_relative_path("Movies/../Shows").is_err());
+    }
+
+    #[test]
+    fn new_share_gets_share_root_as_default_folder() {
+        let mount = SmbMount {
+            id: "m1".into(),
+            name: "zoey/media".into(),
+            server: "zoey".into(),
+            share: "media".into(),
+            ..Default::default()
+        };
+        let mount = with_default_root_folder(mount);
+        assert_eq!(mount.folders.len(), 1);
+        let root = &mount.folders[0];
+        assert_eq!(root.path, "", "default folder must be the share root");
+        assert_eq!(root.kind, "", "root folder kind must be auto-detect");
+        assert_eq!(root.name, "zoey/media");
+        assert!(!root.id.is_empty());
     }
 
     #[test]
