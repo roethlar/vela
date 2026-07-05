@@ -5,6 +5,16 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- Active review loop (e2e-2, slice 2 + eh-5): see `.agents/review/index.md`.
+- E2E slice 2 landed 2026-07-05 (`d2be263`): mpv-IPC playback scenario —
+  seeded local source (ffmpeg clip), real poster-click play, mpv socket
+  probe (path/seek/quit), recents `viewOffsetMs` stamp, hero assertion.
+  It immediately caught a REAL app bug (eh-5, fixed in `b4b4ebb`): the
+  Continue Watching hero was hub-gated, so local-only setups never saw
+  it despite the 2026-07-04 recents-fed-hero decision. Harness knowledge
+  gained: `mpv_extra_args` parses one option per LINE; recents items
+  serialize camelCase (`viewOffsetMs`); local folder `kind` is singular
+  (`movie`/`show`).
 - Review loop e2e-1 (2026-07-05) CLOSED: slice-1 review found 2 defects
   (codex) + 2 coder-filed during live diagnosis — signal-orphaned process
   groups; silent false-green on typo'd scenario filters; unbounded
