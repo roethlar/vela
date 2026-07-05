@@ -5,6 +5,27 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- LANDED 2026-07-05 — mpv autocrop bundle (`.agents/plans/mpv-autocrop-bundle.md`,
+  owner-approved; decision in `.agents/decisions.md` 2026-07-05 "Ship mpv's
+  autocrop.lua behind an opt-in toggle", which REVERSES the same-day crop-drop for
+  this narrow bundled-script case only). Owner reopened the dropped crop feature
+  (option "C") to ship mpv's own `autocrop.lua` + a Settings control. Three
+  commits, each `reviewloop codex`-accepted (plan itself converged r1-r4):
+  - slice 1 `95d4b1a`: vendored `autocrop.lua` (mpv `efb70d7f`) + LICENSE.GPL +
+    PROVENANCE under `src-tauri/resources/mpv-scripts/`; `tauri.conf.json` resources
+    map + `bundle.license = "MIT AND GPL-2.0-or-later"`; PKGBUILD installs to
+    `/usr/lib/Vela/mpv-scripts/` + `license=('MIT' 'GPL2')`. Verified: deb AND Arch
+    packages ship the files at the resolver path (`.PKGINFO` = MIT+GPL2).
+  - slice 2 `c66e680`: tri-state `mpv_autocrop` config (off/manual/auto); resolver
+    via `AppHandle::path().resolve(mpv-scripts/autocrop.lua, Resource)`; mode-branched
+    `--script` injection in `play()` (manual adds `autocrop-auto=no`; auto = crop on
+    start). Guard-proven arg tests.
+  - slice 3 `be292e0`: Settings → Advanced mpv three-state selector
+    (Off/Manual/Automatic); Automatic carries the D-state/HDR hang warning.
+  Off by default; **Automatic auto-fires the live `video-crop` D-state path** (owner
+  chose to have it available, disclosed via UI). REMAINING: version bump (routine)
+  + owner playtest (does Shift+C/Automatic crop cleanly on the real HDR stack). NOTE:
+  rpm `License` tag not locally verifiable (no rpm tooling on the Arch dev host).
 - CURRENT WORK (2026-07-05) — implementing
   `.agents/plans/smb-ssh-playtest-fixes.md`, **owner-approved** after a 3-round
   codex plan-reviewloop (accepted at r3; trail in the plan's Review log). Five
