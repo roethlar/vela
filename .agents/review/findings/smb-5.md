@@ -1,9 +1,9 @@
 # smb-5: Remove the Linux mount machinery; update the add-SMB copy
 
 **Severity**: — (planned slice 5 of `.agents/plans/smb-native-client.md`, not a defect)
-**Status**: In progress (pending review)
+**Status**: Verified (accepted round 3; awaiting owner-gated merge)
 **Branch**: `smb-native` (stacked; commit follows smb-4's `f2a4640`)
-**Commit**: `514b0938d2fe93b71eb4820763cbd22982695e50` (base `f2a4640c32790aec7bb3e988d4a95cfb51de613c`, the accepted smb-4 head)
+**Commit**: `a213cb21e3822c396c9ec44091f03e5645119286` (deletion `514b093` + drift fix-ups `c541903`/`a213cb2`; base `f2a4640c32790aec7bb3e988d4a95cfb51de613c`)
 
 ## Evidence
 Approved plan slice 5 (design §4): with browsing (smb-3) and playback
@@ -82,3 +82,8 @@ SmbMount, mountpoint, SmbFolder.path docs); commands.rs:386/626
 decisions.md:62 (2026-05-23 entry still "Active" — now marked partially
 superseded, preserving the no-root constraint and SSH stance). All
 accepted and fixed in the round-3 head.
+
+Round 3 — accepted. Reviewed `a213cb2…`, same base. 2026-07-04 (UTC).
+guard_confirmed: **true** (clippy -D warnings + 71 tests green in the
+reviewer's isolated checkout). All 15 prior findings verified resolved;
+no factually-wrong platform wording found.
