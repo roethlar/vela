@@ -1,9 +1,9 @@
 # eh-6: Playback scenario races the seeded source's first render
 
 **Severity**: MEDIUM — a timing-dependent false-red undermines trust in the harness on slower startups
-**Status**: Open
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `4f5abd9`
 
 ## Evidence
 `tests/e2e/scenarios/playback.mjs:52-57` — the render wait accepts any
@@ -43,4 +43,10 @@ None — admitted as filed.
 None.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~09:25 UTC.
+Reviewed `4f5abd972e69ee3e5a43243b6c4e41712e715625` against base
+`e50a7976767e828e10054fa55b9d30fc4b6e585f`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: polling for the exact seeded sideitem
+closes the race at its root; the wait script is valid and targets the same
+button as the click; observational red accepted per the eh-4 precedent —
+the green path gates every run.
