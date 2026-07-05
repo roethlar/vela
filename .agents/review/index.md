@@ -9,12 +9,12 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop e2e-2 opened 2026-07-05 (standing instruction: reviewloop codex per
-slice). Scope: E2E slice 2 + the app fix it surfaced — base `8ebbde1`,
-head `d2be263` (`b4b4ebb` eh-5 hero fix; `d2be263` mpv-IPC playback
-scenario). eh-5 was coder-filed and fixed before this loop opened; its
-guard is the committed playback scenario (red/green + revert-check
-transcribed in the finding doc). Same no-branches adaptation.
+Loop e2e-2 CLOSED 2026-07-05: eh-5..eh-7 all verified `[x]`, fixes on
+`main`. Scope was E2E slice 2 + the app fix it surfaced — base `8ebbde1`,
+head `d2be263` (`b4b4ebb` eh-5 hero fix, coder-filed with the playback
+scenario as its guard; codex batch pass admitted eh-6 flaky-race and eh-7
+quit-vs-EOF false-green, both fixed and verified). Same no-branches
+adaptation.
 
 Review pass 2026-07-05 (codex, read-only, base `8ebbde1` head `d2be263`,
 loop e2e-2): 2 candidates, 2 admitted (eh-6, eh-7), 0 declined.
@@ -51,9 +51,9 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-2 | MEDIUM | Mixed valid+unknown scenario filter exits 0 without running the unknown one | `[x]` | `404f86a` |
 | eh-3 | MEDIUM | Unbounded driver requests turn any stall into an opaque 300s hang | `[x]` | `0945104` |
 | eh-4 | HIGH | Screenshots hang whenever the test window opens unfocused on the live desktop | `[x]` | `cfe6ee4` |
-| eh-5 | HIGH | Local-only setups never see the Continue Watching hero (hub-gated render path) | `[~]` | `b4b4ebb` |
-| eh-6 | MEDIUM | Playback scenario races the seeded source render — flaky false-red | `[ ]` | |
-| eh-7 | MEDIUM | Quit-vs-EOF indistinguishable in the playback guard — false-green | `[ ]` | |
+| eh-5 | HIGH | Local-only setups never see the Continue Watching hero (hub-gated render path) | `[x]` | `b4b4ebb` |
+| eh-6 | MEDIUM | Playback scenario races the seeded source render — flaky false-red | `[x]` | `4f5abd9` |
+| eh-7 | MEDIUM | Quit-vs-EOF indistinguishable in the playback guard — false-green | `[x]` | `dd5cec9` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.

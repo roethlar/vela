@@ -5,7 +5,11 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
-- Active review loop (e2e-2, slice 2 + eh-5): see `.agents/review/index.md`.
+- Review loop e2e-2 (2026-07-05) CLOSED: 3 findings verified — eh-5 (the
+  app bug below), eh-6 (scenario raced the seeded source render), eh-7
+  (the guard couldn't tell IPC quit from natural EOF; now a socket
+  connectability probe + [3000,8000] stamp bound). Trail:
+  `.agents/review/index.md` + `findings/eh-*.md`.
 - E2E slice 2 landed 2026-07-05 (`d2be263`): mpv-IPC playback scenario —
   seeded local source (ffmpeg clip), real poster-click play, mpv socket
   probe (path/seek/quit), recents `viewOffsetMs` stamp, hero assertion.

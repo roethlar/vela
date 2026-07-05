@@ -1,9 +1,9 @@
 # eh-7: Playback guard cannot distinguish IPC quit from natural EOF
 
 **Severity**: MEDIUM — the scenario claims to prove mid-clip quit/resume, but a broken quit can still pass (false-green in the guard itself)
-**Status**: Open
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `dd5cec9`
 
 ## Evidence
 `tests/e2e/scenarios/playback.mjs` — 10s clip; seek to 6s, sleep 1.5s,
@@ -49,4 +49,11 @@ None — admitted as filed.
 None.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~09:28 UTC.
+Reviewed `dd5cec95d951e8c488348f5507234804197a3f9a` against base
+`4f5abd972e69ee3e5a43243b6c4e41712e715625`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: the AF_UNIX connectability probe checks
+the right observable with no socket leak; probe + tightened bound closes
+the false-green (even an EOF that stopped accepting inside 4s would stamp
+~10s, outside [3000,8000]); residual risk limited to ordinary false-red
+flake under extreme scheduling delay.
