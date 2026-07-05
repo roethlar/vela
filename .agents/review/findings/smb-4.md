@@ -1,9 +1,9 @@
 # smb-4: Loopback stream proxy — native SMB playback and artwork
 
 **Severity**: — (planned slice 4 of `.agents/plans/smb-native-client.md`, not a defect)
-**Status**: In progress (pending review)
+**Status**: Verified (accepted round 2; awaiting owner-gated merge)
 **Branch**: `smb-native` (stacked; commit follows smb-3's `2a283aa`)
-**Commit**: `f47d2566c7109ba308e9c655f3e06d58e2cc6a40` (base `2a283aa7f6e94dcd6d537afa483dd35867536620`, the accepted smb-3 head)
+**Commit**: `f2a4640c32790aec7bb3e988d4a95cfb51de613c` (slice `f47d256` + fix-ups `602fa89`/`f2a4640`; base `2a283aa7f6e94dcd6d537afa483dd35867536620`)
 
 ## Evidence
 Approved plan slice 4 (design §3): mpv has no smb:// support on the
@@ -112,3 +112,12 @@ Round-1 fix-up (coder), 2026-07-04:
   the committed tree; corrected in `f2a4640` with verification re-run
   from a clean state. Lesson applied: mutation proofs only against a
   committed baseline.
+
+Round 2 — accepted.
+- Reviewed SHA `f2a4640c32790aec7bb3e988d4a95cfb51de613c`, same base.
+  2026-07-04 (UTC). Verdict: **accepted**; guard_confirmed: **true**
+  (both mutations FAIL-then-PASS in the reviewer's isolated checkout;
+  71 green before and after).
+- Comments: velasmb artwork handling, async protocol path, CSP, and
+  register_smb call paths reviewed; no remaining artwork proxy-token
+  minting or restart-unstable SMB poster path found.
