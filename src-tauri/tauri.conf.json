@@ -44,13 +44,13 @@
     "linux": {
       "deb": {
         "section": "video",
-        "depends": ["libsmbclient"],
+        "depends": ["libsmbclient0 | libsmbclient"],
         "desktopTemplate": "bundle/linux/vela.desktop.hbs",
         "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
         "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"
       },
       "rpm": {
-        "depends": ["libsmbclient"],
+        "depends": ["libsmbclient0 | libsmbclient"],
         "desktopTemplate": "bundle/linux/vela.desktop.hbs",
         "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
         "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"

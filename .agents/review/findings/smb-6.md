@@ -52,4 +52,22 @@ None.
   merge.
 
 ## Reviewer comments
-(pending)
+Round 1 — reopened. Reviewer: codex (codex-cli 0.142.5); reviewed
+`be31756…`, base `a213cb2…`. 2026-07-04 (UTC). guard_confirmed: **true**.
+Six findings; five accepted and fixed: deb depends now
+"libsmbclient0 | libsmbclient" (covers both Debian generations); README
+artifact name de-versioned; README status line no longer says "SMB
+mounting"; state.md merge gate corrected (NOT fast-forward — main gained
+2 ISSUES commits after branching; brittle commit count replaced with the
+rev-list command); index header no longer runs ahead of the table.
+
+## Coder dispute (recorded, per the silent-veto rule)
+Finding 6 (state.md:16 / repo-guidance.md:70 still grep-hit "gvfs|kio")
+is DISPUTED, not fixed: both hits are accurate NEGATIVE statements
+("gvfs/kio machinery deleted", "no OS mounts, no root, no gvfs/kio") in
+live docs whose job is exactly to record that the dependency is gone.
+The grep criterion in the dispatch prompt was the coder's own
+over-strict phrasing, not a repo rule; removing truthful negative
+mentions would make the change harder to discover, not safer. Round 2
+is asked to judge the rationale; if the reviewer still holds the
+finding, it routes to the owner as contested.

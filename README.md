@@ -110,7 +110,7 @@ On Arch Linux, build a native pacman package instead:
 npm run build:arch
 ```
 
-This emits `packaging/arch/vela-0.1.0-1-x86_64.pkg.tar.zst` from the local
+This emits `packaging/arch/vela-<version>-1-x86_64.pkg.tar.zst` from the local
 checkout using the PKGBUILD in `packaging/arch/`. It installs the same desktop
 entry and hicolor icons, and pacman's desktop/icon hooks refresh the launchers
 when the package is installed.
@@ -132,7 +132,7 @@ Working: Plex device-PIN auth + server discovery, multi-source library browsing
 (unified or per-source) with infinite scroll, show/season/episode drill-down,
 search, mpv HDR playback, Plex progress/resume, local-folder indexing with
 keyless metadata, and an in-app source manager (Jellyfin/Emby connect, local
-folders, SMB mounting).
+folders, SMB shares — native on Linux, OS-mounted on macOS/Windows).
 
 Verification note: Plex is exercised end-to-end, and Jellyfin has been
 smoke-tested against a real server. The Emby, local, and SMB paths are

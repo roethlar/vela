@@ -6,7 +6,7 @@ Keep it short and update it when important repo facts change.
 ## Now
 
 - READY FOR OWNER: `.agents/plans/smb-native-client.md` is IMPLEMENTED on
-  branch `smb-native` (27 commits over main: code slices, fix-ups, and the per-slice review-trail records). All six slices codex-verified
+  branch `smb-native` (code slices, fix-ups, and per-slice review-trail records; `git rev-list --count main..smb-native` for the live number). All six slices codex-verified
   (`.agents/review/index.md`; smb-2/3/4/5 took 2-3 rounds each — every
   reopen was a real finding, recorded in the finding docs). Linux SMB is
   now native and mountless: libsmbclient in-process (via pavao-sys, one
@@ -19,7 +19,10 @@ Keep it short and update it when important repo facts change.
   NEXT: (1) owner playtest on the real NAS — add share 10.1.10.206/media
   with credentials in Settings (native, no mount), browse, add a folder,
   play/seek/resume, check hero recents and posters; (2) owner-gated merge
-  of `smb-native` into `main` (fast-forward); (3) version bump at merge
+  of `smb-native` into `main` — NOT a fast-forward: `main` gained the two
+  Continue-Watching ISSUES commits after the branch was cut, so this is a
+  regular merge commit (no rebase without an explicit owner go); (3)
+  version bump at merge
   (not done on the branch — owner's release call). Env-gated live probe:
   `VELA_SMB_LIVE=server/share cargo test --lib live_probe -- --nocapture`.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,

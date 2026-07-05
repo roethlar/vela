@@ -6,9 +6,10 @@ Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loop: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6, merged to main).
 
-Loop review phase COMPLETE 2026-07-04: all six slices verified `[x]`.
-Awaiting owner playtest + owner-gated merge of `smb-native`; the loop
-closes when the branch lands on `main`.
+Slices smb-1..smb-5 verified `[x]`; smb-6 is in review (flips on its
+recorded verdict — this header must never run ahead of the table).
+After all six verify: owner playtest + owner-gated merge of
+`smb-native`; the loop closes when the branch lands on `main`.
 
 Loop opened 2026-07-04. Scope: implementation of the approved plan
 `.agents/plans/smb-native-client.md`. Adaptation, owner-directed ("go with
