@@ -34,6 +34,15 @@ pub trait Vfs: Send + Sync {
     fn resolve_stream_url(&self, _p: &Path) -> Option<Result<String, String>> {
         None
     }
+
+    /// How artwork found at `p` is exposed to the webview. Local files
+    /// pass through as paths (served by the asset protocol). Native
+    /// providers must return a STABLE fetchable URL — never a raw
+    /// provider path (unloadable) and never an ephemeral token URL
+    /// (persisted by the listing cache, dead after restart).
+    fn artwork_ref(&self, p: &Path) -> Option<String> {
+        Some(p.to_string_lossy().to_string())
+    }
 }
 
 /// The real filesystem: exactly the std::fs calls the local source has

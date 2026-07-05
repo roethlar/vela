@@ -168,9 +168,40 @@ pub fn run() {
             .retain_mut(|c| matches!(c.try_wait(), Ok(None)));
     });
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(state)
+        .manage(state);
+
+    // Stable SMB artwork scheme (velasmb://<mount-id>/<b64url-path>):
+    // config-validated mount, normalized path, image whitelist, bounded
+    // native read — see source/smb_vfs.rs. Blocking work runs off the
+    // protocol thread; failures answer with a plain status code.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let builder = builder.register_asynchronous_uri_scheme_protocol(
+        crate::source::smb_vfs::ARTWORK_SCHEME,
+        |_ctx, request, responder| {
+            let uri = request.uri().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let host = uri.host().unwrap_or_default().to_string();
+                let path = uri.path().to_string();
+                let response = match crate::source::smb_vfs::serve_artwork(&host, &path) {
+                    Ok((bytes, mime)) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", mime)
+                        .header("Cache-Control", "max-age=86400")
+                        .body(bytes)
+                        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
+                    Err(status) => tauri::http::Response::builder()
+                        .status(status)
+                        .body(Vec::new())
+                        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
+                };
+                responder.respond(response);
+            });
+        },
+    );
+
+    builder
         .setup(move |app| {
             use tauri::Manager;
 

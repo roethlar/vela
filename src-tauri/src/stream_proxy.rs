@@ -41,8 +41,11 @@ struct Entry {
     target: Target,
 }
 
-/// Oldest-first; registration evicts from the front once full. 64 tokens
-/// comfortably covers a session's plays plus artwork.
+/// Oldest-first; registration evicts from the front once full. The
+/// registry holds PLAYBACK targets only (artwork uses the stable
+/// `velasmb:` scheme instead — see smb_vfs), so 64 covers a session's
+/// plays many times over and an old token dying is harmless: the next
+/// play mints a fresh one.
 const REGISTRY_CAP: usize = 64;
 
 struct Proxy {
