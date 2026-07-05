@@ -3,10 +3,10 @@
 **Severity**: MEDIUM — the batch's own headline behaviors (mark-watched drops
 from hero; removal sticks) silently fail for merged titles fronted by a
 local/SMB copy with server-owned watch state.
-**Status**: In progress
+**Status**: Verified
 **Branch**: n/a — fixes land as single commits on `main` (owner no-branches
 direction); see Commit.
-**Commit**: (pending)
+**Commit**: `5ce26db`
 
 ## Evidence
 - `src-tauri/src/commands.rs` (merged listing) sets a merged card's
@@ -63,4 +63,11 @@ source's hub is still single-key; out of scope — the merge dedup treats
 those as distinct items today.
 
 ## Reviewer comments
-(pending)
+- Reviewer: codex (codex-cli 0.142.5), dispatched 2026-07-05, verdict recorded 2026-07-05T10:27:19Z
+- reviewed_sha `5ce26dbc6ecba209ec67af14c8a7120a488267e1`, base_sha `147bf7455a6cdf0a695ceec21440e1a8680775d0`
+- guard_confirmed: true (reviewer ran revert-FAIL/restore-PASS in its own worktree)
+- Verdict: **accepted**
+- Comments: full `cargo test --locked` could not run to completion in the
+  reviewer's sandbox (stream-proxy tests need to bind a local socket, denied
+  there); the focused cw-1 guard tests passed after restore. Full suite (80)
+  passes in the coder environment.
