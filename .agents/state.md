@@ -5,6 +5,7 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- Active review loop: see `.agents/review/index.md` (cw-1..cw-3, opened 2026-07-05).
 - OWNER DELEGATION 2026-07-04 (decision recorded): progress must not block
   on the owner. The two locked-choice plans were approved via that
   decision and are now IMPLEMENTED, one commit per slice, all

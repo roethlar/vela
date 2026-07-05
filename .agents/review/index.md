@@ -1,45 +1,37 @@
 # Review status
 
 Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harness: `codex`
-(codex-cli 0.142.5, verified headless via `codex exec --json`, 2026-07-04).
+(codex-cli 0.142.5, re-verified headless 2026-07-05 via `codex exec --json`).
 Per-finding detail: see `.agents/review/findings/<id>.md`.
-Closed prior loop: `.agents/review/2026-07-04-feature-batch-closed.md`
-(rev-1..rev-6, merged to main).
+Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
+(rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
+(smb-1..smb-6).
 
-Loop review phase COMPLETE 2026-07-04: all six slices verified `[x]`
-(smb-1 in one round; smb-2/3 in two; smb-4 in two plus a recorded coder
-process incident; smb-5 in three; smb-6 in three with one dispute
-resolved in the coder's favor — every reopen was a real finding, see
-the finding docs). MERGED to `main` 2026-07-04 (owner go; merge commit `e9f6029`, content
-verified arrived; branch deleted). Loop CLOSED — this file and
-`findings/` remain as the durable review trail. Owner playtest against
-the real NAS is still pending.
-
-Loop opened 2026-07-04. Scope: implementation of the approved plan
-`.agents/plans/smb-native-client.md`. Adaptation, owner-directed ("go with
-reviewloop codex", 2026-07-04): the review units are the plan's six slices,
-not defect findings — the intake gate (evidence / predicted observable
-failure) is satisfied by the approved plan itself, so Severity is `—`.
-Slices are sequential and stacked; they land as consecutive commits on one
-feature branch `smb-native`, and each slice is dispatched for review pinned
-at (base = previous slice's reviewed head, head = this slice's commit). One
-slice ↔ one review ↔ one recorded verdict. Merge of `smb-native` into
-`main` stays owner-gated.
+Loop opened 2026-07-05 (owner: "playbook reviewloop codex"). Scope: the
+2026-07-04 delegation batch, committed directly to `main` —
+`ec94715..a055556`: SMB share-root auto-add (`f05919e`) and Continue
+Watching curation slices 1-3 (`d2ea1a7`, `cf5af95`, `d259213`), plus their
+docs/state commits. Adaptation to the owner's no-branches direction
+(recorded 2026-07-04): findings are fixed as single commits on `main`
+(one finding ↔ one commit ↔ one verdict); the Branch column records the
+fix commit instead. Review dispatches pin (base = ec94715, head =
+a055556) for the batch pass, and (base = pre-fix main head, head = fix
+commit) per finding.
 
 ## Legend
 - `[ ]` Admitted, open (not yet started)
 - `[~]` In progress / pending review
-- `[x]` Verified (awaiting owner-gated merge)
+- `[x]` Verified
 - `[!]` Contested — awaiting owner adjudication
 - `[-]` Declined at intake
 
 ## Findings
 
-| ID    | Severity | Impact (one line)                                      | Status | Branch |
-|-------|----------|--------------------------------------------------------|--------|--------|
-| smb-1 | —        | Native client wrapper + share browsing without mounts  | `[x]`  | `smb-native` |
-| smb-2 | —        | Provider-trait refactor of local source (no behavior)  | `[x]`  | `smb-native` |
-| smb-3 | —        | Native SMB listing via provider + listing cache        | `[x]`  | `smb-native` |
-| smb-4 | —        | Loopback Range proxy + SMB playback via mpv            | `[x]`  | `smb-native` |
-| smb-5 | —        | Remove Linux mount machinery + UI error copy           | `[x]`  | `smb-native` |
-| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[x]`  | `smb-native` |
+| ID | Severity | Impact (one line) | Status | Fix commit |
+|----|----------|-------------------|--------|------------|
+| cw-1 | MEDIUM | Merged items (local front, server watch key) survive mark-watched/remove in the hero | `[~]` | |
+| cw-2 | LOW | Registry lock held across Plex removal await stalls unrelated UI up to 15s | `[~]` | |
+| cw-3 | LOW | Failed play clears a removal tombstone; item wrongly returns to hero | `[~]` | |
+
+Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
+3 candidates, 3 admitted, 0 declined.
