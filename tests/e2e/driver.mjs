@@ -11,12 +11,25 @@ export class Driver {
     this.sessionId = null;
   }
 
-  async #cmd(method, path, body) {
-    const res = await fetch(`${this.baseUrl}${path}`, {
-      method,
-      headers: { 'Content-Type': 'application/json' },
-      body: body === undefined ? undefined : JSON.stringify(body),
-    });
+  async #cmd(method, path, body, { timeoutMs = 30000 } = {}) {
+    const t0 = Date.now();
+    let res;
+    try {
+      res = await fetch(`${this.baseUrl}${path}`, {
+        method,
+        headers: { 'Content-Type': 'application/json' },
+        body: body === undefined ? undefined : JSON.stringify(body),
+        signal: AbortSignal.timeout(timeoutMs),
+      });
+    } catch (err) {
+      throw new WebDriverError(
+        `${method} ${path} → ${err.name === 'TimeoutError' ? `no response within ${timeoutMs}ms` : err.cause?.code ?? err.message} (after ${Date.now() - t0}ms)`,
+      );
+    } finally {
+      if (process.env.VELA_E2E_DEBUG) {
+        console.error(`[driver] ${method} ${path} ${Date.now() - t0}ms`);
+      }
+    }
     const json = await res.json();
     if (!res.ok || json.value?.error) {
       throw new WebDriverError(
@@ -27,11 +40,16 @@ export class Driver {
   }
 
   async newSession(applicationPath) {
-    const value = await this.#cmd('POST', '/session', {
-      capabilities: {
-        alwaysMatch: { 'tauri:options': { application: applicationPath } },
+    const value = await this.#cmd(
+      'POST',
+      '/session',
+      {
+        capabilities: {
+          alwaysMatch: { 'tauri:options': { application: applicationPath } },
+        },
       },
-    });
+      { timeoutMs: 60000 }, // covers the app launch
+    );
     this.sessionId = value.sessionId;
     return value;
   }
