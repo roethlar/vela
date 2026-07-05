@@ -286,16 +286,20 @@
   // the server continue hubs, newest first, deduped. Index 0 = newest;
   // higher indices are older and fan behind-left of the centered card.
   let recents = $state<Item[]>([]);
+  // Keys the user removed from Continue Watching; suppressed from both hero
+  // feeds even while a server hub still carries them.
+  let continueTombstones = $state<string[]>([]);
   let heroPos = $state(0);
   let heroItems = $derived.by(() => {
     const scoped = activeSource ? recents.filter((r) => r.sourceId === activeSource) : recents;
     const hubItems = hubs.filter((h) => hubPolicy(h) === "hero").flatMap((h) => h.items);
+    const hidden = new Set(continueTombstones);
     const seen = new Set<string>();
     const out: Item[] = [];
     // Recents iterate first so the local copy wins the dedup — it carries the
     // freshest position and its own recency stamp.
     for (const it of [...scoped, ...hubItems]) {
-      if (!seen.has(it.ratingKey)) {
+      if (!seen.has(it.ratingKey) && !hidden.has(it.ratingKey)) {
         seen.add(it.ratingKey);
         out.push(it);
       }
@@ -342,14 +346,18 @@
     loading = true;
     error = null;
     try {
-      const [h, r] = await Promise.all([
+      const [h, r, t] = await Promise.all([
         invoke<Hub[]>("get_hubs", { sourceId: activeSource }),
         // Recents failing must not blank Home; the hero degrades to hub data.
         invoke<Item[]>("get_recents").catch(() => [] as Item[]),
+        // Tombstones failing must not blank Home either; worst case a
+        // removed item reappears until the next successful load.
+        invoke<string[]>("get_continue_tombstones").catch(() => [] as string[]),
       ]);
       if (gen === homeGen) {
         hubs = h;
         recents = r;
+        continueTombstones = t;
       }
     } catch (e) {
       if (gen === homeGen) error = String(e);
@@ -705,11 +713,11 @@
   }
 
   // Right-click context menu for per-item actions.
-  let menu = $state<{ x: number; y: number; item: Item } | null>(null);
-  function openMenu(e: MouseEvent, item: Item) {
+  let menu = $state<{ x: number; y: number; item: Item; hero: boolean } | null>(null);
+  function openMenu(e: MouseEvent, item: Item, hero = false) {
     e.preventDefault();
     // Clamp so the menu stays on screen near the right/bottom edges.
-    menu = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 160), item };
+    menu = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 160), item, hero };
   }
   function closeMenu() {
     menu = null;
@@ -729,6 +737,18 @@
       // Curate the hero without a restart: mark-watched drops the item from
       // recents (backend) and the re-fetch drops the server hub copy;
       // mark-unwatched just re-fetches (the hub decides if it returns).
+      refreshWatchState();
+    } catch (e) {
+      error = String(e);
+    }
+  }
+
+  // Explicit hero curation: tombstone + recents drop (backend), then the
+  // standard re-fetch. No watched-state change.
+  async function removeFromContinue(item: Item) {
+    closeMenu();
+    try {
+      await invoke("remove_from_continue", { ratingKey: item.ratingKey });
       refreshWatchState();
     } catch (e) {
       error = String(e);
@@ -907,7 +927,7 @@
               class:center={d === 0}
               style="z-index:{30 - Math.abs(d)}; transform: translateX(calc(-50% + {d * -17}%)) rotateY({d === 0 ? 0 : d > 0 ? 18 : -18}deg) scale({d === 0 ? 1 : Math.max(0.6, 0.86 - (Math.abs(d) - 1) * 0.06)}); filter: brightness({d === 0 ? 1 : Math.max(0.35, 0.6 - (Math.abs(d) - 1) * 0.12)});"
               onclick={() => (d === 0 ? open(it) : (heroPos = i))}
-              oncontextmenu={(e) => openMenu(e, it)}
+              oncontextmenu={(e) => openMenu(e, it, true)}
               title={it.grandparentTitle ?? it.title}
               aria-label={d === 0 ? `Play ${it.grandparentTitle ?? it.title}` : `Show ${it.grandparentTitle ?? it.title}`}
             >
@@ -1137,6 +1157,9 @@
     {/if}
     {#if mi.played != null && (mi.played === true || inProgress)}
       <button role="menuitem" onclick={() => setWatched(mi, false)}>Mark unwatched</button>
+    {/if}
+    {#if menu.hero}
+      <button role="menuitem" onclick={() => removeFromContinue(mi)}>Remove from Continue Watching</button>
     {/if}
     {#if (mi.backing?.length ?? 0) > 1 && mi.canonicalId}
       <!-- Merged title: pick which source plays it (persists for this title).

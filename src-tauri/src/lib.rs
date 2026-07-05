@@ -387,6 +387,8 @@ pub fn run() {
             commands::set_merged_override,
             commands::record_recent,
             commands::get_recents,
+            commands::remove_from_continue,
+            commands::get_continue_tombstones,
             commands::search,
             commands::get_children,
             commands::set_watched,

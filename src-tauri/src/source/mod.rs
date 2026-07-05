@@ -166,6 +166,14 @@ pub trait MediaSource: Send + Sync {
     async fn mark_played(&self, _item_key: &str, _played: bool) -> Result<(), String> {
         Err("this source doesn't support marking watched state".to_string())
     }
+
+    /// Ask the backend to drop the item from its server-side Continue
+    /// Watching (Plex today; Jellyfin/Emby are a recorded follow-up).
+    /// Callers treat failure as non-fatal — Vela's own tombstone already
+    /// guarantees the UX. Default: unsupported, quiet no-op.
+    async fn remove_from_continue(&self, _item_key: &str) -> Result<(), String> {
+        Ok(())
+    }
 }
 
 /// Build a source-namespaced key. Raw Plex/Jellyfin keys never contain `:`,

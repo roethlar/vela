@@ -2836,6 +2836,36 @@ pub async fn get_recents() -> Result<Vec<ItemDto>, String> {
     Ok(crate::recents::list(&cfg))
 }
 
+/// Remove an item from the Continue Watching flow: drop the recents entry,
+/// tombstone the key (so a server hub that still carries it stays
+/// suppressed), and best-effort ask the backend to remove it server-side
+/// (Plex). The tombstone clears if the item is played again.
+#[tauri::command]
+pub async fn remove_from_continue(
+    rating_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let key = rating_key.clone();
+    config::update(move |cfg| {
+        crate::recents::hide(cfg, &key);
+        Ok(())
+    })?;
+    // Server-side removal is best-effort: the tombstone above already
+    // guarantees the UX, and an unroutable key (source removed) is fine.
+    if let Ok((src, raw)) = state.registry.lock().await.route(&rating_key) {
+        let _ = src.remove_from_continue(&raw).await;
+    }
+    Ok(())
+}
+
+/// Rating keys the user removed from Continue Watching — the hero merge
+/// filters these out of both feeds.
+#[tauri::command]
+pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    Ok(cfg.hidden_from_continue.clone())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSnapshot {

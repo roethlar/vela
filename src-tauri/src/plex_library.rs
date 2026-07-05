@@ -736,6 +736,26 @@ impl PlexLibrary {
         Ok(())
     }
 
+    /// Remove an item from the server's Continue Watching hub (the same
+    /// action Plex Web's "Remove from Continue Watching" performs).
+    pub async fn remove_from_continue_watching(
+        &self,
+        rating_key: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let url = format!("{base}/actions/removeFromContinueWatching");
+        self.client
+            .put(&url)
+            .query(&[("ratingKey", rating_key)])
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn fetch_children(
         &self,
         parent_rating_key: &str,

@@ -424,6 +424,16 @@ impl MediaSource for PlexSource {
             }
         }
     }
+
+    async fn remove_from_continue(&self, item_key: &str) -> Result<(), String> {
+        validate_plex_id("item key", item_key)?;
+        let lib = self.ensure_ready().await?;
+        // Single attempt, no rediscover: callers treat this as best-effort
+        // (Vela's tombstone already guarantees the UX).
+        lib.remove_from_continue_watching(item_key)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Extract the underlying part URLs from an mpv concat EDL (`edl://%N%url;...`),

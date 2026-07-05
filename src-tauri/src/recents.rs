@@ -24,8 +24,16 @@ pub struct RecentEntry {
     pub ended_at_ms: u64,
 }
 
+/// Bound on the Continue Watching tombstone list. Feeds aren't available
+/// backend-side, so retired keys can't be pruned precisely; a FIFO cap at
+/// hide time keeps the list small instead.
+const MAX_HIDDEN: usize = 200;
+
 /// Record a play starting: newest first, one entry per item, capped.
 pub fn record(cfg: &mut AppConfig, item: ItemDto) {
+    // Playing something again is the explicit opposite of "stop suggesting
+    // it": clear its Continue Watching tombstone.
+    cfg.hidden_from_continue.retain(|k| k != &item.rating_key);
     cfg.recents.retain(|r| r.item.rating_key != item.rating_key);
     cfg.recents.insert(
         0,
@@ -72,6 +80,20 @@ pub fn finish(cfg: &mut AppConfig, rating_key: &str, position_ms: u64, now_ms: u
 /// past the threshold.
 pub fn unrecord(cfg: &mut AppConfig, rating_key: &str) {
     cfg.recents.retain(|r| r.item.rating_key != rating_key);
+}
+
+/// Explicitly remove an item from Continue Watching: drop any recents entry
+/// AND tombstone the key, so a server hub that still carries the item can't
+/// bring it back. The tombstone clears if the item is played again.
+pub fn hide(cfg: &mut AppConfig, rating_key: &str) {
+    unrecord(cfg, rating_key);
+    if !cfg.hidden_from_continue.iter().any(|k| k == rating_key) {
+        cfg.hidden_from_continue.push(rating_key.to_string());
+    }
+    if cfg.hidden_from_continue.len() > MAX_HIDDEN {
+        let excess = cfg.hidden_from_continue.len() - MAX_HIDDEN;
+        cfg.hidden_from_continue.drain(..excess);
+    }
 }
 
 /// The hero feed: item snapshots, newest first. Each snapshot carries its
@@ -182,6 +204,40 @@ mod tests {
         // Unknown key is a no-op, not an error.
         unrecord(&mut cfg, "absent");
         assert_eq!(cfg.recents.len(), 1);
+    }
+
+    #[test]
+    fn hide_tombstones_and_drops_the_entry() {
+        let mut cfg = AppConfig::default();
+        record(&mut cfg, item("gone", None));
+        hide(&mut cfg, "gone");
+        assert!(cfg.recents.is_empty(), "hidden entry leaves recents");
+        assert_eq!(cfg.hidden_from_continue, vec!["gone".to_string()]);
+        // Idempotent: hiding again doesn't duplicate the tombstone.
+        hide(&mut cfg, "gone");
+        assert_eq!(cfg.hidden_from_continue.len(), 1);
+    }
+
+    #[test]
+    fn replaying_clears_the_tombstone() {
+        let mut cfg = AppConfig::default();
+        hide(&mut cfg, "back");
+        record(&mut cfg, item("back", None));
+        assert!(
+            cfg.hidden_from_continue.is_empty(),
+            "playing again is the explicit opposite of 'stop suggesting it'"
+        );
+        assert_eq!(cfg.recents[0].item.rating_key, "back");
+    }
+
+    #[test]
+    fn tombstone_list_is_bounded_fifo() {
+        let mut cfg = AppConfig::default();
+        for i in 0..(MAX_HIDDEN + 10) {
+            hide(&mut cfg, &format!("k{i}"));
+        }
+        assert_eq!(cfg.hidden_from_continue.len(), MAX_HIDDEN);
+        assert_eq!(cfg.hidden_from_continue[0], "k10", "oldest pruned first");
     }
 
     #[test]

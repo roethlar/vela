@@ -59,6 +59,11 @@ pub struct AppConfig {
     /// stamped at mpv exit, finished entries dropped.
     #[serde(default)]
     pub recents: Vec<crate::recents::RecentEntry>,
+    /// Continue Watching tombstones: rating keys the user explicitly removed
+    /// from the flow. The hero merge suppresses these even when a server hub
+    /// still carries the item; replaying an item clears its tombstone.
+    #[serde(default)]
+    pub hidden_from_continue: Vec<String>,
 }
 
 /// An SMB/CIFS share Vela exposes through the local family. Credentials
