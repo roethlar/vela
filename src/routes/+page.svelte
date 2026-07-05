@@ -644,9 +644,11 @@
 
   async function play(item: Item) {
     try {
-      // Snapshot into Vela's recents (fire-and-forget; hero feed).
-      invoke("record_recent", { item }).catch(() => {});
       await invoke("play_item", { item: queueItemFromItem(item) });
+      // Snapshot into Vela's recents only after the session actually
+      // launched (play_item resolves at mpv spawn): a FAILED play must not
+      // create a recents entry or clear a remove-from-continue tombstone.
+      invoke("record_recent", { item }).catch(() => {});
       if (queueOpen) refreshQueue();
     } catch (e) {
       error = String(e);
