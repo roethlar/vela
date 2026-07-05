@@ -19,12 +19,14 @@ quick flip-through.
 
 ## Architecture (three legs, one npm entry point)
 
-1. **UI driving — `tauri-driver` + WebdriverIO.** Playwright cannot attach
-   to a Tauri window; Tauri's supported Linux route is `tauri-driver`
-   (cargo-installed) fronting WebKitWebDriver (ships with webkit2gtk on
-   Arch). Tests run the debug binary, drive the real webview (sidebar nav,
-   Settings, folder pickers, context menus, All-view scrolling), and take
-   screenshots into an artifacts dir for owner flip-through.
+1. **UI driving — `tauri-driver` + a vendored WebKitWebDriver.** Playwright
+   cannot attach to a Tauri window; Tauri's supported Linux route is
+   `tauri-driver` (cargo-installed) fronting WebKitWebDriver. Tests run the
+   debug binary, drive the real webview (sidebar nav, Settings, folder
+   pickers, context menus, All-view scrolling), and take screenshots into
+   an artifacts dir for owner flip-through. See the 2026-07-05 deviation
+   below for how WebKitWebDriver is obtained and which protocol client is
+   used.
 2. **Playback probing — mpv IPC.** mpv runs with `--input-ipc-server`
    (Vela already uses the socket for progress). The harness triggers a
    play through the UI, then talks to the socket directly: assert the
@@ -73,6 +75,35 @@ A single `npm run e2e` orchestrates: build debug app → start tauri-driver
 - No macOS/Windows automation (tauri-driver is Linux/Windows; macOS has no
   WKWebView driver — macOS smoke stays manual/parked).
 - The harness never replaces the unit-test + guard-proof discipline.
+
+## Deviation 2026-07-05: driver sourcing and protocol client (owner-approved)
+
+The original plan assumed WebKitWebDriver "ships with webkit2gtk on Arch".
+Verified false: Arch/CachyOS, Fedora, and openSUSE all build webkit2gtk
+without the driver binary, and Debian tops out at 2.50.6 — no distro ships
+a driver matching the installed webkit2gtk 2.52.4. AUR has nothing. The
+library itself has automation-session support compiled in (the
+`webkit_automation_session_*` symbols are exported), so only the small
+frontend binary is missing.
+
+Owner-chosen route (2026-07-05, over rebuilding webkit or an in-app
+automation channel): **vendor Debian's WebKitWebDriver 2.50.6** plus its
+ICU 72 libraries (soname-versioned, so they never shadow the system ICU in
+child processes), fetched by `tests/e2e/fetch-driver.sh` into the
+gitignored `tests/e2e/vendor/` with pinned URLs and sha256s. A live probe
+against the debug Vela build validated the 2.50.6↔2.52.4 version skew:
+session creation, script execution, element find, click (opened Settings),
+and pixel-true screenshots all work. Known risk: the driver↔browser wire
+protocol is WebKit-internal; a future webkit2gtk update may break it. If
+that happens, the recorded fallback is an in-app automation channel
+(debug-only, env-gated loopback endpoint in the Rust backend: JS eval
+bridge + in-process WebKit snapshot), which trades the standard WebDriver
+protocol for zero external dependencies.
+
+Second deviation: **no WebdriverIO.** The harness speaks the WebDriver
+protocol directly over Node's built-in `fetch` (`tests/e2e/driver.mjs`,
+~8 endpoints). WDIO would add a very large dev-dependency tree to a repo
+with deliberately few dependencies, for protocol plumbing this thin.
 
 ## Verification of the harness itself
 

@@ -5,6 +5,17 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E harness slice 1 landed 2026-07-05 (plan `.agents/plans/e2e-harness.md`,
+  approved via the 2026-07-04 delegation): `npm run e2e` drives the real
+  debug binary via `tauri-driver` + a **vendored Debian WebKitWebDriver
+  2.50.6** — verified fact: no distro ships a driver for webkit2gtk 2.52
+  (Arch/Fedora/openSUSE drop it; Debian tops out at 2.50.6); the version
+  skew was probe-validated live and the deviation (plus the no-WDIO,
+  zero-dep WebDriver client) is recorded in the plan. Throwaway
+  `XDG_CONFIG_HOME` per scenario; screenshots + driver logs in
+  `tests/e2e/artifacts/`; smoke scenario green and red-proven (broken
+  assertion → exit 1). Owner standing instruction 2026-07-05: run
+  `playbook reviewloop codex` on EVERY slice.
 - Review loop cw-1..cw-3 (2026-07-05) CLOSED: codex batch pass over
   `ec94715..a055556` found 3 real defects (merged-key miss in curation
   actions; registry lock across network await; failed play clearing
@@ -110,11 +121,12 @@ Keep it short and update it when important repo facts change.
 
 ## Next
 
-- Build the E2E harness (`.agents/plans/e2e-harness.md`) — first slice:
-  tauri-driver + WDIO skeleton, throwaway config dir, one SMB
-  add→browse→play scenario + screenshot set. This replaces most of the
-  owner playtest list below with automated runs; the owner keeps only
-  visual flip-throughs and HDR judgment.
+- E2E harness next slices (skeleton is done): (a) SMB add→browse→play
+  scenario — needs owner NAS creds via `VELA_E2E_SMB`/`_USER`/`_PASS` env
+  at run time; (b) the mpv-IPC playback probe leg; (c) hero/curation
+  scenarios from the plan backlog. The harness replaces most of the owner
+  playtest list below; the owner keeps visual flip-throughs and HDR
+  judgment.
 - Owner (or harness, once built) checks for the new batch: share-root
   auto-add against the real NAS; On Deck item (*Blood and Bone* class)
   appearing in the flow; mark-watched dropping an item live;
