@@ -99,21 +99,28 @@ export default {
 
     // Play from each backing: the local copy plays the file path, the
     // server copy plays the mock stream — same card, routed per choice.
-    const localPath = await playFromMenu(driver, 'Play from Local');
-    assert.equal(localPath, path.join(configRoot, 'media', CLIP));
-    await pollUntil(() => {
+    // The override must persist under the exact canonical key with the
+    // chosen source id (eh-14): the backend applies it by exact key, so a
+    // wrong-key/wrong-value persist silently loses the user's choice.
+    const CANONICAL = 'title:mockmovie|2020'; // canonical_id_of: normalized title + year
+    const overrideValue = () => {
       try {
         const cfg = JSON.parse(fs.readFileSync(path.join(configRoot, 'config', 'vela', 'config.json'), 'utf8'));
-        return Object.keys(cfg.merged_overrides ?? {}).length > 0;
+        return cfg.merged_overrides?.[CANONICAL];
       } catch {
-        return false;
+        return undefined;
       }
-    }, 'the per-title override to persist');
+    };
+
+    const localPath = await playFromMenu(driver, 'Play from Local');
+    assert.equal(localPath, path.join(configRoot, 'media', CLIP));
+    await pollUntil(() => overrideValue() === 'local', `the override to persist as ${CANONICAL} → local`);
 
     const streamUrl = await playFromMenu(driver, 'Play from Mock JF');
     assert.ok(
       streamUrl.startsWith(`http://127.0.0.1:${mock.port}/Videos/m1/stream`),
       `server backing must play the mock stream, got ${streamUrl}`,
     );
+    await pollUntil(() => overrideValue() === 'jf-mock', `the override to flip to ${CANONICAL} → jf-mock`);
   },
 };
