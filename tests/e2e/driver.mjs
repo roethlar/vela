@@ -92,6 +92,12 @@ export class Driver {
     await this.#cmd('POST', this.#s(`/element/${elementId}/click`), {});
   }
 
+  // Synthesizes real key events ("" = Enter), so framework bindings
+  // (e.g. Svelte bind:value + keydown handlers) fire like they do for a user.
+  async type(elementId, text) {
+    await this.#cmd('POST', this.#s(`/element/${elementId}/value`), { text });
+  }
+
   async screenshotTo(filePath) {
     const b64 = await this.#cmd('GET', this.#s('/screenshot'));
     await fs.writeFile(filePath, Buffer.from(b64, 'base64'));
