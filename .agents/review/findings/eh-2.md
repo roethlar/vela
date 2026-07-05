@@ -20,16 +20,24 @@ Partial filter matches are indistinguishable from full matches, so a typo
 in one scenario name yields a silent false-green.
 
 ## Approach
-(to fill in with the fix)
+`run.mjs` loads all scenario modules first, then rejects any filter name
+that matches none of them — the run exits 1 listing the unknown names and
+the available ones, before anything launches. Filtering applies only after
+that validation.
 
 ## Files changed
-(to fill in)
+- `tests/e2e/run.mjs` — scenario loading/filter split with unknown-name
+  rejection
 
 ## Guard proof
 No JS unit runner exists in this repo (recorded gap). Manual red/green
 check instead: `npm run e2e -- --skip-build smoke typo` must exit nonzero
 naming `typo` without launching anything; red = exits 0 running only smoke
 before the fix.
+
+Executed 2026-07-05: red — `smoke typo` → `1/1 passed`, exit 0. Green —
+`e2e: unknown scenario(s): typo — available: smoke`, exit 1, nothing
+launched; `smoke` alone still passes (1/1, exit 0).
 
 ## Coder dispute (if any)
 None — admitted as filed.

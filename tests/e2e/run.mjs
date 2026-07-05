@@ -140,13 +140,23 @@ fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
 
 const scenarioDir = path.join(e2eDir, 'scenarios');
-const scenarios = [];
+const allScenarios = [];
 for (const file of fs.readdirSync(scenarioDir).filter((f) => f.endsWith('.mjs')).sort()) {
   const { default: scenario } = await import(pathToFileURL(path.join(scenarioDir, file)).href);
-  if (nameFilter.length === 0 || nameFilter.includes(scenario.name)) scenarios.push(scenario);
+  allScenarios.push(scenario);
 }
+// A typo'd name must fail loudly, not silently shrink the run (eh-2).
+const unknown = nameFilter.filter((n) => !allScenarios.some((s) => s.name === n));
+if (unknown.length > 0) {
+  console.error(
+    `e2e: unknown scenario(s): ${unknown.join(', ')} — available: ${allScenarios.map((s) => s.name).join(', ')}`,
+  );
+  process.exit(1);
+}
+const scenarios =
+  nameFilter.length === 0 ? allScenarios : allScenarios.filter((s) => nameFilter.includes(s.name));
 if (scenarios.length === 0) {
-  console.error(`e2e: no scenarios match [${nameFilter.join(', ')}]`);
+  console.error('e2e: no scenarios found');
   process.exit(1);
 }
 
