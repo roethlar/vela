@@ -1,9 +1,9 @@
 # eh-8: Restart leg proves tombstone persistence, not application
 
 **Severity**: LOW — the scenario's restart assertions can stay green even if the app stops applying `hidden_from_continue` at startup
-**Status**: Open
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `ebf8162`
 
 ## Evidence
 `tests/e2e/scenarios/curation.mjs` (restart leg) — `hide()` removes the
@@ -59,4 +59,12 @@ Server-hub tombstone suppression (the On Deck path) remains server-gated
 backlog — recorded in the plan's scenario backlog.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~09:47 UTC.
+Reviewed `ebf81625a5ac38a57288fa04d3b10bb2cf2fdcd6` against base
+`74b0b3d710ff4dad86ecece3a41d05cf8706bc82`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: reinsertion happens only after
+asserting removal dropped recents, so a real feed item is present;
+heroItems filters both feeds through the tombstones, making the
+cleared-tombstone red the expected discriminator; the between-hook write
+window (post-deleteSession, pre-newSession) is app-down and lock-safe; no
+residual false-green — server-hub suppression stays the recorded gap.

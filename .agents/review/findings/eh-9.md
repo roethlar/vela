@@ -40,7 +40,14 @@ check plus the live run: (a) scripted — the old predicate accepts
 old pid alive or ≠1 scoped pids; (b) the scenario stays green live, and
 its pre-restart exactly-one assertion was run with a second (manually
 launched, different-config) vela alive to confirm foreign processes no
-longer contaminate. Executed results transcribed below.
+longer contaminate.
+
+Executed 2026-07-05: (a) predicate check — old logic returns true for
+before `100` / after `100\n101` (accepts overlap); the new
+exactly-one+different logic rejects it. (b) live — with a decoy vela
+(separate config, own Xvfb) running throughout, the scenario PASSes; the
+environ-scoped filter counts exactly one app on the scenario's config,
+and the post-restart poll requires the old pid gone.
 
 ## Coder dispute (if any)
 None — admitted as filed.
