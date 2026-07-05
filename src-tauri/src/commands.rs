@@ -405,8 +405,10 @@ pub struct SshMountDto {
     mountpoint: String,
 }
 
-/// Mount an SMB share via the OS and persist it for browsing/selection. Library
-/// folders are added separately with `add_smb_folder`.
+/// Add an SMB share and persist it for browsing/selection. Linux verifies
+/// the server/share/credentials over the in-process native client (no OS
+/// mount; `mountpoint` stays empty); macOS/Windows mount via the OS.
+/// Library folders are added separately with `add_smb_folder`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface; each is a distinct field.
 pub async fn mount_smb(
@@ -548,9 +550,9 @@ pub async fn list_smb_mounts() -> Result<Vec<SmbMountDto>, String> {
         .collect())
 }
 
-/// List directories inside a configured SMB share, relative to the mounted
-/// share root. Used by Settings to choose one or more library folders after the
-/// share is mounted.
+/// List directories inside a configured SMB share, relative to the share
+/// root. Used by Settings to choose library folders. Linux lists natively
+/// over the in-process client; macOS/Windows read the OS mount path.
 #[tauri::command]
 pub async fn list_smb_directories(
     id: String,

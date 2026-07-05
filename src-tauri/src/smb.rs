@@ -32,10 +32,9 @@ pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
     Ok(format!(r"\\{}\{}", m.server, m.share))
 }
 
-/// Prepare the share for browsing and update `m.mountpoint` to the path that
-/// should be persisted. On Linux that path may be a desktop-provided FUSE path,
-/// so it is resolved as part of the mount operation instead of being invented
-/// under Vela's config directory.
+/// macOS/Windows: mount the share and update `m.mountpoint` to the path
+/// that should be persisted. Linux never calls this — native records are
+/// verified over libsmbclient and keep `mountpoint` empty.
 #[cfg(not(all(unix, not(target_os = "macos"))))]
 pub fn prepare_mount(m: &mut SmbMount) -> Result<(), String> {
     m.mountpoint = default_mountpoint(m)?;
@@ -205,8 +204,7 @@ pub fn unmount_for_removal(mountpoint: &str) {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub fn unmount_for_removal(_mountpoint: &str) {
-    // Linux SMB mounts are owned by the user's desktop session. Removing the
-    // source from Vela should not disconnect Dolphin/Nautilus or other apps.
+    // Linux shares are native (no OS mount exists); nothing to tear down.
 }
 
 /// A mountpoint sits on a different device than its parent dir.

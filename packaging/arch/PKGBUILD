@@ -8,10 +8,8 @@ license=('MIT')
 # Vela's release profile already strips the binary, so the makepkg debug split
 # finds no symbols — skip it (no empty -debug package, no gdb-add-index warning).
 options=('!debug')
-depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme')
+depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme' 'smbclient')
 optdepends=(
-  'gvfs-smb: browse SMB shares through GNOME/GVfs mounts'
-  'kio-fuse: browse SMB shares through KDE/KIO mounts'
   'sshfs: browse SSH/SFTP sources'
 )
 source=()

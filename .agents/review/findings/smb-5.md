@@ -64,4 +64,13 @@ None.
   gain — left as-is, noted for a possible later cleanup.
 
 ## Reviewer comments
-(pending)
+Round 1 — reopened. Reviewer: codex (codex-cli 0.142.5); reviewed
+`514b093…`, base `f2a4640…`. 2026-07-04 (UTC). guard_confirmed: **true**
+(clippy -D warnings + 71 tests green in its isolated checkout). Six
+findings, all documentation/dependency drift, all accepted:
+smb.rs:35 prepare_mount doc; smb.rs:208 unmount_for_removal comment;
+commands.rs:408 mount_smb doc; commands.rs:551 list_smb_directories doc;
+.agents/repo-guidance.md:68 stale GVfs/KIO-FUSE earned practice;
+packaging/arch/PKGBUILD:13 stale gvfs-smb/kio-fuse optdepends. Fix-up
+round 2 rewrites each and moves the PKGBUILD dependency correction
+(smbclient into depends) forward from slice 6.
