@@ -71,3 +71,15 @@ over-strict phrasing, not a repo rule; removing truthful negative
 mentions would make the change harder to discover, not safer. Round 2
 is asked to judge the rationale; if the reviewer still holds the
 finding, it routes to the owner as contested.
+
+Round 2 — reopened (one finding) + dispute resolved in coder's favor.
+- Reviewed `15b5097…`, base `a213cb2…`. 2026-07-04 (UTC).
+  guard_confirmed: **true** (clippy, 71 tests, JSON parse green).
+- Finding (accepted): the round-1 fix-up had put the Debian alternation
+  into the RPM depends (tauri passes rpm entries literally — invalid
+  requirement) and left deb plain. Fixed: deb =
+  "libsmbclient0 | libsmbclient", rpm = "libsmbclient".
+- Dispute outcome: reviewer ACCEPTED the gvfs/kio rationale — the
+  remaining state.md/repo-guidance hits are accurate negative statements
+  documenting the deleted machinery. Finding withdrawn, no owner
+  adjudication needed.
