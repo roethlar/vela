@@ -5,6 +5,14 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 10 landed 2026-07-05 (`5742789`) + review loop e2e-9 CLOSED
+  (eh-14 verified): the merged All view scenario machine-verifies the
+  library-rework owner checks — mock JF + local folder dedup to ONE
+  "2 sources" card; "Play from Local" plays the file path while "Play
+  from Mock JF" plays the mock stream; the per-title override persists
+  under the exact canonical key (`title:mockmovie|2020`) and flips with
+  the choice. Suite: 10 scenarios. Unblocked follow-on remaining:
+  mark-unwatched (small).
 - E2E slice 9 landed 2026-07-05 (`ccc6270`) + review loop e2e-8 CLOSED
   (eh-13 verified after the loop's first reopen→fix→accept round-trip):
   the watch-state scenario machine-verifies the 2026-07-04 owner-reported
