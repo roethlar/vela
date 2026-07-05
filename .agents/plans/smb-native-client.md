@@ -1,9 +1,12 @@
 # Plan: Native SMB client + loopback streaming proxy (drop Linux mount dependency)
 
-Status: APPROVED 2026-07-04 (owner), as drafted. Process: implement via
-`.agents/playbooks/reviewloop.md` with `codex` as the reviewer harness — one
-slice ↔ one review unit ↔ one recorded verdict; merge to main stays
-owner-gated.
+Status: IMPLEMENTED 2026-07-04 on branch `smb-native` (six slices, each
+codex-verified — see `.agents/review/index.md`). Deviations from the draft
+are recorded in the finding docs: `pavao-sys` instead of the `pavao` crate
+(its global-context design was unsound for multiple mounts); artwork is
+served over a stable `velasmb:` scheme instead of the token proxy (tokens
+died on restart and pressured the registry). Merge to `main` is
+owner-gated, pending the owner playtest against the real NAS.
 
 Owner direction (2026-07-04): the GVfs/KIO-FUSE dependency is unacceptable —
 "if Vela cannot make the connection itself without the underlying OS mount,
