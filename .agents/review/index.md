@@ -16,6 +16,9 @@ scenario). eh-5 was coder-filed and fixed before this loop opened; its
 guard is the committed playback scenario (red/green + revert-check
 transcribed in the finding doc). Same no-branches adaptation.
 
+Review pass 2026-07-05 (codex, read-only, base `8ebbde1` head `d2be263`,
+loop e2e-2): 2 candidates, 2 admitted (eh-6, eh-7), 0 declined.
+
 Loop e2e-1 CLOSED 2026-07-05: eh-1..eh-4 all verified `[x]`, fixes on
 `main`. Scope was E2E harness slice 1 (base `23f6857`, head `34d3412`);
 codex admitted eh-1/eh-2, and live diagnosis during eh-1 verification
@@ -49,6 +52,8 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-3 | MEDIUM | Unbounded driver requests turn any stall into an opaque 300s hang | `[x]` | `0945104` |
 | eh-4 | HIGH | Screenshots hang whenever the test window opens unfocused on the live desktop | `[x]` | `cfe6ee4` |
 | eh-5 | HIGH | Local-only setups never see the Continue Watching hero (hub-gated render path) | `[~]` | `b4b4ebb` |
+| eh-6 | MEDIUM | Playback scenario races the seeded source render — flaky false-red | `[ ]` | |
+| eh-7 | MEDIUM | Quit-vs-EOF indistinguishable in the playback guard — false-green | `[ ]` | |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
