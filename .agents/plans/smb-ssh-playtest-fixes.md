@@ -179,6 +179,33 @@ mitigated by the owner's fast reproduction loop and option-compatibility checks.
 
 ---
 
+## Seek observation — Plex content ALSO sometimes breaks on seek (owner, 2026-07-05) — UNVERIFIED, follow-up
+
+New data point from the owner, recorded for when seek troubleshooting resumes.
+**Not yet diagnosed; not one of the five approved bugs; changes no slice.**
+
+Plex playback is a **third, distinct path** from bugs 1 and 2: it hands mpv a
+direct Plex HTTP(S) stream URL with `X-Plex-Token` supplied via the owner-only
+mpv `--include` header file (see `.agents/decisions.md`, 2026-07-03) — it uses
+**neither** the SMB loopback Range proxy (bug 1) **nor** sshfs (bug 2). So neither
+seek fix in this plan will address a Plex seek break; it is its own diagnosis.
+
+Two hypotheses to distinguish when we pick this up:
+- **(a) Plex-path-specific:** the Plex server rebuilds/re-seeks a transcode
+  session on seek, or the stream is a transcode (not direct-play) whose seek is
+  server-priced; or mpv Range/HTTP handling against the Plex stream stalls.
+  Check direct-play vs transcode, and whether it's timestamp/position-dependent.
+- **(b) Common factor across all three sources:** an mpv/environment issue
+  (gpu-next/Vulkan/Wayland, decode, or the machine) that ALSO contributes to the
+  SMB/SSH freezes — meaning the source-specific fixes only partially mask a shared
+  cause. If Plex, SMB, and SSH all stall on seek in similar ways, weight (b).
+
+Action when troubleshooting resumes: capture a Plex repro (file, direct-play vs
+transcode, seek target, whether it reproduces with `mpv_use_own_config`/a bare
+mpv), and compare its signature against the SMB/SSH freezes to decide (a) vs (b).
+
+---
+
 ## Bug 3 — Clicking a source dead-ends on empty Home — P1 (UX ruling)
 
 ### Root cause
