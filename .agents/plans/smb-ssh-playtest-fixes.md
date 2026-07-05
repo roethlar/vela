@@ -61,53 +61,72 @@ so this is a setup-vs-teardown serialization + per-seek cost, not a body-stream
 deadlock.
 
 ### Fix (ordered sub-slices, each its own commit)
-1. **Drop the share-root `list_dir("")` from the stream-open hot path.** Verify
-   reachability only at mount/add time, not per connection. Removes one full
-   round-trip per seek. (`smb_client.rs:217-219` — separate a `verify()` from
-   `connect()`/open.) Low risk.
-2. **Don't hold `ctx_lifecycle_lock` across the blocking `smbc_free_context`.**
-   Restructure `Drop` (`smb_client.rs:437-439`) so teardown does not serialize a
-   concurrent new-session setup — e.g. take the ctx out under the lock, release,
-   then free; or move frees to a dedicated reaper. Preserve libsmbclient's
-   per-context single-thread invariant. Medium risk (lock discipline; this is the
-   repo's "no shared lock across blocking network work" earned practice).
-3. **Add a write timeout on the proxy socket** in `serve_target`
-   (`stream_proxy.rs:292-337` — today only `read_request` has a 10s read timeout).
-   A client that stops reading without closing can otherwise block `write_all`
-   forever and pin a thread / hold an SMB handle open. Low risk.
-4. **Reuse the SMB session per playback token** so a seek does not rebuild a full
-   session. The proxy registers a target by token (`smb_vfs.rs:268-272` →
-   `stream_proxy::register_smb`); cache the live `SmbConnection` (and, where
-   feasible, the open read handle, seeking via `smbc_lseek`) keyed by that token,
-   reused across HTTP connections for the token and torn down when the token is
-   unregistered / playback ends. A new Range request for a token **supersedes**
-   the prior in-flight stream for that token (abort it) so the two never contend
-   on one context's mutex. Highest complexity — the real fix; lands last so the
-   cheap wins ship first.
+The root fix eliminates per-seek SMB session bring-up entirely, so the lifecycle
+lock is never on the seek hot path — which also removes any need to touch the
+lock discipline. **The `ctx_lifecycle_lock` create/free serialization is proven
+safe and stays unchanged; we do NOT release it around `smbc_free_context`**
+(codex plan-review r1, finding 1: releasing it would race context free against
+`smbc_new_context`/`init` on libsmbclient's shared global state → lifecycle
+crash/corruption). The seek fix comes from reusing the session so a seek never
+frees/creates a context at all.
 
-Keep-alive (dropping unconditional `Connection: close`) is **evaluated, not
-assumed**: ffmpeg often opens a new connection per seek regardless, so the
-per-token session cache (4) is the load-bearing fix; keep-alive is an optional
-add-on only if it demonstrably reduces reconnects.
+1. **Drop the share-root `list_dir("")` from the stream-open hot path**
+   (`smb_client.rs:217-219`); verify reachability only at mount/add time. Also
+   cache the file size from the first open so a seek skips the redundant `stat`
+   (`smb_client.rs:315-316`). Low risk, independently landable.
+2. **Add a write deadline on the proxy socket** in `serve_target`
+   (`stream_proxy.rs:289-337` — today only `read_request` has a 10s read timeout).
+   Stops a non-draining client pinning a thread AND enables the cooperative cancel
+   in slice 3. Low risk.
+3. **Per-token SMB session reuse (the real fix).** Design to be pinned before
+   implementation:
+   - Cache the live `SmbConnection` (the expensive libsmbclient session/context)
+     per proxy token; create once at first stream; **free ONCE at playback-end
+     under the existing `ctx_lifecycle_lock`** (unchanged) — never per seek.
+   - Each HTTP connection (initial or seek) opens its **own file handle** on the
+     cached connection and `smbc_lseek`s to its Range offset. **No shared file
+     handle / no shared file position** (codex r1, finding 2). Context operations
+     serialize on the existing per-connection ctx mutex (bounded per op); two
+     short-lived handles on one context are fine because every op is
+     mutex-guarded.
+   - **Supersede model:** a per-token generation counter; a new Range request
+     bumps it; the prior serving thread checks the generation between write chunks
+     and — together with the write deadline (slice 2) — stops and closes its
+     handle. This is a **cooperative cancel at chunk boundaries**; we do NOT claim
+     sub-chunk interruption of a blocking libsmbclient read — a stuck read is
+     bounded by `OP_TIMEOUT_MS` (10s), which is already today's worst case, so the
+     model never makes it worse and removes it in the common case.
+   - **Cleanup hook:** wire teardown from the resolved-stream URL/token into the
+     play path and playback-end (`commands.rs:2939-2961`; the mpv `on_end`), so
+     the cached session is freed when playback ends or the target is replaced —
+     not left until registry eviction/app exit (codex r1, finding 2: leak).
+   Highest complexity; lands after slices 1-2 so the cheap wins ship first.
+
+Keep-alive (dropping `Connection: close`) is **out of scope**: the per-token
+session cache makes a per-seek TCP reconnect cheap (no session bring-up), so
+keep-alive is at most a later optimization, not required.
 
 ### Verification (hermetic, no NAS)
 Extend the existing `Target::Mem` proxy test seam (`stream_proxy.rs:36,277-285`)
-with a fake backend whose `open` incurs an artificial delay and whose teardown
-blocks:
-- **Concurrent-seek serialization:** first GET (200) still streaming, then a
-  second GET `Range: bytes=X-` (the seek); assert the second's first byte arrives
-  within a bound. Fails today (serializes on `ctx_lifecycle_lock`); passes after
-  slice 2/4.
-- **No readdir on open:** assert the stream-open path performs no `list_dir` —
-  fails today (slice 1 fixes it).
-- **Write timeout:** a client that stops reading mid-body; assert `serve_target`
-  returns within a bound (slice 3).
+with a fake backend whose per-op read incurs an artificial delay:
+- **No readdir/stat on the seek path** (slice 1): assert a second Range request
+  performs no `list_dir` and no redundant `stat` — fails today.
+- **Write deadline** (slice 2): a client that stops reading mid-body; assert
+  `serve_target` returns within a bound — fails today (no write timeout).
+- **Seek reuses the session + supersedes cleanly** (slice 3): first GET streaming,
+  then a second GET `Range: bytes=X-`; assert (i) no new session/context is
+  created for the seek, (ii) the second stream serves from offset X on its own
+  handle, (iii) the superseded first stream is cancelled within the write
+  deadline. Fails today (full session rebuild per connection).
+- **No session leak** (slice 3): assert the cached session is freed on
+  playback-end/target-replace, not left to registry eviction.
 - **Owner playtest** on the NAS confirms the felt freeze is gone.
 
 ### Risk
 Highest of the five. Touches the SMB concurrency core. Must not violate
 libsmbclient's per-context single-threading or the repo's lock-across-blocking
-invariant. Each sub-slice guarded independently before the next.
+invariant — hence the lock discipline is left unchanged and per-seek context
+churn is removed instead. Each sub-slice guarded independently before the next.
 
 ---
 
@@ -155,23 +174,26 @@ library sections are already listed in the sidebar's Library group
 (`+page.svelte:1027-1031`, the `activeSource !== null` branch).
 
 ### Fix
-Clicking a source routes to its **content**, not the empty hub-home. When a
-specific source is selected (`id !== null`), navigate into its library: auto-open
-its first/only section (browse mode) — or, if it has multiple sections, a
-per-source landing that shows content. Keep home/hero for the aggregate ("All")
-scope where hubs/recents exist. Belt-and-suspenders per the UX ruling: never
-render the "Nothing on your home screen yet" dead-end when browsable sections
-exist; show them instead.
+Key the routing on the **empty-Home state, not on "any non-null source"** (codex
+r1, finding 3: force-browsing every source would drop server-source Home rails
+like Continue/On Deck). Rule: when a scoped source's Home has loaded and is empty
+(no hubs **and** no hero/recents) but it has browsable sections, land on its
+library content (auto-open its first section) instead of rendering the dead-end.
+A server source that returns Home hubs keeps its per-source Home unchanged. This
+also satisfies the UX ruling generally: the "Nothing on your home screen yet"
+dead-end is never shown when sections exist.
 
 ### Verification
-E2E scenario (fits the harness; reuse `seedLocalMedia`/`openLibraryGrid`): add a
-local/SMB-class source, click its sidebar entry, assert it lands on content (a
-grid or its sections) and that the dead-end text is absent. Guard-proven
-red/green.
+E2E, both directions:
+- **Fix:** a local/SMB-class source click lands on content (a grid/its sections),
+  dead-end text absent.
+- **Regression guard (finding 3):** a mock server source that DOES return Home
+  hubs still lands on its per-source Home with hubs visible — not force-browsed.
+Both guard-proven red/green (the mock JF server can be seeded to return hubs).
 
 ### Risk
-Low (frontend nav). Must not regress server-source per-source Home, which has
-real hubs and should still land there.
+Low (frontend nav). The state-keyed condition is what prevents the server-source
+Home regression.
 
 ---
 
@@ -204,10 +226,28 @@ to SSH mount roots (`mount_ssh` also permits kind-auto). Secondary: fire a UI
 refresh event when a background metadata lookup lands so posters appear without
 re-entry.
 
+Two code constraints the design MUST satisfy (codex r1, finding 4):
+- `items()` rejects section keys that are not exactly configured folders
+  (`local.rs:685-719`). So **expand each kind-auto root into per-category
+  effective `LocalFolder` roots at registry-build time** (each qualifying subdir
+  becomes a configured folder with its detected kind), so `sections()`/`items()`
+  see normal configured folders — rather than loosening the `items()` guard
+  (which is a safety check). Keep the expanded roots share-scoped with the
+  existing `smb_vfs` normalize/containment + symlink-escape checks (narrow-roots
+  invariant — no filesystem/home roots, no symlink escape).
+- The detected-kind cache is keyed by raw path and stores only `movie`/`show`
+  (`listing_cache.rs:37-40,123-141`, `local.rs:955-976`): `/` and `/Movies`
+  collide across mounts, and a **stale cached root kind would preserve the old
+  flat classification after upgrade**. Key the kind/category cache by
+  **source/mount id + path** and bump/ignore the old cache schema.
+
 ### Verification
-Rust unit tests on the classifier with fixture trees (category-root vs
-single-library-root vs mixed) — hermetic, local fs, no NAS. E2E for the
-merged-dedup path if a nested local fixture makes it practical.
+Rust unit tests (hermetic, local fs, no NAS): category-root vs single-library-root
+vs mixed; **a generated `/Movies` section resolves through `items()` without
+"unknown local folder"**; **a stale root-kind cache entry does not preserve the
+flat classification**; **two mounts sharing a provider path (both `/Movies`) do
+not collide**. E2E for the merged-dedup path if a nested local fixture is
+practical.
 
 ### Risk
 Medium. Changes listing/classification semantics; must not regress existing
@@ -291,4 +331,13 @@ code slice (routine).
   except the frontend (bug 3) and Connected tab (bug 5), which are cross-platform.
 
 ## Review log
-- (pending) `reviewloop codex` on this plan.
+- **r1** 2026-07-05 `codex` (codex-cli 0.142.5), reviewed `06fbd9c` base
+  `05f9594`: **reopened**, 4 findings (2 blocker, 2 major), all admitted and
+  addressed in this revision — Bug 1: removed the unsafe `ctx_lifecycle_lock`
+  release, pinned the session-reuse design (own file handle per stream,
+  generation + write-deadline cooperative cancel, playback-end cleanup hook,
+  honest bound on blocking reads); Bug 3: keyed routing on the empty-Home state so
+  server-source Home is not regressed, with a mock-hubs regression guard; Bug 4:
+  expand kind-auto roots into configured per-category folder roots to satisfy the
+  `items()` guard, key the kind cache by mount id + path with a schema bump.
+- **r2** (pending) re-dispatched to `codex`.
