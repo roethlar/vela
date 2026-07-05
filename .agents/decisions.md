@@ -435,3 +435,38 @@ The 2026-07-03 "detect during first playback, correct once" decision
 anyone touching mpv on this stack: live `video-crop` over IPC can wedge
 mpv into D-state on gpu-next/Vulkan/Wayland/HDR, and cropdetect /
 osd-dimensions readings are unreliable on HDR/PQ content.
+
+### 2026-07-05 - Ship mpv's autocrop.lua behind an opt-in toggle
+
+Status: Active
+
+Decision:
+Vela bundles mpv's unmodified `autocrop.lua` (GPLv2+, provenance recorded) as a
+resource and adds an off-by-default, three-state Settings control
+(Off / Manual / Automatic) that injects mpv `--script` launch args. Off injects
+nothing. Manual appends `--script=<bundled>` plus
+`--script-opts-append=autocrop-auto=no`, so cropping fires only on an explicit
+in-player `Shift+C`. Automatic appends `--script=<bundled>` with the script's own
+`auto=true` (crop at every playback start). Vela writes no crop logic; all
+geometry processing remains mpv's. The Automatic mode auto-fires the recorded
+live-`video-crop` D-state hang path and is therefore an explicit, non-default,
+owner-chosen opt-in guarded by a prominent UI warning; Off/Manual carry the
+`auto=no` code guard. Plan (converged, codex reviewloop r1-r4):
+`.agents/plans/mpv-autocrop-bundle.md`.
+
+Reason:
+Owner reversed the 2026-07-05 drop after confirming the script works via manual
+`--script=`/`Shift+C`, and wanted it distributable without users hand-managing the
+file (2026-07-05: "add it, then approved"), with both automatic and manual modes
+user-selectable. Bundling + a toggle is an extension of the prior decision's
+endorsed `mpv_extra_args` passthrough, not a re-implementation of crop logic.
+
+Supersedes:
+The 2026-07-05 "Letterbox crop feature DROPPED" decision for this narrow
+bundled-script case — specifically its "ships no crop feature", "no design/no
+code", and "existing `mpv_extra_args` passthrough only" clauses. What REMAINS in
+force from that entry (not superseded): the scope boundary that "Vela launches and
+controls mpv but does not re-implement video-geometry processing" (this ships
+mpv's own script, writes no geometry code), and the 2026-06-28 confirmed facts
+(live `video-crop` D-state wedge; unreliable cropdetect on HDR/PQ) — which are the
+reason for the `auto=no` guard on Off/Manual and the warning on Automatic.
