@@ -11,7 +11,7 @@ Keep it short and update it when important repo facts change.
   "2 sources" card; "Play from Local" plays the file path while "Play
   from Mock JF" plays the mock stream; the per-title override persists
   under the exact canonical key (`title:mockmovie|2020`) and flips with
-  the choice. Suite: 10 scenarios. Unblocked follow-on remaining:
+  the choice. Suite: 9 scenarios. Unblocked follow-on remaining:
   mark-unwatched (small).
 - E2E slice 9 landed 2026-07-05 (`ccc6270`) + review loop e2e-8 CLOSED
   (eh-13 verified after the loop's first reopen→fix→accept round-trip):
