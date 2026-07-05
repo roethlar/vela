@@ -2,10 +2,11 @@
 
 ## Status
 
-**Converged** — `reviewloop codex` **accepted** at r3 (2026-07-05, 3 rounds).
-Awaiting **owner approval to implement**: an accepted review verdict is not
-implement authority (owner-gated per the reviewloop playbook). Ordered slices
-below; open decisions still need owner answers.
+**Owner-approved 2026-07-05 — implementing.** `reviewloop codex` accepted at r3
+(3 rounds); owner approved with three decisions folded in (see Owner decisions).
+Metadata gate resolved: no product shift needed — Bug 4 is the metadata unlock
+(see Bug 4 → Metadata). Standing instruction: run `reviewloop codex` on every
+implementation slice.
 
 ## Origin
 
@@ -166,10 +167,11 @@ installed sshfs supports it and its interaction with `reconnect`), and/or cache 
 readahead tuning. Land the confirmed option set; document why.
 
 ### Verification
-Primarily owner playtest (reproduces in seconds). Optional hermetic path: a
-loopback `sshd` + sftp + sshfs mount in a test to compare seek latency with vs
-without the options — flagged optional because it needs sshfs + sshd in CI. State
-clearly if the hermetic test is deferred to owner confirmation.
+**Required (owner decision 2026-07-05): build the hermetic test** — a loopback
+`sshd` + sftp + sshfs mount that reproduces the seek stall and asserts the tuned
+mount options clear it (compare seek latency with vs without). Gate it on sshfs +
+sshd being present (skip with a clear message if not, like other env-gated tests)
+rather than dropping coverage. Owner playtest on the NAS remains the final check.
 
 ### Risk
 Low code risk (mount-arg change). The real risk is picking the wrong option set;
@@ -228,6 +230,22 @@ year since mounts carry no provider ids; `kind_rank` local>smb/ssh>plex>jf/emby)
 but it is fed those year-less, title-mangled junk items, which can never dedup
 against server copies. The merge plumbing needs no change; the root classification
 starves it.
+
+### Metadata (owner Q, 2026-07-05 — no product shift needed)
+The "blank cards with filenames" is this bug, not a metadata gap. Vela's
+`metadata.rs` already resolves: persistent cache → `.nfo` + artwork **sidecar**
+(Kodi/Jellyfin/Emby standard: `<title>/<year>/<plot>`, `poster.jpg`/`folder.jpg`/
+`{stem}-poster.jpg`, read **over the VFS so SMB/SSH work** via `artwork_ref`) →
+keyless **online** lookup (iTunes for movie/show summary+poster, TVmaze for
+episodes), with the filename parse as the floor. At the mis-classified share root
+the "items" are category dirs, so the sidecar search (`Movies/tvshow.nfo`) and the
+online search (`iTunes("Movies")`) both miss. Once this bug classifies to the real
+movie/show level, that same enrichment finds the sidecars (instant) or looks up
+title+year online. So Bug 4 IS the metadata unlock. Richness variable: if the NAS
+carries `.nfo`+poster sidecars (typical for a Plex/JF/Emby-managed library) it is
+rich and instant; otherwise it leans on iTunes/TVmaze (decent for well-named
+files, gradual). Only TMDB/TVDB-grade scraping with API keys would be a "massive
+shift" — deliberately out of scope.
 
 ### Fix
 Make share/mount roots **category-aware**: when a root folder is kind-auto,
@@ -324,28 +342,35 @@ relief ships without waiting on rename.
 
 ## Slice order & commits
 
-1. Bug 1 sub-slices 1→3 (cheap SMB wins: drop readdir, lock discipline, write
-   timeout), then sub-slice 4 (per-token session reuse).
+1. Bug 1: cheap SMB wins first (sub-slice 1 drop per-open readdir+stat; sub-slice
+   2 write deadline), then sub-slice 3 (per-token session reuse). Lock discipline
+   is unchanged — see Bug 1 Fix.
 2. Bug 3 (source-click routing) — small, removes a P1 dead-end.
 3. Bug 5 P1 (Connected-tab filter + remove-last-folder) — small, removes a P1
    dead-end + the triplication.
-4. Bug 2 (SSH mount options) — needs owner option-confirmation loop.
-5. Bug 4 (share-root category-aware classification) — larger.
+4. Bug 2 (SSH mount options + hermetic sshd/sshfs test).
+5. Bug 4 (share-root category-aware classification — the metadata unlock) — larger.
 6. Bug 5 P2 (naming + rename).
+7. Metadata-gated local/SMB/SSH "Recently added" rail (after Bug 4; see Owner
+   decisions) — only items with resolved metadata.
 
 One finding ↔ one commit; each slice guard-proven (test red→green, or owner
 playtest where automation can't reach) before the next. Bump version per landed
 code slice (routine).
 
-## Open decisions (owner)
-- **Local-family Home rails:** bug 3 makes clicking a source show content;
-  separately, should local/SMB/SSH also contribute a "Recently added" hub to the
-  aggregate Home? That reverses `library-all-view-rework.md` open-point-3 and is a
-  product call, not required by the UX ruling.
-- **Bug 2 hermetic test:** build a loopback sshd+sshfs test, or accept
-  owner-playtest confirmation for the SSH mount-option fix?
-- **Keep-alive (bug 1):** pursue HTTP keep-alive in addition to the per-token
-  session cache, or is the cache sufficient?
+## Owner decisions (resolved 2026-07-05)
+- **Local-family Home rails → METADATA-GATED.** Add a "Recently added" rail for
+  local/SMB/SSH only for items that resolved real metadata (a poster / non-floor
+  title); items still at the filename floor are excluded so the rail never shows
+  blank filename cards. This is a small filter, not a product shift — it rides on
+  the Bug 4 metadata unlock. If, in practice, too few items resolve metadata to
+  make a worthwhile rail (bare-filename NAS, no sidecars), the rail is simply
+  empty/absent — reassess only if the owner finds that unacceptable. Sequence
+  after Bug 4.
+- **Bug 2 hermetic test → BUILD IT.** Owner chose the loopback sshd+sshfs test
+  (see Bug 2 Verification), not owner-playtest-only.
+- **Keep-alive (bug 1) → deferred.** The per-token session cache makes per-seek
+  reconnects cheap; keep-alive is at most a later optimization, not in scope now.
 
 ## Non-goals
 - No change to the delegated-mpv playback model (HDR passthrough via mpv's own
