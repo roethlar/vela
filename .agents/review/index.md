@@ -30,7 +30,7 @@ commit) per finding.
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
 | cw-1 | MEDIUM | Merged items (local front, server watch key) survive mark-watched/remove in the hero | `[x]` | `5ce26db` |
-| cw-2 | LOW | Registry lock held across Plex removal await stalls unrelated UI up to 15s | `[~]` | |
+| cw-2 | LOW | Registry lock held across Plex removal await stalls unrelated UI up to 15s | `[x]` | `07167f1` |
 | cw-3 | LOW | Failed play clears a removal tombstone; item wrongly returns to hero | `[~]` | |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):

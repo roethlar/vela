@@ -2,9 +2,9 @@
 
 **Severity**: LOW — bounded (15s reqwest timeout) but user-visible: hub
 loads, browsing, and play routing block behind a best-effort network call.
-**Status**: In progress
+**Status**: Verified
 **Branch**: n/a — single fix commit on `main`.
-**Commit**: (pending)
+**Commit**: `07167f1`
 
 ## Evidence
 `src-tauri/src/commands.rs` `remove_from_continue`:
@@ -45,4 +45,9 @@ None — the Rust 2021 scrutinee-lifetime reading is correct.
 None.
 
 ## Reviewer comments
-(pending)
+- Reviewer: codex (codex-cli 0.142.5), verdict recorded 2026-07-05T10:31:51Z
+- reviewed_sha `07167f144bfc699164c82e965eda89aa7d48f3b3`, base_sha `7f5e0476d7bd8e8e714fe7fac615f402b7a80cc9`
+- guard_confirmed: true (manual-check mode per finding doc: reviewer
+  verified old/new guard lifetimes, pattern parity with set_watched, and
+  cargo check at head in its own worktree)
+- Verdict: **accepted** — no comments.
