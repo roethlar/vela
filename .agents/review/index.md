@@ -9,10 +9,9 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop app-1 opened 2026-07-05 (standing instruction: reviewloop codex per
-slice). Scope: slice 7, single commit — base `24de4ee`, head `e7c5231`
-(resolve_stream onto the blocking pool + repo-map P0-audit note). Same
-no-branches adaptation.
+Loop app-1 CLOSED 2026-07-05: clean pass, no findings. Scope was slice 7
+— base `24de4ee`, head `e7c5231` (resolve_stream onto the blocking pool +
+repo-map P0-audit note). Same no-branches adaptation.
 
 Loop e2e-6 CLOSED 2026-07-05: clean pass, no findings. Scope was E2E
 slice 6 — base `ee757e2`, head `fc902f4` (search scenario + driver

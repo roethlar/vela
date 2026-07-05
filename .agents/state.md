@@ -5,6 +5,11 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- Slice 7 landed 2026-07-05 (`e7c5231`, loop app-1 CLOSED clean):
+  `resolve_stream`'s VFS checks (canonicalize/is_file — network-priced on
+  native SMB) moved onto the blocking pool per the async-worker invariant;
+  full Kimi-P0 audit against current code came back all-resolved and
+  repo-map's stale deferred-issue note was corrected.
 - E2E slice 6 landed 2026-07-05 (`fc902f4`) + review loop e2e-6 CLOSED
   (clean pass, no findings): search scenario — short-query validation
   error, hit/miss result filtering, play-from-results over mpv IPC.
