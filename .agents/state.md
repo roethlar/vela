@@ -5,6 +5,14 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 9 landed 2026-07-05 (`ccc6270`) + review loop e2e-8 CLOSED
+  (eh-13 verified after the loop's first reopen→fix→accept round-trip):
+  the watch-state scenario machine-verifies the 2026-07-04 owner-reported
+  "stale until restart" fix end-to-end — mpv plays THROUGH the mock's
+  Range-capable HTTP stream, Start/Stopped check-ins carry correct
+  ItemId/MediaSourceId/PositionTicks, and the card gains '% watched'
+  without restart. Suite: 8 scenarios. Remaining unblocked follow-ons:
+  mark-unwatched; merged All view (mock JF + local folder = two sources).
 - E2E slice 8 landed 2026-07-05 (`c706228`) + review loop e2e-7 CLOSED
   (eh-12 verified): NEW HARNESS LEG — a hermetic mock Jellyfin server
   (`tests/e2e/mockjf.mjs`, stateful, fail-closed on the client's Items

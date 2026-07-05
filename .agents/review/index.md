@@ -9,10 +9,11 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop e2e-8 opened 2026-07-05 (standing instruction: reviewloop codex per
-slice). Scope: E2E slice 9, single commit — base `d3a79de`, head
-`ccc6270` (watch-state scenario + mock stream/check-in routes + makeClips
-extraction). Same no-branches adaptation.
+Loop e2e-8 CLOSED 2026-07-05: eh-13 verified `[x]` after the loop's first
+reopen→fix→accept round-trip (reviewer caught a reversed-range crash path
+the first fix missed). Scope was E2E slice 9 — base `d3a79de`, head
+`ccc6270` (watch-state scenario + mock stream/check-in routes). Same
+no-branches adaptation.
 
 Loop e2e-7 CLOSED 2026-07-05: eh-12 verified `[x]`. Scope was E2E slice 8
 — base `4ffc272`, head `c706228` (mock-Jellyfin leg + mark-watched
@@ -104,7 +105,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-10 | HIGH | Continue Watching restarted local-family items from 0:00 | `[x]` | `4527613` |
 | eh-11 | MEDIUM | Queue scenario: clip A's EOF races the UI window — flaky false-red | `[x]` | `2eabf26` |
 | eh-12 | MEDIUM | Mock Jellyfin ignores the query contract — client regressions pass silently | `[x]` | `32c01e2` |
-| eh-13 | MEDIUM | Mock stream Range edges crash the runner / send invalid 206s | `[ ]` | |
+| eh-13 | MEDIUM | Mock stream Range edges crash the runner / send invalid 206s | `[x]` | `526f511`+`d5e1b04` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
