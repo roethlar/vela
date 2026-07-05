@@ -1,9 +1,9 @@
 # eh-1: Detached driver process group is orphaned on SIGINT/SIGTERM
 
 **Severity**: MEDIUM — an interrupted run leaves a live app window + drivers and blocks every subsequent run on the occupied port
-**Status**: Open
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `25757ea`
 
 ## Evidence
 `tests/e2e/run.mjs:65-80` — `tauri-driver` is spawned with `detached: true`
@@ -60,4 +60,10 @@ SIGKILL can still orphan the group; not addressable from inside the
 process and accepted.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~08:30 UTC.
+Reviewed `25757ea79c99a71b61736bd70aa0d653a999bef1` against base
+`f24ca117de2c03be998735cf2e03a31a85515a5f`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: the fix closes the root failure
+(signals now run the active scenario's group kill before exit); the
+red/green proof is discriminating (same mid-scenario SIGINT: survivors
+pre-fix, none post-fix, next run green).
