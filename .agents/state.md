@@ -6,7 +6,7 @@ Keep it short and update it when important repo facts change.
 ## Now
 
 - READY FOR OWNER: `.agents/plans/smb-native-client.md` is IMPLEMENTED on
-  branch `smb-native` (13 commits over main). All six slices codex-verified
+  branch `smb-native` (27 commits over main: code slices, fix-ups, and the per-slice review-trail records). All six slices codex-verified
   (`.agents/review/index.md`; smb-2/3/4/5 took 2-3 rounds each — every
   reopen was a real finding, recorded in the finding docs). Linux SMB is
   now native and mountless: libsmbclient in-process (via pavao-sys, one
