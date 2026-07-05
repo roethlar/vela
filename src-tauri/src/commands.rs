@@ -2916,11 +2916,22 @@ pub(crate) async fn play_by_key(
             .push(child);
     }
 
+    // Sources that keep no server-side progress (the local family) resolve
+    // resume_ms 0 — fall back to Vela's own stamped position so a Continue
+    // Watching click actually continues (2026-07-04 hero decision). A server
+    // that supplies a position still wins: it is the watch-state authority.
+    let resume_ms = if resolved.resume_ms > 0 {
+        resolved.resume_ms
+    } else {
+        config::load_config()
+            .map(|cfg| crate::recents::resume_stamp_ms(&cfg, rating_key))
+            .unwrap_or(0)
+    };
     let spec = playback::PlaySpec {
         url: resolved.url,
         title: title.to_string(),
         http_headers: resolved.http_headers,
-        start_seconds: resolved.resume_ms as f64 / 1000.0,
+        start_seconds: resume_ms as f64 / 1000.0,
     };
     // End-of-session notifier → the `playback-ended` UI event, emitted after
     // the final server check-in so a re-fetch it triggers sees the new watch

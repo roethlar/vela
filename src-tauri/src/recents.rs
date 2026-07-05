@@ -84,6 +84,18 @@ pub fn finish(cfg: &mut AppConfig, rating_key: &str, position_ms: u64, now_ms: u
     cfg.recents.insert(0, entry);
 }
 
+/// Vela's own stamped resume position for a key, 0 when none. The local
+/// family keeps no server-side progress, so this stamp is what lets a
+/// Continue Watching click actually continue (2026-07-04 hero decision);
+/// matches either identity of a merged item, like every other curation op.
+pub fn resume_stamp_ms(cfg: &AppConfig, key: &str) -> u64 {
+    cfg.recents
+        .iter()
+        .find(|r| entry_matches(r, key))
+        .and_then(|r| r.item.view_offset_ms)
+        .unwrap_or(0)
+}
+
 /// Drop an item from recents (mark-watched, explicit removal): watched or
 /// dismissed = not "continue watching", the same semantic as `finish()`
 /// past the threshold.
@@ -196,6 +208,18 @@ mod tests {
         );
         assert_eq!(cfg.recents[0].item.view_offset_ms, Some(30_000));
         assert_eq!(cfg.recents[0].ended_at_ms, 1111);
+    }
+
+    #[test]
+    fn resume_stamp_reads_back_the_finished_position() {
+        let mut cfg = AppConfig::default();
+        record(&mut cfg, item("movie", Some(100_000)));
+        finish(&mut cfg, "movie", 30_000, 1111);
+        assert_eq!(resume_stamp_ms(&cfg, "movie"), 30_000);
+        assert_eq!(resume_stamp_ms(&cfg, "unknown"), 0, "no entry ⇒ start from 0");
+        // An open session (no finish yet) has no stamp to resume from.
+        record(&mut cfg, item("playing", None));
+        assert_eq!(resume_stamp_ms(&cfg, "playing"), 0);
     }
 
     #[test]
