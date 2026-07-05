@@ -14,6 +14,9 @@ slice). Scope: E2E slice 3, single commit — base `ca0e9da`, head
 `ee01101` (curation scenario + ctx.restart in the runner). Same
 no-branches adaptation.
 
+Review pass 2026-07-05 (codex, read-only, base `ca0e9da` head `ee01101`,
+loop e2e-3): 2 candidates, 2 admitted (eh-8, eh-9), 0 declined.
+
 Loop e2e-2 CLOSED 2026-07-05: eh-5..eh-7 all verified `[x]`, fixes on
 `main`. Scope was E2E slice 2 + the app fix it surfaced — base `8ebbde1`,
 head `d2be263` (`b4b4ebb` eh-5 hero fix, coder-filed with the playback
@@ -59,6 +62,8 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-5 | HIGH | Local-only setups never see the Continue Watching hero (hub-gated render path) | `[x]` | `b4b4ebb` |
 | eh-6 | MEDIUM | Playback scenario races the seeded source render — flaky false-red | `[x]` | `4f5abd9` |
 | eh-7 | MEDIUM | Quit-vs-EOF indistinguishable in the playback guard — false-green | `[x]` | `dd5cec9` |
+| eh-8 | LOW | Curation restart leg passes without exercising tombstone application | `[ ]` | |
+| eh-9 | LOW | PID restart guard: overlap false-green, foreign-Vela false-red | `[ ]` | |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
