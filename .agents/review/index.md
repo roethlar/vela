@@ -9,6 +9,12 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
+Loop e2e-4 opened 2026-07-05 (standing instruction: reviewloop codex per
+slice). Scope: E2E slice 4 + the app fix it surfaced — base `e91cbcf`,
+head `2f5bba8` (`4527613` eh-10 local-resume fix, coder-filed with the
+resume scenario as guard; `2f5bba8` helpers + resume scenario). Same
+no-branches adaptation.
+
 Loop e2e-3 CLOSED 2026-07-05: eh-8..eh-9 verified `[x]`. Scope was E2E
 slice 3 — base `ca0e9da`, head `ee01101` (curation scenario + ctx.restart
 in the runner); codex admitted 2 guard-strength findings, both fixed and
@@ -64,6 +70,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-7 | MEDIUM | Quit-vs-EOF indistinguishable in the playback guard — false-green | `[x]` | `dd5cec9` |
 | eh-8 | LOW | Curation restart leg passes without exercising tombstone application | `[x]` | `ebf8162` |
 | eh-9 | LOW | PID restart guard: overlap false-green, foreign-Vela false-red | `[x]` | `4b24550` |
+| eh-10 | HIGH | Continue Watching restarted local-family items from 0:00 | `[~]` | `4527613` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
