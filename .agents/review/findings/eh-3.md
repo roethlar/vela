@@ -1,9 +1,9 @@
 # eh-3: Driver requests are unbounded — any stall becomes an opaque 5-minute hang
 
 **Severity**: MEDIUM — a driver/webkit stall turns a ~2s scenario into a silent 300s wait that ends in an error naming no culprit
-**Status**: In progress
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `0945104`
 
 ## Evidence
 `tests/e2e/driver.mjs` `#cmd` — every request uses bare `fetch` with no
@@ -53,4 +53,12 @@ diagnosis; this finding bounds and names such failures, it does not claim
 to remove their cause.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~08:33 UTC.
+Reviewed `0945104740b90917e3b21ae4ffba5acfef575372` against base
+`25757ea79c99a71b61736bd70aa0d653a999bef1`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: every `#cmd` now carries
+`AbortSignal.timeout` (30s / 60s newSession); failures rethrow as
+`WebDriverError` naming method+path; the silent-listener proof matches the
+observed failure class. Residual risk noted, not reopening: this bounds
+and names stalls, it does not diagnose the underlying lost-response cause
+(tracked as eh-4, which identified and removed that cause).
