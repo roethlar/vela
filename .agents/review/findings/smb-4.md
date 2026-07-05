@@ -98,3 +98,17 @@ stable `velasmb://<mount-id>/<path>` custom URI scheme served by a
 Linux-only Tauri protocol handler (config-validated mount, normalized
 path, image-extension whitelist, bounded read). The token registry then
 holds playback targets only, where the cap is ample.
+
+Round-1 fix-up (coder), 2026-07-04:
+- Artwork moved off the token proxy onto the stable `velasmb://` scheme
+  (`602fa89` + `f2a4640`): async Tauri protocol handler, config-validated
+  mount, normalized path, image-extension whitelist (mutation-proven),
+  10 MiB bounded read, CSP `velasmb:`; `Vfs::artwork_ref` replaces
+  artwork-over-proxy; token registry is playback-only.
+- Process incident, recorded for honesty: the first fix-up commit
+  (`602fa89`) was BROKEN — during its mutation proof, `git checkout
+  <file>` reverted uncommitted work instead of the mutation, and the
+  post-restore verification silently didn't run. Caught by re-checking
+  the committed tree; corrected in `f2a4640` with verification re-run
+  from a clean state. Lesson applied: mutation proofs only against a
+  committed baseline.
