@@ -18,9 +18,83 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
 
+use base64::engine::general_purpose::URL_SAFE_NO_PAD;
+use base64::Engine;
+
 use crate::config::SmbMount;
 use crate::smb_client::{connect_mount, SmbConnection};
 use crate::source::vfs::Vfs;
+
+/// Custom webview scheme serving SMB sidecar artwork. URLs are STABLE
+/// across app restarts (mount id + base64url of the provider path), so
+/// they are safe to persist in the listing cache and recents — unlike
+/// loopback proxy tokens, whose port and token die with the process.
+pub const ARTWORK_SCHEME: &str = "velasmb";
+
+/// Bytes cap for a served artwork file.
+const ARTWORK_CAP: u64 = 10 * 1024 * 1024;
+
+/// Extensions the artwork endpoint will serve, with their MIME types.
+/// A whitelist keeps the webview scheme an artwork channel, not a
+/// general remote-file reader.
+const ARTWORK_TYPES: &[(&str, &str)] = &[
+    ("jpg", "image/jpeg"),
+    ("jpeg", "image/jpeg"),
+    ("png", "image/png"),
+    ("webp", "image/webp"),
+];
+
+/// Stable artwork URL for a provider path on a mount.
+pub fn artwork_url(mount_id: &str, provider_path: &Path) -> Option<String> {
+    let norm = normalize(provider_path)?;
+    let encoded = URL_SAFE_NO_PAD.encode(norm.to_string_lossy().as_bytes());
+    Some(format!("{ARTWORK_SCHEME}://{mount_id}/{encoded}"))
+}
+
+/// Parse `velasmb://<mount-id>/<b64url-path>` back into (mount id,
+/// normalized provider path), refusing anything that doesn't decode to a
+/// whitelisted image inside the share namespace.
+pub fn parse_artwork_url(host: &str, path: &str) -> Option<(String, PathBuf)> {
+    if host.is_empty() {
+        return None;
+    }
+    let encoded = path.trim_matches('/');
+    if encoded.is_empty() || encoded.contains('/') {
+        return None; // exactly one opaque segment
+    }
+    let bytes = URL_SAFE_NO_PAD.decode(encoded).ok()?;
+    let decoded = String::from_utf8(bytes).ok()?;
+    let norm = normalize(Path::new(&decoded))?;
+    artwork_mime(&norm)?;
+    Some((host.to_string(), norm))
+}
+
+/// MIME type for a whitelisted artwork path; `None` = refuse to serve.
+pub fn artwork_mime(p: &Path) -> Option<&'static str> {
+    let ext = p.extension()?.to_str()?.to_ascii_lowercase();
+    ARTWORK_TYPES
+        .iter()
+        .find(|(e, _)| *e == ext)
+        .map(|(_, mime)| *mime)
+}
+
+/// Serve one artwork request: look the mount up in config, read the file
+/// over a fresh native connection, bounded. Returns (bytes, mime) or an
+/// HTTP status code. Blocking; run off async workers.
+pub fn serve_artwork(host: &str, path: &str) -> Result<(Vec<u8>, &'static str), u16> {
+    let (mount_id, norm) = parse_artwork_url(host, path).ok_or(404u16)?;
+    let mime = artwork_mime(&norm).ok_or(404u16)?;
+    let cfg = crate::config::load_config().map_err(|_| 500u16)?;
+    let mount = cfg
+        .smb_mounts
+        .into_iter()
+        .find(|m| m.id == mount_id)
+        .ok_or(404u16)?;
+    let rel = SmbVfs::relative(&norm).ok_or(404u16)?;
+    let conn = connect_mount(&mount).map_err(|_| 502u16)?;
+    let bytes = conn.read_small(&rel, ARTWORK_CAP).map_err(|_| 404u16)?;
+    Ok((bytes, mime))
+}
 
 #[derive(Clone, Copy)]
 struct EntryMeta {
@@ -53,7 +127,7 @@ impl SmbVfs {
     }
 
     /// Provider path (`/movies`) → share-relative path (`movies`).
-    fn relative(p: &Path) -> Option<String> {
+    pub(crate) fn relative(p: &Path) -> Option<String> {
         let norm = normalize(p)?;
         let s = norm.to_string_lossy();
         Some(s.trim_start_matches('/').to_string())
@@ -197,6 +271,12 @@ impl Vfs for SmbVfs {
         };
         Some(crate::stream_proxy::register_smb(&self.mount, &rel))
     }
+
+    fn artwork_ref(&self, p: &Path) -> Option<String> {
+        // Stable scheme URL; a path that fails to normalize yields no
+        // artwork at all — never a raw provider path.
+        artwork_url(&self.mount.id, p)
+    }
 }
 
 #[cfg(test)]
@@ -211,6 +291,30 @@ mod tests {
             Some(PathBuf::from("/movies/4k/x.mkv"))
         );
         assert_eq!(normalize(Path::new("/")), Some(PathBuf::from("/")));
+    }
+
+    #[test]
+    fn artwork_urls_roundtrip_and_gate_extensions() {
+        let url = artwork_url("m-1", Path::new("/movies/My Film (2021)/poster.jpg")).unwrap();
+        assert!(url.starts_with("velasmb://m-1/"), "{url}");
+        let (host, b64) = url
+            .strip_prefix("velasmb://")
+            .unwrap()
+            .split_once('/')
+            .unwrap();
+        let (mount, path) = parse_artwork_url(host, b64).expect("roundtrip parses");
+        assert_eq!(mount, "m-1");
+        assert_eq!(path, PathBuf::from("/movies/My Film (2021)/poster.jpg"));
+
+        // Non-image and escaping payloads are refused outright.
+        let mkv = URL_SAFE_NO_PAD.encode("/movies/film.mkv");
+        assert!(parse_artwork_url("m-1", &mkv).is_none(), "extension whitelist");
+        let escape = URL_SAFE_NO_PAD.encode("/../etc/passwd.png");
+        assert!(parse_artwork_url("m-1", &escape).is_none(), "no escapes");
+        assert!(parse_artwork_url("", "abc").is_none(), "mount id required");
+        assert!(parse_artwork_url("m-1", "not!base64").is_none());
+        assert_eq!(artwork_mime(Path::new("/a/p.JPG")), Some("image/jpeg"));
+        assert_eq!(artwork_mime(Path::new("/a/p.nfo")), None);
     }
 
     #[test]
