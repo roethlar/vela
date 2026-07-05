@@ -1,10 +1,12 @@
-// Mark-watched round-trip against the hermetic mock Jellyfin server: the
-// context-menu action must POST PlayedItems for the right user/item, and
-// the card must show the watched badge — surviving the refetch that
-// re-reads (now-flipped) server state.
+// Mark-watched / mark-unwatched round-trip against the hermetic mock
+// Jellyfin server: each context-menu action must hit PlayedItems with the
+// right method (POST / DELETE) for the right user/item, flip the server
+// state, and the card's watched badge must follow — surviving the refetch
+// that re-reads server state.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
+import { pollUntil } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
 let mock; // seed → run → cleanup share the module instance
@@ -90,6 +92,28 @@ export default {
       'watched badge on the card',
     );
     await screenshot('01-watched');
+
+    // And back: mark unwatched must DELETE PlayedItems, flip the server
+    // state, and clear the badge.
+    await driver.exec(
+      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]');
+       const r = el.getBoundingClientRect();
+       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
+    );
+    const unmarkBtn = await driver
+      .waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu (unwatch)')
+      .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='Mark unwatched']`));
+    await driver.click(unmarkBtn);
+    await pollUntil(
+      () => mock.state.requests.some((r) => r.method === 'DELETE' && r.path === `/Users/${mock.userId}/PlayedItems/m1`),
+      'the PlayedItems DELETE',
+    );
+    assert.equal(mock.state.played, false, 'mock server watch state must flip back');
+    await driver.waitFor(
+      `return !document.querySelector('button.poster[aria-label^="Mock Movie"]')?.classList.contains('watched')`,
+      'watched badge to clear',
+    );
+    await screenshot('02-unwatched');
 
     // The client must never have broken the Items query contract (eh-12).
     assert.deepEqual(
