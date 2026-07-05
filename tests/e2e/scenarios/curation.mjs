@@ -124,20 +124,40 @@ export default {
     // feed item that is actually present (both-feeds suppression,
     // +page.svelte heroItems) — not merely on the entry having been removed.
     const { execSync } = await import('node:child_process');
-    const appPid = () => execSync('pgrep -x vela || true').toString().trim();
-    const pidBefore = appPid();
-    assert.ok(pidBefore, 'app process should be findable before restart');
+    // Only THIS scenario's app counts: scope pgrep hits to processes whose
+    // environ carries our unique XDG_CONFIG_HOME — a user-launched Vela (or
+    // a leaked twin from another scenario) must neither satisfy nor break
+    // the restart check.
+    const scopedPids = () =>
+      execSync('pgrep -x vela || true')
+        .toString()
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+        .filter((pid) => {
+          try {
+            return fs
+              .readFileSync(`/proc/${pid}/environ`, 'utf8')
+              .includes(`XDG_CONFIG_HOME=${path.join(configRoot, 'config')}\0`);
+          } catch {
+            return false; // process died mid-scan
+          }
+        });
+    const before = scopedPids();
+    assert.equal(before.length, 1, `exactly one scenario app before restart, got [${before}]`);
     await restart(() => {
       const cfg = readCfg();
       assert.equal(cfg.recents?.length ?? 0, 0, 'removal should have dropped the recents entry');
       cfg.recents = [stampedEntry];
       fs.writeFileSync(configFile, JSON.stringify(cfg));
     });
-    const pidAfter = appPid();
-    assert.ok(
-      pidAfter && pidAfter !== pidBefore,
-      `restart must relaunch the app (pid ${pidBefore} → ${pidAfter})`,
-    );
+    // The old app must be GONE (not merely joined by a new one) and exactly
+    // one new instance must own the config.
+    const after = await pollUntil(() => {
+      const pids = scopedPids();
+      return pids.length === 1 && pids[0] !== before[0] ? pids : null;
+    }, `the old app (${before[0]}) to exit and exactly one new instance to run`);
+    assert.notEqual(after[0], before[0]);
     await driver.waitFor(
       `return document.readyState === 'complete' && document.body.innerText.includes('${EMPTY_HOME}')`,
       'empty home after restart',
