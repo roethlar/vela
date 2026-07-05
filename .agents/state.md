@@ -5,6 +5,34 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- CURRENT WORK (2026-07-05) — implementing
+  `.agents/plans/smb-ssh-playtest-fixes.md`, **owner-approved** after a 3-round
+  codex plan-reviewloop (accepted at r3; trail in the plan's Review log). Five
+  bugs from the owner's 0.1.21 NAS playtest (SMB share + SSH folder, same host);
+  diagnoses done this session, SMB/SSH seek mechanisms adversarially verified.
+  **IMMEDIATE NEXT ACTION: slice 1, SMB seek hang — NOT started** (no slice-1
+  code commits yet; only the plan docs are committed, and unpushed). Slice order +
+  per-slice hermetic verification are in the plan. STANDING INSTRUCTION:
+  `reviewloop codex` on every slice. Load-bearing gotchas from the plan-review a
+  fresh session must not relearn:
+  - SMB seek (slice 1): every mpv seek rebuilds a full libsmbclient session; fix =
+    per-token session reuse (own file handle per stream, generation-owned
+    compare-and-remove cleanup, cooperative cancel bounded by `OP_TIMEOUT_MS`).
+    Do NOT release `ctx_lifecycle_lock` around `smbc_free_context` (codex blocker
+    — lifecycle race); remove per-seek context churn instead.
+  - SSH seek is DISTINCT (raw sshfs path, NOT the proxy): fix = sshfs mount
+    options (max_conns/cache) + a required hermetic loopback sshd+sshfs test.
+  - Bug 4 (share-root) expansion must run OFF-LOCK on the blocking pool (never
+    `detect_kind`/`read_dir` under `config::update`/`source_lock`); key the kind
+    cache by mount id + path with a schema bump.
+  - Source-click routing keys on the empty-Home STATE (not "any source") so
+    server-source Home hubs aren't regressed.
+  - METADATA (owner-gated the whole thing on this): no product shift.
+    `metadata.rs` already resolves `.nfo`+artwork sidecar OVER THE VFS (so SMB/SSH
+    work) + keyless iTunes/TVmaze online; the blank filename cards ARE Bug 4's
+    mis-classification, and Bug 4 is the metadata unlock. The local/SMB/SSH "Recently
+    added" Home rail (last slice) is metadata-gated (only items with resolved
+    metadata; never blank filename cards).
 - E2E slice 11 landed 2026-07-05 (`7c899be`) + review loop e2e-10 CLOSED
   (eh-15 verified, fix `6db391c`): the markwatched scenario now round-trips
   mark-unwatched (DELETE PlayedItems, server flip, badge clears). eh-15
@@ -220,16 +248,17 @@ Keep it short and update it when important repo facts change.
 
 ## Next
 
-- IN IMPLEMENTATION: `.agents/plans/smb-ssh-playtest-fixes.md` — five bugs from
-  the 2026-07-05 NAS playtest of 0.1.21 (SMB seek hang, SSH seek hang,
-  source-click dead-end, share-root mis-classification starving the merged view,
-  Connected-tab triplication + erroring Remove + URL-as-name). Plan codex-
-  reviewloop converged (3 rounds) and **owner-approved 2026-07-05** with three
-  decisions folded in (SSH hermetic test required; Home rail metadata-gated;
-  keep-alive deferred). Metadata gate resolved: no product shift — Bug 4 unlocks
-  the existing `metadata.rs` sidecar+online enrichment. Slice order in the plan;
-  run `reviewloop codex` on every slice. Next: slice 1 (SMB seek hang).
-
+- QUEUED (owner-parked 2026-07-05 — "after current work", do NOT dig into it
+  before then): GitHub CI is RED on the last PUSHED commit `05f9594`. Two jobs
+  failed: `cargo audit` (quick-xml RUSTSEC-2026-0194/0195, published 2026-06-29 —
+  an advisory-DB update, NOT from our commit; that job is `continue-on-error:
+  true`) AND `Rust (src-tauri)` on `cargo check --locked`. Local `cargo check
+  --locked` PASSES on 0.1.21, so the CI Rust-job failure is unexplained (clean-env
+  / network / clean-build?) and not yet triaged. The plan commits after `05f9594`
+  are docs-only and UNPUSHED, so CI hasn't seen them (owner pushes manually).
+- The current SMB/SSH playtest-fix work (see the CURRENT WORK entry at the top of
+  Now) is the active track; the older E2E-harness/playtest items below are
+  largely superseded or owner-cred-gated.
 - E2E harness next slices (skeleton is done): (a) SMB add→browse→play
   scenario — needs owner NAS creds via `VELA_E2E_SMB`/`_USER`/`_PASS` env
   at run time; (b) the mpv-IPC playback probe leg; (c) hero/curation
@@ -263,7 +292,11 @@ Keep it short and update it when important repo facts change.
 
 - See `.agents/repo-map.json` for the current automated verification
   commands (npm check/build; cargo check/clippy/test from `src-tauri/`).
-  Rust suite: 71 tests; clippy `-D warnings` clean.
+  clippy runs `-D warnings`. (Exact test count lives with the suite / CI, not
+  restated here — an earlier "71" vs "78" in this file was drift.)
+- Local `cargo check --locked` passes on 0.1.21; but GitHub CI is currently RED —
+  see the QUEUED CI item in Next (untriaged `cargo check --locked` failure on the
+  CI runner + the advisory-only `cargo audit` job).
 - Rust verification on Linux needs the Tauri/WebKitGTK system dependencies
   used by CI.
 
@@ -273,7 +306,8 @@ Keep it short and update it when important repo facts change.
 - `.agents/repo-guidance.md`
 - `.agents/repo-map.json`
 - `.agents/decisions.md`
-- `.agents/plans/` (all five 2026-07-04 plans carry implementation notes)
+- `.agents/plans/` — the 2026-07-04 plans (implementation notes) plus the ACTIVE
+  `.agents/plans/smb-ssh-playtest-fixes.md` (owner-approved, in implementation)
 - `.agents/review/index.md` (completed review loop, durable trail)
 - `README.md`
 - `ISSUES.md`
