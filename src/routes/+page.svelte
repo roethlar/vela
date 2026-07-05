@@ -147,19 +147,24 @@
   // `playback-ended` after its final server check-in, so the re-fetch below is
   // guaranteed to see the updated progress/played state (the hubs fetch itself
   // is live and uncached).
+  // Shared by the playback-ended event and watched-state edits: anything
+  // that changes watch state re-fetches hubs + recents so the hero flow and
+  // progress bars reflect it without a restart.
+  function refreshWatchState() {
+    heroPos = 0; // the most recent change should be front and center
+    if (mode === "home") {
+      loadHome(++homeGen);
+    } else {
+      // The hidden Home hubs are stale now; empty them so goHome() re-fetches.
+      hubs = [];
+      // Refresh the visible listing so its progress bars / played badges update.
+      if (searchTerm) runSearch(searchTerm);
+      else resetAndLoad();
+    }
+  }
+
   onMount(() => {
-    listen("playback-ended", () => {
-      heroPos = 0; // the just-played item is the newest — center it
-      if (mode === "home") {
-        loadHome(++homeGen);
-      } else {
-        // The hidden Home hubs are stale now; empty them so goHome() re-fetches.
-        hubs = [];
-        // Refresh the visible listing so its progress bars / played badges update.
-        if (searchTerm) runSearch(searchTerm);
-        else resetAndLoad();
-      }
-    }).then((un) => (unlistenPlaybackEnded = un));
+    listen("playback-ended", refreshWatchState).then((un) => (unlistenPlaybackEnded = un));
     // A background listing revalidation found filesystem changes (local/SMB
     // sources serve from cache and re-walk behind the scenes).
     listen("listings-updated", () => {
@@ -721,6 +726,10 @@
       // watched (✓) or unwatched state instead of a contradictory bar + badge.
       item.played = played;
       item.viewOffsetMs = 0;
+      // Curate the hero without a restart: mark-watched drops the item from
+      // recents (backend) and the re-fetch drops the server hub copy;
+      // mark-unwatched just re-fetches (the hub decides if it returns).
+      refreshWatchState();
     } catch (e) {
       error = String(e);
     }

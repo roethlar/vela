@@ -2763,7 +2763,18 @@ pub async fn set_watched(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (src, raw) = state.registry.lock().await.route(&rating_key)?;
-    src.mark_played(&raw, played).await
+    src.mark_played(&raw, played).await?;
+    if played {
+        // Watched = not "continue watching": drop the recents entry so the
+        // hero flow lets go of it. Mark-UNwatched deliberately does not
+        // resurrect one — the item re-enters via the server hub if the
+        // server still lists it.
+        config::update(move |cfg| {
+            crate::recents::unrecord(cfg, &rating_key);
+            Ok(())
+        })?;
+    }
+    Ok(())
 }
 
 // ---- playback ------------------------------------------------------------

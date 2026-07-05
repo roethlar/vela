@@ -67,6 +67,13 @@ pub fn finish(cfg: &mut AppConfig, rating_key: &str, position_ms: u64, now_ms: u
     cfg.recents.insert(0, entry);
 }
 
+/// Drop an item from recents (mark-watched, explicit removal): watched or
+/// dismissed = not "continue watching", the same semantic as `finish()`
+/// past the threshold.
+pub fn unrecord(cfg: &mut AppConfig, rating_key: &str) {
+    cfg.recents.retain(|r| r.item.rating_key != rating_key);
+}
+
 /// The hero feed: item snapshots, newest first. Each snapshot carries its
 /// session-end stamp so the frontend can interleave recents with server
 /// hub items by recency. A still-open session (`ended_at_ms == 0`) has no
@@ -162,6 +169,19 @@ mod tests {
             listed[1].last_watched_at_ms, None,
             "open session has no stamp yet"
         );
+    }
+
+    #[test]
+    fn unrecord_drops_only_the_named_entry() {
+        let mut cfg = AppConfig::default();
+        record(&mut cfg, item("keep", None));
+        record(&mut cfg, item("watched", None));
+        unrecord(&mut cfg, "watched");
+        assert_eq!(cfg.recents.len(), 1);
+        assert_eq!(cfg.recents[0].item.rating_key, "keep");
+        // Unknown key is a no-op, not an error.
+        unrecord(&mut cfg, "absent");
+        assert_eq!(cfg.recents.len(), 1);
     }
 
     #[test]
