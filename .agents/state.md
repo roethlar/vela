@@ -127,9 +127,6 @@ Keep it short and update it when important repo facts change.
   cards, context-menu "Play from" persisting an override); sshfs panel
   guidance.
 - Finish live smoke tests: Emby, local folders, SMB browse/playback depth.
-- Letterbox crop (decided 2026-07-03): next is the render-zoom safety spike
-  (owner at the machine), then design approval, then code. Draft:
-  `.agents/plans/letterbox-crop.md`.
 - Plex stream header auth residuals: owner eyeball check on a real play
   (title bar / Shift+I clean), EDL split-file exercised only by unit tests,
   Jellyfin/Emby stream-URL parity follow-up.

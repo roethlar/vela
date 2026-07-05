@@ -410,3 +410,28 @@ The "On Deck ... uses the same landscape artwork rules" 16:9-row
 treatment in the 2026-07-04 "UI design language" decision; the hero
 cover-flow decision's merge ordering (was: recents then hub order — now
 recency-interleaved across both feeds).
+
+### 2026-07-05 - Letterbox crop feature DROPPED
+
+Status: Active
+
+Decision:
+Vela ships no letterbox/black-bar cropping feature. Owner ruling
+(2026-07-05): "this is mpv's problem, not Vela's." The draft plan
+`.agents/plans/letterbox-crop.md` is deleted; no spike, no design, no
+code. Users who want bar cropping can use mpv's own facilities via the
+existing `mpv_extra_args` config passthrough.
+
+Reason:
+The owner does not recall choosing the 2026-07-03 direction and, on
+re-review, rejects the feature outright as out of Vela's scope. The
+scope boundary is durable: Vela launches and controls mpv but does not
+re-implement video-geometry processing.
+
+Supersedes:
+The 2026-07-03 "detect during first playback, correct once" decision
+(entirely) and the 2026-06-28 open-question entry's target model. The
+2026-06-28 entry's CONFIRMED FACTS remain valid durable evidence for
+anyone touching mpv on this stack: live `video-crop` over IPC can wedge
+mpv into D-state on gpu-next/Vulkan/Wayland/HDR, and cropdetect /
+osd-dimensions readings are unreliable on HDR/PQ content.
