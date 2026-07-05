@@ -77,6 +77,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-8 | LOW | Curation restart leg passes without exercising tombstone application | `[x]` | `ebf8162` |
 | eh-9 | LOW | PID restart guard: overlap false-green, foreign-Vela false-red | `[x]` | `4b24550` |
 | eh-10 | HIGH | Continue Watching restarted local-family items from 0:00 | `[x]` | `4527613` |
+| eh-11 | MEDIUM | Queue scenario: clip A's EOF races the UI window — flaky false-red | `[ ]` | |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
