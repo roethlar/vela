@@ -1,9 +1,9 @@
 # eh-5: Continue Watching hero never renders for a hub-less (local-only) setup
 
 **Severity**: HIGH — the hero is the product's core resume surface, and for local-only libraries it silently never appears; violates the recorded 2026-07-04 hero decision ("Vela's own recents, any source")
-**Status**: In progress
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `b4b4ebb`
 
 ## Evidence
 `src/routes/+page.svelte:1072-1076` (pre-fix) — the Home template renders
@@ -55,4 +55,12 @@ None — coder-filed.
 same `loadHome` batch as hubs, so no flicker regression is expected.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~09:21 UTC.
+Reviewed `b4b4ebbaf3afa5ac683a95284b6736a25a00a7c4` against base
+`8ebbde1c62ccbac9de12682d345432efaaac7e47`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: dual gate closes the root cause;
+hub-only behavior unchanged (hubs still render `.home`, hero skipped
+without items); no material loading regression (initial no-data still
+shows the skeleton; a refresh with hero items keeps Home visible, matching
+the recents-fed semantic); the committed scenario plus dd5cec9 hardening
+is a sound guard.
