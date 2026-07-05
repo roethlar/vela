@@ -101,3 +101,36 @@ guard-proven per AGENTS.md (revert change → test fails → restore).
   appears in the flow; mark-watched drops an item without restart; remove
   hides an item and survives an app restart and a hub refresh; replaying a
   removed item brings it back.
+
+## Implementation notes (2026-07-04, all three slices landed)
+
+- Commits: slice 1 `d2ea1a7`, slice 2 `cf5af95`, slice 3 `d259213`. Full
+  suite green after each (78 Rust tests at the end; svelte-check and
+  `npm run build` clean). All new tests guard-proven (change reverted →
+  test fails → restored).
+- Deviations / refinements:
+  - Hero merge ordering lives in the frontend (`heroItems` in
+    `+page.svelte`); the repo has no JS test runner, so ordering is NOT
+    unit-tested — the Rust halves (onDeck XML parse incl. `lastViewedAt`,
+    recents `ended_at_ms` stamping) are. Covered instead by svelte-check
+    and the planned E2E harness (`.agents/plans/e2e-harness.md`).
+  - Tombstone pruning: the plan's "prune keys absent from any feed at
+    record time" is not implementable backend-side (hub feeds aren't
+    available there); implemented as clear-on-replay + FIFO cap of 200
+    (`MAX_HIDDEN` in `recents.rs`).
+  - Removal is one command (`remove_from_continue`), not `remove_recent`:
+    it drops the recents entry, tombstones, and best-effort calls
+    `MediaSource::remove_from_continue` (Plex implements it; default
+    no-op). Jellyfin/Emby server-side removal and their
+    `last_watched_at_ms` timestamps remain recorded follow-ups.
+  - A recents entry whose session is still open (`ended_at_ms == 0`)
+    reports no `last_watched_at_ms` and sorts after stamped items until
+    mpv exits — self-correcting, noted here for honesty.
+- Live verification status: Plex `/actions/removeFromContinueWatching`
+  existence confirmed against the owner's server (400 without `ratingKey`,
+  404 with a bogus one; an unknown action returns 404 for both shapes).
+  The real-item end-to-end checks in the Verification section above are
+  pending: the automated-permissions layer correctly refused a live
+  mutating PUT on a real hub item mid-implementation. First in-app use or
+  the E2E harness closes this; failure is non-fatal (tombstone owns the
+  UX).

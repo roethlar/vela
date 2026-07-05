@@ -1,8 +1,15 @@
 # Issue Queue
 
-## Open - Owner-Reported (2026-07-04, Continue Watching curation)
+## Resolved - Owner-Reported (2026-07-04, Continue Watching curation)
 
 Reported on Linux against a live Plex server; code-traced same day.
+All three items implemented 2026-07-04 via
+`.agents/plans/continue-watching-curation.md` (slices 2, 3, 1
+respectively; commits `cf5af95`, `d259213`, `d2ea1a7`). Automated
+checks pass and tests are guard-proven; live in-app confirmation of the
+Plex server-side removal is pending first use (non-fatal by design —
+the local tombstone alone hides the item). The On Deck supersession is
+recorded in `.agents/decisions.md`.
 
 - Mark watched/unwatched does not remove an item from the Continue Watching
   hero, and the owner expects it to. Root causes (both required):
