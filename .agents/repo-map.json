@@ -1,7 +1,7 @@
 {
   "validated_against": {
-    "commit": "e7178982774b2dc2a06b687e46f0db5575ece7e1",
-    "date": "2026-07-04"
+    "commit": "042305f",
+    "date": "2026-07-05"
   },
   "projects": [
     {
@@ -11,6 +11,15 @@
       "notes": [
         "Frontend is SvelteKit/TypeScript configured as a static SPA.",
         "Backend is Rust and owns media sources, config persistence, source mounting, and mpv playback."
+      ]
+    },
+    {
+      "name": "E2E harness",
+      "type": "Node WebDriver test suite",
+      "paths": ["tests/e2e/"],
+      "notes": [
+        "Drives the real debug binary via tauri-driver + a vendored WebKitWebDriver (fetch-driver.sh, gitignored vendor/) on a private Xvfb display; throwaway XDG_CONFIG_HOME per scenario.",
+        "Design and deviations live in .agents/plans/e2e-harness.md; six scenarios as of 2026-07-05 (smoke, playback, curation, resume, queue, search)."
       ]
     },
     {
@@ -50,6 +59,11 @@
         "command": "cargo test --locked",
         "working_directory": "src-tauri",
         "when": "Rust unit tests."
+      },
+      {
+        "command": "npm run e2e",
+        "working_directory": ".",
+        "when": "End-to-end UI/playback validation on Linux (drives the real debug app headless on Xvfb; needs tauri-driver, Xvfb, ffmpeg, mpv, bsdtar, curl — see tests/e2e/README.md). Use `-- --skip-build` to reuse the existing debug binary, `-- <name>` for one scenario."
       }
     ],
     "packaging_commands": [
