@@ -29,11 +29,20 @@ pub struct RecentEntry {
 /// hide time keeps the list small instead.
 const MAX_HIDDEN: usize = 200;
 
+/// True when `key` names this entry — by its play identity or its server
+/// watch identity. Merged items carry both (`rating_key` = ranked play
+/// target, often local; `watch_key` = the server backing that owns watch
+/// state), and curation actions may arrive under either.
+fn entry_matches(entry: &RecentEntry, key: &str) -> bool {
+    entry.item.rating_key == key || entry.item.watch_key.as_deref() == Some(key)
+}
+
 /// Record a play starting: newest first, one entry per item, capped.
 pub fn record(cfg: &mut AppConfig, item: ItemDto) {
     // Playing something again is the explicit opposite of "stop suggesting
-    // it": clear its Continue Watching tombstone.
-    cfg.hidden_from_continue.retain(|k| k != &item.rating_key);
+    // it": clear the Continue Watching tombstones of BOTH its identities.
+    cfg.hidden_from_continue
+        .retain(|k| k != &item.rating_key && item.watch_key.as_deref() != Some(k.as_str()));
     cfg.recents.retain(|r| r.item.rating_key != item.rating_key);
     cfg.recents.insert(
         0,
@@ -79,21 +88,36 @@ pub fn finish(cfg: &mut AppConfig, rating_key: &str, position_ms: u64, now_ms: u
 /// dismissed = not "continue watching", the same semantic as `finish()`
 /// past the threshold.
 pub fn unrecord(cfg: &mut AppConfig, rating_key: &str) {
-    cfg.recents.retain(|r| r.item.rating_key != rating_key);
+    cfg.recents.retain(|r| !entry_matches(r, rating_key));
 }
 
 /// Explicitly remove an item from Continue Watching: drop any recents entry
-/// AND tombstone the key, so a server hub that still carries the item can't
-/// bring it back. The tombstone clears if the item is played again.
-pub fn hide(cfg: &mut AppConfig, rating_key: &str) {
+/// AND tombstone its full identity set (a merged item's server hub copy
+/// shows under its watch key, not its play key), so a server hub that still
+/// carries the item can't bring it back. The tombstone clears if the item
+/// is played again. Returns the key server-side removal should target: the
+/// entry's watch key when one exists, else the submitted key.
+pub fn hide(cfg: &mut AppConfig, rating_key: &str) -> String {
+    let mut keys = vec![rating_key.to_string()];
+    let mut server_key = rating_key.to_string();
+    if let Some(entry) = cfg.recents.iter().find(|r| entry_matches(r, rating_key)) {
+        keys.push(entry.item.rating_key.clone());
+        if let Some(watch) = entry.item.watch_key.clone() {
+            server_key = watch.clone();
+            keys.push(watch);
+        }
+    }
     unrecord(cfg, rating_key);
-    if !cfg.hidden_from_continue.iter().any(|k| k == rating_key) {
-        cfg.hidden_from_continue.push(rating_key.to_string());
+    for key in keys {
+        if !cfg.hidden_from_continue.iter().any(|k| k == &key) {
+            cfg.hidden_from_continue.push(key);
+        }
     }
     if cfg.hidden_from_continue.len() > MAX_HIDDEN {
         let excess = cfg.hidden_from_continue.len() - MAX_HIDDEN;
         cfg.hidden_from_continue.drain(..excess);
     }
+    server_key
 }
 
 /// The hero feed: item snapshots, newest first. Each snapshot carries its
@@ -204,6 +228,43 @@ mod tests {
         // Unknown key is a no-op, not an error.
         unrecord(&mut cfg, "absent");
         assert_eq!(cfg.recents.len(), 1);
+    }
+
+    #[test]
+    fn unrecord_matches_watch_key_too() {
+        // Merged card: plays under a local key, watch state lives on Plex.
+        let mut cfg = AppConfig::default();
+        let mut merged = item("local:/movies/Heat.mkv", None);
+        merged.watch_key = Some("plex:42".into());
+        record(&mut cfg, merged);
+        unrecord(&mut cfg, "plex:42"); // mark-watched routes the server key
+        assert!(
+            cfg.recents.is_empty(),
+            "a watch-key match must drop the local-keyed entry"
+        );
+    }
+
+    #[test]
+    fn hide_tombstones_every_key_of_a_merged_entry() {
+        let mut cfg = AppConfig::default();
+        let mut merged = item("local:/movies/Heat.mkv", None);
+        merged.watch_key = Some("plex:42".into());
+        record(&mut cfg, merged);
+        let server = hide(&mut cfg, "local:/movies/Heat.mkv");
+        assert_eq!(server, "plex:42", "server removal must target the watch key");
+        assert!(cfg.recents.is_empty());
+        assert!(cfg
+            .hidden_from_continue
+            .contains(&"local:/movies/Heat.mkv".to_string()));
+        assert!(
+            cfg.hidden_from_continue.contains(&"plex:42".to_string()),
+            "server hub copy shows under the watch key; it must be tombstoned too"
+        );
+        // Replaying the merged item clears BOTH tombstones.
+        let mut again = item("local:/movies/Heat.mkv", None);
+        again.watch_key = Some("plex:42".into());
+        record(&mut cfg, again);
+        assert!(cfg.hidden_from_continue.is_empty());
     }
 
     #[test]

@@ -2845,14 +2845,13 @@ pub async fn remove_from_continue(
     rating_key: String,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // hide() tombstones the entry's full identity set and reports which key
+    // the server actually owns (a merged item's watch key when present).
     let key = rating_key.clone();
-    config::update(move |cfg| {
-        crate::recents::hide(cfg, &key);
-        Ok(())
-    })?;
+    let server_key = config::update(move |cfg| Ok(crate::recents::hide(cfg, &key)))?;
     // Server-side removal is best-effort: the tombstone above already
     // guarantees the UX, and an unroutable key (source removed) is fine.
-    if let Ok((src, raw)) = state.registry.lock().await.route(&rating_key) {
+    if let Ok((src, raw)) = state.registry.lock().await.route(&server_key) {
         let _ = src.remove_from_continue(&raw).await;
     }
     Ok(())
