@@ -9,12 +9,13 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop e2e-1 opened 2026-07-05 (owner standing instruction: reviewloop codex
-on every slice). Scope: E2E harness slice 1, single commit on `main` —
-base `23f6857`, head `34d3412` (tests/e2e/ harness, plan deviation update,
-package.json/.gitignore). Same no-branches adaptation as the cw loop:
-findings are fixed as single commits on `main` (one finding ↔ one commit ↔
-one verdict); the fix-commit column replaces the branch column.
+Loop e2e-1 CLOSED 2026-07-05: eh-1..eh-4 all verified `[x]`, fixes on
+`main`. Scope was E2E harness slice 1 (base `23f6857`, head `34d3412`);
+codex admitted eh-1/eh-2, and live diagnosis during eh-1 verification
+surfaced two coder-filed findings (eh-3 unbounded requests, eh-4
+Wayland-focus screenshot hangs — the root cause of every observed hang),
+both fixed and verified in the same loop. Same no-branches adaptation as
+the cw loop: one finding ↔ one commit ↔ one verdict.
 
 Prior loop (cw, CLOSED): scope was the 2026-07-04 delegation batch
 `ec94715..a055556` — SMB share-root auto-add (`f05919e`) and Continue
@@ -36,11 +37,15 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | cw-1 | MEDIUM | Merged items (local front, server watch key) survive mark-watched/remove in the hero | `[x]` | `5ce26db` |
 | cw-2 | LOW | Registry lock held across Plex removal await stalls unrelated UI up to 15s | `[x]` | `07167f1` |
 | cw-3 | LOW | Failed play clears a removal tombstone; item wrongly returns to hero | `[x]` | `f767ae4` |
-| eh-1 | MEDIUM | Ctrl-C orphans the driver/app process group and blocks the next run on port 4444 | `[ ]` | |
-| eh-2 | MEDIUM | Mixed valid+unknown scenario filter exits 0 without running the unknown one | `[ ]` | |
+| eh-1 | MEDIUM | Ctrl-C orphans the driver/app process group and blocks the next run on port 4444 | `[x]` | `25757ea` |
+| eh-2 | MEDIUM | Mixed valid+unknown scenario filter exits 0 without running the unknown one | `[x]` | `404f86a` |
+| eh-3 | MEDIUM | Unbounded driver requests turn any stall into an opaque 300s hang | `[x]` | `0945104` |
+| eh-4 | HIGH | Screenshots hang whenever the test window opens unfocused on the live desktop | `[x]` | `cfe6ee4` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
 
 Review pass 2026-07-05 (codex, read-only, base `23f6857` head `34d3412`,
-loop e2e-1): 2 candidates, 2 admitted, 0 declined.
+loop e2e-1): 2 candidates, 2 admitted, 0 declined; plus 2 coder-filed
+findings admitted during the loop (eh-3, eh-4). All 4 verdicts: accepted,
+guard_confirmed (codex, manual-check mode — no JS unit runner in repo).

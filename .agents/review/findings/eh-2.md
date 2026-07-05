@@ -1,9 +1,9 @@
 # eh-2: Unknown scenario names in a mixed filter silently pass
 
 **Severity**: MEDIUM — a filtered E2E run can report green while a requested scenario never ran (false-green class)
-**Status**: Open
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `404f86a`
 
 ## Evidence
 `tests/e2e/run.mjs:24,127-134` — `nameFilter` selects scenarios by name,
@@ -46,4 +46,10 @@ None — admitted as filed.
 None.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~08:39 UTC.
+Reviewed `404f86ae42b0564e470cfea1b0c3f17e227c335e` against base
+`cfe6ee4d55b03393e130bf4b05eb7562b19e45ed`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: all modules load before filter
+validation, unknown names exit 1 before anything launches; the red/green
+proof is discriminating; edge cases (empty filter, all-unknown, empty
+scenario dir) check out statically.

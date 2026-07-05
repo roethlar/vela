@@ -5,7 +5,16 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
-- Active review loop (e2e-1, slice review): see `.agents/review/index.md`.
+- Review loop e2e-1 (2026-07-05) CLOSED: slice-1 review found 2 defects
+  (codex) + 2 coder-filed during live diagnosis — signal-orphaned process
+  groups; silent false-green on typo'd scenario filters; unbounded
+  requests hiding stalls for 300s; and the big one, eh-4: on the live
+  Wayland desktop, screenshots hang whenever the test window opens
+  unfocused (no frame callbacks). The harness now runs HEADLESS on a
+  managed Xvfb display by default (`VELA_E2E_HEADED=1` to watch live;
+  `VELA_E2E_DEBUG=1` for per-call timing) — runs are deterministic and
+  never pop windows over the owner's work. All 4 fixes verified
+  (`.agents/review/index.md`, `findings/eh-*.md`).
 - E2E harness slice 1 landed 2026-07-05 (plan `.agents/plans/e2e-harness.md`,
   approved via the 2026-07-04 delegation): `npm run e2e` drives the real
   debug binary via `tauri-driver` + a **vendored Debian WebKitWebDriver
