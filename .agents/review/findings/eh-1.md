@@ -25,10 +25,17 @@ Interrupting the harness orphans the driver process tree because cleanup
 is tied to an event that signals skip.
 
 ## Approach
-(to fill in with the fix)
+Explicit `SIGHUP`/`SIGINT`/`SIGTERM` handlers in `run.mjs`: each active
+scenario's `killTree` (the process-group SIGTERM) is registered in a
+module-level `activeKills` set; the signal handler runs every registered
+kill and exits with the conventional 128+signum code. The existing `exit`
+listener stays for normal/throw paths; `activeKills` is pruned in the same
+`finally` that already removed the `exit` listener, so the sets never leak
+across scenarios.
 
 ## Files changed
-(to fill in)
+- `tests/e2e/run.mjs` — signal handlers + `activeKills` registry (3 small
+  edits around the existing killTree lifecycle)
 
 ## Guard proof
 No JS unit runner exists in this repo (recorded gap). Manual red/green
@@ -37,6 +44,13 @@ SIGINT to the node process mid-scenario, then assert no
 `tauri-driver`/`WebKitWebDriver`/debug `vela` processes remain and port
 4444 accepts a new run. Red = orphans remain before the fix; green = clean
 after.
+
+Executed 2026-07-05 via a scripted proof (SIGINT fired the moment the app
+process exists, survivors checked 2s later):
+- Pre-fix: `tauri-driver`, `WebKitWebDriver`, and `vela` all survive —
+  ORPHANS-REMAIN.
+- Post-fix: no survivors — CLEAN; and a normal `npm run e2e -- --skip-build`
+  stays green.
 
 ## Coder dispute (if any)
 None — admitted as filed.

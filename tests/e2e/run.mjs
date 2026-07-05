@@ -23,6 +23,17 @@ const argv = process.argv.slice(2);
 const skipBuild = argv.includes('--skip-build');
 const nameFilter = argv.filter((a) => !a.startsWith('--'));
 
+// Node skips 'exit' handlers when dying to a default signal disposition,
+// and the detached driver group never sees the terminal's SIGINT — so an
+// interrupted run must reap the group itself (eh-1).
+const activeKills = new Set();
+for (const [sig, code] of Object.entries({ SIGHUP: 129, SIGINT: 130, SIGTERM: 143 })) {
+  process.on(sig, () => {
+    for (const kill of activeKills) kill();
+    process.exit(code);
+  });
+}
+
 function runStep(cmd, args) {
   const res = spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot });
   if (res.status !== 0) {
@@ -78,6 +89,7 @@ async function runScenario(scenario, tauriDriverBin) {
     } catch {}
   };
   process.on('exit', killTree);
+  activeKills.add(killTree);
 
   const driver = new Driver(driverUrl);
   try {
@@ -96,6 +108,7 @@ async function runScenario(scenario, tauriDriverBin) {
   } finally {
     await driver.deleteSession().catch(() => {});
     killTree();
+    activeKills.delete(killTree);
     process.removeListener('exit', killTree);
     fs.closeSync(logFd);
     await waitUntil(async () => !(await driverListening()), 'driver port to free').catch(() => {});
