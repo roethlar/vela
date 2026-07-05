@@ -3240,6 +3240,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn normalize_autocrop_clamps_to_known_states() {
+        assert_eq!(normalize_autocrop(Some("off")), "off");
+        assert_eq!(normalize_autocrop(Some("manual")), "manual");
+        assert_eq!(normalize_autocrop(Some("auto")), "auto");
+        // Anything unrecognised (incl. None and garbage) must fall back to off, so a
+        // corrupt/stale config value can never enable cropping unexpectedly.
+        assert_eq!(normalize_autocrop(None), "off");
+        assert_eq!(normalize_autocrop(Some("")), "off");
+        assert_eq!(normalize_autocrop(Some("AUTO")), "off");
+        assert_eq!(normalize_autocrop(Some("on")), "off");
+    }
+
+    #[test]
     fn validate_sort_rejects_unknown_values() {
         assert!(validate_sort(Some("titleSort:asc".to_string())).is_ok());
         assert!(validate_sort(Some("unknown:desc".to_string())).is_err());

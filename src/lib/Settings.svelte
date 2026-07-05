@@ -45,9 +45,11 @@
     installUrl: string;
   };
 
+  type AutocropMode = "off" | "manual" | "auto";
   type MpvAdvanced = {
     extraArgs: string;
     useOwnConfig: boolean;
+    autocrop: AutocropMode;
   };
 
   let {
@@ -186,6 +188,7 @@
   // Advanced mpv options (free-form args + own-config toggle).
   let mpvExtraArgs = $state("");
   let mpvUseOwnConfig = $state(false);
+  let mpvAutocrop = $state<AutocropMode>("off");
   let mpvAdvBusy = $state(false);
   let showMpvHelp = $state(false);
 
@@ -255,6 +258,7 @@
       mpvPathInput = mp.configuredPath ?? "";
       mpvExtraArgs = adv.extraArgs;
       mpvUseOwnConfig = adv.useOwnConfig;
+      mpvAutocrop = adv.autocrop;
     } catch (e) {
       if (seq === loadSeq) err = String(e);
     }
@@ -564,6 +568,7 @@
       await invoke("set_mpv_advanced", {
         extraArgs: mpvExtraArgs,
         useOwnConfig: mpvUseOwnConfig,
+        autocrop: mpvAutocrop,
       });
     } catch (e) {
       err = String(e);
@@ -757,6 +762,28 @@
           setup. Tick this to load your own <code>mpv.conf</code> instead — it can then
           change anything, including settings that disable HDR or break playback.
         </p>
+
+        <div class="field">
+          <label for="mpv-autocrop">Black-bar cropping (mpv autocrop)</label>
+          <select id="mpv-autocrop" bind:value={mpvAutocrop}>
+            <option value="off">Off</option>
+            <option value="manual">Manual — press Shift+C to crop</option>
+            <option value="auto">Automatic — crop every video</option>
+          </select>
+          <p class="muted small">
+            Loads mpv's bundled <code>autocrop.lua</code> to remove black bars.
+            <b>Manual</b> only crops when you press <code>Shift+C</code> during
+            playback. <b>Automatic</b> crops every video on its own.
+          </p>
+          {#if mpvAutocrop === "auto"}
+            <p class="warn small">
+              ⚠ Automatic cropping runs at the start of every video and can be
+              unreliable on HDR content — on some GPU/Wayland setups it may
+              occasionally hang mpv (unkillable). If playback freezes, switch back to
+              Off or Manual.
+            </p>
+          {/if}
+        </div>
 
         <div class="btnrow">
           <button class="primary" disabled={mpvAdvBusy} onclick={saveMpvAdvanced}>
