@@ -44,6 +44,14 @@ carry on its own.
   practical: `npm run build:linux` for Tauri Linux bundles or
   `npm run build:arch` for the Arch package.
 
+## Git Workflow
+
+- Work lands directly on `main`. Do not create branches — even for
+  multi-slice or review-loop work — without the owner's explicit prior
+  approval; the reviewloop playbook's owner-gated-merge default does NOT
+  imply a branch. (Owner correction, 2026-07-04, after an unapproved
+  `smb-native` branch.)
+
 ## Remotes & Sync
 
 - `origin`: `http://q.internal:3000/michael/vela.git` (fetch and push).
