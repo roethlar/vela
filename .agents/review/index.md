@@ -9,10 +9,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop e2e-5 opened 2026-07-05 (standing instruction: reviewloop codex per
-slice). Scope: E2E slice 5, single commit — base `ec69de0`, head
-`9274ac2` (queue auto-advance scenario + shared seedLocalMedia helper).
-Same no-branches adaptation.
+Loop e2e-5 CLOSED 2026-07-05: eh-11 verified `[x]`. Scope was E2E slice 5
+— base `ec69de0`, head `9274ac2` (queue auto-advance scenario + shared
+seedLocalMedia helper); codex admitted 1 flakiness finding, fixed and
+verified. Same no-branches adaptation.
 
 Loop e2e-4 CLOSED 2026-07-05: eh-10 verified `[x]`. Scope was E2E slice 4
 + the app fix it surfaced — base `e91cbcf`, head `2f5bba8` (`4527613`
@@ -77,7 +77,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-8 | LOW | Curation restart leg passes without exercising tombstone application | `[x]` | `ebf8162` |
 | eh-9 | LOW | PID restart guard: overlap false-green, foreign-Vela false-red | `[x]` | `4b24550` |
 | eh-10 | HIGH | Continue Watching restarted local-family items from 0:00 | `[x]` | `4527613` |
-| eh-11 | MEDIUM | Queue scenario: clip A's EOF races the UI window — flaky false-red | `[ ]` | |
+| eh-11 | MEDIUM | Queue scenario: clip A's EOF races the UI window — flaky false-red | `[x]` | `2eabf26` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.

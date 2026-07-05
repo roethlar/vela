@@ -5,6 +5,12 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 5 landed 2026-07-05 (`9274ac2`) + review loop e2e-5 CLOSED
+  (eh-11 verified): the queue scenario proves backend auto-advance live —
+  clip A to natural EOF over IPC, "Play next"-queued clip B spawns in a
+  fresh mpv session with no UI interaction. eh-11 hardened it against the
+  EOF-races-UI-window flake (A paused across the menu/screenshot window).
+  Suite is now 5 scenarios: smoke, playback, curation, resume, queue.
 - E2E slice 4 landed 2026-07-05 (`2f5bba8`) + review loop e2e-4 CLOSED:
   the resume scenario caught eh-10 (`4527613`), a HIGH app bug —
   **Continue Watching restarted local/SMB/SSH items from 0:00** (local
