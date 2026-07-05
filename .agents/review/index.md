@@ -9,6 +9,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
+Loop e2e-6 opened 2026-07-05 (standing instruction: reviewloop codex per
+slice). Scope: E2E slice 6, single commit — base `ee757e2`, head
+`fc902f4` (search scenario + driver type()). Same no-branches adaptation.
+
 Loop e2e-5 CLOSED 2026-07-05: eh-11 verified `[x]`. Scope was E2E slice 5
 — base `ec69de0`, head `9274ac2` (queue auto-advance scenario + shared
 seedLocalMedia helper); codex admitted 1 flakiness finding, fixed and
