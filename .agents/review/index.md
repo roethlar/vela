@@ -117,6 +117,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-12 | MEDIUM | Mock Jellyfin ignores the query contract — client regressions pass silently | `[x]` | `32c01e2` |
 | eh-13 | MEDIUM | Mock stream Range edges crash the runner / send invalid 206s | `[x]` | `526f511`+`d5e1b04` |
 | eh-14 | LOW | Merged-view override assertion accepts any key/value — wrong persist stays green | `[x]` | `2b8becb` |
+| eh-15 | MEDIUM | Watched-badge waits satisfied by optimistic UI, not post-refetch state | `[ ]` | |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.
