@@ -3,7 +3,7 @@
 **Severity**: — (planned slice 6 of `.agents/plans/smb-native-client.md`, not a defect)
 **Status**: In progress (pending review)
 **Branch**: `smb-native` (stacked; final slice)
-**Commit**: see index — head of `smb-native` at dispatch (base `a213cb21e3822c396c9ec44091f03e5645119286`, the accepted smb-5 head)
+**Commit**: `d869c9165c1c6ff0ac50ac019d8d50e4d75fba61` (base `a213cb21e3822c396c9ec44091f03e5645119286`, the accepted smb-5 head)
 
 ## Evidence
 Approved plan slice 6 (design §5). PKGBUILD's dependency correction was
