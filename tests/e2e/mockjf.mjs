@@ -8,7 +8,8 @@ import http from 'node:http';
 export function startMockJellyfin({ userId = 'u1' } = {}) {
   const state = {
     played: false, // UserData.Played for the single movie
-    requests: [], // { method, path } in arrival order
+    requests: [], // { method, path, query } in arrival order
+    contractViolations: [], // Items requests whose query broke the client contract
   };
 
   const movie = () => ({
@@ -22,8 +23,10 @@ export function startMockJellyfin({ userId = 'u1' } = {}) {
   });
 
   const server = http.createServer((req, res) => {
-    const path = new URL(req.url, 'http://mock').pathname;
-    state.requests.push({ method: req.method, path });
+    const url = new URL(req.url, 'http://mock');
+    const path = url.pathname;
+    const query = Object.fromEntries(url.searchParams);
+    state.requests.push({ method: req.method, path, query });
 
     const json = (body, status = 200) => {
       res.writeHead(status, { 'Content-Type': 'application/json' });
@@ -39,8 +42,19 @@ export function startMockJellyfin({ userId = 'u1' } = {}) {
     if (path === `/Users/${userId}/Items/Latest`) {
       return json([]); // bare array, per the Jellyfin API
     }
-    if (path === `/Users/${userId}/Items` || path === `/Users/${userId}/Items/m1`) {
-      return json(path.endsWith('/m1') ? movie() : { Items: [movie()] });
+    if (path === `/Users/${userId}/Items`) {
+      // Fail closed on the client's query contract (eh-12): a real Jellyfin
+      // would return the wrong contents (or error) for a bad ParentId or a
+      // missing IncludeItemTypes — an ignore-all mock would hide exactly
+      // that class of regression.
+      if (query.ParentId !== 'lib1' || !(query.IncludeItemTypes ?? '').includes('Movie')) {
+        state.contractViolations.push({ path, query });
+        return json({ error: 'query contract violation' }, 400);
+      }
+      return json({ Items: [movie()] });
+    }
+    if (path === `/Users/${userId}/Items/m1`) {
+      return json(movie());
     }
     if (path === `/Users/${userId}/PlayedItems/m1`) {
       if (req.method === 'POST') state.played = true;

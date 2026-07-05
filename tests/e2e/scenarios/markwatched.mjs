@@ -90,5 +90,12 @@ export default {
       'watched badge on the card',
     );
     await screenshot('01-watched');
+
+    // The client must never have broken the Items query contract (eh-12).
+    assert.deepEqual(
+      mock.state.contractViolations,
+      [],
+      'client sent an Items request violating the Jellyfin query contract',
+    );
   },
 };
