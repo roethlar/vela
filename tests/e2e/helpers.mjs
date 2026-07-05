@@ -7,10 +7,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from './mpv.mjs';
 
-// Seed the throwaway config with a local movie folder containing one
-// ffmpeg-generated 10s clip per name, and displayless mpv args (one option
-// per LINE — that is how Vela parses mpv_extra_args).
-export function seedLocalMedia(configRoot, clipNames) {
+// Generate 10s test clips into <configRoot>/media; returns the dir.
+export function makeClips(configRoot, clipNames) {
   const mediaDir = path.join(configRoot, 'media');
   fs.mkdirSync(mediaDir, { recursive: true });
   for (const name of clipNames) {
@@ -22,6 +20,14 @@ export function seedLocalMedia(configRoot, clipNames) {
     ], { stdio: 'ignore' });
     if (ff.status !== 0) throw new Error('ffmpeg is required to generate the test clips');
   }
+  return mediaDir;
+}
+
+// Seed the throwaway config with a local movie folder containing one
+// ffmpeg-generated 10s clip per name, and displayless mpv args (one option
+// per LINE — that is how Vela parses mpv_extra_args).
+export function seedLocalMedia(configRoot, clipNames) {
+  const mediaDir = makeClips(configRoot, clipNames);
   const configDir = path.join(configRoot, 'config', 'vela');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(
