@@ -26,8 +26,16 @@ export default {
     await driver.click(cardA);
     const socketA = await waitForNewMpvSocket(beforeA);
     const mpvA = await MpvIpc.connect(socketA);
+    // Freeze A for the whole UI window (eh-11): the clip is only 10s, and a
+    // slow menu/screenshot path must not let it hit EOF before B is queued
+    // and the beforeB snapshot exists.
+    await pollUntil(
+      () => mpvA.getProp('time-pos').then((t) => t > 0.1).catch(() => false),
+      'clip A to start playing',
+    );
+    await mpvA.setProp('pause', true);
 
-    // Queue B via the real context menu while A plays.
+    // Queue B via the real context menu while A sits paused.
     await driver.exec(
       `const el = document.querySelector('button.poster[aria-label^="E2E Clip B"]');
        const r = el.getBoundingClientRect();
@@ -42,11 +50,8 @@ export default {
     // Drive A to natural EOF (no quit — EOF is what triggers auto-advance).
     const beforeB = mpvSocketSnapshot();
     try {
-      await pollUntil(
-        () => mpvA.getProp('time-pos').then((t) => t > 0.5).catch(() => false),
-        'clip A to progress',
-      );
       await mpvA.setProp('time-pos', 9.5);
+      await mpvA.setProp('pause', false);
     } finally {
       mpvA.close();
     }
