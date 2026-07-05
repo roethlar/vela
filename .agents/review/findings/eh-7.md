@@ -25,8 +25,9 @@ out.
 
 ## Approach
 Make quit observable and the bound discriminating: after `quit()`, assert
-the IPC socket disappears within a few seconds (proves the command acted
-— natural EOF at ~10s cannot satisfy it in time), and tighten the offset
+the IPC socket stops ACCEPTING within 4s (connectability probe — the
+socket file itself is only unlinked when Vela cleans its runtime dir, so
+`existsSync` was the wrong check and was replaced), and tighten the offset
 upper bound to 8000ms (seek 6s + ≤1.5s observation + margin; EOF stamps
 ~10s, reliably outside).
 
@@ -35,10 +36,11 @@ upper bound to 8000ms (seek 6s + ≤1.5s observation + margin; EOF stamps
   offset bound `[3000, 8000]`
 
 ## Guard proof
-Deterministic red/green: with `quit()` temporarily made a no-op, the
-scenario must FAIL (socket persists past the deadline / EOF stamp outside
-the tightened bound); restored, it must PASS. Executed results transcribed
-below once run.
+Deterministic red/green, executed 2026-07-05 against the final probe:
+with `quit()` temporarily a no-op, the scenario FAILS at "mpv socket to
+stop accepting after quit" (exit 1); with quit restored it PASSES. (An
+earlier `existsSync`-based probe failed green because mpv does not unlink
+the socket file — replaced with the connectability probe.)
 
 ## Coder dispute (if any)
 None — admitted as filed.

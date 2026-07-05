@@ -105,6 +105,23 @@ export default {
     } finally {
       mpv.close();
     }
+    // Prove the quit acted (eh-7): the IPC socket must stop accepting well
+    // before the 10s clip could reach natural EOF. The socket FILE is only
+    // unlinked when Vela cleans its runtime dir, so probe connectability.
+    const { createConnection } = await import('node:net');
+    await pollUntil(
+      () =>
+        new Promise((resolve) => {
+          const probe = createConnection(socketPath);
+          probe.once('connect', () => {
+            probe.destroy();
+            resolve(false); // still accepting: mpv alive
+          });
+          probe.once('error', () => resolve(true)); // refused: mpv gone
+        }),
+      'mpv socket to stop accepting after quit',
+      { timeoutMs: 4000 },
+    );
 
     // Vela side: mpv exit stamps the final position into recents…
     const configFile = path.join(configRoot, 'config', 'vela', 'config.json');
@@ -121,9 +138,11 @@ export default {
     }, 'the recents position stamp after mpv exit');
     assert.equal(recent.item.title, 'E2E Clip');
     const offset = recent.item.viewOffsetMs;
+    // Upper bound 8000: seek 6s + ≤1.5s observed playback + margin. A
+    // natural-EOF stamp (~10s) must NOT pass — that's the eh-7 failure mode.
     assert.ok(
-      offset >= 3000 && offset < 10000,
-      `expected a mid-clip resume position, got ${offset}ms`,
+      offset >= 3000 && offset <= 8000,
+      `expected a mid-clip resume position (3000..8000), got ${offset}ms`,
     );
 
     // …and the hero cover-flow shows it as Continue Watching.
