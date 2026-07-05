@@ -1,9 +1,9 @@
 # smb-3: Native SMB listing through the Vfs provider (Linux)
 
 **Severity**: — (planned slice 3 of `.agents/plans/smb-native-client.md`, not a defect)
-**Status**: In progress (pending review)
+**Status**: Verified (accepted round 2; awaiting owner-gated merge)
 **Branch**: `smb-native` (stacked; commit follows smb-2's `a904eb2`)
-**Commit**: `bef25e2384637d59a46cb8a183bc9a61e73fe41d` (base `a904eb26442b76bd837f4e9061a9c94924ac3550`, the accepted smb-2 head)
+**Commit**: `2a283aa7f6e94dcd6d537afa483dd35867536620` (slice `bef25e2` + allow-list fix-up; base `a904eb26442b76bd837f4e9061a9c94924ac3550`)
 
 ## Evidence
 Approved plan slice 3 (design §§2, 4): SMB mounts must be served by the
@@ -90,3 +90,10 @@ Round 1 — reopened.
   the slice closed in refresh_local_source, missed at boot. Accepted as
   correct; fixing via a shared, unit-tested `asset_folder_paths` helper
   used by both boot and refresh.
+
+Round 2 — accepted.
+- Reviewed SHA `2a283aa7f6e94dcd6d537afa483dd35867536620`, same base.
+  2026-07-04 (UTC). Verdict: **accepted**; guard_confirmed: **true**.
+- Both mutations observed FAIL-then-PASS in the reviewer's isolated
+  checkout: asset_folder_paths filter removal failed its test; normalize
+  `..` resolution failed containment. No material defects in the delta.
