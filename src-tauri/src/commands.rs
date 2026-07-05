@@ -2851,7 +2851,11 @@ pub async fn remove_from_continue(
     let server_key = config::update(move |cfg| Ok(crate::recents::hide(cfg, &key)))?;
     // Server-side removal is best-effort: the tombstone above already
     // guarantees the UX, and an unroutable key (source removed) is fine.
-    if let Ok((src, raw)) = state.registry.lock().await.route(&server_key) {
+    // Route in its own statement so the registry guard drops BEFORE the
+    // network call — an if-let scrutinee would hold the lock across the
+    // await and stall every registry user behind a slow server.
+    let routed = state.registry.lock().await.route(&server_key);
+    if let Ok((src, raw)) = routed {
         let _ = src.remove_from_continue(&raw).await;
     }
     Ok(())
