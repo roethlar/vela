@@ -1542,6 +1542,9 @@ pub fn set_mpv_path(path: Option<String>) -> Result<MpvInfo, String> {
 pub struct MpvAdvanced {
     pub extra_args: String,
     pub use_own_config: bool,
+    /// Black-bar cropping mode: `"off" | "manual" | "auto"` (see config
+    /// `mpv_autocrop`). Always one of the three for the UI to bind to.
+    pub autocrop: String,
 }
 
 #[tauri::command]
@@ -1550,14 +1553,32 @@ pub fn get_mpv_advanced() -> MpvAdvanced {
     MpvAdvanced {
         extra_args: cfg.mpv_extra_args.unwrap_or_default(),
         use_own_config: cfg.mpv_use_own_config.unwrap_or(false),
+        autocrop: normalize_autocrop(cfg.mpv_autocrop.as_deref()),
     }
 }
 
-/// Persist the advanced mpv settings. No validation here — these are the user's own
-/// machine and their own call; a bad option just makes mpv refuse to launch, which
-/// surfaces as a normal playback error. An empty `extra_args` clears the override.
+/// Clamp any stored/incoming autocrop value to the known three-state set,
+/// defaulting anything unrecognised (incl. `None`) to `"off"`.
+fn normalize_autocrop(value: Option<&str>) -> String {
+    match value {
+        Some("manual") => "manual",
+        Some("auto") => "auto",
+        _ => "off",
+    }
+    .to_string()
+}
+
+/// Persist the advanced mpv settings. No validation of `extra_args` — these are the
+/// user's own machine and their own call; a bad option just makes mpv refuse to
+/// launch, which surfaces as a normal playback error. An empty `extra_args` clears
+/// the override. `autocrop` is optional so older frontends that don't send it leave
+/// the mode unchanged; when present it is clamped to the known three states.
 #[tauri::command]
-pub fn set_mpv_advanced(extra_args: String, use_own_config: bool) -> Result<(), String> {
+pub fn set_mpv_advanced(
+    extra_args: String,
+    use_own_config: bool,
+    autocrop: Option<String>,
+) -> Result<(), String> {
     let trimmed = extra_args.trim().to_string();
     config::update(move |cfg| {
         cfg.mpv_extra_args = if trimmed.is_empty() {
@@ -1566,6 +1587,13 @@ pub fn set_mpv_advanced(extra_args: String, use_own_config: bool) -> Result<(), 
             Some(trimmed)
         };
         cfg.mpv_use_own_config = Some(use_own_config);
+        if let Some(mode) = autocrop.as_deref() {
+            // Store `None` for "off" so the config stays sparse; missing = off.
+            cfg.mpv_autocrop = match normalize_autocrop(Some(mode)).as_str() {
+                "off" => None,
+                m => Some(m.to_string()),
+            };
+        }
         Ok(())
     })
 }
@@ -2927,11 +2955,26 @@ pub(crate) async fn play_by_key(
             .map(|cfg| crate::recents::resume_stamp_ms(&cfg, rating_key))
             .unwrap_or(0)
     };
+    // Resolve the bundled mpv autocrop script here (the command layer holds the
+    // AppHandle; `playback::play` does not). Whether it's injected depends on the
+    // `mpv_autocrop` config mode, decided in `play`. `resolve` only computes the
+    // path; `play` existence-checks before use.
+    let autocrop_script = state.app_handle.get().and_then(|app| {
+        use tauri::Manager;
+        app.path()
+            .resolve(
+                "mpv-scripts/autocrop.lua",
+                tauri::path::BaseDirectory::Resource,
+            )
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned())
+    });
     let spec = playback::PlaySpec {
         url: resolved.url,
         title: title.to_string(),
         http_headers: resolved.http_headers,
         start_seconds: resume_ms as f64 / 1000.0,
+        autocrop_script,
     };
     // End-of-session notifier → the `playback-ended` UI event, emitted after
     // the final server check-in so a re-fetch it triggers sees the new watch

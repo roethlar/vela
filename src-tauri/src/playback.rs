@@ -425,6 +425,34 @@ pub struct PlaySpec {
     pub title: String,
     pub http_headers: Vec<(String, String)>,
     pub start_seconds: f64,
+    /// Absolute path to the bundled mpv `autocrop.lua`, resolved by the caller
+    /// via Tauri's resource resolver (the caller has the `AppHandle`; `play`
+    /// does not). `None` when it could not be resolved — autocrop is then
+    /// skipped even if enabled. Whether it's actually injected depends on the
+    /// `mpv_autocrop` config mode, read in `play`.
+    pub autocrop_script: Option<String>,
+}
+
+/// mpv launch args for the autocrop feature, given the config `mode`
+/// (`"off"|"manual"|"auto"`) and the resolved script path (already existence-
+/// checked by the caller; `None` when unresolved/missing). Pure so the injection
+/// is unit-testable without spawning mpv:
+/// - `off` / unknown, or no script → no args.
+/// - `manual` → load the script but disable its auto-crop, so it only crops on
+///   an explicit in-player `Shift+C`.
+/// - `auto` → load the script with its own crop-on-playback-start behaviour.
+fn autocrop_args(mode: &str, script: Option<&str>) -> Vec<String> {
+    let Some(path) = script else {
+        return Vec::new();
+    };
+    match mode {
+        "manual" => vec![
+            format!("--script={path}"),
+            "--script-opts-append=autocrop-auto=no".to_string(),
+        ],
+        "auto" => vec![format!("--script={path}")],
+        _ => Vec::new(),
+    }
 }
 
 /// Fired exactly once when a playback session ends — after the final server
@@ -514,6 +542,29 @@ pub fn play(
     // auto-advance, or feed the media URL to mpv as an option.
     if let Some(extra) = cfg.mpv_extra_args.as_deref() {
         for arg in parse_extra_mpv_args(extra) {
+            cmd.arg(arg);
+        }
+    }
+
+    // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
+    // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
+    // the socket. Only injected when enabled AND the bundled script actually
+    // exists — a missing `--script=` would make mpv refuse to launch, so skip and
+    // log instead. `autocrop-auto=no` in Manual mode keeps the known live
+    // `video-crop` hang off the every-play path (see config `mpv_autocrop`).
+    let autocrop_mode = cfg.mpv_autocrop.as_deref().unwrap_or("off");
+    if autocrop_mode != "off" {
+        let script = spec
+            .autocrop_script
+            .as_deref()
+            .filter(|p| std::path::Path::new(p).is_file());
+        if script.is_none() {
+            eprintln!(
+                "vela: autocrop is set to '{autocrop_mode}' but the bundled script \
+                 did not resolve; skipping (playback continues uncropped)"
+            );
+        }
+        for arg in autocrop_args(autocrop_mode, script) {
             cmd.arg(arg);
         }
     }
@@ -968,6 +1019,44 @@ mod tests {
 
     fn tmp(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn autocrop_off_injects_nothing() {
+        assert!(autocrop_args("off", Some("/x/autocrop.lua")).is_empty());
+        // Unknown/garbage mode is treated as off.
+        assert!(autocrop_args("wat", Some("/x/autocrop.lua")).is_empty());
+    }
+
+    #[test]
+    fn autocrop_manual_loads_script_with_auto_disabled() {
+        let args = autocrop_args("manual", Some("/x/autocrop.lua"));
+        assert_eq!(
+            args,
+            vec![
+                "--script=/x/autocrop.lua".to_string(),
+                "--script-opts-append=autocrop-auto=no".to_string(),
+            ],
+            "manual must load the script AND disable its auto-crop"
+        );
+    }
+
+    #[test]
+    fn autocrop_auto_loads_script_without_disabling_auto() {
+        let args = autocrop_args("auto", Some("/x/autocrop.lua"));
+        assert_eq!(args, vec!["--script=/x/autocrop.lua".to_string()]);
+        assert!(
+            !args.iter().any(|a| a.contains("autocrop-auto=no")),
+            "auto mode must NOT disable the script's crop-on-start"
+        );
+    }
+
+    #[test]
+    fn autocrop_without_resolved_script_injects_nothing() {
+        // Even when enabled, an unresolved script yields no args (play() also
+        // existence-checks; here the path is simply absent).
+        assert!(autocrop_args("manual", None).is_empty());
+        assert!(autocrop_args("auto", None).is_empty());
     }
 
     #[test]

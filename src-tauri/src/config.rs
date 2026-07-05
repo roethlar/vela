@@ -34,6 +34,13 @@ pub struct AppConfig {
     /// When true, Vela drops `--no-config` so mpv loads the user's own
     /// `~/.config/mpv/mpv.conf`. Off by default for a reproducible launch.
     pub mpv_use_own_config: Option<bool>,
+    /// Black-bar cropping via mpv's bundled `autocrop.lua`, three-state:
+    /// `"off"` (default; nothing injected), `"manual"` (script loaded with
+    /// `autocrop-auto=no` — crops only on an explicit in-player `Shift+C`), or
+    /// `"auto"` (script's own crop-on-playback-start). Missing/unknown = off.
+    /// `"auto"` auto-fires mpv's live `video-crop`, which can hang mpv on some
+    /// HDR/Wayland stacks — the Settings UI carries that warning.
+    pub mpv_autocrop: Option<String>,
     /// Non-Plex sources (Jellyfin/Emby today; more later). Kept deliberately
     /// provider-neutral so backends can diverge without a schema change.
     #[serde(default)]
