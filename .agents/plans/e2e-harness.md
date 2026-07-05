@@ -105,6 +105,21 @@ protocol directly over Node's built-in `fetch` (`tests/e2e/driver.mjs`,
 ~8 endpoints). WDIO would add a very large dev-dependency tree to a repo
 with deliberately few dependencies, for protocol plumbing this thin.
 
+## Extension 2026-07-05: hermetic mock-server leg
+
+The mutating-server scenarios were originally gated on the owner's live
+servers. A fourth leg removes that dependency for the flows that only need
+protocol-correct responses: the harness can start a **mock Jellyfin server**
+on a loopback port inside the runner process (`tests/e2e/mockjf.mjs`),
+seed a `sources` entry pointing at it (`build_source` restores it at boot
+with no interactive auth), and assert both sides of a mutation — the HTTP
+request the app sent and the UI state after its refetch. Stateful, minimal
+endpoint surface (Views/Items/Resume/Latest/PlayedItems/PlaybackInfo),
+requests recorded for assertions. Live env-gated smoke against real
+backends remains the plan for transport/auth/version coverage; the mock
+leg covers Vela's own logic hermetically. Scenarios get an optional
+`cleanup` hook (runner-invoked in `finally`) to stop such servers.
+
 ## Verification of the harness itself
 
 The harness is code: each slice lands with the standard repo verification,

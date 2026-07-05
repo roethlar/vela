@@ -122,6 +122,7 @@ async function runScenario(scenario, tauriDriverBin) {
   } catch (err) {
     return err;
   } finally {
+    if (scenario.cleanup) await Promise.resolve(scenario.cleanup()).catch(() => {});
     await driver.deleteSession().catch(() => {});
     killTree();
     activeKills.delete(killTree);
