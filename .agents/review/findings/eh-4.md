@@ -1,9 +1,9 @@
 # eh-4: Screenshots hang nondeterministically on the live Wayland desktop
 
 **Severity**: HIGH — the harness's core deliverable (unattended runs with screenshots) fails whenever the owner is using the machine, which is exactly when unattended runs matter
-**Status**: In progress
+**Status**: Verified
 **Branch**: n/a — no-branches adaptation; fix lands as a single commit on `main`
-**Commit**: (filled in after commit)
+**Commit**: `cfe6ee4`
 
 ## Evidence
 `tests/e2e/run.mjs` (pre-fix) launched the app on the owner's live Wayland
@@ -55,4 +55,11 @@ mpv playback scenarios (future slices) will need the same display env
 passed through to mpv, or `--vo=null` per the plan.
 
 ## Reviewer comments
-(pending)
+codex (codex-cli 0.142.5), manual-check mode, 2026-07-05 ~08:36 UTC.
+Reviewed `cfe6ee4d55b03393e130bf4b05eb7562b19e45ed` against base
+`0945104740b90917e3b21ae4ffba5acfef575372`. Verdict: **accepted**,
+`guard_confirmed: true`. Comments: defaulting to Xvfb and passing
+DISPLAY/GDK_BACKEND into tauri-driver closes the focus/occlusion hang at
+its root; the Xvfb lifecycle (lock guard, missing-binary error, readiness
+wait, exit+signal cleanup) is adequate; the observational red + scripted
+green guard is acceptable for an environment-dependent defect.
