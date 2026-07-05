@@ -1,7 +1,8 @@
 # SMB: auto-add the share root as a library folder
 
-Status: DRAFT — owner approval required before code (chosen 2026-07-04:
-"auto-add share root" over guided-folder-step and warning-only).
+Status: APPROVED 2026-07-04 via the owner-delegation decision in
+`.agents/decisions.md` (direction chosen 2026-07-04: "auto-add share root"
+over guided-folder-step and warning-only).
 
 ## Problem
 

@@ -352,3 +352,35 @@ The *mechanism* of the 2026-05-23 "Keep Linux SMB user-space only by
 default" entry (resolving desktop-session GVfs/KIO-FUSE mounts). Its
 *constraint* stands: no root, no privileged CIFS mounts. The SSH/sshfs
 stance in that entry is unchanged.
+
+### 2026-07-04 - Owner delegation: progress must not block on the owner
+
+Status: Active
+
+Decision:
+The owner directed (2026-07-04, verbatim intent: "I need progress to pick
+up. however we can do that. I can't be the delay.") that queued work whose
+direction he has already chosen proceeds without a further per-plan
+approval round-trip. Concretely this approves for implementation:
+- `.agents/plans/smb-share-root-autoadd.md` (direction chosen 2026-07-04),
+- `.agents/plans/continue-watching-curation.md` (choices locked 2026-07-04),
+- building an automated end-to-end test harness (WebDriver/tauri-driver UI
+  automation plus mpv-IPC playback checks plus the live SMB probe) so
+  routine playtesting no longer requires the owner; the harness design
+  still lands as a written plan in `.agents/plans/` before its code.
+The owner stays in the loop only for what physically requires him: visual
+judgments (HDR passthrough, artwork look), release/version calls,
+credentials, and destructive or outward-facing actions. This is NOT a
+blanket approval for new feature directions the owner has not chosen;
+"no code change without an approved plan" still stands — this entry is the
+approval for the plans it names, and future plans with owner-locked
+choices may cite it instead of waiting when the owner is unavailable.
+
+Reason:
+The owner is the current throughput bottleneck and explicitly asked not to
+be. All three named items had their product choices made by the owner
+before this entry; only the approval formality was pending.
+
+Supersedes:
+Nothing structural. Narrows the per-plan approval wait for the named items
+and for future owner-locked plans.

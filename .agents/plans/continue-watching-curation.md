@@ -1,7 +1,8 @@
 # Continue Watching curation: remove action, mark-watched sync, On Deck fold-in
 
-Status: DRAFT — owner approval required before code. Implements the three
-queued items in `ISSUES.md` § "Continue Watching curation (2026-07-04)".
+Status: APPROVED 2026-07-04 via the owner-delegation decision in
+`.agents/decisions.md`. Implements the three queued items in `ISSUES.md`
+§ "Continue Watching curation (2026-07-04)".
 Owner choices locked 2026-07-04: On Deck items fold into the flow (no row),
 ordering is interleaved by recency; removal includes the Plex server side.
 
