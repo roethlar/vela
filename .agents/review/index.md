@@ -9,10 +9,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
-Loop e2e-7 opened 2026-07-05 (standing instruction: reviewloop codex per
-slice). Scope: E2E slice 8, single commit — base `4ffc272`, head
-`c706228` (mock-Jellyfin leg + mark-watched scenario + cleanup hook +
-plan extension). Same no-branches adaptation.
+Loop e2e-7 CLOSED 2026-07-05: eh-12 verified `[x]`. Scope was E2E slice 8
+— base `4ffc272`, head `c706228` (mock-Jellyfin leg + mark-watched
+scenario + cleanup hook + plan extension); codex admitted 1 mock-fidelity
+finding, fixed and verified. Same no-branches adaptation.
 
 Loop docs-2 CLOSED 2026-07-05: clean pass, no findings. Scope was the
 artifact-manifest refresh — base `c1f2b65`, head `7e08272` (docs only).
@@ -98,7 +98,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | eh-9 | LOW | PID restart guard: overlap false-green, foreign-Vela false-red | `[x]` | `4b24550` |
 | eh-10 | HIGH | Continue Watching restarted local-family items from 0:00 | `[x]` | `4527613` |
 | eh-11 | MEDIUM | Queue scenario: clip A's EOF races the UI window — flaky false-red | `[x]` | `2eabf26` |
-| eh-12 | MEDIUM | Mock Jellyfin ignores the query contract — client regressions pass silently | `[ ]` | |
+| eh-12 | MEDIUM | Mock Jellyfin ignores the query contract — client regressions pass silently | `[x]` | `32c01e2` |
 
 Review pass 2026-07-05 (codex, read-only, base `ec94715` head `a055556`):
 3 candidates, 3 admitted, 0 declined.

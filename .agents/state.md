@@ -5,6 +5,16 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- E2E slice 8 landed 2026-07-05 (`c706228`) + review loop e2e-7 CLOSED
+  (eh-12 verified): NEW HARNESS LEG — a hermetic mock Jellyfin server
+  (`tests/e2e/mockjf.mjs`, stateful, fail-closed on the client's Items
+  query contract) runs inside the runner; a seeded `sources` entry
+  restores it at boot with no auth. The mark-watched scenario asserts
+  both the PlayedItems POST and the watched badge surviving the refetch.
+  Suite: 7 scenarios. UNBLOCKED FOLLOW-ONS this leg enables without owner
+  creds: watch-state-refresh-after-playback scenario (mock + local play),
+  mark-unwatched, and a merged All view scenario (mock JF + local folder
+  = two sources).
 - Slice 7 landed 2026-07-05 (`e7c5231`, loop app-1 CLOSED clean):
   `resolve_stream`'s VFS checks (canonicalize/is_file — network-priced on
   native SMB) moved onto the blocking pool per the async-worker invariant;
