@@ -9,6 +9,11 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
+Loop e2e-7 opened 2026-07-05 (standing instruction: reviewloop codex per
+slice). Scope: E2E slice 8, single commit — base `4ffc272`, head
+`c706228` (mock-Jellyfin leg + mark-watched scenario + cleanup hook +
+plan extension). Same no-branches adaptation.
+
 Loop docs-2 CLOSED 2026-07-05: clean pass, no findings. Scope was the
 artifact-manifest refresh — base `c1f2b65`, head `7e08272` (docs only).
 
