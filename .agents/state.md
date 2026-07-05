@@ -5,6 +5,7 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- Active review loop (e2e-1, slice review): see `.agents/review/index.md`.
 - E2E harness slice 1 landed 2026-07-05 (plan `.agents/plans/e2e-harness.md`,
   approved via the 2026-07-04 delegation): `npm run e2e` drives the real
   debug binary via `tauri-driver` + a **vendored Debian WebKitWebDriver
