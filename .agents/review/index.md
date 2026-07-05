@@ -9,6 +9,11 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
+Loop e2e-8 opened 2026-07-05 (standing instruction: reviewloop codex per
+slice). Scope: E2E slice 9, single commit — base `d3a79de`, head
+`ccc6270` (watch-state scenario + mock stream/check-in routes + makeClips
+extraction). Same no-branches adaptation.
+
 Loop e2e-7 CLOSED 2026-07-05: eh-12 verified `[x]`. Scope was E2E slice 8
 — base `4ffc272`, head `c706228` (mock-Jellyfin leg + mark-watched
 scenario + cleanup hook + plan extension); codex admitted 1 mock-fidelity
