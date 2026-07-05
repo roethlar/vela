@@ -822,9 +822,11 @@ fn smb_folder_display_name(m: &SmbMount, relative: &str) -> String {
         .to_string()
 }
 
+/// Linux: native shares have no OS mount path; UI fall back to the
+/// share-relative folder path.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn smb_mount_root(m: &SmbMount) -> Option<String> {
-    crate::smb::resolved_mountpoint(m).filter(|path| Path::new(path).is_dir())
+fn smb_mount_root(_m: &SmbMount) -> Option<String> {
+    None
 }
 
 #[cfg(not(all(unix, not(target_os = "macos"))))]

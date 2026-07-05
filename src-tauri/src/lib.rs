@@ -140,6 +140,7 @@ pub fn run() {
     };
 
     let asset_folders: Vec<String> = source::local::asset_folder_paths(&local_family);
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
     let smb_mounts = cfg.smb_mounts.clone();
     let ssh_mounts = cfg.ssh_mounts.clone();
 
@@ -263,7 +264,9 @@ pub fn run() {
             for path in &asset_folders {
                 let _ = app.asset_protocol_scope().allow_directory(path, true);
             }
-            if smb::remount_on_startup() {
+            // Linux: no remount pass — shares are native (mountless).
+            #[cfg(not(all(unix, not(target_os = "macos"))))]
+            {
                 // Re-establish SMB mounts off the main thread so a slow/offline share
                 // can't stall launch. Once a share mounts, refresh the local source so
                 // selected folders inside that share become browsable in this running
