@@ -9,6 +9,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
+Loop e2e-9 opened 2026-07-05 (standing instruction: reviewloop codex per
+slice). Scope: E2E slice 10, single commit — base `7c7a394`, head
+`5742789` (merged All view scenario). Same no-branches adaptation.
+
 Loop e2e-8 CLOSED 2026-07-05: eh-13 verified `[x]` after the loop's first
 reopen→fix→accept round-trip (reviewer caught a reversed-range crash path
 the first fix missed). Scope was E2E slice 9 — base `d3a79de`, head
