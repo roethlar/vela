@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https: http: asset: http://asset.localhost; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      "csp": "default-src 'self'; img-src 'self' data: https: http: asset: http://asset.localhost velasmb:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": []
@@ -44,11 +44,13 @@
     "linux": {
       "deb": {
         "section": "video",
+        "depends": ["libsmbclient0 | libsmbclient"],
         "desktopTemplate": "bundle/linux/vela.desktop.hbs",
         "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
         "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"
       },
       "rpm": {
+        "depends": ["libsmbclient"],
         "desktopTemplate": "bundle/linux/vela.desktop.hbs",
         "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
         "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"

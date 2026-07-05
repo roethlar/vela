@@ -1,12 +1,14 @@
-//! App-managed SMB/CIFS mounting. Vela gets each share to a POSIX path, then
-//! browses that path through the local source (so all of P2c/P2d applies for
-//! free). macOS uses `mount_smbfs`, Windows uses `net use`; Linux deliberately
-//! stays in user space by resolving KIO-FUSE/GVfs mounts and never invoking
-//! `mount.cifs` or `pkexec` by default.
+//! OS-level SMB mounting for macOS (`mount_smbfs`) and Windows (`net use`),
+//! where the OS mounts rootlessly and the local source browses the mounted
+//! path. Linux does NOT mount: it speaks SMB natively via
+//! `smb_client`/`smb_vfs` and streams playback through `stream_proxy` (see
+//! `.agents/plans/smb-native-client.md`), so the Linux surface here is
+//! only the no-op teardown hooks the cross-platform command paths call.
 //!
-//! The mount target is `SmbMount::mountpoint`. On macOS/Windows it is stable and
-//! app-selected; on Linux it can be the current desktop FUSE path for the share.
+//! The mount target is `SmbMount::mountpoint` on macOS/Windows; on Linux
+//! it stays empty as the marker of a native (mountless) share record.
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 use crate::config::SmbMount;
 
 /// The path the OS mounts at and the local source browses — computed once,
@@ -25,40 +27,18 @@ pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
     Ok(mp.to_string_lossy().to_string())
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
-    Ok(resolve_user_mountpoint(m).unwrap_or_else(|| gvfs_candidates(m).remove(0)))
-}
-
 #[cfg(windows)]
 pub fn default_mountpoint(m: &SmbMount) -> Result<String, String> {
     Ok(format!(r"\\{}\{}", m.server, m.share))
 }
 
-/// Prepare the share for browsing and update `m.mountpoint` to the path that
-/// should be persisted. On Linux that path may be a desktop-provided FUSE path,
-/// so it is resolved as part of the mount operation instead of being invented
-/// under Vela's config directory.
+/// macOS/Windows: mount the share and update `m.mountpoint` to the path
+/// that should be persisted. Linux never calls this — native records are
+/// verified over libsmbclient and keep `mountpoint` empty.
 #[cfg(not(all(unix, not(target_os = "macos"))))]
 pub fn prepare_mount(m: &mut SmbMount) -> Result<(), String> {
     m.mountpoint = default_mountpoint(m)?;
     mount(m)
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-pub fn prepare_mount(m: &mut SmbMount) -> Result<(), String> {
-    m.mountpoint = default_mountpoint(m)?;
-    match mount(m) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            if let Some(path) = resolve_user_mountpoint(m) {
-                m.mountpoint = path;
-                mount(m)
-            } else {
-                Err(e)
-            }
-        }
-    }
 }
 
 /// Mount the share at `m.mountpoint` (which the caller has set).
@@ -172,28 +152,6 @@ pub fn unmount(mountpoint: &str) -> Result<(), String> {
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
-pub fn mount(m: &SmbMount) -> Result<(), String> {
-    if is_readable_dir(&m.mountpoint) {
-        return Ok(());
-    }
-    if let Some(path) = resolve_user_mountpoint(m) {
-        if path == m.mountpoint {
-            return Ok(());
-        }
-    }
-
-    // If GVfs is present and already has credentials in the user's session or
-    // keyring, this can establish the FUSE path without privilege escalation.
-    // It is intentionally bounded so a password prompt or offline share cannot
-    // wedge the app.
-    let _ = try_gio_mount(m);
-    if is_readable_dir(&m.mountpoint) {
-        return Ok(());
-    }
-    Err(linux_mount_error(m))
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
 pub fn unmount(_mountpoint: &str) -> Result<(), String> {
     Ok(())
 }
@@ -246,8 +204,7 @@ pub fn unmount_for_removal(mountpoint: &str) {
 
 #[cfg(all(unix, not(target_os = "macos")))]
 pub fn unmount_for_removal(_mountpoint: &str) {
-    // Linux SMB mounts are owned by the user's desktop session. Removing the
-    // source from Vela should not disconnect Dolphin/Nautilus or other apps.
+    // Linux shares are native (no OS mount exists); nothing to tear down.
 }
 
 /// A mountpoint sits on a different device than its parent dir.
@@ -271,274 +228,8 @@ fn sanitize(s: &str) -> String {
         .collect()
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-pub fn remount_on_startup() -> bool {
-    false
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-pub fn remount_on_startup() -> bool {
-    true
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-pub fn resolved_mountpoint(m: &SmbMount) -> Option<String> {
-    resolve_user_mountpoint(m)
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn resolve_user_mountpoint(m: &SmbMount) -> Option<String> {
-    user_mount_candidates(m)
-        .into_iter()
-        .find(|path| is_readable_dir(path))
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn user_mount_candidates(m: &SmbMount) -> Vec<String> {
-    let mut out = gvfs_candidates(m);
-    out.extend(kio_fuse_candidates(m));
-    dedupe(out)
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn gvfs_candidates(m: &SmbMount) -> Vec<String> {
-    let uid = current_uid();
-    let base = format!("/run/user/{uid}/gvfs");
-    let mut out = Vec::new();
-    for server in case_variants(&m.server) {
-        for share in case_variants(&m.share) {
-            if m.username.trim().is_empty() {
-                out.push(format!("{base}/smb-share:server={server},share={share}"));
-            } else {
-                out.push(format!(
-                    "{base}/smb-share:server={server},share={share},user={}",
-                    m.username.trim()
-                ));
-                out.push(format!("{base}/smb-share:server={server},share={share}"));
-            }
-        }
-    }
-    out
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn kio_fuse_candidates(m: &SmbMount) -> Vec<String> {
-    let root = format!("/run/user/{}", current_uid());
-    let Ok(entries) = std::fs::read_dir(root) else {
-        return Vec::new();
-    };
-    let mut out = Vec::new();
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        if !name.starts_with("kio-fuse") {
-            continue;
-        }
-        let smb_root = path.join("smb");
-        for server in kio_server_variants(m) {
-            for share in case_variants(&m.share) {
-                out.push(
-                    smb_root
-                        .join(&server)
-                        .join(&share)
-                        .to_string_lossy()
-                        .to_string(),
-                );
-            }
-        }
-        out.extend(discover_kio_share_candidates(&smb_root, m));
-    }
-    out
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn discover_kio_share_candidates(smb_root: &std::path::Path, m: &SmbMount) -> Vec<String> {
-    let Ok(servers) = std::fs::read_dir(smb_root) else {
-        return Vec::new();
-    };
-    let wanted_server = m.server.trim().to_ascii_lowercase();
-    let wanted_share = m.share.trim().to_ascii_lowercase();
-    let mut out = Vec::new();
-    for server_entry in servers.flatten() {
-        let server_path = server_entry.path();
-        let Some(server_name) = server_path.file_name().and_then(|n| n.to_str()) else {
-            continue;
-        };
-        let server_host = server_name
-            .rsplit_once('@')
-            .map(|(_, host)| host)
-            .unwrap_or(server_name)
-            .to_ascii_lowercase();
-        if server_host != wanted_server {
-            continue;
-        }
-        let Ok(shares) = std::fs::read_dir(&server_path) else {
-            continue;
-        };
-        for share_entry in shares.flatten() {
-            let share_path = share_entry.path();
-            let Some(share_name) = share_path.file_name().and_then(|n| n.to_str()) else {
-                continue;
-            };
-            if share_name.to_ascii_lowercase() == wanted_share {
-                out.push(share_path.to_string_lossy().to_string());
-            }
-        }
-    }
-    out
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn kio_server_variants(m: &SmbMount) -> Vec<String> {
-    let server_variants = case_variants(&m.server);
-    let username = m.username.trim();
-    let domain = m.domain.trim();
-    let mut out = Vec::new();
-    for server in server_variants {
-        out.push(server.clone());
-        if !username.is_empty() {
-            out.push(format!("{username}@{server}"));
-            if !domain.is_empty() {
-                out.push(format!("{domain};{username}@{server}"));
-            }
-        }
-    }
-    dedupe(out)
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn case_variants(value: &str) -> Vec<String> {
-    let trimmed = value.trim();
-    dedupe(vec![trimmed.to_string(), trimmed.to_ascii_lowercase()])
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn dedupe(values: Vec<String>) -> Vec<String> {
-    let mut seen = std::collections::HashSet::new();
-    let mut out = Vec::new();
-    for value in values {
-        if seen.insert(value.clone()) {
-            out.push(value);
-        }
-    }
-    out
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn is_readable_dir(path: &str) -> bool {
-    let path = std::path::Path::new(path);
-    path.is_dir() && std::fs::read_dir(path).is_ok()
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn try_gio_mount(m: &SmbMount) -> Result<(), String> {
-    let gio = find_program("gio", &["/usr/bin/gio"]).ok_or("gio was not found")?;
-    run_with_timeout(
-        &gio,
-        &["mount", &smb_uri(m)],
-        std::time::Duration::from_secs(10),
-    )
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn run_with_timeout(
-    program: &str,
-    args: &[&str],
-    timeout: std::time::Duration,
-) -> Result<(), String> {
-    use std::process::{Command, Stdio};
-    let mut child = Command::new(program)
-        .args(args)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::piped())
-        .spawn()
-        .map_err(|e| format!("failed to run {program}: {e}"))?;
-    let started = std::time::Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Ok(()),
-            Ok(Some(_)) => {
-                let out = child
-                    .wait_with_output()
-                    .map_err(|e| format!("failed to read {program} output: {e}"))?;
-                return Err(format!(
-                    "{program} failed: {}",
-                    String::from_utf8_lossy(&out.stderr).trim()
-                ));
-            }
-            Ok(None) if started.elapsed() >= timeout => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err(format!("{program} timed out"));
-            }
-            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(100)),
-            Err(e) => return Err(format!("failed to poll {program}: {e}")),
-        }
-    }
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_uri(m: &SmbMount) -> String {
-    let username = m.username.trim();
-    let userinfo = if username.is_empty() {
-        String::new()
-    } else {
-        format!("{}@", pct(username))
-    };
-    format!(
-        "smb://{}{}/{}",
-        userinfo,
-        m.server.trim(),
-        pct(m.share.trim())
-    )
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn linux_mount_error(m: &SmbMount) -> String {
-    format!(
-        "Linux SMB needs a readable user-space FUSE mount for smb://{}/{}. Open the share in your file manager first, or install/enable kio-fuse or gvfs-fuse and try again. Vela will not request root for SMB by default.",
-        m.server.trim(),
-        m.share.trim()
-    )
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn current_uid() -> String {
-    std::env::var("UID")
-        .ok()
-        .filter(|uid| !uid.trim().is_empty())
-        .unwrap_or_else(|| command_stdout("id", &["-u"]).unwrap_or_else(|_| "1000".to_string()))
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn command_stdout(program: &str, args: &[&str]) -> Result<String, String> {
-    let out = std::process::Command::new(program)
-        .args(args)
-        .output()
-        .map_err(|e| format!("failed to run {program}: {e}"))?;
-    if !out.status.success() {
-        return Err(format!(
-            "{program} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
-        ));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn find_program(name: &str, candidates: &[&str]) -> Option<String> {
-    candidates
-        .iter()
-        .find(|p| std::path::Path::new(p).is_file())
-        .map(|p| (*p).to_string())
-        .or_else(|| command_stdout("which", &[name]).ok())
-}
-
 /// Percent-encode credential components for the mount_smbfs URL authority.
-#[cfg(any(target_os = "macos", all(unix, not(target_os = "macos"))))]
+#[cfg(target_os = "macos")]
 fn pct(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     for b in s.bytes() {

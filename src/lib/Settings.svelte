@@ -319,7 +319,7 @@
 
   async function addSmbFolder() {
     if (!smbBrowseMountId) {
-      err = "Mount an SMB share first.";
+      err = "Add an SMB share first.";
       return;
     }
     busy = true;
@@ -662,7 +662,7 @@
         <div class="row">
           <span class="badge">smb</span>
           <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
-          <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Unmount</button>
+          <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Remove</button>
         </div>
         {#each m.folders as f (f.id)}
           <div class="row subrow">
@@ -878,16 +878,17 @@
           <input id="smb-domain" bind:value={smbDomain} />
         </div>
         <button class="primary" disabled={busy} onclick={mountSmb}>
-          {busy ? "Mounting…" : "Mount share"}
+          {busy ? "Connecting…" : "Add share"}
         </button>
         <p class="muted small">
-          On Linux, Vela uses your desktop's user-space SMB mount from KIO-FUSE or GVfs.
-          Open the share in your file manager first if setup cannot find a readable path.
+          On Linux, Vela connects to the share directly — no mount, no root,
+          nothing else to set up; enter the server, share, and credentials.
+          macOS and Windows attach the share through the OS.
         </p>
 
         {#if smbMounts.length > 0}
           <div class="field">
-            <label for="smb-mounted">Mounted share</label>
+            <label for="smb-mounted">Share</label>
             <select
               id="smb-mounted"
               bind:value={smbBrowseMountId}

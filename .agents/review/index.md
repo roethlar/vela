@@ -6,6 +6,14 @@ Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loop: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6, merged to main).
 
+Loop review phase COMPLETE 2026-07-04: all six slices verified `[x]`
+(smb-1 in one round; smb-2/3 in two; smb-4 in two plus a recorded coder
+process incident; smb-5 in three; smb-6 in three with one dispute
+resolved in the coder's favor — every reopen was a real finding, see
+the finding docs). Awaiting owner playtest + owner-gated merge of
+`smb-native` (regular merge commit, not fast-forward); the loop closes
+when the branch lands on `main`.
+
 Loop opened 2026-07-04. Scope: implementation of the approved plan
 `.agents/plans/smb-native-client.md`. Adaptation, owner-directed ("go with
 reviewloop codex", 2026-07-04): the review units are the plan's six slices,
@@ -28,9 +36,9 @@ slice ↔ one review ↔ one recorded verdict. Merge of `smb-native` into
 
 | ID    | Severity | Impact (one line)                                      | Status | Branch |
 |-------|----------|--------------------------------------------------------|--------|--------|
-| smb-1 | —        | Native client wrapper + share browsing without mounts  | `[ ]`  | `smb-native` |
-| smb-2 | —        | Provider-trait refactor of local source (no behavior)  | `[ ]`  | `smb-native` |
-| smb-3 | —        | Native SMB listing via provider + listing cache        | `[ ]`  | `smb-native` |
-| smb-4 | —        | Loopback Range proxy + SMB playback via mpv            | `[ ]`  | `smb-native` |
-| smb-5 | —        | Remove Linux mount machinery + UI error copy           | `[ ]`  | `smb-native` |
-| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[ ]`  | `smb-native` |
+| smb-1 | —        | Native client wrapper + share browsing without mounts  | `[x]`  | `smb-native` |
+| smb-2 | —        | Provider-trait refactor of local source (no behavior)  | `[x]`  | `smb-native` |
+| smb-3 | —        | Native SMB listing via provider + listing cache        | `[x]`  | `smb-native` |
+| smb-4 | —        | Loopback Range proxy + SMB playback via mpv            | `[x]`  | `smb-native` |
+| smb-5 | —        | Remove Linux mount machinery + UI error copy           | `[x]`  | `smb-native` |
+| smb-6 | —        | Packaging deps, docs, decision entry, handoff          | `[x]`  | `smb-native` |

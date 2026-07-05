@@ -27,9 +27,13 @@ negotiated with the display).
 - **Local metadata:** sidecar `.nfo` + local artwork first, then keyless online
   lookup (iTunes Search for movies/shows, TVmaze for episodes; cached), then the
   filename as the floor.
-- **SMB:** mounted by the app via the OS (`mount_smbfs` on macOS, `net use` on
-  Windows), then browsed through the local source. On Linux, mount the share
-  yourself and add the path as a local folder.
+- **SMB:** on Linux, Vela speaks SMB natively in-process (libsmbclient) —
+  no mounts, no root, nothing to set up; browsing lists over the wire and
+  playback streams to mpv through a localhost-only HTTP range proxy.
+  Sidecar posters are served over a private `velasmb:` scheme. Requires
+  the `smbclient` package (libsmbclient). On macOS/Windows the share is
+  mounted by the app via the OS (`mount_smbfs` / `net use`) and browsed
+  through the local source.
 
 ## Requirements
 
@@ -106,7 +110,7 @@ On Arch Linux, build a native pacman package instead:
 npm run build:arch
 ```
 
-This emits `packaging/arch/vela-0.1.0-1-x86_64.pkg.tar.zst` from the local
+This emits `packaging/arch/vela-<version>-1-x86_64.pkg.tar.zst` from the local
 checkout using the PKGBUILD in `packaging/arch/`. It installs the same desktop
 entry and hicolor icons, and pacman's desktop/icon hooks refresh the launchers
 when the package is installed.
@@ -128,7 +132,7 @@ Working: Plex device-PIN auth + server discovery, multi-source library browsing
 (unified or per-source) with infinite scroll, show/season/episode drill-down,
 search, mpv HDR playback, Plex progress/resume, local-folder indexing with
 keyless metadata, and an in-app source manager (Jellyfin/Emby connect, local
-folders, SMB mounting).
+folders, SMB shares — native on Linux, OS-mounted on macOS/Windows).
 
 Verification note: Plex is exercised end-to-end, and Jellyfin has been
 smoke-tested against a real server. The Emby, local, and SMB paths are
@@ -142,7 +146,11 @@ manual version picker. Server stream/poster URLs carry the access token
 (Plex/Jellyfin/Emby), so the token is visible locally — in the webview DOM and
 in mpv's process arguments. This is an accepted **local-only** exposure (your
 own machine, not the network); there is no token proxy. SMB credentials are
-stored in the (`0600` on Unix) config so shares can remount on launch, and are
-passed to the OS mount tool (`mount_smbfs` / `net use`), so they also appear
-briefly in process arguments — same accepted local-only exposure. HDR fidelity
+stored in the (`0600` on Unix) config so shares reconnect on launch. On
+Linux they never leave the process (libsmbclient auth callback — no
+process arguments, no URLs); on macOS/Windows they are passed to the OS
+mount tool (`mount_smbfs` / `net use`) and appear briefly in process
+arguments — same accepted local-only exposure. The Linux playback proxy
+binds 127.0.0.1 only and its URLs carry an unguessable per-play token,
+never paths or credentials. HDR fidelity
 depends on the platform's mpv GPU backend and display support.

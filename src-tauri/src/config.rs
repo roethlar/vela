@@ -41,8 +41,9 @@ pub struct AppConfig {
     /// Local (and mounted remote) folders browsed by the built-in local source.
     #[serde(default)]
     pub local_folders: Vec<LocalFolder>,
-    /// SMB shares Vela mounts itself; selected folders inside each share feed
-    /// the local source.
+    /// Configured SMB shares; selected folders inside each share feed the
+    /// local family (Linux connects natively, macOS/Windows mount via the
+    /// OS).
     #[serde(default)]
     pub smb_mounts: Vec<SmbMount>,
     /// SSH/SFTP folders mounted through sshfs (each feeds a `local_folders` entry).
@@ -60,9 +61,9 @@ pub struct AppConfig {
     pub recents: Vec<crate::recents::RecentEntry>,
 }
 
-/// An SMB/CIFS share Vela exposes through the local source. On macOS/Windows
-/// Vela stores credentials for OS mounting; on Linux it resolves user-space
-/// desktop FUSE mounts instead.
+/// An SMB/CIFS share Vela exposes through the local family. Credentials
+/// are stored for both paths: Linux speaks SMB natively in-process
+/// (libsmbclient; no mount), macOS/Windows mount via the OS.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)] // missing fields fall back to Default rather than failing the parse
 pub struct SmbMount {
@@ -74,7 +75,8 @@ pub struct SmbMount {
     pub password: String,
     #[serde(default)]
     pub domain: String,
-    /// Where the OS mounts it.
+    /// Where the OS mounts it (macOS/Windows). Empty on Linux: the marker
+    /// of a native, mountless share record.
     pub mountpoint: String,
     /// Selected folders inside this share, each with its own media type.
     #[serde(default)]
@@ -85,8 +87,10 @@ pub struct SmbMount {
     pub local_folder_id: String,
 }
 
-/// One selected folder inside an SMB share. `path` is relative to the mounted
-/// share root, using `/` as the separator; empty means the share root itself.
+/// One selected folder inside an SMB share. `path` is relative to the
+/// share root, using `/` as the separator; empty means the share root
+/// itself. (The same relative path serves the native Linux client and the
+/// macOS/Windows mounted tree.)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SmbFolder {

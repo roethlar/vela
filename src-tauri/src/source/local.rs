@@ -1,10 +1,13 @@
-//! Local (and OS-mounted SMB) folder backend. Indexes files by name/structure
-//! and direct-plays them in mpv. No metadata lookup (that's P2d) and no resume
-//! tracking — local playback uses `ProgressTarget::None` by design.
+//! Local-family folder backend: plain folders, SSH mounts, and SMB shares
+//! (native `Vfs` provider on Linux; OS mounts on macOS/Windows). Indexes
+//! files by name/structure and plays them in mpv — local paths directly,
+//! native SMB via the loopback stream proxy. No resume tracking: local
+//! playback uses `ProgressTarget::None` by design.
 //!
-//! Item keys are the absolute filesystem path. The registry splits a namespaced
-//! key on the *first* `:` only, so a Windows `C:\…` path survives intact as the
-//! raw key — no encoding or id↔path map needed.
+//! Item keys are the absolute filesystem path (or share-relative provider
+//! path for native SMB). The registry splits a namespaced key on the
+//! *first* `:` only, so a Windows `C:\…` path survives intact as the raw
+//! key — no encoding or id↔path map needed.
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -13,6 +16,7 @@ use async_trait::async_trait;
 
 use super::listing_cache::{self, ListingCache};
 use super::metadata::{self, Hint, MetaCache};
+use super::vfs::{StdFs, Vfs};
 use super::{namespace_key, HubDto, ItemDto, MediaSource, SectionDto, StreamResolution};
 use crate::config::{AppConfig, LocalFolder, SmbMount, SshMount};
 use crate::playback::ProgressTarget;
@@ -45,16 +49,28 @@ pub struct LocalFamilyMember {
     pub name: String,
     pub kind: &'static str,
     pub folders: Vec<LocalFolder>,
+    /// A native remote provider (e.g. SMB over libsmbclient). `None` means
+    /// the member's folders are real local paths served through std::fs.
+    pub vfs: Option<std::sync::Arc<dyn Vfs>>,
 }
 
 impl LocalFamilyMember {
     pub fn build(&self) -> std::sync::Arc<dyn MediaSource> {
-        std::sync::Arc::new(LocalSource::new(
-            self.id.clone(),
-            self.name.clone(),
-            self.kind,
-            self.folders.clone(),
-        ))
+        match &self.vfs {
+            Some(vfs) => std::sync::Arc::new(LocalSource::with_vfs(
+                self.id.clone(),
+                self.name.clone(),
+                self.kind,
+                self.folders.clone(),
+                vfs.clone(),
+            )),
+            None => std::sync::Arc::new(LocalSource::new(
+                self.id.clone(),
+                self.name.clone(),
+                self.kind,
+                self.folders.clone(),
+            )),
+        }
     }
 }
 
@@ -64,14 +80,16 @@ impl LocalFamilyMember {
 /// resolution is injected because boot and live rebuild derive mount folders
 /// differently; `safe_root` is applied uniformly to every member's folders.
 /// Members that end up with no folders are omitted entirely.
-pub fn local_family<FS, FH, SR>(
+pub fn local_family<FS, FV, FH, SR>(
     cfg: &AppConfig,
     smb_folders: FS,
+    smb_vfs: FV,
     ssh_folder: FH,
     safe_root: SR,
 ) -> Vec<LocalFamilyMember>
 where
     FS: Fn(&SmbMount) -> Vec<LocalFolder>,
+    FV: Fn(&SmbMount) -> Option<std::sync::Arc<dyn Vfs>>,
     FH: Fn(&SshMount) -> Option<LocalFolder>,
     SR: Fn(&str) -> bool,
 {
@@ -94,12 +112,17 @@ where
             name: "Local".to_string(),
             kind: "local",
             folders: plain,
+            vfs: None,
         });
     }
     for m in &cfg.smb_mounts {
+        let vfs = smb_vfs(m);
+        // Native members' folders are share-relative, scoped by the
+        // provider itself (logical normalization, no `..`, no symlinks
+        // client-side) — the local-filesystem root heuristics don't apply.
         let folders: Vec<_> = smb_folders(m)
             .into_iter()
-            .filter(|f| safe_root(&f.path))
+            .filter(|f| vfs.is_some() || safe_root(&f.path))
             .collect();
         if !folders.is_empty() {
             members.push(LocalFamilyMember {
@@ -107,6 +130,7 @@ where
                 name: m.name.clone(),
                 kind: "smb",
                 folders,
+                vfs,
             });
         }
     }
@@ -117,10 +141,24 @@ where
                 name: m.name.clone(),
                 kind: "ssh",
                 folders: vec![f],
+                vfs: None,
             });
         }
     }
     members
+}
+
+/// Folder paths eligible for asset-protocol allow-listing: only members
+/// backed by the real filesystem. Native providers' paths are
+/// share-relative (e.g. `/movies`, even `/` for a share root) — allow-
+/// listing those would grant access to same-named LOCAL directories.
+pub fn asset_folder_paths(members: &[LocalFamilyMember]) -> Vec<String> {
+    members
+        .iter()
+        .filter(|m| m.vfs.is_none())
+        .flat_map(|m| &m.folders)
+        .map(|f| f.path.clone())
+        .collect()
 }
 
 const VIDEO_EXTS: &[&str] = &[
@@ -134,6 +172,13 @@ pub struct LocalSource {
     folders: Vec<LocalFolder>,
     meta: Arc<MetaCache>,
     listings: Arc<ListingCache>,
+    /// Filesystem access for walking/sidecars — std::fs for plain folders;
+    /// injectable so native remote providers reuse the whole pipeline.
+    vfs: Arc<dyn Vfs>,
+    /// True when `vfs` is a native remote provider: item keys are provider
+    /// paths, not playable local files, so resolve_stream must not hand
+    /// them to mpv directly.
+    native_remote: bool,
 }
 
 impl LocalSource {
@@ -145,6 +190,30 @@ impl LocalSource {
             folders,
             meta: metadata::shared(),
             listings: listing_cache::shared(),
+            vfs: Arc::new(StdFs),
+            native_remote: false,
+        }
+    }
+
+    /// A member served by a native remote provider (e.g. SMB): the whole
+    /// listing/cache/metadata pipeline runs over `vfs`; playback resolution
+    /// is provider-specific and NOT a local file path.
+    pub fn with_vfs(
+        id: String,
+        name: String,
+        kind: &'static str,
+        folders: Vec<LocalFolder>,
+        vfs: Arc<dyn Vfs>,
+    ) -> Self {
+        Self {
+            id,
+            name,
+            kind,
+            folders,
+            meta: metadata::shared(),
+            listings: listing_cache::shared(),
+            vfs,
+            native_remote: true,
         }
     }
 
@@ -154,11 +223,12 @@ impl LocalSource {
 
     /// Guard against playing/listing outside the configured roots.
     fn within_roots(&self, p: &Path) -> bool {
-        let Ok(canon) = std::fs::canonicalize(p) else {
+        let Some(canon) = self.vfs.canonicalize(p) else {
             return false;
         };
         self.folders.iter().any(|f| {
-            std::fs::canonicalize(&f.path)
+            self.vfs
+                .canonicalize(Path::new(&f.path))
                 .map(|root| canon.starts_with(root))
                 .unwrap_or(false)
         })
@@ -187,6 +257,7 @@ impl LocalSource {
     ) {
         metadata::enrich(
             &self.meta,
+            self.vfs.as_ref(),
             item,
             Hint {
                 file,
@@ -210,6 +281,8 @@ impl LocalSource {
             folders: self.folders.clone(),
             meta: self.meta.clone(),
             listings: self.listings.clone(),
+            vfs: self.vfs.clone(),
+            native_remote: self.native_remote,
         }
     }
 }
@@ -249,15 +322,17 @@ fn walk_items_level(
     section_type: &str,
 ) -> Result<Vec<ItemDto>, String> {
     let root = Path::new(path);
-    if this.folder(path).is_none() || !root.is_dir() {
+    if this.folder(path).is_none() || !this.vfs.is_dir(root) {
         return Err("unknown local folder".into());
     }
     let mut items = Vec::new();
     if section_type == "show" {
         // Each immediate subdirectory is a show.
-        for entry in read_dir_sorted(root)
+        for entry in this
+            .vfs
+            .read_dir_sorted(root)
             .into_iter()
-            .filter(|p| p.is_dir() && this.within_roots(p))
+            .filter(|p| this.vfs.is_dir(p) && this.within_roots(p))
         {
             let (title, year) = parse_movie(&dir_name(&entry));
             let mut item = base_item(&this.id_str(), &entry, title.clone(), year, "show");
@@ -266,15 +341,15 @@ fn walk_items_level(
         }
     } else {
         // Movies: loose video files, plus subfolders that wrap one movie.
-        for entry in read_dir_sorted(root) {
+        for entry in this.vfs.read_dir_sorted(root) {
             if !this.within_roots(&entry) {
                 continue;
             }
-            let (file, title, year) = if entry.is_file() && is_video(&entry) {
+            let (file, title, year) = if this.vfs.is_file(&entry) && is_video(&entry) {
                 let (t, y) = parse_movie(&file_stem(&entry));
                 (entry.clone(), t, y)
-            } else if entry.is_dir() {
-                match largest_video_in(&entry) {
+            } else if this.vfs.is_dir(&entry) {
+                match largest_video_in(this.vfs.as_ref(), &entry) {
                     Some(file) => {
                         let (t, y) = parse_movie(&dir_name(&entry));
                         (file, t, y)
@@ -295,7 +370,7 @@ fn walk_items_level(
 /// Full (sorted, unpaged) listing of a container (show or season folder).
 fn walk_children_level(this: &LocalSource, path: &str) -> Result<Vec<ItemDto>, String> {
     let dir = Path::new(path);
-    if !this.within_roots(dir) || !dir.is_dir() {
+    if !this.within_roots(dir) || !this.vfs.is_dir(dir) {
         return Err("not a browsable local folder".into());
     }
     // Figure out the show this folder belongs to (for episode lookups):
@@ -309,11 +384,11 @@ fn walk_children_level(this: &LocalSource, path: &str) -> Result<Vec<ItemDto>, S
     let show_title = parse_movie(&dir_name(show_dir)).0;
 
     let mut items = Vec::new();
-    for entry in read_dir_sorted(dir) {
+    for entry in this.vfs.read_dir_sorted(dir) {
         if !this.within_roots(&entry) {
             continue;
         }
-        if entry.is_dir() {
+        if this.vfs.is_dir(&entry) {
             // A season folder.
             let name = dir_name(&entry);
             let index = parse_season_dir(&name);
@@ -323,7 +398,7 @@ fn walk_children_level(this: &LocalSource, path: &str) -> Result<Vec<ItemDto>, S
                 &mut item, &entry, "season", &show_title, None, None, None, None,
             );
             items.push(item);
-        } else if entry.is_file() && is_video(&entry) {
+        } else if this.vfs.is_file(&entry) && is_video(&entry) {
             // An episode file.
             let stem = file_stem(&entry);
             let mut item = base_item(&this.id_str(), &entry, clean_title(&stem), None, "episode");
@@ -400,7 +475,7 @@ fn spawn_redetect_kind(this: LocalSource, root: String) {
     };
     tauri::async_runtime::spawn_blocking(move || {
         let _enter = handle.enter();
-        let kind = detect_kind(Path::new(&root)).to_string();
+        let kind = detect_kind(this.vfs.as_ref(), Path::new(&root)).to_string();
         let changed = this.listings.store_kind(&root, &kind);
         this.listings.finish_revalidate(&key);
         if changed {
@@ -523,24 +598,12 @@ fn dir_name(path: &Path) -> String {
         .to_string()
 }
 
-/// One level of a directory, sorted by name.
-fn read_dir_sorted(path: &Path) -> Vec<PathBuf> {
-    let mut entries: Vec<PathBuf> = std::fs::read_dir(path)
-        .into_iter()
-        .flatten()
-        .flatten()
-        .map(|e| e.path())
-        .collect();
-    entries.sort();
-    entries
-}
-
 /// Largest video file directly inside `dir` (a movie-in-its-own-folder layout).
-fn largest_video_in(dir: &Path) -> Option<PathBuf> {
-    read_dir_sorted(dir)
+fn largest_video_in(vfs: &dyn Vfs, dir: &Path) -> Option<PathBuf> {
+    vfs.read_dir_sorted(dir)
         .into_iter()
-        .filter(|p| p.is_file() && is_video(p))
-        .max_by_key(|p| std::fs::metadata(p).map(|m| m.len()).unwrap_or(0))
+        .filter(|p| vfs.is_file(p) && is_video(p))
+        .max_by_key(|p| vfs.file_len(p))
 }
 
 // ---- ItemDto builders ----------------------------------------------------
@@ -633,7 +696,7 @@ impl MediaSource for LocalSource {
                                 k
                             }
                             None => {
-                                let k = detect_kind(Path::new(&f.path)).to_string();
+                                let k = detect_kind(this.vfs.as_ref(), Path::new(&f.path)).to_string();
                                 this.listings.store_kind(&f.path, &k);
                                 k
                             }
@@ -670,7 +733,7 @@ impl MediaSource for LocalSource {
         );
         run_blocking(move || {
             let root = Path::new(&section_key);
-            if this.folder(&section_key).is_none() || !root.is_dir() {
+            if this.folder(&section_key).is_none() || !this.vfs.is_dir(root) {
                 return Err("unknown local folder".into());
             }
             let kind = LevelKind::Items {
@@ -706,7 +769,7 @@ impl MediaSource for LocalSource {
         let item_key = item_key.to_string();
         run_blocking(move || {
             let dir = Path::new(&item_key);
-            if !this.within_roots(dir) || !dir.is_dir() {
+            if !this.within_roots(dir) || !this.vfs.is_dir(dir) {
                 return Err("not a browsable local folder".into());
             }
             let kind = LevelKind::Children;
@@ -735,7 +798,7 @@ impl MediaSource for LocalSource {
             let mut items = Vec::new();
             for folder in &this.folders {
                 let root = Path::new(&folder.path);
-                walk_search(root, root, &needle, &this.id_str(), &mut items, 0);
+                walk_search(this.vfs.as_ref(), root, root, &needle, &this.id_str(), &mut items, 0);
                 if items.len() >= 100 {
                     break;
                 }
@@ -774,8 +837,24 @@ impl MediaSource for LocalSource {
         _duration_ms: Option<u64>,
     ) -> Result<StreamResolution, String> {
         let path = Path::new(item_key);
-        if !self.within_roots(path) || !path.is_file() {
+        if !self.within_roots(path) || !self.vfs.is_file(path) {
             return Err("file is not inside a configured local folder".into());
+        }
+        if self.native_remote {
+            // Provider paths aren't playable files: mpv gets a loopback
+            // proxy URL that translates Range requests into native reads.
+            // Same progress semantics as local files (recents track resume
+            // client-side; no server watch state to update).
+            let url = self
+                .vfs
+                .resolve_stream_url(path)
+                .unwrap_or_else(|| Err("this source cannot stream".into()))?;
+            return Ok(StreamResolution {
+                url,
+                resume_ms: 0,
+                progress: ProgressTarget::None,
+                http_headers: Vec::new(),
+            });
         }
         // mpv plays the path directly; no token, no network, no resume tracking.
         Ok(StreamResolution {
@@ -789,6 +868,7 @@ impl MediaSource for LocalSource {
 
 /// Bounded recursive filename search.
 fn walk_search(
+    vfs: &dyn Vfs,
     root: &Path,
     dir: &Path,
     needle: &str,
@@ -799,16 +879,16 @@ fn walk_search(
     if depth > 6 || out.len() >= 100 {
         return;
     }
-    for entry in read_dir_sorted(dir) {
+    for entry in vfs.read_dir_sorted(dir) {
         if out.len() >= 100 {
             return;
         }
-        if !within_root(root, &entry) {
+        if !within_root(vfs, root, &entry) {
             continue;
         }
-        if entry.is_dir() {
-            walk_search(root, &entry, needle, source_id, out, depth + 1);
-        } else if entry.is_file() && is_video(&entry) {
+        if vfs.is_dir(&entry) {
+            walk_search(vfs, root, &entry, needle, source_id, out, depth + 1);
+        } else if vfs.is_file(&entry) && is_video(&entry) {
             let stem = file_stem(&entry);
             if !stem.to_lowercase().contains(needle) {
                 continue;
@@ -827,8 +907,8 @@ fn walk_search(
     }
 }
 
-fn within_root(root: &Path, p: &Path) -> bool {
-    let (Ok(root), Ok(canon)) = (std::fs::canonicalize(root), std::fs::canonicalize(p)) else {
+fn within_root(vfs: &dyn Vfs, root: &Path, p: &Path) -> bool {
+    let (Some(root), Some(canon)) = (vfs.canonicalize(root), vfs.canonicalize(p)) else {
         return false;
     };
     canon.starts_with(root)
@@ -854,23 +934,26 @@ fn show_title_for(file: &Path) -> String {
 /// Heuristic for folders added without a declared kind: a library is "show" if
 /// an immediate subdirectory looks like a show (has a season folder or an
 /// `SxxEyy` episode); otherwise "movie".
-fn detect_kind(root: &Path) -> &'static str {
-    for entry in read_dir_sorted(root)
+fn detect_kind(vfs: &dyn Vfs, root: &Path) -> &'static str {
+    for entry in vfs
+        .read_dir_sorted(root)
         .into_iter()
-        .filter(|p| p.is_dir())
+        .filter(|p| vfs.is_dir(p))
         .take(8)
     {
-        if looks_like_show(&entry) {
+        if looks_like_show(vfs, &entry) {
             return "show";
         }
     }
     "movie"
 }
 
-fn looks_like_show(dir: &Path) -> bool {
-    read_dir_sorted(dir).into_iter().take(30).any(|child| {
-        (child.is_dir() && parse_season_dir(&dir_name(&child)).is_some())
-            || (child.is_file() && is_video(&child) && parse_episode(&file_stem(&child)).is_some())
+fn looks_like_show(vfs: &dyn Vfs, dir: &Path) -> bool {
+    vfs.read_dir_sorted(dir).into_iter().take(30).any(|child| {
+        (vfs.is_dir(&child) && parse_season_dir(&dir_name(&child)).is_some())
+            || (vfs.is_file(&child)
+                && is_video(&child)
+                && parse_episode(&file_stem(&child)).is_some())
     })
 }
 
@@ -945,6 +1028,7 @@ mod tests {
         let fam = local_family(
             &cfg,
             |_m| vec![folder("smbf", "movies", "/mnt/smb/movies")],
+            |_m| None,
             |_m| Some(folder("sshfld", "remote", "/mnt/ssh")),
             |_p| true,
         );
@@ -975,8 +1059,56 @@ mod tests {
 
         // The SMB mount resolves no folders and the plain folder fails the
         // safe-root check, so no member survives at all.
-        let fam = local_family(&cfg, |_m| Vec::new(), |_m| None, |p| p != "/");
+        let fam = local_family(&cfg, |_m| Vec::new(), |_m| None, |_m| None, |p| p != "/");
         assert!(fam.is_empty());
+    }
+
+    #[test]
+    fn asset_folder_paths_excludes_native_provider_members() {
+        struct NullVfs;
+        impl Vfs for NullVfs {
+            fn read_dir_sorted(&self, _d: &Path) -> Vec<PathBuf> {
+                Vec::new()
+            }
+            fn is_dir(&self, _p: &Path) -> bool {
+                false
+            }
+            fn is_file(&self, _p: &Path) -> bool {
+                false
+            }
+            fn canonicalize(&self, _p: &Path) -> Option<PathBuf> {
+                None
+            }
+            fn file_len(&self, _p: &Path) -> u64 {
+                0
+            }
+            fn read_to_string(&self, _p: &Path) -> Option<String> {
+                None
+            }
+        }
+        let members = vec![
+            LocalFamilyMember {
+                id: "local".into(),
+                name: "Local".into(),
+                kind: "local",
+                folders: vec![folder("f1", "Movies", "/data/movies")],
+                vfs: None,
+            },
+            LocalFamilyMember {
+                id: "smb-m1".into(),
+                name: "nas".into(),
+                kind: "smb",
+                // Provider-namespace paths: allow-listing "/" would grant
+                // the entire real filesystem to the asset protocol.
+                folders: vec![folder("f2", "movies", "/movies"), folder("f3", "root", "/")],
+                vfs: Some(std::sync::Arc::new(NullVfs)),
+            },
+        ];
+        assert_eq!(
+            asset_folder_paths(&members),
+            vec!["/data/movies".to_string()],
+            "native provider paths must never be allow-listed"
+        );
     }
 
     #[test]

@@ -383,7 +383,7 @@ pub struct SmbFolderDto {
     kind: String,
 }
 
-/// One directory inside a mounted SMB share, for the settings browser.
+/// One directory inside a configured SMB share, for the settings browser.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmbDirectoryDto {
@@ -405,8 +405,10 @@ pub struct SshMountDto {
     mountpoint: String,
 }
 
-/// Mount an SMB share via the OS and persist it for browsing/selection. Library
-/// folders are added separately with `add_smb_folder`.
+/// Add an SMB share and persist it for browsing/selection. Linux verifies
+/// the server/share/credentials over the in-process native client (no OS
+/// mount; `mountpoint` stays empty); macOS/Windows mount via the OS.
+/// Library folders are added separately with `add_smb_folder`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface; each is a distinct field.
 pub async fn mount_smb(
@@ -432,7 +434,7 @@ pub async fn mount_smb(
     }) {
         return Err("that share is already added".into());
     }
-    let mut mount = SmbMount {
+    let mount = SmbMount {
         id: uuid::Uuid::new_v4().to_string(),
         name: name.unwrap_or_else(|| format!("{}/{}", server.trim(), share.trim())),
         server: server.trim().to_string(),
@@ -453,17 +455,9 @@ pub async fn mount_smb(
     // browsing and playback proceed while the (possibly slow) mount runs.
     let _ops = state.source_lock.lock().await;
 
-    // The OS mount can block for seconds (or hang), so run it off the async runtime.
-    let m_for_mount = mount.clone();
-    mount = tauri::async_runtime::spawn_blocking(move || {
-        let mut mounted = m_for_mount;
-        crate::smb::prepare_mount(&mut mounted)?;
-        Ok::<SmbMount, String>(mounted)
-    })
-    .await
-    .map_err(|e| format!("mount task failed: {e}"))??;
+    let mount = establish_smb_share(mount).await?;
 
-    {
+    if !mount.mountpoint.is_empty() {
         use tauri::Manager;
         let _ = app
             .asset_protocol_scope()
@@ -497,8 +491,9 @@ pub async fn mount_smb(
         // it. We still hold source_lock, so no concurrent op can persist this
         // mountpoint between the check and the unmount. On a read error we still
         // clean up: dropping our just-created mount beats orphaning a credentialed
-        // mount with no record. Run the unmount off the async runtime.
-        if mountpoint_referenced(&mountpoint) != Some(true) {
+        // mount with no record. Run the unmount off the async runtime. An empty
+        // mountpoint means a native (mountless) connection: nothing to roll back.
+        if !mountpoint.is_empty() && mountpoint_referenced(&mountpoint) != Some(true) {
             let mp = mountpoint.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || crate::smb::unmount(&mp)).await;
         }
@@ -509,6 +504,32 @@ pub async fn mount_smb(
         name: mount_name,
         kind: "smb".to_string(),
     })
+}
+
+/// Establish a newly added share. Linux-family: verify server/share/
+/// credentials with an in-process libsmbclient connection — no OS mount, and
+/// `mountpoint` stays empty as the marker of a native record. macOS/Windows:
+/// perform the OS mount and fill `mountpoint`. Blocking work runs off the
+/// async runtime either way.
+async fn establish_smb_share(mount: SmbMount) -> Result<SmbMount, String> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let probe = mount.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::smb_client::verify_mount(&probe))
+            .await
+            .map_err(|e| format!("SMB connect task failed: {e}"))??;
+        Ok(mount)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut mounted = mount;
+            crate::smb::prepare_mount(&mut mounted)?;
+            Ok::<SmbMount, String>(mounted)
+        })
+        .await
+        .map_err(|e| format!("mount task failed: {e}"))?
+    }
 }
 
 /// List configured SMB mounts (for the settings UI).
@@ -529,9 +550,9 @@ pub async fn list_smb_mounts() -> Result<Vec<SmbMountDto>, String> {
         .collect())
 }
 
-/// List directories inside a configured SMB share, relative to the mounted
-/// share root. Used by Settings to choose one or more library folders after the
-/// share is mounted.
+/// List directories inside a configured SMB share, relative to the share
+/// root. Used by Settings to choose library folders. Linux lists natively
+/// over the in-process client; macOS/Windows read the OS mount path.
 #[tauri::command]
 pub async fn list_smb_directories(
     id: String,
@@ -544,37 +565,67 @@ pub async fn list_smb_directories(
         .into_iter()
         .find(|m| m.id == id)
         .ok_or("no such SMB mount")?;
-    let root = smb_mount_root(&mount).ok_or_else(|| {
-        format!(
-            "SMB share //{}/{} is not mounted or readable",
-            mount.server, mount.share
-        )
-    })?;
-    let dir = smb_pathbuf_for_relative(&root, &relative);
-    if !dir.is_dir() {
-        return Err("that SMB folder is not readable".into());
+
+    // Linux-family: list natively over an in-process SMB connection, so
+    // browsing works with no OS mount present at all.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let conn = crate::smb_client::connect_mount(&mount)?;
+            let mut dirs: Vec<SmbDirectoryDto> = conn
+                .list_dir(&relative)?
+                .into_iter()
+                .filter(|entry| entry.is_dir)
+                .map(|entry| SmbDirectoryDto {
+                    path: append_smb_relative_path(&relative, &entry.name),
+                    name: entry.name,
+                })
+                .collect();
+            dirs.sort_by_key(|dir| dir.name.to_lowercase());
+            Ok(dirs)
+        })
+        .await
+        .map_err(|e| format!("SMB browse task failed: {e}"))?
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut dirs = Vec::new();
-        for entry in std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))? {
-            let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            dirs.push(SmbDirectoryDto {
-                path: append_smb_relative_path(&relative, &name),
-                name,
-            });
+
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let root = smb_mount_root(&mount).ok_or_else(|| {
+            format!(
+                "SMB share //{}/{} is not mounted or readable",
+                mount.server, mount.share
+            )
+        })?;
+        let dir = smb_pathbuf_for_relative(&root, &relative);
+        if !dir.is_dir() {
+            return Err("that SMB folder is not readable".into());
         }
-        dirs.sort_by_key(|dir| dir.name.to_lowercase());
-        Ok::<_, String>(dirs)
-    })
-    .await
-    .map_err(|e| format!("SMB browse task failed: {e}"))?
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut dirs = Vec::new();
+            for entry in
+                std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))?
+            {
+                let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                dirs.push(SmbDirectoryDto {
+                    path: append_smb_relative_path(&relative, &name),
+                    name,
+                });
+            }
+            dirs.sort_by_key(|dir| dir.name.to_lowercase());
+            Ok::<_, String>(dirs)
+        })
+        .await
+        .map_err(|e| format!("SMB browse task failed: {e}"))?
+    }
 }
 
-/// Add one selected folder inside a mounted SMB share to the local source.
+/// Add one selected folder inside a configured SMB share to its source.
+/// Linux validates the folder over the native client; macOS/Windows probe
+/// the mounted path.
 #[tauri::command]
 pub async fn add_smb_folder(
     id: String,
@@ -596,20 +647,38 @@ pub async fn add_smb_folder(
         .iter()
         .find(|m| m.id == id)
         .ok_or("no such SMB mount")?;
-    let root = smb_mount_root(mount).ok_or_else(|| {
-        format!(
-            "SMB share //{}/{} is not mounted or readable",
-            mount.server, mount.share
-        )
-    })?;
-    let folder_path = smb_path_string_for_relative(&root, &relative);
-    if !Path::new(&folder_path).is_dir() {
-        return Err("that SMB folder is not readable".into());
-    }
-    if !safe_user_media_root(&folder_path) {
-        return Err("choose a specific media folder, not a filesystem or home root".into());
-    }
+    // Linux-family: validate over the native connection — the share is
+    // never OS-mounted, so there is no local path to probe or allow.
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
+        let _ = &app; // asset protocol is unused for native SMB folders
+        let probe = mount.clone();
+        let rel = relative.clone();
+        let is_dir = tauri::async_runtime::spawn_blocking(move || {
+            crate::smb_client::connect_mount(&probe).and_then(|c| c.stat(&rel))
+        })
+        .await
+        .map_err(|e| format!("SMB probe task failed: {e}"))??
+        .is_dir;
+        if !is_dir {
+            return Err("that SMB folder is not readable".into());
+        }
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let root = smb_mount_root(mount).ok_or_else(|| {
+            format!(
+                "SMB share //{}/{} is not mounted or readable",
+                mount.server, mount.share
+            )
+        })?;
+        let folder_path = smb_path_string_for_relative(&root, &relative);
+        if !Path::new(&folder_path).is_dir() {
+            return Err("that SMB folder is not readable".into());
+        }
+        if !safe_user_media_root(&folder_path) {
+            return Err("choose a specific media folder, not a filesystem or home root".into());
+        }
         use tauri::Manager;
         let _ = app
             .asset_protocol_scope()
@@ -757,9 +826,11 @@ fn smb_folder_display_name(m: &SmbMount, relative: &str) -> String {
         .to_string()
 }
 
+/// Linux: native shares have no OS mount path; UI fall back to the
+/// share-relative folder path.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn smb_mount_root(m: &SmbMount) -> Option<String> {
-    crate::smb::resolved_mountpoint(m).filter(|path| Path::new(path).is_dir())
+fn smb_mount_root(_m: &SmbMount) -> Option<String> {
+    None
 }
 
 #[cfg(not(all(unix, not(target_os = "macos"))))]
@@ -998,11 +1069,30 @@ fn ssh_mountpoint_referenced(mountpoint: &str) -> Option<bool> {
 }
 
 fn live_local_family(cfg: &AppConfig) -> Vec<crate::source::local::LocalFamilyMember> {
-    crate::source::local::local_family(cfg, smb_live_folders, ssh_live_folder, |p| {
-        safe_user_media_root(p)
-    })
+    crate::source::local::local_family(
+        cfg,
+        smb_live_folders,
+        smb_live_vfs,
+        ssh_live_folder,
+        safe_user_media_root,
+    )
 }
 
+/// Linux-family: native SMB — mirror of boot's `smb_runtime_folders`.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
+    selected_smb_folders(m)
+        .iter()
+        .map(|folder| LocalFolder {
+            id: folder.id.clone(),
+            name: folder.name.clone(),
+            path: crate::source::smb_vfs_path(&folder.path),
+            kind: folder.kind.clone(),
+        })
+        .collect()
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
     let Some(root) = smb_mount_root(m) else {
         return Vec::new();
@@ -1022,6 +1112,18 @@ fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
             })
         })
         .collect()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_live_vfs(m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    Some(std::sync::Arc::new(crate::source::smb_vfs::SmbVfs::new(
+        m.clone(),
+    )))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn smb_live_vfs(_m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    None
 }
 
 fn ssh_live_folder(m: &SshMount) -> Option<LocalFolder> {

@@ -32,6 +32,14 @@ async-trait = "0.1"
 tauri-plugin-dialog = "2"
 base64 = "0.22"
 
+# Native SMB (Linux-family only): raw libsmbclient bindings. The safe `pavao`
+# wrapper is unusable here — it holds one process-global SMBCCTX (a second
+# client silently reuses the first's credentials, and Drop frees the context
+# under other live clients). smb_client.rs owns one context per connection.
+[target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
+pavao-sys = "0.2.16"
+libc = "0.2"
+
 # Smaller, faster release binary for a desktop app. (Debug builds, which the
 # Tauri dev workflow uses, are unaffected.)
 [profile.release]

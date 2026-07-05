@@ -11,6 +11,20 @@ pub mod listing_cache;
 pub mod local;
 pub mod metadata;
 pub mod plex;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub mod smb_vfs;
+pub mod vfs;
+
+/// Provider-namespace path for a share-relative SMB folder path from config
+/// (`"a/b"` or `""` → `"/a/b"` / `"/"`).
+pub fn smb_vfs_path(relative: &str) -> String {
+    let trimmed = relative.trim_matches('/');
+    if trimmed.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{trimmed}")
+    }
+}
 
 /// A browsable library/section, tagged with the source it came from.
 #[derive(Serialize, Clone)]
