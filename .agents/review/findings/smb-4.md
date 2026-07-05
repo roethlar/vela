@@ -82,4 +82,19 @@ None.
   paths (rating keys), not URLs, so restarts are unaffected.
 
 ## Reviewer comments
-(pending)
+Round 1 — reopened. Reviewer: codex (codex-cli 0.142.5); reviewed
+`f47d256…`, base `2a283aa…`. 2026-07-04 (UTC). guard_confirmed: **true**
+(range-clamp mutation failed the parser test; restore passed 70).
+Findings, both accepted as correct:
+1. `metadata.rs:223` — sidecar artwork minted as loopback token URLs
+   during enrichment is persisted via the listing cache (and recents), so
+   restarts serve dead `127.0.0.1:<old-port>/<old-token>` posters until
+   revalidation.
+2. `stream_proxy.rs:46` — the 64-token registry is smaller than one
+   poster-rich folder; a large listing evicts live playback/artwork
+   tokens → spurious 404s.
+Fix direction (round 2): artwork leaves the token proxy entirely —
+stable `velasmb://<mount-id>/<path>` custom URI scheme served by a
+Linux-only Tauri protocol handler (config-validated mount, normalized
+path, image-extension whitelist, bounded read). The token registry then
+holds playback targets only, where the cap is ample.
