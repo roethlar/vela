@@ -223,15 +223,7 @@ impl LocalSource {
 
     /// Guard against playing/listing outside the configured roots.
     fn within_roots(&self, p: &Path) -> bool {
-        let Some(canon) = self.vfs.canonicalize(p) else {
-            return false;
-        };
-        self.folders.iter().any(|f| {
-            self.vfs
-                .canonicalize(Path::new(&f.path))
-                .map(|root| canon.starts_with(root))
-                .unwrap_or(false)
-        })
+        path_within_roots(self.vfs.as_ref(), &self.folders, p)
     }
 
     fn item_movie(&self, file: &Path, title: String, year: Option<u32>) -> ItemDto {
@@ -503,6 +495,21 @@ where
 }
 
 // ---- filename / structure parsing ---------------------------------------
+
+/// Symlink-safe containment: `p` (canonicalized through the VFS) must sit
+/// under one of the configured folders. Free function so `resolve_stream`
+/// can run it on the blocking pool — every call is VFS-priced (canonicalize
+/// is a network round-trip on the native SMB backend).
+fn path_within_roots(vfs: &dyn Vfs, folders: &[LocalFolder], p: &Path) -> bool {
+    let Some(canon) = vfs.canonicalize(p) else {
+        return false;
+    };
+    folders.iter().any(|f| {
+        vfs.canonicalize(Path::new(&f.path))
+            .map(|root| canon.starts_with(root))
+            .unwrap_or(false)
+    })
+}
 
 fn is_video(path: &Path) -> bool {
     path.extension()
@@ -837,33 +844,43 @@ impl MediaSource for LocalSource {
         item_key: &str,
         _duration_ms: Option<u64>,
     ) -> Result<StreamResolution, String> {
-        let path = Path::new(item_key);
-        if !self.within_roots(path) || !self.vfs.is_file(path) {
-            return Err("file is not inside a configured local folder".into());
-        }
-        if self.native_remote {
-            // Provider paths aren't playable files: mpv gets a loopback
-            // proxy URL that translates Range requests into native reads.
-            // Same progress semantics as local files (recents track resume
-            // client-side; no server watch state to update).
-            let url = self
-                .vfs
-                .resolve_stream_url(path)
-                .unwrap_or_else(|| Err("this source cannot stream".into()))?;
-            return Ok(StreamResolution {
-                url,
+        // Containment + is_file are VFS-priced (network round-trips on the
+        // native SMB backend), so they run on the blocking pool like every
+        // other VFS access in this provider — an async worker must not sit
+        // behind a hung NAS stat.
+        let vfs = self.vfs.clone();
+        let folders = self.folders.clone();
+        let native_remote = self.native_remote;
+        let key = item_key.to_string();
+        run_blocking(move || {
+            let path = Path::new(&key);
+            if !path_within_roots(vfs.as_ref(), &folders, path) || !vfs.is_file(path) {
+                return Err("file is not inside a configured local folder".into());
+            }
+            if native_remote {
+                // Provider paths aren't playable files: mpv gets a loopback
+                // proxy URL that translates Range requests into native reads.
+                // Same progress semantics as local files (recents track resume
+                // client-side; no server watch state to update).
+                let url = vfs
+                    .resolve_stream_url(path)
+                    .unwrap_or_else(|| Err("this source cannot stream".into()))?;
+                return Ok(StreamResolution {
+                    url,
+                    resume_ms: 0,
+                    progress: ProgressTarget::None,
+                    http_headers: Vec::new(),
+                });
+            }
+            // mpv plays the path directly; no token, no network, no resume tracking.
+            Ok(StreamResolution {
+                url: key.clone(),
                 resume_ms: 0,
                 progress: ProgressTarget::None,
                 http_headers: Vec::new(),
-            });
-        }
-        // mpv plays the path directly; no token, no network, no resume tracking.
-        Ok(StreamResolution {
-            url: item_key.to_string(),
-            resume_ms: 0,
-            progress: ProgressTarget::None,
-            http_headers: Vec::new(),
+            })
         })
+        .await
     }
 }
 

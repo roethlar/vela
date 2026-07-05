@@ -111,6 +111,6 @@
   "notes": [
     "CI installs Tauri WebKitGTK/libsoup/GTK dependencies before Rust checks on Linux.",
     "README says live integration for Emby, local, and SMB paths is still pending even where unit-tested; Jellyfin was smoke-tested live on 2026-07-04.",
-    "The current known deferred issue is local filesystem traversal inside async source methods."
+    "Audited 2026-07-05: the previously-noted deferred issue (blocking filesystem traversal inside async source methods) is resolved — local.rs routes traversal-heavy methods and resolve_stream through run_blocking, and all mount/unmount call sites in commands.rs use spawn_blocking. The ISSUES.md Kimi P0 items were re-verified against current code the same day."
   ]
 }
