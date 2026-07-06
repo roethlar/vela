@@ -47,6 +47,11 @@ struct Entry {
     /// Entity length once learned on the first request, so a later Range
     /// request (a seek) skips the per-open `stat`. `None` until discovered.
     len: Option<u64>,
+    /// Bumped every time the token is reused for a fresh play. A request
+    /// captures it at lookup and may only write its discovered length back
+    /// under the same generation, so a slow in-flight request from a prior
+    /// play cannot repopulate a length that a replay just cleared.
+    generation: u64,
 }
 
 /// Oldest-first; registration evicts from the front once full. The
@@ -124,7 +129,10 @@ fn register(target: Target) -> Result<String, String> {
         // on the earlier play may now be stale (the file could have been
         // replaced or resized since). Drop it so the next request re-stats
         // once — the per-seek cache only needs to span a single playback.
+        // Bumping the generation also invalidates any in-flight store from
+        // the prior play, so a late writer can't repopulate the stale length.
         existing.len = None;
+        existing.generation = existing.generation.wrapping_add(1);
         return Ok(format!("http://127.0.0.1:{}/{}", p.port, existing.token));
     }
     if reg.len() >= REGISTRY_CAP {
@@ -134,17 +142,23 @@ fn register(target: Target) -> Result<String, String> {
         token: token.clone(),
         target,
         len: None,
+        generation: 0,
     });
     Ok(format!("http://127.0.0.1:{}/{}", p.port, token))
 }
 
-/// Record the discovered entity length for `token` so later requests (seeks)
-/// skip the length probe. Best-effort: a no-op if the token was evicted
-/// meanwhile (the next request simply re-probes).
-fn store_len(token: &str, len: u64) {
+/// Record the discovered entity length for `token`, learned by a request that
+/// captured `generation` at lookup, so later requests (seeks) skip the length
+/// probe. Best-effort and generation-guarded: a no-op if the token was evicted
+/// meanwhile, or if the token was reused for a fresh play since the request
+/// began (generation moved on) — in which case the stale length is dropped and
+/// the next request re-probes.
+fn store_len(token: &str, generation: u64, len: u64) {
     if let Ok(mut reg) = registry().lock() {
         if let Some(entry) = reg.iter_mut().find(|e| e.token == token) {
-            entry.len = Some(len);
+            if entry.generation == generation {
+                entry.len = Some(len);
+            }
         }
     }
 }
@@ -273,8 +287,10 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
         return respond_status(&mut conn, "405 Method Not Allowed", &[("Allow", "GET, HEAD")]);
     }
     // Look the token up without holding the registry lock during I/O, along
-    // with any length learned on a prior request so a seek skips the probe.
-    let looked_up: Option<(Target, Option<u64>)> = {
+    // with any length learned on a prior request (so a seek skips the probe)
+    // and the current generation (so a length we learn is only written back if
+    // the token has not been reused for a fresh play meanwhile).
+    let looked_up: Option<(Target, Option<u64>, u64)> = {
         let reg = registry()
             .lock()
             .map_err(|_| "stream proxy registry poisoned".to_string())?;
@@ -290,10 +306,10 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
                     probes: probes.clone(),
                 },
             };
-            (target, e.len)
+            (target, e.len, e.generation)
         })
     };
-    let Some((target, cached_len)) = looked_up else {
+    let Some((target, cached_len, generation)) = looked_up else {
         return respond_status(&mut conn, "404 Not Found", &[]);
     };
     match target {
@@ -305,7 +321,7 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
                 Some(len) => smb.open_read_with_len(&relative, len)?,
                 None => {
                     let handle = smb.open_read(&relative)?;
-                    store_len(&req.token, handle.len());
+                    store_len(&req.token, generation, handle.len());
                     handle
                 }
             };
@@ -321,7 +337,7 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
                 None => {
                     probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                     let len = bytes.len() as u64;
-                    store_len(&req.token, len);
+                    store_len(&req.token, generation, len);
                     len
                 }
             };
@@ -544,6 +560,17 @@ mod tests {
             .and_then(|e| e.len)
     }
 
+    /// Read an entry's current generation directly from the registry (test-only).
+    fn entry_gen(token: &str) -> u64 {
+        registry()
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| e.token == token)
+            .map(|e| e.generation)
+            .unwrap()
+    }
+
     #[test]
     fn reregistering_a_token_clears_a_stale_cached_length() {
         let _guard = test_lock();
@@ -554,7 +581,7 @@ mod tests {
         // First play mints a token; a request then learns and caches the size.
         let url1 = register_smb(&m("x"), "movie.mkv").unwrap();
         let token = url1.rsplit('/').next().unwrap().to_string();
-        store_len(&token, 4242);
+        store_len(&token, entry_gen(&token), 4242);
         assert_eq!(entry_len(&token), Some(4242), "first play caches the size");
 
         // Replaying the same file reuses the token — but the cached size must
@@ -566,6 +593,41 @@ mod tests {
             entry_len(&token),
             None,
             "re-registration drops the stale cached length so it is re-statted"
+        );
+    }
+
+    #[test]
+    fn a_stale_generation_store_len_is_ignored() {
+        let _guard = test_lock();
+        let m = |id: &str| SmbMount {
+            id: id.into(),
+            ..SmbMount::default()
+        };
+        // Play 1's first request captures the token's generation.
+        let url = register_smb(&m("x"), "movie.mkv").unwrap();
+        let token = url.rsplit('/').next().unwrap().to_string();
+        let g_old = entry_gen(&token);
+
+        // A replay reuses the token, bumping the generation and clearing len.
+        let _ = register_smb(&m("x"), "movie.mkv").unwrap();
+        let g_new = entry_gen(&token);
+        assert_ne!(g_old, g_new, "reuse bumps the generation");
+
+        // Play 1's slow request finally finishes its stat and writes back under
+        // the OLD generation: it must be ignored, or it repopulates the length
+        // the replay just cleared and the new play serves a stale size.
+        store_len(&token, g_old, 4242);
+        assert_eq!(
+            entry_len(&token),
+            None,
+            "a stale-generation store is rejected"
+        );
+        // The new play's own request (current generation) still caches normally.
+        store_len(&token, g_new, 8888);
+        assert_eq!(
+            entry_len(&token),
+            Some(8888),
+            "a current-generation store is accepted"
         );
     }
 
