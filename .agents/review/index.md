@@ -7,6 +7,17 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop sspf-1..sspf-3 CLOSED 2026-07-05: all verified `[x]`, fixes on `main`.
+Scope was **SMB seek Bug 1 sub-slice 1** (`.agents/plans/smb-ssh-playtest-fixes.md`)
+— base `adbeb867`, converged at head `401fd1bc` after four codex rounds (three
+reopens, each a real distinct defect, all guard-proven). r1 reopened sspf-1
+(token reuse serves a stale cached length → fix `08fef74`); r2 reopened sspf-2
+(a late `store_len` repopulates a length a replay cleared, TOCTOU → per-token
+generation guard, fix `79f3979`); r3 reopened sspf-3 (env-gated live probe
+panics after connect went lazy → fix `401fd1b`); r4 **accepted** clean, no
+comments. Each round banked a verifiable delta (healthy converging loop, not a
+stall). Same no-branches adaptation.
+
 Loop CLOSED 2026-07-05: cw-1..cw-3 all verified `[x]`, fixes on `main`.
 
 Loop e2e-10 CLOSED 2026-07-05: eh-15 verified `[x]`. Scope was E2E slice
