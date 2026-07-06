@@ -171,17 +171,29 @@ Keep it short and update it when important repo facts change.
   (Plex sorts these server-side; only the merged ranking of JF/local items is
   affected; local last-played needs recents merged into library items). REMAINING:
   owner playtest — the sort dropdown on Plex libraries + the merged All view.
-  **IMMEDIATE NEXT ACTION: the second track — Plex item detail / info view**
-  (`.agents/plans/item-detail-view.md`), **awaiting an explicit owner go (no code
-  yet).** The "richer client" surface. Plex gives us much we currently drop
-  (ratings, content rating, genres, cast+crew w/ headshots, studio, tagline, air
-  date, stream specs). **Binding owner UX ruling:** CW carousel click = play; movie
-  click → info page (Play on poster); show → seasons → episodes; episode → ONE
-  shared info page updating per selected episode. Info page = full-screen route
-  (owner-confirmed). **Binding "no half-built state":** build all backends
-  (Plex+JF+local) behind the current nav and **flip navigation last** — never ship a
-  Plex-only stub. Bigger, multi-slice. Run the `codex` plan-review loop before
-  implementation (repo convention).
+  **ACTIVE WORK (2026-07-06): the second track — Plex item detail / info view**
+  (`.agents/plans/item-detail-view.md`), **APPROVED and implementing.** Owner go
+  ("continue" on the prior handoff) + the repo-convention **codex plan-review loop
+  CLOSED accepted at r3** (base=head `410fa4e`; three rounds, six findings idv-1..6
+  all resolved — full trail in the plan's `## Review log`; trail commits `775e1ce`
+  → `0df45b7` → `b6fab67`, UNPUSHED). The "richer client" surface. **Binding owner
+  UX ruling:** CW carousel click = play; movie click → info page (Play on poster);
+  show → seasons → episodes; episode → ONE shared info page updating per selected
+  episode; info page = full-screen route. **Binding "no half-built state":** build
+  all backends (Plex+JF+local) behind the current nav and **flip navigation last**
+  (slice 5) — never a Plex-only stub. Five slices, each its own commit + `reviewloop
+  codex` + version bump. **NOW: slice 1** (DetailDto + `item_detail` trait + `get_item_detail`
+  command + Plex `PlexDetail` serde parse over `/library/metadata/{rk}`). Load-bearing
+  facts the plan-review pinned (don't relearn — all in the plan): Plex listing IS
+  serde-parsed (`get_items`/`ItemsContainer`, `plex_library.rs:669`) so Media/Part
+  are already populated — slice 1 adds a NEW `PlexDetail` serde struct, not a
+  hand-rolled parser; merged cards need an explicit `detail_key` computed in
+  `rank_backings` via a SERVER-preferred rank (reverse of `kind_rank`) — routing both
+  movie detail AND the merged-show `get_children` drill (`commands.rs:3262`);
+  local-family detail runs on the blocking pool; the episode page pages the full
+  `get_children` list + a per-selection generation guard. One non-blocking owner
+  open-decision remains (merged-show episode playback source, idv-5 — default =
+  server-rich; needed only by slice 4/5).
   **DEFERRED (owner 2026-07-06) — Bug 4 (LARGER) — share/mount root shows bare metadata-less cards,
   starves the merged view (P2, the metadata unlock).** The share-root auto-add
   registers the whole share as ONE flat kind-auto folder; a NAS root of category dirs
