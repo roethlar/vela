@@ -72,8 +72,16 @@
   let typeTabs = $derived(
     ["movie", "show", "video"].filter((t) => sections.some((s) => s.sectionType === t))
   );
-  // Merged listings only honor globally sortable fields.
-  const TYPE_SORTS = new Set(["titleSort:asc", "year:desc"]);
+  // Merged listings only honor fields items carry on the DTO across sources:
+  // title, year (release date), date added, last played. `rating` has no DTO
+  // field, so it stays a per-source (server-side) sort only.
+  const TYPE_SORTS = new Set([
+    "titleSort:asc",
+    "year:desc",
+    "originallyAvailableAt:desc",
+    "addedAt:desc",
+    "lastViewedAt:desc",
+  ]);
   function sourceNameOf(id: string): string {
     return sources.find((s) => s.id === id)?.name ?? "";
   }

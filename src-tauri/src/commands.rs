@@ -2340,12 +2340,20 @@ pub async fn get_type_listing(
     state: State<'_, AppState>,
 ) -> Result<Vec<ItemDto>, String> {
     validate_section_type(&section_type)?;
-    // Merged ordering can only honor fields items carry globally (title,
-    // year); the richer per-source sorts stay available in per-source views.
+    // Merged ordering can only honor fields items carry on the DTO across
+    // sources: title, year (= release date at year granularity), added-at, and
+    // last-played. `rating` has no DTO field, so it stays per-source (server-side)
+    // only. A source that doesn't populate a field sorts last for that key.
     let sort = match validate_sort(sort)?.as_deref() {
         None => "titleSort:asc".to_string(),
-        Some(s @ ("titleSort:asc" | "year:desc")) => s.to_string(),
-        Some(_) => return Err("merged listings sort by title or year".into()),
+        Some(
+            s @ ("titleSort:asc"
+            | "year:desc"
+            | "originallyAvailableAt:desc"
+            | "addedAt:desc"
+            | "lastViewedAt:desc"),
+        ) => s.to_string(),
+        Some(_) => return Err("that sort isn't available in the combined view".into()),
     };
     let size = clamp_page_size(size);
 
@@ -2699,12 +2707,23 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
 /// per-source titleSort strips leading articles; the merged re-sort uses the
 /// display title, a small known divergence.)
 fn merge_sort_page(mut items: Vec<ItemDto>, sort: &str, start: usize, size: usize) -> Vec<ItemDto> {
+    let title = |i: &ItemDto| i.title.to_lowercase();
     match sort {
-        "year:desc" => items.sort_by(|a, b| {
-            b.year
-                .cmp(&a.year)
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-        }),
+        // Release date == year granularity, same as year:desc.
+        "year:desc" | "originallyAvailableAt:desc" => {
+            items.sort_by(|a, b| b.year.cmp(&a.year).then_with(|| title(a).cmp(&title(b))));
+        }
+        "addedAt:desc" => {
+            // None (source didn't populate it) sorts last in a desc order.
+            items.sort_by(|a, b| b.added_at_ms.cmp(&a.added_at_ms).then_with(|| title(a).cmp(&title(b))));
+        }
+        "lastViewedAt:desc" => {
+            items.sort_by(|a, b| {
+                b.last_watched_at_ms
+                    .cmp(&a.last_watched_at_ms)
+                    .then_with(|| title(a).cmp(&title(b)))
+            });
+        }
         _ => items.sort_by_key(|i| i.title.to_lowercase()),
     }
     items.into_iter().skip(start).take(size).collect()
@@ -2777,6 +2796,48 @@ mod merge_tests {
         let page = merge_sort_page(merged, "year:desc", 0, 10);
         let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(titles, vec!["a-new", "z-new", "older"]);
+    }
+
+    #[test]
+    fn merged_release_date_matches_year_desc() {
+        let mk = || {
+            vec![
+                item("old", Some(1999), "a"),
+                item("new", Some(2024), "b"),
+                item("undated", None, "a"),
+            ]
+        };
+        // originallyAvailableAt:desc is year:desc granularity; undated sorts last.
+        let by_rel = merge_sort_page(mk(), "originallyAvailableAt:desc", 0, 10);
+        let by_year = merge_sort_page(mk(), "year:desc", 0, 10);
+        let rel: Vec<_> = by_rel.iter().map(|i| i.title.as_str()).collect();
+        let yr: Vec<_> = by_year.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(rel, vec!["new", "old", "undated"]);
+        assert_eq!(rel, yr);
+    }
+
+    #[test]
+    fn merged_added_at_desc_missing_sorts_last() {
+        let mut a = item("mid", None, "plex");
+        a.added_at_ms = Some(200);
+        let mut b = item("newest", None, "smb-1");
+        b.added_at_ms = Some(500);
+        let c = item("unknown", None, "plex"); // added_at_ms None
+        let page = merge_sort_page(vec![a, b, c], "addedAt:desc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["newest", "mid", "unknown"]);
+    }
+
+    #[test]
+    fn merged_last_played_desc_missing_sorts_last() {
+        let mut a = item("watched-old", None, "plex");
+        a.last_watched_at_ms = Some(100);
+        let mut b = item("watched-recent", None, "plex");
+        b.last_watched_at_ms = Some(900);
+        let c = item("never", None, "smb-1"); // last_watched_at_ms None
+        let page = merge_sort_page(vec![a, b, c], "lastViewedAt:desc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["watched-recent", "watched-old", "never"]);
     }
 
     fn with_ids(mut i: ItemDto, ids: &[&str]) -> ItemDto {
