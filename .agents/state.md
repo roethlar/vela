@@ -58,18 +58,35 @@ Keep it short and update it when important repo facts change.
   default to 300s so it's a backstop, not a pause-killer. Trail `findings/sspf-4.md`.
   Owner playtest still owes the end-to-end check (pause past the deadline resumes
   seamlessly — needs mpv + a live drop).
-  **IMMEDIATE NEXT ACTION: Bug 1 sub-slice 3 — per-token SMB session reuse (the
-  real seek fix).** Cache the live `SmbConnection` per proxy token; create once at
-  first stream, free ONCE at playback-end under the existing `ctx_lifecycle_lock`
-  (UNCHANGED — do NOT release it around `smbc_free_context`); each HTTP connection
-  (initial or seek) opens its OWN file handle (no shared file position); supersede
-  via the per-token generation (already added in sub-slice 1/2) + the write deadline
-  (sub-slice 2) as a cooperative cancel; generation-owned compare-and-remove cleanup
-  wired from the play path + mpv `on_end` (`commands.rs` play path). Full design +
-  hermetic verification in the plan (Bug 1 Fix §3 + Verification). Existing seams to
-  reuse: the `Target::Mem` proxy test seam, the per-token generation, the write
-  deadline. Then Bug 3, Bug 5 P1, Bug 2, Bug 4, Bug 5 P2, metadata rail — plan
-  §"Slice order & commits".
+  **Bug 1 sub-slice 3 LANDED 2026-07-06** (code `05ed86b`; five reviewloop-codex
+  fixups `c7211e6`/`5a64172`/`dec0121`/`ada9f65`/`ab3f74c`; trail `14b0102`; version
+  bump 0.1.25 `503593a`; UNPUSHED). Per-token SMB session reuse — the real seek fix:
+  the loopback proxy caches the live `SmbConnection` per token (created once, reused
+  by every seek — each connection opens its OWN file handle) instead of rebuilding a
+  libsmbclient session per seek. A session is stored only for the current, still-live
+  play (`generation` = which play, bumped on replay; `active` = is it live; invariant
+  `active==false ⇒ session==None`), freed once at playback-end (generation-guarded
+  compare-and-remove) — or by the play path if `play()` fails — always OFF the
+  registry lock AND off async workers; evicted entries drop off-lock too. A per-token
+  `serve_epoch` cooperatively cancels a superseded in-flight serve (GET bumps, HEAD
+  doesn't). `ctx_lifecycle_lock` UNCHANGED (per-seek context churn removed instead).
+  `reviewloop codex` converged r1-r5 (r1-r4 reopened, r5 accepted clean) — five real
+  distinct defects, all guard-proven (trail `.agents/review/index.md` +
+  `findings/sspf-5..9.md`); the fixes built toward a correct session-lifecycle model
+  (a healthy converging loop, not a stall). **Bug 1 (SMB seek) is now COMPLETE** —
+  all three sub-slices landed. REMAINING: owner NAS playtest — confirm the felt
+  seek-freeze is gone on the real share.
+  **IMMEDIATE NEXT ACTION: Bug 3 — clicking a source dead-ends on empty Home (P1
+  UX).** Key routing on the empty-Home STATE, NOT "any non-null source" (codex
+  plan-review r1 finding 3 — force-browsing every source would regress server-source
+  Home rails like Continue/On Deck): when a scoped source's Home has loaded empty (no
+  hubs AND no hero/recents) but it has browsable sections, land on its library content
+  (auto-open its first section) instead of the "Nothing on your home screen yet"
+  dead-end; a server source that returns Home hubs keeps its Home unchanged. Frontend
+  (`+page.svelte` `selectSource`/home-scope render). E2E guard BOTH directions
+  (local/SMB-class lands on content; a mock-JF-with-hubs source still shows its Home).
+  Full design in the plan (Bug 3). Then Bug 5 P1, Bug 2, Bug 4, Bug 5 P2, metadata
+  rail — plan §"Slice order & commits".
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
   code slice (routine). Load-bearing gotchas from the plan-review a
   fresh session must not relearn:
@@ -257,7 +274,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.24 (bumped 2026-07-05, `92b1984`, for SMB seek Bug 1 sub-slice 2).
+- Version 0.1.25 (bumped 2026-07-06, `503593a`, for SMB seek Bug 1 sub-slice 3).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
