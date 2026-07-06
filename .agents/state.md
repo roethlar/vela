@@ -44,13 +44,32 @@ Keep it short and update it when important repo facts change.
   reopens, each a real distinct defect, all guard-proven — trail
   `.agents/review/index.md` + `findings/sspf-1..3.md`. Hermetic guards in
   `stream_proxy.rs` tests (seek reuses cached len; reuse clears stale len; stale-gen
-  store rejected). **IMMEDIATE NEXT ACTION: Bug 1 sub-slice 2 — proxy write
-  deadline.** Add a write deadline on the proxy socket in `serve_target`
-  (`stream_proxy.rs`; today only `read_request` has a 10s read timeout) so a
-  non-draining client can't pin a thread, and to enable sub-slice 3's cooperative
-  cancel. Then sub-slice 3 (per-token SMB session reuse — the real seek fix). Full
-  slice order + per-slice hermetic verification are in the plan
-  (§"Slice order & commits").
+  store rejected).
+  **Bug 1 sub-slice 2 LANDED 2026-07-05** (code `d45ffe3`; reviewloop-codex fixup
+  `8f41b90`; version bump 0.1.24 `92b1984`; UNPUSHED). Per-response write deadline
+  on the proxy socket in `serve_target` (`stream_proxy.rs`
+  `DEFAULT_WRITE_TIMEOUT_MS`, atomic, test-configurable) so a non-draining client
+  can't pin a thread + a bounded point for sub-slice 3's cooperative cancel. codex
+  reopened once (sspf-4): a short deadline breaks a normal long mpv pause because
+  ffmpeg HTTP reconnect is off by default → premature EOF on resume. Fixed by
+  enabling ffmpeg reconnect for the loopback proxy stream on the mpv side
+  (`playback::proxy_reconnect_args`, `--stream-lavf-o-append=reconnect=1/…`,
+  scoped to `http://127.0.0.1:`, asserted after user args) AND raising the deadline
+  default to 300s so it's a backstop, not a pause-killer. Trail `findings/sspf-4.md`.
+  Owner playtest still owes the end-to-end check (pause past the deadline resumes
+  seamlessly — needs mpv + a live drop).
+  **IMMEDIATE NEXT ACTION: Bug 1 sub-slice 3 — per-token SMB session reuse (the
+  real seek fix).** Cache the live `SmbConnection` per proxy token; create once at
+  first stream, free ONCE at playback-end under the existing `ctx_lifecycle_lock`
+  (UNCHANGED — do NOT release it around `smbc_free_context`); each HTTP connection
+  (initial or seek) opens its OWN file handle (no shared file position); supersede
+  via the per-token generation (already added in sub-slice 1/2) + the write deadline
+  (sub-slice 2) as a cooperative cancel; generation-owned compare-and-remove cleanup
+  wired from the play path + mpv `on_end` (`commands.rs` play path). Full design +
+  hermetic verification in the plan (Bug 1 Fix §3 + Verification). Existing seams to
+  reuse: the `Target::Mem` proxy test seam, the per-token generation, the write
+  deadline. Then Bug 3, Bug 5 P1, Bug 2, Bug 4, Bug 5 P2, metadata rail — plan
+  §"Slice order & commits".
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
   code slice (routine). Load-bearing gotchas from the plan-review a
   fresh session must not relearn:
@@ -238,7 +257,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.23 (bumped 2026-07-05, `3e9256d`, for SMB seek Bug 1 sub-slice 1).
+- Version 0.1.24 (bumped 2026-07-05, `92b1984`, for SMB seek Bug 1 sub-slice 2).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
