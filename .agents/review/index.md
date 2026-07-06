@@ -7,6 +7,21 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Item-detail-view PLAN-review loop CLOSED 2026-07-06: **accepted at r3** (base=head
+`410fa4e`; three codex rounds, six findings idv-1..6 — full trail in the plan's
+`.agents/plans/item-detail-view.md` `## Review log`, not restated here). A healthy
+converging loop (r1 found 4, r2 found 3 incl. one correcting an r1 error, r3 clean).
+Plan APPROVED for implementation; slices land 1-5, each its own commit + reviewloop.
+
+Loop idv-s1 CLOSED 2026-07-06: **accepted clean, no findings** (codex read-only,
+`guard_confirmed:false` — coder guard-proved red/green). Scope was **item-detail-view
+slice 1** (base `fd0c414`, head `a2abcb7`): backend-only `DetailDto` + `item_detail`
+trait method (graceful default) + `get_item_detail` command + Plex `PlexDetail` serde
+parse over `/library/metadata/{rk}` + `to_detail` mapper (cast headshots via the
+tokened poster path — accepted exposure class). Nav unwired (flip is slice 5). cargo
+test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING for
+the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
+
 Loop sort-1 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Library
 sorting** (base `361c5b7`, head `19b2735`, three codex rounds: r1 reopened 3, r2
 reopened 1, r3 accepted clean). The feature (owner-approved minimum set, folder
