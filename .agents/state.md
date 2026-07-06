@@ -5,6 +5,12 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
+- **CURRENT ACTION (2026-07-06): item-detail-view slice 2** — Jellyfin/Emby
+  `item_detail`. Plan APPROVED (codex plan-review accepted r3); slice 1 LANDED
+  (0.1.31). Full detail + approach + standing instructions in the **ACTIVE WORK**
+  entry below (search "ACTIVE WORK (2026-07-06): the second track"). Everything
+  UNPUSHED (owner pushes manually). The entries below this line are chronological
+  history/context, not the next action.
 - LANDED 2026-07-05 — mpv autocrop bundle (`.agents/plans/mpv-autocrop-bundle.md`,
   owner-approved; decision in `.agents/decisions.md` 2026-07-05 "Ship mpv's
   autocrop.lua behind an opt-in toggle", which REVERSES the same-day crop-drop for
@@ -222,14 +228,20 @@ Keep it short and update it when important repo facts change.
   **DEFERRED with Bug 4 — the metadata-gated local/SMB/SSH "Recently added" rail**
   (depends on Bug 4 — only items with resolved metadata, never blank filename cards).
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
-  code slice (routine). Reviewloop mechanics that worked this session (0.1.26–0.1.28):
-  codex incantation `codex exec --json -s read-only --output-schema <schema> "<prompt>"
-  </dev/null` (final verdict in the last `item.completed` agent_message; schema =
-  `{verdict,guard_confirmed,reviewed_sha,base_sha,comments}`, fail-closed); pin base =
-  pre-slice SHA, head = the fixup commit each round; per slice: trail commit
-  (`review(...)`) + version bump + `handoff:` state commit. This session's three loops
-  each reopened once then accepted — every finding was real (sspf-10/11 Home/Back
-  dead-end trap, sspf-12 missing frontend guard, sspf-13 macOS max_conns regression).
+  code slice (routine). Reviewloop mechanics (proven across the SMB/SSH, sorting, and
+  item-detail loops — unchanged): codex incantation `codex exec --json -s read-only
+  --output-schema <schema> "<prompt>" </dev/null` (final verdict in the last
+  `item.completed` agent_message; schema =
+  `{verdict,guard_confirmed,reviewed_sha,base_sha,comments}`, fail-closed — recreate the
+  schema file each session, it's a scratch artifact); pin base = pre-slice SHA, head =
+  the fixup commit each round; per slice: code commit(s) → trail commit (`review(...)`)
+  + version bump (`scripts/bump.sh`) + `handoff:` state commit. For the item-detail
+  work the PLAN itself also went through the loop first (accepted r3) — a plan is
+  `guard_confirmed:false` (design doc, no executable guard), findings live in the plan's
+  `## Review log`, not `findings/`. codex reads read-only so `guard_confirmed:false`
+  always — the CODER guard-proves each code slice red/green (revert → FAIL → restore →
+  PASS) and records it. Findings are only real when they predict an observable failure;
+  a clean accept (0 comments) is a valid outcome (slice 1 `idv-s1` accepted clean).
   E2E/test techniques earned this session (reuse them):
   - **E2E must run HEADED on this host** — Xvfb is NOT installed, so the harness's
     default headless mode fails; run `VELA_E2E_HEADED=1 npm run e2e -- <scenario>`
