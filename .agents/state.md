@@ -182,8 +182,15 @@ Keep it short and update it when important repo facts change.
   episode; info page = full-screen route. **Binding "no half-built state":** build
   all backends (Plex+JF+local) behind the current nav and **flip navigation last**
   (slice 5) — never a Plex-only stub. Five slices, each its own commit + `reviewloop
-  codex` + version bump. **NOW: slice 1** (DetailDto + `item_detail` trait + `get_item_detail`
-  command + Plex `PlexDetail` serde parse over `/library/metadata/{rk}`). Load-bearing
+  codex` + version bump. **SLICE 1 LANDED 2026-07-06 (0.1.31)** — backend-only
+  `DetailDto` + `item_detail` trait method (graceful `Err` default) + `get_item_detail`
+  command + Plex `PlexDetail` serde parse over `/library/metadata/{rk}` + `to_detail`
+  mapper (cast headshots via the tokened poster path). Code `b32821e`+`a2abcb7` (fixup:
+  `DetailContainer` also captures `<Metadata>`); reviewloop `idv-s1` accepted CLEAN
+  (base `fd0c414`, head `a2abcb7`); trail `2590508`; bump `2feac75`; all UNPUSHED. Nav
+  unwired (flip is slice 5). cargo test 133 green, clippy clean; 3 guard-proven tests.
+  **NOW: slice 2** (Jellyfin/Emby `item_detail` — widen `Fields=`, parse People/Genres/
+  ratings/Studios/Taglines/PremiereDate/MediaStreams). Load-bearing
   facts the plan-review pinned (don't relearn — all in the plan): Plex listing IS
   serde-parsed (`get_items`/`ItemsContainer`, `plex_library.rs:669`) so Media/Part
   are already populated — slice 1 adds a NEW `PlexDetail` serde struct, not a
@@ -424,7 +431,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.30 (bumped 2026-07-06, `f3d8192`, for library sorting).
+- Version 0.1.31 (bumped 2026-07-06, `2feac75`, for item-detail-view slice 1).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
