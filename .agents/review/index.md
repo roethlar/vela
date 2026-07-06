@@ -7,6 +7,41 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop sort-1 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Library
+sorting** (base `361c5b7`, head `19b2735`, three codex rounds: r1 reopened 3, r2
+reopened 1, r3 accepted clean). The feature (owner-approved minimum set, folder
+dropped): local `sort_and_page` now honors release-date/last-played/date-added
+(slice `c368270`); `added_at_ms` on `ItemDto` + `Vfs::modified_ms` (mtime; Plex
+`addedAt`; local walk) (`9a47d43`); the merged "All" view accepts addedAt /
+lastViewedAt / originallyAvailableAt in `get_type_listing` + `merge_sort_page` +
+frontend `TYPE_SORTS` (`21552c9`). codex findings, all real, all fixed + guard-proven
+except the one accepted deferral:
+- **r1 f1 (MEDIUM, DEFERRED):** local items don't overlay Vela recents onto
+  `last_watched_at_ms`, so "Recently played" is a no-op on a local library. Accepted
+  as a documented deferral (owner deprioritized local/SMB last-played; Plex-first).
+  Follow-up: merge recents into local library items.
+- **r1 f2 (MEDIUM, FIXED `c904c66`):** the persistent listing cache accepted schema-1
+  entries (no `added_at_ms` → None) and `same_items` ignored `added_at_ms`, so
+  "Recently added" sorted stale on first browse after upgrade and the background
+  rewalk's real mtimes were seen as "no change" (no repaint). Fix: cache SCHEMA 1→2
+  (discard + rewalk) + `added_at_ms` in `same_items`.
+- **r1 f3 (MEDIUM, FIXED `c904c66`):** merged dedup adopted played/view_offset across
+  backings but not the new timestamps, so a card fronted by a JF/local face sorted
+  last despite a Plex backing carrying the value. Fix: adopt max `added_at_ms` /
+  `last_watched_at_ms` across backings + preserve across the face swap; guard
+  `dedup_adopts_timestamps_from_a_non_face_backing`.
+- **r2 f1 (MEDIUM, FIXED `19b2735`):** Plex shows deserialize as `Directory` rows and
+  `PlexDir` dropped `addedAt`/`lastViewedAt` (`From<PlexDir>` hard-coded None), so the
+  merged TV view mis-ranked every Plex show. Fix: add both fields to `PlexDir` (serde)
+  + carry through the conversion; guard `plexdir_carries_added_and_last_viewed_into_video`.
+r3 accepted clean, no findings (`guard_confirmed:false` — codex read-only; the coder
+guard-proved every pure sort + the two mapping fixes red/green). Full CI green (130
+tests, clippy -D warnings clean, npm check + build clean). Same no-branches adaptation.
+REMAINING: owner playtest — the sort dropdown (Title / Year / Recently added / Release
+date / Recently played) on Plex libraries + the merged All view. NOTE: `folder` sort
+DROPPED (owner: podcast/audio need, video-only Vela doesn't need it); JF + local
+last-played population deferred (low value for a Plex-first owner).
+
 Loop sspf-14 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Bug 5 P2 —
 source naming + rename** (base `8e4f140`, head `5053d2b`, two codex rounds: r1
 reopened, r2 accepted clean). Two code slices: `c83a1be` gives an added SMB

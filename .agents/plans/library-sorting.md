@@ -1,10 +1,12 @@
 # Plan: Library view sorting (DRAFT — awaiting owner decision)
 
 ## Status
-**IN PROGRESS 2026-07-06.** Owner approved implementing the minimum sort set (folder
-dropped). Slices 1-2 LANDED (`c368270`, `9a47d43`); slice 3 (merged "All" view) is
-next; JF/local last-played population deferred. Effective set: date added, date last
-played, title, release date.
+**LANDED 2026-07-06.** All slices landed (`c368270`, `9a47d43`, `21552c9`) +
+`reviewloop codex` converged r1-r3 (r1 3 findings, r2 1 finding, r3 accepted;
+fixups `c904c66`, `19b2735`; trail `.agents/review/index.md` loop `sort-1`).
+Folder dropped; JF/local last-played population deferred. Effective set delivered:
+date added, date last played, title, release date — per-source AND merged views.
+REMAINING: owner playtest.
 
 ## Goal
 Sort options available in **all** library views: **date added, date last played,
