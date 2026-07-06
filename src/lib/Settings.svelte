@@ -160,6 +160,7 @@
   let smbUser = $state("");
   let smbPass = $state("");
   let smbDomain = $state("");
+  let smbName = $state("");
   let smbBrowseMountId = $state("");
   let smbBrowsePath = $state("");
   let smbDirectories = $state<SmbDirectory[]>([]);
@@ -173,6 +174,7 @@
   let sshPath = $state("");
   let sshKey = $state("");
   let sshKind = $state<"" | "movie" | "show">("");
+  let sshName = $state("");
 
   // Add Jellyfin/Emby form
   let kind = $state<"jellyfin" | "emby">("jellyfin");
@@ -290,8 +292,9 @@
         username: smbUser,
         password: smbPass,
         domain: smbDomain.trim() || null,
+        name: smbName.trim() || null,
       });
-      smbServer = smbShare = smbUser = smbPass = smbDomain = "";
+      smbServer = smbShare = smbUser = smbPass = smbDomain = smbName = "";
       await load();
       const mounted = smbMounts.find(
         (mount) =>
@@ -408,8 +411,9 @@
         remotePath: sshPath,
         identityFile: sshKey.trim() || null,
         kind: sshKind || null,
+        name: sshName.trim() || null,
       });
-      sshHost = sshUser = sshPath = sshKey = "";
+      sshHost = sshUser = sshPath = sshKey = sshName = "";
       sshPort = "22";
       await load();
       onChanged();
@@ -923,6 +927,10 @@
           <label for="smb-domain">Domain (optional)</label>
           <input id="smb-domain" bind:value={smbDomain} />
         </div>
+        <div class="field">
+          <label for="smb-name">Name (optional)</label>
+          <input id="smb-name" placeholder="Shown in the sidebar (defaults to the share name)" bind:value={smbName} />
+        </div>
         <button class="primary" disabled={busy} onclick={mountSmb}>
           {busy ? "Connecting…" : "Add share"}
         </button>
@@ -1044,6 +1052,10 @@
             <option value="movie">Movies</option>
             <option value="show">TV Shows</option>
           </select>
+        </div>
+        <div class="field">
+          <label for="ssh-name">Name (optional)</label>
+          <input id="ssh-name" placeholder="Shown in the sidebar (defaults to the folder name)" bind:value={sshName} />
         </div>
         <button class="primary" disabled={busy} onclick={mountSsh}>
           {busy ? "Mounting…" : "Mount & add"}

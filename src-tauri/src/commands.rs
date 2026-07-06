@@ -434,9 +434,12 @@ pub async fn mount_smb(
     }) {
         return Err("that share is already added".into());
     }
+    let taken = local_family_names(&existing);
     let mount = SmbMount {
         id: uuid::Uuid::new_v4().to_string(),
-        name: name.unwrap_or_else(|| format!("{}/{}", server.trim(), share.trim())),
+        name: name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| unique_mount_name(share.trim(), server.trim(), &taken)),
         server: server.trim().to_string(),
         share: share.trim().to_string(),
         username,
@@ -833,6 +836,64 @@ mod smb_folder_tests {
     }
 }
 
+#[cfg(test)]
+mod mount_name_tests {
+    use super::{last_path_segment, unique_mount_name};
+
+    #[test]
+    fn prefers_the_bare_label_when_free() {
+        // The Bug 5 P2 fix: a share named "Media" surfaces as "Media", NOT the
+        // old URL-shaped "nas/Media" default.
+        assert_eq!(unique_mount_name("Media", "nas", &[]), "Media");
+    }
+
+    #[test]
+    fn last_segment_of_a_remote_path() {
+        assert_eq!(last_path_segment("/srv/media/movies"), "movies");
+        assert_eq!(last_path_segment("/srv/media/movies/"), "movies");
+        assert_eq!(last_path_segment("movies"), "movies");
+        assert_eq!(last_path_segment("/"), "");
+        assert_eq!(last_path_segment(""), "");
+    }
+
+    #[test]
+    fn qualifies_with_server_on_collision() {
+        let taken = vec!["Media".to_string()];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (nas)");
+    }
+
+    #[test]
+    fn collision_check_is_case_insensitive() {
+        let taken = vec!["media".to_string()];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (nas)");
+    }
+
+    #[test]
+    fn falls_back_to_a_numeric_suffix() {
+        let taken = vec!["Media".to_string(), "Media (nas)".to_string()];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (2)");
+        let taken = vec![
+            "Media".to_string(),
+            "Media (nas)".to_string(),
+            "Media (2)".to_string(),
+        ];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (3)");
+    }
+
+    #[test]
+    fn empty_preferred_falls_back_to_the_qualifier() {
+        // A remote path of "/" leaves no segment; use the host.
+        assert_eq!(unique_mount_name("", "host.local", &[]), "host.local");
+    }
+
+    #[test]
+    fn skips_the_qualifier_when_it_equals_the_base() {
+        // e.g. share == server would produce "X (X)"; go straight to numeric.
+        let taken = vec!["nas".to_string()];
+        assert_eq!(unique_mount_name("nas", "nas", &taken), "nas (2)");
+    }
+}
+
 fn smb_folders_for_ui(m: &SmbMount) -> Vec<SmbFolderDto> {
     let root = smb_mount_root(m);
     selected_smb_folders(m)
@@ -917,6 +978,54 @@ fn smb_folder_display_name(m: &SmbMount, relative: &str) -> String {
         .find(|part| !part.is_empty())
         .unwrap_or(&m.name)
         .to_string()
+}
+
+/// Last non-empty path segment of `p` (share-relative or absolute), or "".
+fn last_path_segment(p: &str) -> &str {
+    p.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("")
+}
+
+/// Every local-family display label already in use (SMB/SSH mounts + local
+/// folders), so a newly added mount can pick a name that doesn't collide with
+/// an existing sidebar entry.
+fn local_family_names(cfg: &AppConfig) -> Vec<String> {
+    cfg.smb_mounts
+        .iter()
+        .map(|m| m.name.clone())
+        .chain(cfg.ssh_mounts.iter().map(|m| m.name.clone()))
+        .chain(cfg.local_folders.iter().map(|f| f.name.clone()))
+        .collect()
+}
+
+/// Pick a friendly, unique display name for a newly added mount. Prefer
+/// `preferred` (the bare share or the last path segment) so the sidebar shows
+/// "Media" rather than the URL-shaped "nas/Media" or "host:/srv/media"; if that
+/// label is already taken by another local-family source, qualify it with
+/// `qualifier` (the server or host), then fall back to a numeric suffix.
+/// Comparison is case-insensitive so "Media" and "media" don't both appear.
+/// Pure so it is unit-testable (Bug 5 P2).
+fn unique_mount_name(preferred: &str, qualifier: &str, taken: &[String]) -> String {
+    let preferred = preferred.trim();
+    let qualifier = qualifier.trim();
+    let base = if preferred.is_empty() { qualifier } else { preferred };
+    let is_taken = |cand: &str| taken.iter().any(|t| t.eq_ignore_ascii_case(cand));
+    if base.is_empty() || !is_taken(base) {
+        return base.to_string();
+    }
+    if !qualifier.is_empty() && !qualifier.eq_ignore_ascii_case(base) {
+        let qualified = format!("{base} ({qualifier})");
+        if !is_taken(&qualified) {
+            return qualified;
+        }
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{base} ({n})");
+        if !is_taken(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
 }
 
 /// Linux: native shares have no OS mount path; UI fall back to the
@@ -1022,10 +1131,13 @@ pub async fn mount_ssh(
         return Err("that SSH/SFTP folder is already added".into());
     }
 
+    let taken = local_family_names(&existing);
     let folder_id = uuid::Uuid::new_v4().to_string();
     let mut mount = SshMount {
         id: uuid::Uuid::new_v4().to_string(),
-        name: name.unwrap_or_else(|| format!("{}:{}", host.trim(), remote_path.trim())),
+        name: name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| unique_mount_name(last_path_segment(remote_path.trim()), host.trim(), &taken)),
         host: host.trim().to_string(),
         port,
         username: username.trim().to_string(),
