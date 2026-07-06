@@ -249,24 +249,40 @@ pub fn release_session(token: &str, generation: u64) {
             Ok(reg) => reg,
             Err(_) => return,
         };
-        reg.iter_mut()
-            .find(|e| e.token == token)
-            .filter(|e| e.generation == generation)
-            .and_then(|e| e.session.take())
+        match reg.iter_mut().find(|e| e.token == token) {
+            Some(entry) if entry.generation == generation => {
+                let taken = entry.session.take();
+                // Close this token's play-epoch so a slow in-flight request that
+                // has not yet cached its session cannot store one after this
+                // release — such a session would have no owner left to free it
+                // (sspf-5). We bump even when there was nothing to take.
+                entry.generation = entry.generation.wrapping_add(1);
+                taken
+            }
+            _ => None,
+        }
     };
     drop(freed);
 }
 
 /// Return the token's cached backend session, creating it once on the first
 /// request and reusing it for every later request (seeks included) — the core
-/// of the seek fix. Fast path: clone and return the cached session. Slow path:
-/// build one OFF the registry lock (an SMB `connect` touches libsmbclient's
-/// global context state under its own lifecycle lock — the registry lock must
-/// never be held across it), then store it iff the token still has none. A
-/// concurrent first request may have won the race; in that case use the winner
-/// and drop ours — also off-lock, since dropping it may free a context.
-fn get_or_create_session(token: &str, target: &Target) -> Result<Session, String> {
-    // Fast path: already cached.
+/// of the seek fix. `generation` is the play-epoch the calling serve captured at
+/// lookup. Fast path: clone and return the cached session. Slow path: build one
+/// OFF the registry lock (an SMB `connect` touches libsmbclient's global context
+/// state under its own lifecycle lock — the registry lock must never be held
+/// across it), then store it iff the token still has none AND this request's play
+/// is still the current one. A concurrent first request may have won the race; in
+/// that case use the winner and drop ours — also off-lock, since dropping it may
+/// free a context.
+fn get_or_create_session(
+    token: &str,
+    generation: u64,
+    target: &Target,
+) -> Result<Session, String> {
+    // Fast path: already cached. No generation check here — handing a live
+    // session to a request whose play has ended is harmless (its serve fails on
+    // the now-closed socket); the orphan risk is only at the commit below.
     {
         let reg = registry()
             .lock()
@@ -297,14 +313,19 @@ fn get_or_create_session(token: &str, target: &Target) -> Result<Session, String
     enum Outcome {
         Won,
         Lost(Session),
-        Evicted,
+        Superseded,
     }
     let outcome = {
         let mut reg = registry()
             .lock()
             .map_err(|_| "stream proxy registry poisoned".to_string())?;
         match reg.iter_mut().find(|e| e.token == token) {
-            None => Outcome::Evicted,
+            None => Outcome::Superseded, // token evicted while we connected
+            // The play that issued this request ended or was replaced while we
+            // connected (its generation moved on): storing our session now would
+            // orphan it — no `on_end` would ever free it (sspf-5). Drop it
+            // off-lock instead.
+            Some(entry) if entry.generation != generation => Outcome::Superseded,
             Some(entry) => match &entry.session {
                 Some(existing) => Outcome::Lost(existing.clone()),
                 None => {
@@ -320,9 +341,9 @@ fn get_or_create_session(token: &str, target: &Target) -> Result<Session, String
             drop(created);
             Ok(winner)
         }
-        Outcome::Evicted => {
+        Outcome::Superseded => {
             drop(created);
-            Err("stream token was evicted before its session was cached".to_string())
+            Err("stream token was superseded before its session was cached".to_string())
         }
     }
 }
@@ -497,8 +518,10 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
 
     // Reuse the token's cached backend session, creating it once on the first
     // request. This is the heart of the seek fix: a seek opens a fresh file
-    // handle on the existing session instead of rebuilding an SMB context.
-    let session = get_or_create_session(&req.token, &target)?;
+    // handle on the existing session instead of rebuilding an SMB context. The
+    // captured `generation` guards the create against orphaning a session for a
+    // play that ended mid-connect (sspf-5).
+    let session = get_or_create_session(&req.token, generation, &target)?;
 
     match target {
         Target::Smb { relative, .. } => {
@@ -1132,6 +1155,41 @@ mod tests {
         assert!(
             !entry_has_session(&token),
             "play 2's end frees the session it owned"
+        );
+    }
+
+    #[test]
+    fn a_create_after_the_plays_release_is_refused_not_orphaned() {
+        use std::sync::atomic::AtomicUsize;
+        let _guard = test_lock();
+        let url = register(Target::Mem {
+            bytes: vec![0u8; 8],
+            probes: std::sync::Arc::new(AtomicUsize::new(0)),
+            sessions: std::sync::Arc::new(AtomicUsize::new(0)),
+        })
+        .unwrap();
+        let token = url.rsplit('/').next().unwrap().to_string();
+        let g0 = entry_gen(&token);
+
+        // The request captured g0 at lookup. Its play ends and releases BEFORE it
+        // has cached a session: nothing to take, but the play-epoch closes.
+        release_session(&token, g0);
+        assert!(!entry_has_session(&token));
+        assert_ne!(entry_gen(&token), g0, "a matching release closes the play-epoch");
+
+        // The stale request finishes connecting and commits with the OLD
+        // generation — it must be refused, or the stored session would have no
+        // owner to ever free it (sspf-5).
+        let target = Target::Mem {
+            bytes: vec![0u8; 8],
+            probes: std::sync::Arc::new(AtomicUsize::new(0)),
+            sessions: std::sync::Arc::new(AtomicUsize::new(0)),
+        };
+        let r = get_or_create_session(&token, g0, &target);
+        assert!(r.is_err(), "a create for an already-ended play is refused");
+        assert!(
+            !entry_has_session(&token),
+            "no orphaned session is stored for the ended play"
         );
     }
 }
