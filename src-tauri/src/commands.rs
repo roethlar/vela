@@ -731,6 +731,32 @@ pub async fn add_smb_folder(
     })
 }
 
+/// Remove one folder from an SMB mount's config, refusing to empty the mount:
+/// a zero-folder mount is a "zombie" invisible share that browses nothing (the
+/// same trap the share-root auto-add closed). The UI cascades a last-folder
+/// removal to a full unmount instead (Settings.svelte `removeSmbFolder`); this
+/// enforces the invariant for any direct caller. Pure over the config so it is
+/// unit-testable (Bug 5 P1).
+fn remove_smb_folder_in_config(
+    cfg: &mut AppConfig,
+    id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    let mount = cfg
+        .smb_mounts
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or_else(|| "no such SMB mount".to_string())?;
+    if !mount.folders.iter().any(|folder| folder.id == folder_id) {
+        return Err("no such SMB folder".to_string());
+    }
+    if mount.folders.len() <= 1 {
+        return Err("a share must keep at least one folder; remove the share instead".to_string());
+    }
+    mount.folders.retain(|folder| folder.id != folder_id);
+    Ok(())
+}
+
 /// Remove one selected folder from an SMB share without unmounting the share.
 #[tauri::command]
 pub async fn remove_smb_folder(
@@ -739,20 +765,72 @@ pub async fn remove_smb_folder(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     mutate_then_rebuild_local(&state, move |cfg| {
-        let mount = cfg
-            .smb_mounts
-            .iter_mut()
-            .find(|m| m.id == id)
-            .ok_or_else(|| "no such SMB mount".to_string())?;
-        let before = mount.folders.len();
-        mount.folders.retain(|folder| folder.id != folder_id);
-        let removed = mount.folders.len() != before;
-        if !removed {
-            return Err("no such SMB folder".to_string());
-        }
-        Ok(())
+        remove_smb_folder_in_config(cfg, &id, &folder_id)
     })
     .await
+}
+
+#[cfg(test)]
+mod smb_folder_tests {
+    use super::*;
+    use crate::config::{AppConfig, SmbFolder, SmbMount};
+
+    fn folder(id: &str) -> SmbFolder {
+        SmbFolder {
+            id: id.into(),
+            name: id.into(),
+            path: format!("/{id}"),
+            kind: "movie".into(),
+        }
+    }
+
+    fn cfg_with(folders: Vec<SmbFolder>) -> AppConfig {
+        AppConfig {
+            smb_mounts: vec![SmbMount {
+                id: "m1".into(),
+                folders,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn removes_a_non_last_folder() {
+        let mut cfg = cfg_with(vec![folder("a"), folder("b")]);
+        remove_smb_folder_in_config(&mut cfg, "m1", "a").unwrap();
+        let ids: Vec<_> = cfg.smb_mounts[0]
+            .folders
+            .iter()
+            .map(|f| f.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["b"]);
+    }
+
+    #[test]
+    fn refuses_to_remove_the_last_folder() {
+        // The guard: emptying the mount would leave a zombie zero-folder share.
+        let mut cfg = cfg_with(vec![folder("only")]);
+        let err = remove_smb_folder_in_config(&mut cfg, "m1", "only").unwrap_err();
+        assert!(err.contains("at least one folder"), "got: {err}");
+        // Mount is untouched — no zombie.
+        assert_eq!(cfg.smb_mounts[0].folders.len(), 1);
+    }
+
+    #[test]
+    fn unknown_folder_errors_without_touching_the_mount() {
+        let mut cfg = cfg_with(vec![folder("a"), folder("b")]);
+        let err = remove_smb_folder_in_config(&mut cfg, "m1", "nope").unwrap_err();
+        assert!(err.contains("no such SMB folder"), "got: {err}");
+        assert_eq!(cfg.smb_mounts[0].folders.len(), 2);
+    }
+
+    #[test]
+    fn unknown_mount_errors() {
+        let mut cfg = cfg_with(vec![folder("a")]);
+        let err = remove_smb_folder_in_config(&mut cfg, "other", "a").unwrap_err();
+        assert!(err.contains("no such SMB mount"), "got: {err}");
+    }
 }
 
 fn smb_folders_for_ui(m: &SmbMount) -> Vec<SmbFolderDto> {

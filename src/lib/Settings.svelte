@@ -351,6 +351,16 @@
   }
 
   async function removeSmbFolder(id: string, folderId: string) {
+    // Removing a share's last folder would leave a zombie zero-folder mount (an
+    // invisible share that browses nothing). Cascade to a full unmount instead:
+    // the UX ruling forbids an erroring/dead-end click, and a share with no
+    // folders is useless. The backend also refuses to empty a mount as a guard
+    // (Bug 5 P1).
+    const mount = smbMounts.find((m) => m.id === id);
+    if (mount && mount.folders.length <= 1) {
+      await unmountSmb(id);
+      return;
+    }
     busy = true;
     err = null;
     try {
