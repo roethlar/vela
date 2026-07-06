@@ -93,15 +93,34 @@ Keep it short and update it when important repo facts change.
   guard-proven red/green — ran HEADED (Xvfb absent on this host; owner-approved
   2026-07-06). REMAINING: owner playtest — clicking the SMB/SSH source on the real NAS
   lands on content.
-  **IMMEDIATE NEXT ACTION: Bug 5 P1 — Connected tab triplicated rows + erroring
-  Remove (P1).** Exclude the whole local family (`["local","smb","ssh"]`, matching
-  backend `LOCAL_FAMILY_KINDS`) from the registered-sources loop in
-  `Settings.svelte` (~:643, filters only `kind !== "local"` today so smb/ssh leak):
-  this drops the leaked source row (SMB 3→2, SSH 2→1) AND removes the Remove button
-  that calls `remove_source` (which rejects local-family ids and errors — a dead-end
-  click). Settle remove-last-folder semantics (refuse, or cascade to unmount) so no
-  zombie zero-folder share survives. Then Bug 2, Bug 4, Bug 5 P2, metadata rail —
-  plan §"Slice order & commits".
+  **Bug 5 P1 (Connected-tab triplication + erroring Remove) LANDED 2026-07-06**
+  (code `9c3597a`+`9379ec5`; reviewloop-codex fixup `0a64cd0`; trail `eb6a85a`;
+  version bump 0.1.27 `d88a277`; UNPUSHED). `9c3597a`: the Connected registered-source
+  loop now excludes the whole local family (`LOCAL_FAMILY_KINDS = ["local","smb","ssh"]`
+  const mirroring the backend), dropping the leaked smb/ssh source row whose Remove
+  called `remove_source` and errored (a dead-end) + the triplication. `9379ec5`:
+  `remove_smb_folder_in_config` (pure, unit-tested) refuses to remove a mount's last
+  folder (a zombie zero-folder invisible share), and the UI `removeSmbFolder` cascades
+  a last-folder Remove to a full `unmount_smb` (clean, no error). `reviewloop codex`
+  converged r1-r2: r1 reopened sspf-12 (MEDIUM — the frontend filter+cascade shipped
+  with no automated guard; codex showed a hermetic guard IS feasible via a native
+  mountless SMB seed), fixed by `tests/e2e/scenarios/connectedtab.mjs`; r2 accepted.
+  Full CI green (cargo test 102, clippy -D warnings clean). REMAINING: owner playtest
+  — one row per SMB/SSH mount on the real NAS, no erroring Remove.
+  **IMMEDIATE NEXT ACTION: Bug 2 — mpv hangs on seek over SSH (P1).** DISTINCT from
+  the SMB seek (Bug 1): SSH uses the raw sshfs mount, NOT the loopback proxy. Root
+  cause: sshfs's single default SFTP channel + kernel readahead → a seek's read
+  queues behind the sequential-readahead backlog (head-of-line blocking). Fix: add
+  channel/cache tuning to the sshfs args in `src-tauri/src/sshfs.rs` (current opts:
+  `reconnect, ServerAlive*, BatchMode, follow_symlinks` — no channel/cache tuning).
+  Installed sshfs is 3.7.6, which SUPPORTS `-o max_conns=N` (parallel SSH channels —
+  the head-of-line fix); confirm its interaction with `reconnect`. Owner decision:
+  BUILD the hermetic loopback sshd+sftp+sshfs test (sshd/sshfs/ssh-keygen all present
+  on this host), gated on their presence. NOTE the loopback-latency caveat: a
+  localhost sshd may not reproduce the latency-driven stall, so the test may need to
+  assert the tuned option set is accepted + mounts + reads correctly (guarding a
+  broken option string) rather than a latency delta — decide during implementation.
+  Then Bug 4, Bug 5 P2, metadata rail — plan §"Slice order & commits".
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
   code slice (routine). Load-bearing gotchas from the plan-review a
   fresh session must not relearn:
@@ -289,7 +308,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.26 (bumped 2026-07-06, `01c54ec`, for Bug 3 source-click dead-end).
+- Version 0.1.27 (bumped 2026-07-06, `d88a277`, for Bug 5 P1 Connected-tab).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
