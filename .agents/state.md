@@ -120,26 +120,72 @@ Keep it short and update it when important repo facts change.
   can't reproduce hermetically. `reviewloop codex` converged r1-r2 (r1 sspf-13, r2
   accepted). Full CI green (cargo test 105, clippy -D warnings clean). REMAINING:
   owner NAS playtest — SSH seek no longer hangs (the authoritative stall-fix check).
-  **IMMEDIATE NEXT ACTION: Bug 4 — share/mount root shows bare metadata-less cards,
-  starves the merged view (P2, LARGER).** The share-root auto-add registers the whole
-  share as ONE flat kind-auto folder; a NAS root of category dirs (Movies/, TV/…) is
-  mis-classified into one flat section of bare cards (no title/year/poster), which
-  can't dedup against server copies in the merged All view. Fix (see plan Bug 4 for
-  the full design + the THREE codex-pinned constraints): make kind-auto roots
-  category-aware — expand each into per-category effective `LocalFolder` roots so
-  `sections()`/`items()` see normal configured folders (the `items()` guard at
-  `local.rs:744` rejects non-configured section keys — do NOT loosen it); key the
-  detected-kind cache by **source/mount id + path** with a schema bump (raw-path keys
-  collide across mounts and a stale root kind preserves the flat classification); and
-  run the expansion OFF-LOCK on the blocking pool (NOT under `config::update`/
-  `source_lock` — the lock-across-blocking invariant slice 7 `e7c5231` honored). This
-  is the metadata unlock (`metadata.rs` already resolves .nfo/artwork sidecars over
-  the VFS + keyless iTunes/TVmaze once items parse at the right level). DESIGN FORK to
-  settle first: lazy effective-root cache inside `LocalSource` (expand under
-  `run_blocking` in sections()/items()) vs a config-snapshot expand-then-swap. Then
-  Bug 5 P2, metadata rail — plan §"Slice order & commits".
+  **OWNER REORDER 2026-07-06: Bug 5 P2 next, THEN Bug 4, THEN metadata rail.** The
+  owner chose to do the small Bug 5 P2 (naming/rename) before the larger Bug 4,
+  deviating from the plan's "Slice order & commits" (which had Bug 4 before Bug 5 P2).
+  Reason: bank the small win and let the three landed P1 fixes (0.1.26–0.1.28) be
+  playtested before the large P2 metadata work lands on top. Session ended here via
+  `/handoff` right after this decision — no Bug 5 P2 code written yet.
+  **IMMEDIATE NEXT ACTION: Bug 5 P2 — source naming + rename (P2).** Bug 5 P1 (the
+  P1 half: Connected-tab filter + remove-last-folder) already LANDED (0.1.27). P2 is
+  the naming/rename half (plan `.agents/plans/smb-ssh-playtest-fixes.md` Bug 5 → Fix →
+  P2): (a) add an optional **Name** field to both add-SMB and add-SSH forms in
+  `Settings.svelte`, passed through the existing `name` param `mount_smb`/`mount_ssh`
+  already accept (NO backend schema change); (b) improve the no-name default — today
+  it's URL-shaped (`server/share` `commands.rs:439`; `host:remote_path`
+  `commands.rs:950`) and becomes the permanent sidebar label; use the bare share /
+  last path segment, disambiguated on collision; (c) add a **rename** command +
+  affordance for existing mounts, propagating the new name to the root-folder name
+  copies (`commands.rs:517,981`) or the section labels stay stale. Verification: Rust
+  unit test(s) for the rename + default-name logic (extract pure helpers like the Bug
+  5 P1 `remove_smb_folder_in_config` pattern, `commands.rs`); optional E2E via the
+  hermetic native-SMB seed technique proven in `tests/e2e/scenarios/connectedtab.mjs`
+  (mountpoint:"" — no connection). Low risk; frontend + a small backend command.
+  **THEN Bug 4 (LARGER, deferred) — share/mount root shows bare metadata-less cards,
+  starves the merged view (P2, the metadata unlock).** The share-root auto-add
+  registers the whole share as ONE flat kind-auto folder; a NAS root of category dirs
+  (Movies/, TV/…) is mis-classified into one flat section of bare cards (no
+  title/year/poster), which can't dedup against server copies in the merged All view.
+  Fix (see plan Bug 4 for the full design + the THREE codex-pinned constraints): make
+  kind-auto roots category-aware — expand each into per-category effective
+  `LocalFolder` roots so `sections()`/`items()` see normal configured folders (the
+  `items()` guard at `local.rs:744` rejects non-configured section keys — do NOT
+  loosen it); key the detected-kind cache by **source/mount id + path** with a schema
+  bump (raw-path keys collide across mounts and a stale root kind preserves the flat
+  classification); and run the expansion OFF-LOCK on the blocking pool (NOT under
+  `config::update`/`source_lock` — the lock-across-blocking invariant slice 7
+  `e7c5231` honored). This is the metadata unlock (`metadata.rs` already resolves
+  .nfo/artwork sidecars over the VFS + keyless iTunes/TVmaze once items parse at the
+  right level). DESIGN FORK to settle first: lazy effective-root cache inside
+  `LocalSource` (expand under `run_blocking` in sections()/items()) vs a
+  config-snapshot expand-then-swap.
+  **THEN the metadata-gated local/SMB/SSH "Recently added" rail** (last slice; depends
+  on Bug 4 — only items with resolved metadata, never blank filename cards).
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
-  code slice (routine). Load-bearing gotchas from the plan-review a
+  code slice (routine). Reviewloop mechanics that worked this session (0.1.26–0.1.28):
+  codex incantation `codex exec --json -s read-only --output-schema <schema> "<prompt>"
+  </dev/null` (final verdict in the last `item.completed` agent_message; schema =
+  `{verdict,guard_confirmed,reviewed_sha,base_sha,comments}`, fail-closed); pin base =
+  pre-slice SHA, head = the fixup commit each round; per slice: trail commit
+  (`review(...)`) + version bump + `handoff:` state commit. This session's three loops
+  each reopened once then accepted — every finding was real (sspf-10/11 Home/Back
+  dead-end trap, sspf-12 missing frontend guard, sspf-13 macOS max_conns regression).
+  E2E/test techniques earned this session (reuse them):
+  - **E2E must run HEADED on this host** — Xvfb is NOT installed, so the harness's
+    default headless mode fails; run `VELA_E2E_HEADED=1 npm run e2e -- <scenario>`
+    (owner-approved 2026-07-06; it pops a window over the desktop). Frontend slices
+    rebuild the debug binary to embed the change, so guard-proof = revert + rebuild +
+    run RED, restore + rebuild + run GREEN.
+  - **Hermetic Connected-tab E2E**: seed a NATIVE SMB mount (`mountpoint:""`) in
+    `config.json` — renders from config (get_sources + list_smb_mounts) with NO
+    connection (`tests/e2e/scenarios/connectedtab.mjs`).
+  - **Hermetic sshfs test**: a non-root loopback sshd (StrictModes no, UsePAM no,
+    key-only) + sshfs mount + read, gated on sshd/sshfs/ssh-keygen + /dev/fuse
+    (`src/sshfs.rs` `max_conns_option_set_mounts_and_reads_over_loopback_sshd`).
+  - **Testable platform gates**: split on an explicit OS string (`sshfs_options_for(os)`
+    via `std::env::consts::OS`) instead of `#[cfg]`, so both branches unit-test from
+    any host.
+  Load-bearing gotchas from the plan-review a
   fresh session must not relearn:
   - SMB seek (slice 1): every mpv seek rebuilds a full libsmbclient session; fix =
     per-token session reuse (own file handle per stream, generation-owned
