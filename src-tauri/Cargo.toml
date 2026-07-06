@@ -1,6 +1,6 @@
 [package]
 name = "vela"
-version = "0.1.26"
+version = "0.1.27"
 description = "mpv-backed HDR media client (Plex, Jellyfin, Emby, local)"
 authors = ["Michael Coelho"]
 license = "MIT"
