@@ -111,13 +111,20 @@ struct Entry {
     /// Entity length once learned on the first request, so a later Range
     /// request (a seek) skips the per-open `stat`. `None` until discovered.
     len: Option<u64>,
-    /// Bumped every time the token is reused for a fresh play. A request
-    /// captures it at lookup and may only write its discovered length back
-    /// under the same generation, so a slow in-flight request from a prior
-    /// play cannot repopulate a length that a replay just cleared. It is also
-    /// the *session* generation: [`release_session`] frees the cached session
-    /// only if this value still matches the one the finishing play captured.
+    /// Identifies *which play* owns the token: bumped only when the token is
+    /// reused for a fresh play (a same-file replay). A request captures it at
+    /// lookup and may only write its discovered length back under the same
+    /// generation, so a slow in-flight request from a prior play cannot
+    /// repopulate a length that a replay just cleared; [`release_session`] frees
+    /// the cached session only if it still matches the finishing play's capture.
     generation: u64,
+    /// Whether the current-generation play is still live. Set true at
+    /// [`register`] (new play and replay), cleared in [`release_session`] at
+    /// playback-end. Together with `generation` it gates the session *store*: a
+    /// request may only cache a session for the current, still-live play, so a
+    /// straggler after the play ended cannot orphan one (sspf-5, sspf-7).
+    /// Invariant: `active == false` implies `session == None`.
+    active: bool,
     /// The cached live backend session for this token (see [`Session`]). `None`
     /// until the first request creates it, and again after playback-end frees
     /// it. Kept across a same-file replay (token reuse) so the replay skips the
@@ -210,6 +217,7 @@ fn register(target: Target) -> Result<String, String> {
         // the prior play, so a late writer can't repopulate the stale length.
         existing.len = None;
         existing.generation = existing.generation.wrapping_add(1);
+        existing.active = true; // a replay re-activates the token for the new play
         return Ok(format!("http://127.0.0.1:{}/{}", p.port, existing.token));
     }
     // Evict the oldest when full — but hold the evicted entry and drop it AFTER
@@ -227,6 +235,7 @@ fn register(target: Target) -> Result<String, String> {
         target,
         len: None,
         generation: 0,
+        active: true,
         session: None,
         serve_epoch: std::sync::Arc::new(AtomicU64::new(0)),
     });
@@ -290,11 +299,11 @@ pub fn release_session(token: &str, generation: u64) {
         match reg.iter_mut().find(|e| e.token == token) {
             Some(entry) if entry.generation == generation => {
                 let taken = entry.session.take();
-                // Close this token's play-epoch so a slow in-flight request that
-                // has not yet cached its session cannot store one after this
-                // release — such a session would have no owner left to free it
-                // (sspf-5). We bump even when there was nothing to take.
-                entry.generation = entry.generation.wrapping_add(1);
+                // The play that owned this token has ended: mark it inactive so a
+                // straggler request cannot cache a session no `on_end` would ever
+                // free (sspf-5, sspf-7). Cleared even when there was nothing to
+                // take, preserving `active == false` ⟹ `session == None`.
+                entry.active = false;
                 taken
             }
             _ => None,
@@ -310,9 +319,9 @@ pub fn release_session(token: &str, generation: u64) {
 /// OFF the registry lock (an SMB `connect` touches libsmbclient's global context
 /// state under its own lifecycle lock — the registry lock must never be held
 /// across it), then store it iff the token still has none AND this request's play
-/// is still the current one. A concurrent first request may have won the race; in
-/// that case use the winner and drop ours — also off-lock, since dropping it may
-/// free a context.
+/// is still the current, active one (else it would orphan a session — sspf-5,
+/// sspf-7). A concurrent first request may have won the race; in that case use the
+/// winner and drop ours — also off-lock, since dropping it may free a context.
 fn get_or_create_session(
     token: &str,
     generation: u64,
@@ -359,11 +368,14 @@ fn get_or_create_session(
             .map_err(|_| "stream proxy registry poisoned".to_string())?;
         match reg.iter_mut().find(|e| e.token == token) {
             None => Outcome::Superseded, // token evicted while we connected
-            // The play that issued this request ended or was replaced while we
-            // connected (its generation moved on): storing our session now would
-            // orphan it — no `on_end` would ever free it (sspf-5). Drop it
+            // Store only for the current, still-live play: the generation must
+            // still match (not superseded by a newer play — sspf-5 mid-connect)
+            // AND the play must be active (not already ended — sspf-7 straggler).
+            // Otherwise no `on_end` would ever free a stored session; drop it
             // off-lock instead.
-            Some(entry) if entry.generation != generation => Outcome::Superseded,
+            Some(entry) if entry.generation != generation || !entry.active => {
+                Outcome::Superseded
+            }
             Some(entry) => match &entry.session {
                 Some(existing) => Outcome::Lost(existing.clone()),
                 None => {
@@ -1210,14 +1222,14 @@ mod tests {
         let g0 = entry_gen(&token);
 
         // The request captured g0 at lookup. Its play ends and releases BEFORE it
-        // has cached a session: nothing to take, but the play-epoch closes.
+        // has cached a session: nothing to take, but the play is marked inactive.
         release_session(&token, g0);
         assert!(!entry_has_session(&token));
-        assert_ne!(entry_gen(&token), g0, "a matching release closes the play-epoch");
 
-        // The stale request finishes connecting and commits with the OLD
-        // generation — it must be refused, or the stored session would have no
-        // owner to ever free it (sspf-5).
+        // The stale request finishes connecting and commits with the SAME
+        // generation (release does not bump it) — it must still be refused,
+        // because the play is no longer active, or the stored session would have
+        // no owner to ever free it (sspf-5).
         let target = Target::Mem {
             bytes: vec![0u8; 8],
             probes: std::sync::Arc::new(AtomicUsize::new(0)),
@@ -1268,6 +1280,44 @@ mod tests {
         assert!(
             lock_free.load(Ordering::SeqCst),
             "the evicted session's context is freed OFF the registry lock"
+        );
+    }
+
+    #[test]
+    fn a_late_request_after_a_completed_play_does_not_orphan_a_session() {
+        use std::sync::atomic::AtomicUsize;
+        let _guard = test_lock();
+        let url = register(Target::Mem {
+            bytes: vec![0u8; 8],
+            probes: std::sync::Arc::new(AtomicUsize::new(0)),
+            sessions: std::sync::Arc::new(AtomicUsize::new(0)),
+        })
+        .unwrap();
+        let token = url.rsplit('/').next().unwrap().to_string();
+
+        // A full play cycle: the play caches a session, then ends and releases.
+        seed_session(&token);
+        let g = entry_gen(&token);
+        release_session(&token, g);
+        assert!(!entry_has_session(&token));
+
+        // The token still sits in the registry. A LATE request (e.g. an ffmpeg
+        // reconnect straggler after playback ended) looks it up and captures the
+        // CURRENT, post-release generation, then tries to create. It must be
+        // refused — no active play owns the token, so a stored session would be
+        // orphaned (sspf-7: the earlier release-bump fix let this generation pass
+        // the commit guard).
+        let g_late = entry_gen(&token);
+        let target = Target::Mem {
+            bytes: vec![0u8; 8],
+            probes: std::sync::Arc::new(AtomicUsize::new(0)),
+            sessions: std::sync::Arc::new(AtomicUsize::new(0)),
+        };
+        let r = get_or_create_session(&token, g_late, &target);
+        assert!(r.is_err(), "a late create with no active play is refused");
+        assert!(
+            !entry_has_session(&token),
+            "no orphaned session is stored for the completed play"
         );
     }
 }
