@@ -354,14 +354,22 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
 
 /// Per-response write deadline, in milliseconds. `read_request` already bounds
 /// the read side; without a matching write bound a client that stops draining
-/// mid-body — a long pause, or a stuck/dead peer — blocks `write_all` forever
-/// and pins this connection's thread. On expiry the write fails and the
-/// response ends; mpv just reconnects with a fresh Range when it resumes,
-/// exactly as it does after a seek, so dropping a long-idle stream is harmless.
-/// It also gives sub-slice 3's cooperative seek-cancel a bounded point to
-/// notice supersession. Tests lower it; `0` disables it (the pre-deadline
-/// behavior, for the guard proof).
-static WRITE_TIMEOUT_MS: AtomicU64 = AtomicU64::new(30_000);
+/// mid-body — a stuck/dead peer, or a very long pause — blocks `write_all`
+/// forever and pins this connection's thread. On expiry the write fails and
+/// the response ends.
+///
+/// It is a resource BACKSTOP, deliberately generous, not a pause-killer: a
+/// paused mpv is a healthy client that will resume, and dropping it early would
+/// force a fresh SMB session on resume — re-incurring exactly the per-seek
+/// session cost Bug 1 removes. So the default sits well past any normal pause.
+/// If it does fire (a truly long idle, or a dead peer), the loopback stream is
+/// reconnect-enabled on the mpv side (`playback::proxy_reconnect_args`), so mpv
+/// reopens with a fresh `Range` and playback continues — a drop is safe, not a
+/// broken stream. It also gives sub-slice 3's cooperative seek-cancel a bounded
+/// point to notice supersession. Tests lower it; `0` disables it (the
+/// pre-deadline behavior, for the guard proof).
+const DEFAULT_WRITE_TIMEOUT_MS: u64 = 300_000;
+static WRITE_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_WRITE_TIMEOUT_MS);
 
 fn write_timeout() -> Option<Duration> {
     match WRITE_TIMEOUT_MS.load(Ordering::Relaxed) {
@@ -700,7 +708,7 @@ mod tests {
         // serve_connection returns; without it the write blocks forever and
         // this recv times out instead.
         let finished = rx.recv_timeout(Duration::from_secs(5));
-        set_write_timeout_ms_for_test(30_000); // restore for other tests
+        set_write_timeout_ms_for_test(DEFAULT_WRITE_TIMEOUT_MS); // restore for other tests
         assert!(
             finished.is_ok(),
             "the write deadline must unpin serve_connection when the client stops reading"
