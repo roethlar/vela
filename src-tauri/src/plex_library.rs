@@ -203,6 +203,10 @@ pub struct PlexPart {
 pub struct DetailContainer {
     #[serde(rename = "Video", default)]
     pub videos: Vec<PlexDetail>,
+    // Some Plex endpoints label item rows `Metadata` rather than `Video`; capture
+    // both, matching `ItemsContainer`, so the detail parse can't miss the item.
+    #[serde(rename = "Metadata", default)]
+    pub metadata: Vec<PlexDetail>,
     #[serde(rename = "Directory", default)]
     pub directories: Vec<PlexDetail>,
 }
@@ -885,6 +889,7 @@ impl PlexLibrary {
         container
             .videos
             .into_iter()
+            .chain(container.metadata)
             .chain(container.directories)
             .next()
             .ok_or_else(|| "item not found".into())
