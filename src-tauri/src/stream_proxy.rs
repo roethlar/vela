@@ -20,6 +20,7 @@
 use std::collections::VecDeque;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
@@ -351,6 +352,29 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
     }
 }
 
+/// Per-response write deadline, in milliseconds. `read_request` already bounds
+/// the read side; without a matching write bound a client that stops draining
+/// mid-body — a long pause, or a stuck/dead peer — blocks `write_all` forever
+/// and pins this connection's thread. On expiry the write fails and the
+/// response ends; mpv just reconnects with a fresh Range when it resumes,
+/// exactly as it does after a seek, so dropping a long-idle stream is harmless.
+/// It also gives sub-slice 3's cooperative seek-cancel a bounded point to
+/// notice supersession. Tests lower it; `0` disables it (the pre-deadline
+/// behavior, for the guard proof).
+static WRITE_TIMEOUT_MS: AtomicU64 = AtomicU64::new(30_000);
+
+fn write_timeout() -> Option<Duration> {
+    match WRITE_TIMEOUT_MS.load(Ordering::Relaxed) {
+        0 => None,
+        ms => Some(Duration::from_millis(ms)),
+    }
+}
+
+#[cfg(test)]
+fn set_write_timeout_ms_for_test(ms: u64) {
+    WRITE_TIMEOUT_MS.store(ms, Ordering::Relaxed);
+}
+
 /// Write the response for `req` against a `len`-byte entity, pulling bytes
 /// through `read_at`. Streams in 256 KiB chunks; a dropped client (seek,
 /// stop) surfaces as a write error and simply ends the response.
@@ -360,6 +384,14 @@ fn serve_target(
     len: u64,
     read_at: impl Fn(u64, &mut [u8]) -> Result<usize, String>,
 ) -> Result<(), String> {
+    // Bound every write on this response so a non-draining client cannot pin
+    // the thread (see WRITE_TIMEOUT_MS). A timed-out write surfaces exactly
+    // like a client that went away: the head write errors out, a body write
+    // breaks the loop — both end the response.
+    if let Some(deadline) = write_timeout() {
+        conn.set_write_timeout(Some(deadline))
+            .map_err(|e| e.to_string())?;
+    }
     let span = parse_range(req.range.as_deref(), len);
     let (status, start, end) = match span {
         Span::Unsatisfiable => {
@@ -629,6 +661,51 @@ mod tests {
             Some(8888),
             "a current-generation store is accepted"
         );
+    }
+
+    #[test]
+    fn write_deadline_unpins_a_client_that_stops_reading() {
+        use std::sync::mpsc;
+        let _guard = test_lock();
+        // Short deadline for the test; restored before we return.
+        set_write_timeout_ms_for_test(300);
+
+        // A body larger than any plausible socket buffer, so the body write
+        // blocks once the client stops draining.
+        let big = vec![0u8; 16 * 1024 * 1024];
+        let url = register(Target::Mem {
+            bytes: big,
+            probes: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        })
+        .unwrap();
+        let token = url.rsplit('/').next().unwrap().to_string();
+
+        // A real connected TCP pair; hand the server end to serve_connection.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        let (server, _) = listener.accept().unwrap();
+
+        let (tx, rx) = mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(serve_connection(server));
+        });
+
+        // Ask for the whole body, then never read it.
+        client
+            .write_all(format!("GET /{token} HTTP/1.1\r\nHost: x\r\n\r\n").as_bytes())
+            .unwrap();
+
+        // With the deadline the blocked body write times out and
+        // serve_connection returns; without it the write blocks forever and
+        // this recv times out instead.
+        let finished = rx.recv_timeout(Duration::from_secs(5));
+        set_write_timeout_ms_for_test(30_000); // restore for other tests
+        assert!(
+            finished.is_ok(),
+            "the write deadline must unpin serve_connection when the client stops reading"
+        );
+        drop(client); // keep the non-draining client alive until the assertion
     }
 
     #[test]
