@@ -39,7 +39,42 @@ enum Target {
         /// Counts length probes (the stand-in for SMB's network `stat`) so a
         /// test can assert a seek reuses the cached length instead.
         probes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        /// Counts backend-session creations (the stand-in for SMB's
+        /// `connect_mount`) so a test can assert a seek reuses the cached
+        /// session instead of rebuilding one — the felt freeze this slice fixes.
+        sessions: std::sync::Arc<std::sync::atomic::AtomicUsize>,
     },
+}
+
+/// A live backend session cached per token and reused across every request for
+/// that token — the initial open AND every seek — so a seek never rebuilds an
+/// SMB session (context create + teardown under the process-wide lifecycle
+/// lock), which was the felt freeze on a real NAS. Created lazily on the first
+/// request; freed exactly once at playback-end (generation-guarded — see
+/// [`release_session`]), never per seek. Each request still opens its OWN file
+/// handle on the shared session, so no two connections share a file position.
+#[derive(Clone)]
+enum Session {
+    Smb(std::sync::Arc<crate::smb_client::SmbConnection>),
+    /// Presence-only stand-in with no payload; it exists so a test can observe
+    /// that the cache reused a session rather than creating a new one.
+    #[cfg(test)]
+    Fake,
+}
+
+impl Session {
+    /// The SMB connection this session wraps. Only ever called for a session
+    /// built from an SMB target, so the test-only `Fake` arm is unreachable.
+    // The match is infallible in non-test builds (where `Fake` does not exist),
+    // but must stay a match to cover `Fake` under `cfg(test)`.
+    #[allow(clippy::infallible_destructuring_match)]
+    fn smb(&self) -> &std::sync::Arc<crate::smb_client::SmbConnection> {
+        match self {
+            Session::Smb(smb) => smb,
+            #[cfg(test)]
+            Session::Fake => unreachable!("an SMB target yields an SMB session"),
+        }
+    }
 }
 
 struct Entry {
@@ -51,8 +86,21 @@ struct Entry {
     /// Bumped every time the token is reused for a fresh play. A request
     /// captures it at lookup and may only write its discovered length back
     /// under the same generation, so a slow in-flight request from a prior
-    /// play cannot repopulate a length that a replay just cleared.
+    /// play cannot repopulate a length that a replay just cleared. It is also
+    /// the *session* generation: [`release_session`] frees the cached session
+    /// only if this value still matches the one the finishing play captured.
     generation: u64,
+    /// The cached live backend session for this token (see [`Session`]). `None`
+    /// until the first request creates it, and again after playback-end frees
+    /// it. Kept across a same-file replay (token reuse) so the replay skips the
+    /// reconnect too.
+    session: Option<Session>,
+    /// Bumped by each new streaming (GET) request for this token. A serve
+    /// captures the epoch it claimed; when a newer request bumps it, the older
+    /// serve sees the mismatch at its next chunk boundary and stops
+    /// (cooperative seek-cancel — see [`serve_target`]). Shared in an `Arc` so
+    /// the serve loop reads it lock-free after the registry lock is released.
+    serve_epoch: std::sync::Arc<AtomicU64>,
 }
 
 /// Oldest-first; registration evicts from the front once full. The
@@ -144,6 +192,8 @@ fn register(target: Target) -> Result<String, String> {
         target,
         len: None,
         generation: 0,
+        session: None,
+        serve_epoch: std::sync::Arc::new(AtomicU64::new(0)),
     });
     Ok(format!("http://127.0.0.1:{}/{}", p.port, token))
 }
@@ -160,6 +210,119 @@ fn store_len(token: &str, generation: u64, len: u64) {
             if entry.generation == generation {
                 entry.len = Some(len);
             }
+        }
+    }
+}
+
+/// The `(token, generation)` a resolved stream URL maps to, or `None` when the
+/// URL is not one of this proxy's loopback URLs — Plex/Jellyfin/Emby, local
+/// files, and OS-mounted SMB (macOS/Windows) have no cached session to free.
+/// The play path snapshots this at play time (under `play_lock`, right after
+/// resolving the stream) and hands it to [`release_session`] at playback-end.
+pub fn playback_session_key(url: &str) -> Option<(String, u64)> {
+    // register() builds exactly `http://127.0.0.1:{port}/{token}`; the token is
+    // the whole remainder after the first slash (a UUID, no further path/query).
+    let rest = url.strip_prefix("http://127.0.0.1:")?;
+    let (_port, token) = rest.split_once('/')?;
+    if token.is_empty() {
+        return None;
+    }
+    let reg = registry().lock().ok()?;
+    let generation = reg.iter().find(|e| e.token == token)?.generation;
+    Some((token.to_string(), generation))
+}
+
+/// Free the cached backend session for `token`, but only if it still owns
+/// `generation` (compare-and-remove). Called once at playback-end.
+///
+/// A same-file replay reuses the token and bumps the generation BEFORE the
+/// prior play signals end (`play_by_key` resolves the new stream before killing
+/// the old mpv), so the prior play's late call no longer matches and cannot
+/// free the session the new play is now using. A no-op if the token was evicted
+/// or the session was already freed. The freed session is dropped AFTER the
+/// registry lock is released: dropping the last `Arc<SmbConnection>` frees its
+/// context (a blocking teardown under the process-wide lifecycle lock), which
+/// must never run while the registry lock is held.
+pub fn release_session(token: &str, generation: u64) {
+    let freed = {
+        let mut reg = match registry().lock() {
+            Ok(reg) => reg,
+            Err(_) => return,
+        };
+        reg.iter_mut()
+            .find(|e| e.token == token)
+            .filter(|e| e.generation == generation)
+            .and_then(|e| e.session.take())
+    };
+    drop(freed);
+}
+
+/// Return the token's cached backend session, creating it once on the first
+/// request and reusing it for every later request (seeks included) — the core
+/// of the seek fix. Fast path: clone and return the cached session. Slow path:
+/// build one OFF the registry lock (an SMB `connect` touches libsmbclient's
+/// global context state under its own lifecycle lock — the registry lock must
+/// never be held across it), then store it iff the token still has none. A
+/// concurrent first request may have won the race; in that case use the winner
+/// and drop ours — also off-lock, since dropping it may free a context.
+fn get_or_create_session(token: &str, target: &Target) -> Result<Session, String> {
+    // Fast path: already cached.
+    {
+        let reg = registry()
+            .lock()
+            .map_err(|_| "stream proxy registry poisoned".to_string())?;
+        match reg.iter().find(|e| e.token == token) {
+            None => return Err("stream token is no longer registered".to_string()),
+            Some(entry) => {
+                if let Some(session) = &entry.session {
+                    return Ok(session.clone());
+                }
+            }
+        }
+    }
+    // Slow path: build the session off-lock.
+    let created = match target {
+        Target::Smb { mount, .. } => {
+            Session::Smb(std::sync::Arc::new(crate::smb_client::connect_mount(mount)?))
+        }
+        #[cfg(test)]
+        Target::Mem { sessions, .. } => {
+            sessions.fetch_add(1, Ordering::SeqCst);
+            Session::Fake
+        }
+    };
+    // Commit iff still absent. Decide under the lock, then act on the decision
+    // AFTER releasing it so any session we drop (the race loser, or a create
+    // against an evicted token) frees its context off the registry lock.
+    enum Outcome {
+        Won,
+        Lost(Session),
+        Evicted,
+    }
+    let outcome = {
+        let mut reg = registry()
+            .lock()
+            .map_err(|_| "stream proxy registry poisoned".to_string())?;
+        match reg.iter_mut().find(|e| e.token == token) {
+            None => Outcome::Evicted,
+            Some(entry) => match &entry.session {
+                Some(existing) => Outcome::Lost(existing.clone()),
+                None => {
+                    entry.session = Some(created.clone());
+                    Outcome::Won
+                }
+            },
+        }
+    };
+    match outcome {
+        Outcome::Won => Ok(created), // the entry now holds its own clone
+        Outcome::Lost(winner) => {
+            drop(created);
+            Ok(winner)
+        }
+        Outcome::Evicted => {
+            drop(created);
+            Err("stream token was evicted before its session was cached".to_string())
         }
     }
 }
@@ -288,10 +451,11 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
         return respond_status(&mut conn, "405 Method Not Allowed", &[("Allow", "GET, HEAD")]);
     }
     // Look the token up without holding the registry lock during I/O, along
-    // with any length learned on a prior request (so a seek skips the probe)
-    // and the current generation (so a length we learn is only written back if
-    // the token has not been reused for a fresh play meanwhile).
-    let looked_up: Option<(Target, Option<u64>, u64)> = {
+    // with any length learned on a prior request (so a seek skips the probe),
+    // the current generation (so a length we learn is only written back if the
+    // token has not been reused for a fresh play meanwhile), and the shared
+    // serve-epoch (so this serve can notice a later request supersede it).
+    let looked_up: Option<(Target, Option<u64>, u64, std::sync::Arc<AtomicU64>)> = {
         let reg = registry()
             .lock()
             .map_err(|_| "stream proxy registry poisoned".to_string())?;
@@ -302,22 +466,47 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
                     relative: relative.clone(),
                 },
                 #[cfg(test)]
-                Target::Mem { bytes, probes } => Target::Mem {
+                Target::Mem {
+                    bytes,
+                    probes,
+                    sessions,
+                } => Target::Mem {
                     bytes: bytes.clone(),
                     probes: probes.clone(),
+                    sessions: sessions.clone(),
                 },
             };
-            (target, e.len, e.generation)
+            (target, e.len, e.generation, e.serve_epoch.clone())
         })
     };
-    let Some((target, cached_len, generation)) = looked_up else {
+    let Some((target, cached_len, generation, serve_epoch)) = looked_up else {
         return respond_status(&mut conn, "404 Not Found", &[]);
     };
+
+    // Claim this serve's place in the token's supersede order. A GET streams a
+    // body, so it bumps the epoch: any older in-flight serve for this token now
+    // observes a newer epoch and stops at its next chunk boundary (cooperative
+    // seek-cancel). A HEAD carries no body and returns before the stream loop,
+    // so it only reads the epoch — bumping it would spuriously cancel an
+    // in-flight GET.
+    let my_epoch = if req.method == "GET" {
+        serve_epoch.fetch_add(1, Ordering::SeqCst) + 1
+    } else {
+        serve_epoch.load(Ordering::SeqCst)
+    };
+
+    // Reuse the token's cached backend session, creating it once on the first
+    // request. This is the heart of the seek fix: a seek opens a fresh file
+    // handle on the existing session instead of rebuilding an SMB context.
+    let session = get_or_create_session(&req.token, &target)?;
+
     match target {
-        Target::Smb { mount, relative } => {
-            let smb = crate::smb_client::connect_mount(&mount)?;
+        Target::Smb { relative, .. } => {
+            let smb = session.smb();
             // On a seek the length is already known: open without a redundant
-            // network stat. On the first request, learn it and cache it.
+            // network stat. On the first request, learn it and cache it. Each
+            // connection opens its OWN file handle (its own SMB file position),
+            // so a seek's reads never disturb the initial stream's handle.
             let handle = match cached_len {
                 Some(len) => smb.open_read_with_len(&relative, len)?,
                 None => {
@@ -327,27 +516,38 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
                 }
             };
             let len = handle.len();
-            serve_target(&mut conn, &req, len, |offset, buf| {
+            serve_target(&mut conn, &req, len, &serve_epoch, my_epoch, |offset, buf| {
                 handle.read_at(offset, buf)
             })
         }
         #[cfg(test)]
-        Target::Mem { bytes, probes } => {
+        Target::Mem { bytes, probes, .. } => {
+            // The fake session was cached and reuse-counted (via
+            // `get_or_create_session`) exactly as the SMB path caches its
+            // connection; the in-memory bytes are served directly, so the
+            // session itself is not read here — it only exists to prove reuse.
             let len = match cached_len {
                 Some(len) => len,
                 None => {
-                    probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    probes.fetch_add(1, Ordering::SeqCst);
                     let len = bytes.len() as u64;
                     store_len(&req.token, generation, len);
                     len
                 }
             };
-            serve_target(&mut conn, &req, len, move |offset, buf| {
-                let start = (offset as usize).min(bytes.len());
-                let n = (bytes.len() - start).min(buf.len());
-                buf[..n].copy_from_slice(&bytes[start..start + n]);
-                Ok(n)
-            })
+            serve_target(
+                &mut conn,
+                &req,
+                len,
+                &serve_epoch,
+                my_epoch,
+                move |offset, buf| {
+                    let start = (offset as usize).min(bytes.len());
+                    let n = (bytes.len() - start).min(buf.len());
+                    buf[..n].copy_from_slice(&bytes[start..start + n]);
+                    Ok(n)
+                },
+            )
         }
     }
 }
@@ -390,6 +590,8 @@ fn serve_target(
     conn: &mut TcpStream,
     req: &Request,
     len: u64,
+    serve_epoch: &AtomicU64,
+    my_epoch: u64,
     read_at: impl Fn(u64, &mut [u8]) -> Result<usize, String>,
 ) -> Result<(), String> {
     // Bound every write on this response so a non-draining client cannot pin
@@ -428,6 +630,15 @@ fn serve_target(
     let mut buf = vec![0u8; 256 * 1024];
     let mut pos = start;
     while pos <= end {
+        // Cooperative seek-cancel: a newer request for this token bumped the
+        // epoch, so this serve is superseded — stop and let the newer one
+        // serve. Checked at each chunk boundary. A write already blocked on a
+        // non-draining client is bounded by the write deadline instead, and a
+        // blocked SMB read by the connection's per-op timeout, so a stuck serve
+        // is never worse than today's worst case.
+        if serve_epoch.load(Ordering::SeqCst) != my_epoch {
+            break;
+        }
         let want = ((end - pos + 1).min(buf.len() as u64)) as usize;
         let n = read_at(pos, &mut buf[..want])?;
         if n == 0 {
@@ -506,6 +717,7 @@ mod tests {
         let url = register(Target::Mem {
             bytes: bytes.clone(),
             probes: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            sessions: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
         .unwrap();
         let (port, token) = {
@@ -556,6 +768,7 @@ mod tests {
         let url = register(Target::Mem {
             bytes: bytes.clone(),
             probes: probes.clone(),
+            sessions: std::sync::Arc::new(AtomicUsize::new(0)),
         })
         .unwrap();
         let (port, token) = {
@@ -609,6 +822,26 @@ mod tests {
             .find(|e| e.token == token)
             .map(|e| e.generation)
             .unwrap()
+    }
+
+    /// Whether the token currently has a cached session (test-only).
+    fn entry_has_session(token: &str) -> bool {
+        registry()
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| e.token == token)
+            .map(|e| e.session.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Cache a presence-only fake session on the token, standing in for the SMB
+    /// session the first request would create (test-only).
+    fn seed_session(token: &str) {
+        let mut reg = registry().lock().unwrap();
+        if let Some(entry) = reg.iter_mut().find(|e| e.token == token) {
+            entry.session = Some(Session::Fake);
+        }
     }
 
     #[test]
@@ -684,6 +917,7 @@ mod tests {
         let url = register(Target::Mem {
             bytes: big,
             probes: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            sessions: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
         })
         .unwrap();
         let token = url.rsplit('/').next().unwrap().to_string();
@@ -733,5 +967,171 @@ mod tests {
         }
         let reg = registry().lock().unwrap();
         assert!(reg.len() <= REGISTRY_CAP, "registry stays capped");
+    }
+
+    #[test]
+    fn seek_reuses_the_cached_session_without_recreating_it() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _guard = test_lock();
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        let sessions = std::sync::Arc::new(AtomicUsize::new(0));
+        let url = register(Target::Mem {
+            bytes: bytes.clone(),
+            probes: std::sync::Arc::new(AtomicUsize::new(0)),
+            sessions: sessions.clone(),
+        })
+        .unwrap();
+        let (port, token) = {
+            let rest = url.strip_prefix("http://127.0.0.1:").unwrap();
+            let (port, token) = rest.split_once('/').unwrap();
+            (port.parse::<u16>().unwrap(), token.to_string())
+        };
+
+        // First request (initial open) creates the session exactly once.
+        let (head, _) = http(port, &format!("GET /{token} HTTP/1.1\r\nHost: x\r\n\r\n"));
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert_eq!(
+            sessions.load(Ordering::SeqCst),
+            1,
+            "the first request creates one session"
+        );
+
+        // A seek (Range from a mid-file offset) must REUSE the cached session,
+        // not rebuild one — rebuilding an SMB session per seek is exactly the
+        // felt freeze this slice removes.
+        let (head, body) = http(
+            port,
+            &format!("GET /{token} HTTP/1.1\r\nHost: x\r\nRange: bytes=10-19\r\n\r\n"),
+        );
+        assert!(head.starts_with("HTTP/1.1 206"), "{head}");
+        assert_eq!(body, (10..=19u8).collect::<Vec<_>>());
+        assert_eq!(
+            sessions.load(Ordering::SeqCst),
+            1,
+            "the seek reuses the cached session — no new session created"
+        );
+    }
+
+    #[test]
+    fn a_superseded_serve_stops_without_streaming_the_body() {
+        let _guard = test_lock();
+        // A real connected TCP pair; the server end is handed a full-range GET,
+        // but the token's serve-epoch already sits AHEAD of this serve's claimed
+        // epoch — i.e. a newer request has superseded it. It must send the head
+        // and then break at the first chunk boundary, streaming (almost) none of
+        // the promised body.
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let mut client = TcpStream::connect(addr).unwrap();
+        let (mut server, _) = listener.accept().unwrap();
+
+        let body_len: u64 = 8 * 1024 * 1024;
+        let serve_epoch = AtomicU64::new(5); // a newer serve already claimed epoch 5
+        let my_epoch = 3; // this serve is stale
+        let req = Request {
+            method: "GET".to_string(),
+            token: "t".to_string(),
+            range: None,
+        };
+        let worker = std::thread::spawn(move || {
+            // read_at would happily supply bytes, but the epoch check must break
+            // the loop before the first read.
+            serve_target(&mut server, &req, body_len, &serve_epoch, my_epoch, |_off, buf| {
+                Ok(buf.len())
+            })
+        });
+
+        client
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut raw = Vec::new();
+        let _ = client.read_to_end(&mut raw);
+        let served = worker.join().unwrap();
+        assert!(served.is_ok(), "a superseded serve ends cleanly");
+
+        let split = raw.windows(4).position(|w| w == b"\r\n\r\n").unwrap();
+        let head = String::from_utf8_lossy(&raw[..split]).to_string();
+        let body = &raw[split + 4..];
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert!(head.contains(&format!("Content-Length: {body_len}")), "{head}");
+        // Superseded before the first chunk, so the body is far short of the
+        // promised length (empty in practice). Without the epoch check the loop
+        // would stream all 8 MiB.
+        assert!(
+            (body.len() as u64) < body_len / 2,
+            "superseded serve streamed {} of {body_len} bytes",
+            body.len()
+        );
+    }
+
+    #[test]
+    fn release_session_frees_only_on_matching_generation() {
+        let _guard = test_lock();
+        let m = |id: &str| SmbMount {
+            id: id.into(),
+            ..SmbMount::default()
+        };
+        let url = register_smb(&m("x"), "movie.mkv").unwrap();
+        let token = url.rsplit('/').next().unwrap().to_string();
+        let g = entry_gen(&token);
+        seed_session(&token);
+        assert!(entry_has_session(&token), "the session is cached");
+
+        // A stale-generation release (a superseded play's late on_end) must NOT
+        // free the session the current play is using.
+        release_session(&token, g.wrapping_sub(1));
+        assert!(
+            entry_has_session(&token),
+            "release with a stale generation is a no-op"
+        );
+
+        // The owning generation frees it.
+        release_session(&token, g);
+        assert!(
+            !entry_has_session(&token),
+            "release with the owning generation frees the session"
+        );
+    }
+
+    #[test]
+    fn a_replays_late_end_does_not_free_the_new_plays_session() {
+        let _guard = test_lock();
+        let m = |id: &str| SmbMount {
+            id: id.into(),
+            ..SmbMount::default()
+        };
+        // Play 1 registers the token, caches a session, and snapshots its key.
+        let url1 = register_smb(&m("x"), "movie.mkv").unwrap();
+        let token = url1.rsplit('/').next().unwrap().to_string();
+        let (t1, g1) = playback_session_key(&url1).unwrap();
+        seed_session(&token);
+
+        // Play 2 replays the SAME file: it reuses the token and bumps the
+        // generation BEFORE play 1's end fires (play_by_key resolves the new
+        // stream before killing the old mpv). The cached session is kept for
+        // play 2.
+        let url2 = register_smb(&m("x"), "movie.mkv").unwrap();
+        let (t2, g2) = playback_session_key(&url2).unwrap();
+        assert_eq!(t1, token);
+        assert_eq!(t2, token);
+        assert_ne!(g1, g2, "the replay bumps the generation");
+        assert!(
+            entry_has_session(&token),
+            "the session is kept across the replay"
+        );
+
+        // Play 1's LATE end fires now, carrying the stale generation: a no-op.
+        release_session(&t1, g1);
+        assert!(
+            entry_has_session(&token),
+            "play 1's late end must not free play 2's session"
+        );
+
+        // Play 2's own end (the owning generation) frees it.
+        release_session(&t2, g2);
+        assert!(
+            !entry_has_session(&token),
+            "play 2's end frees the session it owned"
+        );
     }
 }

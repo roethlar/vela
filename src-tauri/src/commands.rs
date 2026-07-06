@@ -2904,6 +2904,35 @@ pub struct QueueSnapshot {
     pub current_index: Option<usize>,
 }
 
+/// Snapshot the loopback-proxy session key for a resolved stream URL so the
+/// end-of-session hook can free the cached SMB session for THIS play. Only
+/// Linux-family SMB proxy URLs carry one; Plex/Jellyfin/Emby, local files, and
+/// OS-mounted SMB (macOS/Windows) return `None` — they have no cached session.
+fn proxy_session_key(url: &str) -> Option<(String, u64)> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::stream_proxy::playback_session_key(url)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = url;
+        None
+    }
+}
+
+/// Free the cached SMB proxy session for a finished play (compare-and-remove,
+/// off the proxy registry lock). A no-op off the Linux-family native path.
+fn release_proxy_session(token: &str, generation: u64) {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::stream_proxy::release_session(token, generation);
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = (token, generation);
+    }
+}
+
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
 /// Used by `play_item` (top-level play) AND by `queue_play_at` and the auto-
 /// advance dispatcher — same lock discipline regardless of trigger.
@@ -2976,6 +3005,12 @@ pub(crate) async fn play_by_key(
         start_seconds: resume_ms as f64 / 1000.0,
         autocrop_script,
     };
+    // Snapshot the loopback-proxy session key for THIS play (SMB, Linux-family;
+    // `None` otherwise). Read now, under `play_lock` and right after resolve, so
+    // a same-file replay that reuses the token has already bumped the generation
+    // — the compare-and-remove in `release_session` then keeps a superseded
+    // play's late `on_end` from freeing the new play's session.
+    let session_key = proxy_session_key(&spec.url);
     // End-of-session notifier → the `playback-ended` UI event, emitted after
     // the final server check-in so a re-fetch it triggers sees the new watch
     // state. Payload carries ids only — never URLs or tokens.
@@ -2984,7 +3019,15 @@ pub(crate) async fn play_by_key(
         let app = app.clone();
         let source_id = src.id().to_string();
         let item_key = rating_key.to_string();
+        let session_key = session_key.clone();
         std::sync::Arc::new(move |position_ms: u64| {
+            // Free the cached SMB proxy session for this finished play, so its
+            // libsmbclient context is torn down once here rather than left to
+            // registry eviction (compare-and-remove: a no-op for non-SMB plays
+            // or when a newer play has since reused the token).
+            if let Some((token, generation)) = &session_key {
+                release_proxy_session(token, *generation);
+            }
             // Stamp Vela's recents BEFORE emitting, so the refresh the event
             // triggers reads the updated list. Runs on the tracker thread —
             // synchronous config I/O is fine there.
