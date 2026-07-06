@@ -7,6 +7,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop sspf-4 CLOSED 2026-07-05: verified `[x]`, fix on `main`. Scope was **SMB
+seek Bug 1 sub-slice 2** (write deadline on the proxy socket) — base `5c50044`,
+head `8f41b90` after two codex rounds. r1 reopened sspf-4 (the 30s write
+deadline broke a normal long mpv pause — ffmpeg reconnect is off by default, so
+a mid-stream close hit premature EOF on resume); fix `8f41b90` enables ffmpeg
+reconnect for the loopback proxy stream (`playback::proxy_reconnect_args`) and
+raises the deadline default 30s→300s as a backstop; r2 **accepted** clean.
+Same no-branches adaptation.
+
 Loop sspf-1..sspf-3 CLOSED 2026-07-05: all verified `[x]`, fixes on `main`.
 Scope was **SMB seek Bug 1 sub-slice 1** (`.agents/plans/smb-ssh-playtest-fixes.md`)
 — base `adbeb867`, converged at head `401fd1bc` after four codex rounds (three
