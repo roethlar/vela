@@ -45,33 +45,35 @@ Navigation is spec'd — no per-slice choice:
   nothing).
 
 ## What each backend can give a detail view
-**Plex (richest).** Plex's XML *carries* most of this, but — corrected after
-plan-review r1 (idv-1) — **none of it is parsed today; there is no
-"already-parsed, just-dropped" rich field to remap.** Two facts to build on:
-- The section-listing / hub parse is `video_from_attrs`
-  (`plex_library.rs:1203-1255`): a manual **attribute allowlist** with a
-  `_ => {}` that drops every other attribute, and it sets `media: vec![]`. So
-  `contentRating`/`rating`/`audienceRating`/`studio`/`tagline`/`originallyAvailableAt`
-  are **not** captured, and **no `Media`/`Part` is populated from a listing** either.
-  `PlexVideo` has serde `rename`s for `Media`, but nothing deserializes a rich
-  `PlexVideo` via serde — the live parse is this attribute reader.
-- The per-item `/library/metadata/{rk}` call we *do* make
-  (`get_part_url_for_rating_key`, `plex_library.rs:846-960`) is a **playback-only**
-  bespoke stream parse: it walks `Media`/`Part` to pick the best playable part into
-  a local `candidates` vec. It builds **no reusable rich struct** and reads no
-  cast/crew/genre.
+**Plex (richest).** How Plex XML is parsed today (corrected across plan-review
+r1→r2; r1 mis-stated this and r2/idv-1 corrected it):
+- The **listing** parse (`get_items`, `plex_library.rs:609-694`) is **serde**:
+  quick_xml captures element order (pass 1), then `serde_xml_rs::from_str` into
+  `ItemsContainer` (`:669`). So `PlexVideo` **is** deserialized via serde, and its
+  `#[serde(rename="Media")] media` / `PlexMedia`'s `#[serde(rename="Part")] parts`
+  (`plex_library.rs:138`,`:179`) **are** populated from listings — the codec/
+  resolution block is genuinely already parsed. (`video_from_attrs`,
+  `plex_library.rs:1203-1255`, is a *separate* attribute-only reader used on other
+  paths — not the listing parser; ignore it for detail.)
+- What is **not** parsed today (absent from the `PlexVideo`/`PlexMedia`/`PlexPart`
+  serde structs): the scalar attrs `contentRating`, `rating`, `audienceRating`,
+  `studio`, `tagline`, `originallyAvailableAt`; and the child collections `Genre[]`,
+  cast `Role[]` (name/character/headshot `thumb`), `Director[]`, `Writer[]`,
+  `Country[]`, and per-`Stream` audio-channel/codec + subtitle detail.
+- The per-item `/library/metadata/{rk}` call we already make
+  (`get_part_url_for_rating_key`, `plex_library.rs:846-960`) is a playback-only
+  stream parse — it builds no reusable rich struct.
 
-Therefore slice 1 is genuinely new parsing, in two parts:
-- *Scalar attributes* present on the item element — `contentRating`, `rating`,
-  `audienceRating`, `studio`, `tagline`, `originallyAvailableAt` — added to the
-  detail parser (attribute reads).
-- *Child collections* that need **descending into child elements** (the current
-  parsers never descend into a Video's children): `Genre[]`, cast `Role[]` (name,
-  character, headshot `thumb`), `Director[]`, `Writer[]`, `Country[]`, the
-  `Media`/`Part` codec+resolution block for display, and per-`Stream` audio
-  channels/codec + subtitle languages. This is a new dedicated detail parser over
-  the `/library/metadata/{rk}` response, **not** attribute-widening of
-  `video_from_attrs`. Budget slice 1 as the heaviest slice accordingly.
+Slice-1 approach (simplest robust): Plex `item_detail` makes **one
+`/library/metadata/{rk}` call** and parses the whole response with a **new serde
+struct** (`PlexDetail` in a `DetailContainer`), the *same idiom* as
+`ItemsContainer`. serde_xml_rs already maps repeated child elements to `Vec`
+(`PlexVideo.media`, `PlexVideo.guids` prove it), so `Genre[]`/`Role[]`/`Director[]`/
+`Writer[]`/`Country[]`/`Media`/`Part`/`Stream[]` are ordinary struct fields — **not
+a hand-rolled streaming descent, and no need to touch the listing parser.** The
+metadata endpoint returns the authoritative full record, so slice 1 doesn't depend
+on which fields the *listing* happens to include. Still the heaviest slice (the
+struct + mapping is large), but mechanically it's serde widening.
 
 **Jellyfin/Emby.** Same endpoint, just widen the `Fields=` query
 (`source/jellyfin.rs:780` etc. currently request only `Overview,ProviderIds`):
@@ -113,20 +115,30 @@ view here shows mostly title/year/summary/poster unless we widen the `.nfo` pars
    the same pattern `LocalSource` and the slice-7 `resolve_stream` fix (`e7c5231`)
    already follow. Opening a detail page on a slow/wedged mount must not stall the app.
 
-   **Detail-source policy for merged cards (idv-2, binding):** a merged All-view
-   card's `rating_key` is **not** a safe detail key. `rank_backings`
+   **Detail-source policy for merged cards (idv-2 + idv-6, binding):** a merged
+   All-view card's `rating_key` is **not** a safe detail key. `rank_backings`
    (`commands.rs:2505-2545`) rewrites `rating_key`/`source_id` to the kind-ranked
    *play* face — and `kind_rank` (`commands.rs:2475`) ranks `local`=0 above
    `plex`=2/`jellyfin`=3, so the play face is usually the **local** copy while the
-   card's rich display fields came from the Plex/JF backing. Calling
-   `get_item_detail(play rating_key)` would open the sparse local page for a card
-   that showed rich server metadata. Fix: the info view resolves a **detail key**
-   to the richest-metadata backing — reuse the existing `backing: Vec<BackingRef>`
-   (already on the merged `ItemDto`) and pick the first `plex|jellyfin|emby` backing,
-   exactly mirroring how `watch_key` (`rank_backings`, `commands.rs:2532`) routes
-   watched-state to a server backing when the play face is local-family. Play still
-   uses the play `rating_key`; only *detail* re-targets. Non-merged cards use their
-   own key unchanged.
+   card's rich display fields came from a server backing. Calling
+   `get_item_detail(play rating_key)` opens the sparse local page for a card that
+   showed rich server metadata.
+   - **Do NOT derive the detail target by scanning the post-rank `backing` list**
+     (idv-6): `dedup_across_sources` puts the display face — the richest by
+     summary/poster/year — at `backing[0]` (`commands.rs:2678`), but `rank_backings`
+     then **re-sorts `backing` by play preference** and overwrites `source_id`
+     (`:2520-2527`). So after ranking, neither `backing[0]` nor "the first
+     `plex|jellyfin|emby` entry" reliably equals the display face (Plex sorts before
+     Jellyfin by `kind_rank`, so a Jellyfin-faced card could detail from Plex).
+   - **Fix:** add an explicit **`detail_key`** field to the merged `ItemDto`,
+     computed **in `rank_backings`** (which holds all backings + their kinds) by a
+     dedicated **detail rank that prefers metadata-rich servers** — `plex` <
+     `jellyfin`/`emby` < `smb`/`ssh` < `local` (the *reverse* of `kind_rank`, because
+     the detail page exists to show cast/genre/streams that only servers carry).
+     Deterministic, independent of play order and of `watch_key`. When only
+     local-family backings exist, `detail_key` is that local item (a clean sparse
+     page — accepted). Play still uses `rating_key`; only *detail* uses `detail_key`.
+     Non-merged cards leave `detail_key` unset and use their own key.
 3. **Frontend info surfaces** — new Svelte component(s), not more of `+page.svelte`:
    - **Movie info page**: poster/backdrop, title, meta row (year · runtime · content
      rating · rating), genres, summary, cast strip (headshots), crew, studio, a
@@ -134,6 +146,16 @@ view here shows mostly title/year/summary/poster unless we widen the `.nfo` pars
      poster**. Reached by clicking a movie card.
    - **Show → seasons → episodes** drill: clicking a show lists seasons; a season
      lists episodes (extends the existing `get_children` drill, `+page.svelte:554`).
+     **Merged-show drill (idv-5, binding):** `get_children` routes whatever key it is
+     handed (`commands.rs:3262`), and a merged show's `rating_key` is the *play* face
+     (local, per `rank_backings`), so drilling a merged local+server show would open
+     the **local** seasons/episodes — whose items carry no `backing`, so the episode
+     info page can't retarget to a rich server. Drill the show through **`detail_key`**
+     (the server backing) so seasons/episodes come from the rich source. Its episodes
+     then also play from that server; the top-level per-title override stays a
+     merged-*movie* concern (episodes aren't individually merged today). If only
+     local backings exist, the drill stays local (sparse but present — accepted). See
+     the open decision below on episode playback-source for merged shows.
    - **Episode info page (shared)**: the season's episode list plus a detail panel
      bound to the selected episode — selecting an episode updates title/still/
      summary/air-date/runtime/stream-specs in place; Play acts on the selection.
@@ -163,12 +185,15 @@ discipline by **building behind the current nav and flipping last**:
 
 ## Proposed slices (each its own commit + reviewloop codex; nav stays old until the flip)
 1. **`DetailDto` + `item_detail` trait method (graceful default) + `get_item_detail`
-   command, Plex.** Write the **new dedicated detail parser** over the
-   `/library/metadata/{rk}` response — scalar attributes (contentRating/rating/
-   audienceRating/studio/tagline/originallyAvailableAt) **and** child collections
-   (cast `Role[]`/`Director[]`/`Writer[]`/`Genre[]`/`Country[]`/`Media`/`Part`/
-   `Stream`), descending into child elements. This is not a remap of already-parsed
-   fields (idv-1) — it is the heaviest slice. Backend unit tests over fixture XML.
+   command, Plex.** Plex `item_detail` = one `/library/metadata/{rk}` call parsed
+   into a **new `PlexDetail` serde struct** (`DetailContainer`), same idiom as the
+   existing `ItemsContainer` — scalar attributes (contentRating/rating/audienceRating/
+   studio/tagline/originallyAvailableAt) as struct attrs and child collections
+   (`Role[]`/`Director[]`/`Writer[]`/`Genre[]`/`Country[]`/`Media`/`Part`/`Stream[]`)
+   as `#[serde(rename=…, default)] Vec<…>`, exactly as `PlexVideo.media`/`.guids`
+   already do (idv-1: serde descends into children — no hand-rolled parser, no touch
+   to the listing path). Heaviest slice (large struct + `DetailDto` mapping). Backend
+   unit tests over fixture XML.
 2. **Jellyfin/Emby `item_detail`** (widen `Fields=`, parse people/genres/ratings/
    streams). Keeps the flip from being Plex-only.
 3. **Local `item_detail`** — widen the `.nfo` parse (genre/cast/runtime/rating);
@@ -176,9 +201,11 @@ discipline by **building behind the current nav and flipping last**:
    The reads run **off-runtime on the blocking pool** (idv-3), never under a lock.
 4. **Info-surface components** (movie info page; shared episode info page) wired to
    `get_item_detail`, behind the current nav (dev-flag reachable), across all three
-   backends. Resolve the **detail key to the richest backing** for merged cards
-   (idv-2) and apply the **episode-list paging + per-selection generation guard**
-   (idv-4). E2E where practical.
+   backends. Includes the backend `detail_key` field + the **server-preferred detail
+   rank** in `rank_backings` (idv-2/idv-6), routing both `get_item_detail` and the
+   merged-show `get_children` drill through `detail_key` (idv-5); plus the
+   **episode-list paging + per-selection generation guard** (idv-4). E2E where
+   practical.
 5. **Flip the navigation** (the binding UX ruling): movie click → info page; show →
    seasons → episodes; episode → shared info page; CW carousel unchanged. This is
    the slice that makes it user-visible — only lands when 1-4 are complete.
@@ -216,6 +243,15 @@ discipline by **building behind the current nav and flipping last**:
   state). Slices land internally; the flip is last.
 - How much to widen the local `.nfo` parse (cast/crew adds real value only if the
   owner's libraries carry it) — a scope dial, not a blocker.
+- **Merged-show episode playback source (idv-5, surfaced by plan-review r2).** The
+  plan's default drills a merged local+server show through `detail_key` (the server),
+  so its episodes both *show* rich detail and *play* from the server — even if a local
+  copy exists. Rationale: episodes aren't individually merged, so shown==played stays
+  consistent and rich; the local-preferred play override remains a merged-*movie*
+  feature. Alternative if the owner prefers local direct-play for such episodes: keep
+  the drill on the play face and accept a sparse (local) episode page. Rare for a
+  Plex-first library (needs the *same show* on Plex **and** a local folder); default
+  stands unless the owner says otherwise. Non-blocking for slices 1-3.
 - Info page presentation — **RESOLVED 2026-07-06 (owner-confirmed): full-screen
   route** (a dedicated info page with Back), NOT a floating overlay/popup. A movie's
   info page is just another drill-in level (like show→seasons→episodes), so Back
@@ -252,4 +288,33 @@ taste).**
   the episode page must page the full list and guard the per-selection detail fetch
   with a selection generation token.
 
-r2 dispatched after these revisions (verdict pending).
+**r2 — 2026-07-06 — verdict `reopened`, 3 findings, all ADMITTED (verified against
+live code; one of them corrected a mistake r1 introduced — the loop working as
+intended).**
+- **idv-1 correction (HIGH) — r1's fix was itself factually wrong.** r1 (both codex
+  and coder) keyed on `video_from_attrs` and concluded Media/Part aren't parsed from
+  listings. False: the listing parser is `get_items` (`plex_library.rs:609-694`),
+  which uses `serde_xml_rs::from_str` into `ItemsContainer` (`:669`) and **does**
+  populate `PlexVideo.media`/`PlexMedia.parts` via serde `rename`s (`:138`,`:179`);
+  `video_from_attrs` is a separate reader on other paths. Re-fixed: rewrote the Plex
+  section + slice 1 to the real mechanism — one `/library/metadata/{rk}` call parsed
+  by a **new `PlexDetail` serde struct** (serde already descends into child `Vec`s,
+  as `PlexVideo.media`/`.guids` prove); no hand-rolled descent, no listing-parser
+  change.
+- **idv-6 (MEDIUM) — the idv-2 "first `plex|jellyfin|emby` backing" rule doesn't
+  match the display face.** Confirmed: `dedup_across_sources` puts the richest face at
+  `backing[0]` (`commands.rs:2678`) but `rank_backings` re-sorts `backing` by play
+  kind and overwrites `source_id` (`:2520-2527`), so the post-rank order is play
+  order (Plex before Jellyfin), not display/richness order. Fixed: replaced the
+  scan-the-list rule with an explicit **`detail_key`** computed in `rank_backings`
+  via a dedicated **server-preferred detail rank** (reverse of `kind_rank`),
+  deterministic and independent of play order.
+- **idv-5 (HIGH) — the merged-card fix covered `get_item_detail` but not the show
+  drill.** Confirmed: `get_children` routes the key it's handed
+  (`commands.rs:3262`), which for a merged show is the local play face → local
+  children with no `backing`, so the episode page can't retarget to a rich server.
+  Fixed: drill the merged show through `detail_key` too (idv-5); added an owner
+  open-decision on the episode playback-source tradeoff (server-rich vs local
+  direct-play) — default = server, non-blocking for slices 1-3.
+
+r3 dispatched after these revisions (verdict pending).
