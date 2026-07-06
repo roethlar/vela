@@ -107,20 +107,37 @@ Keep it short and update it when important repo facts change.
   mountless SMB seed), fixed by `tests/e2e/scenarios/connectedtab.mjs`; r2 accepted.
   Full CI green (cargo test 102, clippy -D warnings clean). REMAINING: owner playtest
   — one row per SMB/SSH mount on the real NAS, no erroring Remove.
-  **IMMEDIATE NEXT ACTION: Bug 2 — mpv hangs on seek over SSH (P1).** DISTINCT from
-  the SMB seek (Bug 1): SSH uses the raw sshfs mount, NOT the loopback proxy. Root
-  cause: sshfs's single default SFTP channel + kernel readahead → a seek's read
-  queues behind the sequential-readahead backlog (head-of-line blocking). Fix: add
-  channel/cache tuning to the sshfs args in `src-tauri/src/sshfs.rs` (current opts:
-  `reconnect, ServerAlive*, BatchMode, follow_symlinks` — no channel/cache tuning).
-  Installed sshfs is 3.7.6, which SUPPORTS `-o max_conns=N` (parallel SSH channels —
-  the head-of-line fix); confirm its interaction with `reconnect`. Owner decision:
-  BUILD the hermetic loopback sshd+sftp+sshfs test (sshd/sshfs/ssh-keygen all present
-  on this host), gated on their presence. NOTE the loopback-latency caveat: a
-  localhost sshd may not reproduce the latency-driven stall, so the test may need to
-  assert the tuned option set is accepted + mounts + reads correctly (guarding a
-  broken option string) rather than a latency delta — decide during implementation.
-  Then Bug 4, Bug 5 P2, metadata rail — plan §"Slice order & commits".
+  **Bug 2 (SSH seek) LANDED 2026-07-06** (code `2174d2e`+`0bbff29`; reviewloop-codex
+  fixup `314d76c`; trail `d11ce50`; version bump 0.1.28 `49072f8`; UNPUSHED). SSH uses
+  the raw sshfs mount (NOT the SMB proxy); its single default SFTP channel
+  head-of-line-blocks a seek's read behind the readahead backlog → stall on a latency
+  link. Fix: `-o max_conns=4` (parallel SFTP channels) added to the sshfs options,
+  now via `sshfs_options_for(target_os)` — **Linux-only** (macOS sshfs-mac 2.10
+  rejects max_conns; codex sspf-13 caught the unconditional version as a HIGH macOS
+  regression). Owner chose the FUNCTIONAL hermetic guard (loopback sshd+sshfs mounts
+  with the option set + reads correctly; gated on sshd/sshfs/ssh-keygen + /dev/fuse,
+  skips gracefully) over a latency-repro — localhost has ~0 latency, so the stall
+  can't reproduce hermetically. `reviewloop codex` converged r1-r2 (r1 sspf-13, r2
+  accepted). Full CI green (cargo test 105, clippy -D warnings clean). REMAINING:
+  owner NAS playtest — SSH seek no longer hangs (the authoritative stall-fix check).
+  **IMMEDIATE NEXT ACTION: Bug 4 — share/mount root shows bare metadata-less cards,
+  starves the merged view (P2, LARGER).** The share-root auto-add registers the whole
+  share as ONE flat kind-auto folder; a NAS root of category dirs (Movies/, TV/…) is
+  mis-classified into one flat section of bare cards (no title/year/poster), which
+  can't dedup against server copies in the merged All view. Fix (see plan Bug 4 for
+  the full design + the THREE codex-pinned constraints): make kind-auto roots
+  category-aware — expand each into per-category effective `LocalFolder` roots so
+  `sections()`/`items()` see normal configured folders (the `items()` guard at
+  `local.rs:744` rejects non-configured section keys — do NOT loosen it); key the
+  detected-kind cache by **source/mount id + path** with a schema bump (raw-path keys
+  collide across mounts and a stale root kind preserves the flat classification); and
+  run the expansion OFF-LOCK on the blocking pool (NOT under `config::update`/
+  `source_lock` — the lock-across-blocking invariant slice 7 `e7c5231` honored). This
+  is the metadata unlock (`metadata.rs` already resolves .nfo/artwork sidecars over
+  the VFS + keyless iTunes/TVmaze once items parse at the right level). DESIGN FORK to
+  settle first: lazy effective-root cache inside `LocalSource` (expand under
+  `run_blocking` in sections()/items()) vs a config-snapshot expand-then-swap. Then
+  Bug 5 P2, metadata rail — plan §"Slice order & commits".
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
   code slice (routine). Load-bearing gotchas from the plan-review a
   fresh session must not relearn:
@@ -308,7 +325,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.27 (bumped 2026-07-06, `d88a277`, for Bug 5 P1 Connected-tab).
+- Version 0.1.28 (bumped 2026-07-06, `49072f8`, for Bug 2 SSH seek).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
