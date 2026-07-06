@@ -647,7 +647,14 @@ fn base_item(
     }
 }
 
-/// Sort items by the UI's Plex-style token (title or year), then page.
+/// Sort items by the UI's Plex-style `field:dir` token, then page.
+///
+/// The local family carries title + year (+ `last_watched_at_ms` where a play was
+/// recorded). Tokens whose data the local family doesn't have yet — `addedAt`,
+/// `rating`, `folder` — fall back to title so the order is always stable and
+/// deterministic rather than silently arbitrary (later slices add that data). A
+/// case-insensitive title is the tiebreak for every key so equal primaries order
+/// predictably.
 fn sort_and_page(
     mut items: Vec<ItemDto>,
     sort: Option<&str>,
@@ -658,9 +665,21 @@ fn sort_and_page(
         Some((f, d)) => (f, d.eq_ignore_ascii_case("desc")),
         None => ("titleSort", false),
     };
+    let title_key = |a: &ItemDto| a.title.to_lowercase();
     match field {
-        "year" => items.sort_by_key(|a| a.year),
-        _ => items.sort_by_key(|a| a.title.to_lowercase()),
+        // Release date: year granularity (owner decision — not a full date).
+        "year" | "originallyAvailableAt" => {
+            items.sort_by(|a, b| a.year.cmp(&b.year).then_with(|| title_key(a).cmp(&title_key(b))));
+        }
+        "lastViewedAt" => {
+            items.sort_by(|a, b| {
+                a.last_watched_at_ms
+                    .cmp(&b.last_watched_at_ms)
+                    .then_with(|| title_key(a).cmp(&title_key(b)))
+            });
+        }
+        // titleSort (default) and not-yet-supported tokens (addedAt/rating/folder).
+        _ => items.sort_by_key(title_key),
     }
     if desc {
         items.reverse();
@@ -990,6 +1009,85 @@ mod tests {
             ("Inception".into(), Some(2010))
         );
         assert_eq!(parse_movie("Some_Movie"), ("Some Movie".into(), None));
+    }
+
+    fn sort_item(title: &str, year: Option<u32>, last: Option<u64>) -> ItemDto {
+        let path = format!("/movies/{title}");
+        let mut it = base_item("local", Path::new(&path), title.to_string(), year, "movie");
+        it.last_watched_at_ms = last;
+        it
+    }
+
+    fn titles(items: &[ItemDto]) -> Vec<&str> {
+        items.iter().map(|i| i.title.as_str()).collect()
+    }
+
+    #[test]
+    fn sort_default_is_case_insensitive_title() {
+        let items = vec![
+            sort_item("Charlie", None, None),
+            sort_item("alpha", None, None),
+            sort_item("Bravo", None, None),
+        ];
+        assert_eq!(titles(&sort_and_page(items, None, 0, 10)), ["alpha", "Bravo", "Charlie"]);
+    }
+
+    #[test]
+    fn sort_release_date_maps_to_year() {
+        let mk = || {
+            vec![
+                sort_item("B", Some(2001), None),
+                sort_item("A", Some(1999), None),
+                sort_item("C", None, None),
+            ]
+        };
+        // year and originallyAvailableAt both sort by year (None first, ascending).
+        assert_eq!(titles(&sort_and_page(mk(), Some("year:asc"), 0, 10)), ["C", "A", "B"]);
+        assert_eq!(
+            titles(&sort_and_page(mk(), Some("originallyAvailableAt:asc"), 0, 10)),
+            ["C", "A", "B"]
+        );
+        // desc reverses.
+        assert_eq!(titles(&sort_and_page(mk(), Some("year:desc"), 0, 10)), ["B", "A", "C"]);
+    }
+
+    #[test]
+    fn sort_last_played_uses_watch_stamp() {
+        let items = vec![
+            sort_item("old", None, Some(100)),
+            sort_item("new", None, Some(300)),
+            sort_item("never", None, None),
+        ];
+        // desc: most-recent first; never-played (None) sorts last.
+        assert_eq!(
+            titles(&sort_and_page(items, Some("lastViewedAt:desc"), 0, 10)),
+            ["new", "old", "never"]
+        );
+    }
+
+    #[test]
+    fn sort_year_ties_break_on_title() {
+        let items = vec![sort_item("Zed", Some(2000), None), sort_item("apple", Some(2000), None)];
+        assert_eq!(titles(&sort_and_page(items, Some("year:asc"), 0, 10)), ["apple", "Zed"]);
+    }
+
+    #[test]
+    fn sort_unsupported_token_falls_back_to_title() {
+        // addedAt/rating/folder have no local data yet — deterministic title order,
+        // never silently arbitrary.
+        let items = vec![sort_item("beta", None, None), sort_item("Alpha", None, None)];
+        assert_eq!(titles(&sort_and_page(items, Some("addedAt:desc"), 0, 10)), ["beta", "Alpha"]);
+    }
+
+    #[test]
+    fn sort_then_page() {
+        let items = vec![
+            sort_item("d", None, None),
+            sort_item("a", None, None),
+            sort_item("c", None, None),
+            sort_item("b", None, None),
+        ];
+        assert_eq!(titles(&sort_and_page(items, Some("titleSort:asc"), 1, 2)), ["b", "c"]);
     }
 
     #[test]
