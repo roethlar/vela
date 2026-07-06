@@ -67,6 +67,12 @@ pub struct ItemDto {
     /// yet (needs ISO-8601 parsing; recorded follow-up).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_watched_at_ms: Option<u64>,
+    /// Unix ms when the item was added to the library, when known (Plex
+    /// `addedAt`; local: the file mtime via `Vfs::modified_ms`). Drives the
+    /// "date added" sort. Jellyfin/Emby: not populated yet (needs `DateCreated`
+    /// in the `Fields=` query + ISO-8601 parsing; recorded follow-up).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_at_ms: Option<u64>,
     pub index: Option<u32>,
     pub parent_index: Option<u32>,
     pub grandparent_title: Option<String>,
@@ -312,6 +318,7 @@ mod tests {
             view_offset_ms: None,
             played: None,
             last_watched_at_ms: None,
+            added_at_ms: None,
             index: None,
             parent_index: None,
             grandparent_title: None,

@@ -2728,6 +2728,7 @@ mod merge_tests {
             view_offset_ms: None,
             played: None,
             last_watched_at_ms: None,
+            added_at_ms: None,
             index: None,
             parent_index: None,
             grandparent_title: None,

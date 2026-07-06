@@ -328,6 +328,7 @@ fn walk_items_level(
         {
             let (title, year) = parse_movie(&dir_name(&entry));
             let mut item = base_item(&this.id_str(), &entry, title.clone(), year, "show");
+            item.added_at_ms = this.vfs.modified_ms(&entry);
             this.enrich(&mut item, &entry, "show", &title, year, None, None, None);
             items.push(item);
         }
@@ -352,6 +353,7 @@ fn walk_items_level(
                 continue;
             };
             let mut item = this.item_movie(&file, title.clone(), year);
+            item.added_at_ms = this.vfs.modified_ms(&file);
             this.enrich(&mut item, &file, "movie", &title, year, None, None, None);
             items.push(item);
         }
@@ -635,6 +637,7 @@ fn base_item(
         view_offset_ms: None,
         played: None, // local files have no server-tracked watched state
         last_watched_at_ms: None, // recents::list stamps this for local plays
+        added_at_ms: None,        // set from the file mtime during the walk
         index: None,
         parent_index: None,
         grandparent_title: None,
@@ -649,12 +652,12 @@ fn base_item(
 
 /// Sort items by the UI's Plex-style `field:dir` token, then page.
 ///
-/// The local family carries title + year (+ `last_watched_at_ms` where a play was
-/// recorded). Tokens whose data the local family doesn't have yet — `addedAt`,
-/// `rating`, `folder` — fall back to title so the order is always stable and
-/// deterministic rather than silently arbitrary (later slices add that data). A
-/// case-insensitive title is the tiebreak for every key so equal primaries order
-/// predictably.
+/// The local family carries title + year + `added_at_ms` (the file mtime) (+
+/// `last_watched_at_ms` where a play was recorded). Tokens whose data the local
+/// family doesn't have yet — `rating`, `folder` — fall back to title so the order
+/// is always stable and deterministic rather than silently arbitrary (later slices
+/// add that data). A case-insensitive title is the tiebreak for every key so equal
+/// primaries order predictably.
 fn sort_and_page(
     mut items: Vec<ItemDto>,
     sort: Option<&str>,
@@ -678,7 +681,14 @@ fn sort_and_page(
                     .then_with(|| title_key(a).cmp(&title_key(b)))
             });
         }
-        // titleSort (default) and not-yet-supported tokens (addedAt/rating/folder).
+        "addedAt" => {
+            items.sort_by(|a, b| {
+                a.added_at_ms
+                    .cmp(&b.added_at_ms)
+                    .then_with(|| title_key(a).cmp(&title_key(b)))
+            });
+        }
+        // titleSort (default) and not-yet-supported tokens (rating/folder).
         _ => items.sort_by_key(title_key),
     }
     if desc {
@@ -1072,11 +1082,26 @@ mod tests {
     }
 
     #[test]
+    fn sort_by_added_at() {
+        let mut older = sort_item("older", None, None);
+        older.added_at_ms = Some(100);
+        let mut newer = sort_item("newer", None, None);
+        newer.added_at_ms = Some(300);
+        let unknown = sort_item("unknown", None, None); // added_at_ms None
+        let items = vec![older, newer, unknown];
+        // desc: most-recently-added first; unknown (None) sorts last.
+        assert_eq!(
+            titles(&sort_and_page(items, Some("addedAt:desc"), 0, 10)),
+            ["newer", "older", "unknown"]
+        );
+    }
+
+    #[test]
     fn sort_unsupported_token_falls_back_to_title() {
-        // addedAt/rating/folder have no local data yet — deterministic title order,
+        // rating/folder have no local data yet — deterministic title order,
         // never silently arbitrary.
         let items = vec![sort_item("beta", None, None), sort_item("Alpha", None, None)];
-        assert_eq!(titles(&sort_and_page(items, Some("addedAt:desc"), 0, 10)), ["beta", "Alpha"]);
+        assert_eq!(titles(&sort_and_page(items, Some("rating:desc"), 0, 10)), ["beta", "Alpha"]);
     }
 
     #[test]

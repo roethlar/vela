@@ -24,6 +24,14 @@ pub trait Vfs: Send + Sync {
     /// File size in bytes; 0 when unknown.
     fn file_len(&self, p: &Path) -> u64;
 
+    /// Last-modified time in epoch milliseconds; `None` when unknown or the
+    /// provider doesn't expose it (the default). Vela's best proxy for "date
+    /// added" — when a file appeared in the library. Native remote providers
+    /// (SMB) may override; left `None` there until SMB sorting is picked up.
+    fn modified_ms(&self, _p: &Path) -> Option<u64> {
+        None
+    }
+
     /// Read a small sidecar text file (e.g. `.nfo`). `None` if absent or
     /// unreadable.
     fn read_to_string(&self, p: &Path) -> Option<String>;
@@ -75,6 +83,14 @@ impl Vfs for StdFs {
 
     fn file_len(&self, p: &Path) -> u64 {
         std::fs::metadata(p).map(|m| m.len()).unwrap_or(0)
+    }
+
+    fn modified_ms(&self, p: &Path) -> Option<u64> {
+        std::fs::metadata(p)
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_millis() as u64)
     }
 
     fn read_to_string(&self, p: &Path) -> Option<String> {

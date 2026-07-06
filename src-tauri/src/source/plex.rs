@@ -105,6 +105,8 @@ impl PlexSource {
             // (Some(false)), never "unknown" — the source always knows watched state.
             played: Some(v.view_count.unwrap_or(0) > 0),
             last_watched_at_ms: v.last_viewed_at.map(|s| s.saturating_mul(1000)),
+            // Plex addedAt is epoch seconds; carry it in ms for the date-added sort.
+            added_at_ms: v.added_at.map(|s| s.saturating_mul(1000)),
             index: v.index,
             parent_index: v.parent_index,
             grandparent_title: v.grandparent_title,

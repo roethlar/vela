@@ -699,6 +699,10 @@ impl JellyfinSource {
             // Jellyfin reports LastPlayedDate as an ISO-8601 string; parsing
             // it without a date dependency isn't worth it yet (follow-up).
             last_watched_at_ms: None,
+            // DateCreated is an ISO-8601 string not requested in Fields= today;
+            // date-added sort works server-side for JF, so the DTO field is a
+            // follow-up (needed only for the merged view). None for now.
+            added_at_ms: None,
             index: item.index_number,
             parent_index: item.parent_index_number,
             grandparent_title: item.series_name.clone(),
