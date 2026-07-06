@@ -109,7 +109,7 @@ fn register(target: Target) -> Result<String, String> {
         .lock()
         .map_err(|_| "stream proxy registry poisoned".to_string())?;
     // Same target already registered → reuse its token (stable artwork URLs).
-    if let Some(existing) = reg.iter().find(|e| match (&e.target, &target) {
+    if let Some(existing) = reg.iter_mut().find(|e| match (&e.target, &target) {
         (
             Target::Smb { mount, relative },
             Target::Smb {
@@ -120,6 +120,11 @@ fn register(target: Target) -> Result<String, String> {
         #[cfg(test)]
         _ => false,
     }) {
+        // A replay of the same file reuses the token, but any length learned
+        // on the earlier play may now be stale (the file could have been
+        // replaced or resized since). Drop it so the next request re-stats
+        // once — the per-seek cache only needs to span a single playback.
+        existing.len = None;
         return Ok(format!("http://127.0.0.1:{}/{}", p.port, existing.token));
     }
     if reg.len() >= REGISTRY_CAP {
@@ -526,6 +531,41 @@ mod tests {
             probes.load(Ordering::SeqCst),
             1,
             "seek reuses the cached length, no second probe"
+        );
+    }
+
+    /// Read an entry's cached length directly from the registry (test-only).
+    fn entry_len(token: &str) -> Option<u64> {
+        registry()
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|e| e.token == token)
+            .and_then(|e| e.len)
+    }
+
+    #[test]
+    fn reregistering_a_token_clears_a_stale_cached_length() {
+        let _guard = test_lock();
+        let m = |id: &str| SmbMount {
+            id: id.into(),
+            ..SmbMount::default()
+        };
+        // First play mints a token; a request then learns and caches the size.
+        let url1 = register_smb(&m("x"), "movie.mkv").unwrap();
+        let token = url1.rsplit('/').next().unwrap().to_string();
+        store_len(&token, 4242);
+        assert_eq!(entry_len(&token), Some(4242), "first play caches the size");
+
+        // Replaying the same file reuses the token — but the cached size must
+        // be dropped, or a mid-session resize/replace would serve a stale
+        // Content-Length (416 on a now-valid tail, or a short/truncated body).
+        let url2 = register_smb(&m("x"), "movie.mkv").unwrap();
+        assert_eq!(url1, url2, "same mount+path reuses its token");
+        assert_eq!(
+            entry_len(&token),
+            None,
+            "re-registration drops the stale cached length so it is re-statted"
         );
     }
 
