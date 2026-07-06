@@ -76,17 +76,32 @@ Keep it short and update it when important repo facts change.
   (a healthy converging loop, not a stall). **Bug 1 (SMB seek) is now COMPLETE** —
   all three sub-slices landed. REMAINING: owner NAS playtest — confirm the felt
   seek-freeze is gone on the real share.
-  **IMMEDIATE NEXT ACTION: Bug 3 — clicking a source dead-ends on empty Home (P1
-  UX).** Key routing on the empty-Home STATE, NOT "any non-null source" (codex
-  plan-review r1 finding 3 — force-browsing every source would regress server-source
-  Home rails like Continue/On Deck): when a scoped source's Home has loaded empty (no
-  hubs AND no hero/recents) but it has browsable sections, land on its library content
-  (auto-open its first section) instead of the "Nothing on your home screen yet"
-  dead-end; a server source that returns Home hubs keeps its Home unchanged. Frontend
-  (`+page.svelte` `selectSource`/home-scope render). E2E guard BOTH directions
-  (local/SMB-class lands on content; a mock-JF-with-hubs source still shows its Home).
-  Full design in the plan (Bug 3). Then Bug 5 P1, Bug 2, Bug 4, Bug 5 P2, metadata
-  rail — plan §"Slice order & commits".
+  **Bug 3 (source-click dead-end) LANDED 2026-07-06** (code `b9cca81`;
+  reviewloop-codex fixup `6837157`; trail `f73cdaa`; version bump 0.1.26 `01c54ec`;
+  UNPUSHED). A scoped source whose per-source Home settles empty (no hubs AND no
+  hero/recents) but has browsable sections now lands on its content (opens the first
+  section) instead of the "Nothing on your home screen yet" dead-end; a server source
+  that returns Home hubs keeps its Home unchanged. Implemented as a reactive
+  `!loading`-gated `$effect` in `+page.svelte` (NOT a tail of `selectSource`), so it
+  covers source click, Home, AND Back uniformly. `reviewloop codex` converged r1-r2:
+  r1 reopened sspf-10 (HIGH — the first cut lived only in `selectSource`, so Home/Back
+  still dead-ended and re-clicking the source early-returned = trap) + sspf-11
+  (MEDIUM — reading `hubs`/`heroItems` after `await loadEverything()` could read a
+  superseded load → force-browse a slow server source); both fixed by the
+  reactive-effect approach; r2 accepted clean. Guard
+  `tests/e2e/scenarios/sourcedeadend.mjs` (both directions + Home-button leg),
+  guard-proven red/green — ran HEADED (Xvfb absent on this host; owner-approved
+  2026-07-06). REMAINING: owner playtest — clicking the SMB/SSH source on the real NAS
+  lands on content.
+  **IMMEDIATE NEXT ACTION: Bug 5 P1 — Connected tab triplicated rows + erroring
+  Remove (P1).** Exclude the whole local family (`["local","smb","ssh"]`, matching
+  backend `LOCAL_FAMILY_KINDS`) from the registered-sources loop in
+  `Settings.svelte` (~:643, filters only `kind !== "local"` today so smb/ssh leak):
+  this drops the leaked source row (SMB 3→2, SSH 2→1) AND removes the Remove button
+  that calls `remove_source` (which rejects local-family ids and errors — a dead-end
+  click). Settle remove-last-folder semantics (refuse, or cascade to unmount) so no
+  zombie zero-folder share survives. Then Bug 2, Bug 4, Bug 5 P2, metadata rail —
+  plan §"Slice order & commits".
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
   code slice (routine). Load-bearing gotchas from the plan-review a
   fresh session must not relearn:
@@ -274,7 +289,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.25 (bumped 2026-07-06, `503593a`, for SMB seek Bug 1 sub-slice 3).
+- Version 0.1.26 (bumped 2026-07-06, `01c54ec`, for Bug 3 source-click dead-end).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
