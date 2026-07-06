@@ -10,6 +10,7 @@ export function startMockJellyfin({
   userId = 'u1',
   runTimeTicks = 6_000_000_000, // 10 min in 100ns ticks
   mediaFile = null, // when set, /Videos/m1/stream serves this file (Range-capable)
+  latest = [], // items for /Users/{userId}/Items/Latest → the "Recently Added" Home hub
 } = {}) {
   const state = {
     played: false, // UserData.Played for the single movie
@@ -47,7 +48,7 @@ export function startMockJellyfin({
       return json({ Items: [] });
     }
     if (path === `/Users/${userId}/Items/Latest`) {
-      return json([]); // bare array, per the Jellyfin API
+      return json(latest); // bare array, per the Jellyfin API (seed the Recently Added hub)
     }
     if (path === `/Users/${userId}/Items`) {
       // Fail closed on the client's query contract (eh-12): a real Jellyfin

@@ -201,6 +201,26 @@
     activeSource = id;
     goHome();
     await loadEverything();
+    // Bug 3 (owner UX ruling 2026-07-05): clicking a source must never dead-end
+    // on "Nothing on your home screen yet". A local/SMB/SSH source contributes
+    // no Home hubs and a fresh mount has no recents, so its per-source Home
+    // loads empty even though its library sections are in the sidebar. When a
+    // scoped source's Home loaded empty (no hubs AND no hero/recents) but it
+    // has browsable sections, land on its content by opening the first section.
+    // Keyed on the empty-Home STATE, not "any non-null source", so a server
+    // source that returns Home hubs keeps its per-source Home (no force-browse
+    // — codex plan-review r1, finding 3). Re-check activeSource/mode: the user
+    // may have navigated elsewhere while loadEverything awaited.
+    if (
+      id !== null &&
+      activeSource === id &&
+      mode === "home" &&
+      hubs.length === 0 &&
+      heroItems.length === 0 &&
+      sections.length > 0
+    ) {
+      await select(sections[0]);
+    }
   }
 
   // Re-sync after sources are added/removed in Settings.
