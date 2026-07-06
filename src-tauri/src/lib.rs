@@ -393,6 +393,7 @@ pub fn run() {
             commands::get_continue_tombstones,
             commands::search,
             commands::get_children,
+            commands::get_item_detail,
             commands::set_watched,
             commands::play_item,
             commands::queue_list,

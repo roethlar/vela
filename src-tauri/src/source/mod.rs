@@ -105,6 +105,100 @@ pub struct BackingRef {
     pub rating_key: String,
 }
 
+/// Full metadata for a single item — the detail / "more info" surface. A superset
+/// of the listing [`ItemDto`], fetched on demand so the grid path stays lean. Every
+/// rich field is optional / possibly-empty so a sparse backend (a local file with
+/// no `.nfo`) degrades to a clean minimal page rather than an error.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailDto {
+    /// Source-namespaced key (`"<source_id>:<raw>"`).
+    pub rating_key: String,
+    pub title: String,
+    pub year: Option<u32>,
+    pub summary: Option<String>,
+    pub tagline: Option<String>,
+    /// Runtime.
+    pub duration_ms: Option<u64>,
+    pub media_type: Option<String>,
+    pub poster: Option<String>,
+    pub backdrop: Option<String>,
+    /// Certification (e.g. "PG-13").
+    pub content_rating: Option<String>,
+    /// Critic/user rating (0–10).
+    pub rating: Option<f32>,
+    /// Audience rating (0–10), when the backend distinguishes it.
+    pub audience_rating: Option<f32>,
+    pub studio: Option<String>,
+    /// Air/release date as the backend reports it (ISO `YYYY-MM-DD` for Plex).
+    pub originally_available_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub countries: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cast: Vec<CastMember>,
+    /// Episode positioning (populated for episodes; used by the shared episode page).
+    pub index: Option<u32>,
+    pub parent_index: Option<u32>,
+    pub grandparent_title: Option<String>,
+    pub parent_title: Option<String>,
+    /// Watch state, when the source reports it — lets the info page show progress
+    /// and choose Resume vs Play. `None` = unknown (e.g. a local file).
+    pub played: Option<bool>,
+    pub view_offset_ms: Option<u64>,
+    /// Technical media specs (one entry per available version/file).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media: Vec<MediaVersionDto>,
+    pub source_id: String,
+}
+
+/// A cast member for the detail view's cast strip.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CastMember {
+    pub name: String,
+    /// The character played, when known.
+    pub role: Option<String>,
+    /// Headshot image URL (same accepted poster-exposure class as posters — it may
+    /// carry the backend's image token; never logged).
+    pub thumb: Option<String>,
+}
+
+/// One media version/file's technical specs.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaVersionDto {
+    /// Human resolution label (e.g. "1080", "4k") when the backend gives one.
+    pub video_resolution: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub container: Option<String>,
+    /// True when the backend reports an HDR/Dolby-Vision/HLG dynamic range.
+    pub hdr: bool,
+    /// Per-stream detail (audio channels/codec/language, subtitle languages).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streams: Vec<MediaStreamDto>,
+}
+
+/// One audio/subtitle/video stream within a media version.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaStreamDto {
+    /// 1 = video, 2 = audio, 3 = subtitle (Plex `streamType`).
+    pub stream_type: Option<u8>,
+    pub codec: Option<String>,
+    pub language: Option<String>,
+    pub channels: Option<u32>,
+    pub display_title: Option<String>,
+}
+
 /// A home-screen rail of items, source-tagged.
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -179,6 +273,13 @@ pub trait MediaSource: Send + Sync {
     /// guarantees the UX. Default: unsupported, quiet no-op.
     async fn remove_from_continue(&self, _item_key: &str) -> Result<(), String> {
         Ok(())
+    }
+
+    /// Full metadata for one item, for the detail / "more info" surface. Defaults
+    /// to unsupported; backends that can enrich an item override this (Plex first,
+    /// then Jellyfin/Emby, then local). Callers degrade gracefully on `Err`.
+    async fn item_detail(&self, _item_key: &str) -> Result<DetailDto, String> {
+        Err("this source doesn't provide item detail".to_string())
     }
 }
 

@@ -9,7 +9,7 @@ use crate::playback;
 use crate::plex_library::PlexLibrary;
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
 use crate::source::local::LOCAL_SOURCE_ID;
-use crate::source::{plex::PlexSource, HubDto, ItemDto, SectionDto};
+use crate::source::{plex::PlexSource, DetailDto, HubDto, ItemDto, SectionDto};
 use crate::{AppState, PLEX_SOURCE_ID};
 
 const PRODUCT: &str = "Vela";
@@ -3261,6 +3261,18 @@ pub async fn get_children(
     let size = clamp_page_size(size);
     let (src, raw) = state.registry.lock().await.route(&rating_key)?;
     src.children(&raw, start, size).await
+}
+
+/// Full metadata for one item — the detail / "more info" surface. Routes by the
+/// namespaced key; the registry lock is released before the (network) call.
+/// Sources that can't enrich the item return an error the caller degrades on.
+#[tauri::command]
+pub async fn get_item_detail(
+    rating_key: String,
+    state: State<'_, AppState>,
+) -> Result<DetailDto, String> {
+    let (src, raw) = state.registry.lock().await.route(&rating_key)?;
+    src.item_detail(&raw).await
 }
 
 /// Mark an item watched/unwatched on its source. Routes by the namespaced key;
