@@ -7,6 +7,21 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop sspf-13 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Bug 2 —
+mpv hangs on seek over SSH** (base `61efc4e`, head `314d76c`, two codex rounds: r1
+reopened, r2 accepted). SSH uses the raw sshfs mount (not the SMB proxy); its
+single default SFTP channel head-of-line-blocks a seek's read behind the readahead
+backlog → stalls on a latency link. Fix `2174d2e`: add `-o max_conns=4` (parallel
+SFTP channels) to the sshfs options, with a unit guard + a hermetic loopback
+sshd+sshfs mount/read test (owner chose the functional guard over latency-repro,
+which localhost can't reproduce; the NAS playtest is the authoritative stall check).
+`0bbff29` hardened the test's CI-portability skips. r1 sspf-13 (HIGH): `max_conns`
+was added for ALL Unix, but macOS sshfs-mac (2.10) rejects it → a macOS SSH mount
+would fail outright. Fix `314d76c` gates max_conns to Linux via
+`sshfs_options_for(os)` (split on an explicit OS string so both branches are
+testable from any host); guard-proven (making it unconditional fails the macOS
+test). Same no-branches adaptation.
+
 Loop sspf-12 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Bug 5 P1 —
 Connected-tab triplication + erroring Remove** (base `ae9d2ff`, head `0a64cd0`,
 two codex rounds: r1 reopened, r2 accepted). The slice: `9c3597a` excludes the
