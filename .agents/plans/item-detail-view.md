@@ -16,8 +16,8 @@ backend has less.
 Navigation is spec'd — no per-slice choice:
 - **Continue Watching carousel: click = play** (immediate, unchanged).
 - **Any library view: click → drill in, never instant-play.**
-  - **Movie**: click → **info page**; play from the poster / a Play button on that
-    page.
+  - **Movie**: click → **info page** (a full-screen page with Back, not an overlay);
+    play from the poster / a Play button on that page.
   - **Show**: click → **seasons** → a season → its **episodes**.
   - **Episode**: **one shared info page** for the season's episodes, with the
     displayed info updating as the selected episode changes (episode list + a detail
@@ -154,7 +154,7 @@ discipline by **building behind the current nav and flipping last**:
   state). Slices land internally; the flip is last.
 - How much to widen the local `.nfo` parse (cast/crew adds real value only if the
   owner's libraries carry it) — a scope dial, not a blocker.
-- Info page presentation — **RESOLVED 2026-07-06 (recommend, pending owner veto):
-  full-screen route**, not a floating overlay. Rationale: a movie's info page is
-  just another drill-in level (like show→seasons→episodes), so Back behaves
-  identically everywhere and the nav model stays consistent.
+- Info page presentation — **RESOLVED 2026-07-06 (owner-confirmed): full-screen
+  route** (a dedicated info page with Back), NOT a floating overlay/popup. A movie's
+  info page is just another drill-in level (like show→seasons→episodes), so Back
+  behaves identically everywhere and the nav model stays consistent.
