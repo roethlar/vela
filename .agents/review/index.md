@@ -7,6 +7,30 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop sspf-14 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Bug 5 P2 —
+source naming + rename** (base `8e4f140`, head `5053d2b`, two codex rounds: r1
+reopened, r2 accepted clean). Two code slices: `c83a1be` gives an added SMB
+share / SSH folder a friendly default label (bare share / last remote-path
+segment, disambiguated against existing local-family labels — pure
+`unique_mount_name`/`last_path_segment`, unit-tested) instead of the URL-shaped
+`server/share` / `host:remote_path`, plus an optional Name field in both add
+forms (passed through the existing `name` param — no schema change). `55a6852`
+adds `rename_smb_mount`/`rename_ssh_mount` (pure `rename_*_mount_in_config`
+helpers, unit-tested; propagate the new label to the name copies seeded at add
+time — the SMB share-root folder `path==""` and the SSH-fed local folder — only
+when that copy still equals the OLD mount name) + an inline rename affordance in
+the Connected tab. r1 sspf-14 (MEDIUM): the rename Save button stayed enabled on
+a blank field, so clicking it (or Enter) surfaced the "A name is required." error
+— a click terminating in an error-like state, which the Bug 5 UX ruling forbids.
+Fix `5053d2b`: Save is disabled on a blank name (both rows) and `saveRename`
+no-ops silently on empty (Enter can't error either); the backend still rejects an
+empty name defensively. Full CI green (cargo test 118, clippy -D warnings clean,
+npm run check + build clean); pure helpers guard-proven red/green by the coder
+(codex ran read-only, so `guard_confirmed:false` — its value was the independent
+code review that surfaced sspf-14). Same no-branches adaptation. **Bug 5 is now
+COMPLETE** (P1 landed 0.1.27; P2 here). REMAINING: owner playtest — friendly
+default labels + rename on the real NAS.
+
 Loop sspf-13 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Bug 2 —
 mpv hangs on seek over SSH** (base `61efc4e`, head `314d76c`, two codex rounds: r1
 reopened, r2 accepted). SSH uses the raw sshfs mount (not the SMB proxy); its
