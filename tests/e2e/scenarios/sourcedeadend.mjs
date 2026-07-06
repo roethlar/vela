@@ -105,5 +105,28 @@ export default {
     assert.ok(!localView.deadEnd, 'clicking the local source must not dead-end');
     assert.ok(localView.browsed, 'the local source with an empty Home lands on its content (browse view)');
     await screenshot('02-local-autobrowse');
+
+    // --- Finding 1 (codex r1): reaching the empty scoped Home via the Home
+    // button (the same goHome() path Back uses from a top-level section) must
+    // ALSO land on content, not the dead-end. The routing is reactive, not a
+    // tail of selectSource — pre-fixup this dead-ended and re-clicking the
+    // source early-returned (a trap the user couldn't click out of).
+    const homeBtn = await driver.find(
+      'xpath',
+      `//button[contains(@class,'sideitem') and normalize-space(.)='Home']`,
+    );
+    await driver.click(homeBtn);
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="E2E Clip"]')
+       || document.body.innerText.includes('Nothing on your home screen yet')`,
+      'the scoped Home to settle (content or dead-end)',
+    );
+    const afterHome = await driver.exec(`return {
+      deadEnd: document.body.innerText.includes('Nothing on your home screen yet'),
+      onContent: !!document.querySelector('button.poster[aria-label^="E2E Clip"]'),
+    }`);
+    assert.ok(!afterHome.deadEnd, 'the Home button on a scoped local source must not dead-end (finding 1)');
+    assert.ok(afterHome.onContent, 'the Home button on a scoped local source lands on its content (finding 1)');
+    await screenshot('03-home-no-deadend');
   },
 };

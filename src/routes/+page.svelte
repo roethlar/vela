@@ -195,32 +195,14 @@
     }
   }
 
-  // Switch the active source (null = All), then reload home scoped to it.
+  // Switch the active source (null = All), then reload home scoped to it. The
+  // empty-scoped-Home → content routing is reactive (see the $effect below), so
+  // it is NOT duplicated here.
   async function selectSource(id: string | null) {
     if (activeSource === id && mode === "home") return;
     activeSource = id;
     goHome();
     await loadEverything();
-    // Bug 3 (owner UX ruling 2026-07-05): clicking a source must never dead-end
-    // on "Nothing on your home screen yet". A local/SMB/SSH source contributes
-    // no Home hubs and a fresh mount has no recents, so its per-source Home
-    // loads empty even though its library sections are in the sidebar. When a
-    // scoped source's Home loaded empty (no hubs AND no hero/recents) but it
-    // has browsable sections, land on its content by opening the first section.
-    // Keyed on the empty-Home STATE, not "any non-null source", so a server
-    // source that returns Home hubs keeps its per-source Home (no force-browse
-    // — codex plan-review r1, finding 3). Re-check activeSource/mode: the user
-    // may have navigated elsewhere while loadEverything awaited.
-    if (
-      id !== null &&
-      activeSource === id &&
-      mode === "home" &&
-      hubs.length === 0 &&
-      heroItems.length === 0 &&
-      sections.length > 0
-    ) {
-      await select(sections[0]);
-    }
   }
 
   // Re-sync after sources are added/removed in Settings.
@@ -332,6 +314,37 @@
   function heroClamp(i: number): number {
     return Math.min(Math.max(i, 0), Math.max(heroItems.length - 1, 0));
   }
+
+  // Bug 3 (owner UX ruling 2026-07-05): a scoped source's per-source Home must
+  // never terminate on the "Nothing on your home screen yet" dead-end. A
+  // local/SMB/SSH source contributes no Home hubs and a fresh mount has no
+  // recents, so its Home settles empty even though its library sections are in
+  // the sidebar. When that happens (and the source has sections), land on its
+  // content by opening the first section.
+  //
+  // This is REACTIVE rather than a tail of selectSource() so it fires on every
+  // path that can reach an empty scoped Home — clicking the source, the Home
+  // button, or Back from a top-level section (back() → goHome()); a
+  // selectSource-only fix left Home/Back dead-ending, and re-clicking the source
+  // early-returns (codex r1, finding 1). It is gated on `!loading` so a pending
+  // or superseded Home load can't misfire: a slow server source whose hubs
+  // haven't arrived yet is still loading, so we never force-browse it — its Home
+  // rails are kept once the load settles (codex r1, finding 2 + finding 3).
+  // Keyed on the empty-Home STATE, not "any non-null source".
+  $effect(() => {
+    if (
+      mode === "home" &&
+      activeSource !== null &&
+      !loading &&
+      hubs.length === 0 &&
+      heroItems.length === 0 &&
+      sections.length > 0
+    ) {
+      // select() sets mode = "browse" synchronously, so the condition is false
+      // on the next run — no loop, no double-open.
+      select(sections[0]);
+    }
+  });
 
   // Section (nav) loads are invalidated only by a source switch (`sourceGen`);
   // home/hub loads are also invalidated by leaving home for a browse/search
