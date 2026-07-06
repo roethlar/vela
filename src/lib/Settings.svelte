@@ -97,6 +97,13 @@
   let folders = $state<LocalFolder[]>([]);
   let smbMounts = $state<SmbMount[]>([]);
   let sshMounts = $state<SshMount[]>([]);
+  // Mirrors backend LOCAL_FAMILY_KINDS (src-tauri/src/source/local.rs). These
+  // synthetic sources are managed via the folder / SMB / SSH rows below — NOT
+  // the registered-source list, whose Remove calls remove_source, which rejects
+  // local-family ids and errors. So they must never leak a source row (with a
+  // dead-end Remove button) into Connected. smb/ssh were added 2026-07-04 and
+  // leaked through the old `kind !== "local"` filter (Bug 5 P1).
+  const LOCAL_FAMILY_KINDS = ["local", "smb", "ssh"];
   let sshfs = $state<SshfsStatus | null>(null);
   let busy = $state(false);
   let err = $state<string | null>(null);
@@ -643,9 +650,11 @@
       {#if sources.length === 0 && folders.length === 0}
         <p class="muted">No sources yet. Add one below.</p>
       {/if}
-      <!-- The synthetic "local" source is managed via the folder/SMB rows below,
-           not here (remove_source only handles Jellyfin/Emby). -->
-      {#each sources.filter((s) => s.kind !== "local") as s (s.id)}
+      <!-- The synthetic local-family sources (local/smb/ssh) are managed via the
+           folder/SMB/SSH rows below, not here (remove_source rejects their ids).
+           Excluding the whole family drops the leaked smb/ssh rows AND their
+           erroring Remove button (Bug 5 P1). -->
+      {#each sources.filter((s) => !LOCAL_FAMILY_KINDS.includes(s.kind)) as s (s.id)}
         <div class="row">
           <span class="badge">{s.kind}</span>
           <span class="name">{s.name}</span>
