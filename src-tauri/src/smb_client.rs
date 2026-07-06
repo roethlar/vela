@@ -534,20 +534,21 @@ mod tests {
     /// path completes without crashing or hanging and reports the outcome —
     /// on a credentialed share the expected result is a friendly
     /// access-denied error, which exercises context setup, the auth
-    /// callback, opendir, and errno mapping over the wire.
+    /// callback, opendir, and errno mapping over the wire. `connect` is lazy
+    /// (no network), so `list_dir("")` is the reachability/auth op here; both
+    /// errors are reported, never asserted, so a credentialed share reports
+    /// access-denied instead of panicking.
     #[test]
     fn live_probe_env_gated() {
         let Ok(target) = std::env::var("VELA_SMB_LIVE") else {
             return;
         };
         let (server, share) = target.split_once('/').expect("VELA_SMB_LIVE=server/share");
-        let result = SmbConnection::connect(server, share, "", "", "");
-        match result {
-            Ok(conn) => {
-                let entries = conn.list_dir("").expect("connected but listing failed");
-                eprintln!("live probe: connected, {} entries in root", entries.len());
-            }
-            Err(e) => eprintln!("live probe: connect returned error: {e}"),
+        match SmbConnection::connect(server, share, "", "", "")
+            .and_then(|conn| conn.list_dir("").map(|entries| entries.len()))
+        {
+            Ok(count) => eprintln!("live probe: connected, {count} entries in root"),
+            Err(e) => eprintln!("live probe: probe returned error: {e}"),
         }
     }
 
