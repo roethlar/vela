@@ -1,10 +1,13 @@
-# Plan: Item detail / "more info" view (in plan-review)
+# Plan: Item detail / "more info" view (APPROVED — implementing)
 
 ## Status
-**Owner go given 2026-07-06** ("continue" on the handoff's `next = Plex item
-detail view (awaiting go)`). Per repo convention the **codex plan-review loop runs
-before implementation**; it is in progress (see Review log). No code written yet —
-implementation slice 1 starts once the loop reaches an `accepted` verdict.
+**APPROVED for implementation 2026-07-06.** Owner go given ("continue" on the
+handoff's `next = Plex item detail view (awaiting go)`), and the repo-convention
+**codex plan-review loop CLOSED accepted at r3** (base=head `410fa4e`; three rounds,
+six findings idv-1..6 all resolved — see Review log). Implementing slices 1-5, each
+its own commit + `reviewloop codex` + version bump; nav stays old until the slice-5
+flip ("no half-built state"). One non-blocking owner open-decision remains (merged-
+show episode playback source, idv-5 — default set, needed only by slice 4/5).
 Original framing: owner asked whether Plex exposes more metadata than we surface
 (yes — substantially) and to plan a detail view like Infuse / the Plex clients.
 
@@ -317,4 +320,8 @@ intended).**
   open-decision on the episode playback-source tradeoff (server-rich vs local
   direct-play) — default = server, non-blocking for slices 1-3.
 
-r3 dispatched after these revisions (verdict pending).
+**r3 — 2026-07-06 — verdict `accepted`, 0 comments** (reviewed_sha=base_sha
+`0df45b7`; `guard_confirmed:false` — codex read-only on a design doc). idv-1..6 all
+confirmed resolved; no new material defect. **Plan-review loop CLOSED — the plan is
+APPROVED for implementation.** Healthy converging loop: r1 (4) → r2 (3, one
+correcting an r1 error) → r3 (clean).
