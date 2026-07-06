@@ -51,6 +51,12 @@ pub struct PlexDir {
     pub thumb: Option<String>,
     pub year: Option<u32>,
     pub summary: Option<String>,
+    // Shows arrive as Directory rows; without these the "date added" / "last
+    // played" sorts rank all Plex shows as missing-timestamp (sorting review r2).
+    #[serde(rename = "addedAt")]
+    pub added_at: Option<u64>,
+    #[serde(rename = "lastViewedAt")]
+    pub last_viewed_at: Option<u64>,
 }
 
 impl From<PlexDir> for PlexVideo {
@@ -67,8 +73,8 @@ impl From<PlexDir> for PlexVideo {
             thumb: d.thumb,
             grandparent_thumb: None,
             art: None,
-            added_at: None,
-            last_viewed_at: None,
+            added_at: d.added_at,
+            last_viewed_at: d.last_viewed_at,
             updated_at: None,
             media: vec![],
             year: d.year,
@@ -1280,6 +1286,27 @@ fn part_url(base: &str, part_key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plexdir_carries_added_and_last_viewed_into_video() {
+        // Plex shows deserialize as Directory rows; the conversion must keep
+        // addedAt / lastViewedAt or the date-added / last-played sorts rank all
+        // Plex shows as missing-timestamp (sorting review r2).
+        let d = PlexDir {
+            key: "/k".into(),
+            rating_key: Some("rk".into()),
+            title: "Some Show".into(),
+            media_type: Some("show".into()),
+            thumb: None,
+            year: Some(2020),
+            summary: None,
+            added_at: Some(1_700_000_000),
+            last_viewed_at: Some(1_751_000_000),
+        };
+        let v: PlexVideo = d.into();
+        assert_eq!(v.added_at, Some(1_700_000_000));
+        assert_eq!(v.last_viewed_at, Some(1_751_000_000));
+    }
 
     fn server(name: &str, scheme: &str, host: &str, local: bool, relay: bool) -> PlexServer {
         PlexServer {
