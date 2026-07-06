@@ -41,15 +41,17 @@ double-free). This also clears the stale `active` flag on a failed non-replay pl
   `play()` result through it, releasing `session_key` on failure.
 
 ## Guard proof
-- `commands::tests::finish_play_releases_the_session_only_on_failure` — asserts the
-  release action runs on `Err` and not on `Ok`. Making `finish_play` never release
-  makes it FAIL; restoring makes it PASS. (This guards the release-on-failure
-  control flow. The release *mechanism* — that `release_session` frees a
-  replay-reactivated session — is covered by
-  `stream_proxy::tests::a_replays_late_end_does_not_free_the_new_plays_session`.
-  The end-to-end `play_by_key` failure path is not unit-driven: `AppState` is built
-  only in `lib.rs` and there is no async-command/mpv test harness; the e2e harness
-  is where an integration test would live.)
+Originally guarded by `commands::tests::finish_play_releases_the_session_only_on_failure`
+(asserted the release ran on `Err`, not `Ok`). **Refined by sspf-9**: that release
+had to move onto the blocking pool (its drop runs a blocking `smbc_free_context`),
+so the sync `finish_play` helper was removed and the on-failure release is now an
+inlined awaited `spawn_blocking` in `play_by_key` (that test was removed with it —
+see sspf-9). The release *mechanism* — that `release_session` frees a
+replay-reactivated session — remains covered by
+`stream_proxy::tests::a_replays_late_end_does_not_free_the_new_plays_session`. The
+end-to-end `play_by_key` failure path is not unit-driven: `AppState` is built only
+in `lib.rs` and there is no async-command/mpv test harness; the e2e harness is
+where an integration test would live.
 
 ## Reviewer comments
 - **r3** 2026-07-05 `codex` (codex-cli 0.142.5), `codex exec --json`, reviewed head

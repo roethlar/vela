@@ -2933,20 +2933,6 @@ fn release_proxy_session(token: &str, generation: u64) {
     }
 }
 
-/// Return `play()`'s result, but if it FAILED, run `release_on_failure` first:
-/// `play()` never installed the `on_end` owner that frees this play's proxy
-/// session, so on a same-file replay the reactivated, still-cached session would
-/// otherwise stay active until eviction (sspf-8). On success the `on_end` owner
-/// frees it, so we leave it. Generic over the release action so the
-/// release-on-failure control flow is unit-testable without an AppState/mpv
-/// harness.
-fn finish_play<S>(result: Result<S, String>, release_on_failure: impl FnOnce()) -> Result<S, String> {
-    if result.is_err() {
-        release_on_failure();
-    }
-    result
-}
-
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
 /// Used by `play_item` (top-level play) AND by `queue_play_at` and the auto-
 /// advance dispatcher — same lock discipline regardless of trigger.
@@ -3070,14 +3056,21 @@ pub(crate) async fn play_by_key(
     .await
     .map_err(|e| format!("playback task failed: {e}"))
     .and_then(|r| r);
-    let stop = finish_play(played, || {
-        // play() failed before installing this play's on_end owner; free the
-        // proxy session it reserved so a same-file replay's kept session can't
-        // leak (sspf-8). A no-op for non-SMB plays or when nothing was cached.
-        if let Some((token, generation)) = &session_key {
-            release_proxy_session(token, *generation);
+    // If play() failed it never installed the on_end owner for this play's proxy
+    // session; free it so a same-file replay's reactivated, still-cached session
+    // can't leak (sspf-8). Do it on the blocking pool, never on this async worker:
+    // dropping the last Arc<SmbConnection> runs a blocking smbc_free_context
+    // (sspf-9). The release is generation-guarded, so it is a no-op if a newer
+    // play has since reused the token, and a no-op for non-SMB plays.
+    if played.is_err() {
+        if let Some((token, generation)) = session_key {
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                release_proxy_session(&token, generation);
+            })
+            .await;
         }
-    })?;
+    }
+    let stop = played?;
     *state
         .tracking_stop
         .lock()
@@ -3304,25 +3297,6 @@ fn attr(xml: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn finish_play_releases_the_session_only_on_failure() {
-        use std::cell::Cell;
-        // Failure → the release runs: play() never installed the on_end owner, so
-        // this play's reserved proxy session must be freed here or a same-file
-        // replay's reactivated session leaks active until eviction (sspf-8).
-        let released = Cell::new(false);
-        let r = finish_play(Err::<(), _>("boom".to_string()), || released.set(true));
-        assert!(r.is_err());
-        assert!(released.get(), "a failed play frees its reserved session");
-
-        // Success → the on_end owner will free it; releasing here would double-free
-        // / free the wrong play's session, so it must NOT run.
-        let released = Cell::new(false);
-        let r = finish_play(Ok::<_, String>(7), || released.set(true));
-        assert_eq!(r.unwrap(), 7);
-        assert!(!released.get(), "a successful play leaves its session to on_end");
-    }
 
     #[test]
     fn normalize_autocrop_clamps_to_known_states() {
