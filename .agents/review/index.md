@@ -1,11 +1,31 @@
 # Review status
 
 Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harness: `codex`
-(codex-cli 0.142.5, re-verified headless 2026-07-05 via `codex exec --json`).
+(codex-cli 0.142.5, re-verified headless 2026-07-06 via `codex exec --json`).
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
+
+Loop sspf-10..11 CLOSED 2026-07-06: all verified `[x]`, fixes on `main`. Scope
+was **Bug 3 — clicking a source dead-ends on empty Home** (frontend nav; code
+`b9cca81`) — base `f8e6d81`, converged at head `6837157` after two codex rounds
+(r1 reopened, r2 accepted clean). The b9cca81 slice put the empty-scoped-Home →
+content auto-open at the tail of `selectSource()`; r1 found two real defects: sspf-10
+(HIGH) — Home button and Back (`back()`→`goHome()` from a top-level section) still
+dead-ended a scoped local source, and the selectSource early-return trapped the user
+there; sspf-11 (MEDIUM) — reading `hubs`/`heroItems` right after `await
+loadEverything()` could see a superseded Home load (concurrent `goHome()` bumps
+`homeGen`), force-browsing a slow server source whose hubs hadn't arrived. Both
+fixed in `6837157` by replacing the imperative check with a reactive `$effect`
+that opens the first section when a scoped source's Home *settles* empty (no hubs
+AND no hero/recents) with sections present, gated on `!loading` (covers source
+click / Home / Back; never misfires mid-load or on a superseded load; keeps server
+Home rails — the r1-finding-3 guarantee). Guard `tests/e2e/scenarios/sourcedeadend.mjs`
+drives both directions plus the Home-button leg; guard-proven red/green (ran HEADED
+— Xvfb absent on this host, owner-approved). sspf-11 is a superseded-load race,
+covered by the `!loading` gate + analysis (the deterministic guards cover the
+non-raced paths). Same no-branches adaptation.
 
 Loop sspf-5..9 CLOSED 2026-07-06: all verified `[x]`, fixes on `main`. Scope was
 **SMB seek Bug 1 sub-slice 3** (per-token SMB session reuse — the real seek fix;
