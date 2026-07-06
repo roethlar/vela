@@ -120,28 +120,35 @@ Keep it short and update it when important repo facts change.
   can't reproduce hermetically. `reviewloop codex` converged r1-r2 (r1 sspf-13, r2
   accepted). Full CI green (cargo test 105, clippy -D warnings clean). REMAINING:
   owner NAS playtest — SSH seek no longer hangs (the authoritative stall-fix check).
-  **OWNER REORDER 2026-07-06: Bug 5 P2 next, THEN Bug 4, THEN metadata rail.** The
-  owner chose to do the small Bug 5 P2 (naming/rename) before the larger Bug 4,
+  **OWNER REORDER 2026-07-06: Bug 5 P2 done first, THEN Bug 4, THEN metadata rail.**
+  The owner chose to do the small Bug 5 P2 (naming/rename) before the larger Bug 4,
   deviating from the plan's "Slice order & commits" (which had Bug 4 before Bug 5 P2).
   Reason: bank the small win and let the three landed P1 fixes (0.1.26–0.1.28) be
-  playtested before the large P2 metadata work lands on top. Session ended here via
-  `/handoff` right after this decision — no Bug 5 P2 code written yet.
-  **IMMEDIATE NEXT ACTION: Bug 5 P2 — source naming + rename (P2).** Bug 5 P1 (the
-  P1 half: Connected-tab filter + remove-last-folder) already LANDED (0.1.27). P2 is
-  the naming/rename half (plan `.agents/plans/smb-ssh-playtest-fixes.md` Bug 5 → Fix →
-  P2): (a) add an optional **Name** field to both add-SMB and add-SSH forms in
-  `Settings.svelte`, passed through the existing `name` param `mount_smb`/`mount_ssh`
-  already accept (NO backend schema change); (b) improve the no-name default — today
-  it's URL-shaped (`server/share` `commands.rs:439`; `host:remote_path`
-  `commands.rs:950`) and becomes the permanent sidebar label; use the bare share /
-  last path segment, disambiguated on collision; (c) add a **rename** command +
-  affordance for existing mounts, propagating the new name to the root-folder name
-  copies (`commands.rs:517,981`) or the section labels stay stale. Verification: Rust
-  unit test(s) for the rename + default-name logic (extract pure helpers like the Bug
-  5 P1 `remove_smb_folder_in_config` pattern, `commands.rs`); optional E2E via the
-  hermetic native-SMB seed technique proven in `tests/e2e/scenarios/connectedtab.mjs`
-  (mountpoint:"" — no connection). Low risk; frontend + a small backend command.
-  **THEN Bug 4 (LARGER, deferred) — share/mount root shows bare metadata-less cards,
+  playtested before the large P2 metadata work lands on top.
+  **Bug 5 P2 (source naming + rename) LANDED 2026-07-06** (code `c83a1be`+`55a6852`;
+  reviewloop-codex fixup `5053d2b`; trail `b7652d0`; version bump 0.1.29 `fce064b`;
+  UNPUSHED). **Bug 5 is now COMPLETE** (P1 0.1.27 + P2 here). `c83a1be`: an added
+  SMB share / SSH folder now gets a friendly default label — bare share (SMB) / last
+  remote-path segment (SSH), disambiguated against existing local-family labels
+  (qualify with server/host, then numeric suffix; case-insensitive) via pure
+  `unique_mount_name`/`last_path_segment` — instead of the URL-shaped
+  `server/share` / `host:remote_path`; plus an optional **Name** field in both add
+  forms (passed through the existing `name` param — NO schema change). `55a6852`:
+  `rename_smb_mount`/`rename_ssh_mount` commands (pure `rename_*_mount_in_config`
+  helpers; propagate the new label to the name copies seeded at add time — the SMB
+  share-root folder `path==""` and the SSH-fed local folder — only when that copy
+  still equals the OLD mount name, so a user-renamed folder is left alone) + an
+  inline rename affordance in the Connected tab. `reviewloop codex` converged r1→r2:
+  r1 reopened sspf-14 (MEDIUM — rename **Save** stayed enabled on a blank field, so
+  the click surfaced the "A name is required." error, a Bug-5-UX-ruling-forbidden
+  error click); fixed `5053d2b` (Save disabled on blank + silent Enter no-op; backend
+  still rejects empty defensively). r2 accepted clean. Full CI green (cargo test 118,
+  clippy -D warnings clean, npm check + build clean); pure helpers guard-proven
+  red/green by the coder (codex ran read-only → `guard_confirmed:false`, its value
+  was the code review that surfaced sspf-14). Trail `.agents/review/index.md` +
+  `findings/sspf-14.md`. REMAINING: owner playtest — friendly default labels appear
+  and rename works on the real NAS.
+  **IMMEDIATE NEXT ACTION: Bug 4 (LARGER) — share/mount root shows bare metadata-less cards,
   starves the merged view (P2, the metadata unlock).** The share-root auto-add
   registers the whole share as ONE flat kind-auto folder; a NAS root of category dirs
   (Movies/, TV/…) is mis-classified into one flat section of bare cards (no
@@ -371,7 +378,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.28 (bumped 2026-07-06, `49072f8`, for Bug 2 SSH seek).
+- Version 0.1.29 (bumped 2026-07-06, `fce064b`, for Bug 5 P2 naming + rename).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
