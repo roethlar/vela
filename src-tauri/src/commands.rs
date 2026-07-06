@@ -773,6 +773,47 @@ pub async fn remove_smb_folder(
     .await
 }
 
+/// Rename an SMB mount's display label, propagating the new name to the
+/// auto-added share-root folder (path==""), whose label was copied from the
+/// mount name at add time — otherwise the sidebar source renames but its
+/// section header stays stale. A user-renamed root folder (name no longer equal
+/// to the old mount name) is left alone. Pure over the config so it is
+/// unit-testable (Bug 5 P2).
+fn rename_smb_mount_in_config(cfg: &mut AppConfig, id: &str, new_name: &str) -> Result<(), String> {
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+        return Err("a name is required".to_string());
+    }
+    let mount = cfg
+        .smb_mounts
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or_else(|| "no such SMB mount".to_string())?;
+    let old_name = mount.name.clone();
+    mount.name = new_name.to_string();
+    for folder in mount
+        .folders
+        .iter_mut()
+        .filter(|f| f.path.is_empty() && f.name == old_name)
+    {
+        folder.name = new_name.to_string();
+    }
+    Ok(())
+}
+
+/// Rename an SMB share as shown in the sidebar / Connected tab.
+#[tauri::command]
+pub async fn rename_smb_mount(
+    id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    mutate_then_rebuild_local(&state, move |cfg| {
+        rename_smb_mount_in_config(cfg, &id, &name)
+    })
+    .await
+}
+
 #[cfg(test)]
 mod smb_folder_tests {
     use super::*;
@@ -891,6 +932,117 @@ mod mount_name_tests {
         // e.g. share == server would produce "X (X)"; go straight to numeric.
         let taken = vec!["nas".to_string()];
         assert_eq!(unique_mount_name("nas", "nas", &taken), "nas (2)");
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::{rename_smb_mount_in_config, rename_ssh_mount_in_config};
+    use crate::config::{AppConfig, LocalFolder, SmbFolder, SmbMount, SshMount};
+
+    fn smb_cfg() -> AppConfig {
+        AppConfig {
+            smb_mounts: vec![SmbMount {
+                id: "m1".into(),
+                name: "old".into(),
+                folders: vec![
+                    // The auto-added share-root folder: name copied from the mount.
+                    SmbFolder {
+                        id: "root".into(),
+                        name: "old".into(),
+                        path: String::new(),
+                        kind: String::new(),
+                    },
+                    // A narrower subfolder with its own label.
+                    SmbFolder {
+                        id: "sub".into(),
+                        name: "Movies".into(),
+                        path: "/Movies".into(),
+                        kind: "movie".into(),
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn smb_rename_propagates_to_the_root_folder_only() {
+        let mut cfg = smb_cfg();
+        rename_smb_mount_in_config(&mut cfg, "m1", "  New Name  ").unwrap();
+        let m = &cfg.smb_mounts[0];
+        assert_eq!(m.name, "New Name"); // trimmed
+        assert_eq!(m.folders[0].name, "New Name"); // root folder copy renamed
+        assert_eq!(m.folders[1].name, "Movies"); // subfolder label untouched
+    }
+
+    #[test]
+    fn smb_rename_leaves_a_user_renamed_root_alone() {
+        let mut cfg = smb_cfg();
+        cfg.smb_mounts[0].folders[0].name = "Custom".into();
+        rename_smb_mount_in_config(&mut cfg, "m1", "New").unwrap();
+        assert_eq!(cfg.smb_mounts[0].name, "New");
+        assert_eq!(cfg.smb_mounts[0].folders[0].name, "Custom");
+    }
+
+    #[test]
+    fn smb_rename_rejects_empty_and_unknown() {
+        let mut cfg = smb_cfg();
+        assert!(rename_smb_mount_in_config(&mut cfg, "m1", "   ")
+            .unwrap_err()
+            .contains("name is required"));
+        assert_eq!(cfg.smb_mounts[0].name, "old"); // unchanged on rejection
+        assert!(rename_smb_mount_in_config(&mut cfg, "nope", "X")
+            .unwrap_err()
+            .contains("no such SMB mount"));
+    }
+
+    fn ssh_cfg() -> AppConfig {
+        AppConfig {
+            ssh_mounts: vec![SshMount {
+                id: "s1".into(),
+                name: "old".into(),
+                local_folder_id: "f1".into(),
+                ..Default::default()
+            }],
+            local_folders: vec![LocalFolder {
+                id: "f1".into(),
+                name: "old".into(),
+                path: "/mnt/x".into(),
+                kind: String::new(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ssh_rename_propagates_to_the_fed_local_folder() {
+        let mut cfg = ssh_cfg();
+        rename_ssh_mount_in_config(&mut cfg, "s1", "New").unwrap();
+        assert_eq!(cfg.ssh_mounts[0].name, "New");
+        assert_eq!(cfg.local_folders[0].name, "New");
+    }
+
+    #[test]
+    fn ssh_rename_leaves_a_user_renamed_folder_alone() {
+        let mut cfg = ssh_cfg();
+        cfg.local_folders[0].name = "Custom".into();
+        rename_ssh_mount_in_config(&mut cfg, "s1", "New").unwrap();
+        assert_eq!(cfg.ssh_mounts[0].name, "New");
+        assert_eq!(cfg.local_folders[0].name, "Custom");
+    }
+
+    #[test]
+    fn ssh_rename_rejects_empty_and_unknown() {
+        let mut cfg = ssh_cfg();
+        assert!(rename_ssh_mount_in_config(&mut cfg, "s1", "")
+            .unwrap_err()
+            .contains("name is required"));
+        assert_eq!(cfg.ssh_mounts[0].name, "old");
+        assert!(rename_ssh_mount_in_config(&mut cfg, "nope", "X")
+            .unwrap_err()
+            .contains("no such SSH mount"));
     }
 }
 
@@ -1253,6 +1405,49 @@ pub async fn unmount_ssh(id: String, state: State<'_, AppState>) -> Result<(), S
         }
     }
     Ok(())
+}
+
+/// Rename an SSH mount's display label, propagating the new name to the local
+/// folder it feeds (whose label was copied from the mount name at add time) so
+/// the source's section header renames with the sidebar entry. A user-renamed
+/// folder (name no longer equal to the old mount name) is left alone. Pure over
+/// the config so it is unit-testable (Bug 5 P2).
+fn rename_ssh_mount_in_config(cfg: &mut AppConfig, id: &str, new_name: &str) -> Result<(), String> {
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+        return Err("a name is required".to_string());
+    }
+    let (old_name, folder_id) = {
+        let mount = cfg
+            .ssh_mounts
+            .iter_mut()
+            .find(|m| m.id == id)
+            .ok_or_else(|| "no such SSH mount".to_string())?;
+        let old_name = mount.name.clone();
+        mount.name = new_name.to_string();
+        (old_name, mount.local_folder_id.clone())
+    };
+    for folder in cfg
+        .local_folders
+        .iter_mut()
+        .filter(|f| f.id == folder_id && f.name == old_name)
+    {
+        folder.name = new_name.to_string();
+    }
+    Ok(())
+}
+
+/// Rename an SSH/SFTP folder as shown in the sidebar / Connected tab.
+#[tauri::command]
+pub async fn rename_ssh_mount(
+    id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    mutate_then_rebuild_local(&state, move |cfg| {
+        rename_ssh_mount_in_config(cfg, &id, &name)
+    })
+    .await
 }
 
 /// Whether another persisted SMB record references `mountpoint`. `None` = the

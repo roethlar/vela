@@ -176,6 +176,10 @@
   let sshKind = $state<"" | "movie" | "show">("");
   let sshName = $state("");
 
+  // Inline rename of an existing SMB/SSH mount in the Connected tab.
+  let renamingId = $state("");
+  let renameText = $state("");
+
   // Add Jellyfin/Emby form
   let kind = $state<"jellyfin" | "emby">("jellyfin");
   let url = $state("");
@@ -438,6 +442,37 @@
     }
   }
 
+  function startRename(id: string, name: string) {
+    renamingId = id;
+    renameText = name;
+    err = null;
+  }
+
+  function cancelRename() {
+    renamingId = "";
+    renameText = "";
+  }
+
+  async function saveRename(command: "rename_smb_mount" | "rename_ssh_mount", id: string) {
+    const name = renameText.trim();
+    if (!name) {
+      err = "A name is required.";
+      return;
+    }
+    busy = true;
+    err = null;
+    try {
+      await invoke(command, { id, name });
+      cancelRename();
+      await load();
+      onChanged();
+    } catch (e) {
+      err = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
   async function addServer() {
     if (!url.trim()) {
       err = "Server URL is required.";
@@ -689,8 +724,25 @@
       {#each smbMounts as m (m.id)}
         <div class="row">
           <span class="badge">smb</span>
-          <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
-          <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Remove</button>
+          {#if renamingId === m.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="name rename"
+              bind:value={renameText}
+              disabled={busy}
+              autofocus
+              onkeydown={(e) => {
+                if (e.key === "Enter") saveRename("rename_smb_mount", m.id);
+                else if (e.key === "Escape") cancelRename();
+              }}
+            />
+            <button disabled={busy} onclick={() => saveRename("rename_smb_mount", m.id)}>Save</button>
+            <button disabled={busy} onclick={cancelRename}>Cancel</button>
+          {:else}
+            <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
+            <button disabled={busy} onclick={() => startRename(m.id, m.name)}>Rename</button>
+            <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Remove</button>
+          {/if}
         </div>
         {#each m.folders as f (f.id)}
           <div class="row subrow">
@@ -703,10 +755,27 @@
       {#each sshMounts as m (m.id)}
         <div class="row">
           <span class="badge">ssh</span>
-          <span class="name">
-            {m.name}<span class="muted small"> · {m.username ? `${m.username}@` : ""}{m.host}:{m.remotePath}</span>
-          </span>
-          <button class="rm" disabled={busy} onclick={() => unmountSsh(m.id)}>Unmount</button>
+          {#if renamingId === m.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="name rename"
+              bind:value={renameText}
+              disabled={busy}
+              autofocus
+              onkeydown={(e) => {
+                if (e.key === "Enter") saveRename("rename_ssh_mount", m.id);
+                else if (e.key === "Escape") cancelRename();
+              }}
+            />
+            <button disabled={busy} onclick={() => saveRename("rename_ssh_mount", m.id)}>Save</button>
+            <button disabled={busy} onclick={cancelRename}>Cancel</button>
+          {:else}
+            <span class="name">
+              {m.name}<span class="muted small"> · {m.username ? `${m.username}@` : ""}{m.host}:{m.remotePath}</span>
+            </span>
+            <button disabled={busy} onclick={() => startRename(m.id, m.name)}>Rename</button>
+            <button class="rm" disabled={busy} onclick={() => unmountSsh(m.id)}>Unmount</button>
+          {/if}
         </div>
       {/each}
     </section>
@@ -1273,6 +1342,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  input.name.rename {
+    min-width: 0;
+    padding: 0.25rem 0.4rem;
   }
   .subrow {
     padding-left: 1.6rem;
