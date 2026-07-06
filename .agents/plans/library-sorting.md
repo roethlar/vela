@@ -1,8 +1,10 @@
 # Plan: Library view sorting (DRAFT — awaiting owner decision)
 
 ## Status
-**DRAFT / proposed 2026-07-06.** Owner asked for a minimum sort set across all
-library views. Not approved for implementation yet. No code written.
+**IN PROGRESS 2026-07-06.** Owner approved implementing the minimum sort set (folder
+dropped). Slices 1-2 LANDED (`c368270`, `9a47d43`); slice 3 (merged "All" view) is
+next; JF/local last-played population deferred. Effective set: date added, date last
+played, title, release date.
 
 ## Goal
 Sort options available in **all** library views: **date added, date last played,
@@ -31,18 +33,14 @@ inconsistent across views/backends.
    matches only `year`, everything else falls through to title
    (`source/local.rs:651-669`). So the dropdown's addedAt/originallyAvailableAt/
    rating/lastViewedAt are no-ops on a local library.
-3. **`folder` sort/browse does not exist anywhere** — not in `ALLOWED_SORTS`, not
-   in any `map_sort`/`sort_and_page`. **It IS meaningful across backends** (owner
-   uses folder view in Plex regularly), not local-only. Every backend exposes the
-   underlying path: local — `rating_key` is the path; Plex — `PlexPart.file` is
-   already parsed (`plex_library.rs:177-186`) and dropped in `to_item`; JF/Emby —
-   the item `Path` / `MediaSources[].Path` (request via `Fields=Path`). Plex also
-   has a **native By-Folder browse** endpoint (`/library/sections/{key}/folder`).
-   New token; cross-backend. **DECIDED 2026-07-06 (owner): a flat "sort by folder"**
-   — group the listing by its containing directory and sort, reusing the existing
-   sort pipeline. **NOT** a hierarchical folder-browse mode (no new navigation
-   surface, no Plex `/folder` browse). This keeps the slice small: carry a
-   folder/path per item, sort by it.
+3. **`folder` sort — DROPPED 2026-07-06 (owner).** The owner uses Plex's folder
+   view only for *podcasts* (audio, where flexget can't reliably inject metadata,
+   so folder/file names are the fallback). Vela is video-only, and video doesn't
+   need it. Additionally, Plex has no server-side path sort (its By-Folder is a
+   browse mode), so a correct folder sort on Plex would require fetching whole
+   sections client-side — not worth it for a need that doesn't apply to video.
+   Folder sort is out of scope. Owner's effective minimum set is now: date added,
+   date last played, title, release date.
 4. **`ItemDto` lacks `addedAt`.** Plex parses `addedAt` but drops it in `to_item`
    (`source/plex.rs`); JF doesn't request `DateCreated`; the local VFS exposes no
    modified-time (`source/vfs.rs:9-46` has `file_len`, no `modified`).
@@ -59,33 +57,29 @@ inconsistent across views/backends.
 | **release date** | ✅ at year granularity (= `year:desc`, works all backends) | none for year granularity; full-date precision is a separate, larger change (new DTO date field) — **recommend year granularity, skip full-date** |
 | **date last played** | ✅ Plex; ⚠️ JF null; local ≤20 | populate JF `last_watched_at_ms` (parse `DatePlayed`); local: sort by `recents` where present (partial, document the limit) |
 | **date added** | 🔧 nowhere on DTO | add `added_at_ms` to `ItemDto`; populate Plex (already parsed), JF (`Fields=DateCreated`), local (`Vfs::modified()` mtime); extend `sort_and_page` |
-| **folder** | 🔧 new, **cross-backend** | new token; derive from the file path each backend exposes (local `rating_key`; Plex `Part.file` — parsed, dropped; JF `Path`); or use Plex's native `/folder` browse. Owner uses this in Plex — confirm sort-vs-browse |
+| **folder** | ❌ DROPPED (owner 2026-07-06) | podcast/audio need only; video-only Vela doesn't need it; Plex has no server-side path sort |
 
-## Proposed slices (each its own commit + reviewloop codex + guard proof)
-1. **Local family: honor all existing sort tokens.** Extend `sort_and_page`
-   (`local.rs:651-669`) to handle `originallyAvailableAt`→year, `rating` (n/a →
-   title fallback, documented), `lastViewedAt` (via recents lookup), and prep for
-   `addedAt`/`folder`. Unit-testable (pure sort over a Vec<ItemDto>). This alone
-   makes the dropdown honest on local libraries.
-2. **`added_at_ms` on `ItemDto` + populate per backend.** Add the field; Plex
-   maps its already-parsed `added_at`; JF adds `DateCreated` to the `Fields=` query
-   and parses it; local adds `Vfs::modified()` (mtime; SMB/SSH stat — network, so
-   only read during the walk, cached in the listing). Local `addedAt` sort arm.
-3. **`folder` flat sort (cross-backend).** New `folder` token in `ALLOWED_SORTS` +
-   frontend `SORTS`, offered on **all** backends (owner uses it in Plex). Carry a
-   per-item folder/path: local from `rating_key`; Plex from `PlexPart.file` (already
-   parsed — map it into the DTO); JF/Emby by adding `Path` to `Fields=`. Sort arm:
-   group by parent dir, then title. Server sources sort the fetched page by folder.
-   No folder-browse navigation (owner chose flat sort, 2026-07-06).
-4. **Populate JF `last_watched_at_ms`** (parse the ISO-8601 `DatePlayed`) so
-   last-played sort is real on Jellyfin/Emby, not just Plex.
-5. **Relax the merged "All" view.** Once `added_at_ms` and last-played exist on the
-   DTO for all backends, allow addedAt/lastViewedAt in `get_type_listing`
-   (`commands.rs:2345-2349`) and extend `merge_sort_page` (`:2701-2711`). Document
-   that a backend missing a value sorts last. Folder in the merged view is possible
-   once every backend carries a folder/path (slice 3), but mixing folder trees
-   across sources is messy — default to offering folder only in per-source views;
-   revisit merged-folder if the owner wants it.
+## Slices
+1. **LANDED (`c368270`) — local family honors release-date + last-played sorts.**
+   `sort_and_page` handled only year; now `originallyAvailableAt`→year and
+   `lastViewedAt`→`last_watched_at_ms`, each with a case-insensitive title tiebreak;
+   unsupported tokens fall back to title deterministically. Unit-tested, guard-proven.
+2. **LANDED (`9a47d43`) — date-added sort.** Added `added_at_ms` to `ItemDto` +
+   `Vfs::modified_ms` (file mtime; default None, real impl for `StdFs`; SMB left None
+   — deferred). Populated from the mtime during the local walk and from Plex `addedAt`.
+   Local `addedAt` sort arm. JF `added_at_ms` stays None (server sort already works;
+   DateCreated-in-Fields is a follow-up). Unit-tested, guard-proven.
+3. **NEXT — relax the merged "All" view.** Allow addedAt / lastViewedAt /
+   originallyAvailableAt in `get_type_listing` (`commands.rs:2345-2349`) + extend
+   `merge_sort_page` (`:2701-2711`), and widen the frontend `TYPE_SORTS`
+   (`+page.svelte:76`). A backend missing a value sorts last (document it). This is
+   what makes the sorts work in *all* views, not just per-source.
+4. **DROPPED — `folder` sort** (owner 2026-07-06: podcast/audio need, not video).
+5. **DEFERRED (low value for a Plex-first owner) — populate JF `last_watched_at_ms`
+   + `added_at_ms`** (parse the ISO-8601 dates, add to `Fields=`). Only matters for
+   the merged view ranking JF items correctly; JF per-source sorts server-side today.
+   Local last-played is likewise unpopulated (recents aren't merged into library
+   items) — a follow-up if the owner wants local last-played sorting.
 
 ## Proportionality / "is this worth it?"
 - **Cheapest high-value chunk = slices 1-2** (local honors sorts + date-added
@@ -105,9 +99,6 @@ inconsistent across views/backends.
 - E2E optional (the merged-view sort could reuse the mock-JF + local seed harness).
 
 ## Open decisions for owner
-- Folder sort — **RESOLVED 2026-07-06**: flat "sort by folder" (group by containing
-  dir), not a folder-browse mode.
-- Full-date release sorting vs. year granularity (recommend: year).
-- Episode-level sorting inside a season (default: leave natural order).
-- Whether folder is offered in the merged "All" view or per-source only
-  (recommend: per-source only initially).
+- Folder sort — **DROPPED 2026-07-06** (podcast/audio need, not video).
+- Full-date release sorting vs. year granularity — using **year** (covers it).
+- Episode-level sorting inside a season — left natural order.
