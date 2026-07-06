@@ -157,26 +157,31 @@ Keep it short and update it when important repo facts change.
   Owner: "if I care about that more later, I'll pick it up." Do NOT start these
   without an explicit owner go. Bug 4 technical detail is preserved below for
   whenever it resumes.
-  **IMMEDIATE NEXT ACTION: two Plex-first feature tracks — draft plans committed,
-  owner decisions locked, awaiting an explicit go to implement (no code yet).**
-  (1) **Library sorting** (`.agents/plans/library-sorting.md`): owner's minimum set
-  (date added, date last played, title, release date, folder) across all views.
-  Much already works on Plex/JF per-source; real gaps = merged "All" view locked to
-  title/year, local family ignores 4 of 6 sorts, and `folder` is new. Owner DECIDED
-  folder = a **flat "sort by folder"** (group by containing dir; NOT a folder-browse
-  mode), cross-backend (Plex `Part.file`/JF `Path`/local path). Smaller, universal —
-  good first track. (2) **Plex item detail / info view**
-  (`.agents/plans/item-detail-view.md`): the "richer client" surface. Plex gives us
-  much we currently drop (ratings, content rating, genres, cast+crew w/ headshots,
-  studio, tagline, air date, stream specs). **Binding owner UX ruling:** CW carousel
-  click = play; movie click → info page (Play on poster); show → seasons → episodes;
-  episode → ONE shared info page updating per selected episode. **Binding "no
-  half-built state":** build all backends (Plex+JF+local) behind the current nav and
-  **flip navigation last** — never ship a Plex-only stub. Info page = full-screen
-  route (recommended, consistent with drill-in; owner can veto). Bigger, multi-slice.
-  Both plans should run the `codex` plan-review loop before implementation (repo
-  convention). Suggested order: sorting first (smaller, higher certainty), then the
-  detail view.
+  **LIBRARY SORTING LANDED 2026-07-06 (0.1.30)** — first of the two Plex-first
+  tracks is DONE. Plan `.agents/plans/library-sorting.md` (LANDED); reviewloop
+  `sort-1` converged r1-r3 (trail `.agents/review/index.md`). Slices `c368270`
+  (local honors release-date/last-played), `9a47d43` (`added_at_ms` + `Vfs::
+  modified_ms`; date-added), `21552c9` (merged "All" view honors added/last-played/
+  release-date); review fixups `c904c66` (cache SCHEMA 1→2 + `same_items`; merged
+  dedup timestamp adoption) + `19b2735` (Plex shows carry addedAt/lastViewedAt via
+  `PlexDir`); trail `4fca2ef`; version bump 0.1.30 `f3d8192`; UNPUSHED. Effective
+  set delivered per-source AND merged: date added, date last played, title, release
+  date. **Folder DROPPED** (owner: podcast/audio need, video-only Vela doesn't need
+  it). DEFERRED (low value, Plex-first): JF + local last-played/added population
+  (Plex sorts these server-side; only the merged ranking of JF/local items is
+  affected; local last-played needs recents merged into library items). REMAINING:
+  owner playtest — the sort dropdown on Plex libraries + the merged All view.
+  **IMMEDIATE NEXT ACTION: the second track — Plex item detail / info view**
+  (`.agents/plans/item-detail-view.md`), **awaiting an explicit owner go (no code
+  yet).** The "richer client" surface. Plex gives us much we currently drop
+  (ratings, content rating, genres, cast+crew w/ headshots, studio, tagline, air
+  date, stream specs). **Binding owner UX ruling:** CW carousel click = play; movie
+  click → info page (Play on poster); show → seasons → episodes; episode → ONE
+  shared info page updating per selected episode. Info page = full-screen route
+  (owner-confirmed). **Binding "no half-built state":** build all backends
+  (Plex+JF+local) behind the current nav and **flip navigation last** — never ship a
+  Plex-only stub. Bigger, multi-slice. Run the `codex` plan-review loop before
+  implementation (repo convention).
   **DEFERRED (owner 2026-07-06) — Bug 4 (LARGER) — share/mount root shows bare metadata-less cards,
   starves the merged view (P2, the metadata unlock).** The share-root auto-add
   registers the whole share as ONE flat kind-auto folder; a NAS root of category dirs
@@ -407,7 +412,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.29 (bumped 2026-07-06, `fce064b`, for Bug 5 P2 naming + rename).
+- Version 0.1.30 (bumped 2026-07-06, `f3d8192`, for library sorting).
   The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
