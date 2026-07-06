@@ -44,6 +44,26 @@ pub fn default_mountpoint(m: &SshMount) -> Result<String, String> {
     Ok(mp.to_string_lossy().to_string())
 }
 
+/// The sshfs `-o` options Vela always passes.
+///
+/// `max_conns=4` opens parallel SFTP channels. With sshfs's single default
+/// channel, a seek's read head-of-line-blocks behind the outstanding
+/// sequential-readahead backlog on that one channel; on a real latency-bearing
+/// link (a NAS) that stalls playback for seconds on every seek (Bug 2). Parallel
+/// channels let a seek's read proceed on a free channel instead of queuing. 4 is
+/// a conservative default — enough to break the head-of-line stall without
+/// tripping a server's per-session limits. The remaining options: auto-reconnect
+/// on a dropped connection, liveness probes, key-only auth (no password prompts),
+/// and symlink following.
+pub(crate) const SSHFS_OPTIONS: &[&str] = &[
+    "reconnect",
+    "ServerAliveInterval=15",
+    "ServerAliveCountMax=3",
+    "BatchMode=yes",
+    "follow_symlinks",
+    "max_conns=4",
+];
+
 pub fn prepare_mount(m: &mut SshMount) -> Result<(), String> {
     m.mountpoint = default_mountpoint(m)?;
     mount(m)
@@ -64,17 +84,11 @@ pub fn mount(m: &SshMount) -> Result<(), String> {
         m.mountpoint.clone(),
         "-p".to_string(),
         m.port.to_string(),
-        "-o".to_string(),
-        "reconnect".to_string(),
-        "-o".to_string(),
-        "ServerAliveInterval=15".to_string(),
-        "-o".to_string(),
-        "ServerAliveCountMax=3".to_string(),
-        "-o".to_string(),
-        "BatchMode=yes".to_string(),
-        "-o".to_string(),
-        "follow_symlinks".to_string(),
     ];
+    for opt in SSHFS_OPTIONS {
+        args.push("-o".to_string());
+        args.push((*opt).to_string());
+    }
     if !m.identity_file.trim().is_empty() {
         let identity = expand_user_path(m.identity_file.trim());
         if identity.to_string_lossy().contains(',') {
@@ -344,6 +358,164 @@ mod tests {
             assert!(msg.contains("sshfs-mac"), "macOS message must name the tap build: {msg}");
         } else {
             assert!(msg.contains("package manager"), "non-mac message: {msg}");
+        }
+    }
+
+    // Bug 2: the SSH seek stall comes from a single SFTP channel head-of-line-
+    // blocking a seek's read behind the readahead backlog. Vela must request
+    // parallel connections. Removing `max_conns` from SSHFS_OPTIONS fails this.
+    #[test]
+    fn sshfs_options_request_parallel_sftp_channels() {
+        let n: u32 = SSHFS_OPTIONS
+            .iter()
+            .find_map(|o| o.strip_prefix("max_conns="))
+            .expect("SSHFS_OPTIONS must include max_conns for parallel channels")
+            .parse()
+            .expect("max_conns must be numeric");
+        assert!(n >= 2, "max_conns must be >= 2 to break head-of-line blocking, got {n}");
+    }
+
+    // Hermetic functional guard (owner decision 2026-07-05): stand up a loopback
+    // sshd, mount it with sshfs using Vela's exact SSHFS_OPTIONS (max_conns and
+    // all), and read a file back. Proves the option set is accepted by the
+    // installed sshfs and that max_conns coexists with `reconnect` and mounts +
+    // reads correctly — guarding against an incompatible/broken option string.
+    // (It does NOT reproduce the latency-driven stall — a localhost sshd has ~0
+    // latency; the owner's NAS playtest is the authoritative stall-fix check.)
+    // Gated on sshd/sshfs/ssh-keygen being present; skips with a message if not.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn max_conns_option_set_mounts_and_reads_over_loopback_sshd() {
+        use std::net::{TcpListener, TcpStream};
+        use std::path::PathBuf;
+        use std::process::{Child, Command};
+        use std::time::{Duration, Instant};
+
+        let (Some(sshd), Some(sshfs), Some(keygen)) = (
+            find_program("sshd", &["/usr/bin/sshd", "/usr/sbin/sshd"]),
+            locate(),
+            find_program("ssh-keygen", &["/usr/bin/ssh-keygen"]),
+        ) else {
+            eprintln!("skipping loopback sshfs test: sshd/sshfs/ssh-keygen not all present");
+            return;
+        };
+
+        // Cleanup on drop, even if an assertion panics: unmount the FUSE mount,
+        // kill sshd, remove the temp tree.
+        struct Cleanup {
+            base: PathBuf,
+            mnt: PathBuf,
+            sshd: Option<Child>,
+        }
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                for prog in ["fusermount3", "fusermount"] {
+                    let _ = Command::new(prog).arg("-u").arg(&self.mnt).status();
+                }
+                let _ = Command::new("umount").arg(&self.mnt).status();
+                if let Some(mut c) = self.sshd.take() {
+                    let _ = c.kill();
+                    let _ = c.wait();
+                }
+                let _ = std::fs::remove_dir_all(&self.base);
+            }
+        }
+
+        let base = std::env::temp_dir().join(format!("vela-sshfs-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let srv = base.join("srv");
+        let mnt = base.join("mnt");
+        let keys = base.join("keys");
+        for d in [&srv, &mnt, &keys] {
+            std::fs::create_dir_all(d).unwrap();
+        }
+        let content = "hello-from-vela-sshfs\n";
+        std::fs::write(srv.join("probe.txt"), content).unwrap();
+
+        for name in ["host", "client"] {
+            let ok = Command::new(&keygen)
+                .args(["-q", "-t", "ed25519", "-N", ""])
+                .arg("-f")
+                .arg(keys.join(name))
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            assert!(ok, "ssh-keygen {name} failed");
+        }
+        std::fs::copy(keys.join("client.pub"), keys.join("authorized_keys")).unwrap();
+
+        // A free loopback port: bind :0, read it back, release it for sshd.
+        let port = TcpListener::bind("127.0.0.1:0").unwrap().local_addr().unwrap().port();
+        let cfg = format!(
+            "Port {port}\nListenAddress 127.0.0.1\nHostKey {host}\nAuthorizedKeysFile {ak}\n\
+             PidFile {pid}\nUsePAM no\nStrictModes no\nPasswordAuthentication no\n\
+             PubkeyAuthentication yes\nSubsystem sftp internal-sftp\n",
+            host = keys.join("host").display(),
+            ak = keys.join("authorized_keys").display(),
+            pid = keys.join("sshd.pid").display(),
+        );
+        std::fs::write(keys.join("sshd_config"), cfg).unwrap();
+
+        let child = Command::new(&sshd)
+            .arg("-D")
+            .arg("-f")
+            .arg(keys.join("sshd_config"))
+            .arg("-E")
+            .arg(keys.join("sshd.log"))
+            .spawn()
+            .expect("spawn sshd");
+        let mut guard = Cleanup { base: base.clone(), mnt: mnt.clone(), sshd: Some(child) };
+
+        // Wait for sshd to accept connections.
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while TcpStream::connect(("127.0.0.1", port)).is_err() {
+            if Instant::now() > deadline {
+                let log = std::fs::read_to_string(keys.join("sshd.log")).unwrap_or_default();
+                panic!("sshd did not start listening on {port}: {log}");
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        let user = std::env::var("USER")
+            .or_else(|_| std::env::var("LOGNAME"))
+            .expect("USER/LOGNAME set");
+        let mut args: Vec<String> = vec![
+            format!("{user}@127.0.0.1:{}", srv.display()),
+            mnt.to_string_lossy().into_owned(),
+            "-p".into(),
+            port.to_string(),
+        ];
+        // Vela's real option set — this is what the test guards.
+        for opt in SSHFS_OPTIONS {
+            args.push("-o".into());
+            args.push((*opt).into());
+        }
+        args.push("-o".into());
+        args.push(format!("IdentityFile={}", keys.join("client").display()));
+        // Test scaffolding only: trust the throwaway host key without touching
+        // the user's known_hosts (production relies on a pre-trusted host).
+        args.push("-o".into());
+        args.push("UserKnownHostsFile=/dev/null".into());
+        args.push("-o".into());
+        args.push("StrictHostKeyChecking=no".into());
+
+        let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
+        // sshfs backgrounds itself once mounted, so status() returns promptly.
+        let status = run_with_timeout(&sshfs, &arg_refs, Duration::from_secs(20));
+        assert!(status.is_ok(), "sshfs mount with {SSHFS_OPTIONS:?} failed: {status:?}");
+
+        assert!(is_mounted(&mnt.to_string_lossy()), "mountpoint is not mounted");
+        let got = std::fs::read_to_string(mnt.join("probe.txt")).expect("read probe.txt over sshfs");
+        assert_eq!(got, content, "file content mismatch over the max_conns mount");
+
+        // Explicit unmount so the read handle is released before cleanup; the
+        // guard still cleans up on any panic above.
+        for prog in ["fusermount3", "fusermount"] {
+            let _ = Command::new(prog).arg("-u").arg(&mnt).status();
+        }
+        if let Some(mut c) = guard.sshd.take() {
+            let _ = c.kill();
+            let _ = c.wait();
         }
     }
 }
