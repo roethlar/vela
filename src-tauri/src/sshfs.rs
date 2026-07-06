@@ -44,7 +44,7 @@ pub fn default_mountpoint(m: &SshMount) -> Result<String, String> {
     Ok(mp.to_string_lossy().to_string())
 }
 
-/// The sshfs `-o` options Vela always passes.
+/// The sshfs `-o` options Vela passes on this platform.
 ///
 /// `max_conns=4` opens parallel SFTP channels. With sshfs's single default
 /// channel, a seek's read head-of-line-blocks behind the outstanding
@@ -52,17 +52,34 @@ pub fn default_mountpoint(m: &SshMount) -> Result<String, String> {
 /// link (a NAS) that stalls playback for seconds on every seek (Bug 2). Parallel
 /// channels let a seek's read proceed on a free channel instead of queuing. 4 is
 /// a conservative default — enough to break the head-of-line stall without
-/// tripping a server's per-session limits. The remaining options: auto-reconnect
-/// on a dropped connection, liveness probes, key-only auth (no password prompts),
-/// and symlink following.
-pub(crate) const SSHFS_OPTIONS: &[&str] = &[
-    "reconnect",
-    "ServerAliveInterval=15",
-    "ServerAliveCountMax=3",
-    "BatchMode=yes",
-    "follow_symlinks",
-    "max_conns=4",
-];
+/// tripping a server's per-session limits.
+///
+/// `max_conns` is **Linux-only**: it exists in sshfs 3.x, but macOS uses
+/// sshfs-mac (the sshfs 2.10 line via macFUSE), which does NOT accept it and
+/// would fail the mount outright with an unsupported option. The Bug 2 seek fix
+/// targets the Linux NAS path; macOS SSH keeps its original option set. The rest
+/// (both platforms): auto-reconnect on a dropped connection, liveness probes,
+/// key-only auth (no password prompts), and symlink following.
+pub(crate) fn sshfs_options() -> Vec<&'static str> {
+    sshfs_options_for(std::env::consts::OS)
+}
+
+/// Split out with an explicit `target_os` (as `std::env::consts::OS` gives it:
+/// "linux"/"macos"/…) so BOTH platform branches are unit-testable from any host,
+/// rather than hidden behind a `#[cfg]` that only one platform can exercise.
+fn sshfs_options_for(target_os: &str) -> Vec<&'static str> {
+    let mut opts = vec![
+        "reconnect",
+        "ServerAliveInterval=15",
+        "ServerAliveCountMax=3",
+        "BatchMode=yes",
+        "follow_symlinks",
+    ];
+    if target_os == "linux" {
+        opts.push("max_conns=4");
+    }
+    opts
+}
 
 pub fn prepare_mount(m: &mut SshMount) -> Result<(), String> {
     m.mountpoint = default_mountpoint(m)?;
@@ -85,9 +102,9 @@ pub fn mount(m: &SshMount) -> Result<(), String> {
         "-p".to_string(),
         m.port.to_string(),
     ];
-    for opt in SSHFS_OPTIONS {
+    for opt in sshfs_options() {
         args.push("-o".to_string());
-        args.push((*opt).to_string());
+        args.push(opt.to_string());
     }
     if !m.identity_file.trim().is_empty() {
         let identity = expand_user_path(m.identity_file.trim());
@@ -362,21 +379,32 @@ mod tests {
     }
 
     // Bug 2: the SSH seek stall comes from a single SFTP channel head-of-line-
-    // blocking a seek's read behind the readahead backlog. Vela must request
-    // parallel connections. Removing `max_conns` from SSHFS_OPTIONS fails this.
+    // blocking a seek's read behind the readahead backlog. On Linux Vela must
+    // request parallel connections. Removing `max_conns` fails this.
     #[test]
-    fn sshfs_options_request_parallel_sftp_channels() {
-        let n: u32 = SSHFS_OPTIONS
+    fn linux_sshfs_options_request_parallel_sftp_channels() {
+        let n: u32 = sshfs_options_for("linux")
             .iter()
             .find_map(|o| o.strip_prefix("max_conns="))
-            .expect("SSHFS_OPTIONS must include max_conns for parallel channels")
+            .expect("Linux sshfs options must include max_conns for parallel channels")
             .parse()
             .expect("max_conns must be numeric");
         assert!(n >= 2, "max_conns must be >= 2 to break head-of-line blocking, got {n}");
     }
 
+    // macOS uses sshfs-mac (the sshfs 2.10 line via macFUSE), which does NOT
+    // accept max_conns and would fail the mount outright — so it must NOT be
+    // passed there (codex sspf-13). Reverting the platform gate fails this.
+    #[test]
+    fn macos_sshfs_options_omit_max_conns() {
+        assert!(
+            !sshfs_options_for("macos").iter().any(|o| o.starts_with("max_conns")),
+            "max_conns must not be passed on macOS (sshfs-mac 2.10 rejects it)"
+        );
+    }
+
     // Hermetic functional guard (owner decision 2026-07-05): stand up a loopback
-    // sshd, mount it with sshfs using Vela's exact SSHFS_OPTIONS (max_conns and
+    // sshd, mount it with sshfs using Vela's exact sshfs_options() (max_conns and
     // all), and read a file back. Proves the option set is accepted by the
     // installed sshfs and that max_conns coexists with `reconnect` and mounts +
     // reads correctly — guarding against an incompatible/broken option string.
@@ -496,10 +524,10 @@ mod tests {
             "-p".into(),
             port.to_string(),
         ];
-        // Vela's real option set — this is what the test guards.
-        for opt in SSHFS_OPTIONS {
+        // Vela's real option set for this platform (Linux → includes max_conns).
+        for opt in sshfs_options() {
             args.push("-o".into());
-            args.push((*opt).into());
+            args.push(opt.into());
         }
         args.push("-o".into());
         args.push(format!("IdentityFile={}", keys.join("client").display()));
@@ -513,7 +541,7 @@ mod tests {
         let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
         // sshfs backgrounds itself once mounted, so status() returns promptly.
         let status = run_with_timeout(&sshfs, &arg_refs, Duration::from_secs(20));
-        assert!(status.is_ok(), "sshfs mount with {SSHFS_OPTIONS:?} failed: {status:?}");
+        assert!(status.is_ok(), "sshfs mount with {:?} failed: {status:?}", sshfs_options());
 
         assert!(is_mounted(&mnt.to_string_lossy()), "mountpoint is not mounted");
         let got = std::fs::read_to_string(mnt.join("probe.txt")).expect("read probe.txt over sshfs");
