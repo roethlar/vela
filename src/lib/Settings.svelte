@@ -455,10 +455,10 @@
 
   async function saveRename(command: "rename_smb_mount" | "rename_ssh_mount", id: string) {
     const name = renameText.trim();
-    if (!name) {
-      err = "A name is required.";
-      return;
-    }
+    // No name: the Save button is disabled and Enter no-ops. Return silently
+    // rather than surfacing an error — the Bug 5 UX ruling forbids a click that
+    // terminates in an error-like state (an unavailable action is the answer).
+    if (!name) return;
     busy = true;
     err = null;
     try {
@@ -736,7 +736,7 @@
                 else if (e.key === "Escape") cancelRename();
               }}
             />
-            <button disabled={busy} onclick={() => saveRename("rename_smb_mount", m.id)}>Save</button>
+            <button disabled={busy || !renameText.trim()} onclick={() => saveRename("rename_smb_mount", m.id)}>Save</button>
             <button disabled={busy} onclick={cancelRename}>Cancel</button>
           {:else}
             <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
@@ -767,7 +767,7 @@
                 else if (e.key === "Escape") cancelRename();
               }}
             />
-            <button disabled={busy} onclick={() => saveRename("rename_ssh_mount", m.id)}>Save</button>
+            <button disabled={busy || !renameText.trim()} onclick={() => saveRename("rename_ssh_mount", m.id)}>Save</button>
             <button disabled={busy} onclick={cancelRename}>Cancel</button>
           {:else}
             <span class="name">
