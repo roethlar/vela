@@ -2646,6 +2646,13 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
                     group.played = item.played;
                     group.view_offset_ms = item.view_offset_ms;
                 }
+                // Adopt the most-recent added/last-played across backings so the
+                // merged card sorts correctly even when the face backing (e.g. a
+                // Jellyfin/local item that doesn't populate these) isn't the one
+                // carrying the timestamp. `Option::max` prefers Some over None and
+                // the larger ms (sorting slice 3).
+                group.added_at_ms = group.added_at_ms.max(item.added_at_ms);
+                group.last_watched_at_ms = group.last_watched_at_ms.max(item.last_watched_at_ms);
                 if richer(&item, group) {
                     // The richer entry becomes the face (and default play
                     // target): move it to the front of the backing list and
@@ -2654,6 +2661,10 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
                     let keep_backing = group.backing.take();
                     let keep_played = group.played.take();
                     let keep_offset = group.view_offset_ms.take();
+                    // The accumulated max already folds in the new face's own
+                    // timestamps (adopted just above), so it must survive the swap.
+                    let keep_added = group.added_at_ms.take();
+                    let keep_last_watched = group.last_watched_at_ms.take();
                     let mut ids = std::mem::take(&mut group.provider_ids);
                     for p in &item.provider_ids {
                         if !ids.contains(p) {
@@ -2676,6 +2687,10 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
                         group.played = keep_played;
                         group.view_offset_ms = keep_offset;
                     }
+                    // Restore the accumulated timestamps (they already include the
+                    // new face's own values, so this never loses data).
+                    group.added_at_ms = keep_added;
+                    group.last_watched_at_ms = keep_last_watched;
                 } else {
                     for p in &item.provider_ids {
                         if !group.provider_ids.contains(p) {
@@ -3028,6 +3043,25 @@ mod merge_tests {
         assert_eq!(backing.len(), 2);
         // The union of provider ids is retained for later joins.
         assert!(out[0].provider_ids.contains(&"tmdb:603".to_string()));
+    }
+
+    #[test]
+    fn dedup_adopts_timestamps_from_a_non_face_backing() {
+        // The richer face (poster + summary) lacks added/last-played; a plainer
+        // backing carries them. The merged card must adopt them or it sorts to
+        // the bottom of Recently added / Recently played despite a backing
+        // having the timestamp (sorting slice 3 review, finding 3).
+        let mut backing = with_ids(item("Dune", Some(2021), "plex"), &["imdb:tt1"]);
+        backing.added_at_ms = Some(500);
+        backing.last_watched_at_ms = Some(900);
+        let mut face = with_ids(item("Dune", Some(2021), "jf"), &["imdb:tt1"]);
+        face.poster = Some("p.jpg".into());
+        face.summary = Some("sand".into()); // richer → becomes the face
+        // Backing seen first, then the richer face swaps in — the fragile path.
+        let out = dedup_across_sources(vec![backing, face]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].added_at_ms, Some(500));
+        assert_eq!(out[0].last_watched_at_ms, Some(900));
     }
 
     // rev-2 guard: same-source versions stay separate cards (dedup is a

@@ -19,7 +19,11 @@ use super::ItemDto;
 /// Bound the cache: enough for hundreds of browsed folders, small enough
 /// that the whole-file JSON rewrite stays cheap. Oldest walks evict first.
 const MAX_LEVELS: usize = 512;
-const SCHEMA: u32 = 1;
+// v2 (2026-07-06): items gained `added_at_ms`. Bump so pre-existing schema-1
+// entries (which lack it → deserialize as None) are discarded on load and
+// rewalked, so "Recently added" doesn't sort stale-None on the first browse
+// after upgrade.
+const SCHEMA: u32 = 2;
 
 #[derive(Serialize, Deserialize, Clone)]
 struct LevelSnapshot {
@@ -211,6 +215,11 @@ fn same_items(a: &[ItemDto], b: &[ItemDto]) -> bool {
                 && x.media_type == y.media_type
                 && x.index == y.index
                 && x.parent_index == y.parent_index
+                // Sorting keys must be part of the equality check, or a
+                // background rewalk that only changes added_at_ms (e.g. an
+                // upgraded None → real mtime, or a replaced file) is treated as
+                // "no change" and the UI never gets the corrected sort order.
+                && x.added_at_ms == y.added_at_ms
         })
 }
 
