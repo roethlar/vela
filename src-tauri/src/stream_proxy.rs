@@ -33,12 +33,20 @@ enum Target {
         relative: String,
     },
     #[cfg(test)]
-    Mem(Vec<u8>),
+    Mem {
+        bytes: Vec<u8>,
+        /// Counts length probes (the stand-in for SMB's network `stat`) so a
+        /// test can assert a seek reuses the cached length instead.
+        probes: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    },
 }
 
 struct Entry {
     token: String,
     target: Target,
+    /// Entity length once learned on the first request, so a later Range
+    /// request (a seek) skips the per-open `stat`. `None` until discovered.
+    len: Option<u64>,
 }
 
 /// Oldest-first; registration evicts from the front once full. The
@@ -120,8 +128,20 @@ fn register(target: Target) -> Result<String, String> {
     reg.push_back(Entry {
         token: token.clone(),
         target,
+        len: None,
     });
     Ok(format!("http://127.0.0.1:{}/{}", p.port, token))
+}
+
+/// Record the discovered entity length for `token` so later requests (seeks)
+/// skip the length probe. Best-effort: a no-op if the token was evicted
+/// meanwhile (the next request simply re-probes).
+fn store_len(token: &str, len: u64) {
+    if let Ok(mut reg) = registry().lock() {
+        if let Some(entry) = reg.iter_mut().find(|e| e.token == token) {
+            entry.len = Some(len);
+        }
+    }
 }
 
 /// One parsed request: method, token from the path, and the Range header.
@@ -247,35 +267,59 @@ fn serve_connection(mut conn: TcpStream) -> Result<(), String> {
     if req.method != "GET" && req.method != "HEAD" {
         return respond_status(&mut conn, "405 Method Not Allowed", &[("Allow", "GET, HEAD")]);
     }
-    // Look the token up without holding the registry lock during I/O.
-    let target: Option<Target> = {
+    // Look the token up without holding the registry lock during I/O, along
+    // with any length learned on a prior request so a seek skips the probe.
+    let looked_up: Option<(Target, Option<u64>)> = {
         let reg = registry()
             .lock()
             .map_err(|_| "stream proxy registry poisoned".to_string())?;
-        reg.iter().find(|e| e.token == req.token).map(|e| match &e.target {
-            Target::Smb { mount, relative } => Target::Smb {
-                mount: mount.clone(),
-                relative: relative.clone(),
-            },
-            #[cfg(test)]
-            Target::Mem(bytes) => Target::Mem(bytes.clone()),
+        reg.iter().find(|e| e.token == req.token).map(|e| {
+            let target = match &e.target {
+                Target::Smb { mount, relative } => Target::Smb {
+                    mount: mount.clone(),
+                    relative: relative.clone(),
+                },
+                #[cfg(test)]
+                Target::Mem { bytes, probes } => Target::Mem {
+                    bytes: bytes.clone(),
+                    probes: probes.clone(),
+                },
+            };
+            (target, e.len)
         })
     };
-    let Some(target) = target else {
+    let Some((target, cached_len)) = looked_up else {
         return respond_status(&mut conn, "404 Not Found", &[]);
     };
     match target {
         Target::Smb { mount, relative } => {
             let smb = crate::smb_client::connect_mount(&mount)?;
-            let handle = smb.open_read(&relative)?;
+            // On a seek the length is already known: open without a redundant
+            // network stat. On the first request, learn it and cache it.
+            let handle = match cached_len {
+                Some(len) => smb.open_read_with_len(&relative, len)?,
+                None => {
+                    let handle = smb.open_read(&relative)?;
+                    store_len(&req.token, handle.len());
+                    handle
+                }
+            };
             let len = handle.len();
             serve_target(&mut conn, &req, len, |offset, buf| {
                 handle.read_at(offset, buf)
             })
         }
         #[cfg(test)]
-        Target::Mem(bytes) => {
-            let len = bytes.len() as u64;
+        Target::Mem { bytes, probes } => {
+            let len = match cached_len {
+                Some(len) => len,
+                None => {
+                    probes.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                    let len = bytes.len() as u64;
+                    store_len(&req.token, len);
+                    len
+                }
+            };
             serve_target(&mut conn, &req, len, move |offset, buf| {
                 let start = (offset as usize).min(bytes.len());
                 let n = (bytes.len() - start).min(buf.len());
@@ -398,7 +442,11 @@ mod tests {
     fn serves_full_head_range_and_errors_end_to_end() {
         let _guard = test_lock();
         let bytes: Vec<u8> = (0..=255u8).collect();
-        let url = register(Target::Mem(bytes.clone())).unwrap();
+        let url = register(Target::Mem {
+            bytes: bytes.clone(),
+            probes: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        })
+        .unwrap();
         let (port, token) = {
             let rest = url.strip_prefix("http://127.0.0.1:").unwrap();
             let (port, token) = rest.split_once('/').unwrap();
@@ -436,6 +484,49 @@ mod tests {
 
         let (head, _) = http(port, &format!("POST /{token} HTTP/1.1\r\nHost: x\r\n\r\n"));
         assert!(head.starts_with("HTTP/1.1 405"), "{head}");
+    }
+
+    #[test]
+    fn seek_reuses_cached_length_without_a_second_probe() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        let _guard = test_lock();
+        let bytes: Vec<u8> = (0..=255u8).collect();
+        let probes = std::sync::Arc::new(AtomicUsize::new(0));
+        let url = register(Target::Mem {
+            bytes: bytes.clone(),
+            probes: probes.clone(),
+        })
+        .unwrap();
+        let (port, token) = {
+            let rest = url.strip_prefix("http://127.0.0.1:").unwrap();
+            let (port, token) = rest.split_once('/').unwrap();
+            (port.parse::<u16>().unwrap(), token.to_string())
+        };
+
+        // First request (initial open) learns and caches the length.
+        let (head, body) = http(port, &format!("GET /{token} HTTP/1.1\r\nHost: x\r\n\r\n"));
+        assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+        assert_eq!(body, bytes);
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "first request probes the length exactly once"
+        );
+
+        // Second request is a seek (Range from a mid-file offset). It must
+        // reuse the cached length and perform no new probe — this is the
+        // redundant per-seek stat the fix removes.
+        let (head, body) = http(
+            port,
+            &format!("GET /{token} HTTP/1.1\r\nHost: x\r\nRange: bytes=10-19\r\n\r\n"),
+        );
+        assert!(head.starts_with("HTTP/1.1 206"), "{head}");
+        assert_eq!(body, (10..=19u8).collect::<Vec<_>>());
+        assert_eq!(
+            probes.load(Ordering::SeqCst),
+            1,
+            "seek reuses the cached length, no second probe"
+        );
     }
 
     #[test]

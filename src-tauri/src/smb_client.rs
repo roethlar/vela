@@ -163,8 +163,13 @@ pub struct SmbConnection {
 const OP_TIMEOUT_MS: i32 = 10_000;
 
 impl SmbConnection {
-    /// Create a context for `server`/`share` and verify it by listing the
-    /// share root. Empty `username` means guest/anonymous.
+    /// Create a context for `server`/`share`. Empty `username` means
+    /// guest/anonymous. Reachability and credentials are verified lazily on
+    /// the first operation (open/stat/list); add-time callers use
+    /// [`verify_mount`] for an explicit up-front check. The stream/browse hot
+    /// paths deliberately skip that extra share-root round-trip — on a seek
+    /// mpv reconnects and rebuilds a session, and re-enumerating the root each
+    /// time was a felt freeze on a real NAS.
     pub fn connect(
         server: &str,
         share: &str,
@@ -214,9 +219,6 @@ impl SmbConnection {
             share: share.trim().to_string(),
             _timeout_ms: OP_TIMEOUT_MS,
         };
-        // Verify reachability + credentials up front so callers get one
-        // clear error at add time instead of a broken source later.
-        conn.list_dir("")?;
         Ok(conn)
     }
 
@@ -314,6 +316,36 @@ impl SmbConnection {
     /// run off async workers.
     pub fn open_read(&self, relative: &str) -> Result<SmbReadHandle<'_>, String> {
         let len = self.stat(relative)?.size;
+        let file = self.open_raw(relative)?;
+        Ok(SmbReadHandle {
+            conn: self,
+            file,
+            len,
+        })
+    }
+
+    /// Like [`open_read`] but trusts a caller-supplied `len` instead of a
+    /// fresh network `stat`. The stream proxy uses this on a seek, where the
+    /// entity length was already learned (and cached) on the first request,
+    /// so a seek makes no redundant round-trip. Blocking; run off async
+    /// workers.
+    pub fn open_read_with_len(
+        &self,
+        relative: &str,
+        len: u64,
+    ) -> Result<SmbReadHandle<'_>, String> {
+        let file = self.open_raw(relative)?;
+        Ok(SmbReadHandle {
+            conn: self,
+            file,
+            len,
+        })
+    }
+
+    /// Open the file and return the raw handle. The context lock is held only
+    /// for the `open` call and released on return; positioned reads re-take it
+    /// per op. Blocking; run off async workers.
+    fn open_raw(&self, relative: &str) -> Result<*mut SMBCFILE, String> {
         let url = CString::new(self.url(relative))
             .map_err(|_| "SMB path contains a NUL byte".to_string())?;
         let guard = self
@@ -328,12 +360,7 @@ impl SmbConnection {
             if file.is_null() {
                 return Err(last_error("could not open SMB file"));
             }
-            drop(guard);
-            Ok(SmbReadHandle {
-                conn: self,
-                file,
-                len,
-            })
+            Ok(file)
         }
     }
 
@@ -447,10 +474,12 @@ pub fn connect_mount(m: &crate::config::SmbMount) -> Result<SmbConnection, Strin
     SmbConnection::connect(&m.server, &m.share, &m.username, &m.password, &m.domain)
 }
 
-/// Verify server/share/credentials by connecting and listing the share root.
-/// Blocking; run under spawn_blocking.
+/// Verify server/share/credentials at add time by connecting and listing the
+/// share root once. `connect` itself no longer lists the root (it is on the
+/// per-seek hot path), so this explicit check is the single place add-time
+/// callers pay for reachability. Blocking; run under spawn_blocking.
 pub fn verify_mount(m: &crate::config::SmbMount) -> Result<(), String> {
-    connect_mount(m).map(|_| ())
+    connect_mount(m)?.list_dir("").map(|_| ())
 }
 
 #[cfg(test)]
