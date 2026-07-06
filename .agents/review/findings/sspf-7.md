@@ -3,7 +3,7 @@
 **Severity**: HIGH — same live-context leak class as sspf-5, reopened: the sspf-5
 release-bump left an ownerless generation a straggler request could store under.
 **Status**: Verified
-**Commit**: `<pending>`
+**Commit**: `dec0121`
 
 ## Evidence
 `src-tauri/src/stream_proxy.rs`, `release_session` + `get_or_create_session`

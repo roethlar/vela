@@ -5,7 +5,7 @@ keeps the cached `SmbConnection`; if `playback::play` then fails before installi
 the new `on_end` owner, nothing releases the new generation, so the session stays
 active/servable until eviction/app exit.
 **Status**: Verified
-**Commit**: `<pending>`
+**Commit**: `ada9f65`
 
 ## Evidence
 `src-tauri/src/commands.rs`, `play_by_key` (after the sspf-7 fix, head `dec0121`).

@@ -4,7 +4,7 @@
 process-wide proxy registry mutex, stalling every proxy register / lookup /
 release for the duration of a network teardown (up to the SMB op timeout).
 **Status**: Verified
-**Commit**: `<pending>`
+**Commit**: `5a64172`
 
 ## Evidence
 `src-tauri/src/stream_proxy.rs`, `register` eviction (sub-slice 3, head

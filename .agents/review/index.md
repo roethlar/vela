@@ -7,6 +7,25 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop sspf-5..9 CLOSED 2026-07-06: all verified `[x]`, fixes on `main`. Scope was
+**SMB seek Bug 1 sub-slice 3** (per-token SMB session reuse — the real seek fix;
+code `05ed86b`) — base `21cd8909`, converged at head `ab3f74c` after **five codex
+rounds** (r1-r4 reopened, r5 accepted). Each round banked a distinct, real,
+guard-proven defect (a healthy converging loop, not a stall — the fixes built
+toward a correct session-lifecycle model): r1 sspf-5 (a create after the play
+released orphaned a session → generation-guarded commit, fix `c7211e6`) + sspf-6
+(eviction freed a context under the registry lock → drop off-lock, fix `5a64172`);
+r2 sspf-7 (sspf-5's release-bump left an ownerless generation a straggler could
+store under → replaced with generation=which-play + active=is-it-live, fix
+`dec0121`); r3 sspf-8 (a same-file replay keeps the session but play() installs the
+owner only on success → release on play failure, fix `ada9f65`); r4 sspf-9 (that
+on-failure release ran a blocking `smbc_free_context` on the async worker → moved
+onto the blocking pool, fix `ab3f74c`). r5 **accepted** clean (guard_confirmed,
+no comments) after a first attempt returned a fail-closed `invalid` (a codex
+tooling/budget wrap-up, not a finding; re-prompted per the playbook). All
+`Arc<SmbConnection>` drops verified off both the registry lock and async workers.
+Same no-branches adaptation.
+
 Loop sspf-4 CLOSED 2026-07-05: verified `[x]`, fix on `main`. Scope was **SMB
 seek Bug 1 sub-slice 2** (write deadline on the proxy socket) — base `5c50044`,
 head `8f41b90` after two codex rounds. r1 reopened sspf-4 (the 30s write

@@ -6,7 +6,7 @@ the cached session is the registry's last `Arc`, its drop runs a blocking
 async commands / UI backend work until the SMB teardown returns (up to the SMB op
 timeout).
 **Status**: Verified
-**Commit**: `<pending>`
+**Commit**: `ab3f74c`
 
 ## Evidence
 `src-tauri/src/commands.rs`, `play_by_key` (after the sspf-8 fix, head `ada9f65`).

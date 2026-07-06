@@ -5,7 +5,7 @@ session slot) is orphaned with no owner to free it; rapid replaces accumulate
 them up to the registry cap, and a NAS with per-client session limits can start
 refusing connections.
 **Status**: Verified
-**Commit**: `9a03df8`
+**Commit**: `c7211e6`
 
 ## Evidence
 `src-tauri/src/stream_proxy.rs`, `get_or_create_session` commit step (sub-slice 3,
