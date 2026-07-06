@@ -23,18 +23,27 @@ Keep it short and update it when important repo facts change.
   - slice 3 `be292e0`: Settings → Advanced mpv three-state selector
     (Off/Manual/Automatic); Automatic carries the D-state/HDR hang warning.
   Off by default; **Automatic auto-fires the live `video-crop` D-state path** (owner
-  chose to have it available, disclosed via UI). REMAINING: version bump (routine)
-  + owner playtest (does Shift+C/Automatic crop cleanly on the real HDR stack). NOTE:
-  rpm `License` tag not locally verifiable (no rpm tooling on the Arch dev host).
+  chose to have it available, disclosed via UI). Version bumped to 0.1.22
+  (`f237705`); handoff `607143d`. REMAINING: owner playtest only (does Shift+C /
+  Automatic crop cleanly on the real HDR stack). NOTE: rpm `License` tag not locally
+  verifiable (no rpm tooling on the Arch dev host).
 - CURRENT WORK (2026-07-05) — implementing
   `.agents/plans/smb-ssh-playtest-fixes.md`, **owner-approved** after a 3-round
   codex plan-reviewloop (accepted at r3; trail in the plan's Review log). Five
   bugs from the owner's 0.1.21 NAS playtest (SMB share + SSH folder, same host);
   diagnoses done this session, SMB/SSH seek mechanisms adversarially verified.
-  **IMMEDIATE NEXT ACTION: slice 1, SMB seek hang — NOT started** (no slice-1
-  code commits yet; only the plan docs are committed, and unpushed). Slice order +
-  per-slice hermetic verification are in the plan. STANDING INSTRUCTION:
-  `reviewloop codex` on every slice. Load-bearing gotchas from the plan-review a
+  **IMMEDIATE NEXT ACTION: Bug 1 sub-slice 1 — NOT started** (no slice-1
+  code commits yet; only the plan docs are committed, and unpushed). Concretely:
+  drop the share-root `list_dir("")` from the stream-open hot path
+  (`smb_client.rs:217-219`; verify reachability only at mount/add time) and cache
+  the file size from first open so a seek skips the redundant `stat`
+  (`smb_client.rs:315-316`). Guard-prove via the existing `Target::Mem` proxy test
+  seam (`stream_proxy.rs:36,277-285`): a second Range request must perform no
+  `list_dir` and no redundant `stat` — fails today. Then sub-slice 2 (proxy write
+  deadline), then sub-slice 3 (per-token session reuse — the real fix). Full slice
+  order + per-slice hermetic verification are in the plan (§"Slice order & commits").
+  STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
+  code slice (routine). Load-bearing gotchas from the plan-review a
   fresh session must not relearn:
   - SMB seek (slice 1): every mpv seek rebuilds a full libsmbclient session; fix =
     per-token session reuse (own file handle per stream, generation-owned
@@ -220,7 +229,7 @@ Keep it short and update it when important repo facts change.
 - Vela is a Tauri 2 + SvelteKit + Rust desktop media client for Plex,
   Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP mounts. It plays
   media through the system `mpv` binary for HDR passthrough.
-- Version 0.1.21 (bumped 2026-07-05). The owner pushes manually (push policy:
+- Version 0.1.22 (bumped 2026-07-05, `f237705`, for the autocrop feature). The owner pushes manually (push policy:
   ask, `.agents/push-policy.md`); treat remote positions as owner-managed.
 - 2026-07-04 landed a large batch, all owner-approved and verified:
   - All five approved plans implemented (see `.agents/plans/*`): post-playback
