@@ -7,6 +7,23 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop sspf-12 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Bug 5 P1 —
+Connected-tab triplication + erroring Remove** (base `ae9d2ff`, head `0a64cd0`,
+two codex rounds: r1 reopened, r2 accepted). The slice: `9c3597a` excludes the
+whole local family (`LOCAL_FAMILY_KINDS`) from the Connected registered-source loop
+(drops the leaked smb/ssh source row + its erroring `remove_source` Remove);
+`9379ec5` refuses to remove an SMB mount's last folder (a zombie zero-folder share)
+with a guard-proven Rust test, and cascades a last-folder Remove to a full unmount
+in the UI. r1 sspf-12 (MEDIUM): both frontend fixes shipped with no automated
+guard, so the P1 dead-end could regress with CI green — and codex showed a hermetic
+guard IS feasible (a **native** SMB mount, `mountpoint:""`, seeded in config renders
+the Connected tab with no connection). Fix `0a64cd0` adds
+`tests/e2e/scenarios/connectedtab.mjs` (asserts one SMB row, no leaked source row;
+last-folder Remove cascades to unmount with no error), guard-proven headed by
+reverting each frontend fix independently. Durable technique: the native mountless
+SMB seed makes the Connected tab E2E-testable without SMB infra. Same no-branches
+adaptation.
+
 Loop sspf-10..11 CLOSED 2026-07-06: all verified `[x]`, fixes on `main`. Scope
 was **Bug 3 — clicking a source dead-ends on empty Home** (frontend nav; code
 `b9cca81`) — base `f8e6d81`, converged at head `6837157` after two codex rounds
