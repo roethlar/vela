@@ -6,11 +6,27 @@ than we surface (yes — substantially) and, if so, to plan a detail view like
 Infuse / the Plex clients. Not approved for implementation. No code written.
 
 ## Goal
-Clicking an item (movie, series, season, episode) opens a **detail overlay** with
-richer info than the card: summary, rating(s), content rating, genres, cast +
-crew, studio, air/release date, runtime, and technical media specs (resolution,
-codec, HDR, audio, subtitles) — with **Play** (and the existing context actions)
-from the detail surface. Graceful degradation where a backend has less.
+A **detail / info surface** with richer info than the card: summary, rating(s),
+content rating, genres, cast + crew, studio, air/release date, runtime, and
+technical media specs (resolution, codec, HDR, audio, subtitles) — with **Play**
+(and the existing context actions) from that surface. Graceful degradation where a
+backend has less.
+
+## Owner UX ruling (2026-07-06, binding)
+Navigation is spec'd — no per-slice choice:
+- **Continue Watching carousel: click = play** (immediate, unchanged).
+- **Any library view: click → drill in, never instant-play.**
+  - **Movie**: click → **info page**; play from the poster / a Play button on that
+    page.
+  - **Show**: click → **seasons** → a season → its **episodes**.
+  - **Episode**: **one shared info page** for the season's episodes, with the
+    displayed info updating as the selected episode changes (episode list + a detail
+    panel bound to the selection — not a separate page per episode).
+- **No half-built state (binding):** this ships complete, not incrementally
+  user-visible. The new click routing + info surfaces must work across the backends
+  the owner uses before the navigation flips. See "Sequencing" — build behind the
+  current nav and flip last, rather than landing a Plex-only info page into the live
+  flow while local/JF movies click into a stub.
 
 ## Today: no detail surface at all
 - The whole UI is one file; clicking a movie/episode **plays immediately**, a
@@ -67,38 +83,57 @@ view here shows mostly title/year/summary/poster unless we widen the `.nfo` pars
      child set (cast/crew/genre/media streams).
    - JF/Emby → `/Users/{u}/Items/{id}` with a wide `Fields=` set.
    - Local → return `CachedMeta` + a widened `.nfo` parse; degrade gracefully.
-3. **Frontend detail overlay** — a new Svelte component (not more of
-   `+page.svelte`): poster/backdrop, title, meta row (year · runtime · content
-   rating · rating), genres, summary, cast strip (headshots), crew, studio, a
-   "Media" section (resolution/codec/HDR/audio/subs), and Play + existing actions.
-   Reached from a card click (movies/episodes → detail instead of instant play; add
-   a Play button in the detail) and/or a new context-menu "Info" entry. **Owner
-   decision:** does a movie click open detail-then-play, or keep instant-play and
-   put detail behind "Info"? (Infuse opens detail; instant-play is faster.)
+3. **Frontend info surfaces** — new Svelte component(s), not more of `+page.svelte`:
+   - **Movie info page**: poster/backdrop, title, meta row (year · runtime · content
+     rating · rating), genres, summary, cast strip (headshots), crew, studio, a
+     "Media" section (resolution/codec/HDR/audio/subs), and a **Play button on the
+     poster**. Reached by clicking a movie card.
+   - **Show → seasons → episodes** drill: clicking a show lists seasons; a season
+     lists episodes (extends the existing `get_children` drill, `+page.svelte:554`).
+   - **Episode info page (shared)**: the season's episode list plus a detail panel
+     bound to the selected episode — selecting an episode updates title/still/
+     summary/air-date/runtime/stream-specs in place; Play acts on the selection.
+   Nav wiring per the binding UX ruling (CW carousel click still plays).
 
-## Proposed slices (each its own commit + reviewloop codex)
-1. **`DetailDto` + `item_detail` trait method + `get_item_detail` command,
-   Plex-only** (the richest, highest-ROI backend). Parse the full item-metadata
-   response into the DTO. Backend unit tests on the XML/JSON parse.
-2. **Frontend detail overlay component** wired to `get_item_detail`, Plex data.
-   The felt feature lands here.
-3. **Jellyfin/Emby `item_detail`** (widen `Fields=`, parse people/genres/ratings/
-   streams).
-4. **Local `item_detail`** — widen the `.nfo` parse (genre/cast/runtime/rating)
-   and return what exists; degrade cleanly when only filename data is present.
-5. (Optional) **Cast/crew headshots + genre chips polish**, episode-level detail.
+## Sequencing — "no half-built state" (binding)
+Because the click routing flips globally (movie click stops playing, starts opening
+info), the info surface must be real on every backend the owner browses before that
+flip is user-visible. Reconcile with the repo's commit-per-slice + reviewloop
+discipline by **building behind the current nav and flipping last**:
+- Slices 1-4 add backends + the component but keep the **old click behavior live**
+  (component reachable only behind a dev flag / not yet wired to card click).
+- The **final slice flips the navigation** once movie-info, show/season/episode
+  drill, and the shared episode page all work across Plex + JF/Emby + local (with
+  local degrading to a clean sparse page, not a broken/empty one).
+- Each intermediate slice is still an independently committed, reviewed, guard-proven
+  unit — it just isn't the user-visible entry point until the flip.
+
+## Proposed slices (each its own commit + reviewloop codex; nav stays old until the flip)
+1. **`DetailDto` + `item_detail` trait method + `get_item_detail` command, Plex.**
+   Parse the full `/library/metadata/{rk}` set (cast/crew/genre/media streams) + map
+   the already-parsed-but-dropped `Part`/`Media` fields. Backend unit tests.
+2. **Jellyfin/Emby `item_detail`** (widen `Fields=`, parse people/genres/ratings/
+   streams). Keeps the flip from being Plex-only.
+3. **Local `item_detail`** — widen the `.nfo` parse (genre/cast/runtime/rating);
+   return what exists; a clean sparse page when only filename data is present.
+4. **Info-surface components** (movie info page; shared episode info page) wired to
+   `get_item_detail`, behind the current nav (dev-flag reachable), across all three
+   backends. E2E where practical.
+5. **Flip the navigation** (the binding UX ruling): movie click → info page; show →
+   seasons → episodes; episode → shared info page; CW carousel unchanged. This is
+   the slice that makes it user-visible — only lands when 1-4 are complete.
 
 ## Proportionality / "is this worth it?"
-- This is the single biggest step toward "richer client" — exactly the surface
-  that makes Vela feel like Plex/Infuse. Owner asked for it, so it's wanted, but
-  it's also the most scope. **Recommend Plex-first (slices 1-2)** as a self-
-  contained deliverable: it's the owner's primary backend, the data is already
-  fetched, and it proves the pattern before investing in JF/local parity.
+- This is the single biggest step toward "richer client" — exactly the surface that
+  makes Vela feel like Plex/Infuse. Owner asked for it and spec'd the flow, so it's
+  wanted; it's also the most scope, and the "no half-built" rule means it lands as
+  **one complete feature**, not a trickle. Budget it as a multi-slice project, not a
+  quick win.
 - **Local tier will look sparse** (title/year/summary/poster) unless the NAS has
-  `.nfo` sidecars; set that expectation. Widening the `.nfo` parse (slice 4) is the
-  cheap lever for sidecar-rich libraries.
-- Keep it one clean overlay; resist creeping into full Kodi-style metadata editing,
-  scraper config, or a library-management surface (explicit non-goal below).
+  `.nfo` sidecars; widening the `.nfo` parse (slice 3) is the cheap lever. A sparse
+  page is acceptable ("not broken"); an empty/erroring one is not.
+- Hold the line at a **view**: resist creeping into Kodi-style metadata editing,
+  scraper config, or artwork pickers (explicit non-goals below).
 
 ## Non-goals
 - No metadata editing, no scraper/agent configuration, no artwork picker.
@@ -113,7 +148,11 @@ view here shows mostly title/year/summary/poster unless we widen the `.nfo` pars
   other Plex live tests).
 
 ## Open decisions for owner
-- Movie/episode click → detail-then-play, or instant-play + "Info" entry?
-- Backend order: Plex-only first (recommended) vs. all backends together?
+- Click flow — **RESOLVED** (binding UX ruling above): CW carousel plays; movie →
+  info page (Play on poster); show → seasons → episodes; episode → shared info page.
+- Backend order — **RESOLVED**: all backends before the nav flip (no half-built
+  state). Slices land internally; the flip is last.
 - How much to widen the local `.nfo` parse (cast/crew adds real value only if the
-  owner's libraries carry it).
+  owner's libraries carry it) — a scope dial, not a blocker.
+- Movie "info page" and episode "info page": full-screen route vs. large overlay?
+  (Leaning full-screen route to match the drill-in feel; confirm.)
