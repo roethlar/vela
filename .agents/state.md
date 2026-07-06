@@ -148,7 +148,36 @@ Keep it short and update it when important repo facts change.
   was the code review that surfaced sspf-14). Trail `.agents/review/index.md` +
   `findings/sspf-14.md`. REMAINING: owner playtest — friendly default labels appear
   and rename works on the real NAS.
-  **IMMEDIATE NEXT ACTION: Bug 4 (LARGER) — share/mount root shows bare metadata-less cards,
+  **OWNER REPRIORITIZATION 2026-07-06: SMB/SSH work is DEFERRED — go Plex-first.**
+  The owner is primarily a Plex user, is wary of Vela becoming Kodi-like, and chose
+  to defer *all* remaining SMB/SSH work: **Bug 4 (share-root classification), the
+  metadata "Recently added" rail, AND the SMB metadata-revalidation fix** (plan
+  `.agents/plans/local-metadata-revalidation.md`, diagnosed but parked — SMB
+  "reloading every open" = no-TTL stale-while-revalidate re-walk over the network).
+  Owner: "if I care about that more later, I'll pick it up." Do NOT start these
+  without an explicit owner go. Bug 4 technical detail is preserved below for
+  whenever it resumes.
+  **IMMEDIATE NEXT ACTION: two Plex-first feature tracks — draft plans committed,
+  owner decisions locked, awaiting an explicit go to implement (no code yet).**
+  (1) **Library sorting** (`.agents/plans/library-sorting.md`): owner's minimum set
+  (date added, date last played, title, release date, folder) across all views.
+  Much already works on Plex/JF per-source; real gaps = merged "All" view locked to
+  title/year, local family ignores 4 of 6 sorts, and `folder` is new. Owner DECIDED
+  folder = a **flat "sort by folder"** (group by containing dir; NOT a folder-browse
+  mode), cross-backend (Plex `Part.file`/JF `Path`/local path). Smaller, universal —
+  good first track. (2) **Plex item detail / info view**
+  (`.agents/plans/item-detail-view.md`): the "richer client" surface. Plex gives us
+  much we currently drop (ratings, content rating, genres, cast+crew w/ headshots,
+  studio, tagline, air date, stream specs). **Binding owner UX ruling:** CW carousel
+  click = play; movie click → info page (Play on poster); show → seasons → episodes;
+  episode → ONE shared info page updating per selected episode. **Binding "no
+  half-built state":** build all backends (Plex+JF+local) behind the current nav and
+  **flip navigation last** — never ship a Plex-only stub. Info page = full-screen
+  route (recommended, consistent with drill-in; owner can veto). Bigger, multi-slice.
+  Both plans should run the `codex` plan-review loop before implementation (repo
+  convention). Suggested order: sorting first (smaller, higher certainty), then the
+  detail view.
+  **DEFERRED (owner 2026-07-06) — Bug 4 (LARGER) — share/mount root shows bare metadata-less cards,
   starves the merged view (P2, the metadata unlock).** The share-root auto-add
   registers the whole share as ONE flat kind-auto folder; a NAS root of category dirs
   (Movies/, TV/…) is mis-classified into one flat section of bare cards (no
@@ -166,8 +195,8 @@ Keep it short and update it when important repo facts change.
   right level). DESIGN FORK to settle first: lazy effective-root cache inside
   `LocalSource` (expand under `run_blocking` in sections()/items()) vs a
   config-snapshot expand-then-swap.
-  **THEN the metadata-gated local/SMB/SSH "Recently added" rail** (last slice; depends
-  on Bug 4 — only items with resolved metadata, never blank filename cards).
+  **DEFERRED with Bug 4 — the metadata-gated local/SMB/SSH "Recently added" rail**
+  (depends on Bug 4 — only items with resolved metadata, never blank filename cards).
   STANDING INSTRUCTION: `reviewloop codex` on every slice; bump version per landed
   code slice (routine). Reviewloop mechanics that worked this session (0.1.26–0.1.28):
   codex incantation `codex exec --json -s read-only --output-schema <schema> "<prompt>"

@@ -38,10 +38,11 @@ inconsistent across views/backends.
    already parsed (`plex_library.rs:177-186`) and dropped in `to_item`; JF/Emby —
    the item `Path` / `MediaSources[].Path` (request via `Fields=Path`). Plex also
    has a **native By-Folder browse** endpoint (`/library/sections/{key}/folder`).
-   New token; cross-backend. **Open: folder as a flat sort-by-containing-dir, or a
-   true hierarchical folder-browse mode (Plex-native `/folder`)? Owner uses the
-   Plex folder view, which is a browse mode — confirm which is wanted (see Open
-   decisions); a probe of the live Plex `/folder` endpoint is part of that slice.**
+   New token; cross-backend. **DECIDED 2026-07-06 (owner): a flat "sort by folder"**
+   — group the listing by its containing directory and sort, reusing the existing
+   sort pipeline. **NOT** a hierarchical folder-browse mode (no new navigation
+   surface, no Plex `/folder` browse). This keeps the slice small: carry a
+   folder/path per item, sort by it.
 4. **`ItemDto` lacks `addedAt`.** Plex parses `addedAt` but drops it in `to_item`
    (`source/plex.rs`); JF doesn't request `DateCreated`; the local VFS exposes no
    modified-time (`source/vfs.rs:9-46` has `file_len`, no `modified`).
@@ -70,15 +71,12 @@ inconsistent across views/backends.
    maps its already-parsed `added_at`; JF adds `DateCreated` to the `Fields=` query
    and parses it; local adds `Vfs::modified()` (mtime; SMB/SSH stat — network, so
    only read during the walk, cached in the listing). Local `addedAt` sort arm.
-3. **`folder` sort/browse (cross-backend).** New `folder` token in `ALLOWED_SORTS`
-   + frontend `SORTS`, offered on **all** backends (owner uses it in Plex). Carry a
-   per-item folder/path: local from `rating_key`; Plex from `PlexPart.file`
-   (already parsed — map it into the DTO); JF/Emby by adding `Path` to `Fields=`.
-   `sort_and_page` folder arm (group by parent dir, then title); server sources
-   either sort the fetched page by folder or, if the owner wants true hierarchy,
-   use Plex's native `/library/sections/{key}/folder` browse. **First step of this
-   slice: probe the live Plex `/folder` endpoint + confirm sort-vs-browse with the
-   owner** (this is the one design fork that needs settling before coding).
+3. **`folder` flat sort (cross-backend).** New `folder` token in `ALLOWED_SORTS` +
+   frontend `SORTS`, offered on **all** backends (owner uses it in Plex). Carry a
+   per-item folder/path: local from `rating_key`; Plex from `PlexPart.file` (already
+   parsed — map it into the DTO); JF/Emby by adding `Path` to `Fields=`. Sort arm:
+   group by parent dir, then title. Server sources sort the fetched page by folder.
+   No folder-browse navigation (owner chose flat sort, 2026-07-06).
 4. **Populate JF `last_watched_at_ms`** (parse the ISO-8601 `DatePlayed`) so
    last-played sort is real on Jellyfin/Emby, not just Plex.
 5. **Relax the merged "All" view.** Once `added_at_ms` and last-played exist on the
@@ -107,12 +105,8 @@ inconsistent across views/backends.
 - E2E optional (the merged-view sort could reuse the mock-JF + local seed harness).
 
 ## Open decisions for owner
-- **Folder: flat sort-by-containing-dir vs. true hierarchical folder-browse.** Owner
-  uses the Plex folder view (a browse mode). A flat "sort by folder" is much smaller
-  and reuses the existing sort pipeline; a real folder-browse mode is a new
-  navigation surface (per backend: local walk, Plex `/folder`, JF folder items).
-  Needs an owner call + a Plex `/folder` probe. This is the main scope driver of the
-  whole plan.
+- Folder sort — **RESOLVED 2026-07-06**: flat "sort by folder" (group by containing
+  dir), not a folder-browse mode.
 - Full-date release sorting vs. year granularity (recommend: year).
 - Episode-level sorting inside a season (default: leave natural order).
 - Whether folder is offered in the merged "All" view or per-source only

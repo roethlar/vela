@@ -154,5 +154,7 @@ discipline by **building behind the current nav and flipping last**:
   state). Slices land internally; the flip is last.
 - How much to widen the local `.nfo` parse (cast/crew adds real value only if the
   owner's libraries carry it) — a scope dial, not a blocker.
-- Movie "info page" and episode "info page": full-screen route vs. large overlay?
-  (Leaning full-screen route to match the drill-in feel; confirm.)
+- Info page presentation — **RESOLVED 2026-07-06 (recommend, pending owner veto):
+  full-screen route**, not a floating overlay. Rationale: a movie's info page is
+  just another drill-in level (like show→seasons→episodes), so Back behaves
+  identically everywhere and the nav model stays consistent.
