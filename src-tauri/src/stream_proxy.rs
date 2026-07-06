@@ -60,20 +60,48 @@ enum Session {
     /// that the cache reused a session rather than creating a new one.
     #[cfg(test)]
     Fake,
+    /// Test-only: held only for its `Drop` side effect (a registry-lock probe),
+    /// so a test can prove eviction frees a session OFF the registry lock
+    /// (sspf-6). The payload is never read, only dropped.
+    #[cfg(test)]
+    #[allow(dead_code)]
+    Probed(std::sync::Arc<DropProbe>),
 }
 
 impl Session {
     /// The SMB connection this session wraps. Only ever called for a session
-    /// built from an SMB target, so the test-only `Fake` arm is unreachable.
-    // The match is infallible in non-test builds (where `Fake` does not exist),
-    // but must stay a match to cover `Fake` under `cfg(test)`.
+    /// built from an SMB target, so the test-only arms are unreachable.
+    // The match is infallible in non-test builds (where only `Smb` exists), but
+    // must stay a match to cover the test-only variants under `cfg(test)`.
     #[allow(clippy::infallible_destructuring_match)]
     fn smb(&self) -> &std::sync::Arc<crate::smb_client::SmbConnection> {
         match self {
             Session::Smb(smb) => smb,
             #[cfg(test)]
             Session::Fake => unreachable!("an SMB target yields an SMB session"),
+            #[cfg(test)]
+            Session::Probed(_) => unreachable!("a probed session is never served"),
         }
+    }
+}
+
+/// Test-only: a session payload whose `Drop` records whether the proxy registry
+/// lock was free at drop time, so a test can prove eviction frees a session's
+/// context OFF the registry lock (sspf-6). Uses `try_lock`, so probing a lock
+/// held by the same thread reports "held" rather than deadlocking.
+#[cfg(test)]
+struct DropProbe {
+    lock_free_at_drop: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    dropped: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+#[cfg(test)]
+impl Drop for DropProbe {
+    fn drop(&mut self) {
+        use std::sync::atomic::Ordering;
+        let free = registry().try_lock().is_ok();
+        self.lock_free_at_drop.store(free, Ordering::SeqCst);
+        self.dropped.store(true, Ordering::SeqCst);
     }
 }
 
@@ -184,9 +212,16 @@ fn register(target: Target) -> Result<String, String> {
         existing.generation = existing.generation.wrapping_add(1);
         return Ok(format!("http://127.0.0.1:{}/{}", p.port, existing.token));
     }
-    if reg.len() >= REGISTRY_CAP {
-        reg.pop_front();
-    }
+    // Evict the oldest when full — but hold the evicted entry and drop it AFTER
+    // releasing the registry lock: its cached session may own the last
+    // `Arc<SmbConnection>`, whose `Drop` runs a blocking `smbc_free_context`
+    // under the lifecycle lock (sspf-6). Freeing that while holding the registry
+    // lock would stall every register/lookup/release for the teardown.
+    let evicted = if reg.len() >= REGISTRY_CAP {
+        reg.pop_front()
+    } else {
+        None
+    };
     reg.push_back(Entry {
         token: token.clone(),
         target,
@@ -195,7 +230,10 @@ fn register(target: Target) -> Result<String, String> {
         session: None,
         serve_epoch: std::sync::Arc::new(AtomicU64::new(0)),
     });
-    Ok(format!("http://127.0.0.1:{}/{}", p.port, token))
+    let url = format!("http://127.0.0.1:{}/{}", p.port, token);
+    drop(reg); // release the registry lock…
+    drop(evicted); // …before freeing the evicted context (a blocking teardown)
+    Ok(url)
 }
 
 /// Record the discovered entity length for `token`, learned by a request that
@@ -1190,6 +1228,46 @@ mod tests {
         assert!(
             !entry_has_session(&token),
             "no orphaned session is stored for the ended play"
+        );
+    }
+
+    #[test]
+    fn eviction_frees_the_session_off_the_registry_lock() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        let _guard = test_lock();
+        let m = |id: &str| SmbMount {
+            id: id.into(),
+            ..SmbMount::default()
+        };
+
+        // Give one token a session whose drop probes the registry lock.
+        let lock_free = std::sync::Arc::new(AtomicBool::new(false));
+        let dropped = std::sync::Arc::new(AtomicBool::new(false));
+        let url = register_smb(&m("probed"), "x.mkv").unwrap();
+        let token = url.rsplit('/').next().unwrap().to_string();
+        {
+            let mut reg = registry().lock().unwrap();
+            let entry = reg.iter_mut().find(|e| e.token == token).unwrap();
+            entry.session = Some(Session::Probed(std::sync::Arc::new(DropProbe {
+                lock_free_at_drop: lock_free.clone(),
+                dropped: dropped.clone(),
+            })));
+        }
+
+        // Register REGISTRY_CAP fresh tokens: the deque then holds only those, so
+        // the probed entry (registered before all of them) is evicted, dropping
+        // its probing session during one register() eviction.
+        for i in 0..REGISTRY_CAP {
+            let _ = register_smb(&m(&format!("evict-{i}")), "y.mkv").unwrap();
+        }
+
+        assert!(
+            dropped.load(Ordering::SeqCst),
+            "the probed session was evicted and dropped"
+        );
+        assert!(
+            lock_free.load(Ordering::SeqCst),
+            "the evicted session's context is freed OFF the registry lock"
         );
     }
 }
