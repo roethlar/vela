@@ -527,11 +527,15 @@ Context: the owner rejected every library/browse/direct-play framing for
 files ("zero value to accessing the same file via ssh, smb, plex, emby, and
 jellyfin"; "I already have file explorer, finder, dolphin").
 
-Open question (owner criterion: "if it's easy, then sync; if not, we can
-find something else"): whether Plex -> Jellyfin/Emby watch-state transfer
-for the eventual migration lives in Vela (a one-shot copy tool) or outside
-it (Trakt tooling such as PlexTraktSync + server Trakt plugins). No
-continuous sync daemon in Vela either way.
+Watch-state transfer for the eventual migration (owner-refined 2026-07-08):
+the GOAL is a one-shot direct Plex -> Jellyfin/Emby copy built into Vela
+(match by normalized provider ids; copy played + resume position),
+contingent on it proving simple when planned ("if it's simple to do it
+directly, that will be the goal"). Trakt relay tooling is NOT the plan —
+the owner's Trakt use lives in Infuse, not in Plex, so PlexTraktSync-style
+relays don't fit; if the direct copy turns out non-simple, an alternative
+gets found then. No continuous sync daemon in Vela either way. Assess and
+plan at migration time; nothing is built now.
 
 Reason:
 The local family was a pseudo-library: kind detection, filename parsing,
