@@ -37,8 +37,9 @@ file via ssh, smb, plex, emby, and jellyfin").
   `lib.rs:376`, missed by the first inventory) + their pure helpers/tests; the
   `local`/`smb`/`ssh` arms of `kind_rank`/`detail_rank` (both collapse to
   plex < jellyfin/emby < unknown).
-- **Non-command references that must be pruned for slice 2 to compile (r1
-  finding 2)**: `remove_source`'s `source::local::is_local_family_id` gate
+- **Non-command references that must be pruned within the same
+  turn-off-and-delete slice 1 for it to compile (r1 finding 2; renumbered per
+  r2/r3)**: `remove_source`'s `source::local::is_local_family_id` gate
   (`commands.rs:211`); the playback-cleanup proxy-session machinery
   `proxy_session_key`/`release_proxy_session` and their call sites
   (`commands.rs:3516-3673`), which reference `stream_proxy`. Sweep for further
@@ -73,7 +74,15 @@ decision); any Trakt integration (rejected).
 - **Old configs must keep loading.** `local_folders`/`smb_mounts`/`ssh_mounts`
   stay as tolerated serde fields (parsed, ignored, preserved on save — never
   stripped, so a rollback build still sees them). Config parse stays
-  fail-closed on corruption, unchanged.
+  fail-closed on corruption, unchanged. **This requires disabling the legacy
+  SMB migrator (r3 finding):** `AppConfig::normalize_legacy_smb_mounts`
+  (`config.rs:183-228`) runs on every load (`:300`, `:376`) and REWRITES the
+  legacy fields (moves `local_folder_id`-era data into `smb_mounts[].folders`,
+  strips matching `local_folders` on the next save) — with it active, the
+  preserve-on-save promise is false and rollback data is lost. Slice 1 deletes
+  the migrator (its purpose is moot once mounts are inert), and the round-trip
+  guard must include a legacy-shaped config (pre-migration `local_folder_id`
+  form) proving the inert fields survive load→save byte-identical.
 - **Recents referencing removed sources**: dropped at load (a hero card whose
   Play can only error is the dead-end the UX rulings forbid). Tombstones and
   `merged_overrides` residue is harmless (keyed lookups miss) — leave.
@@ -169,3 +178,13 @@ confirmed resolved).**
   and 2 merged into ONE turn-off-and-delete slice (temporary
   `#[allow(dead_code)]` scaffolding rejected as churn); later slices
   renumbered (E2E re-home = 2, docs sweep = 3).
+
+**r3 — 2026-07-08 — verdict `reopened`, 2 findings, both ADMITTED (r2 fix
+confirmed resolved).**
+- (MEDIUM) The preserve-on-save compatibility rail was contradicted by the
+  live legacy migrator `normalize_legacy_smb_mounts` (`config.rs:183-228`,
+  invoked at `:300`/`:376`), which rewrites legacy SMB/local fields on load —
+  rollback data loss. Fixed: slice 1 deletes the migrator; the round-trip
+  guard must cover a legacy-shaped (pre-migration) config byte-identically.
+- (LOW) A stale "for slice 2 to compile" phrase survived the r2 renumbering
+  in the inventory. Fixed: rephrased to the turn-off-and-delete slice 1.
