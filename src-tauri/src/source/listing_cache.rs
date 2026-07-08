@@ -261,6 +261,7 @@ mod tests {
             backing: None,
             canonical_id: None,
             watch_key: None,
+            detail_key: None,
             source_id: "local".into(),
         }
     }

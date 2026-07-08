@@ -4,6 +4,9 @@
   import { onMount, onDestroy, tick } from "svelte";
   import Settings from "$lib/Settings.svelte";
   import Icon from "$lib/Icon.svelte";
+  import ItemDetail from "$lib/ItemDetail.svelte";
+  import SeasonDetail from "$lib/SeasonDetail.svelte";
+  import { detailKeyOf, type Item } from "$lib/types";
 
   // Poster URLs that 404'd; fall back to the title placeholder for these.
   let failedPosters = $state(new Set<string>());
@@ -31,27 +34,8 @@
   }
 
   type Section = { key: string; title: string; sectionType: string; sourceName?: string };
-  type Item = {
-    ratingKey: string;
-    title: string;
-    year?: number;
-    poster?: string;
-    seriesPoster?: string;
-    backdrop?: string;
-    mediaType?: string;
-    durationMs?: number;
-    viewOffsetMs?: number;
-    grandparentTitle?: string;
-    parentTitle?: string;
-    index?: number;
-    parentIndex?: number;
-    played?: boolean | null;
-    lastWatchedAtMs?: number;
-    sourceId?: string;
-    backing?: { sourceId: string; ratingKey: string }[];
-    canonicalId?: string;
-    watchKey?: string;
-  };
+  // `Item` (the listing-card DTO mirror) lives in $lib/types, shared with the
+  // detail components.
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
   type Crumb = { title: string; ratingKey: string | null };
   type Source = { id: string; name: string; kind: string };
@@ -181,6 +165,9 @@
   });
 
   async function boot() {
+    // Dev flag for the not-yet-flipped detail surface (see openInfo below):
+    // on in dev builds, opt-in via localStorage in release builds.
+    devDetail = import.meta.env.DEV || localStorage.getItem("vela.devDetail") === "1";
     // Check mpv up front so we can prompt to install before the user hits play.
     invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     invoke<AppInfo>("get_app_info").then((a) => (appInfo = a)).catch(() => {});
@@ -235,6 +222,7 @@
       crumbs = [];
       active = null;
       activeType = null;
+      detailView = null;
       mode = "home";
       loading = false;
     }
@@ -408,6 +396,7 @@
   }
 
   function goHome() {
+    detailView = null;
     loadGen++; // invalidate any in-flight browse load so it can't append after we leave
     loadingMore = false;
     loading = false; // a stale browse load won't clear this (its gen is stale); do it here
@@ -469,6 +458,7 @@
   }
 
   async function select(section: Section) {
+    detailView = null;
     mode = "browse";
     searchTerm = "";
     active = section;
@@ -479,6 +469,7 @@
 
   // Open a consolidated content-type listing (All view's Library).
   async function selectType(t: string) {
+    detailView = null;
     mode = "browse";
     searchTerm = "";
     active = null;
@@ -560,13 +551,18 @@
 
   // Drill into shows/seasons; play episodes/movies. Works from the home rails too.
   async function open(item: Item) {
+    detailView = null;
     if (item.mediaType === "show" || item.mediaType === "season") {
+      // Merged shows drill through the metadata-richest backing (idv-5) so
+      // seasons/episodes come from — and play on — the rich server source;
+      // non-merged items carry no detailKey, so nothing changes for them.
+      const key = detailKeyOf(item);
       if (mode === "home") {
         // Drilling out of a hub: start a fresh crumb trail rooted at this item.
         active = null;
-        crumbs = [{ title: item.title, ratingKey: item.ratingKey }];
+        crumbs = [{ title: item.title, ratingKey: key }];
       } else {
-        crumbs = [...crumbs, { title: item.title, ratingKey: item.ratingKey }];
+        crumbs = [...crumbs, { title: item.title, ratingKey: key }];
       }
       mode = "browse";
       await resetAndLoad();
@@ -594,6 +590,7 @@
     homeGen++; // leaving home: invalidate any in-flight home/sections load
     const myGen = ++loadGen; // invalidate any in-flight load; guard our own result
     loadingMore = false;
+    detailView = null;
     mode = "browse";
     active = null; // search results aren't a section, so no pagination
     searchTerm = q;
@@ -795,6 +792,43 @@
       refreshWatchState();
     } catch (e) {
       error = String(e);
+    }
+  }
+
+  // ---- Detail / info surface (item-detail-view, amended slice 2) ----------
+  // Reached only via the dev-flagged context-menu "Info" entry until the
+  // navigation flips (amended slice 3): set localStorage "vela.devDetail" to
+  // "1". The view layers over home/browse without touching their state, so
+  // closing it returns exactly where the user was.
+  type DetailView =
+    | { kind: "item"; item: Item }
+    | { kind: "season"; seasonKey: string | null; seed: Item; initialSelKey?: string };
+  let detailView = $state<DetailView | null>(null);
+  let devDetail = $state(false);
+
+  function closeDetail() {
+    detailView = null;
+  }
+
+  // Route an item to its info surface (owner UX ruling): movie/video → the
+  // full-screen item page; season → the shared episode page; episode → the
+  // shared page for its season (the current crumb when we're inside that
+  // season's grid; single-episode mode otherwise). Shows keep their
+  // seasons drill, so no entry is offered for them.
+  function openInfo(item: Item) {
+    closeMenu();
+    if (item.mediaType === "season") {
+      detailView = { kind: "season", seasonKey: detailKeyOf(item), seed: item };
+    } else if (item.mediaType === "episode") {
+      const here = mode === "browse" && !searchTerm ? crumbs[crumbs.length - 1] : null;
+      detailView = {
+        kind: "season",
+        seasonKey: here?.ratingKey ?? null,
+        seed: item,
+        initialSelKey: item.ratingKey,
+      };
+    } else {
+      detailView = { kind: "item", item };
     }
   }
 </script>
@@ -1109,6 +1143,26 @@
       </p>
       <button class="primary" onclick={() => (showSettings = true)}>Add a source</button>
     </div>
+  {:else if detailView}
+    <!-- The info surface replaces the content area but leaves home/browse
+         state untouched underneath — Back returns exactly where you were. -->
+    {#if detailView.kind === "item"}
+      {#key detailView.item.ratingKey}
+        <ItemDetail item={detailView.item} {posterSrc} onBack={closeDetail} onPlay={play} onMenu={openMenu} />
+      {/key}
+    {:else}
+      {#key detailView.seed.ratingKey}
+        <SeasonDetail
+          seasonKey={detailView.seasonKey}
+          seed={detailView.seed}
+          initialSelKey={detailView.initialSelKey}
+          {posterSrc}
+          onBack={closeDetail}
+          onPlay={play}
+          onMenu={openMenu}
+        />
+      {/key}
+    {/if}
   {:else if mode === "home"}
     {#if loading && hubs.length === 0 && heroItems.length === 0}
       {@render skelRails()}
@@ -1184,6 +1238,7 @@
     if (e.key === "Escape") {
       if (menu) closeMenu();
       else if (queueOpen) toggleQueue();
+      else if (detailView) closeDetail();
     }
   }}
 />
@@ -1196,6 +1251,11 @@
   {@const fullyWatched = mi.played === true && !inProgress}
   <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px;" role="menu">
     <button role="menuitem" onclick={() => { closeMenu(); play(mi); }}>Play</button>
+    {#if devDetail && mi.mediaType !== "show"}
+      <!-- Dev-flagged until the nav flip (amended slice 3) ungates it; it
+           then stays as the info path for carousel items (CW click = play). -->
+      <button role="menuitem" onclick={() => openInfo(mi)}>Info</button>
+    {/if}
     <button role="menuitem" onclick={() => playNext(mi)}>Play next</button>
     <button role="menuitem" onclick={() => addToQueue(mi)}>Add to queue</button>
     {#if mi.played != null && !fullyWatched}

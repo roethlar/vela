@@ -647,6 +647,7 @@ fn base_item(
         backing: None,
         canonical_id: None,
         watch_key: None,
+        detail_key: None,
     }
 }
 

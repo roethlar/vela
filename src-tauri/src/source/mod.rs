@@ -95,6 +95,13 @@ pub struct ItemDto {
     /// backing owns the watch state). Absent when the play key works.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub watch_key: Option<String>,
+    /// Where the detail / "more info" surface (and a merged show's children
+    /// drill) should route: the metadata-richest backing of a merged card,
+    /// which is usually not the play identity (playback prefers direct files,
+    /// detail prefers servers). Absent when the play key is already the
+    /// richest — callers fall back to `rating_key`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail_key: Option<String>,
 }
 
 /// One source's copy of a merged title.
@@ -428,6 +435,7 @@ mod tests {
             backing: None,
             canonical_id: None,
             watch_key: None,
+            detail_key: None,
             source_id: "local".into(),
         };
         let json = serde_json::to_string(&dto).expect("serialize");

@@ -2482,6 +2482,20 @@ fn kind_rank(kind: &str) -> u8 {
     }
 }
 
+/// Detail-surface preference for merged titles: the reverse of `kind_rank`,
+/// because the info page exists to show cast/genre/stream specs that only
+/// metadata-rich servers carry. Also a policy constant; independent of the
+/// playback ranking and of the per-title play override.
+fn detail_rank(kind: &str) -> u8 {
+    match kind {
+        "plex" => 0,
+        "jellyfin" | "emby" => 1,
+        "smb" | "ssh" => 2,
+        "local" => 3,
+        _ => 4,
+    }
+}
+
 /// Stable identity a per-title override persists under: the first provider
 /// id (sorted, so the same set always yields the same key), else the
 /// normalized title + year.
@@ -2536,6 +2550,20 @@ fn rank_backings(
                     kinds.get(&b.source_id).copied(),
                     Some("plex" | "jellyfin" | "emby")
                 )
+            })
+            .map(|b| b.rating_key.clone())
+            .filter(|k| *k != group.rating_key);
+        // The detail surface (and a merged show's children drill) routes to
+        // the metadata-richest backing (idv-2/idv-6). Computed by its own
+        // rank — the post-sort backing order is play order, which does NOT
+        // put the richest first. Absent when it equals the play identity.
+        group.detail_key = backing
+            .iter()
+            .min_by_key(|b| {
+                kinds
+                    .get(&b.source_id)
+                    .map(|k| detail_rank(k))
+                    .unwrap_or(u8::MAX)
             })
             .map(|b| b.rating_key.clone())
             .filter(|k| *k != group.rating_key);
@@ -2771,6 +2799,7 @@ mod merge_tests {
             backing: None,
             canonical_id: None,
             watch_key: None,
+            detail_key: None,
             source_id: source.into(),
         }
     }
@@ -3224,6 +3253,89 @@ mod merge_tests {
         let ranked = rank_backings(groups, &kinds(), &overrides);
         assert_eq!(ranked[0].rating_key, "plex:42");
         assert_eq!(ranked[0].source_id, "plex");
+    }
+
+    // idv-2/idv-6 guard: the detail surface routes to the metadata-richest
+    // backing via its own rank. The play-ordered backing list must not be
+    // scanned for it — play order puts the local family first.
+    #[test]
+    fn merged_detail_key_routes_to_the_richest_backing() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let ranked = rank_backings(
+            dedup_across_sources(vec![a, b]),
+            &kinds(),
+            &Default::default(),
+        );
+        let g = &ranked[0];
+        // smb wins playback; detail must go to the plex copy.
+        assert_eq!(g.rating_key, "smb-1:/x.mkv");
+        assert_eq!(g.detail_key.as_deref(), Some("plex:42"));
+    }
+
+    // Without Plex, the next-richest server still wins detail over the
+    // local-family play face (the rank is a ladder, not a Plex special case).
+    #[test]
+    fn detail_key_prefers_servers_even_without_plex() {
+        let kinds: std::collections::HashMap<String, &'static str> = [
+            ("jf".to_string(), "jellyfin"),
+            ("smb-1".to_string(), "smb"),
+        ]
+        .into_iter()
+        .collect();
+        let mut a = item("Dune", Some(2021), "jf");
+        a.rating_key = "jf:9".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let ranked = rank_backings(
+            dedup_across_sources(vec![a, b]),
+            &kinds,
+            &Default::default(),
+        );
+        let g = &ranked[0];
+        assert_eq!(g.rating_key, "smb-1:/x.mkv");
+        assert_eq!(g.detail_key.as_deref(), Some("jf:9"));
+    }
+
+    // detail_key folds into the play identity when they agree, and never
+    // appears on an unmerged entry (no backing list) — callers fall back to
+    // rating_key in both cases.
+    #[test]
+    fn detail_key_absent_when_redundant_or_unmerged() {
+        // Single server backing: play face == richest backing.
+        let mut only = item("Solo", Some(2020), "plex");
+        only.rating_key = "plex:7".into();
+        let ranked = rank_backings(
+            dedup_across_sources(vec![only]),
+            &kinds(),
+            &Default::default(),
+        );
+        assert_eq!(ranked[0].detail_key, None);
+
+        // No backing list at all (non-merged path).
+        let bare = item("Bare", Some(2019), "plex");
+        let ranked = rank_backings(vec![bare], &kinds(), &Default::default());
+        assert_eq!(ranked[0].detail_key, None);
+    }
+
+    // The per-title play override moves playback only; detail stays with the
+    // richest backing (here they coincide, so the key folds away — the
+    // override must not surface a stale local detail key).
+    #[test]
+    fn detail_key_ignores_the_play_override() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let canonical = canonical_id_of(&groups[0]);
+        let overrides = [(canonical, "plex".to_string())].into_iter().collect();
+        let ranked = rank_backings(groups, &kinds(), &overrides);
+        // Override makes plex the play face; detail (also plex) folds in.
+        assert_eq!(ranked[0].rating_key, "plex:42");
+        assert_eq!(ranked[0].detail_key, None);
     }
 }
 
