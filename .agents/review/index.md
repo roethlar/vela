@@ -21,6 +21,27 @@ parse over `/library/metadata/{rk}` + `to_detail` mapper (cast headshots via the
 tokened poster path — accepted exposure class). Nav unwired (flip is slice 5). cargo
 test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING for
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
+(Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
+
+Loop idv-s2 CLOSED 2026-07-08: verified `[x]`, on `main`. Scope was **item-detail-view
+AMENDED slice 2** (base `3acf581`, head `0ecd819`; owner amendment 2026-07-08 in the
+plan: Plex-first, JF/Emby+local `item_detail` deferred, uniform nav flip later):
+backend `detail_key` on merged `ItemDto` via a server-preferred detail rank in
+`rank_backings` (idv-2/6; guard-proven red/green `merge_tests::*detail_key*`);
+frontend `ItemDetail.svelte` (movie/video info page) + `SeasonDetail.svelte` (shared
+episode page: full `get_children` paging per idv-4a, per-episode detail cache keyed
+by selection per idv-4b) with silent sparse fallback from listing data on detail
+`Err`; merged shows drill through `detail_key` (idv-5); dev-flagged context-menu
+"Info" entry (localStorage `vela.devDetail`, or dev builds) — nav NOT flipped.
+Two codex rounds: r1 reopened idv-s2-1 (LOW — episode Info inside an open season
+page re-listed seasons as episodes; fixed `0ecd819`, `seasonKeyFor` trusts only a
+list that owns the episode), r2 accepted clean. `guard_confirmed:false` both rounds
+(read-only). Verified on the WINDOWS dev host: svelte-check 0/0, npm build, cargo
+test 111 (Linux-gated tests excluded here), clippy clean vs the 13-warning Windows
+dead-code baseline. NO automated frontend guard (no JS runner; E2E harness is
+Linux-only) — recorded follow-up: an E2E detail scenario on the Linux host.
+REMAINING for the feature: amended slice 3 (uniform nav flip), then polish;
+JF/Emby + local `item_detail` deferred (owner).
 
 Loop sort-1 CLOSED 2026-07-06: verified `[x]`, on `main`. Scope was **Library
 sorting** (base `361c5b7`, head `19b2735`, three codex rounds: r1 reopened 3, r2
