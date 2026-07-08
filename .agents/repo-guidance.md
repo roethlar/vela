@@ -65,10 +65,15 @@ carry on its own.
 - Local media roots must stay narrow. Continue rejecting filesystem roots and
   home roots, and keep symlink escape checks before listing, searching, or
   playing local files. (See `.agents/decisions.md`, 2026-05-23.)
-- Linux SMB support deliberately uses the user's existing GVfs/KIO-FUSE path
-  and does not request root by default. SSH/SFTP support uses `sshfs` with
-  OpenSSH keys, agent, and config; Vela does not store SSH passwords. (See
-  `.agents/decisions.md`, 2026-05-23.)
+- Linux SMB is native and mountless: in-process libsmbclient for
+  browsing plus a loopback HTTP Range proxy for mpv playback — no OS
+  mounts, no root, no gvfs/kio. Keep provider paths share-scoped (the
+  normalize/containment rules in `source/smb_vfs.rs`) and never
+  allow-list provider paths with the asset protocol. macOS/Windows still
+  mount via the OS. (See `.agents/decisions.md`, 2026-07-04; plan
+  `.agents/plans/smb-native-client.md`.) SSH/SFTP support uses `sshfs`
+  with OpenSSH keys, agent, and config; Vela does not store SSH
+  passwords. (See `.agents/decisions.md`, 2026-05-23.)
 - Generated outputs and dependency/build directories are not source of truth.
   Do not edit `build/`, `.svelte-kit/`, `node_modules/`, `src-tauri/target/`,
   `src-tauri/gen/`, or packaged Arch output under `packaging/arch/pkg/`.

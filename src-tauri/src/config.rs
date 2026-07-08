@@ -34,6 +34,13 @@ pub struct AppConfig {
     /// When true, Vela drops `--no-config` so mpv loads the user's own
     /// `~/.config/mpv/mpv.conf`. Off by default for a reproducible launch.
     pub mpv_use_own_config: Option<bool>,
+    /// Black-bar cropping via mpv's bundled `autocrop.lua`, three-state:
+    /// `"off"` (default; nothing injected), `"manual"` (script loaded with
+    /// `autocrop-auto=no` — crops only on an explicit in-player `Shift+C`), or
+    /// `"auto"` (script's own crop-on-playback-start). Missing/unknown = off.
+    /// `"auto"` auto-fires mpv's live `video-crop`, which can hang mpv on some
+    /// HDR/Wayland stacks — the Settings UI carries that warning.
+    pub mpv_autocrop: Option<String>,
     /// Non-Plex sources (Jellyfin/Emby today; more later). Kept deliberately
     /// provider-neutral so backends can diverge without a schema change.
     #[serde(default)]
@@ -41,18 +48,34 @@ pub struct AppConfig {
     /// Local (and mounted remote) folders browsed by the built-in local source.
     #[serde(default)]
     pub local_folders: Vec<LocalFolder>,
-    /// SMB shares Vela mounts itself; selected folders inside each share feed
-    /// the local source.
+    /// Configured SMB shares; selected folders inside each share feed the
+    /// local family (Linux connects natively, macOS/Windows mount via the
+    /// OS).
     #[serde(default)]
     pub smb_mounts: Vec<SmbMount>,
     /// SSH/SFTP folders mounted through sshfs (each feeds a `local_folders` entry).
     #[serde(default)]
     pub ssh_mounts: Vec<SshMount>,
+    /// Per-title playback-source overrides for the merged All view: canonical
+    /// title identity → preferred source id. Set from the card's context
+    /// menu; titles without an entry follow the default kind ranking.
+    #[serde(default)]
+    pub merged_overrides: std::collections::HashMap<String, String>,
+    /// Vela's own "recently played" history feeding the Continue Watching
+    /// hero (see `recents.rs`): item snapshots at play time, final position
+    /// stamped at mpv exit, finished entries dropped.
+    #[serde(default)]
+    pub recents: Vec<crate::recents::RecentEntry>,
+    /// Continue Watching tombstones: rating keys the user explicitly removed
+    /// from the flow. The hero merge suppresses these even when a server hub
+    /// still carries the item; replaying an item clears its tombstone.
+    #[serde(default)]
+    pub hidden_from_continue: Vec<String>,
 }
 
-/// An SMB/CIFS share Vela exposes through the local source. On macOS/Windows
-/// Vela stores credentials for OS mounting; on Linux it resolves user-space
-/// desktop FUSE mounts instead.
+/// An SMB/CIFS share Vela exposes through the local family. Credentials
+/// are stored for both paths: Linux speaks SMB natively in-process
+/// (libsmbclient; no mount), macOS/Windows mount via the OS.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)] // missing fields fall back to Default rather than failing the parse
 pub struct SmbMount {
@@ -64,7 +87,8 @@ pub struct SmbMount {
     pub password: String,
     #[serde(default)]
     pub domain: String,
-    /// Where the OS mounts it.
+    /// Where the OS mounts it (macOS/Windows). Empty on Linux: the marker
+    /// of a native, mountless share record.
     pub mountpoint: String,
     /// Selected folders inside this share, each with its own media type.
     #[serde(default)]
@@ -75,8 +99,10 @@ pub struct SmbMount {
     pub local_folder_id: String,
 }
 
-/// One selected folder inside an SMB share. `path` is relative to the mounted
-/// share root, using `/` as the separator; empty means the share root itself.
+/// One selected folder inside an SMB share. `path` is relative to the
+/// share root, using `/` as the separator; empty means the share root
+/// itself. (The same relative path serves the native Linux client and the
+/// macOS/Windows mounted tree.)
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SmbFolder {

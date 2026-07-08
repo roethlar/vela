@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Vela",
-  "version": "0.1.4",
+  "version": "0.1.31",
   "identifier": "com.michael.vela",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -20,7 +20,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; img-src 'self' data: https: http: asset: http://asset.localhost; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
+      "csp": "default-src 'self'; img-src 'self' data: https: http: asset: http://asset.localhost velasmb:; media-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self' ipc: http://ipc.localhost; object-src 'none'; base-uri 'self'; frame-ancestors 'none'",
       "assetProtocol": {
         "enable": true,
         "scope": []
@@ -31,6 +31,10 @@
     "active": true,
     "targets": "all",
     "category": "Video",
+    "license": "MIT AND GPL-2.0-or-later",
+    "resources": {
+      "resources/mpv-scripts/": "mpv-scripts/"
+    },
     "shortDescription": "HDR media client for Plex, Jellyfin, Emby, and local libraries",
     "longDescription": "Vela is a native, HDR-capable media client for Plex, Jellyfin, Emby, SMB, and local libraries. It browses media in a unified desktop UI and plays video through mpv for reliable HDR passthrough.",
     "icon": [
@@ -44,11 +48,17 @@
     "linux": {
       "deb": {
         "section": "video",
+        "depends": [
+          "libsmbclient0 | libsmbclient"
+        ],
         "desktopTemplate": "bundle/linux/vela.desktop.hbs",
         "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
         "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"
       },
       "rpm": {
+        "depends": [
+          "libsmbclient"
+        ],
         "desktopTemplate": "bundle/linux/vela.desktop.hbs",
         "postInstallScript": "bundle/linux/refresh-desktop-cache.sh",
         "postRemoveScript": "bundle/linux/refresh-desktop-cache.sh"

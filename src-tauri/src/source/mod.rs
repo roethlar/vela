@@ -4,12 +4,27 @@
 //! a unified library while still being able to scope to a single source.
 
 use async_trait::async_trait;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 pub mod jellyfin;
+pub mod listing_cache;
 pub mod local;
 pub mod metadata;
 pub mod plex;
+#[cfg(all(unix, not(target_os = "macos")))]
+pub mod smb_vfs;
+pub mod vfs;
+
+/// Provider-namespace path for a share-relative SMB folder path from config
+/// (`"a/b"` or `""` → `"/a/b"` / `"/"`).
+pub fn smb_vfs_path(relative: &str) -> String {
+    let trimmed = relative.trim_matches('/');
+    if trimmed.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{trimmed}")
+    }
+}
 
 /// A browsable library/section, tagged with the source it came from.
 #[derive(Serialize, Clone)]
@@ -24,7 +39,8 @@ pub struct SectionDto {
 }
 
 /// A playable/browsable item (movie, show, season, episode), source-tagged.
-#[derive(Serialize, Clone)]
+/// `Deserialize` exists for the listing-cache/recents persistence round-trips.
+#[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDto {
     /// Source-namespaced key (`"<source_id>:<raw>"`); opaque to the frontend.
@@ -35,15 +51,152 @@ pub struct ItemDto {
     pub duration_ms: Option<u64>,
     pub media_type: Option<String>,
     pub poster: Option<String>,
+    /// The series (grandparent) poster for episodic items, when the backend
+    /// exposes one — lets catalog rows render portrait art for episodes.
+    pub series_poster: Option<String>,
+    /// Landscape backdrop/fanart, when the backend exposes one — used by the
+    /// resume-row/hero rendering for movies and shows.
+    pub backdrop: Option<String>,
     pub view_offset_ms: Option<u64>,
     /// Whether the item is marked watched. `None` when the source doesn't report
     /// it (e.g. local files), so the UI can distinguish "unwatched" from "unknown".
     pub played: Option<bool>,
+    /// Unix ms of the last watch activity, when known (Plex `lastViewedAt`;
+    /// Vela recents stamp their `ended_at_ms`). Drives the Continue Watching
+    /// flow's interleave-by-recency ordering. Jellyfin/Emby: not populated
+    /// yet (needs ISO-8601 parsing; recorded follow-up).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_watched_at_ms: Option<u64>,
+    /// Unix ms when the item was added to the library, when known (Plex
+    /// `addedAt`; local: the file mtime via `Vfs::modified_ms`). Drives the
+    /// "date added" sort. Jellyfin/Emby: not populated yet (needs `DateCreated`
+    /// in the `Fields=` query + ISO-8601 parsing; recorded follow-up).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub added_at_ms: Option<u64>,
     pub index: Option<u32>,
     pub parent_index: Option<u32>,
     pub grandparent_title: Option<String>,
     pub parent_title: Option<String>,
     pub source_id: String,
+    /// Cross-source identity hints, normalized as `"scheme:value"`
+    /// (e.g. `"imdb:tt0133093"`). Used by the merged All view's dedup.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub provider_ids: Vec<String>,
+    /// Present only on merged (deduped) listing entries: every source
+    /// backing this title, play target first (override, else kind rank).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub backing: Option<Vec<BackingRef>>,
+    /// Stable identity of a merged title (first provider id, else
+    /// title+year) — the key the per-title source override persists under.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub canonical_id: Option<String>,
+    /// Where watched-state actions should route when the play identity
+    /// cannot take them (merged card fronted by a local file while a server
+    /// backing owns the watch state). Absent when the play key works.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub watch_key: Option<String>,
+}
+
+/// One source's copy of a merged title.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct BackingRef {
+    pub source_id: String,
+    pub rating_key: String,
+}
+
+/// Full metadata for a single item — the detail / "more info" surface. A superset
+/// of the listing [`ItemDto`], fetched on demand so the grid path stays lean. Every
+/// rich field is optional / possibly-empty so a sparse backend (a local file with
+/// no `.nfo`) degrades to a clean minimal page rather than an error.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DetailDto {
+    /// Source-namespaced key (`"<source_id>:<raw>"`).
+    pub rating_key: String,
+    pub title: String,
+    pub year: Option<u32>,
+    pub summary: Option<String>,
+    pub tagline: Option<String>,
+    /// Runtime.
+    pub duration_ms: Option<u64>,
+    pub media_type: Option<String>,
+    pub poster: Option<String>,
+    pub backdrop: Option<String>,
+    /// Certification (e.g. "PG-13").
+    pub content_rating: Option<String>,
+    /// Critic/user rating (0–10).
+    pub rating: Option<f32>,
+    /// Audience rating (0–10), when the backend distinguishes it.
+    pub audience_rating: Option<f32>,
+    pub studio: Option<String>,
+    /// Air/release date as the backend reports it (ISO `YYYY-MM-DD` for Plex).
+    pub originally_available_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub genres: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub directors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub writers: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub countries: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub cast: Vec<CastMember>,
+    /// Episode positioning (populated for episodes; used by the shared episode page).
+    pub index: Option<u32>,
+    pub parent_index: Option<u32>,
+    pub grandparent_title: Option<String>,
+    pub parent_title: Option<String>,
+    /// Watch state, when the source reports it — lets the info page show progress
+    /// and choose Resume vs Play. `None` = unknown (e.g. a local file).
+    pub played: Option<bool>,
+    pub view_offset_ms: Option<u64>,
+    /// Technical media specs (one entry per available version/file).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub media: Vec<MediaVersionDto>,
+    pub source_id: String,
+}
+
+/// A cast member for the detail view's cast strip.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CastMember {
+    pub name: String,
+    /// The character played, when known.
+    pub role: Option<String>,
+    /// Headshot image URL (same accepted poster-exposure class as posters — it may
+    /// carry the backend's image token; never logged).
+    pub thumb: Option<String>,
+}
+
+/// One media version/file's technical specs.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaVersionDto {
+    /// Human resolution label (e.g. "1080", "4k") when the backend gives one.
+    pub video_resolution: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub video_codec: Option<String>,
+    pub audio_codec: Option<String>,
+    pub container: Option<String>,
+    /// True when the backend reports an HDR/Dolby-Vision/HLG dynamic range.
+    pub hdr: bool,
+    /// Per-stream detail (audio channels/codec/language, subtitle languages).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub streams: Vec<MediaStreamDto>,
+}
+
+/// One audio/subtitle/video stream within a media version.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaStreamDto {
+    /// 1 = video, 2 = audio, 3 = subtitle (Plex `streamType`).
+    pub stream_type: Option<u8>,
+    pub codec: Option<String>,
+    pub language: Option<String>,
+    pub channels: Option<u32>,
+    pub display_title: Option<String>,
 }
 
 /// A home-screen rail of items, source-tagged.
@@ -81,7 +234,8 @@ pub trait MediaSource: Send + Sync {
     fn id(&self) -> String;
     /// Human-friendly name for the UI (e.g. the server or folder name).
     fn name(&self) -> String;
-    /// Backend kind: `"plex"`, `"jellyfin"`, `"emby"`, `"local"`.
+    /// Backend kind: `"plex"`, `"jellyfin"`, `"emby"`, or a local-family kind
+    /// (`"local"` for plain folders, `"smb"`/`"ssh"` for per-mount sources).
     fn kind(&self) -> &'static str;
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String>;
@@ -111,6 +265,21 @@ pub trait MediaSource: Send + Sync {
     /// Defaults to a no-op error; sources that support it override this.
     async fn mark_played(&self, _item_key: &str, _played: bool) -> Result<(), String> {
         Err("this source doesn't support marking watched state".to_string())
+    }
+
+    /// Ask the backend to drop the item from its server-side Continue
+    /// Watching (Plex today; Jellyfin/Emby are a recorded follow-up).
+    /// Callers treat failure as non-fatal — Vela's own tombstone already
+    /// guarantees the UX. Default: unsupported, quiet no-op.
+    async fn remove_from_continue(&self, _item_key: &str) -> Result<(), String> {
+        Ok(())
+    }
+
+    /// Full metadata for one item, for the detail / "more info" surface. Defaults
+    /// to unsupported; backends that can enrich an item override this (Plex first,
+    /// then Jellyfin/Emby, then local). Callers degrade gracefully on `Err`.
+    async fn item_detail(&self, _item_key: &str) -> Result<DetailDto, String> {
+        Err("this source doesn't provide item detail".to_string())
     }
 }
 
@@ -155,6 +324,13 @@ impl SourceRegistry {
         self.sources.retain(|s| s.id() != id);
     }
 
+    /// Remove every source whose kind is one of `kinds`. Used to replace the
+    /// whole local family (plain folders + SMB/SSH mounts) on rebuild, since
+    /// `upsert` alone can't drop a source whose mount went away.
+    pub fn remove_kinds(&mut self, kinds: &[&str]) {
+        self.sources.retain(|s| !kinds.contains(&s.kind()));
+    }
+
     /// Resolve a namespaced key to its source and the raw (un-prefixed) key.
     pub fn route(
         &self,
@@ -172,5 +348,106 @@ impl SourceRegistry {
             Some(id) => self.get(id).into_iter().collect(),
             None => self.sources.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Fake {
+        id: &'static str,
+        kind: &'static str,
+    }
+
+    #[async_trait]
+    impl MediaSource for Fake {
+        fn id(&self) -> String {
+            self.id.to_string()
+        }
+        fn name(&self) -> String {
+            self.id.to_string()
+        }
+        fn kind(&self) -> &'static str {
+            self.kind
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _: &str,
+            _: &str,
+            _: Option<&str>,
+            _: usize,
+            _: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn search(&self, _: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(&self, _: &str, _: usize, _: usize) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            _: &str,
+            _: Option<u64>,
+        ) -> Result<StreamResolution, String> {
+            Err("fake source".into())
+        }
+    }
+
+    // The frontend reads these camelCase names; a serde rename regression
+    // would silently blank all card artwork.
+    #[test]
+    fn item_dto_serializes_artwork_fields_camel_case() {
+        let dto = ItemDto {
+            rating_key: "local:/x".into(),
+            title: "T".into(),
+            year: None,
+            summary: None,
+            duration_ms: None,
+            media_type: Some("episode".into()),
+            poster: Some("p".into()),
+            series_poster: Some("sp".into()),
+            backdrop: Some("bd".into()),
+            view_offset_ms: None,
+            played: None,
+            last_watched_at_ms: None,
+            added_at_ms: None,
+            index: None,
+            parent_index: None,
+            grandparent_title: None,
+            parent_title: None,
+            provider_ids: vec![],
+            backing: None,
+            canonical_id: None,
+            watch_key: None,
+            source_id: "local".into(),
+        };
+        let json = serde_json::to_string(&dto).expect("serialize");
+        assert!(json.contains("\"seriesPoster\":\"sp\""));
+        assert!(json.contains("\"backdrop\":\"bd\""));
+    }
+
+    // Rebuilds replace the whole local family: stale mount sources must drop
+    // while non-family sources survive untouched.
+    #[test]
+    fn remove_kinds_drops_only_the_local_family() {
+        let mut reg = SourceRegistry::default();
+        reg.upsert(std::sync::Arc::new(Fake { id: "plex", kind: "plex" }));
+        reg.upsert(std::sync::Arc::new(Fake { id: "local", kind: "local" }));
+        reg.upsert(std::sync::Arc::new(Fake { id: "smb-old", kind: "smb" }));
+        reg.upsert(std::sync::Arc::new(Fake { id: "ssh-old", kind: "ssh" }));
+
+        reg.remove_kinds(&["local", "smb", "ssh"]);
+
+        let ids: Vec<_> = reg.all().iter().map(|s| s.id()).collect();
+        assert_eq!(ids, vec!["plex".to_string()]);
     }
 }

@@ -14,6 +14,10 @@ packaging/arch/*.pkg.tar*
 .env.*
 vite.config.js.timestamp-*
 
+# E2E harness (vendored WebKitWebDriver + run artifacts)
+tests/e2e/vendor/
+tests/e2e/artifacts/
+
 # Editor/agent tool config
 .claude/settings.local.json
 .serena/
@@ -45,3 +49,4 @@ Desktop.ini
 $RECYCLE.BIN/
 *.lnk
 *.tmp
+.agents/review/*.local.json

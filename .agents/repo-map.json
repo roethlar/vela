@@ -1,7 +1,7 @@
 {
   "validated_against": {
-    "commit": "1597526cc20e6708a33c93d01e819a38031286d5",
-    "date": "2026-07-03"
+    "commit": "042305f",
+    "date": "2026-07-05"
   },
   "projects": [
     {
@@ -11,6 +11,15 @@
       "notes": [
         "Frontend is SvelteKit/TypeScript configured as a static SPA.",
         "Backend is Rust and owns media sources, config persistence, source mounting, and mpv playback."
+      ]
+    },
+    {
+      "name": "E2E harness",
+      "type": "Node WebDriver test suite",
+      "paths": ["tests/e2e/"],
+      "notes": [
+        "Drives the real debug binary via tauri-driver + a vendored WebKitWebDriver (fetch-driver.sh, gitignored vendor/) on a private Xvfb display; throwaway XDG_CONFIG_HOME per scenario.",
+        "Design and deviations live in .agents/plans/e2e-harness.md; six scenarios as of 2026-07-05 (smoke, playback, curation, resume, queue, search)."
       ]
     },
     {
@@ -24,7 +33,7 @@
     }
   ],
   "verification": {
-    "status": "local-only. Commands below are confirmed present in package.json scripts and .github/workflows/ci.yml, but that workflow is NOT confirmed to execute: the repo's only remote (`git remote -v`) is a self-hosted Gitea instance (http://q.internal:3000/michael/vela.git); that instance's repo API reports `has_actions: true`, but its Actions runs API (repos/michael/vela/actions/tasks) returned zero workflow runs (`total_count: 0`) despite a push to main as recently as commit 1597526 (2026-07-01), which should have fired the `on: push: branches: [main]` trigger in ci.yml if it were being picked up. No `.gitea/workflows/` directory exists (Gitea's own documented trigger path), only `.github/workflows/`. Treat .github/workflows/ci.yml and release.yml as dead/inactive CI files until this repo is actually hosted or mirrored on GitHub, or the workflows are moved to .gitea/workflows/ and a run is observed. Run these commands locally before claiming completion; do not rely on CI to catch failures.",
+    "status": "Commands below are confirmed present in package.json scripts and .github/workflows/ci.yml. CI execution is split across two remotes (`git remote -v`): `origin` (self-hosted Gitea, http://q:3000/michael/vela.git) does NOT run .github/workflows/* - no `.gitea/workflows/` directory exists (Gitea's actual trigger path), and Gitea's Actions runs API previously returned zero runs. `github` (https://github.com/roethlar/vela.git) DOES run it: `gh api repos/roethlar/vela/actions/runs` on 2026-07-04 showed 7 completed runs, the most recent (2026-07-03) concluding `success` on `main` - GitHub Actions is confirmed ACTIVE there. This corrects an earlier record that called ci.yml/release.yml dead; that conclusion only checked the Gitea origin and missed the github remote. Still run these commands locally before claiming completion - do not rely on CI alone, since it only covers pushes that reach the github remote.",
     "commands": [
       {
         "command": "npm run check",
@@ -50,6 +59,11 @@
         "command": "cargo test --locked",
         "working_directory": "src-tauri",
         "when": "Rust unit tests."
+      },
+      {
+        "command": "npm run e2e",
+        "working_directory": ".",
+        "when": "End-to-end UI/playback validation on Linux (drives the real debug app headless on Xvfb; needs tauri-driver, Xvfb, ffmpeg, mpv, bsdtar, curl — see tests/e2e/README.md). Use `-- --skip-build` to reuse the existing debug binary, `-- <name>` for one scenario."
       }
     ],
     "packaging_commands": [
@@ -96,7 +110,7 @@
   ],
   "notes": [
     "CI installs Tauri WebKitGTK/libsoup/GTK dependencies before Rust checks on Linux.",
-    "README says live integration for Jellyfin/Emby, local, and SMB paths is still pending even where unit-tested.",
-    "The current known deferred issue is local filesystem traversal inside async source methods."
+    "README says live integration for Emby, local, and SMB paths is still pending even where unit-tested; Jellyfin was smoke-tested live on 2026-07-04.",
+    "Audited 2026-07-05: the previously-noted deferred issue (blocking filesystem traversal inside async source methods) is resolved — local.rs routes traversal-heavy methods and resolve_stream through run_blocking, and all mount/unmount call sites in commands.rs use spawn_blocking. The ISSUES.md Kimi P0 items were re-verified against current code the same day."
   ]
 }

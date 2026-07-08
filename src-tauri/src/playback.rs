@@ -425,7 +425,67 @@ pub struct PlaySpec {
     pub title: String,
     pub http_headers: Vec<(String, String)>,
     pub start_seconds: f64,
+    /// Absolute path to the bundled mpv `autocrop.lua`, resolved by the caller
+    /// via Tauri's resource resolver (the caller has the `AppHandle`; `play`
+    /// does not). `None` when it could not be resolved — autocrop is then
+    /// skipped even if enabled. Whether it's actually injected depends on the
+    /// `mpv_autocrop` config mode, read in `play`.
+    pub autocrop_script: Option<String>,
 }
+
+/// mpv launch args for the autocrop feature, given the config `mode`
+/// (`"off"|"manual"|"auto"`) and the resolved script path (already existence-
+/// checked by the caller; `None` when unresolved/missing). Pure so the injection
+/// is unit-testable without spawning mpv:
+/// - `off` / unknown, or no script → no args.
+/// - `manual` → load the script but disable its auto-crop, so it only crops on
+///   an explicit in-player `Shift+C`.
+/// - `auto` → load the script with its own crop-on-playback-start behaviour.
+fn autocrop_args(mode: &str, script: Option<&str>) -> Vec<String> {
+    let Some(path) = script else {
+        return Vec::new();
+    };
+    match mode {
+        "manual" => vec![
+            format!("--script={path}"),
+            "--script-opts-append=autocrop-auto=no".to_string(),
+        ],
+        "auto" => vec![format!("--script={path}")],
+        _ => Vec::new(),
+    }
+}
+
+/// mpv/ffmpeg reconnect args for our loopback stream proxy (native SMB
+/// playback). The proxy bounds each response with a write deadline
+/// (`stream_proxy`), so a long pause — where mpv stops draining and the socket
+/// buffers fill — can close the connection mid-stream. ffmpeg's HTTP backend
+/// does NOT reconnect by default, so without these a resumed pause hits a
+/// premature EOF instead of re-requesting; with them mpv transparently reopens
+/// the stream with a `Range` at the current offset and playback continues.
+/// Pure so the injection is unit-testable without spawning mpv.
+///
+/// Scoped to the loopback proxy URL. Server streams (Plex/JF/Emby) and local
+/// files are untouched; a non-proxy service that happened to live on
+/// `127.0.0.1` would match, but loopback never spontaneously drops mid-stream,
+/// so the options stay inert for anything but our own deliberately-closing
+/// proxy.
+fn proxy_reconnect_args(url: &str) -> Vec<String> {
+    if !url.starts_with("http://127.0.0.1:") {
+        return Vec::new();
+    }
+    vec![
+        "--stream-lavf-o-append=reconnect=1".to_string(),
+        "--stream-lavf-o-append=reconnect_streamed=1".to_string(),
+        "--stream-lavf-o-append=reconnect_delay_max=5".to_string(),
+    ]
+}
+
+/// Fired exactly once when a playback session ends — after the final server
+/// check-in for tracked sessions, or at mpv exit for untracked ones — with
+/// the last observed playback position in ms (0 when none was read). The
+/// caller wires this to recents recording + UI notification (a
+/// `playback-ended` Tauri event); this module stays UI-framework-free.
+pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
 
 /// Spawn mpv for `spec.url`, optionally seeking to `spec.start_seconds`, and
 /// start background progress reporting that runs until mpv exits. Publishes the
@@ -439,6 +499,7 @@ pub fn play(
     child_slot: &Arc<Mutex<Option<std::process::Child>>>,
     shutting_down: &Arc<AtomicBool>,
     advance: &Arc<tokio::sync::Notify>,
+    on_end: Option<EndNotify>,
 ) -> Result<Arc<AtomicBool>, String> {
     // mpv emulates the IPC socket with a named pipe under \\.\pipe\ on Windows.
     #[cfg(windows)]
@@ -510,6 +571,37 @@ pub fn play(
         }
     }
 
+    // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
+    // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
+    // the socket. Only injected when enabled AND the bundled script actually
+    // exists — a missing `--script=` would make mpv refuse to launch, so skip and
+    // log instead. `autocrop-auto=no` in Manual mode keeps the known live
+    // `video-crop` hang off the every-play path (see config `mpv_autocrop`).
+    let autocrop_mode = cfg.mpv_autocrop.as_deref().unwrap_or("off");
+    if autocrop_mode != "off" {
+        let script = spec
+            .autocrop_script
+            .as_deref()
+            .filter(|p| std::path::Path::new(p).is_file());
+        if script.is_none() {
+            eprintln!(
+                "vela: autocrop is set to '{autocrop_mode}' but the bundled script \
+                 did not resolve; skipping (playback continues uncropped)"
+            );
+        }
+        for arg in autocrop_args(autocrop_mode, script) {
+            cmd.arg(arg);
+        }
+    }
+
+    // Reconnect for the loopback proxy stream. Asserted after the user's extra
+    // args (load-bearing, like the IPC socket below) so a user option can't
+    // drop the reconnect the proxy's write deadline relies on to survive a long
+    // pause. A no-op for non-proxy URLs.
+    for arg in proxy_reconnect_args(&spec.url) {
+        cmd.arg(arg);
+    }
+
     cmd.arg(format!("--input-ipc-server={}", ipc_path));
     // Drive mpv's window title and OSD media-title from the human title, NOT the
     // URL. Plex direct-stream URLs carry `?X-Plex-Token=…`, and mpv's default
@@ -579,14 +671,19 @@ pub fn play(
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
 
+    // Route the end-of-session notifier: tracked sessions fire it from their
+    // tracker tail (after the final server write, so a refresh triggered by it
+    // sees the new state); untracked sessions fire it when mpv exits. The match
+    // guards keep degenerate track targets (empty server base) on the untracked
+    // path so the notifier still fires exactly once per session.
     let tracking = match progress {
-        ProgressTarget::Plex(info) => {
-            start_tracking_plex(ipc_path, info, start_ms, stop_flag.clone())
+        ProgressTarget::Plex(info) if !info.server_base.is_empty() => {
+            start_tracking_plex(ipc_path, info, start_ms, stop_flag.clone(), on_end)
         }
-        ProgressTarget::Jellyfin(track) => {
-            start_tracking_jellyfin(ipc_path, track, start_ms, stop_flag.clone())
+        ProgressTarget::Jellyfin(track) if !track.base_url.is_empty() => {
+            start_tracking_jellyfin(ipc_path, track, start_ms, stop_flag.clone(), on_end)
         }
-        ProgressTarget::None => Ok(()),
+        _ => spawn_end_watcher(ipc_path, stop_flag.clone(), on_end),
     };
     if let Err(e) = tracking {
         // mpv launched but we couldn't spawn its tracker threads (e.g. the OS is
@@ -742,166 +839,209 @@ fn wait_tick(stop_flag: &AtomicBool, done: &AtomicBool) -> bool {
 }
 
 /// Plex: report position on a timer, then post the authoritative final position
-/// when mpv exits (this is what makes resume work).
+/// when mpv exits (this is what makes resume work). The caller guarantees a
+/// non-empty `info.server_base` (see the match guards in [`play`]).
 fn start_tracking_plex(
     socket_path: String,
     info: TrackInfo,
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
+    on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    if info.server_base.is_empty() {
-        return Ok(());
-    }
     let (last_t_ms, done) = spawn_position_reader(socket_path, start_ms, stop_flag.clone())?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-plex".into())
         .spawn(move || {
-            // A single current-thread runtime: the tracker only does sequential
-            // block_on HTTP posts, so a full multi-thread runtime (its own thread
-            // pool) per playback session would be wasteful.
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(r) => r,
-                Err(_) => return,
-            };
-            // Bail rather than fall back to a default client with no timeout — a hung
-            // check-in post would otherwise pin this tracker thread indefinitely.
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
+            // Every exit funnels past the notifier below, so it fires exactly
+            // once per session even on early bails inside this closure.
+            (|| {
+                // A single current-thread runtime: the tracker only does sequential
+                // block_on HTTP posts, so a full multi-thread runtime (its own thread
+                // pool) per playback session would be wasteful.
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                {
+                    Ok(r) => r,
+                    Err(_) => return,
+                };
+                // Bail rather than fall back to a default client with no timeout — a hung
+                // check-in post would otherwise pin this tracker thread indefinitely.
+                let client = match reqwest::Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(_) => return,
+                };
 
-            while wait_tick(&stop_flag, &done) {
+                while wait_tick(&stop_flag, &done) {
+                    let t = last_t_ms.load(Ordering::Relaxed);
+                    if let Err(e) = rt.block_on(crate::plex_api::update_timeline(
+                        &client,
+                        &info.server_base,
+                        &info.token,
+                        &info.client_identifier,
+                        &info.rating_key,
+                        &info.key,
+                        "playing",
+                        t,
+                        info.duration_ms,
+                    )) {
+                        eprintln!("plex: timeline update failed: {}", e);
+                    }
+                }
+
+                // Authoritative final position. Skip if we never read a real position
+                // (mpv failed to start / exited immediately) so we don't clobber an
+                // existing resume point with 0.
                 let t = last_t_ms.load(Ordering::Relaxed);
-                if let Err(e) = rt.block_on(crate::plex_api::update_timeline(
-                    &client,
-                    &info.server_base,
-                    &info.token,
-                    &info.client_identifier,
-                    &info.rating_key,
-                    &info.key,
-                    "playing",
-                    t,
-                    info.duration_ms,
-                )) {
-                    eprintln!("plex: timeline update failed: {}", e);
+                if t > 0 {
+                    let _ = rt.block_on(crate::plex_api::update_timeline(
+                        &client,
+                        &info.server_base,
+                        &info.token,
+                        &info.client_identifier,
+                        &info.rating_key,
+                        &info.key,
+                        "stopped",
+                        t,
+                        info.duration_ms,
+                    ));
+                    if let Err(e) = rt.block_on(crate::plex_api::update_progress(
+                        &client,
+                        &info.server_base,
+                        &info.token,
+                        &info.client_identifier,
+                        &info.rating_key,
+                        t,
+                    )) {
+                        eprintln!("plex: final progress update failed: {}", e);
+                    }
                 }
-            }
-
-            // Authoritative final position. Skip if we never read a real position
-            // (mpv failed to start / exited immediately) so we don't clobber an
-            // existing resume point with 0.
-            let t = last_t_ms.load(Ordering::Relaxed);
-            if t > 0 {
-                let _ = rt.block_on(crate::plex_api::update_timeline(
-                    &client,
-                    &info.server_base,
-                    &info.token,
-                    &info.client_identifier,
-                    &info.rating_key,
-                    &info.key,
-                    "stopped",
-                    t,
-                    info.duration_ms,
-                ));
-                if let Err(e) = rt.block_on(crate::plex_api::update_progress(
-                    &client,
-                    &info.server_base,
-                    &info.token,
-                    &info.client_identifier,
-                    &info.rating_key,
-                    t,
-                )) {
-                    eprintln!("plex: final progress update failed: {}", e);
-                }
+            })();
+            if let Some(on_end) = on_end {
+                on_end(last_t_ms.load(Ordering::Relaxed));
             }
         })?;
     Ok(())
 }
 
 /// Jellyfin/Emby: POST to the `/Sessions/Playing*` endpoints — Start on the first
-/// tick, Progress on each tick, Stopped (authoritative) when mpv exits.
+/// tick, Progress on each tick, Stopped (authoritative) when mpv exits. The
+/// caller guarantees a non-empty `track.base_url` (see the match guards in
+/// [`play`]).
 fn start_tracking_jellyfin(
     socket_path: String,
     track: JellyfinTrack,
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
+    on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    if track.base_url.is_empty() {
-        return Ok(());
-    }
     let (last_t_ms, done) = spawn_position_reader(socket_path, start_ms, stop_flag.clone())?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-jellyfin".into())
         .spawn(move || {
-            // A single current-thread runtime: the tracker only does sequential
-            // block_on HTTP posts, so a full multi-thread runtime (its own thread
-            // pool) per playback session would be wasteful.
-            let rt = match tokio::runtime::Builder::new_current_thread()
-                .enable_all()
-                .build()
-            {
-                Ok(r) => r,
-                Err(_) => return,
-            };
-            // Bail rather than fall back to a default client with no timeout — a hung
-            // check-in post would otherwise pin this tracker thread indefinitely.
-            let client = match reqwest::Client::builder()
-                .timeout(Duration::from_secs(10))
-                .build()
-            {
-                Ok(c) => c,
-                Err(_) => return,
-            };
-
-            // Build a PlaybackProgressInfo-shaped body (Emby/Jellyfin check-in model)
-            // so history/dashboard/resume all tie to the right session.
-            let post = |endpoint: &str, position_ms: u64, event: Option<&str>| {
-                let url = format!("{}/Sessions/Playing{}", track.base_url, endpoint);
-                let mut body = serde_json::json!({
-                    "ItemId": track.item_id,
-                    "MediaSourceId": track.media_source_id,
-                    "PositionTicks": position_ms.saturating_mul(10_000),
-                    "PlayMethod": "DirectPlay",
-                    "CanSeek": true,
-                    "IsPaused": false,
-                });
-                if let Some(ps) = &track.play_session_id {
-                    body["PlaySessionId"] = serde_json::Value::String(ps.clone());
-                }
-                if let Some(ev) = event {
-                    body["EventName"] = serde_json::Value::String(ev.to_string());
-                }
-                let mut rb = client.post(&url).json(&body);
-                for (k, v) in &track.headers {
-                    rb = rb.header(k, v);
-                }
-                if let Err(e) =
-                    rt.block_on(async { rb.send().await.and_then(|r| r.error_for_status()) })
+            // Every exit funnels past the notifier below, so it fires exactly
+            // once per session even on early bails inside this closure.
+            (|| {
+                // A single current-thread runtime: the tracker only does sequential
+                // block_on HTTP posts, so a full multi-thread runtime (its own thread
+                // pool) per playback session would be wasteful.
+                let rt = match tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
                 {
-                    eprintln!("jellyfin: progress update failed: {}", e);
-                }
-            };
+                    Ok(r) => r,
+                    Err(_) => return,
+                };
+                // Bail rather than fall back to a default client with no timeout — a hung
+                // check-in post would otherwise pin this tracker thread indefinitely.
+                let client = match reqwest::Client::builder()
+                    .timeout(Duration::from_secs(10))
+                    .build()
+                {
+                    Ok(c) => c,
+                    Err(_) => return,
+                };
 
-            post("", last_t_ms.load(Ordering::Relaxed), None); // Start
-            while wait_tick(&stop_flag, &done) {
-                post(
-                    "/Progress",
-                    last_t_ms.load(Ordering::Relaxed),
-                    Some("TimeUpdate"),
-                );
+                // Build a PlaybackProgressInfo-shaped body (Emby/Jellyfin check-in model)
+                // so history/dashboard/resume all tie to the right session.
+                let post = |endpoint: &str, position_ms: u64, event: Option<&str>| {
+                    let url = format!("{}/Sessions/Playing{}", track.base_url, endpoint);
+                    let mut body = serde_json::json!({
+                        "ItemId": track.item_id,
+                        "MediaSourceId": track.media_source_id,
+                        "PositionTicks": position_ms.saturating_mul(10_000),
+                        "PlayMethod": "DirectPlay",
+                        "CanSeek": true,
+                        "IsPaused": false,
+                    });
+                    if let Some(ps) = &track.play_session_id {
+                        body["PlaySessionId"] = serde_json::Value::String(ps.clone());
+                    }
+                    if let Some(ev) = event {
+                        body["EventName"] = serde_json::Value::String(ev.to_string());
+                    }
+                    let mut rb = client.post(&url).json(&body);
+                    for (k, v) in &track.headers {
+                        rb = rb.header(k, v);
+                    }
+                    if let Err(e) =
+                        rt.block_on(async { rb.send().await.and_then(|r| r.error_for_status()) })
+                    {
+                        eprintln!("jellyfin: progress update failed: {}", e);
+                    }
+                };
+
+                post("", last_t_ms.load(Ordering::Relaxed), None); // Start
+                while wait_tick(&stop_flag, &done) {
+                    post(
+                        "/Progress",
+                        last_t_ms.load(Ordering::Relaxed),
+                        Some("TimeUpdate"),
+                    );
+                }
+                // Always post Stopped — including at position 0 — since we posted Start.
+                // Otherwise a fast mpv exit (before any IPC position arrives) would leave
+                // a stale "now playing" session on the server.
+                post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
+            })();
+            if let Some(on_end) = on_end {
+                on_end(last_t_ms.load(Ordering::Relaxed));
             }
-            // Always post Stopped — including at position 0 — since we posted Start.
-            // Otherwise a fast mpv exit (before any IPC position arrives) would leave
-            // a stale "now playing" session on the server.
-            post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
+        })?;
+    Ok(())
+}
+
+/// For sessions with no progress tracker (local/SMB files, or a degenerate
+/// track target): observe mpv's position over IPC and fire the end notifier
+/// with the last seen position when mpv exits (or the session is replaced).
+/// Tracked sessions instead notify from their tracker tail, after the final
+/// server write. No-op without a notifier.
+fn spawn_end_watcher(
+    socket_path: String,
+    stop_flag: Arc<AtomicBool>,
+    on_end: Option<EndNotify>,
+) -> std::io::Result<()> {
+    let Some(on_end) = on_end else {
+        return Ok(());
+    };
+    // Reuse the shared position reader: its `done` flag doubles as the EOF
+    // signal (set when mpv exits / the socket drops).
+    let (last_t_ms, done) = spawn_position_reader(socket_path, 0, stop_flag.clone())?;
+    std::thread::Builder::new()
+        .name("mpv-end-watcher".into())
+        .spawn(move || {
+            while !done.load(Ordering::Relaxed) && !stop_flag.load(Ordering::Relaxed) {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            // Fire even when the session was replaced or mpv exited before a
+            // position arrived (position 0): the session is over either way,
+            // and a spurious refresh is harmless.
+            on_end(last_t_ms.load(Ordering::Relaxed));
         })?;
     Ok(())
 }
@@ -912,6 +1052,65 @@ mod tests {
 
     fn tmp(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn autocrop_off_injects_nothing() {
+        assert!(autocrop_args("off", Some("/x/autocrop.lua")).is_empty());
+        // Unknown/garbage mode is treated as off.
+        assert!(autocrop_args("wat", Some("/x/autocrop.lua")).is_empty());
+    }
+
+    #[test]
+    fn proxy_reconnect_only_for_the_loopback_proxy() {
+        // The loopback proxy stream gets ffmpeg reconnect so a write-deadline
+        // drop resumes with a Range instead of a premature EOF.
+        let args = proxy_reconnect_args("http://127.0.0.1:5321/deadbeef");
+        assert_eq!(
+            args,
+            vec![
+                "--stream-lavf-o-append=reconnect=1".to_string(),
+                "--stream-lavf-o-append=reconnect_streamed=1".to_string(),
+                "--stream-lavf-o-append=reconnect_delay_max=5".to_string(),
+            ],
+            "the loopback proxy stream must enable reconnect"
+        );
+        // Server streams and local files are untouched.
+        assert!(proxy_reconnect_args("http://192.168.1.5:32400/library/parts/1").is_empty());
+        assert!(proxy_reconnect_args("https://plex.example.com/video").is_empty());
+        assert!(proxy_reconnect_args("/mnt/media/movie.mkv").is_empty());
+        assert!(proxy_reconnect_args("edl://foo").is_empty());
+    }
+
+    #[test]
+    fn autocrop_manual_loads_script_with_auto_disabled() {
+        let args = autocrop_args("manual", Some("/x/autocrop.lua"));
+        assert_eq!(
+            args,
+            vec![
+                "--script=/x/autocrop.lua".to_string(),
+                "--script-opts-append=autocrop-auto=no".to_string(),
+            ],
+            "manual must load the script AND disable its auto-crop"
+        );
+    }
+
+    #[test]
+    fn autocrop_auto_loads_script_without_disabling_auto() {
+        let args = autocrop_args("auto", Some("/x/autocrop.lua"));
+        assert_eq!(args, vec!["--script=/x/autocrop.lua".to_string()]);
+        assert!(
+            !args.iter().any(|a| a.contains("autocrop-auto=no")),
+            "auto mode must NOT disable the script's crop-on-start"
+        );
+    }
+
+    #[test]
+    fn autocrop_without_resolved_script_injects_nothing() {
+        // Even when enabled, an unresolved script yields no args (play() also
+        // existence-checks; here the path is simply absent).
+        assert!(autocrop_args("manual", None).is_empty());
+        assert!(autocrop_args("auto", None).is_empty());
     }
 
     #[test]

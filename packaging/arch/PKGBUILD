@@ -1,17 +1,15 @@
 # Maintainer: Michael Coelho
 pkgname=vela
-pkgver=0.1.4
+pkgver=0.1.31
 pkgrel=1
 pkgdesc='mpv-backed HDR media client for Plex, Jellyfin, Emby, and local libraries'
 arch=('x86_64')
-license=('MIT')
+license=('MIT' 'GPL2')
 # Vela's release profile already strips the binary, so the makepkg debug split
 # finds no symbols — skip it (no empty -debug package, no gdb-add-index warning).
 options=('!debug')
-depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme')
+depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme' 'smbclient')
 optdepends=(
-  'gvfs-smb: browse SMB shares through GNOME/GVfs mounts'
-  'kio-fuse: browse SMB shares through KDE/KIO mounts'
   'sshfs: browse SSH/SFTP sources'
 )
 source=()
@@ -30,4 +28,15 @@ package() {
   install -Dm644 "$repo/src-tauri/icons/icon.png" "$pkgdir/usr/share/icons/hicolor/512x512/apps/vela.png"
 
   install -Dm644 "$repo/LICENSE" "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+
+  # Bundled mpv autocrop script (GPLv2+, unmodified). Installed at the path the
+  # app resolves at runtime: Tauri BaseDirectory::Resource maps to
+  # /usr/lib/<productName>/ for a /usr/bin/vela binary, i.e. /usr/lib/Vela/ — the
+  # same layout the deb/rpm bundles use. build:arch runs `tauri build --no-bundle`,
+  # so Tauri does not stage resources itself; install them explicitly here.
+  install -Dm644 "$repo/src-tauri/resources/mpv-scripts/autocrop.lua" "$pkgdir/usr/lib/Vela/mpv-scripts/autocrop.lua"
+  install -Dm644 "$repo/src-tauri/resources/mpv-scripts/LICENSE.GPL" "$pkgdir/usr/lib/Vela/mpv-scripts/LICENSE.GPL"
+  install -Dm644 "$repo/src-tauri/resources/mpv-scripts/PROVENANCE.md" "$pkgdir/usr/lib/Vela/mpv-scripts/PROVENANCE.md"
+  # GPL license text for the bundled script (Arch license convention).
+  install -Dm644 "$repo/src-tauri/resources/mpv-scripts/LICENSE.GPL" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.GPL"
 }

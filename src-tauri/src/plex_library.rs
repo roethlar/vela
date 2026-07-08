@@ -51,6 +51,12 @@ pub struct PlexDir {
     pub thumb: Option<String>,
     pub year: Option<u32>,
     pub summary: Option<String>,
+    // Shows arrive as Directory rows; without these the "date added" / "last
+    // played" sorts rank all Plex shows as missing-timestamp (sorting review r2).
+    #[serde(rename = "addedAt")]
+    pub added_at: Option<u64>,
+    #[serde(rename = "lastViewedAt")]
+    pub last_viewed_at: Option<u64>,
 }
 
 impl From<PlexDir> for PlexVideo {
@@ -65,7 +71,10 @@ impl From<PlexDir> for PlexVideo {
             view_offset: None,
             view_count: None,
             thumb: d.thumb,
-            added_at: None,
+            grandparent_thumb: None,
+            art: None,
+            added_at: d.added_at,
+            last_viewed_at: d.last_viewed_at,
             updated_at: None,
             media: vec![],
             year: d.year,
@@ -74,6 +83,7 @@ impl From<PlexDir> for PlexVideo {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            guids: vec![],
         }
     }
 }
@@ -114,8 +124,15 @@ pub struct PlexVideo {
     pub view_count: Option<u64>,
     #[serde(rename = "thumb")]
     pub thumb: Option<String>,
+    #[serde(rename = "grandparentThumb")]
+    pub grandparent_thumb: Option<String>,
+    #[serde(rename = "art")]
+    pub art: Option<String>,
     #[serde(rename = "addedAt")]
     pub added_at: Option<u64>,
+    /// Unix seconds of the user's last watch activity on this item.
+    #[serde(rename = "lastViewedAt")]
+    pub last_viewed_at: Option<u64>,
     #[serde(rename = "updatedAt")]
     pub updated_at: Option<u64>,
     #[serde(rename = "Media", default)]
@@ -131,6 +148,15 @@ pub struct PlexVideo {
     pub grandparent_title: Option<String>,
     #[serde(rename = "parentTitle")]
     pub parent_title: Option<String>,
+    /// `<Guid id="imdb://tt…"/>` children (present in section listings when
+    /// requested with `includeGuids=1`); the cross-source dedup identity.
+    #[serde(rename = "Guid", default)]
+    pub guids: Vec<PlexGuid>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct PlexGuid {
+    pub id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -163,6 +189,129 @@ pub struct PlexPart {
     pub file: String,
     pub size: Option<u64>,
     pub container: Option<String>,
+}
+
+// --- Item detail (the "more info" surface) -------------------------------------
+// A dedicated serde hierarchy for the per-item `/library/metadata/{rk}` response.
+// Kept separate from the listing structs above so the hot listing/playback parse
+// isn't widened; serde_xml_rs maps both attributes and repeated child elements to
+// fields (the same mechanism `PlexVideo.media`/`.guids` already rely on).
+
+/// Root wrapper: the metadata endpoint returns the item as a `Video` (movie/
+/// episode) or a `Directory` (show/season) under `MediaContainer`.
+#[derive(Debug, Deserialize, Default)]
+pub struct DetailContainer {
+    #[serde(rename = "Video", default)]
+    pub videos: Vec<PlexDetail>,
+    // Some Plex endpoints label item rows `Metadata` rather than `Video`; capture
+    // both, matching `ItemsContainer`, so the detail parse can't miss the item.
+    #[serde(rename = "Metadata", default)]
+    pub metadata: Vec<PlexDetail>,
+    #[serde(rename = "Directory", default)]
+    pub directories: Vec<PlexDetail>,
+}
+
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+pub struct PlexDetail {
+    pub key: String,
+    #[serde(rename = "ratingKey")]
+    pub rating_key: String,
+    pub title: String,
+    pub summary: Option<String>,
+    pub tagline: Option<String>,
+    pub year: Option<u32>,
+    pub duration: Option<u64>,
+    #[serde(rename = "viewOffset")]
+    pub view_offset: Option<u64>,
+    #[serde(rename = "viewCount")]
+    pub view_count: Option<u64>,
+    #[serde(rename = "type")]
+    pub media_type: Option<String>,
+    pub thumb: Option<String>,
+    #[serde(rename = "grandparentThumb")]
+    pub grandparent_thumb: Option<String>,
+    pub art: Option<String>,
+    #[serde(rename = "contentRating")]
+    pub content_rating: Option<String>,
+    pub rating: Option<f32>,
+    #[serde(rename = "audienceRating")]
+    pub audience_rating: Option<f32>,
+    pub studio: Option<String>,
+    #[serde(rename = "originallyAvailableAt")]
+    pub originally_available_at: Option<String>,
+    pub index: Option<u32>,
+    #[serde(rename = "parentIndex")]
+    pub parent_index: Option<u32>,
+    #[serde(rename = "grandparentTitle")]
+    pub grandparent_title: Option<String>,
+    #[serde(rename = "parentTitle")]
+    pub parent_title: Option<String>,
+    #[serde(rename = "Genre", default)]
+    pub genres: Vec<PlexTag>,
+    #[serde(rename = "Director", default)]
+    pub directors: Vec<PlexTag>,
+    #[serde(rename = "Writer", default)]
+    pub writers: Vec<PlexTag>,
+    #[serde(rename = "Country", default)]
+    pub countries: Vec<PlexTag>,
+    #[serde(rename = "Role", default)]
+    pub roles: Vec<PlexRole>,
+    #[serde(rename = "Media", default)]
+    pub media: Vec<PlexDetailMedia>,
+}
+
+/// A simple `tag=`-bearing child (`<Genre>`, `<Director>`, `<Writer>`, `<Country>`).
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct PlexTag {
+    pub tag: String,
+}
+
+/// A `<Role>` (cast) child: actor `tag`, character `role`, headshot `thumb`.
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct PlexRole {
+    pub tag: String,
+    pub role: Option<String>,
+    pub thumb: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct PlexDetailMedia {
+    #[serde(rename = "videoResolution")]
+    pub video_resolution: Option<String>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    #[serde(rename = "videoCodec")]
+    pub video_codec: Option<String>,
+    #[serde(rename = "audioCodec")]
+    pub audio_codec: Option<String>,
+    pub container: Option<String>,
+    #[serde(rename = "videoDynamicRange")]
+    pub video_dynamic_range: Option<String>,
+    #[serde(rename = "Part", default)]
+    pub parts: Vec<PlexDetailPart>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct PlexDetailPart {
+    #[serde(rename = "Stream", default)]
+    pub streams: Vec<PlexStream>,
+}
+
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct PlexStream {
+    #[serde(rename = "streamType")]
+    pub stream_type: Option<u8>,
+    pub codec: Option<String>,
+    pub language: Option<String>,
+    pub channels: Option<u32>,
+    #[serde(rename = "displayTitle")]
+    pub display_title: Option<String>,
 }
 
 #[derive(Clone)]
@@ -495,6 +644,26 @@ impl PlexLibrary {
         Ok(out)
     }
 
+    /// `/library/onDeck` — the server's next-up/in-progress list. Vela builds
+    /// its own On Deck hub from this endpoint because the `/hubs` On Deck hub
+    /// is server-controlled and often absent (decision 2026-07-04: On Deck
+    /// folds into the Continue Watching flow).
+    pub async fn get_on_deck(&self) -> Result<Vec<PlexVideo>, Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let url = format!("{base}/library/onDeck");
+        let resp = self
+            .client
+            .get(&url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .send()
+            .await?
+            .error_for_status()?;
+        let body = resp.text().await?;
+        Ok(videos_from_xml(&body))
+    }
+
     /// Search across libraries. Returns playable/browsable results (movies,
     /// shows, seasons, episodes), de-duplicated, in the server's relevance order.
     pub async fn search(&self, query: &str) -> Result<Vec<PlexVideo>, Box<dyn std::error::Error>> {
@@ -696,6 +865,56 @@ impl PlexLibrary {
         Ok(())
     }
 
+    /// Fetch the full metadata record for one item (the detail / info surface):
+    /// `/library/metadata/{rk}`, which carries cast/crew/genre/media-streams that
+    /// the section listing omits. Parsed with serde into [`PlexDetail`].
+    pub async fn get_item_detail(
+        &self,
+        rating_key: &str,
+    ) -> Result<PlexDetail, Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let url = format!("{base}/library/metadata/{rating_key}");
+        let body = self
+            .client
+            .get(&url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+        let container: DetailContainer = serde_xml_rs::from_str(&body)?;
+        container
+            .videos
+            .into_iter()
+            .chain(container.metadata)
+            .chain(container.directories)
+            .next()
+            .ok_or_else(|| "item not found".into())
+    }
+
+    /// Remove an item from the server's Continue Watching hub (the same
+    /// action Plex Web's "Remove from Continue Watching" performs).
+    pub async fn remove_from_continue_watching(
+        &self,
+        rating_key: &str,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let url = format!("{base}/actions/removeFromContinueWatching");
+        self.client
+            .put(&url)
+            .query(&[("ratingKey", rating_key)])
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     pub async fn fetch_children(
         &self,
         parent_rating_key: &str,
@@ -732,6 +951,7 @@ impl PlexLibrary {
         let base_url = format!("{base}/library/sections/{section_key}/all");
 
         let mut params = vec![
+            ("includeGuids".to_string(), "1".to_string()),
             ("type".to_string(), type_filter.to_string()),
             ("X-Plex-Container-Start".to_string(), start.to_string()),
             ("X-Plex-Container-Size".to_string(), size.to_string()),
@@ -762,6 +982,7 @@ impl PlexLibrary {
         let base_url = format!("{base}/library/sections/{section_key}/all");
 
         let mut params = vec![
+            ("includeGuids".to_string(), "1".to_string()),
             ("type".to_string(), type_filter.to_string()),
             ("X-Plex-Container-Start".to_string(), start.to_string()),
             ("X-Plex-Container-Size".to_string(), size.to_string()),
@@ -1110,6 +1331,28 @@ fn hub_from_attrs(e: &quick_xml::events::BytesStart) -> PlexHub {
     hub
 }
 
+/// Collect every item element from a flat MediaContainer body (no Hub
+/// grouping), preserving server order.
+fn videos_from_xml(body: &str) -> Vec<PlexVideo> {
+    let mut reader = quick_xml::Reader::from_str(body);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
+                if matches!(e.name().as_ref(), b"Video" | b"Directory" | b"Metadata") {
+                    out.push(video_from_attrs(&e));
+                }
+            }
+            Ok(Event::Eof) => break,
+            Ok(_) => {}
+            Err(_) => break,
+        }
+        buf.clear();
+    }
+    out
+}
+
 fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
     let mut v = PlexVideo {
         key: String::new(),
@@ -1121,7 +1364,10 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
         view_offset: None,
         view_count: None,
         thumb: None,
+        grandparent_thumb: None,
+        art: None,
         added_at: None,
+        last_viewed_at: None,
         updated_at: None,
         media: vec![],
         year: None,
@@ -1130,6 +1376,7 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
         parent_index: None,
         grandparent_title: None,
         parent_title: None,
+        guids: vec![],
     };
     for a in e.attributes().flatten() {
         match a.key.as_ref() {
@@ -1141,7 +1388,10 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
             b"duration" => v.duration = av(&a).parse().ok(),
             b"viewOffset" => v.view_offset = av(&a).parse().ok(),
             b"viewCount" => v.view_count = av(&a).parse().ok(),
+            b"lastViewedAt" => v.last_viewed_at = av(&a).parse().ok(),
             b"thumb" => v.thumb = Some(av(&a)),
+            b"grandparentThumb" => v.grandparent_thumb = Some(av(&a)),
+            b"art" => v.art = Some(av(&a)),
             b"year" => v.year = av(&a).parse().ok(),
             b"type" => v.media_type = Some(av(&a)),
             b"index" => v.index = av(&a).parse().ok(),
@@ -1190,6 +1440,122 @@ fn part_url(base: &str, part_key: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn detail_parse_captures_full_metadata() {
+        // A representative `/library/metadata/{rk}` movie response. The parse must
+        // capture the scalar attrs AND every child collection (genre/director/
+        // writer/country/role/media/part/stream) — the fields the section listing
+        // omits and the detail view exists to show.
+        let xml = r#"<MediaContainer size="1">
+  <Video ratingKey="12345" key="/library/metadata/12345" type="movie"
+         title="Blade Runner 2049" contentRating="R" rating="8.0"
+         audienceRating="8.8" studio="Warner Bros." year="2017"
+         tagline="There is an order to things." originallyAvailableAt="2017-10-06"
+         summary="A young blade runner uncovers a secret." duration="9754000"
+         viewCount="1" viewOffset="120000" thumb="/library/metadata/12345/thumb/1"
+         art="/library/metadata/12345/art/1">
+    <Media id="1" videoResolution="4k" width="3840" height="2160" videoCodec="hevc"
+           audioCodec="truehd" container="mkv" videoDynamicRange="Dolby Vision">
+      <Part id="2" key="/library/parts/2/file.mkv" file="/data/br2049.mkv" container="mkv">
+        <Stream streamType="2" codec="truehd" language="English" channels="8" displayTitle="TrueHD 7.1"/>
+        <Stream streamType="3" codec="srt" language="English" displayTitle="English (SRT)"/>
+      </Part>
+    </Media>
+    <Genre tag="Science Fiction"/>
+    <Genre tag="Drama"/>
+    <Director tag="Denis Villeneuve"/>
+    <Writer tag="Hampton Fancher"/>
+    <Writer tag="Michael Green"/>
+    <Country tag="United States"/>
+    <Role tag="Ryan Gosling" role="K" thumb="/library/metadata/12345/role/1"/>
+    <Role tag="Harrison Ford" role="Rick Deckard" thumb="/library/metadata/12345/role/2"/>
+  </Video>
+</MediaContainer>"#;
+
+        let container: DetailContainer = serde_xml_rs::from_str(xml).expect("detail parse");
+        let d = container.videos.into_iter().next().expect("one Video");
+
+        // Scalar attributes.
+        assert_eq!(d.rating_key, "12345");
+        assert_eq!(d.title, "Blade Runner 2049");
+        assert_eq!(d.content_rating.as_deref(), Some("R"));
+        assert_eq!(d.rating, Some(8.0));
+        assert_eq!(d.audience_rating, Some(8.8));
+        assert_eq!(d.studio.as_deref(), Some("Warner Bros."));
+        assert_eq!(d.tagline.as_deref(), Some("There is an order to things."));
+        assert_eq!(d.originally_available_at.as_deref(), Some("2017-10-06"));
+        assert_eq!(d.year, Some(2017));
+        assert_eq!(d.duration, Some(9_754_000));
+        assert_eq!(d.view_count, Some(1));
+        assert_eq!(d.view_offset, Some(120_000));
+
+        // Child collections.
+        let genres: Vec<_> = d.genres.iter().map(|t| t.tag.as_str()).collect();
+        assert_eq!(genres, ["Science Fiction", "Drama"]);
+        assert_eq!(
+            d.directors.iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(),
+            ["Denis Villeneuve"]
+        );
+        assert_eq!(
+            d.writers.iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(),
+            ["Hampton Fancher", "Michael Green"]
+        );
+        assert_eq!(
+            d.countries.iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(),
+            ["United States"]
+        );
+
+        // Cast: name + character + headshot.
+        assert_eq!(d.roles.len(), 2);
+        assert_eq!(d.roles[0].tag, "Ryan Gosling");
+        assert_eq!(d.roles[0].role.as_deref(), Some("K"));
+        assert_eq!(
+            d.roles[0].thumb.as_deref(),
+            Some("/library/metadata/12345/role/1")
+        );
+        assert_eq!(d.roles[1].tag, "Harrison Ford");
+        assert_eq!(d.roles[1].role.as_deref(), Some("Rick Deckard"));
+
+        // Media / Part / Stream.
+        assert_eq!(d.media.len(), 1);
+        let m = &d.media[0];
+        assert_eq!(m.video_resolution.as_deref(), Some("4k"));
+        assert_eq!(m.width, Some(3840));
+        assert_eq!(m.height, Some(2160));
+        assert_eq!(m.video_codec.as_deref(), Some("hevc"));
+        assert_eq!(m.audio_codec.as_deref(), Some("truehd"));
+        assert_eq!(m.video_dynamic_range.as_deref(), Some("Dolby Vision"));
+        assert_eq!(m.parts.len(), 1);
+        let streams = &m.parts[0].streams;
+        assert_eq!(streams.len(), 2);
+        assert_eq!(streams[0].stream_type, Some(2));
+        assert_eq!(streams[0].codec.as_deref(), Some("truehd"));
+        assert_eq!(streams[0].channels, Some(8));
+        assert_eq!(streams[1].stream_type, Some(3));
+        assert_eq!(streams[1].language.as_deref(), Some("English"));
+    }
+
+    #[test]
+    fn plexdir_carries_added_and_last_viewed_into_video() {
+        // Plex shows deserialize as Directory rows; the conversion must keep
+        // addedAt / lastViewedAt or the date-added / last-played sorts rank all
+        // Plex shows as missing-timestamp (sorting review r2).
+        let d = PlexDir {
+            key: "/k".into(),
+            rating_key: Some("rk".into()),
+            title: "Some Show".into(),
+            media_type: Some("show".into()),
+            thumb: None,
+            year: Some(2020),
+            summary: None,
+            added_at: Some(1_700_000_000),
+            last_viewed_at: Some(1_751_000_000),
+        };
+        let v: PlexVideo = d.into();
+        assert_eq!(v.added_at, Some(1_700_000_000));
+        assert_eq!(v.last_viewed_at, Some(1_751_000_000));
+    }
+
     fn server(name: &str, scheme: &str, host: &str, local: bool, relay: bool) -> PlexServer {
         PlexServer {
             name: name.to_string(),
@@ -1227,6 +1593,43 @@ mod tests {
         );
         // The credential must never ride in the URL; it travels as a header.
         assert!(!u.contains("X-Plex-Token"));
+    }
+
+    #[test]
+    fn video_attrs_capture_series_poster_and_backdrop_art() {
+        let mut e = quick_xml::events::BytesStart::new("Video");
+        e.push_attribute(("ratingKey", "42"));
+        e.push_attribute(("title", "Fallen Angel"));
+        e.push_attribute(("thumb", "/library/metadata/42/thumb/1"));
+        e.push_attribute(("grandparentThumb", "/library/metadata/7/thumb/9"));
+        e.push_attribute(("art", "/library/metadata/7/art/9"));
+
+        let v = video_from_attrs(&e);
+        assert_eq!(v.thumb.as_deref(), Some("/library/metadata/42/thumb/1"));
+        assert_eq!(
+            v.grandparent_thumb.as_deref(),
+            Some("/library/metadata/7/thumb/9")
+        );
+        assert_eq!(v.art.as_deref(), Some("/library/metadata/7/art/9"));
+    }
+
+    #[test]
+    fn on_deck_body_parses_items_with_last_viewed_stamp() {
+        let xml = r#"
+            <MediaContainer size="2">
+              <Video ratingKey="101" key="/library/metadata/101" title="Blood and Bone"
+                     type="movie" viewOffset="1200000" lastViewedAt="1751500000" />
+              <Video ratingKey="202" key="/library/metadata/202" title="Next Up"
+                     type="episode" grandparentTitle="Show" index="3" parentIndex="1" />
+            </MediaContainer>
+        "#;
+        let items = videos_from_xml(xml);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].rating_key, "101");
+        assert_eq!(items[0].last_viewed_at, Some(1_751_500_000));
+        assert_eq!(items[0].view_offset, Some(1_200_000));
+        assert_eq!(items[1].media_type.as_deref(), Some("episode"));
+        assert_eq!(items[1].last_viewed_at, None);
     }
 
     #[test]

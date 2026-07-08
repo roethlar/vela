@@ -8,8 +8,8 @@ use crate::config::{self, AppConfig, LocalFolder, SmbFolder, SmbMount, SourceCon
 use crate::playback;
 use crate::plex_library::PlexLibrary;
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
-use crate::source::local::{LocalSource, LOCAL_SOURCE_ID};
-use crate::source::{plex::PlexSource, HubDto, ItemDto, SectionDto};
+use crate::source::local::LOCAL_SOURCE_ID;
+use crate::source::{plex::PlexSource, DetailDto, HubDto, ItemDto, SectionDto};
 use crate::{AppState, PLEX_SOURCE_ID};
 
 const PRODUCT: &str = "Vela";
@@ -19,7 +19,7 @@ const PRODUCT: &str = "Vela";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
-const BUILD_DATE: &str = "2026-07-03";
+const BUILD_DATE: &str = "2026-07-06";
 
 /// Project home, shown (and opened) from the build-info footer.
 const REPO_URL: &str = "https://github.com/roethlar/vela";
@@ -208,8 +208,8 @@ pub async fn remove_source(id: String, state: State<'_, AppState>) -> Result<(),
     if id == PLEX_SOURCE_ID {
         return Err("the Plex source can't be removed here".into());
     }
-    if id == LOCAL_SOURCE_ID {
-        return Err("manage local media via its folder and SMB entries".into());
+    if crate::source::local::is_local_family_id(&id) {
+        return Err("manage local media via its folder and mount entries".into());
     }
     let id2 = id.clone();
     config::update(move |cfg| {
@@ -383,7 +383,7 @@ pub struct SmbFolderDto {
     kind: String,
 }
 
-/// One directory inside a mounted SMB share, for the settings browser.
+/// One directory inside a configured SMB share, for the settings browser.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SmbDirectoryDto {
@@ -405,8 +405,10 @@ pub struct SshMountDto {
     mountpoint: String,
 }
 
-/// Mount an SMB share via the OS and persist it for browsing/selection. Library
-/// folders are added separately with `add_smb_folder`.
+/// Add an SMB share and persist it for browsing/selection. Linux verifies
+/// the server/share/credentials over the in-process native client (no OS
+/// mount; `mountpoint` stays empty); macOS/Windows mount via the OS.
+/// Library folders are added separately with `add_smb_folder`.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)] // Tauri command surface; each is a distinct field.
 pub async fn mount_smb(
@@ -432,9 +434,12 @@ pub async fn mount_smb(
     }) {
         return Err("that share is already added".into());
     }
-    let mut mount = SmbMount {
+    let taken = local_family_names(&existing);
+    let mount = SmbMount {
         id: uuid::Uuid::new_v4().to_string(),
-        name: name.unwrap_or_else(|| format!("{}/{}", server.trim(), share.trim())),
+        name: name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| unique_mount_name(share.trim(), server.trim(), &taken)),
         server: server.trim().to_string(),
         share: share.trim().to_string(),
         username,
@@ -453,17 +458,9 @@ pub async fn mount_smb(
     // browsing and playback proceed while the (possibly slow) mount runs.
     let _ops = state.source_lock.lock().await;
 
-    // The OS mount can block for seconds (or hang), so run it off the async runtime.
-    let m_for_mount = mount.clone();
-    mount = tauri::async_runtime::spawn_blocking(move || {
-        let mut mounted = m_for_mount;
-        crate::smb::prepare_mount(&mut mounted)?;
-        Ok::<SmbMount, String>(mounted)
-    })
-    .await
-    .map_err(|e| format!("mount task failed: {e}"))??;
+    let mount = with_default_root_folder(establish_smb_share(mount).await?);
 
-    {
+    if !mount.mountpoint.is_empty() {
         use tauri::Manager;
         let _ = app
             .asset_protocol_scope()
@@ -475,6 +472,8 @@ pub async fn mount_smb(
     // is held (it is, above) — so the persist and the rollback both run inside the
     // same critical section as the mount.
     let mountpoint = mount.mountpoint.clone();
+    let mount_id = mount.id.clone();
+    let mount_name = mount.name.clone();
     if let Err(e) = rebuild_local_locked(&state, move |cfg| {
         // Reject a duplicate of an already-configured share (same server/share),
         // so we never persist two records over one shared connection/mountpoint.
@@ -495,18 +494,60 @@ pub async fn mount_smb(
         // it. We still hold source_lock, so no concurrent op can persist this
         // mountpoint between the check and the unmount. On a read error we still
         // clean up: dropping our just-created mount beats orphaning a credentialed
-        // mount with no record. Run the unmount off the async runtime.
-        if mountpoint_referenced(&mountpoint) != Some(true) {
+        // mount with no record. Run the unmount off the async runtime. An empty
+        // mountpoint means a native (mountless) connection: nothing to roll back.
+        if !mountpoint.is_empty() && mountpoint_referenced(&mountpoint) != Some(true) {
             let mp = mountpoint.clone();
             let _ = tauri::async_runtime::spawn_blocking(move || crate::smb::unmount(&mp)).await;
         }
         return Err(e);
     }
     Ok(SourceDto {
-        id: LOCAL_SOURCE_ID.to_string(),
-        name: "Local".to_string(),
-        kind: "local".to_string(),
+        id: crate::source::local::smb_source_id(&mount_id),
+        name: mount_name,
+        kind: "smb".to_string(),
     })
+}
+
+/// A newly added share starts with its root selected as a library folder,
+/// so media appears without the separate folder-selection step (a share
+/// with zero folders produces no source at all — the trap this closes).
+/// The user can remove the root or add narrower subfolders afterwards.
+/// Empty `path` is the share root; empty `kind` means auto-detect.
+fn with_default_root_folder(mut mount: SmbMount) -> SmbMount {
+    mount.folders.push(SmbFolder {
+        id: uuid::Uuid::new_v4().to_string(),
+        name: mount.name.clone(),
+        path: String::new(),
+        kind: String::new(),
+    });
+    mount
+}
+
+/// Establish a newly added share. Linux-family: verify server/share/
+/// credentials with an in-process libsmbclient connection — no OS mount, and
+/// `mountpoint` stays empty as the marker of a native record. macOS/Windows:
+/// perform the OS mount and fill `mountpoint`. Blocking work runs off the
+/// async runtime either way.
+async fn establish_smb_share(mount: SmbMount) -> Result<SmbMount, String> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let probe = mount.clone();
+        tauri::async_runtime::spawn_blocking(move || crate::smb_client::verify_mount(&probe))
+            .await
+            .map_err(|e| format!("SMB connect task failed: {e}"))??;
+        Ok(mount)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut mounted = mount;
+            crate::smb::prepare_mount(&mut mounted)?;
+            Ok::<SmbMount, String>(mounted)
+        })
+        .await
+        .map_err(|e| format!("mount task failed: {e}"))?
+    }
 }
 
 /// List configured SMB mounts (for the settings UI).
@@ -527,9 +568,9 @@ pub async fn list_smb_mounts() -> Result<Vec<SmbMountDto>, String> {
         .collect())
 }
 
-/// List directories inside a configured SMB share, relative to the mounted
-/// share root. Used by Settings to choose one or more library folders after the
-/// share is mounted.
+/// List directories inside a configured SMB share, relative to the share
+/// root. Used by Settings to choose library folders. Linux lists natively
+/// over the in-process client; macOS/Windows read the OS mount path.
 #[tauri::command]
 pub async fn list_smb_directories(
     id: String,
@@ -542,37 +583,67 @@ pub async fn list_smb_directories(
         .into_iter()
         .find(|m| m.id == id)
         .ok_or("no such SMB mount")?;
-    let root = smb_mount_root(&mount).ok_or_else(|| {
-        format!(
-            "SMB share //{}/{} is not mounted or readable",
-            mount.server, mount.share
-        )
-    })?;
-    let dir = smb_pathbuf_for_relative(&root, &relative);
-    if !dir.is_dir() {
-        return Err("that SMB folder is not readable".into());
+
+    // Linux-family: list natively over an in-process SMB connection, so
+    // browsing works with no OS mount present at all.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        tauri::async_runtime::spawn_blocking(move || {
+            let conn = crate::smb_client::connect_mount(&mount)?;
+            let mut dirs: Vec<SmbDirectoryDto> = conn
+                .list_dir(&relative)?
+                .into_iter()
+                .filter(|entry| entry.is_dir)
+                .map(|entry| SmbDirectoryDto {
+                    path: append_smb_relative_path(&relative, &entry.name),
+                    name: entry.name,
+                })
+                .collect();
+            dirs.sort_by_key(|dir| dir.name.to_lowercase());
+            Ok(dirs)
+        })
+        .await
+        .map_err(|e| format!("SMB browse task failed: {e}"))?
     }
-    tauri::async_runtime::spawn_blocking(move || {
-        let mut dirs = Vec::new();
-        for entry in std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))? {
-            let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
-            if !entry.path().is_dir() {
-                continue;
-            }
-            let name = entry.file_name().to_string_lossy().to_string();
-            dirs.push(SmbDirectoryDto {
-                path: append_smb_relative_path(&relative, &name),
-                name,
-            });
+
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let root = smb_mount_root(&mount).ok_or_else(|| {
+            format!(
+                "SMB share //{}/{} is not mounted or readable",
+                mount.server, mount.share
+            )
+        })?;
+        let dir = smb_pathbuf_for_relative(&root, &relative);
+        if !dir.is_dir() {
+            return Err("that SMB folder is not readable".into());
         }
-        dirs.sort_by_key(|dir| dir.name.to_lowercase());
-        Ok::<_, String>(dirs)
-    })
-    .await
-    .map_err(|e| format!("SMB browse task failed: {e}"))?
+        tauri::async_runtime::spawn_blocking(move || {
+            let mut dirs = Vec::new();
+            for entry in
+                std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))?
+            {
+                let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
+                if !entry.path().is_dir() {
+                    continue;
+                }
+                let name = entry.file_name().to_string_lossy().to_string();
+                dirs.push(SmbDirectoryDto {
+                    path: append_smb_relative_path(&relative, &name),
+                    name,
+                });
+            }
+            dirs.sort_by_key(|dir| dir.name.to_lowercase());
+            Ok::<_, String>(dirs)
+        })
+        .await
+        .map_err(|e| format!("SMB browse task failed: {e}"))?
+    }
 }
 
-/// Add one selected folder inside a mounted SMB share to the local source.
+/// Add one selected folder inside a configured SMB share to its source.
+/// Linux validates the folder over the native client; macOS/Windows probe
+/// the mounted path.
 #[tauri::command]
 pub async fn add_smb_folder(
     id: String,
@@ -594,20 +665,38 @@ pub async fn add_smb_folder(
         .iter()
         .find(|m| m.id == id)
         .ok_or("no such SMB mount")?;
-    let root = smb_mount_root(mount).ok_or_else(|| {
-        format!(
-            "SMB share //{}/{} is not mounted or readable",
-            mount.server, mount.share
-        )
-    })?;
-    let folder_path = smb_path_string_for_relative(&root, &relative);
-    if !Path::new(&folder_path).is_dir() {
-        return Err("that SMB folder is not readable".into());
-    }
-    if !safe_user_media_root(&folder_path) {
-        return Err("choose a specific media folder, not a filesystem or home root".into());
-    }
+    // Linux-family: validate over the native connection — the share is
+    // never OS-mounted, so there is no local path to probe or allow.
+    #[cfg(all(unix, not(target_os = "macos")))]
     {
+        let _ = &app; // asset protocol is unused for native SMB folders
+        let probe = mount.clone();
+        let rel = relative.clone();
+        let is_dir = tauri::async_runtime::spawn_blocking(move || {
+            crate::smb_client::connect_mount(&probe).and_then(|c| c.stat(&rel))
+        })
+        .await
+        .map_err(|e| format!("SMB probe task failed: {e}"))??
+        .is_dir;
+        if !is_dir {
+            return Err("that SMB folder is not readable".into());
+        }
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let root = smb_mount_root(mount).ok_or_else(|| {
+            format!(
+                "SMB share //{}/{} is not mounted or readable",
+                mount.server, mount.share
+            )
+        })?;
+        let folder_path = smb_path_string_for_relative(&root, &relative);
+        if !Path::new(&folder_path).is_dir() {
+            return Err("that SMB folder is not readable".into());
+        }
+        if !safe_user_media_root(&folder_path) {
+            return Err("choose a specific media folder, not a filesystem or home root".into());
+        }
         use tauri::Manager;
         let _ = app
             .asset_protocol_scope()
@@ -619,6 +708,7 @@ pub async fn add_smb_folder(
         path: relative.clone(),
         kind,
     };
+    let mount_name = mount.name.clone();
     let mount_id = id.clone();
     let relative_for_check = relative.clone();
     rebuild_local_locked(&state, move |cfg| {
@@ -638,10 +728,36 @@ pub async fn add_smb_folder(
     })
     .await?;
     Ok(SourceDto {
-        id: LOCAL_SOURCE_ID.to_string(),
-        name: "Local".to_string(),
-        kind: "local".to_string(),
+        id: crate::source::local::smb_source_id(&id),
+        name: mount_name,
+        kind: "smb".to_string(),
     })
+}
+
+/// Remove one folder from an SMB mount's config, refusing to empty the mount:
+/// a zero-folder mount is a "zombie" invisible share that browses nothing (the
+/// same trap the share-root auto-add closed). The UI cascades a last-folder
+/// removal to a full unmount instead (Settings.svelte `removeSmbFolder`); this
+/// enforces the invariant for any direct caller. Pure over the config so it is
+/// unit-testable (Bug 5 P1).
+fn remove_smb_folder_in_config(
+    cfg: &mut AppConfig,
+    id: &str,
+    folder_id: &str,
+) -> Result<(), String> {
+    let mount = cfg
+        .smb_mounts
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or_else(|| "no such SMB mount".to_string())?;
+    if !mount.folders.iter().any(|folder| folder.id == folder_id) {
+        return Err("no such SMB folder".to_string());
+    }
+    if mount.folders.len() <= 1 {
+        return Err("a share must keep at least one folder; remove the share instead".to_string());
+    }
+    mount.folders.retain(|folder| folder.id != folder_id);
+    Ok(())
 }
 
 /// Remove one selected folder from an SMB share without unmounting the share.
@@ -652,20 +768,282 @@ pub async fn remove_smb_folder(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     mutate_then_rebuild_local(&state, move |cfg| {
-        let mount = cfg
-            .smb_mounts
-            .iter_mut()
-            .find(|m| m.id == id)
-            .ok_or_else(|| "no such SMB mount".to_string())?;
-        let before = mount.folders.len();
-        mount.folders.retain(|folder| folder.id != folder_id);
-        let removed = mount.folders.len() != before;
-        if !removed {
-            return Err("no such SMB folder".to_string());
-        }
-        Ok(())
+        remove_smb_folder_in_config(cfg, &id, &folder_id)
     })
     .await
+}
+
+/// Rename an SMB mount's display label, propagating the new name to the
+/// auto-added share-root folder (path==""), whose label was copied from the
+/// mount name at add time — otherwise the sidebar source renames but its
+/// section header stays stale. A user-renamed root folder (name no longer equal
+/// to the old mount name) is left alone. Pure over the config so it is
+/// unit-testable (Bug 5 P2).
+fn rename_smb_mount_in_config(cfg: &mut AppConfig, id: &str, new_name: &str) -> Result<(), String> {
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+        return Err("a name is required".to_string());
+    }
+    let mount = cfg
+        .smb_mounts
+        .iter_mut()
+        .find(|m| m.id == id)
+        .ok_or_else(|| "no such SMB mount".to_string())?;
+    let old_name = mount.name.clone();
+    mount.name = new_name.to_string();
+    for folder in mount
+        .folders
+        .iter_mut()
+        .filter(|f| f.path.is_empty() && f.name == old_name)
+    {
+        folder.name = new_name.to_string();
+    }
+    Ok(())
+}
+
+/// Rename an SMB share as shown in the sidebar / Connected tab.
+#[tauri::command]
+pub async fn rename_smb_mount(
+    id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    mutate_then_rebuild_local(&state, move |cfg| {
+        rename_smb_mount_in_config(cfg, &id, &name)
+    })
+    .await
+}
+
+#[cfg(test)]
+mod smb_folder_tests {
+    use super::*;
+    use crate::config::{AppConfig, SmbFolder, SmbMount};
+
+    fn folder(id: &str) -> SmbFolder {
+        SmbFolder {
+            id: id.into(),
+            name: id.into(),
+            path: format!("/{id}"),
+            kind: "movie".into(),
+        }
+    }
+
+    fn cfg_with(folders: Vec<SmbFolder>) -> AppConfig {
+        AppConfig {
+            smb_mounts: vec![SmbMount {
+                id: "m1".into(),
+                folders,
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn removes_a_non_last_folder() {
+        let mut cfg = cfg_with(vec![folder("a"), folder("b")]);
+        remove_smb_folder_in_config(&mut cfg, "m1", "a").unwrap();
+        let ids: Vec<_> = cfg.smb_mounts[0]
+            .folders
+            .iter()
+            .map(|f| f.id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["b"]);
+    }
+
+    #[test]
+    fn refuses_to_remove_the_last_folder() {
+        // The guard: emptying the mount would leave a zombie zero-folder share.
+        let mut cfg = cfg_with(vec![folder("only")]);
+        let err = remove_smb_folder_in_config(&mut cfg, "m1", "only").unwrap_err();
+        assert!(err.contains("at least one folder"), "got: {err}");
+        // Mount is untouched — no zombie.
+        assert_eq!(cfg.smb_mounts[0].folders.len(), 1);
+    }
+
+    #[test]
+    fn unknown_folder_errors_without_touching_the_mount() {
+        let mut cfg = cfg_with(vec![folder("a"), folder("b")]);
+        let err = remove_smb_folder_in_config(&mut cfg, "m1", "nope").unwrap_err();
+        assert!(err.contains("no such SMB folder"), "got: {err}");
+        assert_eq!(cfg.smb_mounts[0].folders.len(), 2);
+    }
+
+    #[test]
+    fn unknown_mount_errors() {
+        let mut cfg = cfg_with(vec![folder("a")]);
+        let err = remove_smb_folder_in_config(&mut cfg, "other", "a").unwrap_err();
+        assert!(err.contains("no such SMB mount"), "got: {err}");
+    }
+}
+
+#[cfg(test)]
+mod mount_name_tests {
+    use super::{last_path_segment, unique_mount_name};
+
+    #[test]
+    fn prefers_the_bare_label_when_free() {
+        // The Bug 5 P2 fix: a share named "Media" surfaces as "Media", NOT the
+        // old URL-shaped "nas/Media" default.
+        assert_eq!(unique_mount_name("Media", "nas", &[]), "Media");
+    }
+
+    #[test]
+    fn last_segment_of_a_remote_path() {
+        assert_eq!(last_path_segment("/srv/media/movies"), "movies");
+        assert_eq!(last_path_segment("/srv/media/movies/"), "movies");
+        assert_eq!(last_path_segment("movies"), "movies");
+        assert_eq!(last_path_segment("/"), "");
+        assert_eq!(last_path_segment(""), "");
+    }
+
+    #[test]
+    fn qualifies_with_server_on_collision() {
+        let taken = vec!["Media".to_string()];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (nas)");
+    }
+
+    #[test]
+    fn collision_check_is_case_insensitive() {
+        let taken = vec!["media".to_string()];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (nas)");
+    }
+
+    #[test]
+    fn falls_back_to_a_numeric_suffix() {
+        let taken = vec!["Media".to_string(), "Media (nas)".to_string()];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (2)");
+        let taken = vec![
+            "Media".to_string(),
+            "Media (nas)".to_string(),
+            "Media (2)".to_string(),
+        ];
+        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (3)");
+    }
+
+    #[test]
+    fn empty_preferred_falls_back_to_the_qualifier() {
+        // A remote path of "/" leaves no segment; use the host.
+        assert_eq!(unique_mount_name("", "host.local", &[]), "host.local");
+    }
+
+    #[test]
+    fn skips_the_qualifier_when_it_equals_the_base() {
+        // e.g. share == server would produce "X (X)"; go straight to numeric.
+        let taken = vec!["nas".to_string()];
+        assert_eq!(unique_mount_name("nas", "nas", &taken), "nas (2)");
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::{rename_smb_mount_in_config, rename_ssh_mount_in_config};
+    use crate::config::{AppConfig, LocalFolder, SmbFolder, SmbMount, SshMount};
+
+    fn smb_cfg() -> AppConfig {
+        AppConfig {
+            smb_mounts: vec![SmbMount {
+                id: "m1".into(),
+                name: "old".into(),
+                folders: vec![
+                    // The auto-added share-root folder: name copied from the mount.
+                    SmbFolder {
+                        id: "root".into(),
+                        name: "old".into(),
+                        path: String::new(),
+                        kind: String::new(),
+                    },
+                    // A narrower subfolder with its own label.
+                    SmbFolder {
+                        id: "sub".into(),
+                        name: "Movies".into(),
+                        path: "/Movies".into(),
+                        kind: "movie".into(),
+                    },
+                ],
+                ..Default::default()
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn smb_rename_propagates_to_the_root_folder_only() {
+        let mut cfg = smb_cfg();
+        rename_smb_mount_in_config(&mut cfg, "m1", "  New Name  ").unwrap();
+        let m = &cfg.smb_mounts[0];
+        assert_eq!(m.name, "New Name"); // trimmed
+        assert_eq!(m.folders[0].name, "New Name"); // root folder copy renamed
+        assert_eq!(m.folders[1].name, "Movies"); // subfolder label untouched
+    }
+
+    #[test]
+    fn smb_rename_leaves_a_user_renamed_root_alone() {
+        let mut cfg = smb_cfg();
+        cfg.smb_mounts[0].folders[0].name = "Custom".into();
+        rename_smb_mount_in_config(&mut cfg, "m1", "New").unwrap();
+        assert_eq!(cfg.smb_mounts[0].name, "New");
+        assert_eq!(cfg.smb_mounts[0].folders[0].name, "Custom");
+    }
+
+    #[test]
+    fn smb_rename_rejects_empty_and_unknown() {
+        let mut cfg = smb_cfg();
+        assert!(rename_smb_mount_in_config(&mut cfg, "m1", "   ")
+            .unwrap_err()
+            .contains("name is required"));
+        assert_eq!(cfg.smb_mounts[0].name, "old"); // unchanged on rejection
+        assert!(rename_smb_mount_in_config(&mut cfg, "nope", "X")
+            .unwrap_err()
+            .contains("no such SMB mount"));
+    }
+
+    fn ssh_cfg() -> AppConfig {
+        AppConfig {
+            ssh_mounts: vec![SshMount {
+                id: "s1".into(),
+                name: "old".into(),
+                local_folder_id: "f1".into(),
+                ..Default::default()
+            }],
+            local_folders: vec![LocalFolder {
+                id: "f1".into(),
+                name: "old".into(),
+                path: "/mnt/x".into(),
+                kind: String::new(),
+            }],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn ssh_rename_propagates_to_the_fed_local_folder() {
+        let mut cfg = ssh_cfg();
+        rename_ssh_mount_in_config(&mut cfg, "s1", "New").unwrap();
+        assert_eq!(cfg.ssh_mounts[0].name, "New");
+        assert_eq!(cfg.local_folders[0].name, "New");
+    }
+
+    #[test]
+    fn ssh_rename_leaves_a_user_renamed_folder_alone() {
+        let mut cfg = ssh_cfg();
+        cfg.local_folders[0].name = "Custom".into();
+        rename_ssh_mount_in_config(&mut cfg, "s1", "New").unwrap();
+        assert_eq!(cfg.ssh_mounts[0].name, "New");
+        assert_eq!(cfg.local_folders[0].name, "Custom");
+    }
+
+    #[test]
+    fn ssh_rename_rejects_empty_and_unknown() {
+        let mut cfg = ssh_cfg();
+        assert!(rename_ssh_mount_in_config(&mut cfg, "s1", "")
+            .unwrap_err()
+            .contains("name is required"));
+        assert_eq!(cfg.ssh_mounts[0].name, "old");
+        assert!(rename_ssh_mount_in_config(&mut cfg, "nope", "X")
+            .unwrap_err()
+            .contains("no such SSH mount"));
+    }
 }
 
 fn smb_folders_for_ui(m: &SmbMount) -> Vec<SmbFolderDto> {
@@ -754,9 +1132,59 @@ fn smb_folder_display_name(m: &SmbMount, relative: &str) -> String {
         .to_string()
 }
 
+/// Last non-empty path segment of `p` (share-relative or absolute), or "".
+fn last_path_segment(p: &str) -> &str {
+    p.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("")
+}
+
+/// Every local-family display label already in use (SMB/SSH mounts + local
+/// folders), so a newly added mount can pick a name that doesn't collide with
+/// an existing sidebar entry.
+fn local_family_names(cfg: &AppConfig) -> Vec<String> {
+    cfg.smb_mounts
+        .iter()
+        .map(|m| m.name.clone())
+        .chain(cfg.ssh_mounts.iter().map(|m| m.name.clone()))
+        .chain(cfg.local_folders.iter().map(|f| f.name.clone()))
+        .collect()
+}
+
+/// Pick a friendly, unique display name for a newly added mount. Prefer
+/// `preferred` (the bare share or the last path segment) so the sidebar shows
+/// "Media" rather than the URL-shaped "nas/Media" or "host:/srv/media"; if that
+/// label is already taken by another local-family source, qualify it with
+/// `qualifier` (the server or host), then fall back to a numeric suffix.
+/// Comparison is case-insensitive so "Media" and "media" don't both appear.
+/// Pure so it is unit-testable (Bug 5 P2).
+fn unique_mount_name(preferred: &str, qualifier: &str, taken: &[String]) -> String {
+    let preferred = preferred.trim();
+    let qualifier = qualifier.trim();
+    let base = if preferred.is_empty() { qualifier } else { preferred };
+    let is_taken = |cand: &str| taken.iter().any(|t| t.eq_ignore_ascii_case(cand));
+    if base.is_empty() || !is_taken(base) {
+        return base.to_string();
+    }
+    if !qualifier.is_empty() && !qualifier.eq_ignore_ascii_case(base) {
+        let qualified = format!("{base} ({qualifier})");
+        if !is_taken(&qualified) {
+            return qualified;
+        }
+    }
+    let mut n = 2;
+    loop {
+        let candidate = format!("{base} ({n})");
+        if !is_taken(&candidate) {
+            return candidate;
+        }
+        n += 1;
+    }
+}
+
+/// Linux: native shares have no OS mount path; UI fall back to the
+/// share-relative folder path.
 #[cfg(all(unix, not(target_os = "macos")))]
-fn smb_mount_root(m: &SmbMount) -> Option<String> {
-    crate::smb::resolved_mountpoint(m).filter(|path| Path::new(path).is_dir())
+fn smb_mount_root(_m: &SmbMount) -> Option<String> {
+    None
 }
 
 #[cfg(not(all(unix, not(target_os = "macos"))))]
@@ -855,10 +1283,13 @@ pub async fn mount_ssh(
         return Err("that SSH/SFTP folder is already added".into());
     }
 
+    let taken = local_family_names(&existing);
     let folder_id = uuid::Uuid::new_v4().to_string();
     let mut mount = SshMount {
         id: uuid::Uuid::new_v4().to_string(),
-        name: name.unwrap_or_else(|| format!("{}:{}", host.trim(), remote_path.trim())),
+        name: name
+            .filter(|n| !n.trim().is_empty())
+            .unwrap_or_else(|| unique_mount_name(last_path_segment(remote_path.trim()), host.trim(), &taken)),
         host: host.trim().to_string(),
         port,
         username: username.trim().to_string(),
@@ -894,6 +1325,8 @@ pub async fn mount_ssh(
         kind,
     };
     let mountpoint = mount.mountpoint.clone();
+    let ssh_mount_id = mount.id.clone();
+    let ssh_mount_name = mount.name.clone();
     if let Err(e) = rebuild_local_locked(&state, move |cfg| {
         if cfg.ssh_mounts.iter().any(|x| {
             x.host.eq_ignore_ascii_case(&mount.host)
@@ -916,9 +1349,9 @@ pub async fn mount_ssh(
         return Err(e);
     }
     Ok(SourceDto {
-        id: LOCAL_SOURCE_ID.to_string(),
-        name: "Local".to_string(),
-        kind: "local".to_string(),
+        id: crate::source::local::ssh_source_id(&ssh_mount_id),
+        name: ssh_mount_name,
+        kind: "ssh".to_string(),
     })
 }
 
@@ -974,6 +1407,49 @@ pub async fn unmount_ssh(id: String, state: State<'_, AppState>) -> Result<(), S
     Ok(())
 }
 
+/// Rename an SSH mount's display label, propagating the new name to the local
+/// folder it feeds (whose label was copied from the mount name at add time) so
+/// the source's section header renames with the sidebar entry. A user-renamed
+/// folder (name no longer equal to the old mount name) is left alone. Pure over
+/// the config so it is unit-testable (Bug 5 P2).
+fn rename_ssh_mount_in_config(cfg: &mut AppConfig, id: &str, new_name: &str) -> Result<(), String> {
+    let new_name = new_name.trim();
+    if new_name.is_empty() {
+        return Err("a name is required".to_string());
+    }
+    let (old_name, folder_id) = {
+        let mount = cfg
+            .ssh_mounts
+            .iter_mut()
+            .find(|m| m.id == id)
+            .ok_or_else(|| "no such SSH mount".to_string())?;
+        let old_name = mount.name.clone();
+        mount.name = new_name.to_string();
+        (old_name, mount.local_folder_id.clone())
+    };
+    for folder in cfg
+        .local_folders
+        .iter_mut()
+        .filter(|f| f.id == folder_id && f.name == old_name)
+    {
+        folder.name = new_name.to_string();
+    }
+    Ok(())
+}
+
+/// Rename an SSH/SFTP folder as shown in the sidebar / Connected tab.
+#[tauri::command]
+pub async fn rename_ssh_mount(
+    id: String,
+    name: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    mutate_then_rebuild_local(&state, move |cfg| {
+        rename_ssh_mount_in_config(cfg, &id, &name)
+    })
+    .await
+}
+
 /// Whether another persisted SMB record references `mountpoint`. `None` = the
 /// config couldn't be read; the caller decides how to treat that uncertainty —
 /// teardown of an existing record fails closed (keep a maybe-shared mount, since
@@ -992,24 +1468,31 @@ fn ssh_mountpoint_referenced(mountpoint: &str) -> Option<bool> {
         .map(|c| c.ssh_mounts.iter().any(|x| x.mountpoint == mountpoint))
 }
 
-fn live_local_folders(cfg: &AppConfig) -> Vec<LocalFolder> {
-    let ssh_folder_ids: std::collections::HashSet<_> = cfg
-        .ssh_mounts
-        .iter()
-        .map(|m| m.local_folder_id.as_str())
-        .collect();
-    let mut folders: Vec<_> = cfg
-        .local_folders
-        .iter()
-        .filter(|f| !ssh_folder_ids.contains(f.id.as_str()))
-        .filter(|f| safe_user_media_root(&f.path))
-        .cloned()
-        .collect();
-    folders.extend(cfg.smb_mounts.iter().flat_map(smb_live_folders));
-    folders.extend(cfg.ssh_mounts.iter().filter_map(ssh_live_folder));
-    folders
+fn live_local_family(cfg: &AppConfig) -> Vec<crate::source::local::LocalFamilyMember> {
+    crate::source::local::local_family(
+        cfg,
+        smb_live_folders,
+        smb_live_vfs,
+        ssh_live_folder,
+        safe_user_media_root,
+    )
 }
 
+/// Linux-family: native SMB — mirror of boot's `smb_runtime_folders`.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
+    selected_smb_folders(m)
+        .iter()
+        .map(|folder| LocalFolder {
+            id: folder.id.clone(),
+            name: folder.name.clone(),
+            path: crate::source::smb_vfs_path(&folder.path),
+            kind: folder.kind.clone(),
+        })
+        .collect()
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
     let Some(root) = smb_mount_root(m) else {
         return Vec::new();
@@ -1029,6 +1512,18 @@ fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
             })
         })
         .collect()
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_live_vfs(m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    Some(std::sync::Arc::new(crate::source::smb_vfs::SmbVfs::new(
+        m.clone(),
+    )))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn smb_live_vfs(_m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    None
 }
 
 fn ssh_live_folder(m: &SshMount) -> Option<LocalFolder> {
@@ -1066,15 +1561,15 @@ async fn rebuild_local_locked<F>(state: &State<'_, AppState>, f: F) -> Result<()
 where
     F: FnOnce(&mut AppConfig) -> Result<(), String>,
 {
-    let folders = config::update(|cfg| {
+    let family = config::update(|cfg| {
         f(cfg)?;
-        Ok(live_local_folders(cfg))
+        Ok(live_local_family(cfg))
     })?;
     let mut reg = state.registry.lock().await;
-    if folders.is_empty() {
-        reg.remove(LOCAL_SOURCE_ID);
-    } else {
-        reg.upsert(std::sync::Arc::new(LocalSource::new(folders)));
+    // Replace the whole family: a mount that went away must drop its source.
+    reg.remove_kinds(crate::source::local::LOCAL_FAMILY_KINDS);
+    for member in &family {
+        reg.upsert(member.build());
     }
     Ok(())
 }
@@ -1432,6 +1927,9 @@ pub fn set_mpv_path(path: Option<String>) -> Result<MpvInfo, String> {
 pub struct MpvAdvanced {
     pub extra_args: String,
     pub use_own_config: bool,
+    /// Black-bar cropping mode: `"off" | "manual" | "auto"` (see config
+    /// `mpv_autocrop`). Always one of the three for the UI to bind to.
+    pub autocrop: String,
 }
 
 #[tauri::command]
@@ -1440,14 +1938,32 @@ pub fn get_mpv_advanced() -> MpvAdvanced {
     MpvAdvanced {
         extra_args: cfg.mpv_extra_args.unwrap_or_default(),
         use_own_config: cfg.mpv_use_own_config.unwrap_or(false),
+        autocrop: normalize_autocrop(cfg.mpv_autocrop.as_deref()),
     }
 }
 
-/// Persist the advanced mpv settings. No validation here — these are the user's own
-/// machine and their own call; a bad option just makes mpv refuse to launch, which
-/// surfaces as a normal playback error. An empty `extra_args` clears the override.
+/// Clamp any stored/incoming autocrop value to the known three-state set,
+/// defaulting anything unrecognised (incl. `None`) to `"off"`.
+fn normalize_autocrop(value: Option<&str>) -> String {
+    match value {
+        Some("manual") => "manual",
+        Some("auto") => "auto",
+        _ => "off",
+    }
+    .to_string()
+}
+
+/// Persist the advanced mpv settings. No validation of `extra_args` — these are the
+/// user's own machine and their own call; a bad option just makes mpv refuse to
+/// launch, which surfaces as a normal playback error. An empty `extra_args` clears
+/// the override. `autocrop` is optional so older frontends that don't send it leave
+/// the mode unchanged; when present it is clamped to the known three states.
 #[tauri::command]
-pub fn set_mpv_advanced(extra_args: String, use_own_config: bool) -> Result<(), String> {
+pub fn set_mpv_advanced(
+    extra_args: String,
+    use_own_config: bool,
+    autocrop: Option<String>,
+) -> Result<(), String> {
     let trimmed = extra_args.trim().to_string();
     config::update(move |cfg| {
         cfg.mpv_extra_args = if trimmed.is_empty() {
@@ -1456,6 +1972,13 @@ pub fn set_mpv_advanced(extra_args: String, use_own_config: bool) -> Result<(), 
             Some(trimmed)
         };
         cfg.mpv_use_own_config = Some(use_own_config);
+        if let Some(mode) = autocrop.as_deref() {
+            // Store `None` for "off" so the config stays sparse; missing = off.
+            cfg.mpv_autocrop = match normalize_autocrop(Some(mode)).as_str() {
+                "off" => None,
+                m => Some(m.to_string()),
+            };
+        }
         Ok(())
     })
 }
@@ -1790,6 +2313,920 @@ pub async fn get_items(
         .await
 }
 
+/// Merged listing for the All view's consolidated Library: every section of
+/// `section_type` across every source contributes, sorted and windowed here.
+/// Paging is stateless-but-exact: each section supplies its first
+/// `start+size` items (already source-sorted), so the merged window is
+/// correct; cost grows with scroll depth, acceptable at library scale.
+/// No dedup yet — that's the rework's Phase C.
+/// The materialized merged listing pages are served from. Pagination over a
+/// dynamically re-fetched, deduped, re-sorted union is unstable by
+/// construction (review rounds 1–2: titles can be skipped forever or
+/// duplicated across pages whenever a deeper fetch re-orders the union), so
+/// the listing is built once, in full, and continuation pages window this
+/// immutable snapshot.
+pub struct MergedSnapshot {
+    pub section_type: String,
+    pub sort: String,
+    pub items: Vec<ItemDto>,
+}
+
+#[tauri::command]
+pub async fn get_type_listing(
+    section_type: String,
+    sort: Option<String>,
+    start: usize,
+    size: usize,
+    state: State<'_, AppState>,
+) -> Result<Vec<ItemDto>, String> {
+    validate_section_type(&section_type)?;
+    // Merged ordering can only honor fields items carry on the DTO across
+    // sources: title, year (= release date at year granularity), added-at, and
+    // last-played. `rating` has no DTO field, so it stays per-source (server-side)
+    // only. A source that doesn't populate a field sorts last for that key.
+    let sort = match validate_sort(sort)?.as_deref() {
+        None => "titleSort:asc".to_string(),
+        Some(
+            s @ ("titleSort:asc"
+            | "year:desc"
+            | "originallyAvailableAt:desc"
+            | "addedAt:desc"
+            | "lastViewedAt:desc"),
+        ) => s.to_string(),
+        Some(_) => return Err("that sort isn't available in the combined view".into()),
+    };
+    let size = clamp_page_size(size);
+
+    // Continuation pages (start > 0) must window the same immutable snapshot
+    // the listing started with; entering a listing (start == 0) rebuilds.
+    if start > 0 {
+        let snap = state.merged_snapshot.lock().await;
+        if let Some(s) = snap
+            .as_ref()
+            .filter(|s| s.section_type == section_type && s.sort == sort)
+        {
+            return Ok(s.items.iter().skip(start).take(size).cloned().collect());
+        }
+        // No matching snapshot (e.g. app restarted mid-scroll): fall through
+        // and rebuild — the windowed result is still correct, merely fresher.
+    }
+
+    let sources = state.registry.lock().await.selected(None);
+    // source id → kind, for the default playback ranking of merged backings.
+    let kinds: std::collections::HashMap<String, &'static str> =
+        sources.iter().map(|s| (s.id(), s.kind())).collect();
+    // Owner's per-title source choices (set via the card's context menu).
+    let overrides = config::load_config()
+        .map(|c| c.merged_overrides)
+        .unwrap_or_default();
+    // Collect the contributing sections once; a failing source drops out
+    // rather than failing the whole view, matching aggregate()'s stance —
+    // but TOTAL failure surfaces as an error, not an empty library (rev-4).
+    let mut section_refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+        Vec::new();
+    let mut sections_err: Option<String> = None;
+    for src in &sources {
+        let sections = match src.sections().await {
+            Ok(s) => s,
+            Err(e) => {
+                sections_err = Some(e);
+                continue;
+            }
+        };
+        for sec in sections
+            .into_iter()
+            .filter(|s| s.section_type == section_type)
+        {
+            let raw = sec
+                .key
+                .split_once(':')
+                .map(|(_, r)| r.to_string())
+                .unwrap_or(sec.key);
+            section_refs.push((src.clone(), raw));
+        }
+    }
+    if section_refs.is_empty() {
+        if let Some(e) = sections_err {
+            // Nothing contributed AND something failed: report it rather
+            // than rendering a blank library.
+            return Err(e);
+        }
+        // No sections of this type anywhere: legitimately empty.
+    }
+    let deduped = fetch_all_merged(&section_refs, &section_type, &sort).await?;
+    let ranked = rank_backings(deduped, &kinds, &overrides);
+    let items = merge_sort_page(ranked, &sort, 0, usize::MAX);
+    let page = items.iter().skip(start).take(size).cloned().collect();
+    *state.merged_snapshot.lock().await = Some(MergedSnapshot {
+        section_type,
+        sort,
+        items,
+    });
+    Ok(page)
+}
+
+/// Fetch EVERY item of the type across the given sections: per-section depth
+/// doubles until no section returns a full window (`!any_full` — nothing
+/// more exists anywhere), then the union is deduped. There is deliberately
+/// no early stop and no depth cap: any count-based stop leaves the window's
+/// contents unstable across pages (review rounds 1–2), and a cap recreates
+/// the paging cliff at its own depth. The full-library fetch cost is paid
+/// once per listing entry and amortized by the snapshot above.
+async fn fetch_all_merged(
+    section_refs: &[(std::sync::Arc<dyn crate::source::MediaSource>, String)],
+    section_type: &str,
+    sort: &str,
+) -> Result<Vec<ItemDto>, String> {
+    // Start deep enough that typical libraries resolve in one round trip.
+    let mut depth: usize = 512;
+    loop {
+        let mut merged: Vec<ItemDto> = Vec::new();
+        // Whether any section returned a full window — i.e. deepening could
+        // still surface more items somewhere.
+        let mut any_full = false;
+        // A partially failing view stays useful, but when EVERY section
+        // failed the caller gets the error, not an empty library (rev-4).
+        let mut any_ok = section_refs.is_empty();
+        let mut last_err: Option<String> = None;
+        for (src, raw) in section_refs {
+            match src.items(raw, section_type, Some(sort), 0, depth).await {
+                Ok(items) => {
+                    any_ok = true;
+                    any_full |= items.len() >= depth;
+                    merged.extend(items);
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+        if !any_full {
+            return if any_ok {
+                Ok(dedup_across_sources(merged))
+            } else {
+                Err(last_err.unwrap_or_else(|| "no sources available".into()))
+            };
+        }
+        depth = depth.saturating_mul(2);
+    }
+}
+
+/// Default playback preference for merged titles: a direct file beats a
+/// network mount beats a server stream. A policy constant, not a heuristic —
+/// the per-title override wins over all of it.
+fn kind_rank(kind: &str) -> u8 {
+    match kind {
+        "local" => 0,
+        "smb" | "ssh" => 1,
+        "plex" => 2,
+        "jellyfin" | "emby" => 3,
+        _ => 4,
+    }
+}
+
+/// Stable identity a per-title override persists under: the first provider
+/// id (sorted, so the same set always yields the same key), else the
+/// normalized title + year.
+fn canonical_id_of(item: &ItemDto) -> String {
+    if let Some(id) = item.provider_ids.iter().min() {
+        return id.clone();
+    }
+    let norm: String = item
+        .title
+        .to_lowercase()
+        .chars()
+        .filter(|c| c.is_alphanumeric())
+        .collect();
+    match item.year {
+        Some(y) => format!("title:{norm}|{y}"),
+        None => format!("title:{norm}|"),
+    }
+}
+
+/// Order each merged entry's backing list — owner override first, then the
+/// kind ranking (registry order breaks ties via stable sort) — and point the
+/// entry's play identity (rating_key/source_id) at the winner. Display
+/// fields keep whatever the dedup pass chose as richest.
+fn rank_backings(
+    mut groups: Vec<ItemDto>,
+    kinds: &std::collections::HashMap<String, &'static str>,
+    overrides: &std::collections::HashMap<String, String>,
+) -> Vec<ItemDto> {
+    for group in &mut groups {
+        let canonical = canonical_id_of(group);
+        let Some(backing) = group.backing.as_mut() else {
+            group.canonical_id = Some(canonical);
+            continue;
+        };
+        let override_sid = overrides.get(&canonical);
+        backing.sort_by_key(|b| {
+            let overridden = Some(&b.source_id) == override_sid;
+            let rank = kinds.get(&b.source_id).map(|k| kind_rank(k)).unwrap_or(4);
+            (!overridden, rank)
+        });
+        if let Some(face) = backing.first() {
+            group.rating_key = face.rating_key.clone();
+            group.source_id = face.source_id.clone();
+        }
+        // Watched-state actions can't route to a local-family face (those
+        // sources have no watch state); point them at the first server
+        // backing instead (rev-3). Absent when the face itself can take them.
+        group.watch_key = backing
+            .iter()
+            .find(|b| {
+                matches!(
+                    kinds.get(&b.source_id).copied(),
+                    Some("plex" | "jellyfin" | "emby")
+                )
+            })
+            .map(|b| b.rating_key.clone())
+            .filter(|k| *k != group.rating_key);
+        group.canonical_id = Some(canonical);
+    }
+    groups
+}
+
+/// Persist (or clear, with `source_id: None`) the owner's preferred playback
+/// source for a merged title.
+#[tauri::command]
+pub async fn set_merged_override(
+    canonical_id: String,
+    source_id: Option<String>,
+) -> Result<(), String> {
+    config::update(move |cfg| {
+        match source_id {
+            Some(sid) => {
+                cfg.merged_overrides.insert(canonical_id.clone(), sid);
+            }
+            None => {
+                cfg.merged_overrides.remove(&canonical_id);
+            }
+        }
+        Ok(())
+    })
+}
+
+/// Rank a watch state for merged adoption: finished > in-progress (deeper
+/// offset wins the tie) > known-unwatched > unknown. Local-family items are
+/// unknown (`played: None`), so any server-reported state outranks them.
+/// First-Some-wins was order-dependent and hid real progress (rev-5).
+fn watch_rank(played: Option<bool>, offset: Option<u64>) -> (u8, u64) {
+    match (played, offset) {
+        (Some(true), _) => (3, 0),
+        (_, Some(o)) if o > 0 => (2, o),
+        (Some(false), _) => (1, 0),
+        _ => (0, 0),
+    }
+}
+
+/// Collapse the same title carried by several sources into one entry backed
+/// by all of them (rework Phase C). Identity: any shared provider id
+/// ("imdb:tt…"), else normalized title + exact year (a missing year only
+/// matches another missing year, so remakes and unparsed files don't
+/// false-merge). Display fields come from the richest backing — an entry
+/// with server metadata (summary + artwork) replaces a bare filename parse —
+/// and watch state comes from the first backing that reports any.
+fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
+    use std::collections::HashMap;
+    let mut groups: Vec<ItemDto> = Vec::new();
+    let mut by_provider: HashMap<String, usize> = HashMap::new();
+    let mut by_title: HashMap<String, usize> = HashMap::new();
+
+    fn title_key(item: &ItemDto) -> String {
+        let norm: String = item
+            .title
+            .to_lowercase()
+            .chars()
+            .filter(|c| c.is_alphanumeric())
+            .collect();
+        format!("{norm}|{:?}", item.year)
+    }
+    fn richer(candidate: &ItemDto, current: &ItemDto) -> bool {
+        let score = |i: &ItemDto| {
+            i.summary.is_some() as u8 + i.poster.is_some() as u8 + i.year.is_some() as u8
+        };
+        score(candidate) > score(current)
+    }
+
+    for item in items {
+        let tkey = title_key(&item);
+        let hit = item
+            .provider_ids
+            .iter()
+            .find_map(|p| by_provider.get(p).copied())
+            .or_else(|| by_title.get(&tkey).copied())
+            // Dedup is a cross-source merge only: a colliding item from a
+            // source already backing the group stays its own card (rev-2 —
+            // same-source versions must remain individually reachable, and
+            // duplicate source_ids would make the backing list ambiguous).
+            .filter(|gi| {
+                groups[*gi]
+                    .backing
+                    .as_ref()
+                    .is_none_or(|b| b.iter().all(|r| r.source_id != item.source_id))
+            });
+        match hit {
+            Some(gi) => {
+                for p in &item.provider_ids {
+                    by_provider.entry(p.clone()).or_insert(gi);
+                }
+                by_title.entry(tkey).or_insert(gi);
+                let group = &mut groups[gi];
+                let backing = group.backing.get_or_insert_with(Vec::new);
+                let item_ref = crate::source::BackingRef {
+                    source_id: item.source_id.clone(),
+                    rating_key: item.rating_key.clone(),
+                };
+                if !backing.contains(&item_ref) {
+                    backing.push(item_ref.clone());
+                }
+                // Adopt the most-progressed watch state across backings
+                // before a possible display swap (rev-5).
+                if watch_rank(item.played, item.view_offset_ms)
+                    > watch_rank(group.played, group.view_offset_ms)
+                {
+                    group.played = item.played;
+                    group.view_offset_ms = item.view_offset_ms;
+                }
+                // Adopt the most-recent added/last-played across backings so the
+                // merged card sorts correctly even when the face backing (e.g. a
+                // Jellyfin/local item that doesn't populate these) isn't the one
+                // carrying the timestamp. `Option::max` prefers Some over None and
+                // the larger ms (sorting slice 3).
+                group.added_at_ms = group.added_at_ms.max(item.added_at_ms);
+                group.last_watched_at_ms = group.last_watched_at_ms.max(item.last_watched_at_ms);
+                if richer(&item, group) {
+                    // The richer entry becomes the face (and default play
+                    // target): move it to the front of the backing list and
+                    // take its display fields, keeping the accumulated
+                    // backing/provider state and any adopted watch state.
+                    let keep_backing = group.backing.take();
+                    let keep_played = group.played.take();
+                    let keep_offset = group.view_offset_ms.take();
+                    // The accumulated max already folds in the new face's own
+                    // timestamps (adopted just above), so it must survive the swap.
+                    let keep_added = group.added_at_ms.take();
+                    let keep_last_watched = group.last_watched_at_ms.take();
+                    let mut ids = std::mem::take(&mut group.provider_ids);
+                    for p in &item.provider_ids {
+                        if !ids.contains(p) {
+                            ids.push(p.clone());
+                        }
+                    }
+                    *group = item;
+                    group.provider_ids = ids;
+                    group.backing = keep_backing.map(|mut b| {
+                        b.retain(|r| *r != item_ref);
+                        b.insert(0, item_ref.clone());
+                        b
+                    });
+                    // `keep_*` already holds the most-progressed state seen
+                    // (the adopt above ran first); restore it if it outranks
+                    // the new face's own state (rev-5).
+                    if watch_rank(keep_played, keep_offset)
+                        > watch_rank(group.played, group.view_offset_ms)
+                    {
+                        group.played = keep_played;
+                        group.view_offset_ms = keep_offset;
+                    }
+                    // Restore the accumulated timestamps (they already include the
+                    // new face's own values, so this never loses data).
+                    group.added_at_ms = keep_added;
+                    group.last_watched_at_ms = keep_last_watched;
+                } else {
+                    for p in &item.provider_ids {
+                        if !group.provider_ids.contains(p) {
+                            group.provider_ids.push(p.clone());
+                        }
+                    }
+                }
+            }
+            None => {
+                let gi = groups.len();
+                for p in &item.provider_ids {
+                    by_provider.insert(p.clone(), gi);
+                }
+                by_title.insert(tkey, gi);
+                let mut group = item;
+                group.backing = Some(vec![crate::source::BackingRef {
+                    source_id: group.source_id.clone(),
+                    rating_key: group.rating_key.clone(),
+                }]);
+                groups.push(group);
+            }
+        }
+    }
+    groups
+}
+
+/// Order the merged union and cut the requested window. Title comparisons
+/// fold case; year sorting is newest-first with title tiebreak. (Plex's
+/// per-source titleSort strips leading articles; the merged re-sort uses the
+/// display title, a small known divergence.)
+fn merge_sort_page(mut items: Vec<ItemDto>, sort: &str, start: usize, size: usize) -> Vec<ItemDto> {
+    let title = |i: &ItemDto| i.title.to_lowercase();
+    match sort {
+        // Release date == year granularity, same as year:desc.
+        "year:desc" | "originallyAvailableAt:desc" => {
+            items.sort_by(|a, b| b.year.cmp(&a.year).then_with(|| title(a).cmp(&title(b))));
+        }
+        "addedAt:desc" => {
+            // None (source didn't populate it) sorts last in a desc order.
+            items.sort_by(|a, b| b.added_at_ms.cmp(&a.added_at_ms).then_with(|| title(a).cmp(&title(b))));
+        }
+        "lastViewedAt:desc" => {
+            items.sort_by(|a, b| {
+                b.last_watched_at_ms
+                    .cmp(&a.last_watched_at_ms)
+                    .then_with(|| title(a).cmp(&title(b)))
+            });
+        }
+        _ => items.sort_by_key(|i| i.title.to_lowercase()),
+    }
+    items.into_iter().skip(start).take(size).collect()
+}
+
+#[cfg(test)]
+mod merge_tests {
+    use super::*;
+
+    fn item(title: &str, year: Option<u32>, source: &str) -> ItemDto {
+        ItemDto {
+            rating_key: format!("{source}:{title}"),
+            title: title.into(),
+            year,
+            summary: None,
+            duration_ms: None,
+            media_type: Some("movie".into()),
+            poster: None,
+            series_poster: None,
+            backdrop: None,
+            view_offset_ms: None,
+            played: None,
+            last_watched_at_ms: None,
+            added_at_ms: None,
+            index: None,
+            parent_index: None,
+            grandparent_title: None,
+            parent_title: None,
+            provider_ids: vec![],
+            backing: None,
+            canonical_id: None,
+            watch_key: None,
+            source_id: source.into(),
+        }
+    }
+
+    #[test]
+    fn merged_page_interleaves_sources_by_title_case_folded() {
+        let merged = vec![
+            item("delta", Some(2020), "plex"),
+            item("Alpha", Some(2021), "plex"),
+            item("charlie", Some(2019), "smb-1"),
+            item("Bravo", Some(2022), "smb-1"),
+        ];
+        let page = merge_sort_page(merged, "titleSort:asc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["Alpha", "Bravo", "charlie", "delta"]);
+    }
+
+    #[test]
+    fn merged_page_windows_after_sorting() {
+        let merged = vec![
+            item("c", None, "a"),
+            item("a", None, "a"),
+            item("d", None, "b"),
+            item("b", None, "b"),
+        ];
+        let page = merge_sort_page(merged, "titleSort:asc", 1, 2);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["b", "c"]);
+    }
+
+    #[test]
+    fn merged_page_year_desc_with_title_tiebreak() {
+        let merged = vec![
+            item("older", Some(1999), "a"),
+            item("z-new", Some(2024), "b"),
+            item("a-new", Some(2024), "a"),
+        ];
+        let page = merge_sort_page(merged, "year:desc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["a-new", "z-new", "older"]);
+    }
+
+    #[test]
+    fn merged_release_date_matches_year_desc() {
+        let mk = || {
+            vec![
+                item("old", Some(1999), "a"),
+                item("new", Some(2024), "b"),
+                item("undated", None, "a"),
+            ]
+        };
+        // originallyAvailableAt:desc is year:desc granularity; undated sorts last.
+        let by_rel = merge_sort_page(mk(), "originallyAvailableAt:desc", 0, 10);
+        let by_year = merge_sort_page(mk(), "year:desc", 0, 10);
+        let rel: Vec<_> = by_rel.iter().map(|i| i.title.as_str()).collect();
+        let yr: Vec<_> = by_year.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(rel, vec!["new", "old", "undated"]);
+        assert_eq!(rel, yr);
+    }
+
+    #[test]
+    fn merged_added_at_desc_missing_sorts_last() {
+        let mut a = item("mid", None, "plex");
+        a.added_at_ms = Some(200);
+        let mut b = item("newest", None, "smb-1");
+        b.added_at_ms = Some(500);
+        let c = item("unknown", None, "plex"); // added_at_ms None
+        let page = merge_sort_page(vec![a, b, c], "addedAt:desc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["newest", "mid", "unknown"]);
+    }
+
+    #[test]
+    fn merged_last_played_desc_missing_sorts_last() {
+        let mut a = item("watched-old", None, "plex");
+        a.last_watched_at_ms = Some(100);
+        let mut b = item("watched-recent", None, "plex");
+        b.last_watched_at_ms = Some(900);
+        let c = item("never", None, "smb-1"); // last_watched_at_ms None
+        let page = merge_sort_page(vec![a, b, c], "lastViewedAt:desc", 0, 10);
+        let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
+        assert_eq!(titles, vec!["watched-recent", "watched-old", "never"]);
+    }
+
+    fn with_ids(mut i: ItemDto, ids: &[&str]) -> ItemDto {
+        i.provider_ids = ids.iter().map(|s| s.to_string()).collect();
+        i
+    }
+
+    struct FakeItems {
+        items: Vec<ItemDto>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for FakeItems {
+        fn id(&self) -> String {
+            "fake".into()
+        }
+        fn name(&self) -> String {
+            "Fake".into()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _key: &str,
+            _ty: &str,
+            _sort: Option<&str>,
+            start: usize,
+            size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(self.items.iter().skip(start).take(size).cloned().collect())
+        }
+        async fn search(&self, _q: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(&self, _k: &str, _s: usize, _z: usize) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            _k: &str,
+            _d: Option<u64>,
+        ) -> Result<crate::source::StreamResolution, String> {
+            Err("fake source".into())
+        }
+    }
+
+    struct FailingSource;
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for FailingSource {
+        fn id(&self) -> String {
+            "down".into()
+        }
+        fn name(&self) -> String {
+            "Down".into()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Err("server offline".into())
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Err("server offline".into())
+        }
+        async fn items(
+            &self,
+            _k: &str,
+            _t: &str,
+            _s: Option<&str>,
+            _st: usize,
+            _sz: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Err("server offline".into())
+        }
+        async fn search(&self, _q: &str) -> Result<Vec<ItemDto>, String> {
+            Err("server offline".into())
+        }
+        async fn children(&self, _k: &str, _s: usize, _z: usize) -> Result<Vec<ItemDto>, String> {
+            Err("server offline".into())
+        }
+        async fn resolve_stream(
+            &self,
+            _k: &str,
+            _d: Option<u64>,
+        ) -> Result<crate::source::StreamResolution, String> {
+            Err("server offline".into())
+        }
+    }
+
+    // rev-4 guard: when EVERY contributing section fails, the merged fetch
+    // reports the failure instead of masquerading as an empty library; a
+    // partially failing view still serves the healthy sources.
+    #[test]
+    fn merged_fetch_surfaces_total_failure_but_tolerates_partial() {
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+
+        let all_down: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+            vec![(std::sync::Arc::new(FailingSource), "sec".into())];
+        let err = rt
+            .block_on(fetch_all_merged(&all_down, "movie", "titleSort:asc"))
+            .expect_err("total failure must surface as an error");
+        assert!(err.contains("offline"));
+
+        let mixed: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> = vec![
+            (std::sync::Arc::new(FailingSource), "sec".into()),
+            (
+                std::sync::Arc::new(FakeItems {
+                    items: vec![item("Alpha", Some(2020), "fake")],
+                }),
+                "sec".into(),
+            ),
+        ];
+        let out = rt
+            .block_on(fetch_all_merged(&mixed, "movie", "titleSort:asc"))
+            .expect("partial failure still serves healthy sources");
+        assert_eq!(out.len(), 1);
+    }
+
+    // rev-1 guard: the merged fetch must be EXHAUSTIVE — every unique title
+    // is present regardless of duplicates or section size, because pages
+    // window an immutable snapshot of this result (any early stop makes
+    // pagination skip or duplicate titles across pages; review rounds 1–2).
+    #[test]
+    fn merged_fetch_is_exhaustive_past_the_initial_depth() {
+        // Two duplicates up front, then more items than the initial fetch
+        // depth (512), so exhaustiveness requires actually deepening.
+        let mut items = vec![
+            with_ids(item("Alpha", Some(2020), "fake"), &["imdb:tt1"]),
+            with_ids(item("Alpha copy", Some(2020), "fake"), &["imdb:tt1"]),
+        ];
+        for i in 0..600 {
+            items.push(item(&format!("Title {i:04}"), Some(2000), "fake"));
+        }
+        let refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+            vec![(std::sync::Arc::new(FakeItems { items }), "sec".into())];
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let out = rt
+            .block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"))
+            .expect("fetch succeeds");
+        // 602: same-source versions stay separate cards (rev-2), and every
+        // item past the initial depth must be present.
+        assert_eq!(out.len(), 602, "every title must be fetched");
+    }
+
+    // The exhaustive loop must terminate once every section is exhausted
+    // (!any_full). Same-source versions stay separate cards (rev-2), so all
+    // three survive dedup.
+    #[test]
+    fn merged_fetch_terminates_when_everything_duplicates() {
+        let items = vec![
+            with_ids(item("Alpha", Some(2020), "fake"), &["imdb:tt1"]),
+            with_ids(item("Alpha 4K", Some(2020), "fake"), &["imdb:tt1"]),
+            with_ids(item("Alpha DC", Some(2020), "fake"), &["imdb:tt1"]),
+        ];
+        let refs: Vec<(std::sync::Arc<dyn crate::source::MediaSource>, String)> =
+            vec![(std::sync::Arc::new(FakeItems { items }), "sec".into())];
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .unwrap();
+        let out = rt
+            .block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"))
+            .expect("fetch succeeds");
+        assert_eq!(out.len(), 3, "same-source versions all kept; loop terminates");
+    }
+
+    #[test]
+    fn dedup_merges_by_provider_id_despite_title_differences() {
+        let a = with_ids(item("The Matrix", Some(1999), "plex"), &["imdb:tt0133093"]);
+        let b = with_ids(
+            item("Matrix, The", Some(1999), "jf"),
+            &["imdb:tt0133093", "tmdb:603"],
+        );
+        let out = dedup_across_sources(vec![a, b]);
+        assert_eq!(out.len(), 1);
+        let backing = out[0].backing.as_ref().unwrap();
+        assert_eq!(backing.len(), 2);
+        // The union of provider ids is retained for later joins.
+        assert!(out[0].provider_ids.contains(&"tmdb:603".to_string()));
+    }
+
+    #[test]
+    fn dedup_adopts_timestamps_from_a_non_face_backing() {
+        // The richer face (poster + summary) lacks added/last-played; a plainer
+        // backing carries them. The merged card must adopt them or it sorts to
+        // the bottom of Recently added / Recently played despite a backing
+        // having the timestamp (sorting slice 3 review, finding 3).
+        let mut backing = with_ids(item("Dune", Some(2021), "plex"), &["imdb:tt1"]);
+        backing.added_at_ms = Some(500);
+        backing.last_watched_at_ms = Some(900);
+        let mut face = with_ids(item("Dune", Some(2021), "jf"), &["imdb:tt1"]);
+        face.poster = Some("p.jpg".into());
+        face.summary = Some("sand".into()); // richer → becomes the face
+        // Backing seen first, then the richer face swaps in — the fragile path.
+        let out = dedup_across_sources(vec![backing, face]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].added_at_ms, Some(500));
+        assert_eq!(out[0].last_watched_at_ms, Some(900));
+    }
+
+    // rev-2 guard: same-source versions stay separate cards (dedup is a
+    // cross-source merge only); other sources' copies still merge into the
+    // first group.
+    #[test]
+    fn dedup_keeps_same_source_versions_as_separate_cards() {
+        let mut a = item("Dune", Some(2021), "smb-1");
+        a.rating_key = "smb-1:/dune.1080p.mkv".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/dune.2160p.mkv".into();
+        let mut c = item("Dune", Some(2021), "plex");
+        c.rating_key = "plex:42".into();
+
+        let out = dedup_across_sources(vec![a, b, c]);
+        assert_eq!(out.len(), 2, "two cards: merged cross-source + solo version");
+        let merged = out
+            .iter()
+            .find(|g| g.backing.as_ref().unwrap().len() == 2)
+            .expect("cross-source merge must still happen");
+        assert!(merged
+            .backing
+            .as_ref()
+            .unwrap()
+            .iter()
+            .any(|r| r.source_id == "plex"));
+        // Which of the two smb versions the plex copy attaches to is not
+        // pinned; the guarantee is that the other stays its own card.
+        let solo = out
+            .iter()
+            .find(|g| g.backing.as_ref().unwrap().len() == 1)
+            .expect("second same-source version stays its own card");
+        assert_eq!(solo.source_id, "smb-1");
+    }
+
+    #[test]
+    fn dedup_merges_by_normalized_title_and_exact_year() {
+        let a = item("The Matrix", Some(1999), "plex");
+        let b = item("the  matrix!", Some(1999), "smb-1"); // punctuation/case folded
+        let c = item("The Matrix", Some(2021), "plex"); // remake: different year
+        let out = dedup_across_sources(vec![a, b, c]);
+        assert_eq!(out.len(), 2);
+        assert_eq!(out[0].backing.as_ref().unwrap().len(), 2);
+        assert_eq!(out[1].backing.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn dedup_prefers_richer_display_and_keeps_watch_state() {
+        // Bare local parse first, then the server copy with metadata.
+        let mut local = item("Dune", Some(2021), "smb-1");
+        local.rating_key = "smb-1:/x/dune.mkv".into();
+        let mut server = item("Dune", Some(2021), "plex");
+        server.rating_key = "plex:42".into();
+        server.summary = Some("desert".into());
+        server.poster = Some("p".into());
+        server.played = Some(false);
+        server.view_offset_ms = Some(1234);
+
+        let out = dedup_across_sources(vec![local, server]);
+        assert_eq!(out.len(), 1);
+        let g = &out[0];
+        // Server copy is the face and the first backing (default play target).
+        assert_eq!(g.rating_key, "plex:42");
+        assert_eq!(g.summary.as_deref(), Some("desert"));
+        assert_eq!(g.view_offset_ms, Some(1234));
+        let backing = g.backing.as_ref().unwrap();
+        assert_eq!(backing.len(), 2);
+        assert_eq!(backing[0].rating_key, "plex:42");
+    }
+
+    fn kinds() -> std::collections::HashMap<String, &'static str> {
+        [
+            ("plex".to_string(), "plex"),
+            ("smb-1".to_string(), "smb"),
+            ("local".to_string(), "local"),
+        ]
+        .into_iter()
+        .collect()
+    }
+
+    #[test]
+    fn ranking_prefers_direct_files_and_points_play_identity_at_winner() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let ranked = rank_backings(groups, &kinds(), &Default::default());
+        let g = &ranked[0];
+        // smb outranks a server stream by default.
+        assert_eq!(g.rating_key, "smb-1:/x.mkv");
+        assert_eq!(g.source_id, "smb-1");
+        assert_eq!(g.backing.as_ref().unwrap()[0].source_id, "smb-1");
+        assert!(g.canonical_id.is_some());
+    }
+
+    // rev-3 guard: when the ranked face is a local-family backing (no watch
+    // state support), watched-state actions must route to a server backing.
+    #[test]
+    fn merged_watch_key_routes_to_a_server_backing() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let ranked = rank_backings(groups, &kinds(), &Default::default());
+        let g = &ranked[0];
+        // smb wins playback; watch actions must go to the plex copy.
+        assert_eq!(g.rating_key, "smb-1:/x.mkv");
+        assert_eq!(g.watch_key.as_deref(), Some("plex:42"));
+
+        // When the face itself is a server backing, no separate watch key.
+        let mut only = item("Solo", Some(2020), "plex");
+        only.rating_key = "plex:7".into();
+        let ranked = rank_backings(
+            dedup_across_sources(vec![only]),
+            &kinds(),
+            &Default::default(),
+        );
+        assert_eq!(ranked[0].watch_key, None);
+    }
+
+    // rev-5 guard: merged watch state is the most-progressed across
+    // backings — real progress must survive an earlier plain-unwatched
+    // report, and finished beats in-progress.
+    #[test]
+    fn dedup_adopts_the_most_progressed_watch_state() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.played = Some(false); // plain unwatched, reported first
+        let mut b = item("Dune", Some(2021), "jf");
+        b.played = Some(false);
+        b.view_offset_ms = Some(30 * 60 * 1000); // real progress
+        let out = dedup_across_sources(vec![a, b]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(
+            out[0].view_offset_ms,
+            Some(30 * 60 * 1000),
+            "progress must not be hidden by an earlier unwatched report"
+        );
+
+        let mut c = item("Alien", Some(1979), "jf");
+        c.played = Some(false);
+        c.view_offset_ms = Some(1000); // barely started, reported first
+        let mut d = item("Alien", Some(1979), "plex");
+        d.played = Some(true); // finished elsewhere
+        let out = dedup_across_sources(vec![c, d]);
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].played, Some(true), "finished beats in-progress");
+    }
+
+    #[test]
+    fn per_title_override_beats_the_default_ranking() {
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "smb-1");
+        b.rating_key = "smb-1:/x.mkv".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let canonical = canonical_id_of(&groups[0]);
+        let overrides = [(canonical, "plex".to_string())].into_iter().collect();
+        let ranked = rank_backings(groups, &kinds(), &overrides);
+        assert_eq!(ranked[0].rating_key, "plex:42");
+        assert_eq!(ranked[0].source_id, "plex");
+    }
+}
+
 #[tauri::command]
 pub async fn search(
     query: String,
@@ -1826,6 +3263,18 @@ pub async fn get_children(
     src.children(&raw, start, size).await
 }
 
+/// Full metadata for one item — the detail / "more info" surface. Routes by the
+/// namespaced key; the registry lock is released before the (network) call.
+/// Sources that can't enrich the item return an error the caller degrades on.
+#[tauri::command]
+pub async fn get_item_detail(
+    rating_key: String,
+    state: State<'_, AppState>,
+) -> Result<DetailDto, String> {
+    let (src, raw) = state.registry.lock().await.route(&rating_key)?;
+    src.item_detail(&raw).await
+}
+
 /// Mark an item watched/unwatched on its source. Routes by the namespaced key;
 /// the registry lock is released before the (network) call.
 #[tauri::command]
@@ -1835,7 +3284,18 @@ pub async fn set_watched(
     state: State<'_, AppState>,
 ) -> Result<(), String> {
     let (src, raw) = state.registry.lock().await.route(&rating_key)?;
-    src.mark_played(&raw, played).await
+    src.mark_played(&raw, played).await?;
+    if played {
+        // Watched = not "continue watching": drop the recents entry so the
+        // hero flow lets go of it. Mark-UNwatched deliberately does not
+        // resurrect one — the item re-enters via the server hub if the
+        // server still lists it.
+        config::update(move |cfg| {
+            crate::recents::unrecord(cfg, &rating_key);
+            Ok(())
+        })?;
+    }
+    Ok(())
 }
 
 // ---- playback ------------------------------------------------------------
@@ -1857,11 +3317,113 @@ pub struct QueueItem {
 
 /// Result of `queue_list` — the queue snapshot plus the cursor, so the drawer
 /// can highlight whichever item is currently playing.
+/// Availability of the `sshfs` binary for the add-SSH UI: whether it was
+/// found and where, plus the platform so the frontend can show the right
+/// install guidance up front instead of only failing at mount time.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SshfsStatus {
+    pub found: bool,
+    pub path: Option<String>,
+    pub platform: &'static str,
+}
+
+#[tauri::command]
+pub fn sshfs_status() -> SshfsStatus {
+    let path = crate::sshfs::locate();
+    SshfsStatus {
+        found: path.is_some(),
+        path,
+        platform: std::env::consts::OS,
+    }
+}
+
+/// Snapshot an item into Vela's recents as playback starts (frontend passes
+/// the full card it played, artwork included). The end notifier stamps the
+/// final position and drops finished entries.
+#[tauri::command]
+pub async fn record_recent(item: ItemDto) -> Result<(), String> {
+    config::update(move |cfg| {
+        crate::recents::record(cfg, item);
+        Ok(())
+    })
+}
+
+/// Vela's "recently played and not finished" list, newest first — the hero
+/// cover-flow's primary feed.
+#[tauri::command]
+pub async fn get_recents() -> Result<Vec<ItemDto>, String> {
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    Ok(crate::recents::list(&cfg))
+}
+
+/// Remove an item from the Continue Watching flow: drop the recents entry,
+/// tombstone the key (so a server hub that still carries it stays
+/// suppressed), and best-effort ask the backend to remove it server-side
+/// (Plex). The tombstone clears if the item is played again.
+#[tauri::command]
+pub async fn remove_from_continue(
+    rating_key: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // hide() tombstones the entry's full identity set and reports which key
+    // the server actually owns (a merged item's watch key when present).
+    let key = rating_key.clone();
+    let server_key = config::update(move |cfg| Ok(crate::recents::hide(cfg, &key)))?;
+    // Server-side removal is best-effort: the tombstone above already
+    // guarantees the UX, and an unroutable key (source removed) is fine.
+    // Route in its own statement so the registry guard drops BEFORE the
+    // network call — an if-let scrutinee would hold the lock across the
+    // await and stall every registry user behind a slow server.
+    let routed = state.registry.lock().await.route(&server_key);
+    if let Ok((src, raw)) = routed {
+        let _ = src.remove_from_continue(&raw).await;
+    }
+    Ok(())
+}
+
+/// Rating keys the user removed from Continue Watching — the hero merge
+/// filters these out of both feeds.
+#[tauri::command]
+pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
+    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    Ok(cfg.hidden_from_continue.clone())
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSnapshot {
     pub items: Vec<QueueItem>,
     pub current_index: Option<usize>,
+}
+
+/// Snapshot the loopback-proxy session key for a resolved stream URL so the
+/// end-of-session hook can free the cached SMB session for THIS play. Only
+/// Linux-family SMB proxy URLs carry one; Plex/Jellyfin/Emby, local files, and
+/// OS-mounted SMB (macOS/Windows) return `None` — they have no cached session.
+fn proxy_session_key(url: &str) -> Option<(String, u64)> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::stream_proxy::playback_session_key(url)
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = url;
+        None
+    }
+}
+
+/// Free the cached SMB proxy session for a finished play (compare-and-remove,
+/// off the proxy registry lock). A no-op off the Linux-family native path.
+fn release_proxy_session(token: &str, generation: u64) {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        crate::stream_proxy::release_session(token, generation);
+    }
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
+    {
+        let _ = (token, generation);
+    }
 }
 
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
@@ -1904,21 +3466,104 @@ pub(crate) async fn play_by_key(
             .push(child);
     }
 
+    // Sources that keep no server-side progress (the local family) resolve
+    // resume_ms 0 — fall back to Vela's own stamped position so a Continue
+    // Watching click actually continues (2026-07-04 hero decision). A server
+    // that supplies a position still wins: it is the watch-state authority.
+    let resume_ms = if resolved.resume_ms > 0 {
+        resolved.resume_ms
+    } else {
+        config::load_config()
+            .map(|cfg| crate::recents::resume_stamp_ms(&cfg, rating_key))
+            .unwrap_or(0)
+    };
+    // Resolve the bundled mpv autocrop script here (the command layer holds the
+    // AppHandle; `playback::play` does not). Whether it's injected depends on the
+    // `mpv_autocrop` config mode, decided in `play`. `resolve` only computes the
+    // path; `play` existence-checks before use.
+    let autocrop_script = state.app_handle.get().and_then(|app| {
+        use tauri::Manager;
+        app.path()
+            .resolve(
+                "mpv-scripts/autocrop.lua",
+                tauri::path::BaseDirectory::Resource,
+            )
+            .ok()
+            .map(|p| p.to_string_lossy().into_owned())
+    });
     let spec = playback::PlaySpec {
         url: resolved.url,
         title: title.to_string(),
         http_headers: resolved.http_headers,
-        start_seconds: resolved.resume_ms as f64 / 1000.0,
+        start_seconds: resume_ms as f64 / 1000.0,
+        autocrop_script,
     };
+    // Snapshot the loopback-proxy session key for THIS play (SMB, Linux-family;
+    // `None` otherwise). Read now, under `play_lock` and right after resolve, so
+    // a same-file replay that reuses the token has already bumped the generation
+    // — the compare-and-remove in `release_session` then keeps a superseded
+    // play's late `on_end` from freeing the new play's session.
+    let session_key = proxy_session_key(&spec.url);
+    // End-of-session notifier → the `playback-ended` UI event, emitted after
+    // the final server check-in so a re-fetch it triggers sees the new watch
+    // state. Payload carries ids only — never URLs or tokens.
+    let on_end: Option<playback::EndNotify> = state.app_handle.get().map(|app| {
+        use tauri::Emitter;
+        let app = app.clone();
+        let source_id = src.id().to_string();
+        let item_key = rating_key.to_string();
+        let session_key = session_key.clone();
+        std::sync::Arc::new(move |position_ms: u64| {
+            // Free the cached SMB proxy session for this finished play, so its
+            // libsmbclient context is torn down once here rather than left to
+            // registry eviction (compare-and-remove: a no-op for non-SMB plays
+            // or when a newer play has since reused the token).
+            if let Some((token, generation)) = &session_key {
+                release_proxy_session(token, *generation);
+            }
+            // Stamp Vela's recents BEFORE emitting, so the refresh the event
+            // triggers reads the updated list. Runs on the tracker thread —
+            // synchronous config I/O is fine there.
+            let now_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let key = item_key.clone();
+            let _ = config::update(move |cfg| {
+                crate::recents::finish(cfg, &key, position_ms, now_ms);
+                Ok(())
+            });
+            let _ = app.emit(
+                "playback-ended",
+                serde_json::json!({ "sourceId": source_id, "itemKey": item_key }),
+            );
+        }) as playback::EndNotify
+    });
     let progress = resolved.progress;
     let child_slot = state.current_child.clone();
     let shutting_down = state.shutting_down.clone();
     let advance = state.queue_advance.clone();
-    let stop = tauri::async_runtime::spawn_blocking(move || {
-        playback::play(&spec, progress, &child_slot, &shutting_down, &advance)
+    let played = tauri::async_runtime::spawn_blocking(move || {
+        playback::play(&spec, progress, &child_slot, &shutting_down, &advance, on_end)
     })
     .await
-    .map_err(|e| format!("playback task failed: {e}"))??;
+    .map_err(|e| format!("playback task failed: {e}"))
+    .and_then(|r| r);
+    // If play() failed it never installed the on_end owner for this play's proxy
+    // session; free it so a same-file replay's reactivated, still-cached session
+    // can't leak (sspf-8). Do it on the blocking pool, never on this async worker:
+    // dropping the last Arc<SmbConnection> runs a blocking smbc_free_context
+    // (sspf-9). The release is generation-guarded, so it is a no-op if a newer
+    // play has since reused the token, and a no-op for non-SMB plays.
+    if played.is_err() {
+        if let Some((token, generation)) = session_key {
+            let _ = tauri::async_runtime::spawn_blocking(move || {
+                release_proxy_session(&token, generation);
+            })
+            .await;
+        }
+    }
+    let stop = played?;
     *state
         .tracking_stop
         .lock()
@@ -2147,6 +3792,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn normalize_autocrop_clamps_to_known_states() {
+        assert_eq!(normalize_autocrop(Some("off")), "off");
+        assert_eq!(normalize_autocrop(Some("manual")), "manual");
+        assert_eq!(normalize_autocrop(Some("auto")), "auto");
+        // Anything unrecognised (incl. None and garbage) must fall back to off, so a
+        // corrupt/stale config value can never enable cropping unexpectedly.
+        assert_eq!(normalize_autocrop(None), "off");
+        assert_eq!(normalize_autocrop(Some("")), "off");
+        assert_eq!(normalize_autocrop(Some("AUTO")), "off");
+        assert_eq!(normalize_autocrop(Some("on")), "off");
+    }
+
+    #[test]
     fn validate_sort_rejects_unknown_values() {
         assert!(validate_sort(Some("titleSort:asc".to_string())).is_ok());
         assert!(validate_sort(Some("unknown:desc".to_string())).is_err());
@@ -2185,6 +3843,24 @@ mod tests {
         assert!(normalize_smb_relative_path("/Movies").is_err());
         assert!(normalize_smb_relative_path("../Movies").is_err());
         assert!(normalize_smb_relative_path("Movies/../Shows").is_err());
+    }
+
+    #[test]
+    fn new_share_gets_share_root_as_default_folder() {
+        let mount = SmbMount {
+            id: "m1".into(),
+            name: "zoey/media".into(),
+            server: "zoey".into(),
+            share: "media".into(),
+            ..Default::default()
+        };
+        let mount = with_default_root_folder(mount);
+        assert_eq!(mount.folders.len(), 1);
+        let root = &mount.folders[0];
+        assert_eq!(root.path, "", "default folder must be the share root");
+        assert_eq!(root.kind, "", "root folder kind must be auto-detect");
+        assert_eq!(root.name, "zoey/media");
+        assert!(!root.id.is_empty());
     }
 
     #[test]

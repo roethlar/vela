@@ -1,5 +1,170 @@
 # Issue Queue
 
+## Resolved - Owner-Reported (2026-07-04, Continue Watching curation)
+
+Reported on Linux against a live Plex server; code-traced same day.
+All three items implemented 2026-07-04 via
+`.agents/plans/continue-watching-curation.md` (slices 2, 3, 1
+respectively; commits `cf5af95`, `d259213`, `d2ea1a7`). Automated
+checks pass and tests are guard-proven; live in-app confirmation of the
+Plex server-side removal is pending first use (non-fatal by design —
+the local tombstone alone hides the item). The On Deck supersession is
+recorded in `.agents/decisions.md`.
+
+- Mark watched/unwatched does not remove an item from the Continue Watching
+  hero, and the owner expects it to. Root causes (both required):
+  (a) `setWatched` (`src/routes/+page.svelte:707`) updates the card
+  in place and never re-fetches hubs, so the server-side continue hub row
+  keeps its stale copy until the next full refresh; (b) the hero also merges
+  Vela's own recents (`recents.rs`), and a recents entry only leaves via the
+  playback-end path (`finish()` past the watched threshold) — a right-click
+  mark-watched never touches `cfg.recents`, so the item persists in the hero
+  from the recents half even after the server drops it. Fix direction:
+  `set_watched` should also drop the key from recents (backend) and trigger
+  the same hub+recents re-fetch the `playback-ended` path uses (frontend).
+- No "Remove from Continue Watching" action exists. Owner wants an explicit
+  context-menu option on hero cards that removes the entry without changing
+  watched state. Needs: a `remove_recent(rating_key)` command clearing the
+  Vela recents entry, plus — for Plex-backed items — the server's
+  remove-from-continue-watching action so the server hub copy goes too
+  (Plex exposes this in its API; Jellyfin/Emby equivalents need
+  investigation). Until the server side is wired, removal must at least
+  stick locally (recents) and survive the merge with server hubs.
+- QUEUED (owner direction 2026-07-04): collapse On Deck into the Continue
+  Watching hero so both feed ONE cover-flow interface — no separate On Deck
+  row. Background: the two are different lists by design (hero = Vela's
+  recents ∪ the servers' continue/resume hubs; On Deck = Plex's "what's
+  next" hub with next-up episodes) and overlap for in-progress episodes;
+  the owner wants them merged rather than stacked. Direction: fold
+  `hubPolicy`'s "landscape" (ondeck) bucket into "hero", dedupe by rating
+  key against recents/continue items (recents-first ordering as today),
+  and drop the 16:9 On Deck row. This refines the 2026-07-04 split-artwork
+  decision's On Deck treatment; record the supersession when implemented.
+  Needs a plan + owner approval of ordering semantics (where next-up
+  episodes rank against in-progress items in the flow).
+
+## Open - Owner-Reported (2026-07-04)
+
+Owner-observed on macOS during live smoke testing. Recorded as reported;
+untriaged, no code investigation yet.
+
+Home screen, against a live Plex server (screenshot evidence; other backends
+unchecked for these):
+
+- Continue Watching does not refresh after playback. A video watched to
+  completion or partway is only reflected in the Home hubs after an app
+  restart.
+
+- Card watch state is stale after playback. Progress bars and played
+  checkmarks do not update after a video is finished or its resume position
+  moves in either direction, until restart. Root cause confirmed 2026-07-04:
+  the server is updated correctly on mpv exit; the frontend never re-fetches.
+  Plan for this and the previous item:
+  `.agents/plans/watch-state-refresh.md`. Implemented 2026-07-04 (backend
+  `playback-ended` event after the final server check-in + frontend
+  re-fetch); automated checks pass, owner playtest pending.
+
+- Rows mix poster and content-frame artwork. The same row renders 2:3 posters
+  next to 16:9 episode thumbnails at different heights (e.g. a movie poster
+  beside an episode thumb in Continue Watching). The owner finds this
+  distracting; a row should present one consistent artwork shape. Plan:
+  `.agents/plans/row-artwork-consistency.md`. Implemented 2026-07-04 per the
+  split policy: Continue Watching renders as the hero carousel (overlay
+  arrows, backdrops for movies), On Deck as a uniform 16:9 row, catalog rows
+  as uniform 2:3 with series posters for episodes (new seriesPoster/backdrop
+  fields from Plex and Jellyfin/Emby; local series art deferred).
+  Unit-tested (guard-proven); owner playtest pending.
+
+- Hero carousel reads as static/broken (reported 2026-07-04, v0.1.7: ignored
+  the hero, played another video ~seconds, stopped — hero unchanged, "no
+  arrows", no replacement). Diagnosis (code-traced): three stacked causes.
+  (a) UX defect, real: the prev/next arrows are hover-revealed
+  (`+page.svelte` `.heroarrow` opacity 0 until `.heroframe:hover`), so a
+  single visible hero card shows no affordance at all — the approved plan's
+  "proposed hover-reveal" default fails in practice. Fix direction: arrows
+  (or an equivalent position indicator) always visible.
+  (b) Not a Vela defect: the post-playback refresh did run (`playback-ended`
+  fires even on early quit; hubs are refetched live), but Plex does not
+  create a resume point for only a few seconds of playback (server-side
+  minimum, ~60s — assumption from observed Plex behavior), so Continue
+  Watching legitimately did not change. A >60s partial play is the correct
+  retest.
+  (c) By design (recorded in the artwork plan): if the played item was
+  local/SMB, it can never enter Continue Watching — local items carry no
+  watch state.
+  Owner direction 2026-07-04: recency IS the desired semantic, and the hero
+  becomes a cover-flow (foobar2000 reference; see `.agents/decisions.md`).
+  Implemented same day: Vela-side recents (snapshot at play, position
+  stamped at mpv exit, finished entries dropped at the watched threshold),
+  ONE consolidated hero fed by recents ∪ server hubs, cover-flow capped at
+  30% of window height with older items fanned behind-left / newer
+  behind-right, side cards clickable, arrows always visible. Unit-tested
+  (guard-proven); owner playtest pending.
+
+Source setup:
+
+- SMB shares surface labeled "Local" on the main screen. The share connects
+  fine, but the UI presents it as "Local" instead of identifying it as an SMB
+  source/share. Plausibly a consequence of the SMB-feeds-the-local-source
+  design (selected share folders feed the local source; see
+  `.agents/state.md`) — unverified — but as presented it is confusing.
+  Screenshot evidence: source chips read "All | Plex | Nagatha | Local" and
+  the nav lists the share's folders as "movies · Local" and
+  "skippy/video/archive/tv · Local". Confirmed 2026-07-04: SMB/SSH folders
+  are flattened into the single hardcoded "Local" source. Plan:
+  `.agents/plans/smb-source-labeling.md`. Implemented 2026-07-04: each
+  SMB/SSH mount now registers as its own source (`smb-<id>`/`ssh-<id>`)
+  carrying the mount's human name; chips and nav tags pick it up
+  automatically. Unit-tested (guard-proven); owner playtest pending.
+
+- The `sshfs` requirement surfaces too late, and its install guidance is a
+  dead end on macOS. Diagnosed 2026-07-04 on the owner's machine: the
+  attempted `brew install sshfs` installed nothing — Homebrew core's `sshfs`
+  depends on `libfuse`, which is Linux-only, so it cannot succeed on macOS.
+  No sshfs binary exists in any checked location and macFUSE is absent;
+  Vela's detection and its "sshfs was not found" error were correct.
+  Remaining work: surface the dependency up front in the add-SSH UI rather
+  than at add-failure time, and make the guidance platform-aware — on macOS
+  the working route is the `macfuse` cask plus a macFUSE-compatible sshfs
+  build (e.g. `gromgit/fuse/sshfs-mac`), including approving the macFUSE
+  kernel/system extension (on Apple Silicon that means allowing third-party
+  kexts via Recovery). Bare "install sshfs" sends macOS users into exactly
+  this dead end. Decided 2026-07-04 (see `.agents/decisions.md`): keep the
+  sshfs dependency and handle macOS with in-UI setup help/hint text (upfront
+  requirement, platform-aware install route, known instability caveats);
+  macOS SSH live testing is parked because the brew macFUSE/sshfs-mac builds
+  segfault or act oddly on the owner's machine. Note for any eventual retest:
+  mounts run ssh with `BatchMode=yes` and no password support, so first-time
+  hosts need their host key trusted via plain `ssh` before Vela can mount
+  them. Plan: `.agents/plans/ssh-macos-guidance.md`. Implemented 2026-07-04:
+  `sshfs_status` command + upfront platform-aware guidance in the add-SSH
+  panel, platform-aware mount error (unit-tested), host-key note in the form
+  footer. Automated checks pass; owner visual check pending.
+
+Library navigation and the "All" view (owner direction, 2026-07-04):
+
+- The "All" view is not useful in its current form, and the library list
+  needs rework. Per-source views break down by content type, but "All" breaks
+  down by connection/share — as segregated as per-source browsing, only
+  busier and sloppier. The nav sprawls one flat entry per library per source
+  ("Movies · Plex", "Movies Archive · Plex", "TV Shows · Plex", "TV Shows
+  Archive · Plex", "Shows · Nagatha", "movies · Local",
+  "skippy/video/archive/tv · Local"). Owner direction: "All" should be a
+  consolidated, deduped listing by content type — one entry per title backed
+  by every source that carries it, defaulting playback to the most
+  performant/reliable source, with an override to pick the source per title.
+  Prerequisite: SMB/local metadata is not cached today, so those sources load
+  slowly; likely needs persistent local metadata caching first (confirmed
+  2026-07-04: the existing `metadata_cache.json` caches online-lookup results
+  only; directory listings are re-walked live on every call). Plan, phased:
+  `.agents/plans/library-all-view-rework.md`. All four phases implemented
+  2026-07-04 (listing cache; consolidated type nav with merged listings;
+  provider-id/title+year dedup with backing lists; kind ranking + per-title
+  override via context menu). Unit-tested throughout (guard-proven); owner
+  playtest pending.
+
+## Kimi-K2.6 Review Triage (2026-05-23)
+
 Review triage from the Kimi-K2.6 report against `vela-foundation` on 2026-05-23.
 Items here are verified or worth tracking. Severity is adjusted from the report
 where the original claim was overstated.
@@ -13,7 +178,7 @@ where the original claim was overstated.
 > and CI enforces it. Not-runtime-verified: the CSP needs confirming against a
 > release build (it doesn't apply to the Vite dev server).
 
-## P0 - Fix Before Merge
+### P0 - Fix Before Merge
 
 - Move blocking OS/process work out of async command bodies.
   `mount_smb`, `unmount_smb`, and `play_item` call OS mount/unmount or child
@@ -47,7 +212,7 @@ where the original claim was overstated.
   XSS blast radius with stricter command validation or a narrower file-serving
   strategy.
 
-## P1 - Security and Reliability Hardening
+### P1 - Security and Reliability Hardening
 
 - Put mpv IPC sockets in a private runtime directory.
   The Unix IPC path is predictable under `/tmp`. Use a per-app private directory
@@ -86,7 +251,7 @@ where the original claim was overstated.
   The current SVG is backend-generated, so this is low risk, but an `<img>` data
   URI or sanitized SVG keeps the UI safer if the data path changes later.
 
-## P2 - UX, Accessibility, and Maintenance
+### P2 - UX, Accessibility, and Maintenance
 
 - Fix Settings modal accessibility.
   Remove `role="button"` from the backdrop, move focus into the dialog on open,
@@ -108,7 +273,7 @@ where the original claim was overstated.
   Minimum checks: `cargo check`, `cargo clippy --all-targets`, `cargo test`,
   `npm run check`, and dependency auditing once tooling is installed.
 
-## Not Queued From The Report
+### Not Queued From The Report
 
 - SMB credentials in process arguments: already documented and accepted as a
   local-only exposure for this branch. Reopen only if the threat model changes.

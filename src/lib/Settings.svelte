@@ -33,6 +33,8 @@
     mountpoint: string;
   };
 
+  type SshfsStatus = { found: boolean; path: string | null; platform: string };
+
   type MpvInfo = {
     available: boolean;
     path: string | null;
@@ -43,9 +45,11 @@
     installUrl: string;
   };
 
+  type AutocropMode = "off" | "manual" | "auto";
   type MpvAdvanced = {
     extraArgs: string;
     useOwnConfig: boolean;
+    autocrop: AutocropMode;
   };
 
   let {
@@ -93,6 +97,14 @@
   let folders = $state<LocalFolder[]>([]);
   let smbMounts = $state<SmbMount[]>([]);
   let sshMounts = $state<SshMount[]>([]);
+  // Mirrors backend LOCAL_FAMILY_KINDS (src-tauri/src/source/local.rs). These
+  // synthetic sources are managed via the folder / SMB / SSH rows below — NOT
+  // the registered-source list, whose Remove calls remove_source, which rejects
+  // local-family ids and errors. So they must never leak a source row (with a
+  // dead-end Remove button) into Connected. smb/ssh were added 2026-07-04 and
+  // leaked through the old `kind !== "local"` filter (Bug 5 P1).
+  const LOCAL_FAMILY_KINDS = ["local", "smb", "ssh"];
+  let sshfs = $state<SshfsStatus | null>(null);
   let busy = $state(false);
   let err = $state<string | null>(null);
 
@@ -148,6 +160,7 @@
   let smbUser = $state("");
   let smbPass = $state("");
   let smbDomain = $state("");
+  let smbName = $state("");
   let smbBrowseMountId = $state("");
   let smbBrowsePath = $state("");
   let smbDirectories = $state<SmbDirectory[]>([]);
@@ -161,6 +174,11 @@
   let sshPath = $state("");
   let sshKey = $state("");
   let sshKind = $state<"" | "movie" | "show">("");
+  let sshName = $state("");
+
+  // Inline rename of an existing SMB/SSH mount in the Connected tab.
+  let renamingId = $state("");
+  let renameText = $state("");
 
   // Add Jellyfin/Emby form
   let kind = $state<"jellyfin" | "emby">("jellyfin");
@@ -183,6 +201,7 @@
   // Advanced mpv options (free-form args + own-config toggle).
   let mpvExtraArgs = $state("");
   let mpvUseOwnConfig = $state(false);
+  let mpvAutocrop = $state<AutocropMode>("off");
   let mpvAdvBusy = $state(false);
   let showMpvHelp = $state(false);
 
@@ -225,19 +244,21 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, f, m, ssh, mp, adv] = await Promise.all([
+      const [s, f, m, ssh, mp, adv, sfs] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<LocalFolder[]>("list_local_folders"),
         invoke<SmbMount[]>("list_smb_mounts"),
         invoke<SshMount[]>("list_ssh_mounts"),
         invoke<MpvInfo>("check_mpv"),
         invoke<MpvAdvanced>("get_mpv_advanced"),
+        invoke<SshfsStatus>("sshfs_status"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
       folders = f;
       smbMounts = m;
       sshMounts = ssh;
+      sshfs = sfs;
       if (smbBrowseMountId && !m.some((mount) => mount.id === smbBrowseMountId)) {
         smbBrowseMountId = "";
         smbBrowsePath = "";
@@ -250,6 +271,7 @@
       mpvPathInput = mp.configuredPath ?? "";
       mpvExtraArgs = adv.extraArgs;
       mpvUseOwnConfig = adv.useOwnConfig;
+      mpvAutocrop = adv.autocrop;
     } catch (e) {
       if (seq === loadSeq) err = String(e);
     }
@@ -274,8 +296,9 @@
         username: smbUser,
         password: smbPass,
         domain: smbDomain.trim() || null,
+        name: smbName.trim() || null,
       });
-      smbServer = smbShare = smbUser = smbPass = smbDomain = "";
+      smbServer = smbShare = smbUser = smbPass = smbDomain = smbName = "";
       await load();
       const mounted = smbMounts.find(
         (mount) =>
@@ -314,7 +337,7 @@
 
   async function addSmbFolder() {
     if (!smbBrowseMountId) {
-      err = "Mount an SMB share first.";
+      err = "Add an SMB share first.";
       return;
     }
     busy = true;
@@ -335,6 +358,16 @@
   }
 
   async function removeSmbFolder(id: string, folderId: string) {
+    // Removing a share's last folder would leave a zombie zero-folder mount (an
+    // invisible share that browses nothing). Cascade to a full unmount instead:
+    // the UX ruling forbids an erroring/dead-end click, and a share with no
+    // folders is useless. The backend also refuses to empty a mount as a guard
+    // (Bug 5 P1).
+    const mount = smbMounts.find((m) => m.id === id);
+    if (mount && mount.folders.length <= 1) {
+      await unmountSmb(id);
+      return;
+    }
     busy = true;
     err = null;
     try {
@@ -382,8 +415,9 @@
         remotePath: sshPath,
         identityFile: sshKey.trim() || null,
         kind: sshKind || null,
+        name: sshName.trim() || null,
       });
-      sshHost = sshUser = sshPath = sshKey = "";
+      sshHost = sshUser = sshPath = sshKey = sshName = "";
       sshPort = "22";
       await load();
       onChanged();
@@ -399,6 +433,37 @@
     err = null;
     try {
       await invoke("unmount_ssh", { id });
+      await load();
+      onChanged();
+    } catch (e) {
+      err = String(e);
+    } finally {
+      busy = false;
+    }
+  }
+
+  function startRename(id: string, name: string) {
+    renamingId = id;
+    renameText = name;
+    err = null;
+  }
+
+  function cancelRename() {
+    renamingId = "";
+    renameText = "";
+  }
+
+  async function saveRename(command: "rename_smb_mount" | "rename_ssh_mount", id: string) {
+    const name = renameText.trim();
+    // No name: the Save button is disabled and Enter no-ops. Return silently
+    // rather than surfacing an error — the Bug 5 UX ruling forbids a click that
+    // terminates in an error-like state (an unavailable action is the answer).
+    if (!name) return;
+    busy = true;
+    err = null;
+    try {
+      await invoke(command, { id, name });
+      cancelRename();
       await load();
       onChanged();
     } catch (e) {
@@ -559,6 +624,7 @@
       await invoke("set_mpv_advanced", {
         extraArgs: mpvExtraArgs,
         useOwnConfig: mpvUseOwnConfig,
+        autocrop: mpvAutocrop,
       });
     } catch (e) {
       err = String(e);
@@ -633,9 +699,11 @@
       {#if sources.length === 0 && folders.length === 0}
         <p class="muted">No sources yet. Add one below.</p>
       {/if}
-      <!-- The synthetic "local" source is managed via the folder/SMB rows below,
-           not here (remove_source only handles Jellyfin/Emby). -->
-      {#each sources.filter((s) => s.kind !== "local") as s (s.id)}
+      <!-- The synthetic local-family sources (local/smb/ssh) are managed via the
+           folder/SMB/SSH rows below, not here (remove_source rejects their ids).
+           Excluding the whole family drops the leaked smb/ssh rows AND their
+           erroring Remove button (Bug 5 P1). -->
+      {#each sources.filter((s) => !LOCAL_FAMILY_KINDS.includes(s.kind)) as s (s.id)}
         <div class="row">
           <span class="badge">{s.kind}</span>
           <span class="name">{s.name}</span>
@@ -656,8 +724,25 @@
       {#each smbMounts as m (m.id)}
         <div class="row">
           <span class="badge">smb</span>
-          <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
-          <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Unmount</button>
+          {#if renamingId === m.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="name rename"
+              bind:value={renameText}
+              disabled={busy}
+              autofocus
+              onkeydown={(e) => {
+                if (e.key === "Enter") saveRename("rename_smb_mount", m.id);
+                else if (e.key === "Escape") cancelRename();
+              }}
+            />
+            <button disabled={busy || !renameText.trim()} onclick={() => saveRename("rename_smb_mount", m.id)}>Save</button>
+            <button disabled={busy} onclick={cancelRename}>Cancel</button>
+          {:else}
+            <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
+            <button disabled={busy} onclick={() => startRename(m.id, m.name)}>Rename</button>
+            <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Remove</button>
+          {/if}
         </div>
         {#each m.folders as f (f.id)}
           <div class="row subrow">
@@ -670,10 +755,27 @@
       {#each sshMounts as m (m.id)}
         <div class="row">
           <span class="badge">ssh</span>
-          <span class="name">
-            {m.name}<span class="muted small"> · {m.username ? `${m.username}@` : ""}{m.host}:{m.remotePath}</span>
-          </span>
-          <button class="rm" disabled={busy} onclick={() => unmountSsh(m.id)}>Unmount</button>
+          {#if renamingId === m.id}
+            <!-- svelte-ignore a11y_autofocus -->
+            <input
+              class="name rename"
+              bind:value={renameText}
+              disabled={busy}
+              autofocus
+              onkeydown={(e) => {
+                if (e.key === "Enter") saveRename("rename_ssh_mount", m.id);
+                else if (e.key === "Escape") cancelRename();
+              }}
+            />
+            <button disabled={busy || !renameText.trim()} onclick={() => saveRename("rename_ssh_mount", m.id)}>Save</button>
+            <button disabled={busy} onclick={cancelRename}>Cancel</button>
+          {:else}
+            <span class="name">
+              {m.name}<span class="muted small"> · {m.username ? `${m.username}@` : ""}{m.host}:{m.remotePath}</span>
+            </span>
+            <button disabled={busy} onclick={() => startRename(m.id, m.name)}>Rename</button>
+            <button class="rm" disabled={busy} onclick={() => unmountSsh(m.id)}>Unmount</button>
+          {/if}
         </div>
       {/each}
     </section>
@@ -752,6 +854,28 @@
           setup. Tick this to load your own <code>mpv.conf</code> instead — it can then
           change anything, including settings that disable HDR or break playback.
         </p>
+
+        <div class="field">
+          <label for="mpv-autocrop">Black-bar cropping (mpv autocrop)</label>
+          <select id="mpv-autocrop" bind:value={mpvAutocrop}>
+            <option value="off">Off</option>
+            <option value="manual">Manual — press Shift+C to crop</option>
+            <option value="auto">Automatic — crop every video</option>
+          </select>
+          <p class="muted small">
+            Loads mpv's bundled <code>autocrop.lua</code> to remove black bars.
+            <b>Manual</b> only crops when you press <code>Shift+C</code> during
+            playback. <b>Automatic</b> crops every video on its own.
+          </p>
+          {#if mpvAutocrop === "auto"}
+            <p class="warn small">
+              ⚠ Automatic cropping runs at the start of every video and can be
+              unreliable on HDR content — on some GPU/Wayland setups it may
+              occasionally hang mpv (unkillable). If playback freezes, switch back to
+              Off or Manual.
+            </p>
+          {/if}
+        </div>
 
         <div class="btnrow">
           <button class="primary" disabled={mpvAdvBusy} onclick={saveMpvAdvanced}>
@@ -872,17 +996,22 @@
           <label for="smb-domain">Domain (optional)</label>
           <input id="smb-domain" bind:value={smbDomain} />
         </div>
+        <div class="field">
+          <label for="smb-name">Name (optional)</label>
+          <input id="smb-name" placeholder="Shown in the sidebar (defaults to the share name)" bind:value={smbName} />
+        </div>
         <button class="primary" disabled={busy} onclick={mountSmb}>
-          {busy ? "Mounting…" : "Mount share"}
+          {busy ? "Connecting…" : "Add share"}
         </button>
         <p class="muted small">
-          On Linux, Vela uses your desktop's user-space SMB mount from KIO-FUSE or GVfs.
-          Open the share in your file manager first if setup cannot find a readable path.
+          On Linux, Vela connects to the share directly — no mount, no root,
+          nothing else to set up; enter the server, share, and credentials.
+          macOS and Windows attach the share through the OS.
         </p>
 
         {#if smbMounts.length > 0}
           <div class="field">
-            <label for="smb-mounted">Mounted share</label>
+            <label for="smb-mounted">Share</label>
             <select
               id="smb-mounted"
               bind:value={smbBrowseMountId}
@@ -945,6 +1074,25 @@
 
     <section>
       <h3>Add an SSH / SFTP folder</h3>
+      {#if sshfs && !sshfs.found}
+        <div class="warn">
+          <b>sshfs is not installed</b> — SSH folders need it.
+          {#if sshfs.platform === "macos"}
+            Plain <code>brew install sshfs</code> does not work on macOS. The working
+            route: <code>brew install --cask macfuse</code>, approve its system
+            extension in System Settings (Apple Silicon Macs must first allow
+            third-party kernel extensions via Recovery) and restart, then
+            <code>brew install gromgit/fuse/sshfs-mac</code>. Heads-up: these builds
+            can be unstable on recent macOS.
+          {:else if sshfs.platform === "linux"}
+            Install <code>sshfs</code> with your package manager (apt, dnf, pacman, …).
+          {:else}
+            SSH/SFTP folders currently require sshfs on Linux or macOS.
+          {/if}
+        </div>
+      {:else if sshfs?.found && sshfs.path}
+        <p class="muted small">sshfs detected: {sshfs.path}</p>
+      {/if}
       <div class="form">
         <div class="field">
           <label for="ssh-host">Host</label>
@@ -974,11 +1122,17 @@
             <option value="show">TV Shows</option>
           </select>
         </div>
+        <div class="field">
+          <label for="ssh-name">Name (optional)</label>
+          <input id="ssh-name" placeholder="Shown in the sidebar (defaults to the folder name)" bind:value={sshName} />
+        </div>
         <button class="primary" disabled={busy} onclick={mountSsh}>
           {busy ? "Mounting…" : "Mount & add"}
         </button>
         <p class="muted small">
-          SSH/SFTP uses sshfs with your SSH keys, agent, and ~/.ssh/config. Vela does not store SSH passwords.
+          SSH/SFTP uses sshfs with your SSH keys, agent, and ~/.ssh/config. Vela does not
+          store SSH passwords. Connect to new hosts once with plain <code>ssh</code>
+          first so the host key is trusted — mounts can't answer that prompt.
         </p>
       </div>
     </section>
@@ -1188,6 +1342,10 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  input.name.rename {
+    min-width: 0;
+    padding: 0.25rem 0.4rem;
   }
   .subrow {
     padding-left: 1.6rem;

@@ -1,5 +1,5 @@
 # Agent Guidance
-<!-- templateVersion: 2026-07-02.1 -->
+<!-- templateVersion: 2026-07-04.1 -->
 
 ## Prime Invariants
 <!-- prime:begin — keep terse; re-grounded after compaction -->
@@ -31,6 +31,7 @@ Repo-specific rules live in `.agents/repo-guidance.md`, imported above (read it 
 - Keep one canonical location for each durable project truth when practical. Prefer pointers over duplicating the same rule; a summary or pointer names where a fact lives and does not keep a second copy of a count or enumeration another doc owns.
 - Establish one immediately discoverable current-state entry point. Do not reconstruct current state from chat, long journals, or tool-local memory.
 - When repo documents disagree, flag the conflict instead of silently choosing whichever source is convenient. Code and tests are evidence for behavior; approved plans and guidance are evidence for intent.
+- Specific over generic: an explicit authority or scope boundary, or a rule or decision whose wording removes discretion for the case it names ("unconditional", "no per-run choice", "deterministic"), outranks every generic default for that case — flag-conflicts, one-canonical-location, smallest-guidance-set included. Apply it as written; do not reopen the case it settles as a conflict or approval question against surrounding repo state such as git history. Generic defaults govern only questions no more specific rule has already resolved.
 - Label inferred but unverified facts as assumptions. Do not write assumptions as durable facts until repo evidence or explicit human approval supports them.
 - Prefer the smallest durable guidance set that fits the repo.
 - Verify before claiming completion; the operative rules are in the Verification section below.

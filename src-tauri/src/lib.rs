@@ -3,10 +3,17 @@ mod config;
 mod playback;
 mod plex_api;
 mod plex_library;
+mod recents;
 mod smb;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod smb_client;
+#[cfg(all(unix, not(target_os = "macos")))]
+mod stream_proxy;
 mod source;
 mod sshfs;
+mod ui_events;
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -64,6 +71,13 @@ pub struct AppState {
     /// plays the next queued item, so closing mpv stops playback while watching
     /// to the end continues to the next.
     pub queue_advance: Arc<tokio::sync::Notify>,
+    /// The Tauri app handle, set once at setup. Lets non-command code (the
+    /// playback tracker tails) emit UI events such as `playback-ended`.
+    pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
+    /// The materialized merged All-view listing: built in full when a type
+    /// listing is entered, windowed immutably by continuation pages so
+    /// paging can never skip or duplicate titles (see `get_type_listing`).
+    pub merged_snapshot: AsyncMutex<Option<commands::MergedSnapshot>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -97,16 +111,17 @@ pub fn run() {
             registry.upsert(src);
         }
     }
-    let safe_local_folders: Vec<_> = runtime_local_folders(&cfg)
-        .iter()
-        .filter(|f| safe_user_media_root(&f.path))
-        .cloned()
-        .collect();
-    // Restore the local source if any safe folders are configured.
-    if !safe_local_folders.is_empty() {
-        registry.upsert(Arc::new(source::local::LocalSource::new(
-            safe_local_folders.clone(),
-        )));
+    // Restore the local family: plain folders as "Local", plus one named
+    // source per SMB/SSH mount so shares aren't presented as "Local".
+    let local_family = source::local::local_family(
+        &cfg,
+        smb_runtime_folders,
+        smb_runtime_vfs,
+        ssh_runtime_folder,
+        safe_user_media_root,
+    );
+    for member in &local_family {
+        registry.upsert(member.build());
     }
 
     let state = AppState {
@@ -120,9 +135,12 @@ pub fn run() {
         queue: Arc::new(Mutex::new(Vec::new())),
         queue_index: Arc::new(Mutex::new(None)),
         queue_advance: Arc::new(tokio::sync::Notify::new()),
+        app_handle: std::sync::OnceLock::new(),
+        merged_snapshot: AsyncMutex::new(None),
     };
 
-    let asset_folders: Vec<String> = safe_local_folders.iter().map(|f| f.path.clone()).collect();
+    let asset_folders: Vec<String> = source::local::asset_folder_paths(&local_family);
+    #[cfg(not(all(unix, not(target_os = "macos"))))]
     let smb_mounts = cfg.smb_mounts.clone();
     let ssh_mounts = cfg.ssh_mounts.clone();
 
@@ -151,11 +169,54 @@ pub fn run() {
             .retain_mut(|c| matches!(c.try_wait(), Ok(None)));
     });
 
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
-        .manage(state)
+        .manage(state);
+
+    // Stable SMB artwork scheme (velasmb://<mount-id>/<b64url-path>):
+    // config-validated mount, normalized path, image whitelist, bounded
+    // native read — see source/smb_vfs.rs. Blocking work runs off the
+    // protocol thread; failures answer with a plain status code.
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let builder = builder.register_asynchronous_uri_scheme_protocol(
+        crate::source::smb_vfs::ARTWORK_SCHEME,
+        |_ctx, request, responder| {
+            let uri = request.uri().clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                let host = uri.host().unwrap_or_default().to_string();
+                let path = uri.path().to_string();
+                let response = match crate::source::smb_vfs::serve_artwork(&host, &path) {
+                    Ok((bytes, mime)) => tauri::http::Response::builder()
+                        .status(200)
+                        .header("Content-Type", mime)
+                        .header("Cache-Control", "max-age=86400")
+                        .body(bytes)
+                        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
+                    Err(status) => tauri::http::Response::builder()
+                        .status(status)
+                        .body(Vec::new())
+                        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
+                };
+                responder.respond(response);
+            });
+        },
+    );
+
+    builder
         .setup(move |app| {
             use tauri::Manager;
+
+            // Publish the app handle so playback threads can emit UI events
+            // (`playback-ended`). Set-once; a second set can't happen (setup
+            // runs once) but would be harmlessly ignored.
+            let _ = app
+                .handle()
+                .state::<AppState>()
+                .app_handle
+                .set(app.handle().clone());
+            // Same handle for fire-and-forget background signals (the listing
+            // cache's `listings-updated`).
+            ui_events::set_app_handle(app.handle().clone());
 
             // Auto-advance dispatcher: when the mpv EOF watcher notifies a clean
             // file end, walk the queue cursor forward and play the next item.
@@ -203,7 +264,9 @@ pub fn run() {
             for path in &asset_folders {
                 let _ = app.asset_protocol_scope().allow_directory(path, true);
             }
-            if smb::remount_on_startup() {
+            // Linux: no remount pass — shares are native (mountless).
+            #[cfg(not(all(unix, not(target_os = "macos"))))]
+            {
                 // Re-establish SMB mounts off the main thread so a slow/offline share
                 // can't stall launch. Once a share mounts, refresh the local source so
                 // selected folders inside that share become browsable in this running
@@ -304,10 +367,13 @@ pub fn run() {
             commands::list_smb_directories,
             commands::add_smb_folder,
             commands::remove_smb_folder,
+            commands::rename_smb_mount,
             commands::unmount_smb,
             commands::mount_ssh,
             commands::list_ssh_mounts,
             commands::unmount_ssh,
+            commands::rename_ssh_mount,
+            commands::sshfs_status,
             commands::check_mpv,
             commands::set_mpv_path,
             commands::get_mpv_advanced,
@@ -319,8 +385,15 @@ pub fn run() {
             commands::get_hubs,
             commands::get_sections,
             commands::get_items,
+            commands::get_type_listing,
+            commands::set_merged_override,
+            commands::record_recent,
+            commands::get_recents,
+            commands::remove_from_continue,
+            commands::get_continue_tombstones,
             commands::search,
             commands::get_children,
+            commands::get_item_detail,
             commands::set_watched,
             commands::play_item,
             commands::queue_list,
@@ -373,41 +446,43 @@ async fn refresh_local_source(app_handle: &tauri::AppHandle) {
     let Ok(cfg) = config::load_config() else {
         return;
     };
-    let folders: Vec<_> = runtime_local_folders(&cfg)
-        .into_iter()
-        .filter(|f| safe_user_media_root(&f.path))
-        .collect();
-    for folder in &folders {
+    let family = source::local::local_family(
+        &cfg,
+        smb_runtime_folders,
+        smb_runtime_vfs,
+        ssh_runtime_folder,
+        safe_user_media_root,
+    );
+    for path in source::local::asset_folder_paths(&family) {
         let _ = app_handle
             .asset_protocol_scope()
-            .allow_directory(&folder.path, true);
+            .allow_directory(&path, true);
     }
     let state = app_handle.state::<AppState>();
     let mut reg = state.registry.lock().await;
-    if folders.is_empty() {
-        reg.remove(source::local::LOCAL_SOURCE_ID);
-    } else {
-        reg.upsert(Arc::new(source::local::LocalSource::new(folders)));
+    // Replace the whole family: a mount that went away must drop its source.
+    reg.remove_kinds(source::local::LOCAL_FAMILY_KINDS);
+    for member in &family {
+        reg.upsert(member.build());
     }
 }
 
-fn runtime_local_folders(cfg: &config::AppConfig) -> Vec<config::LocalFolder> {
-    let ssh_folder_ids: std::collections::HashSet<_> = cfg
-        .ssh_mounts
+/// Linux-family: native SMB — folders live in the provider's namespace
+/// (share-relative, leading slash); no mount lookup at all.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
+    m.folders
         .iter()
-        .map(|m| m.local_folder_id.as_str())
-        .collect();
-    let mut folders: Vec<_> = cfg
-        .local_folders
-        .iter()
-        .filter(|f| !ssh_folder_ids.contains(f.id.as_str()))
-        .cloned()
-        .collect();
-    folders.extend(cfg.smb_mounts.iter().flat_map(smb_runtime_folders));
-    folders.extend(cfg.ssh_mounts.iter().filter_map(ssh_runtime_folder));
-    folders
+        .map(|folder| config::LocalFolder {
+            id: folder.id.clone(),
+            name: folder.name.clone(),
+            path: crate::source::smb_vfs_path(&folder.path),
+            kind: folder.kind.clone(),
+        })
+        .collect()
 }
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
     let Some(root) = smb_mount_root(m) else {
         return Vec::new();
@@ -423,6 +498,22 @@ fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
         .collect()
 }
 
+#[cfg(all(unix, not(target_os = "macos")))]
+fn smb_runtime_vfs(
+    m: &config::SmbMount,
+) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    Some(std::sync::Arc::new(crate::source::smb_vfs::SmbVfs::new(
+        m.clone(),
+    )))
+}
+
+#[cfg(not(all(unix, not(target_os = "macos"))))]
+fn smb_runtime_vfs(
+    _m: &config::SmbMount,
+) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
+    None
+}
+
 fn ssh_runtime_folder(m: &config::SshMount) -> Option<config::LocalFolder> {
     if !sshfs::is_active_mount(m) {
         return None;
@@ -435,11 +526,6 @@ fn ssh_runtime_folder(m: &config::SshMount) -> Option<config::LocalFolder> {
     })
 }
 
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
-    smb::resolved_mountpoint(m).filter(|path| Path::new(path).is_dir())
-}
-
 #[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
     if Path::new(&m.mountpoint).is_dir() {
@@ -449,6 +535,7 @@ fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
     }
 }
 
+#[cfg(not(all(unix, not(target_os = "macos"))))]
 fn smb_path_string_for_relative(root: &str, relative: &str) -> String {
     let mut path = PathBuf::from(root);
     for part in relative.split('/').filter(|part| !part.is_empty()) {

@@ -1,6 +1,6 @@
 {
   "name": "vela",
-  "version": "0.1.4",
+  "version": "0.1.31",
   "description": "mpv-backed HDR media client (Plex, Jellyfin, Emby, local)",
   "type": "module",
   "scripts": {
@@ -10,6 +10,7 @@
     "build:linux": "tauri build --bundles deb,rpm",
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "e2e": "node tests/e2e/run.mjs",
     "tauri": "tauri"
   },
   "license": "MIT",

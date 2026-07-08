@@ -205,6 +205,34 @@ impl JellyfinClient {
         )
     }
 
+    /// Landscape backdrop at hero resolution (the hero renders at window
+    /// width). Same token-in-URL exposure as `poster_url`.
+    fn backdrop_url(&self, item_id: &str, tag: &str) -> String {
+        self.build_url(
+            &["Items", item_id, "Images", "Backdrop", "0"],
+            &[
+                ("fillHeight", "1080"),
+                ("fillWidth", "1920"),
+                ("tag", tag),
+                ("api_key", self.token.as_str()),
+            ],
+        )
+    }
+
+    /// An episode's Primary image (its 16:9 scene still) at hero resolution,
+    /// for hero rendering when no backdrop exists on the item itself.
+    fn hero_still_url(&self, item_id: &str, tag: &str) -> String {
+        self.build_url(
+            &["Items", item_id, "Images", "Primary"],
+            &[
+                ("fillHeight", "1080"),
+                ("fillWidth", "1920"),
+                ("tag", tag),
+                ("api_key", self.token.as_str()),
+            ],
+        )
+    }
+
     /// Build a URL from path segments + query pairs, percent-encoding both so an
     /// id/tag/token containing `&`, `?`, `#`, or a space can't malform the URL
     /// or leak a token into an adjacent parameter.
@@ -424,8 +452,12 @@ struct BaseItem {
     parent_index_number: Option<u32>,
     series_name: Option<String>,
     season_name: Option<String>,
+    series_id: Option<String>,
+    series_primary_image_tag: Option<String>,
+    backdrop_image_tags: Option<Vec<String>>,
     image_tags: Option<ImageTags>,
     collection_type: Option<String>,
+    provider_ids: Option<std::collections::HashMap<String, String>>,
 }
 
 #[derive(Deserialize)]
@@ -623,6 +655,29 @@ impl JellyfinSource {
             .as_ref()
             .and_then(|t| t.primary.as_ref())
             .map(|tag| self.client.poster_url(&item.id, tag));
+        // An episode's series poster (portrait art for catalog rows).
+        let series_poster = item
+            .series_id
+            .as_ref()
+            .zip(item.series_primary_image_tag.as_ref())
+            .map(|(sid, tag)| self.client.poster_url(sid, tag));
+        let backdrop = item
+            .backdrop_image_tags
+            .as_ref()
+            .and_then(|tags| tags.first())
+            .map(|tag| self.client.backdrop_url(&item.id, tag))
+            .or_else(|| {
+                // Episodes rarely carry backdrops; their Primary image IS the
+                // 16:9 scene still — request it at hero resolution.
+                if item.item_type.as_deref() == Some("Episode") {
+                    item.image_tags
+                        .as_ref()
+                        .and_then(|t| t.primary.as_ref())
+                        .map(|tag| self.client.hero_still_url(&item.id, tag))
+                } else {
+                    None
+                }
+            });
         let view_offset_ms = item
             .user_data
             .as_ref()
@@ -637,13 +692,36 @@ impl JellyfinSource {
             duration_ms: item.run_time_ticks.map(ticks_to_ms),
             media_type: map_type(item.item_type.as_deref()),
             poster,
+            series_poster,
+            backdrop,
             view_offset_ms,
             played: item.user_data.as_ref().and_then(|u| u.played),
+            // Jellyfin reports LastPlayedDate as an ISO-8601 string; parsing
+            // it without a date dependency isn't worth it yet (follow-up).
+            last_watched_at_ms: None,
+            // DateCreated is an ISO-8601 string not requested in Fields= today;
+            // date-added sort works server-side for JF, so the DTO field is a
+            // follow-up (needed only for the merged view). None for now.
+            added_at_ms: None,
             index: item.index_number,
             parent_index: item.parent_index_number,
             grandparent_title: item.series_name.clone(),
             parent_title: item.season_name.clone(),
             source_id: self.id.clone(),
+            // {"Imdb": "tt0133093"} → "imdb:tt0133093", matching Plex's form.
+            provider_ids: item
+                .provider_ids
+                .as_ref()
+                .map(|m| {
+                    m.iter()
+                        .filter(|(_, v)| !v.is_empty())
+                        .map(|(k, v)| format!("{}:{v}", k.to_lowercase()))
+                        .collect()
+                })
+                .unwrap_or_default(),
+            backing: None,
+            canonical_id: None,
+            watch_key: None,
         }
     }
 
@@ -703,7 +781,7 @@ impl MediaSource for JellyfinSource {
                     ("Limit", "12".to_string()),
                     ("Recursive", "true".to_string()),
                     ("MediaTypes", "Video".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                 ],
             )
             .await?;
@@ -725,7 +803,7 @@ impl MediaSource for JellyfinSource {
                 &format!("/Users/{uid}/Items/Latest"),
                 &[
                     ("Limit", "20".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                     // Keep mixed libraries from surfacing audio/photos/books here.
                     (
                         "IncludeItemTypes",
@@ -763,7 +841,7 @@ impl MediaSource for JellyfinSource {
             ("Recursive", "true".to_string()),
             ("SortBy", by),
             ("SortOrder", order),
-            ("Fields", "Overview".to_string()),
+            ("Fields", "Overview,ProviderIds".to_string()),
         ];
         match section_type {
             "movie" => query.push(("IncludeItemTypes", "Movie".to_string())),
@@ -792,7 +870,7 @@ impl MediaSource for JellyfinSource {
                         "Movie,Series,Episode,Video,MusicVideo".to_string(),
                     ),
                     ("Limit", "50".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                 ],
             )
             .await?;
@@ -818,7 +896,7 @@ impl MediaSource for JellyfinSource {
                         "ParentIndexNumber,IndexNumber,SortName".to_string(),
                     ),
                     ("SortOrder", "Ascending".to_string()),
-                    ("Fields", "Overview".to_string()),
+                    ("Fields", "Overview,ProviderIds".to_string()),
                 ],
             )
             .await?;
@@ -902,6 +980,40 @@ mod tests {
                 height: Some(height),
             }],
         }
+    }
+
+    fn test_client() -> JellyfinClient {
+        JellyfinClient {
+            flavor: Flavor::Jellyfin,
+            base_url: "http://jf.example:8096".into(),
+            device_id: "dev".into(),
+            token: "tok".into(),
+            user_id: "u1".into(),
+            http: reqwest::Client::new(),
+        }
+    }
+
+    #[test]
+    fn artwork_urls_are_sized_and_encoded() {
+        let c = test_client();
+        let bd = c.backdrop_url("item1", "tag/1");
+        assert!(bd.starts_with("http://jf.example:8096/Items/item1/Images/Backdrop/0?"));
+        assert!(bd.contains("fillHeight=1080"));
+        assert!(bd.contains("fillWidth=1920"));
+        // The tag rides percent-encoded so it can't malform the query.
+        assert!(bd.contains("tag=tag%2F1"));
+
+        // Episode hero stills come from Primary at the same hero resolution.
+        let hs = c.hero_still_url("ep7", "t7");
+        assert!(hs.contains("/Items/ep7/Images/Primary"));
+        assert!(hs.contains("fillHeight=1080"));
+        assert!(hs.contains("fillWidth=1920"));
+
+        // The series poster reuses the primary-image shape at grid size.
+        let sp = c.poster_url("series9", "t9");
+        assert!(sp.contains("/Items/series9/Images/Primary"));
+        assert!(sp.contains("fillHeight=450"));
+        assert!(sp.contains("fillWidth=300"));
     }
 
     #[test]

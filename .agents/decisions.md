@@ -59,7 +59,10 @@ The local asset scope concerns in `ISSUES.md` and `.review/gpt_review.md`.
 
 ### 2026-05-23 - Keep Linux SMB user-space only by default
 
-Status: Active
+Status: Partially superseded (2026-07-04). The GVfs/KIO-FUSE resolution
+mechanism is replaced by the native in-process client — see "Linux SMB
+goes native" (2026-07-04). Still active from this entry: the no-root /
+no-privileged-CIFS constraint and the entire SSH/sshfs stance.
 
 Decision:
 On Linux, Vela resolves readable GVfs/KIO-FUSE SMB mounts created by the user's
@@ -223,3 +226,247 @@ Refines the 2026-05-23 "Accept token-bearing media URLs as local-only
 exposure" entry: Plex stream URLs are no longer token-bearing once this
 lands; poster/photo-transcode URLs and SMB mount-argument exposure remain
 accepted local-only exposures.
+
+### 2026-07-04 - macOS SSH: keep sshfs, add in-UI setup guidance; live testing parked
+
+Status: Active
+
+Decision:
+SSH/SFTP sources keep the `sshfs` dependency on macOS (no in-app SFTP client
+for now). Vela's add-SSH UI must carry platform-aware help: state the sshfs
+requirement up front rather than at add-failure time, and on macOS describe
+the actual working route — the `macfuse` cask plus a macFUSE-compatible sshfs
+build (e.g. `gromgit/fuse/sshfs-mac`), including system-extension approval
+and, on Apple Silicon, the Recovery reduced-security step — with a caution
+that these builds can be unstable. macOS SSH live smoke testing is parked:
+the brew macFUSE/sshfs-mac builds segfault or act oddly on the owner's
+machine (2026-07-04), so Vela documents that stack rather than owning it.
+
+Reason:
+Homebrew core's `sshfs` cannot install on macOS (Linux-only libfuse
+dependency), so the app's bare "Install sshfs, then try again" error sends
+macOS users into a dead end the owner hit verbatim; the working tap route
+then proved unstable on the owner's machine and carries real friction
+(closed-source kext, extension approval, Recovery step, restart). An in-app
+SFTP client is more scope than the feature currently justifies. Honest
+in-UI guidance is the supportable stance.
+
+Supersedes:
+The open product question in `ISSUES.md` ("Open - Owner-Reported
+(2026-07-04)", SSH entry) about whether macOS SSH should depend on macFUSE
+or switch to an in-app SFTP client. The Linux sshfs stance from 2026-05-23
+is unchanged.
+
+### 2026-07-04 - UI design language: steer toward the Infuse reference
+
+Status: Active
+
+Decision:
+Vela's browsing UI moves toward the design language of the owner-supplied
+Infuse screenshot at `reference_screens/infuse-home-reference.png`
+(committed with this entry) — a direction, explicitly not a pixel clone.
+Concrete direction (refined by the owner the same day):
+- Continue Watching is a single hero carousel, not a card row: one large
+  centered 16:9 card showing the most recently watched item — scene still
+  for episodes, backdrop art for movies — with the progress bar and a
+  title + S·E/episode-name caption. Prev/next arrows float overlaid on the
+  hero image's left/right edges (not separate side controls) and swap the
+  hero through the other recent items.
+- Other resume-style content (e.g. On Deck) uses the same landscape artwork
+  rules; whether it folds into the hero rotation or stays a row is settled
+  in the artwork plan.
+- Catalog rows and library grids are uniform 2:3 posters; episodic entries
+  show series artwork there, not episode stills.
+- Navigation trends toward a sidebar structure: Home, a consolidated
+  Library, and per-connection Files entries (matches the library/All-view
+  rework direction).
+Explicitly excluded from the reference: the Favorites tile row (superfluous
+per owner). Specifics land only through approved plans.
+
+Reason:
+Reviewing the artwork plan's open question (in-progress movies: poster or
+content view?), the owner supplied Infuse as the reference and asked that
+Vela get closer to its design language (2026-07-04). The split policy keeps
+every row internally uniform — the original complaint — while resume rows
+read as scenes in progress.
+
+Supersedes:
+The "poster-uniform hub rows" primary proposal in
+`.agents/plans/row-artwork-consistency.md` (updated to the split policy) and
+that plan's poster-vs-landscape open point. Informs, not replaces, the nav
+phases of `.agents/plans/library-all-view-rework.md`.
+
+### 2026-07-04 - Hero is a cover-flow fed by Vela's own recency
+
+Status: Active
+
+Decision:
+The Continue Watching hero becomes a cover-flow (owner reference: foobar2000
+album wall): the current item front-and-center capped at ~30% of the window
+height, older items fanned behind-left, newer behind-right, side cards and
+always-visible arrows both navigate — hover-revealed controls are dropped
+(they read as no controls at all). Its content follows the owner's semantic
+"recently played and not finished = Continue Watching": Vela records its own
+recents at play time (item snapshot; final position stamped at mpv exit) and
+the hero shows recents merged with the server continue-watching hubs, newest
+first, deduped. Entries past the watched threshold (config
+`watched_threshold_percent`, default 95%) drop out as finished. This makes
+the hero source-agnostic (local/SMB plays appear) and independent of Plex's
+server-side ~60s resume threshold. Home renders ONE consolidated hero;
+per-source scoping filters it.
+
+Reason:
+Owner playtest 2026-07-04 (v0.1.7): played a video for a few seconds,
+stopped — the hero never changed and showed no controls. Two real causes:
+Plex never registered the short play (server threshold), and with a
+one-item hub the hover-revealed arrows rendered nothing. The owner's stated
+expectation is recency semantics, which only a client-side record satisfies.
+
+Supersedes:
+The hero-carousel shape in the 2026-07-04 design-language decision (single
+centered card, hover-revealed overlay arrows). The split artwork policy and
+the rest of that decision stand.
+
+### 2026-07-04 - Linux SMB goes native: in-process client + loopback stream proxy
+
+Status: Active
+
+Decision:
+On Linux, Vela speaks SMB itself: browsing/listing/search through an
+in-process libsmbclient-backed client (`pavao` crate), and playback through a
+localhost-only HTTP Range proxy that translates mpv byte-range requests into
+SMB reads. The GVfs/KIO-FUSE mount-resolution path, `gio mount` nudge, and
+boot remount are removed on Linux. macOS (`mount_smbfs`) and Windows
+(`net use`) keep their OS-mount flows; taking those native is a separate
+future decision. Plan: `.agents/plans/smb-native-client.md`.
+
+Reason:
+Owner rejected the mount dependency outright (2026-07-04, hit on Arch/KDE
+with no gvfs and no active KIO mapping): "if Vela cannot make the connection
+itself without the underlying OS mount, it's worthless." mpv on the owner's
+system has no smb:// protocol support, so playback requires the proxy, not
+just native browsing.
+
+Supersedes:
+The *mechanism* of the 2026-05-23 "Keep Linux SMB user-space only by
+default" entry (resolving desktop-session GVfs/KIO-FUSE mounts). Its
+*constraint* stands: no root, no privileged CIFS mounts. The SSH/sshfs
+stance in that entry is unchanged.
+
+### 2026-07-04 - Owner delegation: progress must not block on the owner
+
+Status: Active
+
+Decision:
+The owner directed (2026-07-04, verbatim intent: "I need progress to pick
+up. however we can do that. I can't be the delay.") that queued work whose
+direction he has already chosen proceeds without a further per-plan
+approval round-trip. Concretely this approves for implementation:
+- `.agents/plans/smb-share-root-autoadd.md` (direction chosen 2026-07-04),
+- `.agents/plans/continue-watching-curation.md` (choices locked 2026-07-04),
+- building an automated end-to-end test harness (WebDriver/tauri-driver UI
+  automation plus mpv-IPC playback checks plus the live SMB probe) so
+  routine playtesting no longer requires the owner; the harness design
+  still lands as a written plan in `.agents/plans/` before its code.
+The owner stays in the loop only for what physically requires him: visual
+judgments (HDR passthrough, artwork look), release/version calls,
+credentials, and destructive or outward-facing actions. This is NOT a
+blanket approval for new feature directions the owner has not chosen;
+"no code change without an approved plan" still stands — this entry is the
+approval for the plans it names, and future plans with owner-locked
+choices may cite it instead of waiting when the owner is unavailable.
+
+Reason:
+The owner is the current throughput bottleneck and explicitly asked not to
+be. All three named items had their product choices made by the owner
+before this entry; only the approval formality was pending.
+
+Supersedes:
+Nothing structural. Narrows the per-plan approval wait for the named items
+and for future owner-locked plans.
+
+### 2026-07-04 - On Deck folds into the Continue Watching flow
+
+Status: Active
+
+Decision:
+Plex On Deck items are part of the hero cover-flow, interleaved with
+recents and continue-watching items by last watch activity (Plex
+`lastViewedAt`; Vela recents' `ended_at_ms`), newest first; items with no
+timestamp follow the timestamped ones in feed order. Vela builds its own
+On Deck hub from `/library/onDeck` (synthetic id `vela.ondeck`) because
+the `/hubs` On Deck hub is server-controlled and often absent. There is
+no separate On Deck row. Jellyfin `/Shows/NextUp` and Emby equivalents,
+and Jellyfin/Emby last-watched timestamps, are recorded follow-ups.
+
+Reason:
+Owner choices locked 2026-07-04 (plan
+`.agents/plans/continue-watching-curation.md`): fold in, no row,
+interleave by recency. On the owner's server, `/hubs` returns no On Deck
+hub, so an in-progress movie was invisible in the flow.
+
+Supersedes:
+The "On Deck ... uses the same landscape artwork rules" 16:9-row
+treatment in the 2026-07-04 "UI design language" decision; the hero
+cover-flow decision's merge ordering (was: recents then hub order — now
+recency-interleaved across both feeds).
+
+### 2026-07-05 - Letterbox crop feature DROPPED
+
+Status: Active
+
+Decision:
+Vela ships no letterbox/black-bar cropping feature. Owner ruling
+(2026-07-05): "this is mpv's problem, not Vela's." The draft plan
+`.agents/plans/letterbox-crop.md` is deleted; no spike, no design, no
+code. Users who want bar cropping can use mpv's own facilities via the
+existing `mpv_extra_args` config passthrough.
+
+Reason:
+The owner does not recall choosing the 2026-07-03 direction and, on
+re-review, rejects the feature outright as out of Vela's scope. The
+scope boundary is durable: Vela launches and controls mpv but does not
+re-implement video-geometry processing.
+
+Supersedes:
+The 2026-07-03 "detect during first playback, correct once" decision
+(entirely) and the 2026-06-28 open-question entry's target model. The
+2026-06-28 entry's CONFIRMED FACTS remain valid durable evidence for
+anyone touching mpv on this stack: live `video-crop` over IPC can wedge
+mpv into D-state on gpu-next/Vulkan/Wayland/HDR, and cropdetect /
+osd-dimensions readings are unreliable on HDR/PQ content.
+
+### 2026-07-05 - Ship mpv's autocrop.lua behind an opt-in toggle
+
+Status: Active
+
+Decision:
+Vela bundles mpv's unmodified `autocrop.lua` (GPLv2+, provenance recorded) as a
+resource and adds an off-by-default, three-state Settings control
+(Off / Manual / Automatic) that injects mpv `--script` launch args. Off injects
+nothing. Manual appends `--script=<bundled>` plus
+`--script-opts-append=autocrop-auto=no`, so cropping fires only on an explicit
+in-player `Shift+C`. Automatic appends `--script=<bundled>` with the script's own
+`auto=true` (crop at every playback start). Vela writes no crop logic; all
+geometry processing remains mpv's. The Automatic mode auto-fires the recorded
+live-`video-crop` D-state hang path and is therefore an explicit, non-default,
+owner-chosen opt-in guarded by a prominent UI warning; Off/Manual carry the
+`auto=no` code guard. Plan (converged, codex reviewloop r1-r4):
+`.agents/plans/mpv-autocrop-bundle.md`.
+
+Reason:
+Owner reversed the 2026-07-05 drop after confirming the script works via manual
+`--script=`/`Shift+C`, and wanted it distributable without users hand-managing the
+file (2026-07-05: "add it, then approved"), with both automatic and manual modes
+user-selectable. Bundling + a toggle is an extension of the prior decision's
+endorsed `mpv_extra_args` passthrough, not a re-implementation of crop logic.
+
+Supersedes:
+The 2026-07-05 "Letterbox crop feature DROPPED" decision for this narrow
+bundled-script case — specifically its "ships no crop feature", "no design/no
+code", and "existing `mpv_extra_args` passthrough only" clauses. What REMAINS in
+force from that entry (not superseded): the scope boundary that "Vela launches and
+controls mpv but does not re-implement video-geometry processing" (this ships
+mpv's own script, writes no geometry code), and the 2026-06-28 confirmed facts
+(live `video-crop` D-state wedge; unreliable cropdetect on HDR/PQ) — which are the
+reason for the `auto=no` guard on Off/Manual and the warning on Automatic.

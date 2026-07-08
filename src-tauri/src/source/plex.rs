@@ -5,9 +5,12 @@
 use async_trait::async_trait;
 use tokio::sync::Mutex as AsyncMutex;
 
-use super::{namespace_key, HubDto, ItemDto, MediaSource, SectionDto, StreamResolution};
+use super::{
+    namespace_key, CastMember, DetailDto, HubDto, ItemDto, MediaSource, MediaStreamDto,
+    MediaVersionDto, SectionDto, StreamResolution,
+};
 use crate::playback::{ProgressTarget, TrackInfo};
-use crate::plex_library::{PlexLibrary, PlexVideo};
+use crate::plex_library::{PlexDetail, PlexLibrary, PlexVideo};
 
 pub struct PlexSource {
     id: String,
@@ -81,6 +84,19 @@ impl PlexSource {
                 .thumb
                 .as_deref()
                 .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+            series_poster: v
+                .grandparent_thumb
+                .as_deref()
+                .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+            // Hero art renders at window width, so request it big. Episodes
+            // use their own scene still (thumb) there; other types use the
+            // backdrop/fanart.
+            backdrop: if v.media_type.as_deref() == Some("episode") {
+                v.thumb.as_deref()
+            } else {
+                v.art.as_deref()
+            }
+            .and_then(|t| lib.poster_transcode_url(t, 1920, 1080)),
             rating_key: namespace_key(&self.id, &v.rating_key),
             title: v.title,
             year: v.year,
@@ -91,13 +107,129 @@ impl PlexSource {
             // Plex omits viewCount for unwatched items, so absent == 0 == unwatched
             // (Some(false)), never "unknown" — the source always knows watched state.
             played: Some(v.view_count.unwrap_or(0) > 0),
+            last_watched_at_ms: v.last_viewed_at.map(|s| s.saturating_mul(1000)),
+            // Plex addedAt is epoch seconds; carry it in ms for the date-added sort.
+            added_at_ms: v.added_at.map(|s| s.saturating_mul(1000)),
             index: v.index,
             parent_index: v.parent_index,
             grandparent_title: v.grandparent_title,
             parent_title: v.parent_title,
             source_id: self.id.clone(),
+            // "imdb://tt0133093" → "imdb:tt0133093"; includes plex:// ids,
+            // which are stable across Plex servers on the new agents.
+            provider_ids: v
+                .guids
+                .iter()
+                .filter_map(|g| {
+                    let (scheme, rest) = g.id.split_once("://")?;
+                    let rest = rest.split('?').next().unwrap_or(rest);
+                    (!rest.is_empty()).then(|| format!("{}:{rest}", scheme.to_lowercase()))
+                })
+                .collect(),
+            backing: None,
+            canonical_id: None,
+            watch_key: None,
         }
     }
+
+    /// Map a fetched `/library/metadata/{rk}` record to the frontend [`DetailDto`],
+    /// building image URLs through the same tokened transcode path as posters.
+    fn to_detail(&self, lib: &PlexLibrary, d: PlexDetail) -> DetailDto {
+        let tags = |v: Vec<crate::plex_library::PlexTag>| -> Vec<String> {
+            v.into_iter().map(|t| t.tag).filter(|s| !s.is_empty()).collect()
+        };
+        DetailDto {
+            rating_key: namespace_key(&self.id, &d.rating_key),
+            poster: d
+                .thumb
+                .as_deref()
+                .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+            // Episodes use their scene still as the backdrop; other types use art.
+            backdrop: if d.media_type.as_deref() == Some("episode") {
+                d.thumb.as_deref()
+            } else {
+                d.art.as_deref()
+            }
+            .and_then(|t| lib.poster_transcode_url(t, 1920, 1080)),
+            cast: d
+                .roles
+                .into_iter()
+                .filter(|r| !r.tag.is_empty())
+                .map(|r| CastMember {
+                    name: r.tag,
+                    role: r.role.filter(|s| !s.is_empty()),
+                    thumb: r
+                        .thumb
+                        .as_deref()
+                        .and_then(|t| lib.poster_transcode_url(t, 300, 300)),
+                })
+                .collect(),
+            genres: tags(d.genres),
+            directors: tags(d.directors),
+            writers: tags(d.writers),
+            countries: tags(d.countries),
+            media: d
+                .media
+                .into_iter()
+                .map(|m| MediaVersionDto {
+                    hdr: m
+                        .video_dynamic_range
+                        .as_deref()
+                        .map(is_hdr_range)
+                        .unwrap_or(false),
+                    streams: m
+                        .parts
+                        .into_iter()
+                        .flat_map(|p| p.streams)
+                        .map(|s| MediaStreamDto {
+                            stream_type: s.stream_type,
+                            codec: s.codec,
+                            language: s.language,
+                            channels: s.channels,
+                            display_title: s.display_title,
+                        })
+                        .collect(),
+                    video_resolution: m.video_resolution,
+                    width: m.width,
+                    height: m.height,
+                    video_codec: m.video_codec,
+                    audio_codec: m.audio_codec,
+                    container: m.container,
+                })
+                .collect(),
+            // Plex omits viewCount when unwatched; absent == 0 == unwatched
+            // (always Some — the server knows, matching `to_item`).
+            played: Some(d.view_count.unwrap_or(0) > 0),
+            view_offset_ms: d.view_offset,
+            title: d.title,
+            year: d.year,
+            summary: d.summary,
+            tagline: d.tagline,
+            duration_ms: d.duration,
+            media_type: d.media_type,
+            content_rating: d.content_rating,
+            rating: d.rating,
+            audience_rating: d.audience_rating,
+            studio: d.studio,
+            originally_available_at: d.originally_available_at,
+            index: d.index,
+            parent_index: d.parent_index,
+            grandparent_title: d.grandparent_title,
+            parent_title: d.parent_title,
+            source_id: self.id.clone(),
+        }
+    }
+}
+
+/// True when a Plex `videoDynamicRange`/`videoProfile` string names an HDR variant
+/// (mirrors the playback-side detection in `get_part_url_for_rating_key`).
+fn is_hdr_range(v: &str) -> bool {
+    let v = v.to_ascii_lowercase();
+    v.contains("hdr")
+        || v.contains("dolby")
+        || v.contains("dovi")
+        || v.contains("hlg")
+        || v.contains("pq")
 }
 
 #[async_trait]
@@ -152,7 +284,7 @@ impl MediaSource for PlexSource {
                 (lib2, h)
             }
         };
-        Ok(hubs
+        let mut out: Vec<HubDto> = hubs
             .into_iter()
             .map(|h| HubDto {
                 title: h.title,
@@ -170,7 +302,29 @@ impl MediaSource for PlexSource {
                 source_name: self.name.clone(),
             })
             .filter(|h: &HubDto| !h.items.is_empty())
-            .collect())
+            .collect();
+        // On Deck folds into the Continue Watching flow (decision 2026-07-04):
+        // built from /library/onDeck because the /hubs On Deck hub is
+        // server-controlled and often absent. A fetch failure degrades to no
+        // hub, matching the per-hub resilience stance.
+        if let Ok(deck) = lib.get_on_deck().await.map_err(|e| e.to_string()) {
+            let items: Vec<_> = deck
+                .into_iter()
+                .filter(|v| is_playable_video(v.media_type.as_deref()))
+                .map(|v| self.to_item(&lib, v))
+                .collect();
+            if !items.is_empty() {
+                out.push(HubDto {
+                    title: "On Deck".to_string(),
+                    hub_identifier: "vela.ondeck".to_string(),
+                    hub_type: "mixed".to_string(),
+                    items,
+                    source_id: self.id.clone(),
+                    source_name: self.name.clone(),
+                });
+            }
+        }
+        Ok(out)
     }
 
     async fn items(
@@ -258,6 +412,25 @@ impl MediaSource for PlexSource {
             }
         };
         Ok(videos.into_iter().map(|v| self.to_item(&lib, v)).collect())
+    }
+
+    async fn item_detail(&self, item_key: &str) -> Result<DetailDto, String> {
+        validate_plex_id("item key", item_key)?;
+        let lib = self.ensure_ready().await?;
+        let fetch = |lib: PlexLibrary| async move {
+            lib.get_item_detail(item_key)
+                .await
+                .map(|d| (lib, d))
+                .map_err(|e| e.to_string())
+        };
+        let (lib, detail) = match fetch(lib).await {
+            Ok(ok) => ok,
+            Err(_) => {
+                let lib = self.rediscover().await?;
+                fetch(lib).await?
+            }
+        };
+        Ok(self.to_detail(&lib, detail))
     }
 
     async fn resolve_stream(
@@ -374,6 +547,16 @@ impl MediaSource for PlexSource {
             }
         }
     }
+
+    async fn remove_from_continue(&self, item_key: &str) -> Result<(), String> {
+        validate_plex_id("item key", item_key)?;
+        let lib = self.ensure_ready().await?;
+        // Single attempt, no rediscover: callers treat this as best-effort
+        // (Vela's tombstone already guarantees the UX).
+        lib.remove_from_continue_watching(item_key)
+            .await
+            .map_err(|e| e.to_string())
+    }
 }
 
 /// Extract the underlying part URLs from an mpv concat EDL (`edl://%N%url;...`),
@@ -409,5 +592,84 @@ fn validate_plex_id(name: &str, value: &str) -> Result<(), String> {
         Ok(())
     } else {
         Err(format!("invalid Plex {name}"))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plex_library::{PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag};
+
+    #[test]
+    fn hdr_range_detection() {
+        for s in ["Dolby Vision", "HDR10", "hlg", "SMPTE ST 2084 (PQ)", "DoVi"] {
+            assert!(is_hdr_range(s), "{s} should be HDR");
+        }
+        for s in ["SDR", "Rec. 709", ""] {
+            assert!(!is_hdr_range(s), "{s} should not be HDR");
+        }
+    }
+
+    #[test]
+    fn to_detail_maps_and_namespaces() {
+        // A server-less library builds no image URLs (poster_transcode_url -> None),
+        // which lets us assert the non-URL mapping deterministically.
+        let src = PlexSource::new(
+            "plexA",
+            "Plex",
+            PlexLibrary::new("tok".into(), "cid".into()),
+        );
+        let lib = PlexLibrary::new("tok".into(), "cid".into());
+        let detail = PlexDetail {
+            rating_key: "42".into(),
+            title: "A Movie".into(),
+            media_type: Some("movie".into()),
+            view_count: Some(0),
+            genres: vec![
+                PlexTag { tag: "Action".into() },
+                PlexTag { tag: String::new() }, // blank tag is dropped
+            ],
+            roles: vec![
+                PlexRole {
+                    tag: "Actor One".into(),
+                    role: Some("Hero".into()),
+                    thumb: Some("/library/metadata/42/role/1".into()),
+                },
+                PlexRole { tag: String::new(), role: None, thumb: None }, // nameless dropped
+            ],
+            media: vec![PlexDetailMedia {
+                video_resolution: Some("1080".into()),
+                video_dynamic_range: Some("Dolby Vision".into()),
+                parts: vec![PlexDetailPart {
+                    streams: vec![PlexStream {
+                        stream_type: Some(2),
+                        channels: Some(6),
+                        codec: Some("eac3".into()),
+                        ..Default::default()
+                    }],
+                }],
+                ..Default::default()
+            }],
+            thumb: Some("/library/metadata/42/thumb/1".into()),
+            ..Default::default()
+        };
+
+        let dto = src.to_detail(&lib, detail);
+
+        assert_eq!(dto.rating_key, "plexA:42"); // namespaced
+        assert_eq!(dto.source_id, "plexA");
+        assert_eq!(dto.genres, ["Action"]); // blank filtered
+        assert_eq!(dto.cast.len(), 1); // nameless filtered
+        assert_eq!(dto.cast[0].name, "Actor One");
+        assert_eq!(dto.cast[0].role.as_deref(), Some("Hero"));
+        assert_eq!(dto.cast[0].thumb, None); // no server -> no URL
+        assert_eq!(dto.poster, None); // no server -> no URL
+        assert_eq!(dto.played, Some(false)); // viewCount 0
+        assert_eq!(dto.media.len(), 1);
+        assert!(dto.media[0].hdr); // Dolby Vision
+        assert_eq!(dto.media[0].video_resolution.as_deref(), Some("1080"));
+        assert_eq!(dto.media[0].streams.len(), 1);
+        assert_eq!(dto.media[0].streams[0].channels, Some(6));
+        assert_eq!(dto.media[0].streams[0].codec.as_deref(), Some("eac3"));
     }
 }

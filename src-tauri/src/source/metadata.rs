@@ -111,13 +111,36 @@ impl MetaCache {
     /// Persist the cache. The `write_lock` serializes writers so a slower one
     /// can't write an older snapshot after a newer one, while the (brief)
     /// snapshot is the only thing taken under the map lock — the disk write
-    /// happens without holding it.
+    /// happens without holding it. The write itself is defensive like the
+    /// config's: owner-only temp file, fsync, atomic rename — a crash mid-
+    /// write can never truncate the existing cache file.
     fn persist(&self) {
         let Some(path) = &self.file else { return };
         let _w = self.write_lock.lock().unwrap_or_else(|e| e.into_inner());
         let snapshot = self.map.lock().unwrap_or_else(|e| e.into_inner()).clone();
-        if let Ok(s) = serde_json::to_string(&snapshot) {
-            let _ = std::fs::write(path, s);
+        let Ok(json) = serde_json::to_string(&snapshot) else {
+            return;
+        };
+        let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
+        let write = || -> std::io::Result<()> {
+            {
+                let mut opts = std::fs::OpenOptions::new();
+                opts.write(true).create(true).truncate(true);
+                #[cfg(unix)]
+                {
+                    use std::os::unix::fs::OpenOptionsExt;
+                    opts.mode(0o600);
+                }
+                use std::io::Write;
+                let mut f = opts.open(&tmp)?;
+                f.write_all(json.as_bytes())?;
+                f.sync_all()?;
+            }
+            std::fs::rename(&tmp, path)
+        };
+        if let Err(e) = write() {
+            let _ = std::fs::remove_file(&tmp);
+            eprintln!("vela: metadata cache write failed (kept in memory): {e}");
         }
     }
 }
@@ -135,14 +158,19 @@ pub struct Hint<'a> {
 
 /// Fill an item's metadata from cache or sidecar synchronously; if neither has
 /// it, leave the filename data in place and kick off a background online lookup.
-pub fn enrich(cache: &std::sync::Arc<MetaCache>, item: &mut ItemDto, hint: Hint) {
+pub fn enrich(
+    cache: &std::sync::Arc<MetaCache>,
+    vfs: &dyn crate::source::vfs::Vfs,
+    item: &mut ItemDto,
+    hint: Hint,
+) {
     let key = hint.file.to_string_lossy().to_string();
 
     // Sidecar is re-read every browse (cheap) so a newly added or edited
     // .nfo / artwork is picked up immediately rather than being shadowed by a
     // stale cache entry (e.g. an earlier online miss).
     let mut local_poster = None;
-    if let Some(meta) = read_sidecar(hint.file) {
+    if let Some(meta) = read_sidecar(vfs, hint.file) {
         apply(item, &meta);
         // A real .nfo (title/year/summary) is authoritative — done. But an
         // artwork-only sidecar (poster.jpg with no .nfo) must NOT block title/
@@ -185,14 +213,14 @@ fn apply(item: &mut ItemDto, meta: &CachedMeta) {
 
 // ---- sidecar (.nfo + local artwork) -------------------------------------
 
-fn read_sidecar(file: &Path) -> Option<CachedMeta> {
+fn read_sidecar(vfs: &dyn crate::source::vfs::Vfs, file: &Path) -> Option<CachedMeta> {
     let mut meta = CachedMeta::default();
-    if let Some(nfo) = read_nfo(file) {
+    if let Some(nfo) = read_nfo(vfs, file) {
         meta.title = xml_text(&nfo, "title");
         meta.year = xml_text(&nfo, "year").and_then(|y| y.trim().parse().ok());
         meta.summary = xml_text(&nfo, "plot");
     }
-    meta.poster = local_artwork(file).map(|p| p.to_string_lossy().to_string());
+    meta.poster = local_artwork(vfs, file).and_then(|p| vfs.artwork_ref(&p));
     if meta.is_empty() {
         None
     } else {
@@ -203,8 +231,8 @@ fn read_sidecar(file: &Path) -> Option<CachedMeta> {
 /// Where to look for sidecars: inside a directory item (show/season), or beside
 /// a file item (movie/episode). Returns the base dir and the file stem (empty
 /// for directory items).
-fn meta_base(path: &Path) -> (PathBuf, String) {
-    if path.is_dir() {
+fn meta_base(vfs: &dyn crate::source::vfs::Vfs, path: &Path) -> (PathBuf, String) {
+    if vfs.is_dir(path) {
         (path.to_path_buf(), String::new())
     } else {
         (
@@ -217,8 +245,8 @@ fn meta_base(path: &Path) -> (PathBuf, String) {
     }
 }
 
-fn read_nfo(file: &Path) -> Option<String> {
-    let (dir, stem) = meta_base(file);
+fn read_nfo(vfs: &dyn crate::source::vfs::Vfs, file: &Path) -> Option<String> {
+    let (dir, stem) = meta_base(vfs, file);
     let mut candidates = Vec::new();
     if stem.is_empty() {
         // Directory item (show/season): the series / movie-folder nfo.
@@ -230,13 +258,11 @@ fn read_nfo(file: &Path) -> Option<String> {
         candidates.push(dir.join(format!("{stem}.nfo")));
         candidates.push(dir.join("movie.nfo"));
     }
-    candidates
-        .iter()
-        .find_map(|p| std::fs::read_to_string(p).ok())
+    candidates.iter().find_map(|p| vfs.read_to_string(p))
 }
 
-fn local_artwork(file: &Path) -> Option<PathBuf> {
-    let (dir, stem) = meta_base(file);
+fn local_artwork(vfs: &dyn crate::source::vfs::Vfs, file: &Path) -> Option<PathBuf> {
+    let (dir, stem) = meta_base(vfs, file);
     let mut names = Vec::new();
     if !stem.is_empty() {
         names.push(format!("{stem}-poster.jpg"));
@@ -244,7 +270,7 @@ fn local_artwork(file: &Path) -> Option<PathBuf> {
         names.push(format!("{stem}-poster.png"));
     }
     names.extend(["poster.jpg", "folder.jpg", "cover.jpg", "poster.png"].map(String::from));
-    names.iter().map(|n| dir.join(n)).find(|p| p.is_file())
+    names.iter().map(|n| dir.join(n)).find(|p| vfs.is_file(p))
 }
 
 /// Extract the text of the first `<tag>…</tag>` (handles a CDATA wrapper).
@@ -473,7 +499,7 @@ mod tests {
         .unwrap();
         std::fs::write(dir.join("poster.jpg"), b"x").unwrap();
 
-        let meta = read_sidecar(&dir.join("Heat.mkv")).expect("sidecar found");
+        let meta = read_sidecar(&crate::source::vfs::StdFs, &dir.join("Heat.mkv")).expect("sidecar found");
         assert_eq!(meta.title.as_deref(), Some("Heat"));
         assert_eq!(meta.year, Some(1995));
         assert!(meta.poster.as_deref().unwrap().ends_with("poster.jpg"));
