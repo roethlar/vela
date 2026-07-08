@@ -18,6 +18,20 @@ Keep it short and update it when important repo facts change.
   (0.1.32)** — see the ACTIVE WORK entry below for detail. Everything UNPUSHED
   (owner pushes manually). The entries below this line are chronological
   history/context, not the next action.
+- **NEW TRACK DECIDED 2026-07-08 (awaiting owner approval to implement):
+  drop local/SMB/SSH sources entirely — Vela is a multi-server client.**
+  Decision `.agents/decisions.md` 2026-07-08 (also: watch-state migration
+  goal = a one-shot direct Plex→JF/Emby copy in Vela at migration time if
+  simple; no Trakt relay — owner's Trakt lives in Infuse, not Plex). Plan
+  `.agents/plans/drop-local-sources.md` drafted and **codex plan-review
+  CLOSED accepted at r5** (nine findings resolved; trail in the plan's
+  Review log + `.agents/review/index.md`). Three slices: (1) one
+  turn-off-AND-delete slice (registry/startup/commands/UI/modules/deps in
+  one CI-green commit; config fields inert-but-preserved incl. the legacy
+  serde fixes; recents dead-source filter), (2) E2E re-home to mock servers
+  — LINUX HOST ONLY, (3) docs sweep. Do NOT implement without the owner's
+  explicit go. Supersedes Bug 4 + metadata rail + local-metadata-revalidation
+  (all close unworked when this lands).
 - **WINDOWS DEV HOST FACTS (2026-07-08, first session on `F:\dev\vela`):**
   cargo/rustc fail with "The handle is invalid (os error 6)" unless stdin is
   valid — run via `cmd /c "cargo ... < nul"` (rustup shim quirk). codex lives at

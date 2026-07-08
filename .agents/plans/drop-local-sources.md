@@ -1,9 +1,10 @@
-# Plan: Drop local/SMB/SSH sources — Vela is a multi-server client (DRAFT)
+# Plan: Drop local/SMB/SSH sources — Vela is a multi-server client
 
 ## Status
-DRAFT 2026-07-08 — decision recorded (`.agents/decisions.md` 2026-07-08 "Vela is
-a multi-server client"); plan not yet codex-reviewed or owner-approved. No code
-change until approval.
+CODEX-REVIEWED 2026-07-08, **awaiting owner approval** — decision recorded
+(`.agents/decisions.md` 2026-07-08 "Vela is a multi-server client"); the
+plan-review loop CLOSED accepted at r5 (five rounds, nine findings dls-r1..r4
+all resolved — see Review log). No code change until the owner's explicit go.
 
 ## Goal
 Remove local-file playback entirely: local folders, SMB shares, and SSH/SFTP
@@ -209,3 +210,10 @@ confirmed resolved).**
   `skip_serializing_if = "String::is_empty"`; the round-trip guard must fail
   if either drops. Coder audit exhausted the class: those two attrs + the one
   migrator are the entire mutation surface for the inert fields.
+
+**r5 — 2026-07-08 — verdict `accepted`, 0 comments** (reviewed_sha=base_sha
+`2533f09`; `guard_confirmed:false` — read-only on a design doc). r4 fix
+confirmed; no new material defect. **Plan-review loop CLOSED — awaiting owner
+approval before implementation.** Healthy converging loop: r1 (5) → r2 (1) →
+r3 (2) → r4 (1) → r5 (clean); every finding independently verified against
+the tree before acceptance.

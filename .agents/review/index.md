@@ -23,6 +23,19 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Drop-local-sources PLAN-review loop CLOSED 2026-07-08: **accepted at r5**
+(base=head per round: `ff6fb64`→`48a0883`→`4fcbb80`→`a46be0f`→`2533f09`; five
+rounds, nine findings, all resolved — full trail in the plan's
+`.agents/plans/drop-local-sources.md` `## Review log`, not restated here).
+Scope: remove local/SMB/SSH sources entirely (owner decision 2026-07-08,
+`.agents/decisions.md` "Vela is a multi-server client"). The loop hardened:
+lib.rs startup restore/remount paths into slice 1; the full deletion inventory
+(sshfs_status, is_local_family_id, proxy-session cleanup, pavao-sys/libc,
+PKGBUILD sshfs optdepends, empty-state copy); one merged turn-off-and-delete
+slice (dead_code clippy boundary); and the config preserve-on-save rail
+(legacy migrator deleted + SmbMount legacy serde attrs round-trip). **Awaiting
+owner approval before implementation.**
+
 Loop idv-s2 CLOSED 2026-07-08: verified `[x]`, on `main`. Scope was **item-detail-view
 AMENDED slice 2** (base `3acf581`, head `0ecd819`; owner amendment 2026-07-08 in the
 plan: Plex-first, JF/Emby+local `item_detail` deferred, uniform nav flip later):
