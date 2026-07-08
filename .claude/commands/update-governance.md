@@ -1,16 +1,22 @@
 Refresh this repo's governance from the AgentGovernanceBootstrap toolkit.
 
-1. Confirm the canonical toolkit remote responds:
-   `git ls-remote --exit-code https://github.com/roethlar/AgentGovernanceBootstrap.git HEAD`.
-   If it does not and no reachable mirror or current local clone is available,
-   report that in plain English and stop.
-2. Obtain a current copy: shallow-clone the canonical remote into a scratch
-   directory (`git clone --depth 1 <canonical-url> <scratch>/agb-toolkit`). A
-   LAN mirror, when this repo's guidance names one, may serve as a faster
-   fetch source — fast-forward to the canonical head only.
-3. Read `<scratch>/agb-toolkit/procedures/bootstrap.md` and follow it top to
-   bottom against this repo. The single approval gate is the approval summary;
-   every change still goes through it — this command adds no write authority.
+1. Locate the local toolkit clone (normally `~/dev/AgentGovernanceBootstrap`).
+   If none exists, clone it:
+   `git clone https://github.com/roethlar/AgentGovernanceBootstrap.git ~/dev/AgentGovernanceBootstrap`.
+2. From this repo's root, run the refresh script:
+   `py -3 <toolkit>/tools/refresh.py` (Windows) or
+   `python3 <toolkit>/tools/refresh.py` (macOS/Linux).
+   The script syncs the toolkit from its canonical remote itself (offline it
+   proceeds on the local copy and says so), reconciles this repo to the
+   shipped artifact set, and makes one scoped commit. It never overwrites or
+   deletes an owner-modified file - those come back as FLAG lines.
+3. Report the script's reconcile summary to the owner in plain English.
+   Surface every FLAG line; do not resolve a flagged file without an
+   explicit owner decision.
+4. If the script flags `AGENTS.md` as not a toolkit instance, this repo
+   needs the bootstrap/migration procedure, not a refresh: read
+   `<toolkit>/procedures/bootstrap.md` and follow it.
 
-This wrapper is only a pointer; the synced `procedures/bootstrap.md` is the
-authority for everything that follows.
+This wrapper adds no write authority: the script's scoped commit is the
+refresh; anything beyond it (repo-guidance changes, migrations) goes through
+the bootstrap procedure's approval gate.
