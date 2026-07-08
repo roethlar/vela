@@ -82,22 +82,27 @@ decision); any Trakt integration (rejected).
   rollback). Note in README changelog that removing them is manual.
 
 ## Slices (each: own commit, reviewloop codex, full CI, version bump)
-1. **Turn the family off at the surface.** Registry stops constructing
-   local/SMB/SSH sources; the lib.rs startup restore/remount paths and
-   `refresh_local_source` are disabled (r1 finding 1 — no SMB/SSH side
-   effects from an old config); the 15 commands + their Settings UI (forms,
-   Connected tab) go together so no affordance can call a missing command;
-   the empty-state copy drops its local-folder clause; recents load-filter
-   for dead sources; rank arms pruned. App = servers only; all local-family
-   Rust below the registry is now dead code but still compiles. CI green.
-2. **Delete the corpse.** Remove the Rust modules, playback proxy paths,
+1. **Turn off AND delete, one slice (r2 finding: a split boundary cannot be
+   CI-green).** Leaving the modules as dead code between an "off" slice and a
+   "delete" slice fails Linux clippy `-D warnings` on `dead_code` (this
+   crate demonstrably fires that lint — the Windows host's 13 baseline
+   warnings are exactly unreferenced local-family helpers). So one slice
+   does both, ordered internally as: registry stops constructing
+   local/SMB/SSH sources; lib.rs startup restore/remount +
+   `refresh_local_source` disabled (r1 finding 1 — no SMB/SSH side effects
+   from an old config); the 15 commands + their Settings UI (forms,
+   Connected tab) removed together so no affordance can call a missing
+   command; empty-state copy loses its local-folder clause; recents
+   load-filter for dead sources; rank arms pruned; then the module
+   deletion in the same commit — Rust modules, playback proxy paths,
    `velasmb:` scheme, their tests, the non-command cross-references
-   enumerated above (`is_local_family_id` gate, proxy-session cleanup), the
-   `pavao-sys`/`libc` Cargo target block, and the packaging deps. CI green;
-   test count drops accordingly (Linux CI is the authoritative gate — the
-   Windows dev host skips the unix-gated tests anyway, and its 13
-   dead-code baseline warnings should disappear with the modules).
-3. **Re-home the E2E suite.** Port the local-seeded scenarios (playback,
+   (`is_local_family_id` gate, proxy-session cleanup), the
+   `pavao-sys`/`libc` Cargo target block, and the packaging deps. One
+   large but mechanical deletion-heavy commit; CI green at its end; test
+   count drops accordingly (Linux CI is the authoritative gate; the
+   Windows host's 13 dead-code baseline warnings disappear with the
+   modules).
+2. **Re-home the E2E suite.** Port the local-seeded scenarios (playback,
    queue, search, curation, resume) to the mock-JF server's Range-capable
    HTTP streams; `mergedview` becomes two-server (second mock instance —
    mock Emby or a second mock JF on another port); delete `connectedtab`
@@ -110,14 +115,14 @@ decision); any Trakt integration (rejected).
    red. **The whole slice must be validated on the Linux host** (the
    harness does not run on the Windows dev host); it lands only from a
    session that can run it, or explicitly owner-run.
-4. **Docs/guidance sweep.** Mission line, earned practices, README, ISSUES,
+3. **Docs/guidance sweep.** Mission line, earned practices, README, ISSUES,
    repo-map, plan banners, decision status updates (2026-05-23 local-roots
    + 2026-07-04 SMB-native close as "code removed").
 
 ## Open decisions for owner
-- Slice 3 timing: port E2E in the same push (needs a Linux session) or
-  accept a temporarily red/thinner e2e suite? Recommendation: slices 1-2
-  land now; slice 3 immediately next from the Linux host, before any
+- Slice 2 (E2E) timing: port E2E in the same push (needs a Linux session)
+  or accept a temporarily red/thinner e2e suite? Recommendation: slice 1
+  lands now; slice 2 immediately next from the Linux host, before any
   further feature work.
 - Nothing else — config tolerance and recents filtering above are the
   recommended defaults unless overridden.
@@ -130,7 +135,7 @@ decision); any Trakt integration (rejected).
   local/SMB/SSH fields loads, registers zero local-family sources, and
   round-trips those fields unchanged on save; recents dead-source filter
   guard-proven red/green.
-- Owner playtest after slice 2: old real config boots clean; sidebar shows
+- Owner playtest after slice 1: old real config boots clean; sidebar shows
   servers only; hero has no dead cards; Plex playback/seek unaffected.
 
 ## Review log
@@ -153,3 +158,14 @@ against the tree before acceptance).**
   and the PKGBUILD `sshfs` optdepends. Fixed: added to inventory + slice 2.
 - (LOW) Unauthenticated empty-state copy still offers "or a local folder".
   Fixed: added to the frontend sweep (slice 1).
+
+**r2 — 2026-07-08 — verdict `reopened`, 1 finding, ADMITTED (r1 fixes all
+confirmed resolved).**
+- (MEDIUM) The off-then-delete two-slice split cannot be CI-green at its
+  boundary: with registry/startup/command call sites gone, the retained
+  modules become `dead_code` and Linux clippy `-D warnings` fails before the
+  delete slice (this crate demonstrably fires the lint — the Windows host's
+  13-warning baseline is unreferenced local-family helpers). Fixed: slices 1
+  and 2 merged into ONE turn-off-and-delete slice (temporary
+  `#[allow(dead_code)]` scaffolding rejected as churn); later slices
+  renumbered (E2E re-home = 2, docs sweep = 3).
