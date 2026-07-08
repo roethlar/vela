@@ -24,16 +24,35 @@ file via ssh, smb, plex, emby, and jellyfin").
   `smb_client.rs`, `smb.rs`, `sshfs.rs`, `stream_proxy.rs`; the `velasmb:`
   scheme + loopback-proxy handling in `playback.rs` (incl.
   `proxy_reconnect_args`); local-family registration in `lib.rs`/registry.
-- **commands.rs**: the 14 local-family commands (`add/list/remove_local_folder`,
+- **lib.rs startup restore paths (r1 finding 1 — slice 1, not slice 2)**: the
+  boot sequence clones `smb_mounts`/`ssh_mounts` from config and auto-remounts
+  them (`lib.rs:144-145`, `:283-348`) and re-registers local-family sources via
+  `refresh_local_source` (`:318`, `:348`, `:444-467`). These must be disabled in
+  slice 1 or an old config keeps performing SMB/SSH side effects and
+  resurrecting local sources despite the "tolerated but ignored" rule.
+- **commands.rs**: the 15 local-family commands (`add/list/remove_local_folder`,
   `mount/unmount_smb`, `list_smb_mounts`, `list_smb_directories`,
   `add/remove_smb_folder`, `rename_smb_mount`, `mount/unmount_ssh`,
-  `list_ssh_mounts`, `rename_ssh_mount`) + their pure helpers/tests; the
+  `list_ssh_mounts`, `rename_ssh_mount`, **`sshfs_status`** — registered at
+  `lib.rs:376`, missed by the first inventory) + their pure helpers/tests; the
   `local`/`smb`/`ssh` arms of `kind_rank`/`detail_rank` (both collapse to
   plex < jellyfin/emby < unknown).
+- **Non-command references that must be pruned for slice 2 to compile (r1
+  finding 2)**: `remove_source`'s `source::local::is_local_family_id` gate
+  (`commands.rs:211`); the playback-cleanup proxy-session machinery
+  `proxy_session_key`/`release_proxy_session` and their call sites
+  (`commands.rs:3516-3673`), which reference `stream_proxy`. Sweep for further
+  cross-module references (`grep stream_proxy|sshfs|smb|local::` outside the
+  deleted modules) before declaring the slice compilable.
 - **Frontend**: Settings' local-folder / SMB / SSH add forms, the Connected
-  tab's mount rows + rename/remove affordances, sshfs guidance panel.
-- **Packaging**: PKGBUILD `smbclient` dep (+ `license=('MIT' 'GPL2')` stays —
-  that's the mpv autocrop script, unrelated); deb/rpm `libsmbclient` deps.
+  tab's mount rows + rename/remove affordances, sshfs guidance panel; the
+  unauthenticated empty-state copy "Connect Plex, Jellyfin, Emby, or a local
+  folder" (`+page.svelte:1160` — r1 finding 5) loses its local-folder clause.
+- **Packaging & build deps (r1 finding 4)**: PKGBUILD `smbclient` dep AND the
+  `sshfs` optdepends block (`PKGBUILD:12-14`); deb/rpm `libsmbclient` deps;
+  the Linux-target `pavao-sys`/`libc` dependency block in
+  `src-tauri/Cargo.toml:39-41` (+ its comment). `license=('MIT' 'GPL2')`
+  stays — that's the mpv autocrop script, unrelated.
 - **Docs**: repo-guidance mission line + SMB/SSH earned-practice bullets,
   README/ISSUES mentions, `.agents/repo-map.json` refresh.
 - **Plans CLOSED as obsolete** (banner, not deletion): `smb-native-client.md`,
@@ -64,24 +83,33 @@ decision); any Trakt integration (rejected).
 
 ## Slices (each: own commit, reviewloop codex, full CI, version bump)
 1. **Turn the family off at the surface.** Registry stops constructing
-   local/SMB/SSH sources; the 14 commands + their Settings UI (forms,
+   local/SMB/SSH sources; the lib.rs startup restore/remount paths and
+   `refresh_local_source` are disabled (r1 finding 1 — no SMB/SSH side
+   effects from an old config); the 15 commands + their Settings UI (forms,
    Connected tab) go together so no affordance can call a missing command;
-   recents load-filter for dead sources; rank arms pruned. App = servers
-   only; all local-family Rust below the registry is now dead code but
-   still compiles. CI green.
+   the empty-state copy drops its local-folder clause; recents load-filter
+   for dead sources; rank arms pruned. App = servers only; all local-family
+   Rust below the registry is now dead code but still compiles. CI green.
 2. **Delete the corpse.** Remove the Rust modules, playback proxy paths,
-   `velasmb:` scheme, their tests, and the packaging deps. CI green; test
-   count drops accordingly (Linux CI is the authoritative gate — the
+   `velasmb:` scheme, their tests, the non-command cross-references
+   enumerated above (`is_local_family_id` gate, proxy-session cleanup), the
+   `pavao-sys`/`libc` Cargo target block, and the packaging deps. CI green;
+   test count drops accordingly (Linux CI is the authoritative gate — the
    Windows dev host skips the unix-gated tests anyway, and its 13
    dead-code baseline warnings should disappear with the modules).
 3. **Re-home the E2E suite.** Port the local-seeded scenarios (playback,
    queue, search, curation, resume) to the mock-JF server's Range-capable
    HTTP streams; `mergedview` becomes two-server (second mock instance —
    mock Emby or a second mock JF on another port); delete `connectedtab`
-   (its subject is gone); `sourcedeadend` keeps its mock-JF leg, loses the
-   SMB leg. **Must be validated on the Linux host** (the harness does not
-   run on the Windows dev host); this slice lands only from a session that
-   can run it, or explicitly owner-run.
+   (its subject is gone). `sourcedeadend` (r1 finding 3): its two legs are
+   a LOCAL source + mock JF (no SMB leg), and the Sources sidebar group it
+   clicks only renders with >1 source (`+page.svelte` gates on
+   `sources.length > 1`) — it must be rewritten around two mock servers
+   (an empty-Home mock + a hubs-serving mock) or deleted with its Bug-3
+   coverage noted as lost; a single-mock port would leave it permanently
+   red. **The whole slice must be validated on the Linux host** (the
+   harness does not run on the Windows dev host); it lands only from a
+   session that can run it, or explicitly owner-run.
 4. **Docs/guidance sweep.** Mission line, earned practices, README, ISSUES,
    repo-map, plan banners, decision status updates (2026-05-23 local-roots
    + 2026-07-04 SMB-native close as "code removed").
@@ -106,4 +134,22 @@ decision); any Trakt integration (rejected).
   servers only; hero has no dead cards; Plex playback/seek unaffected.
 
 ## Review log
-(plan-review rounds recorded here)
+Plan-review loop (playbook `reviewloop`, reviewer `codex` 0.142.5, read-only).
+
+**r1 — 2026-07-08 — verdict `reopened`, 5 findings, all ADMITTED (each verified
+against the tree before acceptance).**
+- (HIGH) lib.rs startup restore/remount + `refresh_local_source` paths missing
+  from slice 1 — old configs would keep performing SMB/SSH side effects. Fixed:
+  inventory + slice 1 now disable them explicitly.
+- (HIGH) Inventory incomplete for a compiling slice 2: `sshfs_status` (15th
+  command), `remove_source`'s `is_local_family_id` gate, playback-cleanup
+  proxy-session machinery in commands.rs. Fixed: all enumerated + a pre-delete
+  cross-reference sweep required.
+- (MEDIUM) `sourcedeadend` mis-inventoried (local+mockJF legs, no SMB leg; needs
+  >1 source for the sidebar group) — a single-mock port would stay red. Fixed:
+  slice 3 rewrites it around two mock servers or deletes it with coverage loss
+  noted.
+- (MEDIUM) Build/packaging cleanup missed `pavao-sys`/`libc` Cargo target block
+  and the PKGBUILD `sshfs` optdepends. Fixed: added to inventory + slice 2.
+- (LOW) Unauthenticated empty-state copy still offers "or a local folder".
+  Fixed: added to the frontend sweep (slice 1).
