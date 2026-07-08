@@ -5,35 +5,6 @@
   import Icon from "$lib/Icon.svelte";
 
   type Source = { id: string; name: string; kind: string };
-  type LocalFolder = { id: string; name: string; path: string; kind: string };
-  type SmbFolder = {
-    id: string;
-    name: string;
-    path: string;
-    relativePath: string;
-    kind: string;
-  };
-  type SmbMount = {
-    id: string;
-    name: string;
-    server: string;
-    share: string;
-    mountpoint: string;
-    folders: SmbFolder[];
-  };
-  type SmbDirectory = { name: string; path: string };
-  type SshMount = {
-    id: string;
-    name: string;
-    host: string;
-    port: number;
-    username: string;
-    remotePath: string;
-    identityFile: string;
-    mountpoint: string;
-  };
-
-  type SshfsStatus = { found: boolean; path: string | null; platform: string };
 
   type MpvInfo = {
     available: boolean;
@@ -94,26 +65,14 @@
   }
 
   let sources = $state<Source[]>([]);
-  let folders = $state<LocalFolder[]>([]);
-  let smbMounts = $state<SmbMount[]>([]);
-  let sshMounts = $state<SshMount[]>([]);
-  // Mirrors backend LOCAL_FAMILY_KINDS (src-tauri/src/source/local.rs). These
-  // synthetic sources are managed via the folder / SMB / SSH rows below — NOT
-  // the registered-source list, whose Remove calls remove_source, which rejects
-  // local-family ids and errors. So they must never leak a source row (with a
-  // dead-end Remove button) into Connected. smb/ssh were added 2026-07-04 and
-  // leaked through the old `kind !== "local"` filter (Bug 5 P1).
-  const LOCAL_FAMILY_KINDS = ["local", "smb", "ssh"];
-  let sshfs = $state<SshfsStatus | null>(null);
   let busy = $state(false);
   let err = $state<string | null>(null);
 
   // Vertical settings tabs — split the (formerly very long) panel into sections.
-  type TabId = "connected" | "servers" | "folders" | "player" | "appearance";
+  type TabId = "connected" | "servers" | "player" | "appearance";
   const tabs: { id: TabId; label: string }[] = [
     { id: "connected", label: "Connected" },
     { id: "servers", label: "Servers" },
-    { id: "folders", label: "Folders" },
     { id: "player", label: "Player" },
     { id: "appearance", label: "Appearance" },
   ];
@@ -154,32 +113,6 @@
     document.documentElement.setAttribute("data-theme", id);
   }
 
-  // Add SMB share
-  let smbServer = $state("");
-  let smbShare = $state("");
-  let smbUser = $state("");
-  let smbPass = $state("");
-  let smbDomain = $state("");
-  let smbName = $state("");
-  let smbBrowseMountId = $state("");
-  let smbBrowsePath = $state("");
-  let smbDirectories = $state<SmbDirectory[]>([]);
-  let smbFolderKind = $state<"" | "movie" | "show">("");
-  let smbBrowseBusy = $state(false);
-
-  // Add SSH/SFTP folder
-  let sshHost = $state("");
-  let sshPort = $state("22");
-  let sshUser = $state("");
-  let sshPath = $state("");
-  let sshKey = $state("");
-  let sshKind = $state<"" | "movie" | "show">("");
-  let sshName = $state("");
-
-  // Inline rename of an existing SMB/SSH mount in the Connected tab.
-  let renamingId = $state("");
-  let renameText = $state("");
-
   // Add Jellyfin/Emby form
   let kind = $state<"jellyfin" | "emby">("jellyfin");
   let url = $state("");
@@ -188,9 +121,6 @@
   let useApiKey = $state(false);
   let apiKey = $state("");
   let userId = $state("");
-
-  // Add local folder
-  let folderKind = $state<"" | "movie" | "show">("");
 
   // mpv player location
   let mpv = $state<MpvInfo | null>(null);
@@ -244,29 +174,13 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, f, m, ssh, mp, adv, sfs] = await Promise.all([
+      const [s, mp, adv] = await Promise.all([
         invoke<Source[]>("get_sources"),
-        invoke<LocalFolder[]>("list_local_folders"),
-        invoke<SmbMount[]>("list_smb_mounts"),
-        invoke<SshMount[]>("list_ssh_mounts"),
         invoke<MpvInfo>("check_mpv"),
         invoke<MpvAdvanced>("get_mpv_advanced"),
-        invoke<SshfsStatus>("sshfs_status"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
-      folders = f;
-      smbMounts = m;
-      sshMounts = ssh;
-      sshfs = sfs;
-      if (smbBrowseMountId && !m.some((mount) => mount.id === smbBrowseMountId)) {
-        smbBrowseMountId = "";
-        smbBrowsePath = "";
-        smbDirectories = [];
-      }
-      if (!smbBrowseMountId && m.length > 0) {
-        smbBrowseMountId = m[0].id;
-      }
       mpv = mp;
       mpvPathInput = mp.configuredPath ?? "";
       mpvExtraArgs = adv.extraArgs;
@@ -274,202 +188,6 @@
       mpvAutocrop = adv.autocrop;
     } catch (e) {
       if (seq === loadSeq) err = String(e);
-    }
-  }
-
-  // Local folders fed by remote mounts are managed via the mount, not directly.
-  let remoteFolderIds = $derived(new Set(sshMounts.map((m) => m.mountpoint)));
-
-  async function mountSmb() {
-    if (!smbServer.trim() || !smbShare.trim()) {
-      err = "Server and share are required.";
-      return;
-    }
-    const mountedServer = smbServer.trim();
-    const mountedShare = smbShare.trim();
-    busy = true;
-    err = null;
-    try {
-      await invoke("mount_smb", {
-        server: smbServer,
-        share: smbShare,
-        username: smbUser,
-        password: smbPass,
-        domain: smbDomain.trim() || null,
-        name: smbName.trim() || null,
-      });
-      smbServer = smbShare = smbUser = smbPass = smbDomain = smbName = "";
-      await load();
-      const mounted = smbMounts.find(
-        (mount) =>
-          mount.server.toLowerCase() === mountedServer.toLowerCase() &&
-          mount.share.toLowerCase() === mountedShare.toLowerCase()
-      );
-      if (mounted) {
-        await loadSmbDirectories(mounted.id, "");
-      }
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function loadSmbDirectories(id = smbBrowseMountId, path = smbBrowsePath) {
-    if (!id) return;
-    smbBrowseBusy = true;
-    err = null;
-    try {
-      smbDirectories = await invoke<SmbDirectory[]>("list_smb_directories", {
-        id,
-        path: path || null,
-      });
-      smbBrowseMountId = id;
-      smbBrowsePath = path;
-    } catch (e) {
-      smbDirectories = [];
-      err = String(e);
-    } finally {
-      smbBrowseBusy = false;
-    }
-  }
-
-  async function addSmbFolder() {
-    if (!smbBrowseMountId) {
-      err = "Add an SMB share first.";
-      return;
-    }
-    busy = true;
-    err = null;
-    try {
-      await invoke("add_smb_folder", {
-        id: smbBrowseMountId,
-        path: smbBrowsePath,
-        kind: smbFolderKind || null,
-      });
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function removeSmbFolder(id: string, folderId: string) {
-    // Removing a share's last folder would leave a zombie zero-folder mount (an
-    // invisible share that browses nothing). Cascade to a full unmount instead:
-    // the UX ruling forbids an erroring/dead-end click, and a share with no
-    // folders is useless. The backend also refuses to empty a mount as a guard
-    // (Bug 5 P1).
-    const mount = smbMounts.find((m) => m.id === id);
-    if (mount && mount.folders.length <= 1) {
-      await unmountSmb(id);
-      return;
-    }
-    busy = true;
-    err = null;
-    try {
-      await invoke("remove_smb_folder", { id, folderId });
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function unmountSmb(id: string) {
-    busy = true;
-    err = null;
-    try {
-      await invoke("unmount_smb", { id });
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function mountSsh() {
-    if (!sshHost.trim() || !sshPath.trim()) {
-      err = "Host and remote path are required.";
-      return;
-    }
-    const parsedPort = Number(sshPort || "22");
-    if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
-      err = "SSH port must be between 1 and 65535.";
-      return;
-    }
-    busy = true;
-    err = null;
-    try {
-      await invoke("mount_ssh", {
-        host: sshHost,
-        port: parsedPort,
-        username: sshUser,
-        remotePath: sshPath,
-        identityFile: sshKey.trim() || null,
-        kind: sshKind || null,
-        name: sshName.trim() || null,
-      });
-      sshHost = sshUser = sshPath = sshKey = sshName = "";
-      sshPort = "22";
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function unmountSsh(id: string) {
-    busy = true;
-    err = null;
-    try {
-      await invoke("unmount_ssh", { id });
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  function startRename(id: string, name: string) {
-    renamingId = id;
-    renameText = name;
-    err = null;
-  }
-
-  function cancelRename() {
-    renamingId = "";
-    renameText = "";
-  }
-
-  async function saveRename(command: "rename_smb_mount" | "rename_ssh_mount", id: string) {
-    const name = renameText.trim();
-    // No name: the Save button is disabled and Enter no-ops. Return silently
-    // rather than surfacing an error — the Bug 5 UX ruling forbids a click that
-    // terminates in an error-like state (an unavailable action is the answer).
-    if (!name) return;
-    busy = true;
-    err = null;
-    try {
-      await invoke(command, { id, name });
-      cancelRename();
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
     }
   }
 
@@ -501,22 +219,6 @@
     }
   }
 
-  async function addFolder() {
-    err = null;
-    const picked = await openDialog({ directory: true, multiple: false, title: "Choose a media folder" });
-    if (!picked || Array.isArray(picked)) return;
-    busy = true;
-    try {
-      await invoke("add_local_folder", { path: picked, kind: folderKind || null });
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
   async function removeSource(id: string) {
     busy = true;
     err = null;
@@ -537,20 +239,6 @@
     err = null;
     try {
       await invoke("unlink_plex");
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
-  async function removeFolder(id: string) {
-    busy = true;
-    err = null;
-    try {
-      await invoke("remove_local_folder", { id });
       await load();
       onChanged();
     } catch (e) {
@@ -643,16 +331,6 @@
   function navigatorIsWindows() {
     return typeof navigator !== "undefined" && /Win/i.test(navigator.platform);
   }
-
-  function parentSmbPath(path: string) {
-    const parts = path.split("/").filter(Boolean);
-    parts.pop();
-    return parts.join("/");
-  }
-
-  function smbPathLabel(path: string) {
-    return path || "Share root";
-  }
 </script>
 
 <svelte:window onkeydown={(e) => e.key === "Escape" && onClose()} />
@@ -696,14 +374,10 @@
     {#if activeTab === "connected"}
     <section>
       <h3>Connected</h3>
-      {#if sources.length === 0 && folders.length === 0}
-        <p class="muted">No sources yet. Add one below.</p>
+      {#if sources.length === 0}
+        <p class="muted">No servers yet. Add one under Servers.</p>
       {/if}
-      <!-- The synthetic local-family sources (local/smb/ssh) are managed via the
-           folder/SMB/SSH rows below, not here (remove_source rejects their ids).
-           Excluding the whole family drops the leaked smb/ssh rows AND their
-           erroring Remove button (Bug 5 P1). -->
-      {#each sources.filter((s) => !LOCAL_FAMILY_KINDS.includes(s.kind)) as s (s.id)}
+      {#each sources as s (s.id)}
         <div class="row">
           <span class="badge">{s.kind}</span>
           <span class="name">{s.name}</span>
@@ -711,70 +385,6 @@
             <button class="rm" disabled={busy} onclick={unlinkPlex}>Disconnect</button>
           {:else}
             <button class="rm" disabled={busy} onclick={() => removeSource(s.id)}>Remove</button>
-          {/if}
-        </div>
-      {/each}
-      {#each folders.filter((f) => !remoteFolderIds.has(f.path)) as f (f.id)}
-        <div class="row">
-          <span class="badge">local</span>
-          <span class="name">{f.name}<span class="muted small"> · {f.path}</span></span>
-          <button class="rm" disabled={busy} onclick={() => removeFolder(f.id)}>Remove</button>
-        </div>
-      {/each}
-      {#each smbMounts as m (m.id)}
-        <div class="row">
-          <span class="badge">smb</span>
-          {#if renamingId === m.id}
-            <!-- svelte-ignore a11y_autofocus -->
-            <input
-              class="name rename"
-              bind:value={renameText}
-              disabled={busy}
-              autofocus
-              onkeydown={(e) => {
-                if (e.key === "Enter") saveRename("rename_smb_mount", m.id);
-                else if (e.key === "Escape") cancelRename();
-              }}
-            />
-            <button disabled={busy || !renameText.trim()} onclick={() => saveRename("rename_smb_mount", m.id)}>Save</button>
-            <button disabled={busy} onclick={cancelRename}>Cancel</button>
-          {:else}
-            <span class="name">{m.name}<span class="muted small"> · //{m.server}/{m.share}</span></span>
-            <button disabled={busy} onclick={() => startRename(m.id, m.name)}>Rename</button>
-            <button class="rm" disabled={busy} onclick={() => unmountSmb(m.id)}>Remove</button>
-          {/if}
-        </div>
-        {#each m.folders as f (f.id)}
-          <div class="row subrow">
-            <span class="badge">{f.kind || "auto"}</span>
-            <span class="name">{f.name}<span class="muted small"> · {smbPathLabel(f.relativePath)}</span></span>
-            <button class="rm" disabled={busy} onclick={() => removeSmbFolder(m.id, f.id)}>Remove</button>
-          </div>
-        {/each}
-      {/each}
-      {#each sshMounts as m (m.id)}
-        <div class="row">
-          <span class="badge">ssh</span>
-          {#if renamingId === m.id}
-            <!-- svelte-ignore a11y_autofocus -->
-            <input
-              class="name rename"
-              bind:value={renameText}
-              disabled={busy}
-              autofocus
-              onkeydown={(e) => {
-                if (e.key === "Enter") saveRename("rename_ssh_mount", m.id);
-                else if (e.key === "Escape") cancelRename();
-              }}
-            />
-            <button disabled={busy || !renameText.trim()} onclick={() => saveRename("rename_ssh_mount", m.id)}>Save</button>
-            <button disabled={busy} onclick={cancelRename}>Cancel</button>
-          {:else}
-            <span class="name">
-              {m.name}<span class="muted small"> · {m.username ? `${m.username}@` : ""}{m.host}:{m.remotePath}</span>
-            </span>
-            <button disabled={busy} onclick={() => startRename(m.id, m.name)}>Rename</button>
-            <button class="rm" disabled={busy} onclick={() => unmountSsh(m.id)}>Unmount</button>
           {/if}
         </div>
       {/each}
@@ -952,187 +562,6 @@
         <p class="muted small">
           Add as many servers as you like — connect one, then fill this in again for the
           next. Each appears under <b>Connected</b> and is browsed alongside the rest.
-        </p>
-      </div>
-    </section>
-    {/if}
-
-    {#if activeTab === "folders"}
-    <section>
-      <h3>Add a local / mounted folder</h3>
-      <div class="form">
-        <div class="field">
-          <label for="fld-kind">Contains</label>
-          <select id="fld-kind" bind:value={folderKind}>
-            <option value="">Auto-detect</option>
-            <option value="movie">Movies</option>
-            <option value="show">TV Shows</option>
-          </select>
-        </div>
-        <button class="primary" disabled={busy} onclick={addFolder}>Choose folder…</button>
-      </div>
-    </section>
-
-    <section>
-      <h3>Add an SMB / network share</h3>
-      <div class="form">
-        <div class="field">
-          <label for="smb-server">Server</label>
-          <input id="smb-server" placeholder="192.168.1.10 or nas.local" bind:value={smbServer} />
-        </div>
-        <div class="field">
-          <label for="smb-share">Share</label>
-          <input id="smb-share" placeholder="Media" bind:value={smbShare} />
-        </div>
-        <div class="field">
-          <label for="smb-user">Username</label>
-          <input id="smb-user" bind:value={smbUser} />
-        </div>
-        <div class="field">
-          <label for="smb-pass">Password</label>
-          <input id="smb-pass" type="password" bind:value={smbPass} placeholder="(blank for guest)" />
-        </div>
-        <div class="field">
-          <label for="smb-domain">Domain (optional)</label>
-          <input id="smb-domain" bind:value={smbDomain} />
-        </div>
-        <div class="field">
-          <label for="smb-name">Name (optional)</label>
-          <input id="smb-name" placeholder="Shown in the sidebar (defaults to the share name)" bind:value={smbName} />
-        </div>
-        <button class="primary" disabled={busy} onclick={mountSmb}>
-          {busy ? "Connecting…" : "Add share"}
-        </button>
-        <p class="muted small">
-          On Linux, Vela connects to the share directly — no mount, no root,
-          nothing else to set up; enter the server, share, and credentials.
-          macOS and Windows attach the share through the OS.
-        </p>
-
-        {#if smbMounts.length > 0}
-          <div class="field">
-            <label for="smb-mounted">Share</label>
-            <select
-              id="smb-mounted"
-              bind:value={smbBrowseMountId}
-              onchange={(e) => loadSmbDirectories((e.currentTarget as HTMLSelectElement).value, "")}
-            >
-              {#each smbMounts as mount (mount.id)}
-                <option value={mount.id}>//{mount.server}/{mount.share}</option>
-              {/each}
-            </select>
-          </div>
-
-          <div class="smb-browser">
-            <div class="browser-head">
-              <div>
-                <b>{smbPathLabel(smbBrowsePath)}</b>
-                {#if smbBrowseMountId}
-                  <span class="muted small"> · {smbMounts.find((mount) => mount.id === smbBrowseMountId)?.name}</span>
-                {/if}
-              </div>
-              <div class="btnrow compact">
-                {#if smbBrowsePath}
-                  <button disabled={smbBrowseBusy} onclick={() => loadSmbDirectories(smbBrowseMountId, parentSmbPath(smbBrowsePath))}>
-                    Up
-                  </button>
-                {/if}
-                <button disabled={smbBrowseBusy || !smbBrowseMountId} onclick={() => loadSmbDirectories(smbBrowseMountId, smbBrowsePath)}>
-                  {smbBrowseBusy ? "Loading…" : "Refresh"}
-                </button>
-              </div>
-            </div>
-
-            <div class="field">
-              <label for="smb-folder-kind">Contains</label>
-              <select id="smb-folder-kind" bind:value={smbFolderKind}>
-                <option value="">Auto-detect</option>
-                <option value="movie">Movies</option>
-                <option value="show">TV Shows</option>
-              </select>
-            </div>
-            <button class="primary" disabled={busy || !smbBrowseMountId} onclick={addSmbFolder}>
-              Add this folder
-            </button>
-
-            <div class="dirlist">
-              {#if smbDirectories.length === 0}
-                <p class="muted small">No child folders loaded.</p>
-              {:else}
-                {#each smbDirectories as dir (dir.path)}
-                  <div class="dirrow">
-                    <span>{dir.name}</span>
-                    <button disabled={smbBrowseBusy} onclick={() => loadSmbDirectories(smbBrowseMountId, dir.path)}>Open</button>
-                  </div>
-                {/each}
-              {/if}
-            </div>
-          </div>
-        {/if}
-      </div>
-    </section>
-
-    <section>
-      <h3>Add an SSH / SFTP folder</h3>
-      {#if sshfs && !sshfs.found}
-        <div class="warn">
-          <b>sshfs is not installed</b> — SSH folders need it.
-          {#if sshfs.platform === "macos"}
-            Plain <code>brew install sshfs</code> does not work on macOS. The working
-            route: <code>brew install --cask macfuse</code>, approve its system
-            extension in System Settings (Apple Silicon Macs must first allow
-            third-party kernel extensions via Recovery) and restart, then
-            <code>brew install gromgit/fuse/sshfs-mac</code>. Heads-up: these builds
-            can be unstable on recent macOS.
-          {:else if sshfs.platform === "linux"}
-            Install <code>sshfs</code> with your package manager (apt, dnf, pacman, …).
-          {:else}
-            SSH/SFTP folders currently require sshfs on Linux or macOS.
-          {/if}
-        </div>
-      {:else if sshfs?.found && sshfs.path}
-        <p class="muted small">sshfs detected: {sshfs.path}</p>
-      {/if}
-      <div class="form">
-        <div class="field">
-          <label for="ssh-host">Host</label>
-          <input id="ssh-host" placeholder="media.example.com" bind:value={sshHost} />
-        </div>
-        <div class="field">
-          <label for="ssh-port">Port</label>
-          <input id="ssh-port" inputmode="numeric" bind:value={sshPort} />
-        </div>
-        <div class="field">
-          <label for="ssh-user">Username</label>
-          <input id="ssh-user" bind:value={sshUser} />
-        </div>
-        <div class="field">
-          <label for="ssh-path">Remote path</label>
-          <input id="ssh-path" placeholder="/srv/media" bind:value={sshPath} />
-        </div>
-        <div class="field">
-          <label for="ssh-key">Identity file (optional)</label>
-          <input id="ssh-key" placeholder="~/.ssh/id_ed25519" bind:value={sshKey} />
-        </div>
-        <div class="field">
-          <label for="ssh-kind">Contains</label>
-          <select id="ssh-kind" bind:value={sshKind}>
-            <option value="">Auto-detect</option>
-            <option value="movie">Movies</option>
-            <option value="show">TV Shows</option>
-          </select>
-        </div>
-        <div class="field">
-          <label for="ssh-name">Name (optional)</label>
-          <input id="ssh-name" placeholder="Shown in the sidebar (defaults to the folder name)" bind:value={sshName} />
-        </div>
-        <button class="primary" disabled={busy} onclick={mountSsh}>
-          {busy ? "Mounting…" : "Mount & add"}
-        </button>
-        <p class="muted small">
-          SSH/SFTP uses sshfs with your SSH keys, agent, and ~/.ssh/config. Vela does not
-          store SSH passwords. Connect to new hosts once with plain <code>ssh</code>
-          first so the host key is trusted — mounts can't answer that prompt.
         </p>
       </div>
     </section>
@@ -1343,13 +772,6 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
-  input.name.rename {
-    min-width: 0;
-    padding: 0.25rem 0.4rem;
-  }
-  .subrow {
-    padding-left: 1.6rem;
-  }
   .badge {
     font-size: 0.7rem;
     text-transform: uppercase;
@@ -1369,51 +791,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-  }
-  .smb-browser {
-    background: var(--surface-sunken);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.65rem;
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-  }
-  .browser-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.75rem;
-  }
-  .btnrow.compact {
-    gap: 0.35rem;
-  }
-  .btnrow.compact button:not(.primary):not(.rm),
-  .dirrow button {
-    background: var(--surface-2);
-    color: var(--text);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 0.35rem 0.65rem;
-    cursor: pointer;
-  }
-  .dirlist {
-    display: flex;
-    flex-direction: column;
-    gap: 0.3rem;
-  }
-  .dirrow {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 0.6rem;
-    padding: 0.35rem 0;
-    border-top: 1px solid var(--border);
-  }
-  .dirrow span {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
   .field {
     display: flex;
@@ -1523,9 +900,6 @@
     border-radius: 6px;
     padding: 0.55rem 1.1rem;
     cursor: pointer;
-  }
-  .btnrow.compact button:not(.primary):not(.rm) {
-    padding: 0.35rem 0.65rem;
   }
   .btnrow button:disabled {
     opacity: 0.6;

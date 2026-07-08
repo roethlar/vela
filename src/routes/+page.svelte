@@ -14,13 +14,11 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let unlistenPlaybackEnded: (() => void) | undefined;
-  let unlistenListings: (() => void) | undefined;
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     if (queueTimer) clearInterval(queueTimer);
     unlistenPlaybackEnded?.();
-    unlistenListings?.();
     linkGen++; // invalidate any in-flight link_poll so it won't reschedule after unmount
   });
 
@@ -157,11 +155,6 @@
 
   onMount(() => {
     listen("playback-ended", refreshWatchState).then((un) => (unlistenPlaybackEnded = un));
-    // A background listing revalidation found filesystem changes (local/SMB
-    // sources serve from cache and re-walk behind the scenes).
-    listen("listings-updated", () => {
-      if (mode === "browse" && !searchTerm) resetAndLoad();
-    }).then((un) => (unlistenListings = un));
   });
 
   async function boot() {
@@ -1157,7 +1150,7 @@
       <div class="empty-icon" aria-hidden="true"><Icon name="film" size={46} stroke={1.5} /></div>
       <h2>Welcome to Vela</h2>
       <p class="muted empty-sub">
-        Connect Plex, Jellyfin, Emby, or a local folder to start browsing your library in HDR.
+        Connect Plex, Jellyfin, or Emby to start browsing your library in HDR.
       </p>
       <button class="primary" onclick={() => (showSettings = true)}>Add a source</button>
     </div>

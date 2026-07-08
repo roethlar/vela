@@ -2,16 +2,13 @@
 pkgname=vela
 pkgver=0.1.32
 pkgrel=1
-pkgdesc='mpv-backed HDR media client for Plex, Jellyfin, Emby, and local libraries'
+pkgdesc='mpv-backed HDR media client for Plex, Jellyfin, and Emby'
 arch=('x86_64')
 license=('MIT' 'GPL2')
 # Vela's release profile already strips the binary, so the makepkg debug split
 # finds no symbols — skip it (no empty -debug package, no gdb-add-index warning).
 options=('!debug')
-depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme' 'smbclient')
-optdepends=(
-  'sshfs: browse SSH/SFTP sources'
-)
+depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme')
 source=()
 sha256sums=()
 

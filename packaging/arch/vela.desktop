@@ -2,7 +2,7 @@
 Type=Application
 Name=Vela
 GenericName=Media Client
-Comment=HDR media client for Plex, Jellyfin, Emby, and local libraries
+Comment=HDR media client for Plex, Jellyfin, and Emby
 Exec=vela %U
 Icon=vela
 Terminal=false

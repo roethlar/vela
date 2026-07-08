@@ -1,30 +1,13 @@
-//! Media-source abstraction. Each backend (Plex, Jellyfin/Emby, and a local
-//! source) implements [`MediaSource`] and is registered in the [`SourceRegistry`].
-//! Commands talk to the registry, not to any one backend, so the UI can present
-//! a unified library while still being able to scope to a single source.
+//! Media-source abstraction. Each backend (Plex, Jellyfin/Emby) implements
+//! [`MediaSource`] and is registered in the [`SourceRegistry`]. Commands talk
+//! to the registry, not to any one backend, so the UI can present a unified
+//! library while still being able to scope to a single source.
 
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub mod jellyfin;
-pub mod listing_cache;
-pub mod local;
-pub mod metadata;
 pub mod plex;
-#[cfg(all(unix, not(target_os = "macos")))]
-pub mod smb_vfs;
-pub mod vfs;
-
-/// Provider-namespace path for a share-relative SMB folder path from config
-/// (`"a/b"` or `""` → `"/a/b"` / `"/"`).
-pub fn smb_vfs_path(relative: &str) -> String {
-    let trimmed = relative.trim_matches('/');
-    if trimmed.is_empty() {
-        "/".to_string()
-    } else {
-        format!("/{trimmed}")
-    }
-}
 
 /// A browsable library/section, tagged with the source it came from.
 #[derive(Serialize, Clone)]
@@ -331,11 +314,10 @@ impl SourceRegistry {
         self.sources.retain(|s| s.id() != id);
     }
 
-    /// Remove every source whose kind is one of `kinds`. Used to replace the
-    /// whole local family (plain folders + SMB/SSH mounts) on rebuild, since
-    /// `upsert` alone can't drop a source whose mount went away.
-    pub fn remove_kinds(&mut self, kinds: &[&str]) {
-        self.sources.retain(|s| !kinds.contains(&s.kind()));
+    /// Ids of every registered source — the "still exists" set for read-time
+    /// filtering (e.g. recents entries whose source was removed).
+    pub fn ids(&self) -> Vec<String> {
+        self.sources.iter().map(|s| s.id().to_string()).collect()
     }
 
     /// Resolve a namespaced key to its source and the raw (un-prefixed) key.
@@ -443,19 +425,12 @@ mod tests {
         assert!(json.contains("\"backdrop\":\"bd\""));
     }
 
-    // Rebuilds replace the whole local family: stale mount sources must drop
-    // while non-family sources survive untouched.
+    // The "still exists" set for read-time filtering (dead recents entries).
     #[test]
-    fn remove_kinds_drops_only_the_local_family() {
+    fn registry_ids_lists_every_registered_source() {
         let mut reg = SourceRegistry::default();
         reg.upsert(std::sync::Arc::new(Fake { id: "plex", kind: "plex" }));
-        reg.upsert(std::sync::Arc::new(Fake { id: "local", kind: "local" }));
-        reg.upsert(std::sync::Arc::new(Fake { id: "smb-old", kind: "smb" }));
-        reg.upsert(std::sync::Arc::new(Fake { id: "ssh-old", kind: "ssh" }));
-
-        reg.remove_kinds(&["local", "smb", "ssh"]);
-
-        let ids: Vec<_> = reg.all().iter().map(|s| s.id()).collect();
-        assert_eq!(ids, vec!["plex".to_string()]);
+        reg.upsert(std::sync::Arc::new(Fake { id: "jf", kind: "jellyfin" }));
+        assert_eq!(reg.ids(), vec!["plex".to_string(), "jf".to_string()]);
     }
 }

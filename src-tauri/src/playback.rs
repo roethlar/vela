@@ -455,31 +455,6 @@ fn autocrop_args(mode: &str, script: Option<&str>) -> Vec<String> {
     }
 }
 
-/// mpv/ffmpeg reconnect args for our loopback stream proxy (native SMB
-/// playback). The proxy bounds each response with a write deadline
-/// (`stream_proxy`), so a long pause — where mpv stops draining and the socket
-/// buffers fill — can close the connection mid-stream. ffmpeg's HTTP backend
-/// does NOT reconnect by default, so without these a resumed pause hits a
-/// premature EOF instead of re-requesting; with them mpv transparently reopens
-/// the stream with a `Range` at the current offset and playback continues.
-/// Pure so the injection is unit-testable without spawning mpv.
-///
-/// Scoped to the loopback proxy URL. Server streams (Plex/JF/Emby) and local
-/// files are untouched; a non-proxy service that happened to live on
-/// `127.0.0.1` would match, but loopback never spontaneously drops mid-stream,
-/// so the options stay inert for anything but our own deliberately-closing
-/// proxy.
-fn proxy_reconnect_args(url: &str) -> Vec<String> {
-    if !url.starts_with("http://127.0.0.1:") {
-        return Vec::new();
-    }
-    vec![
-        "--stream-lavf-o-append=reconnect=1".to_string(),
-        "--stream-lavf-o-append=reconnect_streamed=1".to_string(),
-        "--stream-lavf-o-append=reconnect_delay_max=5".to_string(),
-    ]
-}
-
 /// Fired exactly once when a playback session ends — after the final server
 /// check-in for tracked sessions, or at mpv exit for untracked ones — with
 /// the last observed playback position in ms (0 when none was read). The
@@ -592,14 +567,6 @@ pub fn play(
         for arg in autocrop_args(autocrop_mode, script) {
             cmd.arg(arg);
         }
-    }
-
-    // Reconnect for the loopback proxy stream. Asserted after the user's extra
-    // args (load-bearing, like the IPC socket below) so a user option can't
-    // drop the reconnect the proxy's write deadline relies on to survive a long
-    // pause. A no-op for non-proxy URLs.
-    for arg in proxy_reconnect_args(&spec.url) {
-        cmd.arg(arg);
     }
 
     cmd.arg(format!("--input-ipc-server={}", ipc_path));
@@ -1059,27 +1026,6 @@ mod tests {
         assert!(autocrop_args("off", Some("/x/autocrop.lua")).is_empty());
         // Unknown/garbage mode is treated as off.
         assert!(autocrop_args("wat", Some("/x/autocrop.lua")).is_empty());
-    }
-
-    #[test]
-    fn proxy_reconnect_only_for_the_loopback_proxy() {
-        // The loopback proxy stream gets ffmpeg reconnect so a write-deadline
-        // drop resumes with a Range instead of a premature EOF.
-        let args = proxy_reconnect_args("http://127.0.0.1:5321/deadbeef");
-        assert_eq!(
-            args,
-            vec![
-                "--stream-lavf-o-append=reconnect=1".to_string(),
-                "--stream-lavf-o-append=reconnect_streamed=1".to_string(),
-                "--stream-lavf-o-append=reconnect_delay_max=5".to_string(),
-            ],
-            "the loopback proxy stream must enable reconnect"
-        );
-        // Server streams and local files are untouched.
-        assert!(proxy_reconnect_args("http://192.168.1.5:32400/library/parts/1").is_empty());
-        assert!(proxy_reconnect_args("https://plex.example.com/video").is_empty());
-        assert!(proxy_reconnect_args("/mnt/media/movie.mkv").is_empty());
-        assert!(proxy_reconnect_args("edl://foo").is_empty());
     }
 
     #[test]

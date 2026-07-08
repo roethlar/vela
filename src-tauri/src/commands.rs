@@ -1,14 +1,13 @@
 use serde::{Deserialize, Serialize};
-use std::path::{Component, Path, PathBuf};
+use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use tauri::State;
 
-use crate::config::{self, AppConfig, LocalFolder, SmbFolder, SmbMount, SourceConfig, SshMount};
+use crate::config::{self, SourceConfig};
 use crate::playback;
 use crate::plex_library::PlexLibrary;
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
-use crate::source::local::LOCAL_SOURCE_ID;
 use crate::source::{plex::PlexSource, DetailDto, HubDto, ItemDto, SectionDto};
 use crate::{AppState, PLEX_SOURCE_ID};
 
@@ -57,16 +56,6 @@ pub struct AppInfoDto {
 pub struct SourceDto {
     id: String,
     name: String,
-    kind: String,
-}
-
-/// A configured local folder, for the settings UI (individually removable).
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct LocalFolderDto {
-    id: String,
-    name: String,
-    path: String,
     kind: String,
 }
 
@@ -208,9 +197,6 @@ pub async fn remove_source(id: String, state: State<'_, AppState>) -> Result<(),
     if id == PLEX_SOURCE_ID {
         return Err("the Plex source can't be removed here".into());
     }
-    if crate::source::local::is_local_family_id(&id) {
-        return Err("manage local media via its folder and mount entries".into());
-    }
     let id2 = id.clone();
     config::update(move |cfg| {
         if !cfg.sources.iter().any(|s| s.id == id2) {
@@ -268,1310 +254,6 @@ fn normalize_base_url(input: &str) -> Result<String, String> {
         format!("http://{s}")
     };
     Ok(s.trim_end_matches('/').to_string())
-}
-
-// ---- local folders -------------------------------------------------------
-
-/// Add a local (or OS-mounted SMB) folder to the built-in local source.
-/// `kind` is "movie", "show", or empty (auto). Browsing only — no resume.
-#[tauri::command]
-pub async fn add_local_folder(
-    path: String,
-    kind: Option<String>,
-    name: Option<String>,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<SourceDto, String> {
-    let p = std::path::Path::new(&path);
-    if !p.is_dir() {
-        return Err("that path is not a folder".into());
-    }
-    let kind = kind.unwrap_or_default();
-    if !kind.is_empty() && kind != "movie" && kind != "show" {
-        return Err("kind must be 'movie', 'show', or empty".into());
-    }
-    if !safe_user_media_root(&path) {
-        return Err("choose a specific media folder, not a filesystem or home root".into());
-    }
-    // Let the webview load poster images from this folder, after all validation.
-    {
-        use tauri::Manager;
-        let _ = app.asset_protocol_scope().allow_directory(&path, true);
-    }
-    let folder = LocalFolder {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: name.unwrap_or_else(|| {
-            p.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("Local")
-                .to_string()
-        }),
-        path,
-        kind,
-    };
-    mutate_then_rebuild_local(&state, move |cfg| {
-        cfg.local_folders.push(folder);
-        Ok(())
-    })
-    .await?;
-    Ok(SourceDto {
-        id: LOCAL_SOURCE_ID.to_string(),
-        name: "Local".to_string(),
-        kind: "local".to_string(),
-    })
-}
-
-/// List configured local folders (for the settings UI).
-#[tauri::command]
-pub async fn list_local_folders() -> Result<Vec<LocalFolderDto>, String> {
-    let cfg = config::load_config().map_err(|e| e.to_string())?;
-    Ok(cfg
-        .local_folders
-        .into_iter()
-        .map(|f| LocalFolderDto {
-            id: f.id,
-            name: f.name,
-            path: f.path,
-            kind: f.kind,
-        })
-        .collect())
-}
-
-/// Remove a local folder by id.
-#[tauri::command]
-pub async fn remove_local_folder(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let id2 = id.clone();
-    mutate_then_rebuild_local(&state, move |cfg| {
-        // A folder backing a remote mount must be removed via its mount row, or
-        // we'd leave an orphaned mount that still remounts on launch with no source.
-        if cfg.ssh_mounts.iter().any(|m| m.local_folder_id == id2) {
-            return Err(
-                "this folder is provided by an SSH/SFTP mount — unmount it instead".to_string(),
-            );
-        }
-        let before = cfg.local_folders.len();
-        cfg.local_folders.retain(|f| f.id != id2);
-        if cfg.local_folders.len() == before {
-            return Err("no such folder".to_string());
-        }
-        Ok(())
-    })
-    .await?;
-    Ok(())
-}
-
-/// A configured SMB mount, for the settings UI.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SmbMountDto {
-    id: String,
-    name: String,
-    server: String,
-    share: String,
-    mountpoint: String,
-    folders: Vec<SmbFolderDto>,
-}
-
-/// A selected SMB folder, for the settings UI.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SmbFolderDto {
-    id: String,
-    name: String,
-    path: String,
-    relative_path: String,
-    kind: String,
-}
-
-/// One directory inside a configured SMB share, for the settings browser.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SmbDirectoryDto {
-    name: String,
-    path: String,
-}
-
-/// A configured SSH/SFTP mount, for the settings UI.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SshMountDto {
-    id: String,
-    name: String,
-    host: String,
-    port: u16,
-    username: String,
-    remote_path: String,
-    identity_file: String,
-    mountpoint: String,
-}
-
-/// Add an SMB share and persist it for browsing/selection. Linux verifies
-/// the server/share/credentials over the in-process native client (no OS
-/// mount; `mountpoint` stays empty); macOS/Windows mount via the OS.
-/// Library folders are added separately with `add_smb_folder`.
-#[tauri::command]
-#[allow(clippy::too_many_arguments)] // Tauri command surface; each is a distinct field.
-pub async fn mount_smb(
-    server: String,
-    share: String,
-    username: String,
-    password: String,
-    domain: Option<String>,
-    name: Option<String>,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<SourceDto, String> {
-    if server.trim().is_empty() || share.trim().is_empty() {
-        return Err("server and share are required".into());
-    }
-    // Reject a duplicate up front, before doing the (blocking, credentialed) OS
-    // mount. Fail if config can't even be read, so we don't mount on an
-    // unreadable config and risk an unrecoverable orphan if the later persist
-    // fails too. The authoritative check is still in the persist closure below.
-    let existing = config::load_config().map_err(|e| format!("could not read config: {e}"))?;
-    if existing.smb_mounts.iter().any(|x| {
-        x.server.eq_ignore_ascii_case(server.trim()) && x.share.eq_ignore_ascii_case(share.trim())
-    }) {
-        return Err("that share is already added".into());
-    }
-    let taken = local_family_names(&existing);
-    let mount = SmbMount {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: name
-            .filter(|n| !n.trim().is_empty())
-            .unwrap_or_else(|| unique_mount_name(share.trim(), server.trim(), &taken)),
-        server: server.trim().to_string(),
-        share: share.trim().to_string(),
-        username,
-        password,
-        domain: domain.unwrap_or_default(),
-        mountpoint: String::new(),
-        folders: Vec::new(),
-        kind: String::new(),
-        local_folder_id: String::new(),
-    };
-    // Hold source_lock across the whole mount→persist→rollback. Otherwise a
-    // concurrent unmount_smb could, between our OS mount and our persist, see no
-    // record referencing this mountpoint and tear it down — leaving our
-    // just-persisted record pointing at a dead connection (the shared Windows UNC
-    // makes this concrete). The registry/play locks are NOT held here, so
-    // browsing and playback proceed while the (possibly slow) mount runs.
-    let _ops = state.source_lock.lock().await;
-
-    let mount = with_default_root_folder(establish_smb_share(mount).await?);
-
-    if !mount.mountpoint.is_empty() {
-        use tauri::Manager;
-        let _ = app
-            .asset_protocol_scope()
-            .allow_directory(&mount.mountpoint, true);
-    }
-
-    // Roll back the OS mount if we can't persist it, so we don't leave a live
-    // mount with no app-managed record. rebuild_local_locked assumes source_lock
-    // is held (it is, above) — so the persist and the rollback both run inside the
-    // same critical section as the mount.
-    let mountpoint = mount.mountpoint.clone();
-    let mount_id = mount.id.clone();
-    let mount_name = mount.name.clone();
-    if let Err(e) = rebuild_local_locked(&state, move |cfg| {
-        // Reject a duplicate of an already-configured share (same server/share),
-        // so we never persist two records over one shared connection/mountpoint.
-        if cfg.smb_mounts.iter().any(|x| {
-            x.server.eq_ignore_ascii_case(&mount.server)
-                && x.share.eq_ignore_ascii_case(&mount.share)
-        }) {
-            return Err("that share is already added".to_string());
-        }
-        cfg.smb_mounts.push(mount);
-        Ok(())
-    })
-    .await
-    {
-        // Persisting failed: roll back the OS mount we just created — unless
-        // another record *positively* still references this mountpoint (the
-        // concurrent-duplicate case), in which case unmounting would disconnect
-        // it. We still hold source_lock, so no concurrent op can persist this
-        // mountpoint between the check and the unmount. On a read error we still
-        // clean up: dropping our just-created mount beats orphaning a credentialed
-        // mount with no record. Run the unmount off the async runtime. An empty
-        // mountpoint means a native (mountless) connection: nothing to roll back.
-        if !mountpoint.is_empty() && mountpoint_referenced(&mountpoint) != Some(true) {
-            let mp = mountpoint.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || crate::smb::unmount(&mp)).await;
-        }
-        return Err(e);
-    }
-    Ok(SourceDto {
-        id: crate::source::local::smb_source_id(&mount_id),
-        name: mount_name,
-        kind: "smb".to_string(),
-    })
-}
-
-/// A newly added share starts with its root selected as a library folder,
-/// so media appears without the separate folder-selection step (a share
-/// with zero folders produces no source at all — the trap this closes).
-/// The user can remove the root or add narrower subfolders afterwards.
-/// Empty `path` is the share root; empty `kind` means auto-detect.
-fn with_default_root_folder(mut mount: SmbMount) -> SmbMount {
-    mount.folders.push(SmbFolder {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: mount.name.clone(),
-        path: String::new(),
-        kind: String::new(),
-    });
-    mount
-}
-
-/// Establish a newly added share. Linux-family: verify server/share/
-/// credentials with an in-process libsmbclient connection — no OS mount, and
-/// `mountpoint` stays empty as the marker of a native record. macOS/Windows:
-/// perform the OS mount and fill `mountpoint`. Blocking work runs off the
-/// async runtime either way.
-async fn establish_smb_share(mount: SmbMount) -> Result<SmbMount, String> {
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let probe = mount.clone();
-        tauri::async_runtime::spawn_blocking(move || crate::smb_client::verify_mount(&probe))
-            .await
-            .map_err(|e| format!("SMB connect task failed: {e}"))??;
-        Ok(mount)
-    }
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    {
-        tauri::async_runtime::spawn_blocking(move || {
-            let mut mounted = mount;
-            crate::smb::prepare_mount(&mut mounted)?;
-            Ok::<SmbMount, String>(mounted)
-        })
-        .await
-        .map_err(|e| format!("mount task failed: {e}"))?
-    }
-}
-
-/// List configured SMB mounts (for the settings UI).
-#[tauri::command]
-pub async fn list_smb_mounts() -> Result<Vec<SmbMountDto>, String> {
-    let cfg = config::load_config().map_err(|e| e.to_string())?;
-    Ok(cfg
-        .smb_mounts
-        .into_iter()
-        .map(|m| SmbMountDto {
-            folders: smb_folders_for_ui(&m),
-            id: m.id,
-            name: m.name,
-            server: m.server,
-            share: m.share,
-            mountpoint: m.mountpoint,
-        })
-        .collect())
-}
-
-/// List directories inside a configured SMB share, relative to the share
-/// root. Used by Settings to choose library folders. Linux lists natively
-/// over the in-process client; macOS/Windows read the OS mount path.
-#[tauri::command]
-pub async fn list_smb_directories(
-    id: String,
-    path: Option<String>,
-) -> Result<Vec<SmbDirectoryDto>, String> {
-    let relative = normalize_smb_relative_path(path.as_deref().unwrap_or(""))?;
-    let cfg = config::load_config().map_err(|e| e.to_string())?;
-    let mount = cfg
-        .smb_mounts
-        .into_iter()
-        .find(|m| m.id == id)
-        .ok_or("no such SMB mount")?;
-
-    // Linux-family: list natively over an in-process SMB connection, so
-    // browsing works with no OS mount present at all.
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        tauri::async_runtime::spawn_blocking(move || {
-            let conn = crate::smb_client::connect_mount(&mount)?;
-            let mut dirs: Vec<SmbDirectoryDto> = conn
-                .list_dir(&relative)?
-                .into_iter()
-                .filter(|entry| entry.is_dir)
-                .map(|entry| SmbDirectoryDto {
-                    path: append_smb_relative_path(&relative, &entry.name),
-                    name: entry.name,
-                })
-                .collect();
-            dirs.sort_by_key(|dir| dir.name.to_lowercase());
-            Ok(dirs)
-        })
-        .await
-        .map_err(|e| format!("SMB browse task failed: {e}"))?
-    }
-
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    {
-        let root = smb_mount_root(&mount).ok_or_else(|| {
-            format!(
-                "SMB share //{}/{} is not mounted or readable",
-                mount.server, mount.share
-            )
-        })?;
-        let dir = smb_pathbuf_for_relative(&root, &relative);
-        if !dir.is_dir() {
-            return Err("that SMB folder is not readable".into());
-        }
-        tauri::async_runtime::spawn_blocking(move || {
-            let mut dirs = Vec::new();
-            for entry in
-                std::fs::read_dir(&dir).map_err(|e| format!("could not read folder: {e}"))?
-            {
-                let entry = entry.map_err(|e| format!("could not read folder entry: {e}"))?;
-                if !entry.path().is_dir() {
-                    continue;
-                }
-                let name = entry.file_name().to_string_lossy().to_string();
-                dirs.push(SmbDirectoryDto {
-                    path: append_smb_relative_path(&relative, &name),
-                    name,
-                });
-            }
-            dirs.sort_by_key(|dir| dir.name.to_lowercase());
-            Ok::<_, String>(dirs)
-        })
-        .await
-        .map_err(|e| format!("SMB browse task failed: {e}"))?
-    }
-}
-
-/// Add one selected folder inside a configured SMB share to its source.
-/// Linux validates the folder over the native client; macOS/Windows probe
-/// the mounted path.
-#[tauri::command]
-pub async fn add_smb_folder(
-    id: String,
-    path: String,
-    kind: Option<String>,
-    name: Option<String>,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<SourceDto, String> {
-    let kind = kind.unwrap_or_default();
-    if !kind.is_empty() && kind != "movie" && kind != "show" {
-        return Err("kind must be 'movie', 'show', or empty".into());
-    }
-    let relative = normalize_smb_relative_path(&path)?;
-    let _ops = state.source_lock.lock().await;
-    let cfg = config::load_config().map_err(|e| e.to_string())?;
-    let mount = cfg
-        .smb_mounts
-        .iter()
-        .find(|m| m.id == id)
-        .ok_or("no such SMB mount")?;
-    // Linux-family: validate over the native connection — the share is
-    // never OS-mounted, so there is no local path to probe or allow.
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        let _ = &app; // asset protocol is unused for native SMB folders
-        let probe = mount.clone();
-        let rel = relative.clone();
-        let is_dir = tauri::async_runtime::spawn_blocking(move || {
-            crate::smb_client::connect_mount(&probe).and_then(|c| c.stat(&rel))
-        })
-        .await
-        .map_err(|e| format!("SMB probe task failed: {e}"))??
-        .is_dir;
-        if !is_dir {
-            return Err("that SMB folder is not readable".into());
-        }
-    }
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    {
-        let root = smb_mount_root(mount).ok_or_else(|| {
-            format!(
-                "SMB share //{}/{} is not mounted or readable",
-                mount.server, mount.share
-            )
-        })?;
-        let folder_path = smb_path_string_for_relative(&root, &relative);
-        if !Path::new(&folder_path).is_dir() {
-            return Err("that SMB folder is not readable".into());
-        }
-        if !safe_user_media_root(&folder_path) {
-            return Err("choose a specific media folder, not a filesystem or home root".into());
-        }
-        use tauri::Manager;
-        let _ = app
-            .asset_protocol_scope()
-            .allow_directory(&folder_path, true);
-    }
-    let folder = SmbFolder {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: name.unwrap_or_else(|| smb_folder_display_name(mount, &relative)),
-        path: relative.clone(),
-        kind,
-    };
-    let mount_name = mount.name.clone();
-    let mount_id = id.clone();
-    let relative_for_check = relative.clone();
-    rebuild_local_locked(&state, move |cfg| {
-        let mount = cfg
-            .smb_mounts
-            .iter_mut()
-            .find(|m| m.id == mount_id)
-            .ok_or_else(|| "no such SMB mount".to_string())?;
-        if selected_smb_folders(mount)
-            .iter()
-            .any(|existing| existing.path == relative_for_check)
-        {
-            return Err("that SMB folder is already added".to_string());
-        }
-        mount.folders.push(folder);
-        Ok(())
-    })
-    .await?;
-    Ok(SourceDto {
-        id: crate::source::local::smb_source_id(&id),
-        name: mount_name,
-        kind: "smb".to_string(),
-    })
-}
-
-/// Remove one folder from an SMB mount's config, refusing to empty the mount:
-/// a zero-folder mount is a "zombie" invisible share that browses nothing (the
-/// same trap the share-root auto-add closed). The UI cascades a last-folder
-/// removal to a full unmount instead (Settings.svelte `removeSmbFolder`); this
-/// enforces the invariant for any direct caller. Pure over the config so it is
-/// unit-testable (Bug 5 P1).
-fn remove_smb_folder_in_config(
-    cfg: &mut AppConfig,
-    id: &str,
-    folder_id: &str,
-) -> Result<(), String> {
-    let mount = cfg
-        .smb_mounts
-        .iter_mut()
-        .find(|m| m.id == id)
-        .ok_or_else(|| "no such SMB mount".to_string())?;
-    if !mount.folders.iter().any(|folder| folder.id == folder_id) {
-        return Err("no such SMB folder".to_string());
-    }
-    if mount.folders.len() <= 1 {
-        return Err("a share must keep at least one folder; remove the share instead".to_string());
-    }
-    mount.folders.retain(|folder| folder.id != folder_id);
-    Ok(())
-}
-
-/// Remove one selected folder from an SMB share without unmounting the share.
-#[tauri::command]
-pub async fn remove_smb_folder(
-    id: String,
-    folder_id: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    mutate_then_rebuild_local(&state, move |cfg| {
-        remove_smb_folder_in_config(cfg, &id, &folder_id)
-    })
-    .await
-}
-
-/// Rename an SMB mount's display label, propagating the new name to the
-/// auto-added share-root folder (path==""), whose label was copied from the
-/// mount name at add time — otherwise the sidebar source renames but its
-/// section header stays stale. A user-renamed root folder (name no longer equal
-/// to the old mount name) is left alone. Pure over the config so it is
-/// unit-testable (Bug 5 P2).
-fn rename_smb_mount_in_config(cfg: &mut AppConfig, id: &str, new_name: &str) -> Result<(), String> {
-    let new_name = new_name.trim();
-    if new_name.is_empty() {
-        return Err("a name is required".to_string());
-    }
-    let mount = cfg
-        .smb_mounts
-        .iter_mut()
-        .find(|m| m.id == id)
-        .ok_or_else(|| "no such SMB mount".to_string())?;
-    let old_name = mount.name.clone();
-    mount.name = new_name.to_string();
-    for folder in mount
-        .folders
-        .iter_mut()
-        .filter(|f| f.path.is_empty() && f.name == old_name)
-    {
-        folder.name = new_name.to_string();
-    }
-    Ok(())
-}
-
-/// Rename an SMB share as shown in the sidebar / Connected tab.
-#[tauri::command]
-pub async fn rename_smb_mount(
-    id: String,
-    name: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    mutate_then_rebuild_local(&state, move |cfg| {
-        rename_smb_mount_in_config(cfg, &id, &name)
-    })
-    .await
-}
-
-#[cfg(test)]
-mod smb_folder_tests {
-    use super::*;
-    use crate::config::{AppConfig, SmbFolder, SmbMount};
-
-    fn folder(id: &str) -> SmbFolder {
-        SmbFolder {
-            id: id.into(),
-            name: id.into(),
-            path: format!("/{id}"),
-            kind: "movie".into(),
-        }
-    }
-
-    fn cfg_with(folders: Vec<SmbFolder>) -> AppConfig {
-        AppConfig {
-            smb_mounts: vec![SmbMount {
-                id: "m1".into(),
-                folders,
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn removes_a_non_last_folder() {
-        let mut cfg = cfg_with(vec![folder("a"), folder("b")]);
-        remove_smb_folder_in_config(&mut cfg, "m1", "a").unwrap();
-        let ids: Vec<_> = cfg.smb_mounts[0]
-            .folders
-            .iter()
-            .map(|f| f.id.as_str())
-            .collect();
-        assert_eq!(ids, vec!["b"]);
-    }
-
-    #[test]
-    fn refuses_to_remove_the_last_folder() {
-        // The guard: emptying the mount would leave a zombie zero-folder share.
-        let mut cfg = cfg_with(vec![folder("only")]);
-        let err = remove_smb_folder_in_config(&mut cfg, "m1", "only").unwrap_err();
-        assert!(err.contains("at least one folder"), "got: {err}");
-        // Mount is untouched — no zombie.
-        assert_eq!(cfg.smb_mounts[0].folders.len(), 1);
-    }
-
-    #[test]
-    fn unknown_folder_errors_without_touching_the_mount() {
-        let mut cfg = cfg_with(vec![folder("a"), folder("b")]);
-        let err = remove_smb_folder_in_config(&mut cfg, "m1", "nope").unwrap_err();
-        assert!(err.contains("no such SMB folder"), "got: {err}");
-        assert_eq!(cfg.smb_mounts[0].folders.len(), 2);
-    }
-
-    #[test]
-    fn unknown_mount_errors() {
-        let mut cfg = cfg_with(vec![folder("a")]);
-        let err = remove_smb_folder_in_config(&mut cfg, "other", "a").unwrap_err();
-        assert!(err.contains("no such SMB mount"), "got: {err}");
-    }
-}
-
-#[cfg(test)]
-mod mount_name_tests {
-    use super::{last_path_segment, unique_mount_name};
-
-    #[test]
-    fn prefers_the_bare_label_when_free() {
-        // The Bug 5 P2 fix: a share named "Media" surfaces as "Media", NOT the
-        // old URL-shaped "nas/Media" default.
-        assert_eq!(unique_mount_name("Media", "nas", &[]), "Media");
-    }
-
-    #[test]
-    fn last_segment_of_a_remote_path() {
-        assert_eq!(last_path_segment("/srv/media/movies"), "movies");
-        assert_eq!(last_path_segment("/srv/media/movies/"), "movies");
-        assert_eq!(last_path_segment("movies"), "movies");
-        assert_eq!(last_path_segment("/"), "");
-        assert_eq!(last_path_segment(""), "");
-    }
-
-    #[test]
-    fn qualifies_with_server_on_collision() {
-        let taken = vec!["Media".to_string()];
-        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (nas)");
-    }
-
-    #[test]
-    fn collision_check_is_case_insensitive() {
-        let taken = vec!["media".to_string()];
-        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (nas)");
-    }
-
-    #[test]
-    fn falls_back_to_a_numeric_suffix() {
-        let taken = vec!["Media".to_string(), "Media (nas)".to_string()];
-        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (2)");
-        let taken = vec![
-            "Media".to_string(),
-            "Media (nas)".to_string(),
-            "Media (2)".to_string(),
-        ];
-        assert_eq!(unique_mount_name("Media", "nas", &taken), "Media (3)");
-    }
-
-    #[test]
-    fn empty_preferred_falls_back_to_the_qualifier() {
-        // A remote path of "/" leaves no segment; use the host.
-        assert_eq!(unique_mount_name("", "host.local", &[]), "host.local");
-    }
-
-    #[test]
-    fn skips_the_qualifier_when_it_equals_the_base() {
-        // e.g. share == server would produce "X (X)"; go straight to numeric.
-        let taken = vec!["nas".to_string()];
-        assert_eq!(unique_mount_name("nas", "nas", &taken), "nas (2)");
-    }
-}
-
-#[cfg(test)]
-mod rename_tests {
-    use super::{rename_smb_mount_in_config, rename_ssh_mount_in_config};
-    use crate::config::{AppConfig, LocalFolder, SmbFolder, SmbMount, SshMount};
-
-    fn smb_cfg() -> AppConfig {
-        AppConfig {
-            smb_mounts: vec![SmbMount {
-                id: "m1".into(),
-                name: "old".into(),
-                folders: vec![
-                    // The auto-added share-root folder: name copied from the mount.
-                    SmbFolder {
-                        id: "root".into(),
-                        name: "old".into(),
-                        path: String::new(),
-                        kind: String::new(),
-                    },
-                    // A narrower subfolder with its own label.
-                    SmbFolder {
-                        id: "sub".into(),
-                        name: "Movies".into(),
-                        path: "/Movies".into(),
-                        kind: "movie".into(),
-                    },
-                ],
-                ..Default::default()
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn smb_rename_propagates_to_the_root_folder_only() {
-        let mut cfg = smb_cfg();
-        rename_smb_mount_in_config(&mut cfg, "m1", "  New Name  ").unwrap();
-        let m = &cfg.smb_mounts[0];
-        assert_eq!(m.name, "New Name"); // trimmed
-        assert_eq!(m.folders[0].name, "New Name"); // root folder copy renamed
-        assert_eq!(m.folders[1].name, "Movies"); // subfolder label untouched
-    }
-
-    #[test]
-    fn smb_rename_leaves_a_user_renamed_root_alone() {
-        let mut cfg = smb_cfg();
-        cfg.smb_mounts[0].folders[0].name = "Custom".into();
-        rename_smb_mount_in_config(&mut cfg, "m1", "New").unwrap();
-        assert_eq!(cfg.smb_mounts[0].name, "New");
-        assert_eq!(cfg.smb_mounts[0].folders[0].name, "Custom");
-    }
-
-    #[test]
-    fn smb_rename_rejects_empty_and_unknown() {
-        let mut cfg = smb_cfg();
-        assert!(rename_smb_mount_in_config(&mut cfg, "m1", "   ")
-            .unwrap_err()
-            .contains("name is required"));
-        assert_eq!(cfg.smb_mounts[0].name, "old"); // unchanged on rejection
-        assert!(rename_smb_mount_in_config(&mut cfg, "nope", "X")
-            .unwrap_err()
-            .contains("no such SMB mount"));
-    }
-
-    fn ssh_cfg() -> AppConfig {
-        AppConfig {
-            ssh_mounts: vec![SshMount {
-                id: "s1".into(),
-                name: "old".into(),
-                local_folder_id: "f1".into(),
-                ..Default::default()
-            }],
-            local_folders: vec![LocalFolder {
-                id: "f1".into(),
-                name: "old".into(),
-                path: "/mnt/x".into(),
-                kind: String::new(),
-            }],
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn ssh_rename_propagates_to_the_fed_local_folder() {
-        let mut cfg = ssh_cfg();
-        rename_ssh_mount_in_config(&mut cfg, "s1", "New").unwrap();
-        assert_eq!(cfg.ssh_mounts[0].name, "New");
-        assert_eq!(cfg.local_folders[0].name, "New");
-    }
-
-    #[test]
-    fn ssh_rename_leaves_a_user_renamed_folder_alone() {
-        let mut cfg = ssh_cfg();
-        cfg.local_folders[0].name = "Custom".into();
-        rename_ssh_mount_in_config(&mut cfg, "s1", "New").unwrap();
-        assert_eq!(cfg.ssh_mounts[0].name, "New");
-        assert_eq!(cfg.local_folders[0].name, "Custom");
-    }
-
-    #[test]
-    fn ssh_rename_rejects_empty_and_unknown() {
-        let mut cfg = ssh_cfg();
-        assert!(rename_ssh_mount_in_config(&mut cfg, "s1", "")
-            .unwrap_err()
-            .contains("name is required"));
-        assert_eq!(cfg.ssh_mounts[0].name, "old");
-        assert!(rename_ssh_mount_in_config(&mut cfg, "nope", "X")
-            .unwrap_err()
-            .contains("no such SSH mount"));
-    }
-}
-
-fn smb_folders_for_ui(m: &SmbMount) -> Vec<SmbFolderDto> {
-    let root = smb_mount_root(m);
-    selected_smb_folders(m)
-        .iter()
-        .map(|folder| {
-            let relative_path = folder.path.clone();
-            let path = root
-                .as_ref()
-                .map(|root| smb_path_string_for_relative(root, &relative_path))
-                .unwrap_or_else(|| relative_path.clone());
-            SmbFolderDto {
-                id: folder.id.clone(),
-                name: folder.name.clone(),
-                path,
-                relative_path,
-                kind: folder.kind.clone(),
-            }
-        })
-        .collect()
-}
-
-fn selected_smb_folders(m: &SmbMount) -> &[SmbFolder] {
-    &m.folders
-}
-
-fn normalize_smb_relative_path(path: &str) -> Result<String, String> {
-    let raw = path.trim();
-    if raw.is_empty() {
-        return Ok(String::new());
-    }
-    if raw.starts_with('/') || raw.starts_with('\\') || Path::new(raw).is_absolute() {
-        return Err("SMB folder path must be relative to the share".into());
-    }
-    let normalized = raw.replace('\\', "/");
-    let trimmed = normalized.trim_matches('/');
-    if trimmed.is_empty() {
-        return Ok(String::new());
-    }
-    let mut parts = Vec::new();
-    for component in Path::new(trimmed).components() {
-        match component {
-            Component::Normal(part) => {
-                let part = part
-                    .to_str()
-                    .ok_or_else(|| "SMB folder path must be valid UTF-8".to_string())?;
-                if !part.is_empty() {
-                    parts.push(part.to_string());
-                }
-            }
-            Component::CurDir => {}
-            _ => return Err("SMB folder path must stay inside the share".into()),
-        }
-    }
-    Ok(parts.join("/"))
-}
-
-fn append_smb_relative_path(base: &str, name: &str) -> String {
-    if base.is_empty() {
-        name.to_string()
-    } else {
-        format!("{base}/{name}")
-    }
-}
-
-fn smb_pathbuf_for_relative(root: &str, relative: &str) -> PathBuf {
-    let mut path = PathBuf::from(root);
-    for part in relative.split('/').filter(|part| !part.is_empty()) {
-        path.push(part);
-    }
-    path
-}
-
-fn smb_path_string_for_relative(root: &str, relative: &str) -> String {
-    smb_pathbuf_for_relative(root, relative)
-        .to_string_lossy()
-        .to_string()
-}
-
-fn smb_folder_display_name(m: &SmbMount, relative: &str) -> String {
-    relative
-        .rsplit('/')
-        .find(|part| !part.is_empty())
-        .unwrap_or(&m.name)
-        .to_string()
-}
-
-/// Last non-empty path segment of `p` (share-relative or absolute), or "".
-fn last_path_segment(p: &str) -> &str {
-    p.rsplit(['/', '\\']).find(|s| !s.is_empty()).unwrap_or("")
-}
-
-/// Every local-family display label already in use (SMB/SSH mounts + local
-/// folders), so a newly added mount can pick a name that doesn't collide with
-/// an existing sidebar entry.
-fn local_family_names(cfg: &AppConfig) -> Vec<String> {
-    cfg.smb_mounts
-        .iter()
-        .map(|m| m.name.clone())
-        .chain(cfg.ssh_mounts.iter().map(|m| m.name.clone()))
-        .chain(cfg.local_folders.iter().map(|f| f.name.clone()))
-        .collect()
-}
-
-/// Pick a friendly, unique display name for a newly added mount. Prefer
-/// `preferred` (the bare share or the last path segment) so the sidebar shows
-/// "Media" rather than the URL-shaped "nas/Media" or "host:/srv/media"; if that
-/// label is already taken by another local-family source, qualify it with
-/// `qualifier` (the server or host), then fall back to a numeric suffix.
-/// Comparison is case-insensitive so "Media" and "media" don't both appear.
-/// Pure so it is unit-testable (Bug 5 P2).
-fn unique_mount_name(preferred: &str, qualifier: &str, taken: &[String]) -> String {
-    let preferred = preferred.trim();
-    let qualifier = qualifier.trim();
-    let base = if preferred.is_empty() { qualifier } else { preferred };
-    let is_taken = |cand: &str| taken.iter().any(|t| t.eq_ignore_ascii_case(cand));
-    if base.is_empty() || !is_taken(base) {
-        return base.to_string();
-    }
-    if !qualifier.is_empty() && !qualifier.eq_ignore_ascii_case(base) {
-        let qualified = format!("{base} ({qualifier})");
-        if !is_taken(&qualified) {
-            return qualified;
-        }
-    }
-    let mut n = 2;
-    loop {
-        let candidate = format!("{base} ({n})");
-        if !is_taken(&candidate) {
-            return candidate;
-        }
-        n += 1;
-    }
-}
-
-/// Linux: native shares have no OS mount path; UI fall back to the
-/// share-relative folder path.
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_mount_root(_m: &SmbMount) -> Option<String> {
-    None
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_mount_root(m: &SmbMount) -> Option<String> {
-    if Path::new(&m.mountpoint).is_dir() {
-        Some(m.mountpoint.clone())
-    } else {
-        None
-    }
-}
-
-/// Unmount an SMB share and drop its selected folders from the local source.
-#[tauri::command]
-pub async fn unmount_smb(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    // Remove the config records and rebuild the local source FIRST, then tear down
-    // the OS mount best-effort: config is the source of truth, so we never leave a
-    // record pointing at an unmounted folder, and a failed/slow OS unmount just
-    // means the connection lingers rather than corrupting state.
-    let m = config::load_config()
-        .map_err(|e| e.to_string())?
-        .smb_mounts
-        .into_iter()
-        .find(|m| m.id == id)
-        .ok_or("no such mount")?;
-    // Remove the records first — config is the source of truth, written
-    // atomically under lock. If this fails, nothing else changes (no dangling
-    // record, no orphaned mount). Only then tear down the OS mount, best-effort:
-    // a failure just means the connection lingers until closed/rebooted, but we
-    // never leave a record pointing at an unmounted folder, never force-close an
-    // in-use mount, and never resurrect one.
-    // Remove records + rebuild the live source atomically BEFORE the (possibly
-    // slow/hung) OS teardown, so playback can't route through the now-removed
-    // folder meanwhile. The lock-held existence check means two concurrent
-    // unmounts don't both report success for the same (already-removed) mount.
-    mutate_then_rebuild_local(&state, move |cfg| {
-        if !cfg.smb_mounts.iter().any(|x| x.id == id) {
-            return Err("no such mount".to_string());
-        }
-        cfg.smb_mounts.retain(|x| x.id != id);
-        Ok(())
-    })
-    .await?;
-    // Only tear down the OS mount if no remaining record *positively* references
-    // it (duplicate records can share a mountpoint, esp. the Windows UNC). Fail
-    // closed: on a read error (None) keep the mount rather than risk
-    // disconnecting a share another record still uses. Hold source_lock across
-    // the reference check + teardown so a concurrent mount_smb can't persist this
-    // mountpoint between them and have its fresh connection torn down.
-    {
-        let _ops = state.source_lock.lock().await;
-        if mountpoint_referenced(&m.mountpoint) == Some(false) {
-            // umount / net use can block, so run it off the async runtime.
-            let mp = m.mountpoint.clone();
-            let _ =
-                tauri::async_runtime::spawn_blocking(move || crate::smb::unmount_for_removal(&mp))
-                    .await;
-        }
-    }
-    Ok(())
-}
-
-/// Mount an SSH/SFTP folder via sshfs, then register its mountpoint as a local
-/// folder so the local source browses it. Authentication is handled by OpenSSH
-/// keys, agent, and config; Vela stores no SSH password.
-#[tauri::command]
-#[allow(clippy::too_many_arguments)] // Tauri command surface; each is a distinct field.
-pub async fn mount_ssh(
-    host: String,
-    port: Option<u16>,
-    username: String,
-    remote_path: String,
-    identity_file: Option<String>,
-    kind: Option<String>,
-    name: Option<String>,
-    app: tauri::AppHandle,
-    state: State<'_, AppState>,
-) -> Result<SourceDto, String> {
-    if host.trim().is_empty() || remote_path.trim().is_empty() {
-        return Err("host and remote path are required".into());
-    }
-    let port = port.unwrap_or(22);
-    if port == 0 {
-        return Err("port must be between 1 and 65535".into());
-    }
-    let kind = kind.unwrap_or_default();
-    if !kind.is_empty() && kind != "movie" && kind != "show" {
-        return Err("kind must be 'movie', 'show', or empty".into());
-    }
-    let existing = config::load_config().map_err(|e| format!("could not read config: {e}"))?;
-    if existing.ssh_mounts.iter().any(|x| {
-        x.host.eq_ignore_ascii_case(host.trim())
-            && x.port == port
-            && x.username == username.trim()
-            && x.remote_path == remote_path.trim()
-    }) {
-        return Err("that SSH/SFTP folder is already added".into());
-    }
-
-    let taken = local_family_names(&existing);
-    let folder_id = uuid::Uuid::new_v4().to_string();
-    let mut mount = SshMount {
-        id: uuid::Uuid::new_v4().to_string(),
-        name: name
-            .filter(|n| !n.trim().is_empty())
-            .unwrap_or_else(|| unique_mount_name(last_path_segment(remote_path.trim()), host.trim(), &taken)),
-        host: host.trim().to_string(),
-        port,
-        username: username.trim().to_string(),
-        remote_path: remote_path.trim().to_string(),
-        identity_file: identity_file.unwrap_or_default().trim().to_string(),
-        kind: kind.clone(),
-        mountpoint: String::new(),
-        local_folder_id: folder_id.clone(),
-    };
-
-    let _ops = state.source_lock.lock().await;
-
-    let m_for_mount = mount.clone();
-    mount = tauri::async_runtime::spawn_blocking(move || {
-        let mut mounted = m_for_mount;
-        crate::sshfs::prepare_mount(&mut mounted)?;
-        Ok::<SshMount, String>(mounted)
-    })
-    .await
-    .map_err(|e| format!("mount task failed: {e}"))??;
-
-    {
-        use tauri::Manager;
-        let _ = app
-            .asset_protocol_scope()
-            .allow_directory(&mount.mountpoint, true);
-    }
-
-    let folder = LocalFolder {
-        id: folder_id,
-        name: mount.name.clone(),
-        path: mount.mountpoint.clone(),
-        kind,
-    };
-    let mountpoint = mount.mountpoint.clone();
-    let ssh_mount_id = mount.id.clone();
-    let ssh_mount_name = mount.name.clone();
-    if let Err(e) = rebuild_local_locked(&state, move |cfg| {
-        if cfg.ssh_mounts.iter().any(|x| {
-            x.host.eq_ignore_ascii_case(&mount.host)
-                && x.port == mount.port
-                && x.username == mount.username
-                && x.remote_path == mount.remote_path
-        }) {
-            return Err("that SSH/SFTP folder is already added".to_string());
-        }
-        cfg.local_folders.push(folder);
-        cfg.ssh_mounts.push(mount);
-        Ok(())
-    })
-    .await
-    {
-        if ssh_mountpoint_referenced(&mountpoint) != Some(true) {
-            let mp = mountpoint.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || crate::sshfs::unmount(&mp)).await;
-        }
-        return Err(e);
-    }
-    Ok(SourceDto {
-        id: crate::source::local::ssh_source_id(&ssh_mount_id),
-        name: ssh_mount_name,
-        kind: "ssh".to_string(),
-    })
-}
-
-/// List configured SSH/SFTP mounts (for the settings UI).
-#[tauri::command]
-pub async fn list_ssh_mounts() -> Result<Vec<SshMountDto>, String> {
-    let cfg = config::load_config().map_err(|e| e.to_string())?;
-    Ok(cfg
-        .ssh_mounts
-        .into_iter()
-        .map(|m| SshMountDto {
-            id: m.id,
-            name: m.name,
-            host: m.host,
-            port: m.port,
-            username: m.username,
-            remote_path: m.remote_path,
-            identity_file: m.identity_file,
-            mountpoint: m.mountpoint,
-        })
-        .collect())
-}
-
-/// Unmount an SSH/SFTP folder and drop the local folder it fed.
-#[tauri::command]
-pub async fn unmount_ssh(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let m = config::load_config()
-        .map_err(|e| e.to_string())?
-        .ssh_mounts
-        .into_iter()
-        .find(|m| m.id == id)
-        .ok_or("no such mount")?;
-    let folder_id = m.local_folder_id.clone();
-    mutate_then_rebuild_local(&state, move |cfg| {
-        if !cfg.ssh_mounts.iter().any(|x| x.id == id) {
-            return Err("no such mount".to_string());
-        }
-        cfg.ssh_mounts.retain(|x| x.id != id);
-        cfg.local_folders.retain(|f| f.id != folder_id);
-        Ok(())
-    })
-    .await?;
-    {
-        let _ops = state.source_lock.lock().await;
-        if ssh_mountpoint_referenced(&m.mountpoint) == Some(false) {
-            let mp = m.mountpoint.clone();
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                crate::sshfs::unmount_for_removal(&mp)
-            })
-            .await;
-        }
-    }
-    Ok(())
-}
-
-/// Rename an SSH mount's display label, propagating the new name to the local
-/// folder it feeds (whose label was copied from the mount name at add time) so
-/// the source's section header renames with the sidebar entry. A user-renamed
-/// folder (name no longer equal to the old mount name) is left alone. Pure over
-/// the config so it is unit-testable (Bug 5 P2).
-fn rename_ssh_mount_in_config(cfg: &mut AppConfig, id: &str, new_name: &str) -> Result<(), String> {
-    let new_name = new_name.trim();
-    if new_name.is_empty() {
-        return Err("a name is required".to_string());
-    }
-    let (old_name, folder_id) = {
-        let mount = cfg
-            .ssh_mounts
-            .iter_mut()
-            .find(|m| m.id == id)
-            .ok_or_else(|| "no such SSH mount".to_string())?;
-        let old_name = mount.name.clone();
-        mount.name = new_name.to_string();
-        (old_name, mount.local_folder_id.clone())
-    };
-    for folder in cfg
-        .local_folders
-        .iter_mut()
-        .filter(|f| f.id == folder_id && f.name == old_name)
-    {
-        folder.name = new_name.to_string();
-    }
-    Ok(())
-}
-
-/// Rename an SSH/SFTP folder as shown in the sidebar / Connected tab.
-#[tauri::command]
-pub async fn rename_ssh_mount(
-    id: String,
-    name: String,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
-    mutate_then_rebuild_local(&state, move |cfg| {
-        rename_ssh_mount_in_config(cfg, &id, &name)
-    })
-    .await
-}
-
-/// Whether another persisted SMB record references `mountpoint`. `None` = the
-/// config couldn't be read; the caller decides how to treat that uncertainty —
-/// teardown of an existing record fails closed (keep a maybe-shared mount, since
-/// records can share a mountpoint, notably the Windows UNC), while rollback of a
-/// just-created mount fails open (clean it up rather than orphan a credentialed
-/// mount with no record).
-fn mountpoint_referenced(mountpoint: &str) -> Option<bool> {
-    config::load_config()
-        .ok()
-        .map(|c| c.smb_mounts.iter().any(|x| x.mountpoint == mountpoint))
-}
-
-fn ssh_mountpoint_referenced(mountpoint: &str) -> Option<bool> {
-    config::load_config()
-        .ok()
-        .map(|c| c.ssh_mounts.iter().any(|x| x.mountpoint == mountpoint))
-}
-
-fn live_local_family(cfg: &AppConfig) -> Vec<crate::source::local::LocalFamilyMember> {
-    crate::source::local::local_family(
-        cfg,
-        smb_live_folders,
-        smb_live_vfs,
-        ssh_live_folder,
-        safe_user_media_root,
-    )
-}
-
-/// Linux-family: native SMB — mirror of boot's `smb_runtime_folders`.
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
-    selected_smb_folders(m)
-        .iter()
-        .map(|folder| LocalFolder {
-            id: folder.id.clone(),
-            name: folder.name.clone(),
-            path: crate::source::smb_vfs_path(&folder.path),
-            kind: folder.kind.clone(),
-        })
-        .collect()
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_live_folders(m: &SmbMount) -> Vec<LocalFolder> {
-    let Some(root) = smb_mount_root(m) else {
-        return Vec::new();
-    };
-    selected_smb_folders(m)
-        .iter()
-        .filter_map(|folder| {
-            let path = smb_path_string_for_relative(&root, &folder.path);
-            if !safe_user_media_root(&path) {
-                return None;
-            }
-            Some(LocalFolder {
-                id: folder.id.clone(),
-                name: folder.name.clone(),
-                path,
-                kind: folder.kind.clone(),
-            })
-        })
-        .collect()
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_live_vfs(m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
-    Some(std::sync::Arc::new(crate::source::smb_vfs::SmbVfs::new(
-        m.clone(),
-    )))
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_live_vfs(_m: &SmbMount) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
-    None
-}
-
-fn ssh_live_folder(m: &SshMount) -> Option<LocalFolder> {
-    if !crate::sshfs::is_active_mount(m) || !safe_user_media_root(&m.mountpoint) {
-        return None;
-    }
-    Some(LocalFolder {
-        id: m.local_folder_id.clone(),
-        name: m.name.clone(),
-        path: m.mountpoint.clone(),
-        kind: m.kind.clone(),
-    })
-}
-
-/// Apply a config mutation, then rebuild the local source from what was just
-/// persisted. Serializes source mutations via `source_lock` (so they apply in
-/// order) without holding the registry lock across config file I/O.
-async fn mutate_then_rebuild_local<F>(state: &State<'_, AppState>, f: F) -> Result<(), String>
-where
-    F: FnOnce(&mut AppConfig) -> Result<(), String>,
-{
-    // Serialize source mutations with their own lock so they apply in order —
-    // WITHOUT holding the registry lock across config::update's file I/O (and its
-    // cross-process flock), which would block browsing commands meanwhile.
-    let _ops = state.source_lock.lock().await;
-    rebuild_local_locked(state, f).await
-}
-
-/// The persist + registry-swap half of `mutate_then_rebuild_local`, WITHOUT
-/// acquiring `source_lock`. For callers that already hold it because they need a
-/// wider critical section (e.g. `mount_smb`, which must keep the OS mount and the
-/// persist atomic against a concurrent teardown). The registry lock is still
-/// taken only briefly, for the swap-in.
-async fn rebuild_local_locked<F>(state: &State<'_, AppState>, f: F) -> Result<(), String>
-where
-    F: FnOnce(&mut AppConfig) -> Result<(), String>,
-{
-    let family = config::update(|cfg| {
-        f(cfg)?;
-        Ok(live_local_family(cfg))
-    })?;
-    let mut reg = state.registry.lock().await;
-    // Replace the whole family: a mount that went away must drop its source.
-    reg.remove_kinds(crate::source::local::LOCAL_FAMILY_KINDS);
-    for member in &family {
-        reg.upsert(member.build());
-    }
-    Ok(())
 }
 
 /// Request a plex.tv device PIN; the user enters the code at plex.tv/link.
@@ -2469,30 +1151,26 @@ async fn fetch_all_merged(
     }
 }
 
-/// Default playback preference for merged titles: a direct file beats a
-/// network mount beats a server stream. A policy constant, not a heuristic —
-/// the per-title override wins over all of it.
+/// Default playback preference for merged titles. A policy constant, not a
+/// heuristic — the per-title override wins over all of it. (Sources are
+/// servers only since the 2026-07-08 local-family removal; the ladder kept
+/// its Plex-first order.)
 fn kind_rank(kind: &str) -> u8 {
     match kind {
-        "local" => 0,
-        "smb" | "ssh" => 1,
-        "plex" => 2,
-        "jellyfin" | "emby" => 3,
-        _ => 4,
+        "plex" => 0,
+        "jellyfin" | "emby" => 1,
+        _ => 2,
     }
 }
 
-/// Detail-surface preference for merged titles: the reverse of `kind_rank`,
-/// because the info page exists to show cast/genre/stream specs that only
-/// metadata-rich servers carry. Also a policy constant; independent of the
-/// playback ranking and of the per-title play override.
+/// Detail-surface preference for merged titles: the metadata-richest backing
+/// first. Also a policy constant; independent of the per-title play override
+/// (an override moves playback only — detail routing must not follow it).
 fn detail_rank(kind: &str) -> u8 {
     match kind {
         "plex" => 0,
         "jellyfin" | "emby" => 1,
-        "smb" | "ssh" => 2,
-        "local" => 3,
-        _ => 4,
+        _ => 2,
     }
 }
 
@@ -2809,8 +1487,8 @@ mod merge_tests {
         let merged = vec![
             item("delta", Some(2020), "plex"),
             item("Alpha", Some(2021), "plex"),
-            item("charlie", Some(2019), "smb-1"),
-            item("Bravo", Some(2022), "smb-1"),
+            item("charlie", Some(2019), "jf-1"),
+            item("Bravo", Some(2022), "jf-1"),
         ];
         let page = merge_sort_page(merged, "titleSort:asc", 0, 10);
         let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
@@ -2864,7 +1542,7 @@ mod merge_tests {
     fn merged_added_at_desc_missing_sorts_last() {
         let mut a = item("mid", None, "plex");
         a.added_at_ms = Some(200);
-        let mut b = item("newest", None, "smb-1");
+        let mut b = item("newest", None, "jf-1");
         b.added_at_ms = Some(500);
         let c = item("unknown", None, "plex"); // added_at_ms None
         let page = merge_sort_page(vec![a, b, c], "addedAt:desc", 0, 10);
@@ -2878,7 +1556,7 @@ mod merge_tests {
         a.last_watched_at_ms = Some(100);
         let mut b = item("watched-recent", None, "plex");
         b.last_watched_at_ms = Some(900);
-        let c = item("never", None, "smb-1"); // last_watched_at_ms None
+        let c = item("never", None, "jf-1"); // last_watched_at_ms None
         let page = merge_sort_page(vec![a, b, c], "lastViewedAt:desc", 0, 10);
         let titles: Vec<_> = page.iter().map(|i| i.title.as_str()).collect();
         assert_eq!(titles, vec!["watched-recent", "watched-old", "never"]);
@@ -3098,10 +1776,10 @@ mod merge_tests {
     // first group.
     #[test]
     fn dedup_keeps_same_source_versions_as_separate_cards() {
-        let mut a = item("Dune", Some(2021), "smb-1");
-        a.rating_key = "smb-1:/dune.1080p.mkv".into();
-        let mut b = item("Dune", Some(2021), "smb-1");
-        b.rating_key = "smb-1:/dune.2160p.mkv".into();
+        let mut a = item("Dune", Some(2021), "jf-1");
+        a.rating_key = "jf-1:/dune.1080p.mkv".into();
+        let mut b = item("Dune", Some(2021), "jf-1");
+        b.rating_key = "jf-1:/dune.2160p.mkv".into();
         let mut c = item("Dune", Some(2021), "plex");
         c.rating_key = "plex:42".into();
 
@@ -3123,13 +1801,13 @@ mod merge_tests {
             .iter()
             .find(|g| g.backing.as_ref().unwrap().len() == 1)
             .expect("second same-source version stays its own card");
-        assert_eq!(solo.source_id, "smb-1");
+        assert_eq!(solo.source_id, "jf-1");
     }
 
     #[test]
     fn dedup_merges_by_normalized_title_and_exact_year() {
         let a = item("The Matrix", Some(1999), "plex");
-        let b = item("the  matrix!", Some(1999), "smb-1"); // punctuation/case folded
+        let b = item("the  matrix!", Some(1999), "jf-1"); // punctuation/case folded
         let c = item("The Matrix", Some(2021), "plex"); // remake: different year
         let out = dedup_across_sources(vec![a, b, c]);
         assert_eq!(out.len(), 2);
@@ -3140,8 +1818,8 @@ mod merge_tests {
     #[test]
     fn dedup_prefers_richer_display_and_keeps_watch_state() {
         // Bare local parse first, then the server copy with metadata.
-        let mut local = item("Dune", Some(2021), "smb-1");
-        local.rating_key = "smb-1:/x/dune.mkv".into();
+        let mut local = item("Dune", Some(2021), "jf-1");
+        local.rating_key = "jf-1:/x/dune.mkv".into();
         let mut server = item("Dune", Some(2021), "plex");
         server.rating_key = "plex:42".into();
         server.summary = Some("desert".into());
@@ -3164,45 +1842,40 @@ mod merge_tests {
     fn kinds() -> std::collections::HashMap<String, &'static str> {
         [
             ("plex".to_string(), "plex"),
-            ("smb-1".to_string(), "smb"),
-            ("local".to_string(), "local"),
+            ("jf".to_string(), "jellyfin"),
         ]
         .into_iter()
         .collect()
     }
 
     #[test]
-    fn ranking_prefers_direct_files_and_points_play_identity_at_winner() {
-        let mut a = item("Dune", Some(2021), "plex");
-        a.rating_key = "plex:42".into();
-        let mut b = item("Dune", Some(2021), "smb-1");
-        b.rating_key = "smb-1:/x.mkv".into();
+    fn ranking_prefers_plex_and_points_play_identity_at_winner() {
+        let mut a = item("Dune", Some(2021), "jf");
+        a.rating_key = "jf:9".into();
+        let mut b = item("Dune", Some(2021), "plex");
+        b.rating_key = "plex:42".into();
         let groups = dedup_across_sources(vec![a, b]);
         let ranked = rank_backings(groups, &kinds(), &Default::default());
         let g = &ranked[0];
-        // smb outranks a server stream by default.
-        assert_eq!(g.rating_key, "smb-1:/x.mkv");
-        assert_eq!(g.source_id, "smb-1");
-        assert_eq!(g.backing.as_ref().unwrap()[0].source_id, "smb-1");
+        // Plex outranks Jellyfin/Emby by default (policy ladder).
+        assert_eq!(g.rating_key, "plex:42");
+        assert_eq!(g.source_id, "plex");
+        assert_eq!(g.backing.as_ref().unwrap()[0].source_id, "plex");
         assert!(g.canonical_id.is_some());
     }
 
-    // rev-3 guard: when the ranked face is a local-family backing (no watch
-    // state support), watched-state actions must route to a server backing.
+    // rev-3 guard, server-only form: every face is a server that can take
+    // watched-state actions itself, so no separate watch key is emitted.
     #[test]
-    fn merged_watch_key_routes_to_a_server_backing() {
+    fn merged_watch_key_absent_when_face_is_a_server() {
         let mut a = item("Dune", Some(2021), "plex");
         a.rating_key = "plex:42".into();
-        let mut b = item("Dune", Some(2021), "smb-1");
-        b.rating_key = "smb-1:/x.mkv".into();
+        let mut b = item("Dune", Some(2021), "jf");
+        b.rating_key = "jf:9".into();
         let groups = dedup_across_sources(vec![a, b]);
         let ranked = rank_backings(groups, &kinds(), &Default::default());
-        let g = &ranked[0];
-        // smb wins playback; watch actions must go to the plex copy.
-        assert_eq!(g.rating_key, "smb-1:/x.mkv");
-        assert_eq!(g.watch_key.as_deref(), Some("plex:42"));
+        assert_eq!(ranked[0].watch_key, None);
 
-        // When the face itself is a server backing, no separate watch key.
         let mut only = item("Solo", Some(2020), "plex");
         only.rating_key = "plex:7".into();
         let ranked = rank_backings(
@@ -3245,58 +1918,34 @@ mod merge_tests {
     fn per_title_override_beats_the_default_ranking() {
         let mut a = item("Dune", Some(2021), "plex");
         a.rating_key = "plex:42".into();
-        let mut b = item("Dune", Some(2021), "smb-1");
-        b.rating_key = "smb-1:/x.mkv".into();
+        let mut b = item("Dune", Some(2021), "jf");
+        b.rating_key = "jf:9".into();
         let groups = dedup_across_sources(vec![a, b]);
         let canonical = canonical_id_of(&groups[0]);
-        let overrides = [(canonical, "plex".to_string())].into_iter().collect();
+        let overrides = [(canonical, "jf".to_string())].into_iter().collect();
         let ranked = rank_backings(groups, &kinds(), &overrides);
-        assert_eq!(ranked[0].rating_key, "plex:42");
-        assert_eq!(ranked[0].source_id, "plex");
+        assert_eq!(ranked[0].rating_key, "jf:9");
+        assert_eq!(ranked[0].source_id, "jf");
     }
 
     // idv-2/idv-6 guard: the detail surface routes to the metadata-richest
-    // backing via its own rank. The play-ordered backing list must not be
-    // scanned for it — play order puts the local family first.
+    // backing via its own rank, independent of the play override — the
+    // play-ordered backing list must not be scanned for it (an override
+    // puts the overridden source first).
     #[test]
-    fn merged_detail_key_routes_to_the_richest_backing() {
+    fn detail_key_stays_on_the_richest_backing_despite_play_override() {
         let mut a = item("Dune", Some(2021), "plex");
         a.rating_key = "plex:42".into();
-        let mut b = item("Dune", Some(2021), "smb-1");
-        b.rating_key = "smb-1:/x.mkv".into();
-        let ranked = rank_backings(
-            dedup_across_sources(vec![a, b]),
-            &kinds(),
-            &Default::default(),
-        );
+        let mut b = item("Dune", Some(2021), "jf");
+        b.rating_key = "jf:9".into();
+        let groups = dedup_across_sources(vec![a, b]);
+        let canonical = canonical_id_of(&groups[0]);
+        let overrides = [(canonical, "jf".to_string())].into_iter().collect();
+        let ranked = rank_backings(groups, &kinds(), &overrides);
         let g = &ranked[0];
-        // smb wins playback; detail must go to the plex copy.
-        assert_eq!(g.rating_key, "smb-1:/x.mkv");
+        // The override moves playback to Jellyfin; detail stays on Plex.
+        assert_eq!(g.rating_key, "jf:9");
         assert_eq!(g.detail_key.as_deref(), Some("plex:42"));
-    }
-
-    // Without Plex, the next-richest server still wins detail over the
-    // local-family play face (the rank is a ladder, not a Plex special case).
-    #[test]
-    fn detail_key_prefers_servers_even_without_plex() {
-        let kinds: std::collections::HashMap<String, &'static str> = [
-            ("jf".to_string(), "jellyfin"),
-            ("smb-1".to_string(), "smb"),
-        ]
-        .into_iter()
-        .collect();
-        let mut a = item("Dune", Some(2021), "jf");
-        a.rating_key = "jf:9".into();
-        let mut b = item("Dune", Some(2021), "smb-1");
-        b.rating_key = "smb-1:/x.mkv".into();
-        let ranked = rank_backings(
-            dedup_across_sources(vec![a, b]),
-            &kinds,
-            &Default::default(),
-        );
-        let g = &ranked[0];
-        assert_eq!(g.rating_key, "smb-1:/x.mkv");
-        assert_eq!(g.detail_key.as_deref(), Some("jf:9"));
     }
 
     // detail_key folds into the play identity when they agree, and never
@@ -3304,37 +1953,22 @@ mod merge_tests {
     // rating_key in both cases.
     #[test]
     fn detail_key_absent_when_redundant_or_unmerged() {
-        // Single server backing: play face == richest backing.
-        let mut only = item("Solo", Some(2020), "plex");
-        only.rating_key = "plex:7".into();
+        // Default ranking: the play face IS the richest backing.
+        let mut a = item("Dune", Some(2021), "plex");
+        a.rating_key = "plex:42".into();
+        let mut b = item("Dune", Some(2021), "jf");
+        b.rating_key = "jf:9".into();
         let ranked = rank_backings(
-            dedup_across_sources(vec![only]),
+            dedup_across_sources(vec![a, b]),
             &kinds(),
             &Default::default(),
         );
+        assert_eq!(ranked[0].rating_key, "plex:42");
         assert_eq!(ranked[0].detail_key, None);
 
         // No backing list at all (non-merged path).
         let bare = item("Bare", Some(2019), "plex");
         let ranked = rank_backings(vec![bare], &kinds(), &Default::default());
-        assert_eq!(ranked[0].detail_key, None);
-    }
-
-    // The per-title play override moves playback only; detail stays with the
-    // richest backing (here they coincide, so the key folds away — the
-    // override must not surface a stale local detail key).
-    #[test]
-    fn detail_key_ignores_the_play_override() {
-        let mut a = item("Dune", Some(2021), "plex");
-        a.rating_key = "plex:42".into();
-        let mut b = item("Dune", Some(2021), "smb-1");
-        b.rating_key = "smb-1:/x.mkv".into();
-        let groups = dedup_across_sources(vec![a, b]);
-        let canonical = canonical_id_of(&groups[0]);
-        let overrides = [(canonical, "plex".to_string())].into_iter().collect();
-        let ranked = rank_backings(groups, &kinds(), &overrides);
-        // Override makes plex the play face; detail (also plex) folds in.
-        assert_eq!(ranked[0].rating_key, "plex:42");
         assert_eq!(ranked[0].detail_key, None);
     }
 }
@@ -3427,29 +2061,6 @@ pub struct QueueItem {
     pub subtitle: Option<String>,
 }
 
-/// Result of `queue_list` — the queue snapshot plus the cursor, so the drawer
-/// can highlight whichever item is currently playing.
-/// Availability of the `sshfs` binary for the add-SSH UI: whether it was
-/// found and where, plus the platform so the frontend can show the right
-/// install guidance up front instead of only failing at mount time.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SshfsStatus {
-    pub found: bool,
-    pub path: Option<String>,
-    pub platform: &'static str,
-}
-
-#[tauri::command]
-pub fn sshfs_status() -> SshfsStatus {
-    let path = crate::sshfs::locate();
-    SshfsStatus {
-        found: path.is_some(),
-        path,
-        platform: std::env::consts::OS,
-    }
-}
-
 /// Snapshot an item into Vela's recents as playback starts (frontend passes
 /// the full card it played, artwork included). The end notifier stamps the
 /// final position and drops finished entries.
@@ -3461,12 +2072,26 @@ pub async fn record_recent(item: ItemDto) -> Result<(), String> {
     })
 }
 
+/// Keep only recents whose source still exists. An entry from a removed
+/// source (e.g. the local/SMB/SSH family removed 2026-07-08) would render a
+/// hero card whose Play can only error — the dead-end the UX rulings forbid.
+/// Read-time filtering only: the config entries are preserved untouched, so
+/// a rollback build still sees them.
+fn filter_live_recents(items: Vec<ItemDto>, live_source_ids: &[String]) -> Vec<ItemDto> {
+    items
+        .into_iter()
+        .filter(|i| live_source_ids.contains(&i.source_id))
+        .collect()
+}
+
 /// Vela's "recently played and not finished" list, newest first — the hero
-/// cover-flow's primary feed.
+/// cover-flow's primary feed. Entries from removed sources are filtered out
+/// at read time (see `filter_live_recents`).
 #[tauri::command]
-pub async fn get_recents() -> Result<Vec<ItemDto>, String> {
+pub async fn get_recents(state: State<'_, AppState>) -> Result<Vec<ItemDto>, String> {
     let cfg = config::load_config().map_err(|e| e.to_string())?;
-    Ok(crate::recents::list(&cfg))
+    let live = state.registry.lock().await.ids();
+    Ok(filter_live_recents(crate::recents::list(&cfg), &live))
 }
 
 /// Remove an item from the Continue Watching flow: drop the recents entry,
@@ -3502,40 +2127,13 @@ pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
     Ok(cfg.hidden_from_continue.clone())
 }
 
+/// Result of `queue_list` — the queue snapshot plus the cursor, so the drawer
+/// can highlight whichever item is currently playing.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueSnapshot {
     pub items: Vec<QueueItem>,
     pub current_index: Option<usize>,
-}
-
-/// Snapshot the loopback-proxy session key for a resolved stream URL so the
-/// end-of-session hook can free the cached SMB session for THIS play. Only
-/// Linux-family SMB proxy URLs carry one; Plex/Jellyfin/Emby, local files, and
-/// OS-mounted SMB (macOS/Windows) return `None` — they have no cached session.
-fn proxy_session_key(url: &str) -> Option<(String, u64)> {
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        crate::stream_proxy::playback_session_key(url)
-    }
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    {
-        let _ = url;
-        None
-    }
-}
-
-/// Free the cached SMB proxy session for a finished play (compare-and-remove,
-/// off the proxy registry lock). A no-op off the Linux-family native path.
-fn release_proxy_session(token: &str, generation: u64) {
-    #[cfg(all(unix, not(target_os = "macos")))]
-    {
-        crate::stream_proxy::release_session(token, generation);
-    }
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    {
-        let _ = (token, generation);
-    }
 }
 
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
@@ -3610,12 +2208,6 @@ pub(crate) async fn play_by_key(
         start_seconds: resume_ms as f64 / 1000.0,
         autocrop_script,
     };
-    // Snapshot the loopback-proxy session key for THIS play (SMB, Linux-family;
-    // `None` otherwise). Read now, under `play_lock` and right after resolve, so
-    // a same-file replay that reuses the token has already bumped the generation
-    // — the compare-and-remove in `release_session` then keeps a superseded
-    // play's late `on_end` from freeing the new play's session.
-    let session_key = proxy_session_key(&spec.url);
     // End-of-session notifier → the `playback-ended` UI event, emitted after
     // the final server check-in so a re-fetch it triggers sees the new watch
     // state. Payload carries ids only — never URLs or tokens.
@@ -3624,15 +2216,7 @@ pub(crate) async fn play_by_key(
         let app = app.clone();
         let source_id = src.id().to_string();
         let item_key = rating_key.to_string();
-        let session_key = session_key.clone();
         std::sync::Arc::new(move |position_ms: u64| {
-            // Free the cached SMB proxy session for this finished play, so its
-            // libsmbclient context is torn down once here rather than left to
-            // registry eviction (compare-and-remove: a no-op for non-SMB plays
-            // or when a newer play has since reused the token).
-            if let Some((token, generation)) = &session_key {
-                release_proxy_session(token, *generation);
-            }
             // Stamp Vela's recents BEFORE emitting, so the refresh the event
             // triggers reads the updated list. Runs on the tracker thread —
             // synchronous config I/O is fine there.
@@ -3661,20 +2245,6 @@ pub(crate) async fn play_by_key(
     .await
     .map_err(|e| format!("playback task failed: {e}"))
     .and_then(|r| r);
-    // If play() failed it never installed the on_end owner for this play's proxy
-    // session; free it so a same-file replay's reactivated, still-cached session
-    // can't leak (sspf-8). Do it on the blocking pool, never on this async worker:
-    // dropping the last Arc<SmbConnection> runs a blocking smbc_free_context
-    // (sspf-9). The release is generation-guarded, so it is a no-op if a newer
-    // play has since reused the token, and a no-op for non-SMB plays.
-    if played.is_err() {
-        if let Some((token, generation)) = session_key {
-            let _ = tauri::async_runtime::spawn_blocking(move || {
-                release_proxy_session(&token, generation);
-            })
-            .await;
-        }
-    }
     let stop = played?;
     *state
         .tracking_stop
@@ -3853,21 +2423,6 @@ fn clamp_page_size(size: usize) -> usize {
     size.clamp(1, MAX_PAGE_SIZE)
 }
 
-fn safe_user_media_root(path: &str) -> bool {
-    let Ok(canon) = std::fs::canonicalize(path) else {
-        return false;
-    };
-    if canon.parent().is_none() {
-        return false;
-    }
-    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-        if std::fs::canonicalize(home).ok().as_ref() == Some(&canon) {
-            return false;
-        }
-    }
-    true
-}
-
 /// reqwest client for plex.tv auth calls, with a timeout so linking can't hang.
 fn plextv_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
@@ -3938,45 +2493,53 @@ mod tests {
     }
 
     #[test]
-    fn smb_relative_paths_are_normalized() {
-        assert_eq!(normalize_smb_relative_path("").unwrap(), "");
-        assert_eq!(
-            normalize_smb_relative_path("Movies\\4K").unwrap(),
-            "Movies/4K"
-        );
-        assert_eq!(
-            normalize_smb_relative_path("Shows/Season 01").unwrap(),
-            "Shows/Season 01"
-        );
-    }
-
-    #[test]
-    fn smb_relative_paths_cannot_escape_share() {
-        assert!(normalize_smb_relative_path("/Movies").is_err());
-        assert!(normalize_smb_relative_path("../Movies").is_err());
-        assert!(normalize_smb_relative_path("Movies/../Shows").is_err());
-    }
-
-    #[test]
-    fn new_share_gets_share_root_as_default_folder() {
-        let mount = SmbMount {
-            id: "m1".into(),
-            name: "zoey/media".into(),
-            server: "zoey".into(),
-            share: "media".into(),
-            ..Default::default()
-        };
-        let mount = with_default_root_folder(mount);
-        assert_eq!(mount.folders.len(), 1);
-        let root = &mount.folders[0];
-        assert_eq!(root.path, "", "default folder must be the share root");
-        assert_eq!(root.kind, "", "root folder kind must be auto-detect");
-        assert_eq!(root.name, "zoey/media");
-        assert!(!root.id.is_empty());
-    }
-
-    #[test]
     fn weak_pin_uses_plex_link_url() {
         assert_eq!(plex_link_url("ABCD"), "https://plex.tv/link/?pin=ABCD");
+    }
+
+    // Recents from a source that no longer exists (e.g. the removed
+    // local/SMB/SSH family) must not surface — a hero card whose Play can
+    // only error is a forbidden dead-end. The config entries themselves are
+    // preserved; this is read-time filtering only.
+    #[test]
+    fn recents_from_removed_sources_are_filtered_at_read_time() {
+        let mk = |key: &str, sid: &str| {
+            let mut i = crate::source::ItemDto {
+                rating_key: key.to_string(),
+                title: key.to_string(),
+                year: None,
+                summary: None,
+                duration_ms: None,
+                media_type: Some("movie".into()),
+                poster: None,
+                series_poster: None,
+                backdrop: None,
+                view_offset_ms: None,
+                played: None,
+                last_watched_at_ms: None,
+                added_at_ms: None,
+                index: None,
+                parent_index: None,
+                grandparent_title: None,
+                parent_title: None,
+                provider_ids: vec![],
+                backing: None,
+                canonical_id: None,
+                watch_key: None,
+                detail_key: None,
+                source_id: String::new(),
+            };
+            i.source_id = sid.to_string();
+            i
+        };
+        let items = vec![
+            mk("plex:1", "plex"),
+            mk("local-abc:/x.mkv", "local-abc"),
+            mk("jf:9", "jf"),
+        ];
+        let live = vec!["plex".to_string(), "jf".to_string()];
+        let out = filter_live_recents(items, &live);
+        let keys: Vec<_> = out.iter().map(|i| i.rating_key.as_str()).collect();
+        assert_eq!(keys, vec!["plex:1", "jf:9"], "dead-source entry dropped");
     }
 }

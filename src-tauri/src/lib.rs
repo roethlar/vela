@@ -4,17 +4,8 @@ mod playback;
 mod plex_api;
 mod plex_library;
 mod recents;
-mod smb;
-#[cfg(all(unix, not(target_os = "macos")))]
-mod smb_client;
-#[cfg(all(unix, not(target_os = "macos")))]
-mod stream_proxy;
 mod source;
-mod sshfs;
-mod ui_events;
 
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-use std::path::{Path, PathBuf};
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
@@ -37,7 +28,7 @@ pub fn platform_name() -> &'static str {
 
 /// Shared application state, managed by Tauri and injected into commands.
 pub struct AppState {
-    /// All configured media sources (Plex, Jellyfin/Emby, and a local source).
+    /// All configured media sources (Plex and Jellyfin/Emby servers).
     pub registry: AsyncMutex<SourceRegistry>,
     /// Stop flag for the currently-tracked playback (so a new play cancels the old tracker).
     pub tracking_stop: Mutex<Option<Arc<AtomicBool>>>,
@@ -57,8 +48,8 @@ pub struct AppState {
     pub reap_queue: Arc<Mutex<Vec<std::process::Child>>>,
     /// Serializes play_item so overlapping clicks can't both spawn and orphan an mpv.
     pub play_lock: AsyncMutex<()>,
-    /// Serializes source mutations (add/remove folder, mount/unmount SMB) so they
-    /// apply in order without holding the registry lock across config file I/O.
+    /// Serializes source mutations (add/remove) so they apply in order
+    /// without holding the registry lock across config file I/O.
     pub source_lock: AsyncMutex<()>,
     /// In-memory play queue. Cleared+repopulated by a top-level "Play"; mutated by
     /// "Play Next" / "Add to Queue". Not persisted across restarts.
@@ -111,18 +102,6 @@ pub fn run() {
             registry.upsert(src);
         }
     }
-    // Restore the local family: plain folders as "Local", plus one named
-    // source per SMB/SSH mount so shares aren't presented as "Local".
-    let local_family = source::local::local_family(
-        &cfg,
-        smb_runtime_folders,
-        smb_runtime_vfs,
-        ssh_runtime_folder,
-        safe_user_media_root,
-    );
-    for member in &local_family {
-        registry.upsert(member.build());
-    }
 
     let state = AppState {
         registry: AsyncMutex::new(registry),
@@ -138,11 +117,6 @@ pub fn run() {
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
     };
-
-    let asset_folders: Vec<String> = source::local::asset_folder_paths(&local_family);
-    #[cfg(not(all(unix, not(target_os = "macos"))))]
-    let smb_mounts = cfg.smb_mounts.clone();
-    let ssh_mounts = cfg.ssh_mounts.clone();
 
     // Periodically reap exited mpv processes so they don't sit as zombies: the
     // live player once it exits on its own, plus any killed players handed off via
@@ -173,35 +147,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(state);
 
-    // Stable SMB artwork scheme (velasmb://<mount-id>/<b64url-path>):
-    // config-validated mount, normalized path, image whitelist, bounded
-    // native read — see source/smb_vfs.rs. Blocking work runs off the
-    // protocol thread; failures answer with a plain status code.
-    #[cfg(all(unix, not(target_os = "macos")))]
-    let builder = builder.register_asynchronous_uri_scheme_protocol(
-        crate::source::smb_vfs::ARTWORK_SCHEME,
-        |_ctx, request, responder| {
-            let uri = request.uri().clone();
-            tauri::async_runtime::spawn_blocking(move || {
-                let host = uri.host().unwrap_or_default().to_string();
-                let path = uri.path().to_string();
-                let response = match crate::source::smb_vfs::serve_artwork(&host, &path) {
-                    Ok((bytes, mime)) => tauri::http::Response::builder()
-                        .status(200)
-                        .header("Content-Type", mime)
-                        .header("Cache-Control", "max-age=86400")
-                        .body(bytes)
-                        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
-                    Err(status) => tauri::http::Response::builder()
-                        .status(status)
-                        .body(Vec::new())
-                        .unwrap_or_else(|_| tauri::http::Response::new(Vec::new())),
-                };
-                responder.respond(response);
-            });
-        },
-    );
-
     builder
         .setup(move |app| {
             use tauri::Manager;
@@ -214,9 +159,6 @@ pub fn run() {
                 .state::<AppState>()
                 .app_handle
                 .set(app.handle().clone());
-            // Same handle for fire-and-forget background signals (the listing
-            // cache's `listings-updated`).
-            ui_events::set_app_handle(app.handle().clone());
 
             // Auto-advance dispatcher: when the mpv EOF watcher notifies a clean
             // file end, walk the queue cursor forward and play the next item.
@@ -260,95 +202,6 @@ pub fn run() {
                 }
             });
 
-            // Let the webview load poster images from configured local folders.
-            for path in &asset_folders {
-                let _ = app.asset_protocol_scope().allow_directory(path, true);
-            }
-            // Linux: no remount pass — shares are native (mountless).
-            #[cfg(not(all(unix, not(target_os = "macos"))))]
-            {
-                // Re-establish SMB mounts off the main thread so a slow/offline share
-                // can't stall launch. Once a share mounts, refresh the local source so
-                // selected folders inside that share become browsable in this running
-                // app. Uses the bounded blocking pool (one task per share, so a slow
-                // one doesn't block the others, and no unbounded native threads /
-                // spawn panics). Each task re-checks the share is still configured
-                // before mounting, and undoes the mount if it was removed while
-                // mounting — so a remove/remount race can't leave an OS mount with no
-                // config record.
-                // Cap concurrency so a large/pathological config can't queue a huge
-                // number of blocking mount attempts at once.
-                let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
-                let app_handle = app.handle().clone();
-                for m in smb_mounts {
-                    let sem = sem.clone();
-                    let app_handle = app_handle.clone();
-                    tauri::async_runtime::spawn(async move {
-                        let Ok(_permit) = sem.acquire_owned().await else {
-                            return;
-                        };
-                        let mounted = tauri::async_runtime::spawn_blocking(move || {
-                            let cfg_now = || config::load_config().ok();
-                            // Mount only if this specific record is *definitely* still
-                            // configured (read error / removed → skip).
-                            let still_configured =
-                                cfg_now().map(|c| c.smb_mounts.iter().any(|x| x.id == m.id));
-                            if still_configured != Some(true) {
-                                return false;
-                            }
-                            if smb::mount(&m).is_ok() {
-                                // Undo only if the mountpoint is *definitely* no longer
-                                // referenced by ANY current record — so we don't tear down
-                                // a connection a re-added record (same UNC) now uses, and a
-                                // read error (None) doesn't unmount anything.
-                                let mp_referenced = cfg_now().map(|c| {
-                                    c.smb_mounts.iter().any(|x| x.mountpoint == m.mountpoint)
-                                });
-                                if mp_referenced == Some(false) {
-                                    smb::unmount_for_removal(&m.mountpoint);
-                                    return false;
-                                }
-                                return true;
-                            }
-                            false
-                        })
-                        .await
-                        .unwrap_or(false);
-                        if mounted {
-                            refresh_local_source(&app_handle).await;
-                        }
-                    });
-                }
-            }
-            // SSH/SFTP mounts are user-space but app-managed, so try to restore
-            // them in the background. A missing key/agent should not stall launch;
-            // once a mount succeeds, refresh the local source from the current
-            // config so the folder becomes browsable in this running app.
-            let sem = std::sync::Arc::new(tokio::sync::Semaphore::new(4));
-            let app_handle = app.handle().clone();
-            for m in ssh_mounts {
-                let sem = sem.clone();
-                let app_handle = app_handle.clone();
-                tauri::async_runtime::spawn(async move {
-                    let Ok(_permit) = sem.acquire_owned().await else {
-                        return;
-                    };
-                    let mounted = tauri::async_runtime::spawn_blocking(move || {
-                        let cfg_now = || config::load_config().ok();
-                        let still_configured =
-                            cfg_now().map(|c| c.ssh_mounts.iter().any(|x| x.id == m.id));
-                        if still_configured != Some(true) {
-                            return false;
-                        }
-                        sshfs::mount(&m).is_ok()
-                    })
-                    .await
-                    .unwrap_or(false);
-                    if mounted {
-                        refresh_local_source(&app_handle).await;
-                    }
-                });
-            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -359,21 +212,6 @@ pub fn run() {
             commands::connect_jellyfin_token,
             commands::remove_source,
             commands::unlink_plex,
-            commands::add_local_folder,
-            commands::list_local_folders,
-            commands::remove_local_folder,
-            commands::mount_smb,
-            commands::list_smb_mounts,
-            commands::list_smb_directories,
-            commands::add_smb_folder,
-            commands::remove_smb_folder,
-            commands::rename_smb_mount,
-            commands::unmount_smb,
-            commands::mount_ssh,
-            commands::list_ssh_mounts,
-            commands::unmount_ssh,
-            commands::rename_ssh_mount,
-            commands::sshfs_status,
             commands::check_mpv,
             commands::set_mpv_path,
             commands::get_mpv_advanced,
@@ -441,120 +279,3 @@ pub fn run() {
         });
 }
 
-async fn refresh_local_source(app_handle: &tauri::AppHandle) {
-    use tauri::Manager;
-    let Ok(cfg) = config::load_config() else {
-        return;
-    };
-    let family = source::local::local_family(
-        &cfg,
-        smb_runtime_folders,
-        smb_runtime_vfs,
-        ssh_runtime_folder,
-        safe_user_media_root,
-    );
-    for path in source::local::asset_folder_paths(&family) {
-        let _ = app_handle
-            .asset_protocol_scope()
-            .allow_directory(&path, true);
-    }
-    let state = app_handle.state::<AppState>();
-    let mut reg = state.registry.lock().await;
-    // Replace the whole family: a mount that went away must drop its source.
-    reg.remove_kinds(source::local::LOCAL_FAMILY_KINDS);
-    for member in &family {
-        reg.upsert(member.build());
-    }
-}
-
-/// Linux-family: native SMB — folders live in the provider's namespace
-/// (share-relative, leading slash); no mount lookup at all.
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
-    m.folders
-        .iter()
-        .map(|folder| config::LocalFolder {
-            id: folder.id.clone(),
-            name: folder.name.clone(),
-            path: crate::source::smb_vfs_path(&folder.path),
-            kind: folder.kind.clone(),
-        })
-        .collect()
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_runtime_folders(m: &config::SmbMount) -> Vec<config::LocalFolder> {
-    let Some(root) = smb_mount_root(m) else {
-        return Vec::new();
-    };
-    m.folders
-        .iter()
-        .map(|folder| config::LocalFolder {
-            id: folder.id.clone(),
-            name: folder.name.clone(),
-            path: smb_path_string_for_relative(&root, &folder.path),
-            kind: folder.kind.clone(),
-        })
-        .collect()
-}
-
-#[cfg(all(unix, not(target_os = "macos")))]
-fn smb_runtime_vfs(
-    m: &config::SmbMount,
-) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
-    Some(std::sync::Arc::new(crate::source::smb_vfs::SmbVfs::new(
-        m.clone(),
-    )))
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_runtime_vfs(
-    _m: &config::SmbMount,
-) -> Option<std::sync::Arc<dyn crate::source::vfs::Vfs>> {
-    None
-}
-
-fn ssh_runtime_folder(m: &config::SshMount) -> Option<config::LocalFolder> {
-    if !sshfs::is_active_mount(m) {
-        return None;
-    }
-    Some(config::LocalFolder {
-        id: m.local_folder_id.clone(),
-        name: m.name.clone(),
-        path: m.mountpoint.clone(),
-        kind: m.kind.clone(),
-    })
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_mount_root(m: &config::SmbMount) -> Option<String> {
-    if Path::new(&m.mountpoint).is_dir() {
-        Some(m.mountpoint.clone())
-    } else {
-        None
-    }
-}
-
-#[cfg(not(all(unix, not(target_os = "macos"))))]
-fn smb_path_string_for_relative(root: &str, relative: &str) -> String {
-    let mut path = PathBuf::from(root);
-    for part in relative.split('/').filter(|part| !part.is_empty()) {
-        path.push(part);
-    }
-    path.to_string_lossy().to_string()
-}
-
-fn safe_user_media_root(path: &str) -> bool {
-    let Ok(canon) = std::fs::canonicalize(path) else {
-        return false;
-    };
-    if canon.parent().is_none() {
-        return false;
-    }
-    if let Some(home) = std::env::var_os("HOME").map(std::path::PathBuf::from) {
-        if std::fs::canonicalize(home).ok().as_ref() == Some(&canon) {
-            return false;
-        }
-    }
-    true
-}

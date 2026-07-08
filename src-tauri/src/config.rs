@@ -45,15 +45,14 @@ pub struct AppConfig {
     /// provider-neutral so backends can diverge without a schema change.
     #[serde(default)]
     pub sources: Vec<SourceConfig>,
-    /// Local (and mounted remote) folders browsed by the built-in local source.
+    /// INERT since 2026-07-08 (local/SMB/SSH sources removed — see
+    /// `.agents/decisions.md` "Vela is a multi-server client"): these three
+    /// fields are parsed, ignored, and preserved on save so an older build
+    /// can still read its config after a rollback. Never strip them here.
     #[serde(default)]
     pub local_folders: Vec<LocalFolder>,
-    /// Configured SMB shares; selected folders inside each share feed the
-    /// local family (Linux connects natively, macOS/Windows mount via the
-    /// OS).
     #[serde(default)]
     pub smb_mounts: Vec<SmbMount>,
-    /// SSH/SFTP folders mounted through sshfs (each feeds a `local_folders` entry).
     #[serde(default)]
     pub ssh_mounts: Vec<SshMount>,
     /// Per-title playback-source overrides for the merged All view: canonical
@@ -73,9 +72,11 @@ pub struct AppConfig {
     pub hidden_from_continue: Vec<String>,
 }
 
-/// An SMB/CIFS share Vela exposes through the local family. Credentials
-/// are stored for both paths: Linux speaks SMB natively in-process
-/// (libsmbclient; no mount), macOS/Windows mount via the OS.
+/// A configured SMB share. INERT: kept only so old configs round-trip
+/// (rollback-safe); no code mounts or browses these anymore. Every field —
+/// including the legacy `kind`/`local_folder_id` pair — must survive
+/// load→save (they were `skip_serializing` while a migrator handled them;
+/// with the migrator gone, dropping them on save would lose rollback data).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)] // missing fields fall back to Default rather than failing the parse
 pub struct SmbMount {
@@ -87,22 +88,16 @@ pub struct SmbMount {
     pub password: String,
     #[serde(default)]
     pub domain: String,
-    /// Where the OS mounts it (macOS/Windows). Empty on Linux: the marker
-    /// of a native, mountless share record.
     pub mountpoint: String,
-    /// Selected folders inside this share, each with its own media type.
     #[serde(default)]
     pub folders: Vec<SmbFolder>,
-    #[serde(default, skip_serializing)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub kind: String,
-    #[serde(default, skip_serializing)]
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub local_folder_id: String,
 }
 
-/// One selected folder inside an SMB share. `path` is relative to the
-/// share root, using `/` as the separator; empty means the share root
-/// itself. (The same relative path serves the native Linux client and the
-/// macOS/Windows mounted tree.)
+/// One selected folder inside an inert `SmbMount` record (see above).
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct SmbFolder {
@@ -113,9 +108,9 @@ pub struct SmbFolder {
     pub kind: String,
 }
 
-/// An SSH/SFTP folder mounted with sshfs, then browsed through the local source.
-/// Authentication is delegated to OpenSSH (`~/.ssh/config`, keys, and agent);
-/// Vela stores no SSH passwords.
+/// A configured SSH/SFTP folder. INERT: kept only so old configs round-trip
+/// (rollback-safe); no code mounts or browses these anymore. Vela stores no
+/// SSH passwords.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)] // missing fields fall back to Default rather than failing the parse
 pub struct SshMount {
@@ -140,8 +135,8 @@ fn default_ssh_port() -> u16 {
     22
 }
 
-/// One folder the local source browses. `kind` declares whether it holds movies
-/// or shows; empty means "auto-detect from contents".
+/// A configured local folder. INERT: kept only so old configs round-trip
+/// (rollback-safe); no code browses these anymore.
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)] // missing fields fall back to Default rather than failing the parse
 pub struct LocalFolder {
@@ -178,54 +173,6 @@ impl AppConfig {
     pub fn upsert_source(&mut self, src: SourceConfig) {
         self.sources.retain(|s| s.id != src.id);
         self.sources.push(src);
-    }
-
-    fn normalize_legacy_smb_mounts(&mut self) {
-        let mut legacy_folder_ids = std::collections::HashSet::new();
-        {
-            let local_folders = &self.local_folders;
-            for mount in &mut self.smb_mounts {
-                if !mount.local_folder_id.is_empty() {
-                    legacy_folder_ids.insert(mount.local_folder_id.clone());
-                }
-                if !mount.folders.is_empty() || mount.local_folder_id.is_empty() {
-                    continue;
-                }
-
-                let legacy_folder = local_folders
-                    .iter()
-                    .find(|folder| folder.id == mount.local_folder_id);
-                let fallback_name = if mount.name.trim().is_empty() {
-                    mount.share.as_str()
-                } else {
-                    mount.name.as_str()
-                };
-                let name = legacy_folder
-                    .map(|folder| folder.name.trim())
-                    .filter(|name| !name.is_empty())
-                    .unwrap_or(fallback_name)
-                    .to_string();
-                let kind = if mount.kind.trim().is_empty() {
-                    legacy_folder
-                        .map(|folder| folder.kind.clone())
-                        .unwrap_or_default()
-                } else {
-                    mount.kind.clone()
-                };
-
-                mount.folders.push(SmbFolder {
-                    id: mount.local_folder_id.clone(),
-                    name,
-                    path: String::new(),
-                    kind,
-                });
-            }
-        }
-
-        if !legacy_folder_ids.is_empty() {
-            self.local_folders
-                .retain(|folder| !legacy_folder_ids.contains(&folder.id));
-        }
     }
 }
 
@@ -295,9 +242,8 @@ pub fn load_config() -> io::Result<AppConfig> {
         }
         Err(e) => return Err(e),
     };
-    let mut cfg: AppConfig =
+    let cfg: AppConfig =
         serde_json::from_str(&s).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    cfg.normalize_legacy_smb_mounts();
     Ok(cfg)
 }
 
@@ -348,39 +294,49 @@ pub fn save_config(cfg: &AppConfig) -> io::Result<()> {
 mod tests {
     use super::*;
 
+    // Rollback rail for the 2026-07-08 local-source removal: every inert
+    // local-family field — including the legacy pre-migration SmbMount shape
+    // (`kind`/`local_folder_id` set, no `folders`) — must survive a
+    // serde round trip unchanged. This fails if the old `skip_serializing`
+    // attrs return. (It exercises the serde layer directly — the same layer
+    // load_config/save_config use — not the file I/O around it.)
     #[test]
-    fn legacy_smb_mount_becomes_selected_folder() {
-        let mut cfg = AppConfig {
-            local_folders: vec![LocalFolder {
-                id: "legacy-folder".to_string(),
-                name: "Movies".to_string(),
-                path: "/Volumes/media".to_string(),
-                kind: "movie".to_string(),
-            }],
-            smb_mounts: vec![SmbMount {
-                id: "mount".to_string(),
-                name: "Media".to_string(),
-                server: "nas".to_string(),
-                share: "media".to_string(),
-                username: "user".to_string(),
-                password: "pass".to_string(),
-                domain: String::new(),
-                mountpoint: "/Volumes/media".to_string(),
-                folders: Vec::new(),
-                kind: String::new(),
-                local_folder_id: "legacy-folder".to_string(),
-            }],
-            ..Default::default()
-        };
+    fn inert_local_family_config_round_trips_unchanged() {
+        let legacy = r#"{
+            "auth_token": "tok",
+            "local_folders": [
+                {"id": "legacy-folder", "name": "Movies", "path": "/Volumes/media", "kind": "movie"}
+            ],
+            "smb_mounts": [
+                {"id": "mount", "name": "Media", "server": "nas", "share": "media",
+                 "username": "user", "password": "pass", "mountpoint": "/Volumes/media",
+                 "kind": "movie", "local_folder_id": "legacy-folder"}
+            ],
+            "ssh_mounts": [
+                {"id": "sshm", "name": "NAS ssh", "host": "nas", "port": 22,
+                 "username": "user", "remote_path": "/srv/media",
+                 "mountpoint": "/mnt/vela-ssh", "local_folder_id": "lf-ssh"}
+            ]
+        }"#;
+        let cfg: AppConfig = serde_json::from_str(legacy).expect("legacy config parses");
 
-        cfg.normalize_legacy_smb_mounts();
+        // Loaded untouched: no migrator moves/strips legacy fields anymore.
+        assert_eq!(cfg.local_folders.len(), 1, "local_folders preserved on load");
+        assert_eq!(cfg.smb_mounts[0].kind, "movie");
+        assert_eq!(cfg.smb_mounts[0].local_folder_id, "legacy-folder");
+        assert!(cfg.smb_mounts[0].folders.is_empty(), "no synthesized folders");
 
-        assert!(cfg.local_folders.is_empty());
-        assert_eq!(cfg.smb_mounts[0].folders.len(), 1);
-        let folder = &cfg.smb_mounts[0].folders[0];
-        assert_eq!(folder.id, "legacy-folder");
-        assert_eq!(folder.name, "Movies");
-        assert_eq!(folder.path, "");
-        assert_eq!(folder.kind, "movie");
+        // Saved with everything intact: a rollback build sees its data.
+        let saved = serde_json::to_string(&cfg).expect("serializes");
+        let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
+        assert_eq!(back.local_folders.len(), 1);
+        assert_eq!(back.local_folders[0].path, "/Volumes/media");
+        assert_eq!(back.smb_mounts[0].kind, "movie", "legacy kind survives save");
+        assert_eq!(
+            back.smb_mounts[0].local_folder_id, "legacy-folder",
+            "legacy local_folder_id survives save"
+        );
+        assert_eq!(back.ssh_mounts[0].local_folder_id, "lf-ssh");
+        assert_eq!(back.ssh_mounts[0].mountpoint, "/mnt/vela-ssh");
     }
 }
