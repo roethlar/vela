@@ -83,6 +83,17 @@ decision); any Trakt integration (rejected).
   the migrator (its purpose is moot once mounts are inert), and the round-trip
   guard must include a legacy-shaped config (pre-migration `local_folder_id`
   form) proving the inert fields survive load→save byte-identical.
+  **And the serde attrs must change with it (r4 finding):** `SmbMount.kind`
+  and `SmbMount.local_folder_id` are `#[serde(default, skip_serializing)]`
+  (`config.rs:96-99`) — they load but NEVER save, so even with the migrator
+  gone, any save strips them. Slice 1 replaces `skip_serializing` with
+  `skip_serializing_if = "String::is_empty"` on both (present legacy values
+  round-trip; fresh configs stay clean), and the round-trip guard must fail
+  if either field is dropped on save. Audit note (2026-07-08): these two
+  attrs and the one migrator are the complete mutation-on-save surface for
+  the inert fields — `grep skip_serializing config.rs` returns exactly
+  lines 96/98, and `normalize_legacy_smb_mounts` is the only load-time
+  normalizer.
 - **Recents referencing removed sources**: dropped at load (a hero card whose
   Play can only error is the dead-end the UX rulings forbid). Tombstones and
   `merged_overrides` residue is harmless (keyed lookups miss) — leave.
@@ -188,3 +199,13 @@ confirmed resolved).**
   guard must cover a legacy-shaped (pre-migration) config byte-identically.
 - (LOW) A stale "for slice 2 to compile" phrase survived the r2 renumbering
   in the inventory. Fixed: rephrased to the turn-off-and-delete slice 1.
+
+**r4 — 2026-07-08 — verdict `reopened`, 1 finding, ADMITTED (r3 fixes
+confirmed resolved).**
+- (MEDIUM) The preserve-on-save rail was still incomplete: `SmbMount.kind` /
+  `SmbMount.local_folder_id` are `#[serde(default, skip_serializing)]`
+  (`config.rs:96-99`) — never written back, so saves strip rollback data even
+  without the migrator. Fixed: slice 1 switches both to
+  `skip_serializing_if = "String::is_empty"`; the round-trip guard must fail
+  if either drops. Coder audit exhausted the class: those two attrs + the one
+  migrator are the entire mutation surface for the inert fields.
