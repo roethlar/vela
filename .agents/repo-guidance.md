@@ -21,18 +21,36 @@
 1. `AGENTS.md` and this file.
 2. `.agents/state.md` for current active work and blockers.
 3. `.agents/decisions.md` for durable decisions and supersessions.
-4. `.agents/repo-map.json` for repo shape and verification commands.
-5. `README.md` and `ISSUES.md`.
-6. `.review/deduped_action_list.md` and `.review/gpt_review.md` as historical
+4. `README.md` and `ISSUES.md`.
+5. `.review/deduped_action_list.md` and `.review/gpt_review.md` as historical
    evidence only — both carry a 2026-06-10 supersession banner; their current
    facts live in `.agents/state.md` and `.agents/decisions.md`, not in the
    `.review/` files themselves.
 
 ## Verification
 
-Concrete commands and their working directories are recorded in
-`.agents/repo-map.json`; this section adds rules the command list doesn't
-carry on its own.
+This section is the canonical home for the verification commands (carved in
+from the retired `.agents/repo-map.json`, 2026-07-08; verified against
+`package.json` scripts and `.github/workflows/ci.yml` as of that carve):
+
+- `npm run check` (repo root) — frontend type and Svelte validation.
+- `npm run build` (repo root) — production frontend build, or any change
+  that can affect the Tauri frontend bundle.
+- `cargo check --locked` (from `src-tauri/`) — Rust compile validation.
+- `cargo clippy --all-targets --locked -- -D warnings` (from `src-tauri/`).
+- `cargo test --locked` (from `src-tauri/`) — Rust unit tests.
+- `npm run e2e` (repo root) — end-to-end UI/playback validation on Linux
+  (drives the real debug app; needs tauri-driver, Xvfb, ffmpeg, mpv, bsdtar,
+  curl — see `tests/e2e/README.md`). `-- --skip-build` reuses the existing
+  debug binary; `-- <name>` runs one scenario.
+
+CI note: `.github/workflows/ci.yml` runs on the `github` remote
+(`https://github.com/roethlar/vela.git` — confirmed active 2026-07-04 via
+`gh api .../actions/runs`), NOT on the gitea `origin` (no
+`.gitea/workflows/`). Run the commands locally before claiming completion;
+CI only covers pushes that reach the github remote.
+
+Rules the command list doesn't carry on its own:
 
 - Run Rust commands (`cargo check`, `cargo clippy`, `cargo test`) from
   `src-tauri/`, not the repo root.

@@ -590,9 +590,9 @@ Keep it short and update it when important repo facts change.
 - Plex stream header auth residuals: owner eyeball check on a real play
   (title bar / Shift+I clean), EDL split-file exercised only by unit tests,
   Jellyfin/Emby stream-URL parity follow-up.
-- If updating broader governance metadata, refresh `.agents/repo-map.json`
-  and `.agents/artifact-manifest.json` from their old `validated_against`
-  commit.
+- (Retired 2026-07-08: `.agents/repo-map.json` and
+  `.agents/artifact-manifest.json` were removed with the toolkit's JSON-layer
+  retirement; verification commands now live in `.agents/repo-guidance.md`.)
 
 ## Blockers
 
@@ -600,10 +600,11 @@ Keep it short and update it when important repo facts change.
 
 ## Verification
 
-- See `.agents/repo-map.json` for the current automated verification
-  commands (npm check/build; cargo check/clippy/test from `src-tauri/`).
-  clippy runs `-D warnings`. (Exact test count lives with the suite / CI, not
-  restated here — an earlier "71" vs "78" in this file was drift.)
+- See `.agents/repo-guidance.md` (Verification) for the current automated
+  verification commands (npm check/build; cargo check/clippy/test from
+  `src-tauri/`). clippy runs `-D warnings`. (Exact test count lives with the
+  suite / CI, not restated here — an earlier "71" vs "78" in this file was
+  drift.)
 - Local `cargo check --locked` passes on 0.1.21; but GitHub CI is currently RED —
   see the QUEUED CI item in Next (untriaged `cargo check --locked` failure on the
   CI runner + the advisory-only `cargo audit` job).
@@ -614,7 +615,6 @@ Keep it short and update it when important repo facts change.
 
 - `AGENTS.md`
 - `.agents/repo-guidance.md`
-- `.agents/repo-map.json`
 - `.agents/decisions.md`
 - `.agents/plans/` — the 2026-07-04 plans (implementation notes) plus the ACTIVE
   `.agents/plans/smb-ssh-playtest-fixes.md` (owner-approved, in implementation)
