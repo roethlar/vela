@@ -5,11 +5,17 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
-- **CURRENT ACTION (2026-07-06): item-detail-view slice 2** — Jellyfin/Emby
-  `item_detail`. Plan APPROVED (codex plan-review accepted r3); slice 1 LANDED
-  (0.1.31). Full detail + approach + standing instructions in the **ACTIVE WORK**
-  entry below (search "ACTIVE WORK (2026-07-06): the second track"). Everything
-  UNPUSHED (owner pushes manually). The entries below this line are chronological
+- **CURRENT ACTION (2026-07-08): item-detail-view AMENDED slice 2** — the
+  info-surface components, Plex-scoped + sparse fallback. **Owner amendment
+  2026-07-08 (Plex-first):** JF/Emby + local `item_detail` (original slices 2-3)
+  DEFERRED; the nav flip is UNIFORM across sources (library views → detail page,
+  CW carousel keeps click-to-play; non-Plex renders the same pages sparse from
+  listing data, detail `Err` falls back silently). Amendment recorded in the plan
+  (`.agents/plans/item-detail-view.md`, "Owner amendment 2026-07-08") and
+  `.agents/decisions.md` (2026-07-08). Plan APPROVED (r3) + amendment; slice 1
+  LANDED (0.1.31). Standing instructions in the **ACTIVE WORK** entry below
+  (search "ACTIVE WORK (2026-07-06): the second track"). Everything UNPUSHED
+  (owner pushes manually). The entries below this line are chronological
   history/context, not the next action.
 - LANDED 2026-07-05 — mpv autocrop bundle (`.agents/plans/mpv-autocrop-bundle.md`,
   owner-approved; decision in `.agents/decisions.md` 2026-07-05 "Ship mpv's
@@ -195,8 +201,16 @@ Keep it short and update it when important repo facts change.
   `DetailContainer` also captures `<Metadata>`); reviewloop `idv-s1` accepted CLEAN
   (base `fd0c414`, head `a2abcb7`); trail `2590508`; bump `2feac75`; all UNPUSHED. Nav
   unwired (flip is slice 5). cargo test 133 green, clippy clean; 3 guard-proven tests.
-  **NOW: slice 2** (Jellyfin/Emby `item_detail` — widen `Fields=`, parse People/Genres/
-  ratings/Studios/Taglines/PremiereDate/MediaStreams). Load-bearing
+  **OWNER AMENDMENT 2026-07-08 (Plex-first)** — supersedes the "never a Plex-only
+  stub" half of the binding above (see the plan's amendment section +
+  `.agents/decisions.md` 2026-07-08): JF/Emby + local `item_detail` (original
+  slices 2-3) DEFERRED (no start without owner go); nav flip UNIFORM (library
+  views → detail for every source, CW carousel click = play; non-Plex opens the
+  same pages sparse from listing `ItemDto`, detail `Err` → silent fallback, never
+  an error page). **NOW: amended slice 2** (was slice 4, Plex + sparse fallback):
+  info components + `detail_key`/server-preferred rank in `rank_backings` +
+  merged-show drill via `detail_key` + episode paging/selection-generation guard.
+  Then amended slice 3 (was 5): the uniform nav flip. Load-bearing
   facts the plan-review pinned (don't relearn — all in the plan): Plex listing IS
   serde-parsed (`get_items`/`ItemsContainer`, `plex_library.rs:669`) so Media/Part
   are already populated — slice 1 adds a NEW `PlexDetail` serde struct, not a

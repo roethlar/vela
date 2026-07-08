@@ -470,3 +470,39 @@ controls mpv but does not re-implement video-geometry processing" (this ships
 mpv's own script, writes no geometry code), and the 2026-06-28 confirmed facts
 (live `video-crop` D-state wedge; unreliable cropdetect on HDR/PQ) — which are the
 reason for the `auto=no` guard on Off/Manual and the warning on Automatic.
+
+
+### 2026-07-08 - Plex-first item detail: uniform nav flip, non-Plex detail backends deferred
+
+Status: Active
+
+Decision:
+For the item-detail-view feature (`.agents/plans/item-detail-view.md`), sources
+other than Plex are deprioritized: the Jellyfin/Emby and local `item_detail`
+backends (the plan's original slices 2-3) are DEFERRED until the owner picks
+them back up; do not start them without an explicit owner go. Navigation still
+flips uniformly for every source: in library views a movie click opens the info
+page, a show drills seasons then episodes, an episode opens the shared info
+page; the Continue Watching carousel keeps click-to-play everywhere. Non-Plex
+items open the same detail pages rendered sparse from listing data (`ItemDto`);
+a failed `get_item_detail` fetch (e.g. a deferred backend's graceful `Err`
+default) falls back silently to listing data and never surfaces an error page.
+
+Owner wording (2026-07-08): "sources other than plex are deprioritized. get
+this perfect with plex, then we'll worry about the others." and "plex items
+only go to detail page from library views, not from continue watching
+carousel. other sources should behave the same way."
+
+Reason:
+The owner is primarily a Plex user (consistent with the 2026-07-06 Plex-first
+reprioritization of the SMB/SSH work) and wants the detail surface polished for
+Plex before effort goes to other backends, without forking navigation semantics
+per source.
+
+Supersedes:
+The backend-coverage half of the plan's "no half-built state" ruling
+(2026-07-06): the navigation flip no longer waits for JF/Emby/local
+`item_detail`; it waits for a polished Plex surface plus a clean (never
+broken/empty/erroring) sparse page on other sources. Unchanged: the routing
+spec (CW carousel plays; library views drill), build-behind-the-nav with the
+flip landing last, and the per-slice commit + reviewloop discipline.

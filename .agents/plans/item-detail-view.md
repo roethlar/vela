@@ -10,6 +10,50 @@ flip ("no half-built state"). One non-blocking owner open-decision remains (merg
 show episode playback source, idv-5 — default set, needed only by slice 4/5).
 Original framing: owner asked whether Plex exposes more metadata than we surface
 (yes — substantially) and to plan a detail view like Infuse / the Plex clients.
+**AMENDED 2026-07-08 (owner, Plex-first)** — see "Owner amendment 2026-07-08"
+below; it supersedes the backend-coverage half of "no half-built state" and
+re-orders the remaining slices.
+
+## Owner amendment 2026-07-08 (Plex-first)
+Owner directives (verbatim): "sources other than plex are deprioritized. get this
+perfect with plex, then we'll worry about the others." And, settling the non-Plex
+routing fork: "plex items only go to detail page from library views, not from
+continue watching carousel. other sources should behave the same way."
+Recorded in `.agents/decisions.md` (2026-07-08).
+
+What changes:
+- **JF/Emby `item_detail` (old slice 2) and local `item_detail` (old slice 3) are
+  DEFERRED** — do not start without an explicit owner go. The trait's graceful-`Err`
+  default already covers them at runtime.
+- **The navigation flip is uniform across ALL sources** (refined ruling): library-view
+  clicks route to the detail surface (movie → info page; show → seasons → episodes;
+  episode → shared info page); the Continue Watching carousel keeps click-to-play
+  everywhere. Non-Plex items open the SAME pages rendered **sparse from listing data**
+  (`ItemDto`: title/year/summary/poster/duration). `get_item_detail` is still called;
+  an `Err` (unimplemented backend) falls back silently to listing data — never an
+  error state. When the deferred backends land later, the same pages simply get
+  richer; no nav change. This also covers merged cards whose `detail_key` resolves to
+  a backing with no `item_detail` yet (e.g. JF-only): detail errs → sparse fallback.
+- **What "no half-built state" still means:** the flip lands only when the surface is
+  complete and polished for Plex AND the non-Plex sparse page is clean (never
+  broken/empty/erroring) — the same bar the plan already set for local.
+
+Amended slice order (slice 1 LANDED 0.1.31, unchanged):
+- **Slice 2 (was slice 4, now Plex-scoped + sparse fallback):** info-surface
+  components (movie info page; shared episode info page; seasons/episodes drill)
+  wired to `get_item_detail`, dev-flag reachable behind the current nav; backend
+  `detail_key` + server-preferred detail rank in `rank_backings` (idv-2/6);
+  merged-show drill through `detail_key` (idv-5); episode-list paging + per-selection
+  generation guard (idv-4); sparse fallback from listing `ItemDto` when detail errs.
+- **Slice 3 (was slice 5):** flip the navigation for all sources per the refined
+  ruling above.
+- **Then:** owner playtest → polish rounds ("get this perfect with plex").
+- **Deferred:** JF/Emby `item_detail` (old slice 2); local `.nfo` widening (old
+  slice 3). Resume only on owner go; they slot in with no nav change.
+
+The amendment itself gets no separate plan-review round; its technical content
+(sparse fallback, slice re-scope) is reviewed as part of the amended slice 2's
+`reviewloop codex`.
 
 ## Goal
 A **detail / info surface** with richer info than the card: summary, rating(s),
@@ -28,11 +72,12 @@ Navigation is spec'd — no per-slice choice:
   - **Episode**: **one shared info page** for the season's episodes, with the
     displayed info updating as the selected episode changes (episode list + a detail
     panel bound to the selection — not a separate page per episode).
-- **No half-built state (binding):** this ships complete, not incrementally
-  user-visible. The new click routing + info surfaces must work across the backends
-  the owner uses before the navigation flips. See "Sequencing" — build behind the
-  current nav and flip last, rather than landing a Plex-only info page into the live
-  flow while local/JF movies click into a stub.
+- **No half-built state (binding — SUPERSEDED IN PART 2026-07-08):** this ships
+  complete, not incrementally user-visible. ~~The new click routing + info surfaces
+  must work across the backends the owner uses before the navigation flips.~~ Per the
+  owner amendment above: the flip no longer waits for JF/Emby/local `item_detail`;
+  it waits for a polished Plex surface plus a clean sparse page on other sources.
+  Build behind the current nav and flip last still holds.
 
 ## Today: no detail surface at all
 - The whole UI is one file; clicking a movie/episode **plays immediately**, a
@@ -173,7 +218,7 @@ view here shows mostly title/year/summary/poster unless we widen the `.nfo` pars
      selection, and drop any detail response whose generation is stale.
    Nav wiring per the binding UX ruling (CW carousel click still plays).
 
-## Sequencing — "no half-built state" (binding)
+## Sequencing — "no half-built state" (binding — superseded in part by the 2026-07-08 owner amendment)
 Because the click routing flips globally (movie click stops playing, starts opening
 info), the info surface must be real on every backend the owner browses before that
 flip is user-visible. Reconcile with the repo's commit-per-slice + reviewloop
@@ -186,7 +231,7 @@ discipline by **building behind the current nav and flipping last**:
 - Each intermediate slice is still an independently committed, reviewed, guard-proven
   unit — it just isn't the user-visible entry point until the flip.
 
-## Proposed slices (each its own commit + reviewloop codex; nav stays old until the flip)
+## Proposed slices (each its own commit + reviewloop codex; nav stays old until the flip) — ORIGINAL ORDER; superseded by the amended slice order in the 2026-07-08 owner amendment (slices 2-3 below DEFERRED)
 1. **`DetailDto` + `item_detail` trait method (graceful default) + `get_item_detail`
    command, Plex.** Plex `item_detail` = one `/library/metadata/{rk}` call parsed
    into a **new `PlexDetail` serde struct** (`DetailContainer`), same idiom as the
