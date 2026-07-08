@@ -506,3 +506,53 @@ The backend-coverage half of the plan's "no half-built state" ruling
 broken/empty/erroring) sparse page on other sources. Unchanged: the routing
 spec (CW carousel plays; library views drill), build-behind-the-nav with the
 flip landing last, and the per-slice commit + reviewloop discipline.
+
+
+### 2026-07-08 - Vela is a multi-server client: local/SMB/SSH playback dropped
+
+Status: Active (decided; removal not yet implemented or planned in detail)
+
+Decision:
+Vela will not play local files at all. The local-family sources (local
+folders, SMB shares, SSH/SFTP mounts) are to be REMOVED: sources are media
+servers only (Plex now; Jellyfin/Emby remain supported because the owner
+plans to eventually migrate from Plex to one of them). No file browser, no
+"open with Vela" plumbing, no local library. The removal is a separate
+planned track (deletion plan to be drafted and reviewed before any code
+change).
+
+Owner wording (2026-07-08): "no need for vela to play local files at all.
+multiple servers stay. I will eventually migrate from plex to emby or jf."
+Context: the owner rejected every library/browse/direct-play framing for
+files ("zero value to accessing the same file via ssh, smb, plex, emby, and
+jellyfin"; "I already have file explorer, finder, dolphin").
+
+Open question (owner criterion: "if it's easy, then sync; if not, we can
+find something else"): whether Plex -> Jellyfin/Emby watch-state transfer
+for the eventual migration lives in Vela (a one-shot copy tool) or outside
+it (Trakt tooling such as PlexTraktSync + server Trakt plugins). No
+continuous sync daemon in Vela either way.
+
+Reason:
+The local family was a pseudo-library: kind detection, filename parsing,
+sidecar/online metadata scraping, listing caches, and title+year dedup
+produced bare cards and a long defect tail (Bug 4, metadata revalidation,
+reload-on-open) for a use case the owner does not have. The owner is a
+server-library user; playback quality work (mpv/HDR) applies to server
+streams the same way.
+
+Supersedes:
+- The 2026-07-06 deferral of Bug 4 (share-root classification), the
+  metadata "Recently added" rail, and the SMB metadata-revalidation plan
+  (`.agents/plans/local-metadata-revalidation.md`): all three CLOSE as
+  obsolete rather than parked - their subject matter is being removed.
+- The local slice (original slice 3) of `.agents/plans/item-detail-view.md`:
+  dead, not deferred.
+- The 2026-05-23 local-media-roots narrowing decision and the 2026-07-04
+  SMB native-client decision remain historically accurate for the code
+  while it exists, but the code they govern is slated for removal; they
+  close when the removal lands.
+NOT superseded: multi-server support, the merged All view and its
+dedup/backing machinery (server-to-server overlap becomes real during the
+eventual Plex -> JF/Emby migration), mpv delegation, and the token-handling
+stance.
