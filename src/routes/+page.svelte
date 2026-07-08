@@ -810,20 +810,38 @@
     detailView = null;
   }
 
+  // A season key for an episode's shared page is only trustworthy when it
+  // names the list the episode actually came from: the already-open shared
+  // page itself, or a browse grid whose children include this episode. A
+  // bare crumb is NOT enough — with a season page open above a seasons
+  // grid, the crumb still points at the show, and get_children(show) would
+  // list seasons in the episode list (idv-s2 review r1). Anything else
+  // degrades to single-episode mode rather than a wrong list.
+  function seasonKeyFor(ep: Item): string | null {
+    if (detailView) {
+      return detailView.kind === "season" ? detailView.seasonKey : null;
+    }
+    if (mode === "browse" && !searchTerm) {
+      const here = crumbs[crumbs.length - 1];
+      if (here?.ratingKey && items.some((i) => i.ratingKey === ep.ratingKey)) {
+        return here.ratingKey;
+      }
+    }
+    return null;
+  }
+
   // Route an item to its info surface (owner UX ruling): movie/video → the
   // full-screen item page; season → the shared episode page; episode → the
-  // shared page for its season (the current crumb when we're inside that
-  // season's grid; single-episode mode otherwise). Shows keep their
-  // seasons drill, so no entry is offered for them.
+  // shared page for its season (see seasonKeyFor). Shows keep their seasons
+  // drill, so no entry is offered for them.
   function openInfo(item: Item) {
     closeMenu();
     if (item.mediaType === "season") {
       detailView = { kind: "season", seasonKey: detailKeyOf(item), seed: item };
     } else if (item.mediaType === "episode") {
-      const here = mode === "browse" && !searchTerm ? crumbs[crumbs.length - 1] : null;
       detailView = {
         kind: "season",
-        seasonKey: here?.ratingKey ?? null,
+        seasonKey: seasonKeyFor(item),
         seed: item,
         initialSelKey: item.ratingKey,
       };
