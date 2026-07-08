@@ -5,18 +5,31 @@ Keep it short and update it when important repo facts change.
 
 ## Now
 
-- **CURRENT ACTION (2026-07-08): item-detail-view AMENDED slice 2** — the
-  info-surface components, Plex-scoped + sparse fallback. **Owner amendment
-  2026-07-08 (Plex-first):** JF/Emby + local `item_detail` (original slices 2-3)
-  DEFERRED; the nav flip is UNIFORM across sources (library views → detail page,
-  CW carousel keeps click-to-play; non-Plex renders the same pages sparse from
-  listing data, detail `Err` falls back silently). Amendment recorded in the plan
-  (`.agents/plans/item-detail-view.md`, "Owner amendment 2026-07-08") and
-  `.agents/decisions.md` (2026-07-08). Plan APPROVED (r3) + amendment; slice 1
-  LANDED (0.1.31). Standing instructions in the **ACTIVE WORK** entry below
-  (search "ACTIVE WORK (2026-07-06): the second track"). Everything UNPUSHED
+- **CURRENT ACTION (2026-07-08): item-detail-view AMENDED slice 3 — the uniform
+  nav flip** (library views → detail surface for EVERY source: movie click →
+  info page, season click → shared episode page, episode click → shared page;
+  show click keeps the seasons drill; CW carousel keeps click-to-play; ungate
+  the context-menu "Info" entry). Do this only after the owner playtests slice 2
+  OR on an explicit go. **Owner amendment 2026-07-08 (Plex-first):** JF/Emby +
+  local `item_detail` (original slices 2-3) DEFERRED; non-Plex renders the same
+  pages sparse from listing data (detail `Err` falls back silently — already
+  built). Amendment recorded in the plan ("Owner amendment 2026-07-08") and
+  `.agents/decisions.md` (2026-07-08). **AMENDED SLICE 2 LANDED 2026-07-08
+  (0.1.32)** — see the ACTIVE WORK entry below for detail. Everything UNPUSHED
   (owner pushes manually). The entries below this line are chronological
   history/context, not the next action.
+- **WINDOWS DEV HOST FACTS (2026-07-08, first session on `F:\dev\vela`):**
+  cargo/rustc fail with "The handle is invalid (os error 6)" unless stdin is
+  valid — run via `cmd /c "cargo ... < nul"` (rustup shim quirk). codex lives at
+  `%APPDATA%\npm\codex.cmd` (the WinGet copy vanished mid-session); pass the
+  review prompt via stdin redirect (`< promptfile`), the `</dev/null` incantation
+  is POSIX-only. Windows baseline: cargo test runs 111 (Linux-gated SMB/sshfs
+  tests excluded); clippy shows 13 pre-existing dead-code warnings from unix-cfg
+  paths (NOT slice regressions; the true `-D warnings` gate is Linux CI). The
+  E2E harness does NOT run here (vendored Linux WebKitWebDriver) — frontend
+  slices get no automated E2E leg on this host; recorded follow-up: an E2E
+  detail scenario on the Linux host. Checkout is autocrlf=true (phantom
+  modified files with empty diffs are line-ending noise).
 - LANDED 2026-07-05 — mpv autocrop bundle (`.agents/plans/mpv-autocrop-bundle.md`,
   owner-approved; decision in `.agents/decisions.md` 2026-07-05 "Ship mpv's
   autocrop.lua behind an opt-in toggle", which REVERSES the same-day crop-drop for
@@ -210,7 +223,31 @@ Keep it short and update it when important repo facts change.
   an error page). **NOW: amended slice 2** (was slice 4, Plex + sparse fallback):
   info components + `detail_key`/server-preferred rank in `rank_backings` +
   merged-show drill via `detail_key` + episode paging/selection-generation guard.
-  Then amended slice 3 (was 5): the uniform nav flip. Load-bearing
+  Then amended slice 3 (was 5): the uniform nav flip.
+  **AMENDED SLICE 2 LANDED 2026-07-08 (0.1.32)** — code `7085fdf`; reviewloop-codex
+  fixup `0ecd819`; trail `76415ea`; bump `c7aaeba`; all UNPUSHED. Backend:
+  `detail_key` on merged `ItemDto` computed in `rank_backings` via `detail_rank`
+  (reverse of `kind_rank`; folds away when redundant/unmerged; guard-proven
+  red/green `merge_tests::*detail_key*`). Frontend: `src/lib/ItemDetail.svelte`
+  (movie/video full-screen info page), `src/lib/SeasonDetail.svelte` (shared
+  episode page — loads ALL `get_children` pages (idv-4a); per-episode detail
+  cache keyed by the CURRENT selection so stale paint is structurally impossible
+  (idv-4b)); both render listing data instantly and enrich from `get_item_detail`,
+  Err → silent sparse render (the NORMAL path for deferred JF/Emby/local);
+  shared `Item`/`Detail` types in `src/lib/types.ts`; merged shows drill through
+  `detailKey ?? ratingKey` in `open()` (idv-5). Entry: context-menu **Info**
+  (dev builds, or localStorage `vela.devDetail`="1"; no entry on shows — they
+  keep the seasons drill); the detail view LAYERS over home/browse state (Back/
+  Esc returns exactly; cleared on any nav). Loop `idv-s2` r1 reopened idv-s2-1
+  (LOW — episode Info inside an open season page re-listed seasons as episodes;
+  fixed via `seasonKeyFor`: trust only the open page's own key or a crumb whose
+  grid contains the episode, else single-episode mode), r2 accepted clean
+  (trail `.agents/review/index.md` + `findings/idv-s2-1.md`). svelte-check 0/0,
+  npm build, cargo test 111 (Windows host), clippy baseline-clean. REMAINING:
+  owner playtest (dev build, or set the localStorage flag in a release build:
+  Info on a Plex movie → rich page; Info on a season → shared episode page;
+  Info on a JF/local item → clean sparse page, no error); then slice 3.
+  Load-bearing
   facts the plan-review pinned (don't relearn — all in the plan): Plex listing IS
   serde-parsed (`get_items`/`ItemsContainer`, `plex_library.rs:669`) so Media/Part
   are already populated — slice 1 adds a NEW `PlexDetail` serde struct, not a
