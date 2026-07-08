@@ -23,6 +23,23 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop dls-s1 CLOSED 2026-07-08: **accepted clean at r1, no findings** (codex
+read-only, `guard_confirmed:false` — coder guard-proved red/green). Scope was
+**drop-local-sources slice 1** (base `3a62ac4`, head `6855df5`): the single
+turn-off-and-delete commit — 22 files, +297/−8087; ten Rust modules deleted,
+15 commands + registrations + startup remount paths gone, Settings local/SMB/
+SSH surfaces gone, server-only rank ladders, packaging deps dropped. Compat
+rails guard-proven red/green: `config.rs
+inert_local_family_config_round_trips_unchanged` (inert fields + legacy
+SmbMount shape survive save) and `commands.rs
+recents_from_removed_sources_are_filtered_at_read_time` (no dead hero cards;
+config preserved). Windows-host CI green (cargo test 62, clippy at the
+4-warning cfg baseline, svelte-check 0/0, build). Additionally an ULTRACODE
+multi-agent audit (5 sweep lenses + adversarial verification, 13 agents) ran
+pre-commit: 8 findings, all refuted as inert; 4 hardened anyway (velasmb CSP
+token, packaged SMB/local description strings, guard-test comment). REMAINING:
+slice 2 (E2E re-home — Linux host), slice 3 (docs sweep), owner playtest.
+
 Drop-local-sources PLAN-review loop CLOSED 2026-07-08: **accepted at r5**
 (base=head per round: `ff6fb64`→`48a0883`→`4fcbb80`→`a46be0f`→`2533f09`; five
 rounds, nine findings, all resolved — full trail in the plan's
