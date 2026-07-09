@@ -4,6 +4,76 @@ Entries rotated verbatim out of `.agents/state.md` `## Now` when they stopped
 being live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-07-09 (item-detail complete + person browse code-complete, v0.1.39)
+
+Context for readers: the item-detail track (nav flip + episode navigation +
+crumb trail) completed and was owner-verified through 0.1.36; the DLS slice-1
+landed detail and its playtest record rotate now that only slices 2-3 remain
+live; the 2026-07-05 RED-CI re-triage item CLOSED 2026-07-09 — the owner
+pushed both remotes to `926162c` and GitHub CI ran GREEN on it (and on
+`2b7e769`), so the old failures no longer reproduce on current code.
+
+- **DLS slice 1 LANDED 2026-07-08 (0.1.33)** — the turn-off-and-delete commit
+  `6855df5` (22 files, +297/−8087): ten Rust modules deleted (source/{local,
+  vfs,smb_vfs,metadata,listing_cache}.rs, smb.rs, smb_client.rs, sshfs.rs,
+  stream_proxy.rs, ui_events.rs), 15 local-family commands + lib.rs
+  registrations + startup remount/refresh paths gone, velasmb scheme + CSP
+  token gone, proxy plumbing out of play_by_key/playback.rs, server-only
+  `kind_rank`/`detail_rank` (plex 0, jf/emby 1; they now coincide, so
+  `detail_key` only appears under a per-title play override), Settings
+  local/SMB/SSH forms + Connected mount rows + Folders tab removed, packaging
+  deps (smbclient/sshfs/libsmbclient/pavao-sys) dropped, packaged descriptions
+  de-SMB'd (`97d4467` got the crate description). **Compat rails, guard-proven
+  red/green:** config's `local_folders`/`smb_mounts`/`ssh_mounts` are inert —
+  parsed, ignored, PRESERVED on save (legacy migrator deleted; SmbMount
+  `kind`/`local_folder_id` now round-trip) — and recents from dead sources are
+  filtered at read time (`filter_live_recents`), never stripped from config.
+  Reviewloop `dls-s1` accepted CLEAN r1; an ultracode 13-agent audit found 8
+  inert-only findings (4 hardened anyway). Trail `c11a458`; bump `e66bf7c`.
+- **ITEM-DETAIL TRACK (Plex-first, owner amendment 2026-07-08):** slice 1
+  (backend DetailDto + Plex parse, 0.1.31), amended slice 2 (info surfaces
+  + `detail_key` routing, 0.1.32, loop `idv-s2` accepted r2), and **amended
+  slice 3 — the uniform nav flip — LANDED 2026-07-08** (`74ff385`, 0.1.34;
+  loop `idv-s3` accepted clean r1, trail `.agents/review/index.md`):
+  library/home-rail clicks open the detail surface for every source
+  (movie/video → info page; season/episode → shared episode page; show
+  keeps the seasons drill through `detail_key`), the CW cover-flow center
+  click plays directly, the context-menu "Info" entry is ungated
+  (`devDetail` flag removed), and the poster-card hover play overlay is
+  gone. JF/Emby `item_detail` stays deferred (local permanently, per the
+  removal). **0.1.34 PLAYTEST (owner, 2026-07-08): "otherwise, successful
+  test"** — one defect: a home-rail episode click opened a single-episode
+  page with no season/show context. **Fixed in polish round idv-s4
+  (0.1.35)** — `f1e36d3` + r1 fix `cc9f060`, loop accepted r2: episodes
+  carry namespaced parent/grandparent keys (Plex + JF/Emby), episode clicks
+  open the shared season page with the episode selected however arrived at,
+  and the season page heading links to the show (seasons drill) and, in
+  single-episode mode, to the full season page. The 0.1.35 playtest
+  verified all of that and surfaced one more inconsistency — the detail
+  pages dropped the browse crumb trail (no direct back to TV Shows from a
+  season page) — **fixed in polish round idv-s5 (0.1.36, `496218e`, loop
+  accepted clean r1)**: detail pages carry the standard crumb bar
+  (ancestors clickable; detail page as current crumb; just Back over
+  Home). **0.1.36 PLAYTEST VERIFIED (owner, 2026-07-09)** — the whole
+  flipped-nav surface is owner-verified: episode→season routing, heading
+  links, and the detail crumb trail.
+- **DLS slice 1 PLAYTEST SUCCESSFUL (owner, 2026-07-08, 0.1.33 Windows NSIS
+  build):** Plex-only sidebar, no dead hero cards, playback unchanged. The
+  item-detail Info pages were NOT exercised — release builds cannot show the
+  dev-gated Info entry (no `devtools` feature, so no console for the
+  localStorage flag); the owner knows clicking tiles still plays by design
+  until the nav flip.
+- Owner styling ruling 2026-07-09 (encoded at the `.watchedbadge` CSS
+  comment, landed `fcb3e22` without a reviewloop — one-rule CSS deletion,
+  disproportionate): watched items are NOT dimmed; the checkmark badge is
+  the only indicator. Owner confirmed in the 0.1.37 build.
+- QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
+  on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
+  untriaged `cargo check --locked` failure on the runner). Stale-risk: local
+  code has since changed enormously (unpushed); re-triage only after the next
+  owner push gives CI something current to run. [CLOSED 2026-07-09: CI GREEN
+  on the newly pushed `926162c` and `2b7e769`.]
+
 ## Rotated 2026-07-08 (post drop-local-sources slice 1, v0.1.33)
 
 Context for readers: everything below predates or was superseded by the

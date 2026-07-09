@@ -13,66 +13,35 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   or Emby; the watch-state migration goal is a one-shot direct Plex→JF/Emby
   copy in Vela at migration time if simple (no Trakt relay). Nothing of that
   tool is built yet.
-- **DLS slice 1 LANDED 2026-07-08 (0.1.33)** — the turn-off-and-delete commit
-  `6855df5` (22 files, +297/−8087): ten Rust modules deleted (source/{local,
-  vfs,smb_vfs,metadata,listing_cache}.rs, smb.rs, smb_client.rs, sshfs.rs,
-  stream_proxy.rs, ui_events.rs), 15 local-family commands + lib.rs
-  registrations + startup remount/refresh paths gone, velasmb scheme + CSP
-  token gone, proxy plumbing out of play_by_key/playback.rs, server-only
-  `kind_rank`/`detail_rank` (plex 0, jf/emby 1; they now coincide, so
-  `detail_key` only appears under a per-title play override), Settings
-  local/SMB/SSH forms + Connected mount rows + Folders tab removed, packaging
-  deps (smbclient/sshfs/libsmbclient/pavao-sys) dropped, packaged descriptions
-  de-SMB'd (`97d4467` got the crate description). **Compat rails, guard-proven
-  red/green:** config's `local_folders`/`smb_mounts`/`ssh_mounts` are inert —
-  parsed, ignored, PRESERVED on save (legacy migrator deleted; SmbMount
-  `kind`/`local_folder_id` now round-trip) — and recents from dead sources are
-  filtered at read time (`filter_live_recents`), never stripped from config.
-  Reviewloop `dls-s1` accepted CLEAN r1; an ultracode 13-agent audit found 8
-  inert-only findings (4 hardened anyway). Trail `c11a458`; bump `e66bf7c`.
-  REMAINING: **slice 2 — E2E re-home to mock servers (LINUX HOST ONLY;
-  tests/e2e is knowingly broken until then)**; **slice 3 — docs sweep**
-  (README, ISSUES, `.agents/repo-guidance.md` Mission Detail + the SMB/local
-  Earned Practices bullets — now drift vs code — plus plan banners and the
-  2026-05-23/2026-07-04 decision closures); owner playtest (below).
-- **ITEM-DETAIL TRACK (Plex-first, owner amendment 2026-07-08):** slice 1
-  (backend DetailDto + Plex parse, 0.1.31), amended slice 2 (info surfaces
-  + `detail_key` routing, 0.1.32, loop `idv-s2` accepted r2), and **amended
-  slice 3 — the uniform nav flip — LANDED 2026-07-08** (`74ff385`, 0.1.34;
-  loop `idv-s3` accepted clean r1, trail `.agents/review/index.md`):
-  library/home-rail clicks open the detail surface for every source
-  (movie/video → info page; season/episode → shared episode page; show
-  keeps the seasons drill through `detail_key`), the CW cover-flow center
-  click plays directly, the context-menu "Info" entry is ungated
-  (`devDetail` flag removed), and the poster-card hover play overlay is
-  gone. Full earlier detail in `docs/history/state-archive.md` and
-  `.agents/plans/item-detail-view.md`. JF/Emby `item_detail` stays deferred
-  (local permanently, per the removal). **0.1.34 PLAYTEST (owner,
-  2026-07-08): "otherwise, successful test"** — one defect: a home-rail
-  episode click opened a single-episode page with no season/show context.
-  **Fixed in polish round idv-s4 (0.1.35)** — `f1e36d3` + r1 fix `cc9f060`,
-  loop accepted r2 (trail `.agents/review/index.md`): episodes carry
-  namespaced parent/grandparent keys (Plex + JF/Emby), episode clicks open
-  the shared season page with the episode selected however arrived at, and
-  the season page heading links to the show (seasons drill) and, in
-  single-episode mode, to the full season page. The 0.1.35 playtest
-  verified all of that and surfaced one more inconsistency — the detail
-  pages dropped the browse crumb trail (no direct back to TV Shows from a
-  season page) — **fixed in polish round idv-s5 (0.1.36, `496218e`, loop
-  accepted clean r1)**: detail pages carry the standard crumb bar
-  (ancestors clickable; detail page as current crumb; just Back over
-  Home). **0.1.36 PLAYTEST VERIFIED (owner, 2026-07-09)** — the whole
-  flipped-nav surface is now owner-verified: episode→season routing,
-  heading links, and the detail crumb trail. **NEXT: Plex polish continues
-  only on the next owner report; no open item-detail defect.** No
-  automated frontend guard (no JS runner; E2E is Linux-only) — owner
-  playtests are the behavioral check.
-- **DLS slice 1 PLAYTEST SUCCESSFUL (owner, 2026-07-08, 0.1.33 Windows NSIS
-  build):** Plex-only sidebar, no dead hero cards, playback unchanged. The
-  item-detail Info pages were NOT exercised — release builds cannot show the
-  dev-gated Info entry (no `devtools` feature, so no console for the
-  localStorage flag); the owner knows clicking tiles still plays by design
-  until the nav flip. Remaining owner playtest asks: (1) library sorting
+- **DLS (drop-local-sources): slice 1 LANDED + owner-playtested 2026-07-08**
+  (0.1.33, `6855df5`; loop `dls-s1` clean r1; full detail rotated to
+  `docs/history/state-archive.md`). REMAINING: **slice 2 — E2E re-home to
+  mock servers (LINUX HOST ONLY; tests/e2e is knowingly broken until then,
+  and the re-home must also rewrite scenarios written against click-to-play
+  — since the nav flip, library card clicks open info pages)**; **slice 3 —
+  docs sweep** (README, ISSUES, `.agents/repo-guidance.md` Mission Detail +
+  the SMB/local Earned Practices bullets — now drift vs code — plus plan
+  banners and the 2026-05-23/2026-07-04 decision closures).
+- **ITEM-DETAIL TRACK: COMPLETE and owner-verified through 0.1.36
+  (2026-07-09)** — nav flip (`74ff385`), episode navigation polish
+  (`f1e36d3`+`cc9f060`), detail crumb trail (`496218e`); loops idv-s3/s4/s5
+  in `.agents/review/index.md`; full history rotated to the archive and
+  `.agents/plans/item-detail-view.md`. No open defect; further Plex polish
+  only on the next owner report. JF/Emby `item_detail` stays deferred on an
+  explicit owner go. No automated frontend guard (no JS runner; E2E is
+  Linux-only) — owner playtests are the behavioral check.
+- **PERSON BROWSE (clickable actor/director/writer → filtered grid):
+  CODE-COMPLETE at 0.1.39, owner playtest PENDING.** Owner go 2026-07-09
+  (defaults accepted: newest-first, full cast, episode-level crew links);
+  plan `.agents/plans/person-browse.md` (reviewed r3); slice 1 backend
+  `35fcc67` (loop `pb-s1` clean r1), slice 2 frontend `b290b31` (loop
+  `pb-s2` clean r1), bumps `62fd927`/`8204a77`. Playtest checklist:
+  cast/director/writer clicks open the person grid (newest first,
+  movies+shows mixed), results route per the nav flip, Back/crumbs work,
+  mark-watched from the person grid keeps the grid populated (the plan's
+  refresh case), non-Plex sparse pages stay plain text. The owner last
+  BUILT 0.1.37 — 0.1.39 needs a fresh `./scripts/build.ps1`.
+- Outstanding owner playtest asks (older builds): (1) library sorting
   0.1.30 — sort dropdown on Plex libraries + merged All view; (2) mpv
   autocrop 0.1.22 — Shift+C / Automatic crop on the real HDR stack.
 - **machine-local (Windows dev host, `F:\dev\vela`):** the `ptk` MCP server
@@ -92,37 +61,19 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   (roethlar/AgentGovernanceBootstrap#2, 2026-07-09 — the handoff operator
   conflicts with the toolkit's own `*.local.*` convention); expect a future
   governance refresh to move it to an untracked `state.local.md`-style home.
-- Version 0.1.39 (bumped `8204a77`, 2026-07-09). Everything since the last
-  owner push is UNPUSHED as of `ca826d8` (owner pushes manually; policy
-  `.agents/push-policy.md`). Owner styling ruling 2026-07-09 (encoded at the
-  `.watchedbadge` CSS comment, landed `fcb3e22` without a reviewloop —
-  one-rule CSS deletion, disproportionate): watched items are NOT dimmed;
-  the checkmark badge is the only indicator.
+- Version 0.1.39 (bumped `8204a77`, 2026-07-09). **Owner pushed BOTH remotes
+  (origin + github) to `926162c` on 2026-07-09**; 9 commits are unpushed as
+  of `d3dbb58` (owner pushes manually; policy `.agents/push-policy.md`).
+  **GitHub CI is GREEN on the pushed head `926162c`** (verified via
+  `gh run list` 2026-07-09) — the 2026-07-05 RED-CI re-triage item is
+  CLOSED; the old `05f9594` failures don't reproduce on current code.
 
 ## Next
 
+- Owner playtest of person browse (0.1.39 — build first; checklist in the
+  entry above). The most likely next action on any host.
 - DLS slice 2 (E2E re-home) from a Linux-host session, then slice 3 (docs
-  sweep) — see the DLS entry above for the sweep list. The re-home must
-  also update scenarios written against click-to-play: since the nav flip
-  (`74ff385`), library card clicks open info pages, not playback.
-- Item-detail: no open defect (0.1.36 verified 2026-07-09); further Plex
-  polish on the next owner report; JF/Emby `item_detail` resumes only on
-  an explicit owner go.
-- Person browse (clickable actor/director/writer → filtered grid): owner
-  GO 2026-07-09 (defaults accepted: newest-first, full cast, episode-level
-  crew links). **CODE-COMPLETE at 0.1.39**: slice 1 backend (`35fcc67`,
-  loop `pb-s1` clean r1) + slice 2 frontend (`b290b31`, loop `pb-s2` clean
-  r1; bump `8204a77`) — trails `.agents/review/index.md`, plan
-  `.agents/plans/person-browse.md`. **NEXT: owner playtest 0.1.39** —
-  cast/director/writer clicks open the person grid (newest first,
-  movies+shows), results route per the nav flip, Back/crumbs work, and the
-  plan's refresh case (mark-watched from the person grid keeps the grid);
-  non-Plex sparse pages stay plain text.
-- QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
-  on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
-  untriaged `cargo check --locked` failure on the runner). Stale-risk: local
-  code has since changed enormously (unpushed); re-triage only after the next
-  owner push gives CI something current to run.
+  sweep) — scope lists in the DLS entry above.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
@@ -152,7 +103,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - `.agents/decisions.md`
 - `.agents/plans/drop-local-sources.md` (ACTIVE — slice 1 landed, 2-3 open)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
-- `.agents/plans/person-browse.md` (REVIEWED — awaiting owner go)
+- `.agents/plans/person-browse.md` (IMPLEMENTED — slices 1-2 landed;
+  owner playtest pending)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (drift-suspect until DLS slice 3 sweeps them)
