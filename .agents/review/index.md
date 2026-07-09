@@ -24,6 +24,25 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop pb-s2 CLOSED 2026-07-09: **accepted clean at r1, no findings** (codex
+read-only, `guard_confirmed:false` — no JS runner; owner playtest is the
+plan-recorded behavioral check). Scope was **person-browse slice 2 — the
+frontend** (base `1fef0e8`, head `b290b31`; 3 files +157/−24): cast cards and
+director/writer names become buttons when `personKey` is present (plain text
+otherwise — non-Plex sparse pages inert); clicking runs the new `personView`
+browse root ("With <Name>" / "Directed by <Name>" / "Written by <Name>"
+crumb, one-shot `get_person_items`, newest first, normal `open()` routing on
+results). The plan-review bindings verified in-code by codex: root switches
+clear `personView`, child drills preserve it (searchTerm pattern),
+`refreshWatchState` re-runs the person query only at the root level, `goCrumb`
+routes person roots to the re-run. svelte-check caught two defects pre-commit
+(missing `onPerson` destructure; `svelte:element` a11y) — fixed before the
+reviewed commit. Verified: svelte-check 0/0, npm build clean; bump 0.1.39
+`8204a77`. **The person-browse feature is CODE-COMPLETE; REMAINING: owner
+playtest** (incl. the plan's refresh case: mark-watched from the person grid
+must keep the grid populated), then the env-gated live-filter check note in
+the plan stands satisfied by the playtest itself (the grid IS the live check).
+
 Loop pb-s1 CLOSED 2026-07-09: **accepted clean at r1, no findings** (codex
 read-only, `guard_confirmed:false` — coder ran the red/green proof). Scope was
 **person-browse slice 1** (base `02cbf39`, head `35fcc67`; 8 files +232/−15;

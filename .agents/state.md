@@ -101,10 +101,14 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   an explicit owner go.
 - Person browse (clickable actor/director/writer → filtered grid): owner
   GO 2026-07-09 (defaults accepted: newest-first, full cast, episode-level
-  crew links). **Slice 1 LANDED** (`35fcc67`, 0.1.38 `62fd927`; loop
-  `pb-s1` accepted clean r1 — trail `.agents/review/index.md`): backend
-  person identity + `person_items` (Plex). Slice 2 (clickable credits +
-  person view) IN PROGRESS.
+  crew links). **CODE-COMPLETE at 0.1.39**: slice 1 backend (`35fcc67`,
+  loop `pb-s1` clean r1) + slice 2 frontend (`b290b31`, loop `pb-s2` clean
+  r1; bump `8204a77`) — trails `.agents/review/index.md`, plan
+  `.agents/plans/person-browse.md`. **NEXT: owner playtest 0.1.39** —
+  cast/director/writer clicks open the person grid (newest first,
+  movies+shows), results route per the nav flip, Back/crumbs work, and the
+  plan's refresh case (mark-watched from the person grid keeps the grid);
+  non-Plex sparse pages stay plain text.
 - QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
   on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
   untriaged `cargo check --locked` failure on the runner). Stale-risk: local
