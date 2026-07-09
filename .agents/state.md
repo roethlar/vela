@@ -47,10 +47,18 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   (`devDetail` flag removed), and the poster-card hover play overlay is
   gone. Full earlier detail in `docs/history/state-archive.md` and
   `.agents/plans/item-detail-view.md`. JF/Emby `item_detail` stays deferred
-  (local permanently, per the removal). **NEXT: owner playtest of the
-  flipped nav + info pages (0.1.34), then Plex polish rounds** ("get this
-  perfect with plex"). No automated frontend guard (no JS runner; E2E is
-  Linux-only) — the playtest is the behavioral check.
+  (local permanently, per the removal). **0.1.34 PLAYTEST (owner,
+  2026-07-08): "otherwise, successful test"** — one defect: a home-rail
+  episode click opened a single-episode page with no season/show context.
+  **Fixed in polish round idv-s4 (0.1.35)** — `f1e36d3` + r1 fix `cc9f060`,
+  loop accepted r2 (trail `.agents/review/index.md`): episodes carry
+  namespaced parent/grandparent keys (Plex + JF/Emby), episode clicks open
+  the shared season page with the episode selected however arrived at, and
+  the season page heading links to the show (seasons drill) and, in
+  single-episode mode, to the full season page. **NEXT: owner re-playtest
+  (0.1.35) — rail episode click lands on the season page; heading links —
+  then Plex polish continues.** No automated frontend guard (no JS runner;
+  E2E is Linux-only) — the playtest is the behavioral check.
 - **DLS slice 1 PLAYTEST SUCCESSFUL (owner, 2026-07-08, 0.1.33 Windows NSIS
   build):** Plex-only sidebar, no dead hero cards, playback unchanged. The
   item-detail Info pages were NOT exercised — release builds cannot show the
@@ -67,9 +75,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   warnings (post-removal; was 13); the E2E harness does NOT run here (Linux
   WebKitWebDriver); checkout is autocrlf=true (empty-diff "modified" files
   are line-ending noise).
-- Version 0.1.34 (bumped `e388a60`, 2026-07-08; BUILD_DATE reads 2026-07-09
+- Version 0.1.35 (bumped `5ec20ad`, 2026-07-08; BUILD_DATE reads 2026-07-09
   — the script stamps UTC, which was past midnight). Everything since the
-  last owner push is UNPUSHED as of `e388a60` (owner pushes manually; policy
+  last owner push is UNPUSHED as of `5ec20ad` (owner pushes manually; policy
   `.agents/push-policy.md`).
 
 ## Next
@@ -78,9 +86,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   sweep) — see the DLS entry above for the sweep list. The re-home must
   also update scenarios written against click-to-play: since the nav flip
   (`74ff385`), library card clicks open info pages, not playback.
-- Item-detail: owner playtest of the flipped nav (0.1.34), then Plex
-  polish rounds; JF/Emby `item_detail` resumes only on an explicit owner
-  go.
+- Item-detail: owner re-playtest of 0.1.35 (rail episode → season page
+  with episode selected; show/season heading links), then Plex polish
+  rounds; JF/Emby `item_detail` resumes only on an explicit owner go.
 - QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
   on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
   untriaged `cargo check --locked` failure on the runner). Stale-risk: local

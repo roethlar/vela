@@ -24,6 +24,33 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop idv-s4 CLOSED 2026-07-08: **accepted at r2** (codex read-only,
+`guard_confirmed:false` both rounds — coder ran the red/green proof). Scope
+was the **owner-playtest polish round: episode info navigation** (base
+`4c56aac`, head `cc9f060`; slice `f1e36d3` + r1 fix `cc9f060`). Owner-reported
+in the 0.1.34 playtest ("otherwise, successful test"): a home-rail episode
+click opened a single-episode page with no season/show context. The change:
+`ItemDto` gains source-namespaced `parentRatingKey`/`grandparentRatingKey`
+(Plex: both listing parsers + season Directory rows; JF/Emby: SeasonId/
+SeriesId; serde default/skip-none so recents + cache round-trip), frontend
+`seasonKeyFor` prefers the episode's own parent key — so an episode clicked
+from a rail/search opens the shared season page with the episode selected —
+and the season page heading gains navigation (show title → seasons drill;
+season title → full season page, only when not already listing it). **r1
+reopened 1 finding, admitted:** a season seed's `parentRatingKey` is the SHOW
+key, so while `selected` was null (loading, or failed/empty load) the Season
+heading linked `onSeason(showKey)` — get_children(show) would list seasons as
+episodes (the idv-s2 routing-guard violation). Fixed `cc9f060`: the season
+link derives from EPISODE parents only. **r2 accepted clean.** Guards proven
+red/green: `episode_and_season_rows_carry_parent_keys` (both Plex parsers +
+Directory→Video map), `to_item_namespaces_parent_and_grandparent_keys`
+(Plex), `to_item_namespaces_season_and_series_keys` (JF/Emby) — reverting the
+mappings fails exactly these three. Verified on the Windows dev host: cargo
+test 65, clippy at the 4-warning baseline, svelte-check 0/0, npm build clean;
+post-bump `cargo check --locked` clean (0.1.35, `5ec20ad`). Frontend link/
+routing behavior itself has NO automated guard (recorded gap) — owner
+re-playtest is the check.
+
 Loop idv-s3 CLOSED 2026-07-08: **accepted clean at r1, no findings** (codex
 read-only, `guard_confirmed:false` — no JS unit runner; E2E harness is
 Linux-only and awaits the DLS slice 2 re-home). Scope was **item-detail-view
