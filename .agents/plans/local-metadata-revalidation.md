@@ -1,5 +1,10 @@
 # Plan: Stop the local family re-walking over the network every open (DRAFT — likely DEFER)
 
+> **CLOSED as obsolete 2026-07-09:** the local family this plan targeted was
+> removed from Vela (decision `.agents/decisions.md` 2026-07-08, which
+> explicitly closes this plan; slice 1 landed 0.1.33 `6855df5`). Never
+> implemented; retained as historical diagnosis only.
+
 ## Status
 **DRAFT / proposed 2026-07-06.** Owner observed SMB metadata "reloading every time"
 and asked to plan a fix, but flagged it **may not be worth it** — they mostly use

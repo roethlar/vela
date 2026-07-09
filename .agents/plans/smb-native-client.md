@@ -1,5 +1,11 @@
 # Plan: Native SMB client + loopback streaming proxy (drop Linux mount dependency)
 
+> **CLOSED as obsolete 2026-07-09:** all SMB code this plan produced was
+> deleted with the local/SMB/SSH source removal (decision
+> `.agents/decisions.md` 2026-07-08; plan
+> `.agents/plans/drop-local-sources.md`, slice 1 landed 0.1.33 `6855df5`).
+> Retained as historical design record only.
+
 Status: IMPLEMENTED 2026-07-04 on branch `smb-native` (six slices, each
 codex-verified — see `.agents/review/index.md`). Deviations from the draft
 are recorded in the finding docs: `pavao-sys` instead of the `pavao` crate

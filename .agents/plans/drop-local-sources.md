@@ -1,10 +1,17 @@
 # Plan: Drop local/SMB/SSH sources — Vela is a multi-server client
 
 ## Status
-CODEX-REVIEWED 2026-07-08, **awaiting owner approval** — decision recorded
-(`.agents/decisions.md` 2026-07-08 "Vela is a multi-server client"); the
-plan-review loop CLOSED accepted at r5 (five rounds, nine findings dls-r1..r4
-all resolved — see Review log). No code change until the owner's explicit go.
+**IMPLEMENTING — slices 1 and 3 landed, slice 2 in progress (2026-07-09).**
+Slice 1 (turn-off-and-delete) landed 2026-07-08 (0.1.33, `6855df5`; loop
+`dls-s1` clean r1) and is owner-playtested. Slice 3 (docs sweep) landed
+2026-07-09 — README/ISSUES/repo-guidance de-localed, six obsolete plans
+bannered, decision closures recorded; the "repo-map refresh" item is moot
+(`.agents/repo-map.json` was retired by the 2026-07-08 governance refresh).
+Slice 2 (E2E re-home) is in progress on the owner's Linux VM. Slices 2 and 3
+were reordered (3 before 2) while the VM was provisioned — they are
+independent; slice 2 still precedes any further feature work.
+Plan-review loop CLOSED accepted at r5 (five rounds, nine findings
+dls-r1..r4 all resolved — see Review log).
 
 ## Goal
 Remove local-file playback entirely: local folders, SMB shares, and SSH/SFTP

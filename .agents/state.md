@@ -15,13 +15,14 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   tool is built yet.
 - **DLS (drop-local-sources): slice 1 LANDED + owner-playtested 2026-07-08**
   (0.1.33, `6855df5`; loop `dls-s1` clean r1; full detail rotated to
-  `docs/history/state-archive.md`). REMAINING: **slice 2 — E2E re-home to
-  mock servers (LINUX HOST ONLY; tests/e2e is knowingly broken until then,
-  and the re-home must also rewrite scenarios written against click-to-play
-  — since the nav flip, library card clicks open info pages)**; **slice 3 —
-  docs sweep** (README, ISSUES, `.agents/repo-guidance.md` Mission Detail +
-  the SMB/local Earned Practices bullets — now drift vs code — plus plan
-  banners and the 2026-05-23/2026-07-04 decision closures).
+  `docs/history/state-archive.md`). **Slice 3 (docs sweep) LANDED
+  2026-07-09** — README/ISSUES/repo-guidance de-localed, six obsolete plans
+  bannered, 2026-05-23/2026-07-04 decisions closed as "code removed";
+  repo-map refresh moot (file retired 2026-07-08). REMAINING: **slice 2 —
+  E2E re-home to mock servers (LINUX HOST ONLY; tests/e2e is knowingly
+  broken until then, and the re-home must also rewrite scenarios written
+  against click-to-play — since the nav flip, library card clicks open info
+  pages)** — in progress 2026-07-09 on the owner's Linux VM.
 - **ITEM-DETAIL TRACK: COMPLETE and owner-verified through 0.1.36
   (2026-07-09)** — nav flip (`74ff385`), episode navigation polish
   (`f1e36d3`+`cc9f060`), detail crumb trail (`496218e`); loops idv-s3/s4/s5

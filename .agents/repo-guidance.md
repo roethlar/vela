@@ -6,8 +6,10 @@
 
 - Vela is a Tauri 2 desktop app with a SvelteKit/TypeScript frontend in `src/`
   and a Rust backend in `src-tauri/`.
-- The app browses Plex, Jellyfin, Emby, local folders, SMB shares, and SSH/SFTP
-  mounts through a common media-source abstraction.
+- The app browses Plex, Jellyfin, and Emby media servers through a common
+  media-source abstraction. Local folder, SMB, and SSH/SFTP sources were
+  REMOVED (decision `.agents/decisions.md` 2026-07-08 — Vela is a
+  multi-server client; do not resurrect them).
 - Playback is intentionally delegated to the system `mpv` binary in its own
   window for HDR passthrough. Do not embed video in the webview unless the
   owner explicitly changes that product decision.
@@ -75,23 +77,18 @@ Rules the command list doesn't carry on its own:
   URLs, auth tokens, SMB passwords, or config contents. (See
   `.agents/decisions.md`, 2026-05-23.)
 - Keep config persistence defensive. The config may contain Plex/Jellyfin/Emby
-  tokens and SMB credentials; preserve owner-only Unix permissions, atomic
-  saves, parse-error fail-closed behavior, and cross-process locking.
+  tokens and legacy SMB credentials (inert, next bullet); preserve owner-only
+  Unix permissions, atomic saves, parse-error fail-closed behavior, and
+  cross-process locking.
+- Old configs must keep loading after the local-source removal. The legacy
+  `local_folders`/`smb_mounts`/`ssh_mounts` fields are tolerated serde
+  fields — parsed, ignored, and preserved on save (never stripped,
+  credentials included) so a rollback build still sees them. Guarded by the
+  slice-1 round-trip tests; do not strip or migrate these fields. (See
+  `.agents/plans/drop-local-sources.md`, compatibility rails.)
 - Do not hold async runtime workers or shared locks across blocking OS,
   filesystem, process, or network work. Use the existing lock boundaries and
   `spawn_blocking` patterns.
-- Local media roots must stay narrow. Continue rejecting filesystem roots and
-  home roots, and keep symlink escape checks before listing, searching, or
-  playing local files. (See `.agents/decisions.md`, 2026-05-23.)
-- Linux SMB is native and mountless: in-process libsmbclient for
-  browsing plus a loopback HTTP Range proxy for mpv playback — no OS
-  mounts, no root, no gvfs/kio. Keep provider paths share-scoped (the
-  normalize/containment rules in `source/smb_vfs.rs`) and never
-  allow-list provider paths with the asset protocol. macOS/Windows still
-  mount via the OS. (See `.agents/decisions.md`, 2026-07-04; plan
-  `.agents/plans/smb-native-client.md`.) SSH/SFTP support uses `sshfs`
-  with OpenSSH keys, agent, and config; Vela does not store SSH
-  passwords. (See `.agents/decisions.md`, 2026-05-23.)
 - Generated outputs and dependency/build directories are not source of truth.
   Do not edit `build/`, `.svelte-kit/`, `node_modules/`, `src-tauri/target/`,
   `src-tauri/gen/`, or packaged Arch output under `packaging/arch/pkg/`.

@@ -1,5 +1,10 @@
 # Plan: SSH source setup guidance in the UI (macOS-aware)
 
+> **CLOSED as obsolete 2026-07-09:** SSH/SFTP sources (and this plan's
+> guidance UI) were removed from Vela (decision `.agents/decisions.md`
+> 2026-07-08; plan `.agents/plans/drop-local-sources.md`, slice 1 landed
+> 0.1.33 `6855df5`). Retained as historical design record only.
+
 Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Implements the 2026-07-04
 decision (`.agents/decisions.md`): keep the sshfs dependency; handle macOS
 with in-UI setup help/hint text. Covers the remaining work in the `ISSUES.md`

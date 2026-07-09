@@ -103,6 +103,11 @@ unchecked for these):
 
 Source setup:
 
+> **Closed 2026-07-08:** local/SMB/SSH sources were removed from Vela
+> entirely (decision `.agents/decisions.md` 2026-07-08 "Vela is a
+> multi-server client"; removal landed in 0.1.33). Both entries below are
+> moot and retained as history only.
+
 - SMB shares surface labeled "Local" on the main screen. The share connects
   fine, but the UI presents it as "Local" instead of identifying it as an SMB
   source/share. Plausibly a consequence of the SMB-feeds-the-local-source

@@ -1,5 +1,10 @@
 # SMB: auto-add the share root as a library folder
 
+> **CLOSED as obsolete 2026-07-09:** SMB sources were removed from Vela
+> (decision `.agents/decisions.md` 2026-07-08; plan
+> `.agents/plans/drop-local-sources.md`, slice 1 landed 0.1.33 `6855df5`).
+> Retained as historical design record only.
+
 Status: APPROVED 2026-07-04 via the owner-delegation decision in
 `.agents/decisions.md` (direction chosen 2026-07-04: "auto-add share root"
 over guided-folder-step and warning-only).

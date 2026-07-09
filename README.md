@@ -1,8 +1,8 @@
 # Vela
 
 A native, HDR-capable media client for Linux, macOS, and Windows. It browses
-**Plex, Jellyfin, Emby, and local/SMB** libraries in a custom UI — unified
-across sources or one at a time — and plays video through **mpv** in its own
+**Plex, Jellyfin, and Emby** libraries in a custom UI — unified across
+servers or one at a time — and plays video through **mpv** in its own
 window, which is the reliable way to get true HDR passthrough (10-bit PQ/BT.2020
 negotiated with the display).
 
@@ -11,9 +11,8 @@ negotiated with the display).
 - **UI:** [Tauri 2](https://tauri.app) + SvelteKit (TypeScript). The frontend
   (`src/`) talks to a Rust backend (`src-tauri/`) over Tauri commands.
 - **Sources:** each backend implements a `MediaSource` trait (`src-tauri/src/source/`)
-  behind a `SourceRegistry`. Plex (`plex.rs`), Jellyfin/Emby (`jellyfin.rs`, one
-  client with a `Flavor` for the small differences), and a local-folder source
-  (`local.rs`) with keyless metadata (`metadata.rs`). Item keys are
+  behind a `SourceRegistry`. Plex (`plex.rs`) and Jellyfin/Emby (`jellyfin.rs`,
+  one client with a `Flavor` for the small differences). Item keys are
   source-namespaced; commands fan out for the unified view or scope to one source.
 - **Playback:** the system **`mpv`** binary is launched as its own window. HDR is
   negotiated by mpv (`--vo=gpu-next --target-colorspace-hint=yes`); the app does
@@ -23,17 +22,7 @@ negotiated with the display).
 - **Progress/Resume:** tracked over mpv's JSON IPC channel (a Unix domain socket
   on Linux/macOS, an emulated named pipe on Windows) and reported back to the
   server — Plex timelines, Jellyfin/Emby playback check-ins — so resume works
-  across sessions. Local files play without progress tracking.
-- **Local metadata:** sidecar `.nfo` + local artwork first, then keyless online
-  lookup (iTunes Search for movies/shows, TVmaze for episodes; cached), then the
-  filename as the floor.
-- **SMB:** on Linux, Vela speaks SMB natively in-process (libsmbclient) —
-  no mounts, no root, nothing to set up; browsing lists over the wire and
-  playback streams to mpv through a localhost-only HTTP range proxy.
-  Sidecar posters are served over a private `velasmb:` scheme. Requires
-  the `smbclient` package (libsmbclient). On macOS/Windows the share is
-  mounted by the app via the OS (`mount_smbfs` / `net use`) and browsed
-  through the local source.
+  across sessions.
 
 ## Requirements
 
@@ -78,7 +67,7 @@ npm run tauri dev
 
 On first launch you'll get a `plex.tv/link` code (with a QR/clickable link) to
 authorize a Plex account. Use the **⚙ Sources** panel to add more: Jellyfin/Emby
-servers (username + password, or an API key), local folders, or SMB shares. The
+servers (username + password, or an API key). The
 header source switcher toggles between the unified view and a single source.
 Click a movie to play, or drill into a show → season → episode.
 
@@ -147,6 +136,12 @@ Config (including the Plex auth token) is stored in the platform config dir:
 on macOS, and `%APPDATA%\vela\vela\config\config.json`
 on Windows. On Unix it is written `0600`.
 
+Configs written by older builds may still contain local-folder / SMB / SSH
+source fields (including stored SMB credentials). Current builds parse,
+ignore, and preserve those fields so rolling back to an older build still
+works; removing them — credentials included — is a manual edit of
+`config.json`.
+
 ## Status
 
 Builds and runs on Linux, macOS, and Windows (the mpv IPC layer is
@@ -154,14 +149,13 @@ platform-abstracted: Unix domain socket on Linux/macOS, named pipe on Windows).
 
 Working: Plex device-PIN auth + server discovery, multi-source library browsing
 (unified or per-source) with infinite scroll, show/season/episode drill-down,
-search, mpv HDR playback, Plex progress/resume, local-folder indexing with
-keyless metadata, and an in-app source manager (Jellyfin/Emby connect, local
-folders, SMB shares — native on Linux, OS-mounted on macOS/Windows).
+search, mpv HDR playback, Plex progress/resume, and an in-app source manager
+(Jellyfin/Emby connect).
 
 Verification note: Plex is exercised end-to-end, and Jellyfin has been
-smoke-tested against a real server. The Emby, local, and SMB paths are
-implemented and unit-tested where logic allows, but live integration against
-real servers/shares is still pending.
+smoke-tested against a real server. The Emby path is implemented and
+unit-tested where logic allows, but live integration against a real server
+is still pending.
 
 Known limitations: Plex/Jellyfin/Emby media-version selection is heuristic: Vela
 prefers direct-play/direct-stream candidates, HDR, higher resolution, and higher
@@ -169,12 +163,5 @@ bitrate where the source exposes that metadata, but it does not yet offer a
 manual version picker. Server stream/poster URLs carry the access token
 (Plex/Jellyfin/Emby), so the token is visible locally — in the webview DOM and
 in mpv's process arguments. This is an accepted **local-only** exposure (your
-own machine, not the network); there is no token proxy. SMB credentials are
-stored in the (`0600` on Unix) config so shares reconnect on launch. On
-Linux they never leave the process (libsmbclient auth callback — no
-process arguments, no URLs); on macOS/Windows they are passed to the OS
-mount tool (`mount_smbfs` / `net use`) and appear briefly in process
-arguments — same accepted local-only exposure. The Linux playback proxy
-binds 127.0.0.1 only and its URLs carry an unguessable per-play token,
-never paths or credentials. HDR fidelity
+own machine, not the network); there is no token proxy. HDR fidelity
 depends on the platform's mpv GPU backend and display support.

@@ -1,5 +1,12 @@
 # Plan: SMB/SSH playtest fixes (found on 0.1.21)
 
+> **CLOSED as obsolete 2026-07-09:** SMB/SSH sources were removed from Vela
+> (decision `.agents/decisions.md` 2026-07-08; plan
+> `.agents/plans/drop-local-sources.md`, slice 1 landed 0.1.33 `6855df5`).
+> Bug 4 (share-root classification) and the metadata "Recently added" rail
+> die UNWORKED — their subject matter no longer exists. Retained as
+> historical record only.
+
 ## Status
 
 **Owner-approved 2026-07-05 — implementing.** `reviewloop codex` accepted at r3

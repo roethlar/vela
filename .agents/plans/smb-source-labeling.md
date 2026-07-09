@@ -1,5 +1,10 @@
 # Plan: SMB/SSH mounts as named sources (stop labeling them "Local")
 
+> **CLOSED as obsolete 2026-07-09:** SMB/SSH sources were removed from Vela
+> (decision `.agents/decisions.md` 2026-07-08; plan
+> `.agents/plans/drop-local-sources.md`, slice 1 landed 0.1.33 `6855df5`).
+> Retained as historical design record only.
+
 Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Covers the `ISSUES.md` entry
 (Open - Owner-Reported 2026-07-04): SMB shares surface labeled "Local" in the
 source chips and nav instead of being identified as SMB.

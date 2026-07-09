@@ -41,7 +41,10 @@ The open policy question in `.review/deduped_action_list.md`.
 
 ### 2026-05-23 - Keep local media roots narrow
 
-Status: Active
+Status: Closed 2026-07-09 — code removed. The local-family sources this
+governed were deleted in drop-local-sources slice 1 (0.1.33, `6855df5`;
+decision 2026-07-08 "Vela is a multi-server client"). Historically
+accurate while the code existed.
 
 Decision:
 Local folders and mounted remote folders must be validated as specific media
@@ -59,10 +62,11 @@ The local asset scope concerns in `ISSUES.md` and `.review/gpt_review.md`.
 
 ### 2026-05-23 - Keep Linux SMB user-space only by default
 
-Status: Partially superseded (2026-07-04). The GVfs/KIO-FUSE resolution
-mechanism is replaced by the native in-process client — see "Linux SMB
-goes native" (2026-07-04). Still active from this entry: the no-root /
-no-privileged-CIFS constraint and the entire SSH/sshfs stance.
+Status: Closed 2026-07-09 — code removed. SMB and SSH sources were deleted
+in drop-local-sources slice 1 (0.1.33, `6855df5`; decision 2026-07-08
+"Vela is a multi-server client"). Previously partially superseded
+(2026-07-04): the GVfs/KIO-FUSE resolution mechanism was replaced by the
+native in-process client — see "Linux SMB goes native" (2026-07-04).
 
 Decision:
 On Linux, Vela resolves readable GVfs/KIO-FUSE SMB mounts created by the user's
@@ -229,7 +233,10 @@ accepted local-only exposures.
 
 ### 2026-07-04 - macOS SSH: keep sshfs, add in-UI setup guidance; live testing parked
 
-Status: Active
+Status: Closed 2026-07-09 — code removed. SSH/SFTP sources (and the sshfs
+guidance UI this decision mandated) were deleted in drop-local-sources
+slice 1 (0.1.33, `6855df5`; decision 2026-07-08 "Vela is a multi-server
+client").
 
 Decision:
 SSH/SFTP sources keep the `sshfs` dependency on macOS (no in-app SFTP client
@@ -329,7 +336,10 @@ the rest of that decision stand.
 
 ### 2026-07-04 - Linux SMB goes native: in-process client + loopback stream proxy
 
-Status: Active
+Status: Closed 2026-07-09 — code removed. The native SMB client, loopback
+proxy, and `velasmb:` scheme were deleted in drop-local-sources slice 1
+(0.1.33, `6855df5`; decision 2026-07-08 "Vela is a multi-server client").
+Historically accurate while the code existed.
 
 Decision:
 On Linux, Vela speaks SMB itself: browsing/listing/search through an
@@ -510,7 +520,9 @@ flip landing last, and the per-slice commit + reviewloop discipline.
 
 ### 2026-07-08 - Vela is a multi-server client: local/SMB/SSH playback dropped
 
-Status: Active (decided; removal not yet implemented or planned in detail)
+Status: Active (slice 1 — turn-off-and-delete — landed 2026-07-08, 0.1.33
+`6855df5`, owner-playtested; E2E re-home and docs sweep follow per
+`.agents/plans/drop-local-sources.md`)
 
 Decision:
 Vela will not play local files at all. The local-family sources (local

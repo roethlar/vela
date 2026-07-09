@@ -29,7 +29,10 @@ Recorded in `.agents/decisions.md` (2026-07-08).
 What changes:
 - **JF/Emby `item_detail` (old slice 2) and local `item_detail` (old slice 3) are
   DEFERRED** — do not start without an explicit owner go. The trait's graceful-`Err`
-  default already covers them at runtime.
+  default already covers them at runtime. (2026-07-09 update: the local
+  `item_detail` slice is DEAD, not deferred — local sources were removed,
+  decision `.agents/decisions.md` 2026-07-08. JF/Emby is the only deferred
+  backend.)
 - **The navigation flip is uniform across ALL sources** (refined ruling): library-view
   clicks route to the detail surface (movie → info page; show → seasons → episodes;
   episode → shared info page); the Continue Watching carousel keeps click-to-play
