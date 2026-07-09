@@ -24,6 +24,23 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop idv-s5 CLOSED 2026-07-08: **accepted clean at r1, no findings** (codex
+read-only, `guard_confirmed:false` — no JS unit runner). Scope was the
+**owner-playtest polish round: detail-page breadcrumb consistency** (base
+`2b7e769`, head `496218e`; frontend-only, 3 files +30/−44). Owner-reported on
+0.1.35: once a season page opened, the trail collapsed to Back + show link —
+no direct way back to TV Shows. The change: the detail branch renders the
+standard `.crumbs` bar (Back closes the detail; each underlying browse crumb
+clickable — closes the detail then `goCrumb(i)`; the detail page itself is
+the non-clickable current crumb via `detailCrumbTitle`); over Home the bar is
+just Back. ItemDetail/SeasonDetail drop their private Back buttons, `onBack`
+prop, and dead CSS; the season heading keeps its show/season links (still the
+only route to the show from rail/search entries). Verified on the Windows dev
+host: svelte-check 0/0 (would flag unused CSS), npm build clean; post-bump
+`cargo check --locked` clean (0.1.36, `89d5391`). NO automated frontend guard
+(recorded gap) — owner re-playtest is the check. REMAINING: owner playtest
+0.1.36, then further Plex polish.
+
 Loop idv-s4 CLOSED 2026-07-08: **accepted at r2** (codex read-only,
 `guard_confirmed:false` both rounds — coder ran the red/green proof). Scope
 was the **owner-playtest polish round: episode info navigation** (base
