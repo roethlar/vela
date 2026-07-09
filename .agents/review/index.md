@@ -24,6 +24,23 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop pb-s1 CLOSED 2026-07-09: **accepted clean at r1, no findings** (codex
+read-only, `guard_confirmed:false` — coder ran the red/green proof). Scope was
+**person-browse slice 1** (base `02cbf39`, head `35fcc67`; 8 files +232/−15;
+plan `.agents/plans/person-browse.md`, owner go 2026-07-09): Plex tag-id
+capture on Role/Director/Writer (string-typed, digits-validated at mapping so
+malformed ids degrade to plain text), `CastMember.person_key` +
+directors/writers → `PersonRef`, `MediaSource::person_items` graceful default
++ Plex impl (section enumeration with rediscover-once, explicit-type
+person-filtered listing with full Container paging, newest-first sort),
+`get_person_items` command + registration, frontend type/render
+compile-through (no visible change — clicks land in slice 2). Guards proven
+red/green: to_detail person-key namespacing (nulled mapping fails it), serde
+id capture, pure `person_filter_query` (asserts no token in the query).
+Verified: cargo test 67, clippy 4-warning baseline, svelte-check 0/0, build
+clean; bump 0.1.38 `62fd927`. REMAINING: slice 2 (clickable credits + the
+person browse view).
+
 Loop idv-s5 CLOSED 2026-07-08: **accepted clean at r1, no findings** (codex
 read-only, `guard_confirmed:false` — no JS unit runner). Scope was the
 **owner-playtest polish round: detail-page breadcrumb consistency** (base

@@ -99,10 +99,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - Item-detail: no open defect (0.1.36 verified 2026-07-09); further Plex
   polish on the next owner report; JF/Emby `item_detail` resumes only on
   an explicit owner go.
-- Person browse (clickable actor/director/writer → filtered grid): plan
-  REVIEWED (`.agents/plans/person-browse.md`; codex loop accepted r3,
-  2026-07-09) — **awaiting an explicit owner go before code.** Two slices:
-  backend ids + `person_items`, then frontend clicks + person grid.
+- Person browse (clickable actor/director/writer → filtered grid): owner
+  GO 2026-07-09 (defaults accepted: newest-first, full cast, episode-level
+  crew links). **Slice 1 LANDED** (`35fcc67`, 0.1.38 `62fd927`; loop
+  `pb-s1` accepted clean r1 — trail `.agents/review/index.md`): backend
+  person identity + `person_items` (Plex). Slice 2 (clickable credits +
+  person view) IN PROGRESS.
 - QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
   on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
   untriaged `cargo check --locked` failure on the runner). Stale-risk: local
