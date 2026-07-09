@@ -31,16 +31,11 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   explicit owner go. No automated frontend guard (no JS runner; E2E is
   Linux-only) — owner playtests are the behavioral check.
 - **PERSON BROWSE (clickable actor/director/writer → filtered grid):
-  CODE-COMPLETE at 0.1.39, owner playtest PENDING.** Owner go 2026-07-09
-  (defaults accepted: newest-first, full cast, episode-level crew links);
-  plan `.agents/plans/person-browse.md` (reviewed r3); slice 1 backend
-  `35fcc67` (loop `pb-s1` clean r1), slice 2 frontend `b290b31` (loop
-  `pb-s2` clean r1), bumps `62fd927`/`8204a77`. Playtest checklist:
-  cast/director/writer clicks open the person grid (newest first,
-  movies+shows mixed), results route per the nav flip, Back/crumbs work,
-  mark-watched from the person grid keeps the grid populated (the plan's
-  refresh case), non-Plex sparse pages stay plain text. The owner last
-  BUILT 0.1.37 — 0.1.39 needs a fresh `./scripts/build.ps1`.
+  COMPLETE — owner playtest VERIFIED 2026-07-09 ("works well") on 0.1.39.**
+  Plan `.agents/plans/person-browse.md`; slice 1 backend `35fcc67` (loop
+  `pb-s1` clean r1), slice 2 frontend `b290b31` (loop `pb-s2` clean r1),
+  bumps `62fd927`/`8204a77`. No open defect; JF/Emby person browse stays
+  deferred on an explicit owner go (same bar as JF/Emby `item_detail`).
 - Outstanding owner playtest asks (older builds): (1) library sorting
   0.1.30 — sort dropdown on Plex libraries + merged All view; (2) mpv
   autocrop 0.1.22 — Shift+C / Automatic crop on the real HDR stack.
@@ -61,19 +56,20 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   (roethlar/AgentGovernanceBootstrap#2, 2026-07-09 — the handoff operator
   conflicts with the toolkit's own `*.local.*` convention); expect a future
   governance refresh to move it to an untracked `state.local.md`-style home.
-- Version 0.1.39 (bumped `8204a77`, 2026-07-09). **Owner pushed BOTH remotes
-  (origin + github) to `926162c` on 2026-07-09**; 9 commits are unpushed as
-  of `d3dbb58` (owner pushes manually; policy `.agents/push-policy.md`).
-  **GitHub CI is GREEN on the pushed head `926162c`** (verified via
-  `gh run list` 2026-07-09) — the 2026-07-05 RED-CI re-triage item is
-  CLOSED; the old `05f9594` failures don't reproduce on current code.
+- Version 0.1.39 (bumped `8204a77`, 2026-07-09). **Both remotes (origin +
+  github) are at `a39be7f` == local HEAD as of 2026-07-09** (verified via
+  `ls-remote`; owner pushes manually — policy `.agents/push-policy.md`).
+  **GitHub CI is GREEN on the pushed head `a39be7f`** (verified via
+  `gh run list` 2026-07-09).
 
 ## Next
 
-- Owner playtest of person browse (0.1.39 — build first; checklist in the
-  entry above). The most likely next action on any host.
-- DLS slice 2 (E2E re-home) from a Linux-host session, then slice 3 (docs
-  sweep) — scope lists in the DLS entry above.
+- DLS slice 2 (E2E re-home) — the owner's Linux VM is the venue:
+  **machine-local (mac host `/Users/michael/Dev/vela`):** VM at
+  `michael@192.168.64.5` (Ubuntu 25.10 aarch64, 12 CPU, ~3.3 GiB RAM —
+  tight for the debug build; RAM bump requested), clone target `~/dev/vela`;
+  VM on hold 2026-07-09 while the owner installs OS updates.
+- DLS slice 3 (docs sweep) — scope list in the DLS entry above.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
@@ -103,8 +99,7 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - `.agents/decisions.md`
 - `.agents/plans/drop-local-sources.md` (ACTIVE — slice 1 landed, 2-3 open)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
-- `.agents/plans/person-browse.md` (IMPLEMENTED — slices 1-2 landed;
-  owner playtest pending)
+- `.agents/plans/person-browse.md` (COMPLETE — owner-verified 2026-07-09)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (drift-suspect until DLS slice 3 sweeps them)

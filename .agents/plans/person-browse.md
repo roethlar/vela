@@ -1,7 +1,12 @@
-# Plan: clickable people — actor/director/writer browse (REVIEWED — awaiting owner go)
+# Plan: clickable people — actor/director/writer browse (COMPLETE — owner-verified)
 
 ## Status
-**REVIEWED 2026-07-09, awaiting owner go before any code.** Drafted on the
+**COMPLETE 2026-07-09 — implemented and owner-playtest verified ("works
+well") on 0.1.39.** Slice 1 backend `35fcc67` (loop `pb-s1` clean r1),
+slice 2 frontend `b290b31` (loop `pb-s2` clean r1). Plan retained as the
+design record; JF/Emby person browse stays deferred on an explicit owner go.
+
+Original status: **REVIEWED 2026-07-09, awaiting owner go before any code.** Drafted on the
 owner's ask ("does plex make it easy to click things like actor / director
 names on the info pages and find other things by that name?" → "draft it").
 The codex plan-review loop CLOSED accepted at r3 (base `0338176`, head
