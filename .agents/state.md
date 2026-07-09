@@ -44,16 +44,21 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   slice 3 — the uniform nav flip** (library views → detail surface for every
   source; movie click → info page, season → shared episode page, episode →
   shared page; show click keeps the seasons drill; CW carousel keeps
-  click-to-play; ungate the context-menu "Info" entry). Only after the owner
-  playtests 0.1.32's Info pages OR on an explicit go.
-- **OWNER PLAYTEST QUEUE (live asks, as of `97d4467`):** (1) DLS slice 1 —
-  boot 0.1.33 with the real config: sidebar shows Plex only, no dead hero
-  cards, browse/play/seek unaffected; (2) item-detail 0.1.32 — dev build or
-  localStorage `vela.devDetail`="1": Info on a Plex movie → rich page, Info
-  on a season → shared episode page; (3) library sorting 0.1.30 — sort
-  dropdown on Plex libraries + merged All view; (4) mpv autocrop 0.1.22 —
-  Shift+C / Automatic crop on the real HDR stack. (SMB/SSH playtest items
-  died with the removal — archived.)
+  click-to-play; ungate the context-menu "Info" entry). The original
+  "playtest 0.1.32's Info pages first" gate is MOOT: release builds cannot
+  show the dev-gated entry (no devtools), and the owner discovered exactly
+  that in the 0.1.33 playtest — he expects clicks to open info pages. The
+  flip is the most likely next slice on this host (DLS slice 2 needs Linux;
+  DLS slice 3 docs sweep is host-agnostic); confirm with a one-line go at
+  session start, then implement.
+- **DLS slice 1 PLAYTEST SUCCESSFUL (owner, 2026-07-08, 0.1.33 Windows NSIS
+  build):** Plex-only sidebar, no dead hero cards, playback unchanged. The
+  item-detail Info pages were NOT exercised — release builds cannot show the
+  dev-gated Info entry (no `devtools` feature, so no console for the
+  localStorage flag); the owner knows clicking tiles still plays by design
+  until the nav flip. Remaining owner playtest asks: (1) library sorting
+  0.1.30 — sort dropdown on Plex libraries + merged All view; (2) mpv
+  autocrop 0.1.22 — Shift+C / Automatic crop on the real HDR stack.
 - **machine-local (Windows dev host, `F:\dev\vela`):** cargo/rustc need valid
   stdin — `cmd /c "cargo ... < nul"` (rustup shim quirk); codex lives at
   `%APPDATA%\npm\codex.cmd`, prompt via stdin redirect (`</dev/null` is
@@ -79,6 +84,13 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   owner push gives CI something current to run.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
+- QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
+  bottom of the queue"): **Continue Watching carousel needs a one-op
+  curation.** Owner-reported annoyance: "if I mark a video in the carousel as
+  unwatched, it stays in the carousel. if I remove it from continue watching,
+  the watched status remains. so I have to do two ops to get what I want."
+  Design when picked up (plan first; options include a combined context-menu
+  action or changing what each action implies) — not spec'd yet.
 
 ## Blockers
 
