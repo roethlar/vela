@@ -948,7 +948,6 @@
     <button
       class="poster"
       class:landscape
-      class:watched={item.played === true && pct === null}
       style="animation-delay: {Math.min(i, 14) * 22}ms;"
       onclick={() => open(item)}
       oncontextmenu={(e) => openMenu(e, item)}
@@ -1998,7 +1997,8 @@
     animation: vela-slide-down 0.2s var(--ease);
   }
 
-  /* Watched indicator + dimming */
+  /* Watched indicator (checkmark only — owner ruling 2026-07-09: watched
+     items are not dimmed) */
   .watchedbadge {
     position: absolute;
     top: 0.35rem;
@@ -2013,10 +2013,6 @@
     align-items: center;
     justify-content: center;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
-  }
-  .poster.watched .art img,
-  .poster.watched .noart {
-    opacity: 0.55;
   }
 
   /* Right-click context menu */
