@@ -276,6 +276,10 @@ pub struct PlexDetail {
 #[serde(default)]
 pub struct PlexTag {
     pub tag: String,
+    /// Server-local numeric tag id (captured as a string; digits-validated at
+    /// mapping time). On Director/Writer it keys the person-filtered listing
+    /// (`?director=<id>`); Genre/Country simply ignore it.
+    pub id: Option<String>,
 }
 
 /// A `<Role>` (cast) child: actor `tag`, character `role`, headshot `thumb`.
@@ -283,6 +287,8 @@ pub struct PlexTag {
 #[serde(default)]
 pub struct PlexRole {
     pub tag: String,
+    /// Server-local numeric tag id — keys the `?actor=<id>` filtered listing.
+    pub id: Option<String>,
     pub role: Option<String>,
     pub thumb: Option<String>,
 }
@@ -980,6 +986,25 @@ impl PlexLibrary {
         self.get_items(&base_url, &params).await
     }
 
+    /// One page of a section filtered by a person tag id (`actor=` /
+    /// `director=` / `writer=`), explicit item type like the other listing
+    /// fetches. The URL/params come from the pure `person_filter_query` so
+    /// the construction is unit-testable.
+    pub async fn get_section_person_filtered(
+        &self,
+        section_key: &str,
+        filter: &str,
+        tag_id: &str,
+        type_filter: &str,
+        start: usize,
+        size: usize,
+    ) -> Result<Vec<PlexVideo>, Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let (url, params) =
+            person_filter_query(&base, section_key, filter, tag_id, type_filter, start, size);
+        self.get_items(&url, &params).await
+    }
+
     pub async fn get_section_content_with_type_alpha(
         &self,
         section_key: &str,
@@ -1421,6 +1446,31 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
     v
 }
 
+/// The URL + query for a person-filtered section listing: `filter` is the
+/// Plex param name (`actor`/`director`/`writer` — validated by the caller),
+/// `tag_id` the digits-validated server-local tag id, `type_filter` the
+/// explicit item type ("1" movies / "2" shows), plus the standard paging.
+fn person_filter_query(
+    base: &str,
+    section_key: &str,
+    filter: &str,
+    tag_id: &str,
+    type_filter: &str,
+    start: usize,
+    size: usize,
+) -> (String, Vec<(String, String)>) {
+    (
+        format!("{base}/library/sections/{section_key}/all"),
+        vec![
+            ("includeGuids".to_string(), "1".to_string()),
+            ("type".to_string(), type_filter.to_string()),
+            (filter.to_string(), tag_id.to_string()),
+            ("X-Plex-Container-Start".to_string(), start.to_string()),
+            ("X-Plex-Container-Size".to_string(), size.to_string()),
+        ],
+    )
+}
+
 /// Build the playable URL for a Plex part key. An absolute part URL is reduced
 /// to its path+query and re-rooted onto `base` (our chosen connection origin).
 /// Auth deliberately travels as the `X-Plex-Token` HEADER — threaded to mpv by
@@ -1626,6 +1676,46 @@ mod tests {
             Some("/library/metadata/7/thumb/9")
         );
         assert_eq!(v.art.as_deref(), Some("/library/metadata/7/art/9"));
+    }
+
+    #[test]
+    fn person_filter_query_builds_filtered_paged_url() {
+        let (url, params) = person_filter_query(
+            "https://plex.example:32400",
+            "3",
+            "director",
+            "456",
+            "1",
+            60,
+            200,
+        );
+        assert_eq!(url, "https://plex.example:32400/library/sections/3/all");
+        assert!(params.contains(&("director".to_string(), "456".to_string())));
+        assert!(params.contains(&("type".to_string(), "1".to_string())));
+        assert!(params.contains(&("X-Plex-Container-Start".to_string(), "60".to_string())));
+        assert!(params.contains(&("X-Plex-Container-Size".to_string(), "200".to_string())));
+        // The credential never rides in the query; it travels as a header.
+        assert!(!params.iter().any(|(k, _)| k.contains("Token")));
+    }
+
+    #[test]
+    fn detail_parse_captures_person_tag_ids() {
+        let xml = r#"
+            <MediaContainer size="1">
+              <Video ratingKey="42" key="/library/metadata/42" title="A Movie" type="movie">
+                <Role tag="Actor One" role="Hero" id="123" />
+                <Role tag="No Id" role="Extra" />
+                <Director tag="Dir One" id="456" />
+                <Writer tag="Writer One" id="789" />
+              </Video>
+            </MediaContainer>
+        "#;
+        let c: DetailContainer = serde_xml_rs::from_str(xml).expect("parse");
+        let d = &c.videos[0];
+        assert_eq!(d.roles[0].id.as_deref(), Some("123"));
+        assert_eq!(d.roles[1].id, None);
+        assert_eq!(d.directors[0].id.as_deref(), Some("456"));
+        assert_eq!(d.writers[0].id.as_deref(), Some("789"));
     }
 
     #[test]

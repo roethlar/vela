@@ -2023,6 +2023,20 @@ pub async fn get_item_detail(
     src.item_detail(&raw).await
 }
 
+/// Everything in a source's libraries featuring a person — the clickable
+/// actor/director/writer browse. Routes by the namespaced person key; the
+/// registry lock is released before the (network) call. Unsupported sources
+/// return an error the caller degrades on.
+#[tauri::command]
+pub async fn get_person_items(
+    person_key: String,
+    kind: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ItemDto>, String> {
+    let (src, raw) = state.registry.lock().await.route(&person_key)?;
+    src.person_items(&raw, &kind).await
+}
+
 /// Mark an item watched/unwatched on its source. Routes by the namespaced key;
 /// the registry lock is released before the (network) call.
 #[tauri::command]

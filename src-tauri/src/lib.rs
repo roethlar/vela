@@ -232,6 +232,7 @@ pub fn run() {
             commands::search,
             commands::get_children,
             commands::get_item_detail,
+            commands::get_person_items,
             commands::set_watched,
             commands::play_item,
             commands::queue_list,

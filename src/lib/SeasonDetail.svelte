@@ -276,10 +276,10 @@
         {#if detail?.directors?.length || detail?.writers?.length}
           <div class="credits">
             {#if detail?.directors?.length}
-              <div><span class="credlabel">Directed by</span> {detail.directors.join(", ")}</div>
+              <div><span class="credlabel">Directed by</span> {detail.directors.map((p) => p.name).join(", ")}</div>
             {/if}
             {#if detail?.writers?.length}
-              <div><span class="credlabel">Written by</span> {detail.writers.join(", ")}</div>
+              <div><span class="credlabel">Written by</span> {detail.writers.map((p) => p.name).join(", ")}</div>
             {/if}
           </div>
         {/if}

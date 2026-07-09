@@ -34,7 +34,11 @@ export type Item = {
   detailKey?: string;
 };
 
-export type CastMember = { name: string; role?: string; thumb?: string };
+export type CastMember = { name: string; role?: string; thumb?: string; personKey?: string };
+
+// A person credit (director/writer); `personKey` (namespaced, when the
+// backend identifies the person) is the person-browse query target.
+export type PersonRef = { name: string; personKey?: string };
 
 export type MediaStream = {
   streamType?: number; // 1 = video, 2 = audio, 3 = subtitle
@@ -71,8 +75,8 @@ export type Detail = {
   studio?: string;
   originallyAvailableAt?: string;
   genres?: string[];
-  directors?: string[];
-  writers?: string[];
+  directors?: PersonRef[];
+  writers?: PersonRef[];
   countries?: string[];
   cast?: CastMember[];
   index?: number;

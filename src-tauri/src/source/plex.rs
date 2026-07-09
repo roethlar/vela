@@ -7,7 +7,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
     namespace_key, CastMember, DetailDto, HubDto, ItemDto, MediaSource, MediaStreamDto,
-    MediaVersionDto, SectionDto, StreamResolution,
+    MediaVersionDto, PersonRef, SectionDto, StreamResolution,
 };
 use crate::playback::{ProgressTarget, TrackInfo};
 use crate::plex_library::{PlexDetail, PlexLibrary, PlexVideo};
@@ -143,9 +143,27 @@ impl PlexSource {
 
     /// Map a fetched `/library/metadata/{rk}` record to the frontend [`DetailDto`],
     /// building image URLs through the same tokened transcode path as posters.
+    /// A namespaced person key from a Plex tag id — only when the id is the
+    /// expected server-local digits form; anything else stays plain text
+    /// (never a dangling or malformed key).
+    fn person_key_of(&self, id: &Option<String>) -> Option<String> {
+        id.as_deref()
+            .filter(|s| !s.is_empty() && s.chars().all(|c| c.is_ascii_digit()))
+            .map(|s| namespace_key(&self.id, s))
+    }
+
     fn to_detail(&self, lib: &PlexLibrary, d: PlexDetail) -> DetailDto {
         let tags = |v: Vec<crate::plex_library::PlexTag>| -> Vec<String> {
             v.into_iter().map(|t| t.tag).filter(|s| !s.is_empty()).collect()
+        };
+        let people = |v: Vec<crate::plex_library::PlexTag>| -> Vec<PersonRef> {
+            v.into_iter()
+                .filter(|t| !t.tag.is_empty())
+                .map(|t| PersonRef {
+                    person_key: self.person_key_of(&t.id),
+                    name: t.tag,
+                })
+                .collect()
         };
         DetailDto {
             rating_key: namespace_key(&self.id, &d.rating_key),
@@ -165,6 +183,7 @@ impl PlexSource {
                 .into_iter()
                 .filter(|r| !r.tag.is_empty())
                 .map(|r| CastMember {
+                    person_key: self.person_key_of(&r.id),
                     name: r.tag,
                     role: r.role.filter(|s| !s.is_empty()),
                     thumb: r
@@ -174,8 +193,8 @@ impl PlexSource {
                 })
                 .collect(),
             genres: tags(d.genres),
-            directors: tags(d.directors),
-            writers: tags(d.writers),
+            directors: people(d.directors),
+            writers: people(d.writers),
             countries: tags(d.countries),
             media: d
                 .media
@@ -442,6 +461,57 @@ impl MediaSource for PlexSource {
         Ok(self.to_detail(&lib, detail))
     }
 
+    async fn person_items(&self, person_key: &str, kind: &str) -> Result<Vec<ItemDto>, String> {
+        validate_plex_id("person key", person_key)?;
+        let filter = match kind {
+            "actor" | "director" | "writer" => kind,
+            _ => return Err("invalid person kind".to_string()),
+        };
+        let lib = self.ensure_ready().await?;
+        // Section enumeration with the standard rediscover-once fallback
+        // (map_err first so the non-Send error drops before the next await).
+        let first = lib.get_library_sections().await.map_err(|e| e.to_string());
+        let (lib, sections) = match first {
+            Ok(s) => (lib, s),
+            Err(_) => {
+                let lib = self.rediscover().await?;
+                let s = lib
+                    .get_library_sections()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                (lib, s)
+            }
+        };
+        const PAGE: usize = 200;
+        let mut out = Vec::new();
+        for s in sections
+            .into_iter()
+            .filter(|s| s.section_type == "movie" || s.section_type == "show")
+        {
+            let type_filter = if s.section_type == "movie" { "1" } else { "2" };
+            let mut start = 0;
+            loop {
+                let page = lib
+                    .get_section_person_filtered(&s.key, filter, person_key, type_filter, start, PAGE)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                let n = page.len();
+                out.extend(page.into_iter().map(|v| self.to_item(&lib, v)));
+                if n < PAGE {
+                    break;
+                }
+                start += n;
+            }
+        }
+        // Newest first, title tiebreak (owner default for person pages).
+        out.sort_by(|a, b| {
+            b.year
+                .cmp(&a.year)
+                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+        });
+        Ok(out)
+    }
+
     async fn resolve_stream(
         &self,
         item_key: &str,
@@ -666,16 +736,23 @@ mod tests {
             media_type: Some("movie".into()),
             view_count: Some(0),
             genres: vec![
-                PlexTag { tag: "Action".into() },
-                PlexTag { tag: String::new() }, // blank tag is dropped
+                PlexTag { tag: "Action".into(), id: None },
+                PlexTag { tag: String::new(), id: None }, // blank tag is dropped
             ],
+            directors: vec![
+                PlexTag { tag: "Dir One".into(), id: Some("456".into()) },
+                PlexTag { tag: "Dir NoId".into(), id: None },
+                PlexTag { tag: "Dir BadId".into(), id: Some("abc".into()) }, // non-numeric id -> no key
+            ],
+            writers: vec![PlexTag { tag: "Writer One".into(), id: Some("789".into()) }],
             roles: vec![
                 PlexRole {
                     tag: "Actor One".into(),
+                    id: Some("123".into()),
                     role: Some("Hero".into()),
                     thumb: Some("/library/metadata/42/role/1".into()),
                 },
-                PlexRole { tag: String::new(), role: None, thumb: None }, // nameless dropped
+                PlexRole { tag: String::new(), id: None, role: None, thumb: None }, // nameless dropped
             ],
             media: vec![PlexDetailMedia {
                 video_resolution: Some("1080".into()),
@@ -703,6 +780,15 @@ mod tests {
         assert_eq!(dto.cast[0].name, "Actor One");
         assert_eq!(dto.cast[0].role.as_deref(), Some("Hero"));
         assert_eq!(dto.cast[0].thumb, None); // no server -> no URL
+        // Person-browse keys: namespaced when the tag id is numeric; absent
+        // (plain text) when the id is missing or malformed.
+        assert_eq!(dto.cast[0].person_key.as_deref(), Some("plexA:123"));
+        assert_eq!(dto.directors.len(), 3);
+        assert_eq!(dto.directors[0].name, "Dir One");
+        assert_eq!(dto.directors[0].person_key.as_deref(), Some("plexA:456"));
+        assert_eq!(dto.directors[1].person_key, None);
+        assert_eq!(dto.directors[2].person_key, None); // "abc" never becomes a key
+        assert_eq!(dto.writers[0].person_key.as_deref(), Some("plexA:789"));
         assert_eq!(dto.poster, None); // no server -> no URL
         assert_eq!(dto.played, Some(false)); // viewCount 0
         assert_eq!(dto.media.len(), 1);

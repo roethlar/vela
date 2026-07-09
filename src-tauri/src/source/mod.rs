@@ -133,9 +133,9 @@ pub struct DetailDto {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub genres: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub directors: Vec<String>,
+    pub directors: Vec<PersonRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub writers: Vec<String>,
+    pub writers: Vec<PersonRef>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub countries: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -165,6 +165,20 @@ pub struct CastMember {
     /// Headshot image URL (same accepted poster-exposure class as posters — it may
     /// carry the backend's image token; never logged).
     pub thumb: Option<String>,
+    /// Source-namespaced person key (`"<source_id>:<tag_id>"`) when the
+    /// backend can identify the person — the person-browse query target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_key: Option<String>,
+}
+
+/// A person credit (director/writer) with an optional identity the person
+/// browse can query by. Absent `person_key` renders as plain text.
+#[derive(Debug, Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct PersonRef {
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub person_key: Option<String>,
 }
 
 /// One media version/file's technical specs.
@@ -278,6 +292,14 @@ pub trait MediaSource: Send + Sync {
     /// then Jellyfin/Emby, then local). Callers degrade gracefully on `Err`.
     async fn item_detail(&self, _item_key: &str) -> Result<DetailDto, String> {
         Err("this source doesn't provide item detail".to_string())
+    }
+
+    /// Everything in this source's libraries featuring a person (`kind` is
+    /// "actor" | "director" | "writer"), newest first. Defaults to
+    /// unsupported; sources opt in (Plex today — JF/Emby `PersonIds` is a
+    /// recorded follow-up).
+    async fn person_items(&self, _person_key: &str, _kind: &str) -> Result<Vec<ItemDto>, String> {
+        Err("this source doesn't support person browsing".to_string())
     }
 }
 
