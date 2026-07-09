@@ -158,9 +158,6 @@
   });
 
   async function boot() {
-    // Dev flag for the not-yet-flipped detail surface (see openInfo below):
-    // on in dev builds, opt-in via localStorage in release builds.
-    devDetail = import.meta.env.DEV || localStorage.getItem("vela.devDetail") === "1";
     // Check mpv up front so we can prompt to install before the user hits play.
     invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     invoke<AppInfo>("get_app_info").then((a) => (appInfo = a)).catch(() => {});
@@ -542,26 +539,30 @@
     if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) loadMore();
   }
 
-  // Drill into shows/seasons; play episodes/movies. Works from the home rails too.
+  // Library/home-rail click routing (owner UX ruling, nav flip): a show keeps
+  // the seasons drill; everything else opens its info surface — movie/video →
+  // the item page, season/episode → the shared episode page (openInfo).
+  // Clicking never instant-plays here; only the Continue Watching flow and
+  // the context menu play directly.
   async function open(item: Item) {
-    detailView = null;
-    if (item.mediaType === "show" || item.mediaType === "season") {
-      // Merged shows drill through the metadata-richest backing (idv-5) so
-      // seasons/episodes come from — and play on — the rich server source;
-      // non-merged items carry no detailKey, so nothing changes for them.
-      const key = detailKeyOf(item);
-      if (mode === "home") {
-        // Drilling out of a hub: start a fresh crumb trail rooted at this item.
-        active = null;
-        crumbs = [{ title: item.title, ratingKey: key }];
-      } else {
-        crumbs = [...crumbs, { title: item.title, ratingKey: key }];
-      }
-      mode = "browse";
-      await resetAndLoad();
-    } else {
-      await play(item);
+    if (item.mediaType !== "show") {
+      openInfo(item);
+      return;
     }
+    detailView = null;
+    // Merged shows drill through the metadata-richest backing (idv-5) so
+    // seasons/episodes come from — and play on — the rich server source;
+    // non-merged items carry no detailKey, so nothing changes for them.
+    const key = detailKeyOf(item);
+    if (mode === "home") {
+      // Drilling out of a hub: start a fresh crumb trail rooted at this item.
+      active = null;
+      crumbs = [{ title: item.title, ratingKey: key }];
+    } else {
+      crumbs = [...crumbs, { title: item.title, ratingKey: key }];
+    }
+    mode = "browse";
+    await resetAndLoad();
   }
 
   async function changeSort() {
@@ -788,16 +789,14 @@
     }
   }
 
-  // ---- Detail / info surface (item-detail-view, amended slice 2) ----------
-  // Reached only via the dev-flagged context-menu "Info" entry until the
-  // navigation flips (amended slice 3): set localStorage "vela.devDetail" to
-  // "1". The view layers over home/browse without touching their state, so
+  // ---- Detail / info surface (item-detail-view) ----------------------------
+  // Reached from library/home-rail clicks (open) and the context-menu "Info"
+  // entry. The view layers over home/browse without touching their state, so
   // closing it returns exactly where the user was.
   type DetailView =
     | { kind: "item"; item: Item }
     | { kind: "season"; seasonKey: string | null; seed: Item; initialSelKey?: string };
   let detailView = $state<DetailView | null>(null);
-  let devDetail = $state(false);
 
   function closeDetail() {
     detailView = null;
@@ -922,7 +921,6 @@
         ? Math.round(Math.min(100, (100 * item.viewOffsetMs) / item.durationMs))
         : null}
     {@const baseName = item.grandparentTitle ?? item.title}
-    {@const playable = item.mediaType !== "show" && item.mediaType !== "season"}
     {@const parts = item.grandparentTitle
       ? [
           item.grandparentTitle,
@@ -960,11 +958,6 @@
           />
         {:else}
           <div class="noart">{item.title}</div>
-        {/if}
-        {#if playable}
-          <div class="playoverlay" aria-hidden="true">
-            <span class="playbtn"><Icon name="play" size={20} /></span>
-          </div>
         {/if}
         {#if pct !== null}
           <!-- Decorative: the percentage is exposed on the button's aria-label
@@ -1014,7 +1007,7 @@
               class="flowcard"
               class:center={d === 0}
               style="z-index:{30 - Math.abs(d)}; transform: translateX(calc(-50% + {d * -17}%)) rotateY({d === 0 ? 0 : d > 0 ? 18 : -18}deg) scale({d === 0 ? 1 : Math.max(0.6, 0.86 - (Math.abs(d) - 1) * 0.06)}); filter: brightness({d === 0 ? 1 : Math.max(0.35, 0.6 - (Math.abs(d) - 1) * 0.12)});"
-              onclick={() => (d === 0 ? open(it) : (heroPos = i))}
+              onclick={() => (d === 0 ? play(it) : (heroPos = i))}
               oncontextmenu={(e) => openMenu(e, it, true)}
               title={it.grandparentTitle ?? it.title}
               aria-label={d === 0 ? `Play ${it.grandparentTitle ?? it.title}` : `Show ${it.grandparentTitle ?? it.title}`}
@@ -1262,9 +1255,9 @@
   {@const fullyWatched = mi.played === true && !inProgress}
   <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px;" role="menu">
     <button role="menuitem" onclick={() => { closeMenu(); play(mi); }}>Play</button>
-    {#if devDetail && mi.mediaType !== "show"}
-      <!-- Dev-flagged until the nav flip (amended slice 3) ungates it; it
-           then stays as the info path for carousel items (CW click = play). -->
+    {#if mi.mediaType !== "show"}
+      <!-- The info path for the Continue Watching flow, where click plays;
+           shows get no entry — their info surface is the seasons drill. -->
       <button role="menuitem" onclick={() => openInfo(mi)}>Info</button>
     {/if}
     <button role="menuitem" onclick={() => playNext(mi)}>Play next</button>
@@ -1620,14 +1613,6 @@
     box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
     transform: scale(0.82);
     transition: transform 0.18s var(--ease);
-  }
-  .poster:hover .playoverlay,
-  .poster:focus-visible .playoverlay {
-    opacity: 1;
-  }
-  .poster:hover .playbtn,
-  .poster:focus-visible .playbtn {
-    transform: scale(1);
   }
   .poster.landscape .art {
     aspect-ratio: 16 / 9;
