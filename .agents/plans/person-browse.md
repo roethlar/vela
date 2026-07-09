@@ -79,25 +79,37 @@ text (the sparse-page bar: never broken, never erroring).
    detail crumb bar gets this for free (the underlying trail is the person
    crumb).
 
-   **State exclusivity + refresh (plan-review r1, binding):** `personView`
-   joins the mutually-exclusive browse-root family and must follow BOTH of
-   `searchTerm`'s disciplines, or watch-state refreshes corrupt the grid:
+   **State exclusivity + refresh (plan-review r1+r2, binding):** `personView`
+   joins the mutually-exclusive browse-root family and follows `searchTerm`'s
+   disciplines exactly, or watch-state refreshes corrupt the grid:
    - *Entering* the person view clears the other roots (`active = null`,
      `activeType = null`, `searchTerm = ""`), bumps `loadGen`/`homeGen`
-     exactly as `runSearch` does, and sets the single crumb. *Every existing
-     navigation entry* (`select`, `selectType`, `runSearch`, `goHome`,
-     `open`'s show drill) clears `personView` the way they already reset
-     `searchTerm`/`active` — otherwise a later `resetAndLoad` repaints a
-     stale listing under the person crumb.
+     exactly as `runSearch` does, and sets the single crumb.
+   - *Root switches clear it; child drills preserve it (r2).* `select`,
+     `selectType`, `runSearch`, `selectSource`, and `goHome` clear
+     `personView` the way they already reset `searchTerm`/`active`. But
+     `open()`'s show drill PRESERVES it, exactly as it preserves
+     `searchTerm` today (`+page.svelte:547-565` appends the crumb without
+     touching the root state) — that surviving root state is what lets
+     `goCrumb(0)` re-run the root query (`+page.svelte:612-619`). Clearing
+     it on the drill would strand the person crumb with nothing to re-run.
    - *`refreshWatchState`* (fires on `playback-ended` and every
      watched-state edit, `+page.svelte:143-153`) gains a `personView`
-     branch beside the `searchTerm` branch: re-run the person query.
-     Without it the live code falls to `resetAndLoad()`, which empties
-     `items` and then either loads nothing (person crumb has no
-     `ratingKey`/`active`/`activeType` → blank grid) or reloads a stale
-     `activeType` listing under the person crumb (`+page.svelte:475-495`).
-   - *`goCrumb` re-entry* routes to the person re-run when the root is a
-     person crumb (the existing search-root special case, extended).
+     branch beside the `searchTerm` branch, gated to the ROOT level:
+     when `personView` is set and the person root is the visible level
+     (`crumbs.length === 1`), re-run the person query; a drilled level
+     under the person root (`crumbs.length > 1`) refreshes through the
+     existing `resetAndLoad()` path, which works there because the drilled
+     crumb has a `ratingKey`. Without the branch, the root level would
+     blank (`items` emptied; person crumb has no
+     `ratingKey`/`active`/`activeType` to reload) or repaint a stale
+     `activeType` listing (`+page.svelte:475-495`). The gate deliberately
+     does NOT copy search's ungated behavior (an ungated re-run yanks a
+     drilled view back to the root — a live search quirk this plan does
+     not import or fix).
+   - *`goCrumb` re-entry* routes to the person re-run when the target root
+     is a person crumb (the existing search-root special case, extended;
+     depends on the survival rule above).
 6. **Click targets:** in `ItemDetail`, each cast card becomes a button when
    `person_key` is present (whole card), and Directed by / Written by render
    as per-name links instead of a joined string. In `SeasonDetail`, the
@@ -165,3 +177,17 @@ block to the person-view design (personView joins the mutually-exclusive
 browse-root family: cleared by every navigation entry, clears the others on
 entry, gets its own `refreshWatchState` and `goCrumb` re-run branches) and a
 matching playtest check in Verification.
+
+**r2 — 2026-07-09 — verdict `reopened`, 1 finding, ADMITTED (verified against
+live code; it corrected an overshoot the r1 fix introduced — the loop working
+as intended).** Base `0338176`, head `05ef618`. Finding: the r1 block listed
+`open`'s show drill among the entries that clear `personView`, which
+contradicts the live search-root pattern the plan mirrors — `open()` appends
+a show crumb WITHOUT clearing `searchTerm` (`+page.svelte:547-565`), and
+`goCrumb(0)` re-runs the root query only because that state survives
+(`:612-619`); clearing on the drill would strand the person crumb with
+nothing to re-run, recreating the r1 blank/stale path. Fixed: root switches
+clear `personView`, child drills preserve it; the `refreshWatchState` person
+branch is gated to the root level (`crumbs.length === 1`), with drilled
+levels refreshing through the existing `ratingKey` path (and explicitly NOT
+importing search's ungated root-yank quirk).
