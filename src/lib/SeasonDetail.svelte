@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import Icon from "$lib/Icon.svelte";
-  import { detailKeyOf, type Detail, type Item } from "$lib/types";
+  import { detailKeyOf, type Detail, type Item, type PersonRef } from "$lib/types";
 
   // The shared episode info page (binding UX ruling): ONE page per season —
   // an episode list plus a detail panel bound to the selection; selecting an
@@ -24,6 +24,7 @@
     onMenu,
     onShow,
     onSeason,
+    onPerson,
   }: {
     seasonKey: string | null;
     seed: Item;
@@ -36,6 +37,9 @@
     // page when this page isn't already listing it (single-episode mode).
     onShow?: (key: string, title: string) => void;
     onSeason?: (key: string, seed: Item, selKey?: string) => void;
+    // Person browse: episode director/writer names are clickable when the
+    // backend identified the person; absent keys render plain text.
+    onPerson?: (key: string, kind: "director" | "writer", name: string) => void;
   } = $props();
 
   const PAGE = 60;
@@ -181,6 +185,10 @@
   }
 </script>
 
+{#snippet people(refs: PersonRef[], kind: "director" | "writer")}
+  {#each refs as p, i (p.name + i)}{#if i > 0}{", "}{/if}{#if p.personKey && onPerson}<button class="personlink" onclick={() => onPerson!(p.personKey!, kind, p.name)}>{p.name}</button>{:else}<span>{p.name}</span>{/if}{/each}
+{/snippet}
+
 <div class="season" role="region" aria-label="Season details">
   <!-- Back lives in the page-level crumb bar (the info surface is one more
        drill level); the heading is the page title plus show/season links. -->
@@ -276,10 +284,10 @@
         {#if detail?.directors?.length || detail?.writers?.length}
           <div class="credits">
             {#if detail?.directors?.length}
-              <div><span class="credlabel">Directed by</span> {detail.directors.map((p) => p.name).join(", ")}</div>
+              <div><span class="credlabel">Directed by</span> {@render people(detail.directors, "director")}</div>
             {/if}
             {#if detail?.writers?.length}
-              <div><span class="credlabel">Written by</span> {detail.writers.map((p) => p.name).join(", ")}</div>
+              <div><span class="credlabel">Written by</span> {@render people(detail.writers, "writer")}</div>
             {/if}
           </div>
         {/if}
@@ -345,6 +353,21 @@
   }
   .heading .navlink:hover,
   .heading .navlink:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  /* Person-browse affordance: identified director/writer names are links. */
+  .personlink {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .personlink:hover,
+  .personlink:focus-visible {
     color: var(--accent);
     text-decoration: underline;
   }

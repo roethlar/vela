@@ -147,8 +147,12 @@
     } else {
       // The hidden Home hubs are stale now; empty them so goHome() re-fetches.
       hubs = [];
-      // Refresh the visible listing so its progress bars / played badges update.
+      // Refresh the visible listing so its progress bars / played badges
+      // update. The person root re-runs its own query, gated to the ROOT
+      // level (plan-review r2): a drilled level under it refreshes through
+      // resetAndLoad, whose crumb has a ratingKey.
       if (searchTerm) runSearch(searchTerm);
+      else if (personView && crumbs.length === 1) runPersonView(personView);
       else resetAndLoad();
     }
   }
@@ -392,6 +396,7 @@
     loading = false; // a stale browse load won't clear this (its gen is stale); do it here
     error = null; // don't carry a browse/search error banner onto Home
     searchTerm = "";
+    personView = null;
     activeType = null;
     mode = "home";
     // Entering a browse earlier may have discarded an in-flight hub load (via the
@@ -451,6 +456,7 @@
     detailView = null;
     mode = "browse";
     searchTerm = "";
+    personView = null;
     active = section;
     activeType = null;
     crumbs = [{ title: section.title, ratingKey: null }];
@@ -462,6 +468,7 @@
     detailView = null;
     mode = "browse";
     searchTerm = "";
+    personView = null;
     active = null;
     activeType = t;
     if (!TYPE_SORTS.has(sort)) sort = "titleSort:asc";
@@ -587,6 +594,7 @@
     detailView = null;
     mode = "browse";
     active = null; // search results aren't a section, so no pagination
+    personView = null;
     searchTerm = q;
     crumbs = [{ title: `Search: "${q}"`, ratingKey: null }];
     items = [];
@@ -612,11 +620,57 @@
   async function goCrumb(index: number) {
     crumbs = crumbs.slice(0, index + 1);
     const here = crumbs[crumbs.length - 1];
-    // Returning to a search root (no section, no rating key) re-runs the search.
+    // Returning to a search/person root (no section, no rating key) re-runs
+    // its query — the root state survives child drills (searchTerm pattern).
     if (!here.ratingKey && !active && searchTerm) {
       await runSearch(searchTerm);
+    } else if (!here.ratingKey && !active && personView) {
+      await runPersonView(personView);
     } else {
       await resetAndLoad();
+    }
+  }
+
+  // ---- Person browse (person-browse plan slice 2) --------------------------
+  // A browse ROOT parallel to search: everything featuring a person, fetched
+  // one-shot from the person's own source (tag ids are server-local). It
+  // joins the mutually-exclusive root family (plan-review r1/r2, binding):
+  // entering clears the other roots; root switches clear it; child drills
+  // preserve it exactly as they preserve searchTerm.
+  type PersonView = { key: string; kind: "actor" | "director" | "writer"; name: string };
+  let personView = $state<PersonView | null>(null);
+
+  function personLabel(p: PersonView): string {
+    return p.kind === "actor"
+      ? `With ${p.name}`
+      : p.kind === "director"
+        ? `Directed by ${p.name}`
+        : `Written by ${p.name}`;
+  }
+
+  async function runPersonView(p: PersonView) {
+    homeGen++; // leaving home: invalidate any in-flight home/sections load
+    const myGen = ++loadGen; // invalidate any in-flight load; guard our own result
+    loadingMore = false;
+    detailView = null;
+    mode = "browse";
+    active = null;
+    activeType = null; // a stale type root must never repaint under this crumb
+    searchTerm = "";
+    personView = p;
+    crumbs = [{ title: personLabel(p), ratingKey: null }];
+    items = [];
+    hasMore = false; // one-shot: the backend returns the full merged list
+    loading = true;
+    error = null;
+    try {
+      const results = await invoke<Item[]>("get_person_items", { personKey: p.key, kind: p.kind });
+      if (myGen !== loadGen) return; // user navigated away while loading
+      items = results;
+    } catch (e) {
+      if (myGen === loadGen) error = String(e);
+    } finally {
+      if (myGen === loadGen) loading = false;
     }
   }
 
@@ -1179,7 +1233,13 @@
     </div>
     {#if detailView.kind === "item"}
       {#key detailView.item.ratingKey}
-        <ItemDetail item={detailView.item} {posterSrc} onPlay={play} onMenu={openMenu} />
+        <ItemDetail
+          item={detailView.item}
+          {posterSrc}
+          onPlay={play}
+          onMenu={openMenu}
+          onPerson={(key, kind, name) => runPersonView({ key, kind, name })}
+        />
       {/key}
     {:else}
       {#key detailView.seed.ratingKey}
@@ -1193,6 +1253,7 @@
           onShow={(key, title) => open({ ratingKey: key, title, mediaType: "show" })}
           onSeason={(key, seed, sel) =>
             (detailView = { kind: "season", seasonKey: key, seed, initialSelKey: sel })}
+          onPerson={(key, kind, name) => runPersonView({ key, kind, name })}
         />
       {/key}
     {/if}

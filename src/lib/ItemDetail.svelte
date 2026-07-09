@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import Icon from "$lib/Icon.svelte";
-  import { detailKeyOf, type Detail, type Item } from "$lib/types";
+  import { detailKeyOf, type Detail, type Item, type PersonRef } from "$lib/types";
 
   // Full-screen info page for a single item (movie / video). Renders the
   // listing data immediately and enriches in place when `get_item_detail`
@@ -13,11 +13,15 @@
     posterSrc,
     onPlay,
     onMenu,
+    onPerson,
   }: {
     item: Item;
     posterSrc: (p: string) => string;
     onPlay: (item: Item) => void;
     onMenu: (e: MouseEvent, item: Item) => void;
+    // Person browse: cast cards and director/writer names are clickable when
+    // the backend identified the person; absent keys render plain text.
+    onPerson?: (key: string, kind: "actor" | "director" | "writer", name: string) => void;
   } = $props();
 
   let detail = $state<Detail | null>(null);
@@ -85,6 +89,26 @@
   }
 </script>
 
+{#snippet people(refs: PersonRef[], kind: "director" | "writer")}
+  {#each refs as p, i (p.name + i)}{#if i > 0}{", "}{/if}{#if p.personKey && onPerson}<button class="personlink" onclick={() => onPerson!(p.personKey!, kind, p.name)}>{p.name}</button>{:else}<span>{p.name}</span>{/if}{/each}
+{/snippet}
+
+{#snippet castBody(c: NonNullable<Detail["cast"]>[number])}
+  {#if c.thumb}
+    <img
+      class="headshot"
+      src={posterSrc(c.thumb)}
+      alt={c.name}
+      loading="lazy"
+      onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
+    />
+  {:else}
+    <div class="headshot placeholder" aria-hidden="true"><Icon name="film" size={22} stroke={1.5} /></div>
+  {/if}
+  <div class="castname">{c.name}</div>
+  {#if c.role}<div class="castrole">{c.role}</div>{/if}
+{/snippet}
+
 <div class="detail" role="region" aria-label="Item details">
   {#if backdrop}
     <div class="backdrop" aria-hidden="true">
@@ -147,10 +171,10 @@
         {/if}
         <div class="credits">
           {#if detail?.directors?.length}
-            <div><span class="credlabel">Directed by</span> {detail.directors.map((p) => p.name).join(", ")}</div>
+            <div><span class="credlabel">Directed by</span> {@render people(detail.directors, "director")}</div>
           {/if}
           {#if detail?.writers?.length}
-            <div><span class="credlabel">Written by</span> {detail.writers.map((p) => p.name).join(", ")}</div>
+            <div><span class="credlabel">Written by</span> {@render people(detail.writers, "writer")}</div>
           {/if}
           {#if detail?.studio}
             <div><span class="credlabel">Studio</span> {detail.studio}</div>
@@ -167,21 +191,17 @@
         <h2>Cast</h2>
         <div class="castrow">
           {#each detail.cast as c (c.name + (c.role ?? ""))}
-            <div class="castcard">
-              {#if c.thumb}
-                <img
-                  class="headshot"
-                  src={posterSrc(c.thumb)}
-                  alt={c.name}
-                  loading="lazy"
-                  onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
-                />
-              {:else}
-                <div class="headshot placeholder" aria-hidden="true"><Icon name="film" size={22} stroke={1.5} /></div>
-              {/if}
-              <div class="castname">{c.name}</div>
-              {#if c.role}<div class="castrole">{c.role}</div>{/if}
-            </div>
+            {#if c.personKey && onPerson}
+              <button
+                class="castcard clickable"
+                onclick={() => onPerson!(c.personKey!, "actor", c.name)}
+                title="Browse titles with {c.name}"
+              >
+                {@render castBody(c)}
+              </button>
+            {:else}
+              <div class="castcard">{@render castBody(c)}</div>
+            {/if}
           {/each}
         </div>
       </section>
@@ -432,6 +452,35 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  /* Person-browse affordances: identified people are clickable. */
+  button.castcard {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .castcard.clickable:hover .castname,
+  .castcard.clickable:focus-visible .castname {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+  .personlink {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+  }
+  .personlink:hover,
+  .personlink:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
   }
   .version {
     border: 1px solid var(--border-subtle);
