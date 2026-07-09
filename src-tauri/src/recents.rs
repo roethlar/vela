@@ -170,6 +170,8 @@ mod tests {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            parent_rating_key: None,
+            grandparent_rating_key: None,
             source_id: "local".into(),
             provider_ids: vec![],
             backing: None,

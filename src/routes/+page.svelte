@@ -802,14 +802,18 @@
     detailView = null;
   }
 
-  // A season key for an episode's shared page is only trustworthy when it
-  // names the list the episode actually came from: the already-open shared
-  // page itself, or a browse grid whose children include this episode. A
-  // bare crumb is NOT enough — with a season page open above a seasons
-  // grid, the crumb still points at the show, and get_children(show) would
-  // list seasons in the episode list (idv-s2 review r1). Anything else
-  // degrades to single-episode mode rather than a wrong list.
+  // A season key for an episode's shared page: the episode's own parent key
+  // is authoritative when the server sent one — it names the episode's season
+  // no matter which surface (home rail, search, grid) the click came from.
+  // Otherwise the key is only trustworthy when it names the list the episode
+  // actually came from: the already-open shared page itself, or a browse grid
+  // whose children include this episode. A bare crumb is NOT enough — with a
+  // season page open above a seasons grid, the crumb still points at the
+  // show, and get_children(show) would list seasons in the episode list
+  // (idv-s2 review r1). Anything else degrades to single-episode mode rather
+  // than a wrong list.
   function seasonKeyFor(ep: Item): string | null {
+    if (ep.parentRatingKey) return ep.parentRatingKey;
     if (detailView) {
       return detailView.kind === "season" ? detailView.seasonKey : null;
     }
@@ -1164,6 +1168,9 @@
           onBack={closeDetail}
           onPlay={play}
           onMenu={openMenu}
+          onShow={(key, title) => open({ ratingKey: key, title, mediaType: "show" })}
+          onSeason={(key, seed, sel) =>
+            (detailView = { kind: "season", seasonKey: key, seed, initialSelKey: sel })}
         />
       {/key}
     {/if}

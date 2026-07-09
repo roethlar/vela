@@ -437,7 +437,7 @@ struct MediaStreamInfo {
     height: Option<u32>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Default)]
 #[serde(rename_all = "PascalCase")]
 struct BaseItem {
     id: String,
@@ -453,6 +453,7 @@ struct BaseItem {
     series_name: Option<String>,
     season_name: Option<String>,
     series_id: Option<String>,
+    season_id: Option<String>,
     series_primary_image_tag: Option<String>,
     backdrop_image_tags: Option<Vec<String>>,
     image_tags: Option<ImageTags>,
@@ -707,6 +708,21 @@ impl JellyfinSource {
             parent_index: item.parent_index_number,
             grandparent_title: item.series_name.clone(),
             parent_title: item.season_name.clone(),
+            // Container-navigation keys: an episode's season/series, a
+            // season's series (its parent). Namespaced like rating_key.
+            parent_rating_key: match item.item_type.as_deref() {
+                Some("Episode") => item.season_id.as_deref(),
+                Some("Season") => item.series_id.as_deref(),
+                _ => None,
+            }
+            .map(|k| namespace_key(&self.id, k)),
+            grandparent_rating_key: if item.item_type.as_deref() == Some("Episode") {
+                item.series_id
+                    .as_deref()
+                    .map(|k| namespace_key(&self.id, k))
+            } else {
+                None
+            },
             source_id: self.id.clone(),
             // {"Imdb": "tt0133093"} → "imdb:tt0133093", matching Plex's form.
             provider_ids: item
@@ -992,6 +1008,42 @@ mod tests {
             user_id: "u1".into(),
             http: reqwest::Client::new(),
         }
+    }
+
+    #[test]
+    fn to_item_namespaces_season_and_series_keys() {
+        let src = JellyfinSource::new("jfA", "JF", test_client());
+        let ep = BaseItem {
+            id: "ep7".into(),
+            item_type: Some("Episode".into()),
+            season_id: Some("sea4".into()),
+            series_id: Some("ser1".into()),
+            ..Default::default()
+        };
+        let dto = src.to_item(&ep);
+        assert_eq!(dto.parent_rating_key.as_deref(), Some("jfA:sea4"));
+        assert_eq!(dto.grandparent_rating_key.as_deref(), Some("jfA:ser1"));
+
+        // A season's parent is its series; it has no grandparent.
+        let season = BaseItem {
+            id: "sea4".into(),
+            item_type: Some("Season".into()),
+            series_id: Some("ser1".into()),
+            ..Default::default()
+        };
+        let dto = src.to_item(&season);
+        assert_eq!(dto.parent_rating_key.as_deref(), Some("jfA:ser1"));
+        assert_eq!(dto.grandparent_rating_key, None);
+
+        // Movies carry neither.
+        let movie = BaseItem {
+            id: "m1".into(),
+            item_type: Some("Movie".into()),
+            ..Default::default()
+        };
+        let dto = src.to_item(&movie);
+        assert_eq!(dto.parent_rating_key, None);
+        assert_eq!(dto.grandparent_rating_key, None);
     }
 
     #[test]

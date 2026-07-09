@@ -16,6 +16,11 @@ export type Item = {
   viewOffsetMs?: number;
   grandparentTitle?: string;
   parentTitle?: string;
+  // Namespaced container keys, when the backend exposes them: an episode's
+  // season / a season's show (parent), an episode's show (grandparent).
+  // Drive the info surface's season/show navigation.
+  parentRatingKey?: string;
+  grandparentRatingKey?: string;
   index?: number;
   parentIndex?: number;
   played?: boolean | null;

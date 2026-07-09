@@ -60,6 +60,14 @@ pub struct ItemDto {
     pub parent_index: Option<u32>,
     pub grandparent_title: Option<String>,
     pub parent_title: Option<String>,
+    /// Source-namespaced key of the parent container (an episode's season, a
+    /// season's show), when the backend exposes one — the info surface's
+    /// season/show navigation targets.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_rating_key: Option<String>,
+    /// Source-namespaced key of the grandparent (an episode's show).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grandparent_rating_key: Option<String>,
     pub source_id: String,
     /// Cross-source identity hints, normalized as `"scheme:value"`
     /// (e.g. `"imdb:tt0133093"`). Used by the merged All view's dedup.
@@ -413,6 +421,8 @@ mod tests {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            parent_rating_key: Some("s1:150".into()),
+            grandparent_rating_key: Some("s1:100".into()),
             provider_ids: vec![],
             backing: None,
             canonical_id: None,
@@ -422,6 +432,9 @@ mod tests {
         };
         let json = serde_json::to_string(&dto).expect("serialize");
         assert!(json.contains("\"seriesPoster\":\"sp\""));
+        // The season/show navigation keys ride camelCase like every other field.
+        assert!(json.contains("\"parentRatingKey\":\"s1:150\""));
+        assert!(json.contains("\"grandparentRatingKey\":\"s1:100\""));
         assert!(json.contains("\"backdrop\":\"bd\""));
     }
 

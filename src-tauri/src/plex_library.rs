@@ -57,6 +57,10 @@ pub struct PlexDir {
     pub added_at: Option<u64>,
     #[serde(rename = "lastViewedAt")]
     pub last_viewed_at: Option<u64>,
+    /// A season Directory row's parent (its show) — the info surface's
+    /// show-navigation target.
+    #[serde(rename = "parentRatingKey")]
+    pub parent_rating_key: Option<String>,
 }
 
 impl From<PlexDir> for PlexVideo {
@@ -83,6 +87,8 @@ impl From<PlexDir> for PlexVideo {
             parent_index: None,
             grandparent_title: None,
             parent_title: None,
+            parent_rating_key: d.parent_rating_key,
+            grandparent_rating_key: None,
             guids: vec![],
         }
     }
@@ -107,7 +113,7 @@ pub struct LibrarySection {
     pub scanner: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Default)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct PlexVideo {
     pub key: String,
@@ -148,6 +154,10 @@ pub struct PlexVideo {
     pub grandparent_title: Option<String>,
     #[serde(rename = "parentTitle")]
     pub parent_title: Option<String>,
+    #[serde(rename = "parentRatingKey")]
+    pub parent_rating_key: Option<String>,
+    #[serde(rename = "grandparentRatingKey")]
+    pub grandparent_rating_key: Option<String>,
     /// `<Guid id="imdb://tt…"/>` children (present in section listings when
     /// requested with `includeGuids=1`); the cross-source dedup identity.
     #[serde(rename = "Guid", default)]
@@ -1376,6 +1386,8 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
         parent_index: None,
         grandparent_title: None,
         parent_title: None,
+        parent_rating_key: None,
+        grandparent_rating_key: None,
         guids: vec![],
     };
     for a in e.attributes().flatten() {
@@ -1398,6 +1410,8 @@ fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
             b"parentIndex" => v.parent_index = av(&a).parse().ok(),
             b"grandparentTitle" => v.grandparent_title = Some(av(&a)),
             b"parentTitle" => v.parent_title = Some(av(&a)),
+            b"parentRatingKey" => v.parent_rating_key = Some(av(&a)),
+            b"grandparentRatingKey" => v.grandparent_rating_key = Some(av(&a)),
             _ => {}
         }
     }
@@ -1550,6 +1564,7 @@ mod tests {
             summary: None,
             added_at: Some(1_700_000_000),
             last_viewed_at: Some(1_751_000_000),
+            parent_rating_key: None,
         };
         let v: PlexVideo = d.into();
         assert_eq!(v.added_at, Some(1_700_000_000));
@@ -1611,6 +1626,31 @@ mod tests {
             Some("/library/metadata/7/thumb/9")
         );
         assert_eq!(v.art.as_deref(), Some("/library/metadata/7/art/9"));
+    }
+
+    #[test]
+    fn episode_and_season_rows_carry_parent_keys() {
+        let xml = r#"
+            <MediaContainer size="2">
+              <Video ratingKey="202" key="/library/metadata/202" title="Next Up"
+                     type="episode" parentRatingKey="150" grandparentRatingKey="100" />
+              <Directory ratingKey="150" key="/library/metadata/150/children"
+                     title="Season 1" type="season" parentRatingKey="100" />
+            </MediaContainer>
+        "#;
+        // Attribute path (hubs / on-deck / streamed listings).
+        let items = videos_from_xml(xml);
+        assert_eq!(items[0].parent_rating_key.as_deref(), Some("150"));
+        assert_eq!(items[0].grandparent_rating_key.as_deref(), Some("100"));
+        assert_eq!(items[1].parent_rating_key.as_deref(), Some("100"));
+
+        // Serde path (the get_items listing parse) + the Directory→Video map.
+        let c: ItemsContainer = serde_xml_rs::from_str(xml).expect("parse");
+        assert_eq!(c.videos[0].parent_rating_key.as_deref(), Some("150"));
+        assert_eq!(c.videos[0].grandparent_rating_key.as_deref(), Some("100"));
+        let season: PlexVideo = c.directories[0].clone().into();
+        assert_eq!(season.parent_rating_key.as_deref(), Some("100"));
+        assert_eq!(season.grandparent_rating_key, None);
     }
 
     #[test]

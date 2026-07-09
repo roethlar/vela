@@ -114,6 +114,14 @@ impl PlexSource {
             parent_index: v.parent_index,
             grandparent_title: v.grandparent_title,
             parent_title: v.parent_title,
+            parent_rating_key: v
+                .parent_rating_key
+                .as_deref()
+                .map(|k| namespace_key(&self.id, k)),
+            grandparent_rating_key: v
+                .grandparent_rating_key
+                .as_deref()
+                .map(|k| namespace_key(&self.id, k)),
             source_id: self.id.clone(),
             // "imdb://tt0133093" → "imdb:tt0133093"; includes plex:// ids,
             // which are stable across Plex servers on the new agents.
@@ -609,6 +617,37 @@ mod tests {
         for s in ["SDR", "Rec. 709", ""] {
             assert!(!is_hdr_range(s), "{s} should not be HDR");
         }
+    }
+
+    #[test]
+    fn to_item_namespaces_parent_and_grandparent_keys() {
+        let src = PlexSource::new(
+            "plexA",
+            "Plex",
+            PlexLibrary::new("tok".into(), "cid".into()),
+        );
+        let lib = PlexLibrary::new("tok".into(), "cid".into());
+        let ep = PlexVideo {
+            rating_key: "202".into(),
+            title: "Next Up".into(),
+            media_type: Some("episode".into()),
+            parent_rating_key: Some("150".into()),
+            grandparent_rating_key: Some("100".into()),
+            ..Default::default()
+        };
+        let dto = src.to_item(&lib, ep);
+        assert_eq!(dto.parent_rating_key.as_deref(), Some("plexA:150"));
+        assert_eq!(dto.grandparent_rating_key.as_deref(), Some("plexA:100"));
+
+        // Absent upstream keys stay absent — never a dangling "plexA:" prefix.
+        let movie = PlexVideo {
+            rating_key: "9".into(),
+            title: "A Movie".into(),
+            ..Default::default()
+        };
+        let dto = src.to_item(&lib, movie);
+        assert_eq!(dto.parent_rating_key, None);
+        assert_eq!(dto.grandparent_rating_key, None);
     }
 
     #[test]

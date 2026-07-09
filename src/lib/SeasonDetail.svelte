@@ -23,6 +23,8 @@
     onBack,
     onPlay,
     onMenu,
+    onShow,
+    onSeason,
   }: {
     seasonKey: string | null;
     seed: Item;
@@ -31,6 +33,11 @@
     onBack: () => void;
     onPlay: (item: Item) => void;
     onMenu: (e: MouseEvent, item: Item) => void;
+    // Heading navigation (owner playtest 2026-07-08): the show title links to
+    // the show's seasons drill; the season title links to the full season
+    // page when this page isn't already listing it (single-episode mode).
+    onShow?: (key: string, title: string) => void;
+    onSeason?: (key: string, seed: Item, selKey?: string) => void;
   } = $props();
 
   const PAGE = 60;
@@ -135,6 +142,20 @@
     return seed.mediaType === "season" ? seed.title : (seed.parentTitle ?? "");
   });
 
+  // Heading-link targets, when the listing data carries container keys: the
+  // show is an episode's grandparent or a season seed's parent; the season
+  // link appears only when it would navigate somewhere new (single-episode /
+  // degraded mode — clicking it opens the full season page).
+  let showKey = $derived(
+    selected?.grandparentRatingKey ??
+      seed.grandparentRatingKey ??
+      (seed.mediaType === "season" ? seed.parentRatingKey : undefined)
+  );
+  let seasonLinkKey = $derived.by(() => {
+    const k = selected?.parentRatingKey ?? seed.parentRatingKey;
+    return k && k !== seasonKey ? k : undefined;
+  });
+
   function epTag(e: Item): string {
     return e.index != null ? `E${e.index}` : "";
   }
@@ -160,8 +181,20 @@
   <div class="topbar">
     <button class="back" onclick={onBack}><Icon name="back" size={15} /> Back</button>
     <div class="heading">
-      {#if showTitle}<span class="show">{showTitle}</span>{/if}
-      {#if seasonTitle}<span class="sea">{seasonTitle}</span>{/if}
+      {#if showTitle}
+        {#if showKey && onShow}
+          <button class="show navlink" title="Open show" onclick={() => onShow!(showKey!, showTitle)}>{showTitle}</button>
+        {:else}
+          <span class="show">{showTitle}</span>
+        {/if}
+      {/if}
+      {#if seasonTitle}
+        {#if seasonLinkKey && onSeason}
+          <button class="sea navlink" title="Open season" onclick={() => onSeason!(seasonLinkKey!, seed, selected?.ratingKey)}>{seasonTitle}</button>
+        {:else}
+          <span class="sea">{seasonTitle}</span>
+        {/if}
+      {/if}
     </div>
   </div>
   <div class="split">
@@ -308,6 +341,22 @@
     align-items: baseline;
     gap: 0.6rem;
     min-width: 0;
+  }
+  /* Heading titles rendered as navigation: the button reset comes FIRST so
+     the .show/.sea typography rules below win over `font: inherit`. */
+  .heading .navlink {
+    appearance: none;
+    background: none;
+    border: none;
+    padding: 0;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+  }
+  .heading .navlink:hover,
+  .heading .navlink:focus-visible {
+    color: var(--accent);
+    text-decoration: underline;
   }
   .heading .show {
     font-size: 1.3rem;
