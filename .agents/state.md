@@ -75,16 +75,21 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   until the nav flip. Remaining owner playtest asks: (1) library sorting
   0.1.30 — sort dropdown on Plex libraries + merged All view; (2) mpv
   autocrop 0.1.22 — Shift+C / Automatic crop on the real HDR stack.
-- **machine-local (Windows dev host, `F:\dev\vela`):** cargo/rustc need valid
-  stdin — `cmd /c "cargo ... < nul"` (rustup shim quirk); codex lives at
-  `%APPDATA%\npm\codex.cmd`, prompt via stdin redirect (`</dev/null` is
-  POSIX-only); cargo test runs 62 here (unix-cfg tests excluded — Linux CI is
-  authoritative); clippy baseline = 4 pre-existing cfg-dead mpv-installer
-  warnings (post-removal; was 13); the E2E harness does NOT run here (Linux
-  WebKitWebDriver); checkout is autocrlf=true (empty-diff "modified" files
-  are line-ending noise).
-- Version 0.1.37 (bumped `d51a2c4`, 2026-07-09). Everything since the last
-  owner push is UNPUSHED as of `d51a2c4` (owner pushes manually; policy
+- **machine-local (Windows dev host, `F:\dev\vela`):** the `ptk` MCP server
+  (warm PowerShell runspace, `ptk_invoke`) is the DIRECT shell for agent
+  harnesses on this host — probe it before assuming no shell / delegating
+  shell work to subagents (2026-07-09 lesson: an entire session ran shell
+  through subagent indirection with ptk available the whole time);
+  cargo/rustc need valid stdin — `cmd /c "cargo ... < nul"` (rustup shim
+  quirk); codex lives at `%APPDATA%\npm\codex.cmd`, headless via
+  `codex exec --json --sandbox read-only` with the prompt on stdin;
+  unix-cfg-gated cargo tests are excluded here (Linux CI is authoritative —
+  don't record the local count, it rots); clippy baseline = 4 pre-existing
+  cfg-dead mpv-installer warnings (post-removal; was 13); the E2E harness
+  does NOT run here (Linux WebKitWebDriver); checkout is autocrlf=true
+  (empty-diff "modified" files are line-ending noise).
+- Version 0.1.39 (bumped `8204a77`, 2026-07-09). Everything since the last
+  owner push is UNPUSHED as of `ca826d8` (owner pushes manually; policy
   `.agents/push-policy.md`). Owner styling ruling 2026-07-09 (encoded at the
   `.watchedbadge` CSS comment, landed `fcb3e22` without a reviewloop —
   one-rule CSS deletion, disproportionate): watched items are NOT dimmed;
