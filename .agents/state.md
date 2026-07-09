@@ -99,6 +99,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - Item-detail: no open defect (0.1.36 verified 2026-07-09); further Plex
   polish on the next owner report; JF/Emby `item_detail` resumes only on
   an explicit owner go.
+- Person browse (clickable actor/director/writer → filtered grid): plan
+  DRAFTED on owner ask 2026-07-09 (`.agents/plans/person-browse.md`) —
+  plan-review loop, then owner go before code.
 - QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
   on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
   untriaged `cargo check --locked` failure on the runner). Stale-risk: local
@@ -132,7 +135,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   toolkit `6f08a67`; verification commands now live in repo-guidance)
 - `.agents/decisions.md`
 - `.agents/plans/drop-local-sources.md` (ACTIVE — slice 1 landed, 2-3 open)
-- `.agents/plans/item-detail-view.md` (ACTIVE — amended slice 3 pending)
+- `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
+- `.agents/plans/person-browse.md` (DRAFT — plan-review, then owner go)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (drift-suspect until DLS slice 3 sweeps them)
