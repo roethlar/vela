@@ -152,7 +152,13 @@
       (seed.mediaType === "season" ? seed.parentRatingKey : undefined)
   );
   let seasonLinkKey = $derived.by(() => {
-    const k = selected?.parentRatingKey ?? seed.parentRatingKey;
+    // Only an EPISODE's parent key names a season. A season seed's parent is
+    // its SHOW (see showKey above) — linking that here would re-target this
+    // page at the show and list seasons as episodes (idv-s4 review r1, the
+    // idv-s2 routing guard).
+    const k =
+      selected?.parentRatingKey ??
+      (seed.mediaType === "episode" ? seed.parentRatingKey : undefined);
     return k && k !== seasonKey ? k : undefined;
   });
 
