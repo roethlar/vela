@@ -20,7 +20,6 @@
     seed,
     initialSelKey,
     posterSrc,
-    onBack,
     onPlay,
     onMenu,
     onShow,
@@ -30,7 +29,6 @@
     seed: Item;
     initialSelKey?: string;
     posterSrc: (p: string) => string;
-    onBack: () => void;
     onPlay: (item: Item) => void;
     onMenu: (e: MouseEvent, item: Item) => void;
     // Heading navigation (owner playtest 2026-07-08): the show title links to
@@ -184,8 +182,9 @@
 </script>
 
 <div class="season" role="region" aria-label="Season details">
+  <!-- Back lives in the page-level crumb bar (the info surface is one more
+       drill level); the heading is the page title plus show/season links. -->
   <div class="topbar">
-    <button class="back" onclick={onBack}><Icon name="back" size={15} /> Back</button>
     <div class="heading">
       {#if showTitle}
         {#if showKey && onShow}
@@ -326,21 +325,6 @@
     align-items: center;
     gap: 1rem;
     margin-bottom: 0.9rem;
-  }
-  .back {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--bg-blur);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-2);
-    border-radius: 0.45rem;
-    padding: 0.35rem 0.7rem;
-    cursor: pointer;
-  }
-  .back:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
   }
   .heading {
     display: flex;

@@ -802,6 +802,16 @@
     detailView = null;
   }
 
+  // The detail page's own crumb in the trail: a movie's title, a season
+  // page's season name (mirrors SeasonDetail's heading derivation).
+  function detailCrumbTitle(v: DetailView): string {
+    if (v.kind === "item") return v.item.title;
+    const s = v.seed;
+    if (s.mediaType === "season") return s.title;
+    if (s.parentIndex != null) return `Season ${s.parentIndex}`;
+    return s.parentTitle ?? s.title;
+  }
+
   // A season key for an episode's shared page: the episode's own parent key
   // is authoritative when the server sent one — it names the episode's season
   // no matter which surface (home rail, search, grid) the click came from.
@@ -1153,10 +1163,24 @@
     </div>
   {:else if detailView}
     <!-- The info surface replaces the content area but leaves home/browse
-         state untouched underneath — Back returns exactly where you were. -->
+         state untouched underneath. It is one more drill level, so it
+         carries the same crumb bar as browse (owner playtest 2026-07-08):
+         ancestors close the detail and navigate; over Home, where there is
+         no trail, the bar is just Back. -->
+    <div class="crumbs">
+      <button class="back" onclick={closeDetail}><Icon name="back" size={15} /> Back</button>
+      {#if mode === "browse" && crumbs.length > 0}
+        {#each crumbs as c, i (i)}
+          {#if i > 0}<span class="sep"><Icon name="chevron" size={13} /></span>{/if}
+          <button class="crumb" onclick={() => { closeDetail(); goCrumb(i); }}>{c.title}</button>
+        {/each}
+        <span class="sep"><Icon name="chevron" size={13} /></span>
+        <span class="crumb current">{detailCrumbTitle(detailView)}</span>
+      {/if}
+    </div>
     {#if detailView.kind === "item"}
       {#key detailView.item.ratingKey}
-        <ItemDetail item={detailView.item} {posterSrc} onBack={closeDetail} onPlay={play} onMenu={openMenu} />
+        <ItemDetail item={detailView.item} {posterSrc} onPlay={play} onMenu={openMenu} />
       {/key}
     {:else}
       {#key detailView.seed.ratingKey}
@@ -1165,7 +1189,6 @@
           seed={detailView.seed}
           initialSelKey={detailView.initialSelKey}
           {posterSrc}
-          onBack={closeDetail}
           onPlay={play}
           onMenu={openMenu}
           onShow={(key, title) => open({ ratingKey: key, title, mediaType: "show" })}

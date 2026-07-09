@@ -11,13 +11,11 @@
   let {
     item,
     posterSrc,
-    onBack,
     onPlay,
     onMenu,
   }: {
     item: Item;
     posterSrc: (p: string) => string;
-    onBack: () => void;
     onPlay: (item: Item) => void;
     onMenu: (e: MouseEvent, item: Item) => void;
   } = $props();
@@ -94,9 +92,8 @@
     </div>
   {/if}
   <div class="body">
-    <div class="topbar">
-      <button class="back" onclick={onBack}><Icon name="back" size={15} /> Back</button>
-    </div>
+    <!-- Back lives in the page-level crumb bar (the info surface is one more
+         drill level), not inside the component. -->
     <div class="hero">
       <div class="postercol">
         <button
@@ -237,24 +234,6 @@
     position: relative;
     padding: 1rem 1.5rem 3rem;
     max-width: 68rem;
-  }
-  .topbar {
-    margin-bottom: 0.8rem;
-  }
-  .back {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.3rem;
-    background: var(--bg-blur);
-    border: 1px solid var(--border-subtle);
-    color: var(--text-2);
-    border-radius: 0.45rem;
-    padding: 0.35rem 0.7rem;
-    cursor: pointer;
-  }
-  .back:hover {
-    color: var(--text-bright);
-    border-color: var(--border-strong);
   }
   .hero {
     display: flex;
