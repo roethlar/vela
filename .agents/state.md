@@ -87,7 +87,11 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   don't record the local count, it rots); clippy baseline = 4 pre-existing
   cfg-dead mpv-installer warnings (post-removal; was 13); the E2E harness
   does NOT run here (Linux WebKitWebDriver); checkout is autocrlf=true
-  (empty-diff "modified" files are line-ending noise).
+  (empty-diff "modified" files are line-ending noise). NOTE: whether this
+  block belongs in TRACKED state at all is a filed toolkit defect
+  (roethlar/AgentGovernanceBootstrap#2, 2026-07-09 — the handoff operator
+  conflicts with the toolkit's own `*.local.*` convention); expect a future
+  governance refresh to move it to an untracked `state.local.md`-style home.
 - Version 0.1.39 (bumped `8204a77`, 2026-07-09). Everything since the last
   owner push is UNPUSHED as of `ca826d8` (owner pushes manually; policy
   `.agents/push-policy.md`). Owner styling ruling 2026-07-09 (encoded at the
