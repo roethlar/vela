@@ -100,8 +100,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   polish on the next owner report; JF/Emby `item_detail` resumes only on
   an explicit owner go.
 - Person browse (clickable actor/director/writer → filtered grid): plan
-  DRAFTED on owner ask 2026-07-09 (`.agents/plans/person-browse.md`) —
-  plan-review loop, then owner go before code.
+  REVIEWED (`.agents/plans/person-browse.md`; codex loop accepted r3,
+  2026-07-09) — **awaiting an explicit owner go before code.** Two slices:
+  backend ids + `person_items`, then frontend clicks + person grid.
 - QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
   on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
   untriaged `cargo check --locked` failure on the runner). Stale-risk: local
@@ -136,7 +137,7 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - `.agents/decisions.md`
 - `.agents/plans/drop-local-sources.md` (ACTIVE — slice 1 landed, 2-3 open)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
-- `.agents/plans/person-browse.md` (DRAFT — plan-review, then owner go)
+- `.agents/plans/person-browse.md` (REVIEWED — awaiting owner go)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (drift-suspect until DLS slice 3 sweeps them)

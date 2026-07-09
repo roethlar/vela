@@ -1,12 +1,12 @@
-# Plan: clickable people — actor/director/writer browse (DRAFT)
+# Plan: clickable people — actor/director/writer browse (REVIEWED — awaiting owner go)
 
 ## Status
-**DRAFT 2026-07-09.** Owner asked whether Plex supports clicking actor/director
-names on info pages to find other titles ("does plex make it easy to click
-things like actor / director names on the info pages and find other things by
-that name?") and, on the affirmative answer, said "draft it". This plan awaits
-the repo-convention codex plan-review loop and then an explicit owner go
-before any code. Plex-first, consistent with the item-detail track's
+**REVIEWED 2026-07-09, awaiting owner go before any code.** Drafted on the
+owner's ask ("does plex make it easy to click things like actor / director
+names on the info pages and find other things by that name?" → "draft it").
+The codex plan-review loop CLOSED accepted at r3 (base `0338176`, head
+`926162c`; r1 and r2 each surfaced a real state-machine defect, both fixed —
+see Review log). Plex-first, consistent with the item-detail track's
 2026-07-08 amendment.
 
 ## Goal
@@ -191,3 +191,9 @@ clear `personView`, child drills preserve it; the `refreshWatchState` person
 branch is gated to the root level (`crumbs.length === 1`), with drilled
 levels refreshing through the existing `ratingKey` path (and explicitly NOT
 importing search's ungated root-yank quirk).
+
+**r3 — 2026-07-09 — verdict `accepted`, 0 comments** (reviewed_sha `926162c`,
+base `0338176`; `guard_confirmed:false` — read-only pass over a design doc).
+The r2 finding is confirmed closed; no further material defect. **Plan-review
+loop CLOSED — the plan awaits the owner's implementation go.** Healthy
+converging loop: r1 (1) → r2 (1, correcting the r1 fix) → r3 (clean).
