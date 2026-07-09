@@ -83,10 +83,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   warnings (post-removal; was 13); the E2E harness does NOT run here (Linux
   WebKitWebDriver); checkout is autocrlf=true (empty-diff "modified" files
   are line-ending noise).
-- Version 0.1.36 (bumped `89d5391`, 2026-07-08; BUILD_DATE reads 2026-07-09
-  — the script stamps UTC, which was past midnight). Everything since the
-  last owner push is UNPUSHED as of `89d5391` (owner pushes manually; policy
-  `.agents/push-policy.md`).
+- Version 0.1.37 (bumped `d51a2c4`, 2026-07-09). Everything since the last
+  owner push is UNPUSHED as of `d51a2c4` (owner pushes manually; policy
+  `.agents/push-policy.md`). Owner styling ruling 2026-07-09 (encoded at the
+  `.watchedbadge` CSS comment, landed `fcb3e22` without a reviewloop —
+  one-rule CSS deletion, disproportionate): watched items are NOT dimmed;
+  the checkmark badge is the only indicator.
 
 ## Next
 
