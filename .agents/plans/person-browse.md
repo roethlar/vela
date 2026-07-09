@@ -78,6 +78,26 @@ text (the sparse-page bar: never broken, never erroring).
    show → seasons drill); Back walks the trail as everywhere else. The
    detail crumb bar gets this for free (the underlying trail is the person
    crumb).
+
+   **State exclusivity + refresh (plan-review r1, binding):** `personView`
+   joins the mutually-exclusive browse-root family and must follow BOTH of
+   `searchTerm`'s disciplines, or watch-state refreshes corrupt the grid:
+   - *Entering* the person view clears the other roots (`active = null`,
+     `activeType = null`, `searchTerm = ""`), bumps `loadGen`/`homeGen`
+     exactly as `runSearch` does, and sets the single crumb. *Every existing
+     navigation entry* (`select`, `selectType`, `runSearch`, `goHome`,
+     `open`'s show drill) clears `personView` the way they already reset
+     `searchTerm`/`active` — otherwise a later `resetAndLoad` repaints a
+     stale listing under the person crumb.
+   - *`refreshWatchState`* (fires on `playback-ended` and every
+     watched-state edit, `+page.svelte:143-153`) gains a `personView`
+     branch beside the `searchTerm` branch: re-run the person query.
+     Without it the live code falls to `resetAndLoad()`, which empties
+     `items` and then either loads nothing (person crumb has no
+     `ratingKey`/`active`/`activeType` → blank grid) or reloads a stale
+     `activeType` listing under the person crumb (`+page.svelte:475-495`).
+   - *`goCrumb` re-entry* routes to the person re-run when the root is a
+     person crumb (the existing search-root special case, extended).
 6. **Click targets:** in `ItemDetail`, each cast card becomes a button when
    `person_key` is present (whole card), and Directed by / Written by render
    as per-name links instead of a joined string. In `SeasonDetail`, the
@@ -116,7 +136,10 @@ text (the sparse-page bar: never broken, never erroring).
   movie page (grid of their titles, newest first, movie/show mix), a
   director on an episode page, a result routes per the nav flip, Back
   returns to the info page's trail; a non-Plex sparse page shows plain-text
-  names.
+  names; AND the r1 refresh case: mark a title watched from the person
+  grid's context menu (and finish a playback started from it) — the grid
+  must stay populated with the person's titles, not blank or swap to
+  another listing.
 - Env-gated live check for the filter endpoint against the owner's server
   (assumption above), run once during slice 1.
 
@@ -129,4 +152,16 @@ text (the sparse-page bar: never broken, never erroring).
 - **Episode-level crew links** (SeasonDetail): proposed yes, same mechanism.
 
 ## Review log
-(plan-review loop pending)
+Plan-review loop (playbook `reviewloop`, reviewer `codex` 0.143.0, read-only).
+
+**r1 — 2026-07-09 — verdict `reopened`, 1 finding, ADMITTED (verified against
+live code).** Base `0338176`, head `a3a9fe0`. Finding: the person view had no
+refresh story — `refreshWatchState` (`+page.svelte:143-153`) re-runs only
+`searchTerm` or falls to `resetAndLoad()`, which empties `items` and then, for
+a rootless person crumb, either loads nothing (blank grid) or reloads a stale
+`activeType` listing (`+page.svelte:475-495`); fires on every playback-end and
+watched-state edit. Fixed: added the binding "State exclusivity + refresh"
+block to the person-view design (personView joins the mutually-exclusive
+browse-root family: cleared by every navigation entry, clears the others on
+entry, gets its own `refreshWatchState` and `goCrumb` re-run branches) and a
+matching playtest check in Verification.
