@@ -61,9 +61,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   season page) — **fixed in polish round idv-s5 (0.1.36, `496218e`, loop
   accepted clean r1)**: detail pages carry the standard crumb bar
   (ancestors clickable; detail page as current crumb; just Back over
-  Home). **NEXT: owner playtest 0.1.36 — crumb trail on detail pages —
-  then Plex polish continues.** No automated frontend guard (no JS runner;
-  E2E is Linux-only) — the playtest is the behavioral check.
+  Home). **0.1.36 PLAYTEST VERIFIED (owner, 2026-07-09)** — the whole
+  flipped-nav surface is now owner-verified: episode→season routing,
+  heading links, and the detail crumb trail. **NEXT: Plex polish continues
+  only on the next owner report; no open item-detail defect.** No
+  automated frontend guard (no JS runner; E2E is Linux-only) — owner
+  playtests are the behavioral check.
 - **DLS slice 1 PLAYTEST SUCCESSFUL (owner, 2026-07-08, 0.1.33 Windows NSIS
   build):** Plex-only sidebar, no dead hero cards, playback unchanged. The
   item-detail Info pages were NOT exercised — release builds cannot show the
@@ -91,9 +94,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   sweep) — see the DLS entry above for the sweep list. The re-home must
   also update scenarios written against click-to-play: since the nav flip
   (`74ff385`), library card clicks open info pages, not playback.
-- Item-detail: owner playtest of 0.1.36 (detail pages carry the browse
-  crumb trail), then Plex polish rounds; JF/Emby `item_detail` resumes
-  only on an explicit owner go.
+- Item-detail: no open defect (0.1.36 verified 2026-07-09); further Plex
+  polish on the next owner report; JF/Emby `item_detail` resumes only on
+  an explicit owner go.
 - QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
   on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
   untriaged `cargo check --locked` failure on the runner). Stale-risk: local
