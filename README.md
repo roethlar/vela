@@ -69,7 +69,8 @@ On first launch you'll get a `plex.tv/link` code (with a QR/clickable link) to
 authorize a Plex account. Use the **⚙ Sources** panel to add more: Jellyfin/Emby
 servers (username + password, or an API key). The
 header source switcher toggles between the unified view and a single source.
-Click a movie to play, or drill into a show → season → episode.
+Clicking a title opens its info page — movies play from there, shows drill
+season → episode — while the Continue Watching carousel plays directly.
 
 > NVIDIA + Wayland (Linux only): the app disables WebKitGTK's DMABUF renderer
 > (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) at startup to avoid a known webview crash.
