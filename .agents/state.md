@@ -36,21 +36,21 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   Earned Practices bullets — now drift vs code — plus plan banners and the
   2026-05-23/2026-07-04 decision closures); owner playtest (below).
 - **ITEM-DETAIL TRACK (Plex-first, owner amendment 2026-07-08):** slice 1
-  (backend DetailDto + Plex parse, 0.1.31) and amended slice 2 (info surfaces
-  + `detail_key` routing, 0.1.32, loop `idv-s2` accepted r2) are LANDED —
-  full detail in `docs/history/state-archive.md` and
-  `.agents/plans/item-detail-view.md`. JF/Emby + local `item_detail` are
-  deferred (local now permanently, per the removal). **NEXT SLICE: amended
-  slice 3 — the uniform nav flip** (library views → detail surface for every
-  source; movie click → info page, season → shared episode page, episode →
-  shared page; show click keeps the seasons drill; CW carousel keeps
-  click-to-play; ungate the context-menu "Info" entry). The original
-  "playtest 0.1.32's Info pages first" gate is MOOT: release builds cannot
-  show the dev-gated entry (no devtools), and the owner discovered exactly
-  that in the 0.1.33 playtest — he expects clicks to open info pages. The
-  flip is the most likely next slice on this host (DLS slice 2 needs Linux;
-  DLS slice 3 docs sweep is host-agnostic); confirm with a one-line go at
-  session start, then implement.
+  (backend DetailDto + Plex parse, 0.1.31), amended slice 2 (info surfaces
+  + `detail_key` routing, 0.1.32, loop `idv-s2` accepted r2), and **amended
+  slice 3 — the uniform nav flip — LANDED 2026-07-08** (`74ff385`, 0.1.34;
+  loop `idv-s3` accepted clean r1, trail `.agents/review/index.md`):
+  library/home-rail clicks open the detail surface for every source
+  (movie/video → info page; season/episode → shared episode page; show
+  keeps the seasons drill through `detail_key`), the CW cover-flow center
+  click plays directly, the context-menu "Info" entry is ungated
+  (`devDetail` flag removed), and the poster-card hover play overlay is
+  gone. Full earlier detail in `docs/history/state-archive.md` and
+  `.agents/plans/item-detail-view.md`. JF/Emby `item_detail` stays deferred
+  (local permanently, per the removal). **NEXT: owner playtest of the
+  flipped nav + info pages (0.1.34), then Plex polish rounds** ("get this
+  perfect with plex"). No automated frontend guard (no JS runner; E2E is
+  Linux-only) — the playtest is the behavioral check.
 - **DLS slice 1 PLAYTEST SUCCESSFUL (owner, 2026-07-08, 0.1.33 Windows NSIS
   build):** Plex-only sidebar, no dead hero cards, playback unchanged. The
   item-detail Info pages were NOT exercised — release builds cannot show the
@@ -67,16 +67,20 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   warnings (post-removal; was 13); the E2E harness does NOT run here (Linux
   WebKitWebDriver); checkout is autocrlf=true (empty-diff "modified" files
   are line-ending noise).
-- Version 0.1.33 (bumped `e66bf7c`, 2026-07-08). Everything since the last
-  owner push is UNPUSHED as of `97d4467` (owner pushes manually; policy
+- Version 0.1.34 (bumped `e388a60`, 2026-07-08; BUILD_DATE reads 2026-07-09
+  — the script stamps UTC, which was past midnight). Everything since the
+  last owner push is UNPUSHED as of `e388a60` (owner pushes manually; policy
   `.agents/push-policy.md`).
 
 ## Next
 
 - DLS slice 2 (E2E re-home) from a Linux-host session, then slice 3 (docs
-  sweep) — see the DLS entry above for the sweep list.
-- Item-detail amended slice 3 (nav flip) after the 0.1.32 playtest or an
-  explicit go.
+  sweep) — see the DLS entry above for the sweep list. The re-home must
+  also update scenarios written against click-to-play: since the nav flip
+  (`74ff385`), library card clicks open info pages, not playback.
+- Item-detail: owner playtest of the flipped nav (0.1.34), then Plex
+  polish rounds; JF/Emby `item_detail` resumes only on an explicit owner
+  go.
 - QUEUED (owner-parked 2026-07-05 — "after current work"): GitHub CI was RED
   on the last PUSHED commit `05f9594` (`cargo audit` advisory noise + an
   untriaged `cargo check --locked` failure on the runner). Stale-risk: local

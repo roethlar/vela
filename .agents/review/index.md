@@ -1,7 +1,8 @@
 # Review status
 
 Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harness: `codex`
-(codex-cli 0.142.5, re-verified headless 2026-07-06 via `codex exec --json`).
+(codex-cli 0.143.0, re-verified headless 2026-07-08 via
+`codex exec --json --sandbox read-only`).
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
@@ -22,6 +23,24 @@ tokened poster path — accepted exposure class). Nav unwired (flip is slice 5).
 test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING for
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
+
+Loop idv-s3 CLOSED 2026-07-08: **accepted clean at r1, no findings** (codex
+read-only, `guard_confirmed:false` — no JS unit runner; E2E harness is
+Linux-only and awaits the DLS slice 2 re-home). Scope was **item-detail-view
+AMENDED slice 3 — the uniform nav flip** (base `fdf0790`, head `74ff385`;
+frontend-only, `src/routes/+page.svelte` +27/−42): library/home-rail clicks
+route to the detail surface (movie/video → item info page; season/episode →
+shared episode page; show keeps the seasons drill through `detail_key`), the
+Continue Watching cover-flow center click calls `play` directly (click-to-play
+unchanged), the context-menu "Info" entry is ungated (`devDetail` flag +
+localStorage opt-in removed), and the poster-card hover play overlay + its CSS
+are dropped (card clicks no longer play; the hero keeps its own overlay).
+Verified on the Windows dev host: svelte-check 0/0, npm run build clean;
+post-bump `cargo check --locked` clean (0.1.34, `e388a60`). NO automated
+frontend guard (same recorded gap as idv-s2) — the owner playtest is the
+behavioral check, and the E2E re-home (DLS slice 2) must also update scenarios
+that assumed click-to-play. REMAINING for the feature: owner playtest → Plex
+polish rounds; JF/Emby `item_detail` stays deferred (owner go required).
 
 Loop dls-s1 CLOSED 2026-07-08: **accepted clean at r1, no findings** (codex
 read-only, `guard_confirmed:false` — coder guard-proved red/green). Scope was

@@ -13,6 +13,11 @@ Original framing: owner asked whether Plex exposes more metadata than we surface
 **AMENDED 2026-07-08 (owner, Plex-first)** — see "Owner amendment 2026-07-08"
 below; it supersedes the backend-coverage half of "no half-built state" and
 re-orders the remaining slices.
+**AMENDED SLICE 3 (nav flip) LANDED 2026-07-08** (`74ff385`, 0.1.34; loop
+`idv-s3` accepted clean r1 — trail in `.agents/review/index.md`). The
+navigation is flipped for all sources. Remaining: owner playtest → Plex
+polish rounds; JF/Emby `item_detail` (old slice 2) stays deferred on an
+explicit owner go.
 
 ## Owner amendment 2026-07-08 (Plex-first)
 Owner directives (verbatim): "sources other than plex are deprioritized. get this
@@ -46,7 +51,7 @@ Amended slice order (slice 1 LANDED 0.1.31, unchanged):
   merged-show drill through `detail_key` (idv-5); episode-list paging + per-selection
   generation guard (idv-4); sparse fallback from listing `ItemDto` when detail errs.
 - **Slice 3 (was slice 5):** flip the navigation for all sources per the refined
-  ruling above.
+  ruling above. — LANDED 2026-07-08 (`74ff385`, loop `idv-s3`).
 - **Then:** owner playtest → polish rounds ("get this perfect with plex").
 - **Deferred:** JF/Emby `item_detail` (old slice 2); local `.nfo` widening (old
   slice 3). Resume only on owner go; they slot in with no nav change.
