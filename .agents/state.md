@@ -106,12 +106,13 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   was applied), uncommitted work travels via `git diff | ssh … git apply -`.
 - QUEUED (owner, 2026-07-10, autocrop playtest): **Automatic autocrop
   doesn't engage on RESUME — only on a fresh play; the owner has to hit
-  Shift+C.** Wiring is not the suspect: auto mode just loads the bundled
-  stock script (`playback.rs autocrop_args`), and resume differs only by
-  `--start=<seconds>` on the same command line — so the stock
-  `autocrop.lua`'s auto trigger vs the start-seek interaction is the place
-  to look (the script is bundled in-repo; read it at plan time). Untriaged
-  beyond that; no code without a plan + go.
+  Shift+C.** **PLAN DRAFTED 2026-07-10:
+  `.agents/plans/autocrop-resume.md`** — diagnosis code-confirmed in the
+  stock script's `on_start` (the auto_delay is positional, so a resumed
+  file detects immediately at file-loaded, mid-seek, and dies with no
+  retry); fix is a minimal vendored-script patch (unconditional settle
+  delay) + a new IPC-driven E2E scenario with a letterboxed clip.
+  Awaiting plan review + owner go. No code without the go.
 - QUEUED (owner, 2026-07-10, from the sorting playtest — "add that to the
   queue, but don't code"): **TV shows need a "Date Last Episode Added"
   sort.** Sorting is otherwise verified working, but the date-added sort on
