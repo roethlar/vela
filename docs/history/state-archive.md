@@ -595,3 +595,14 @@ trails and finding docs they reference remain valid history.
   The `.app` exists only transiently during bundling; the DMG is the
   artifact.
 
+
+## Rotated 2026-07-10 (cw-watch-state owner-verified)
+
+- QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
+  bottom of the queue"): **Continue Watching carousel needs a one-op
+  curation.** Owner-reported annoyance: "if I mark a video in the carousel as
+  unwatched, it stays in the carousel. if I remove it from continue watching,
+  the watched status remains. so I have to do two ops to get what I want."
+  RESOLUTION: folded into `.agents/plans/continue-watching-watch-state.md`
+  and implemented 2026-07-10 (`02504be`) — mark-unwatched is a one-op full
+  reset that also leaves the carousel; owner-verified on 0.1.42.

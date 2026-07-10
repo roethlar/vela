@@ -47,28 +47,18 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   `pb-s1` clean r1), slice 2 frontend `b290b31` (loop `pb-s2` clean r1),
   bumps `62fd927`/`8204a77`. No open defect; JF/Emby person browse stays
   deferred on an explicit owner go (same bar as JF/Emby `item_detail`).
-- **CW WATCH-STATE: IMPLEMENTED 2026-07-10, awaiting owner playtest**
-  (fix `02504be` on 0.1.42; plan
-  `.agents/plans/continue-watching-watch-state.md` — diagnosis was
-  code-confirmed: the frozen local recents snapshot wins the hero dedup
-  and masked every server-side watched-state change). Mark
-  watched/unwatched are now one-op curations (recents drop + identity
-  tombstone, curate-first with rollback; edits serialized; every play
-  path clears tombstones); "Remove from Continue Watching" stays the
-  keep-progress dismiss. Decision in `.agents/decisions.md`
-  (2026-07-10). Resolves BOTH the 2026-07-10 masking defect and the
-  2026-07-08 queued-last two-op curation annoyance. Guard: new
-  `watchcurate` E2E, red→green proven on the VM (red at the exact defect
-  assertion vs the pre-fix binary), full suite 11/11 with the fix; local
-  CI set green. Codex plan-review loop closed at r6 (six rounds; every
-  admitted finding fixed; one r6 finding CONTESTED and routed to the
-  owner — adjudication item in ## Next). **Owner playtest ask (real
-  Plex, 0.1.42):** (a) mark a mid-progress carousel item unwatched →
-  leaves the carousel in one op, library card clean; (b) replay it
-  partway → returns to the carousel, starts from 0; (c) mark it watched
-  from the carousel → leaves in one op, library ✓; (d) remove another
-  in-progress item from Continue Watching → progress preserved (Plex Web
-  still resumes it).
+- **CW WATCH-STATE: COMPLETE — owner playtest VERIFIED 2026-07-10
+  ("carousel fix verified") on 0.1.42** (fix `02504be`; plan
+  `.agents/plans/continue-watching-watch-state.md`, retained as design
+  record). Mark watched/unwatched are one-op curations (recents drop +
+  identity tombstone, curate-first with rollback; edits serialized;
+  every play path clears tombstones); "Remove from Continue Watching"
+  stays the keep-progress dismiss. Decision in `.agents/decisions.md`
+  (2026-07-10). Resolved BOTH the 2026-07-10 masking defect and the
+  2026-07-08 two-op curation annoyance. Guard: `watchcurate` E2E,
+  red→green proven on the VM; full suite 11/11; local CI set green.
+  Codex plan-review loop closed at r6 — the one CONTESTED r6 finding
+  still awaits owner adjudication (item in ## Next).
 - Other playtest state: library sorting owner-verified WORKING 2026-07-10
   on 0.1.41 (last-episode-added follow-up queued in ## Next). mpv
   autocrop: owner-tested 2026-07-10 — PARTIAL PASS, defect queued in
@@ -144,11 +134,6 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   that plan fixes only the tombstone-lifecycle slice of it.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
-- RESOLVED pending playtest (was QUEUED LAST, owner 2026-07-08): the
-  Continue Watching one-op curation ask — implemented by the cw-watch-state
-  fix (`02504be`, see ## Now): mark-unwatched is now a one-op full reset
-  that also leaves the carousel. Rotate to the archive once the owner
-  playtest verifies.
 
 ## Blockers
 

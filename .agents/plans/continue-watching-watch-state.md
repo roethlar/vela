@@ -1,13 +1,18 @@
-# Plan: Continue Watching watched-state curation (defect + one-op curation)
+# Plan: Continue Watching watched-state curation (defect + one-op curation) — COMPLETE
 
 ## Status
-**IMPLEMENTED 2026-07-10 — awaiting owner playtest + adjudication of the
-contested r6 finding (see Review log / Accepted edges).** Owner go given
-2026-07-10 ("go" after the drafted plan was summarized). Plan-review loop
-(codex, 6 rounds) closed same day: every admitted finding fixed, one
-final finding contested on materiality and routed to the owner. Guard:
-new `watchcurate` E2E scenario proven red→green on the owner's Linux VM
-(red at the exact defect assertion against the pre-fix binary; full suite
+**COMPLETE — owner playtest VERIFIED 2026-07-10 ("installed and tested.
+carousel fix verified.") on 0.1.42** (fix `02504be`). Open remainder: the
+contested r6 finding awaits owner adjudication (see Review log / Accepted
+edges; also queued in `.agents/state.md ## Next`). Plan retained as the
+design record.
+
+Original status: IMPLEMENTED 2026-07-10 — owner go given 2026-07-10
+("go" after the drafted plan was summarized). Plan-review loop (codex, 6
+rounds) closed same day: every admitted finding fixed, one final finding
+contested on materiality and routed to the owner. Guard: new
+`watchcurate` E2E scenario proven red→green on the owner's Linux VM (red
+at the exact defect assertion against the pre-fix binary; full suite
 11/11 green with the fix). Drafted on the owner's `plan` operator after
 the 2026-07-10 defect report, folding in the queued-last 2026-07-08
 one-op-curation ask (same surface, same ops).
