@@ -122,6 +122,13 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   `.agents/plans/continue-watching-watch-state.md`** (diagnosis
   code-confirmed; folds in the queued-last one-op curation item) —
   awaiting plan review + owner go. No code without the go.
+- QUEUED (agent-observed during plan review, 2026-07-10 — needs owner
+  interest before any plan): queue plays and auto-advance never enter
+  Vela's recents (`play_by_key` records nothing; only the frontend
+  direct-play path calls `record_recent`), so a queue session stopped
+  midway doesn't surface in Continue Watching. Surfaced by codex
+  plan-review r1 on `.agents/plans/continue-watching-watch-state.md`;
+  that plan fixes only the tombstone-lifecycle slice of it.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
