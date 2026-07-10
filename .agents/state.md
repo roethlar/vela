@@ -80,8 +80,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   (roethlar/AgentGovernanceBootstrap#2, 2026-07-09 — the handoff operator
   conflicts with the toolkit's own `*.local.*` convention); expect a future
   governance refresh to move it to an untracked `state.local.md`-style home.
-- Version 0.1.42 (bumped for the cw-watch-state fix, 2026-07-10; no
-  owner build yet). Remotes as of the cw-watch-state landing
+- Version 0.1.43 (bumped for the autocrop-resume fix, 2026-07-10;
+  0.1.42 was the cw-watch-state fix, owner-built and verified same
+  day). Remotes as of the cw-watch-state landing
   (2026-07-10): **origin (gitea) was at `26f460f`** (caught up from the
   earlier 8-behind note) and **github at `878f9c3` with CI green** —
   both now behind local main (the day's plan/fix/docs commits); owner
@@ -104,15 +105,23 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   updateInstead`; the mac clone has a `vm` remote — sync is `git push vm
   main` (VM tree must be clean: `ssh … git checkout -- .` first if a diff
   was applied), uncommitted work travels via `git diff | ssh … git apply -`.
-- QUEUED (owner, 2026-07-10, autocrop playtest): **Automatic autocrop
-  doesn't engage on RESUME — only on a fresh play; the owner has to hit
-  Shift+C.** **PLAN DRAFTED 2026-07-10:
-  `.agents/plans/autocrop-resume.md`** — diagnosis code-confirmed in the
-  stock script's `on_start` (the auto_delay is positional, so a resumed
-  file detects immediately at file-loaded, mid-seek, and dies with no
-  retry); fix is a minimal vendored-script patch (unconditional settle
-  delay) + a new IPC-driven E2E scenario with a letterboxed clip.
-  Awaiting plan review + owner go. No code without the go.
+- **AUTOCROP-RESUME: IMPLEMENTED 2026-07-10, awaiting owner playtest**
+  (fix `c2962a8` on 0.1.43; plan `.agents/plans/autocrop-resume.md`,
+  loop closed accepted r3). Root cause probe-CONFIRMED on the mac host:
+  the stock script's positional auto_delay makes resumed plays detect
+  immediately at file-loaded, before hwdec engages, so its hwdec guard
+  misfires and cropdetect gathers nothing (fresh plays only worked
+  because the delay deferred detection past hwdec init). Fix per owner
+  fork ruling: stock `autocrop.lua` stays byte-identical upstream; new
+  Vela-owned `vela-autocrop.lua` shim owns the auto trigger (settle
+  delay after every load → invokes the stock public binding). Guard:
+  mac probe red→green recorded in the plan; new `autocrop` E2E
+  (sed-red proven, load-marker asserts the shim resolved), full suite
+  12/12; full local CI set green. **Owner playtest ask (0.1.43):**
+  resume a mid-progress letterboxed/HDR title → bars crop automatically
+  within ~5s without Shift+C; fresh play still crops; Shift+C still
+  toggles; and a manual Shift+C crop+undo right after resume stays
+  undone.
 - QUEUED (owner, 2026-07-10, from the sorting playtest — "add that to the
   queue, but don't code"): **TV shows need a "Date Last Episode Added"
   sort.** Sorting is otherwise verified working, but the date-added sort on
@@ -166,8 +175,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - `.agents/plans/person-browse.md` (COMPLETE — owner-verified 2026-07-09)
 - `.agents/plans/continue-watching-watch-state.md` (COMPLETE —
   owner-verified 2026-07-10; r6 adjudication open)
-- `.agents/plans/ui-embellishments.md` (DRAFT — v1.0.0 item 1, awaiting
-  owner decisions + go)
+- `.agents/plans/ui-embellishments.md` (QUEUED — v1.0.0 item 1,
+  decisions resolved, parked at queue bottom)
+- `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner
+  playtest)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)

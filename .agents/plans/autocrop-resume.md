@@ -1,13 +1,16 @@
 # Plan: autocrop doesn't engage on resume (owner defect, 2026-07-10)
 
 ## Status
-**APPROVED-DIRECTION 2026-07-10 — shim approach chosen by owner ("if we
-mod it, we own that fork" → companion script, upstream untouched;
-rework + review + implement authorized "yes"). Plan review running
-before code lands.** Owner report (autocrop playtest, 2026-07-10):
-fresh plays crop automatically; resumed plays don't — the owner has to
-hit Shift+C. Top of the functional queue ("queue first", owner
-2026-07-10).
+**IMPLEMENTED 2026-07-10 — awaiting owner playtest.** Plan-review loop
+CLOSED accepted at r3 (r1: 6 findings fixed; r2: 1 finding fixed; r3:
+clean). Guard complete: mac-host probe red→green (Part A, tables
+below), VM E2E sed-red + green with the load-marker assertion, full
+suite 12/12. Shim approach chosen by owner ("if we mod it, we own that
+fork" → companion script, upstream untouched; rework + review +
+implement authorized "yes"). Owner report (autocrop playtest,
+2026-07-10): fresh plays crop automatically; resumed plays don't — the
+owner has to hit Shift+C. Was top of the functional queue ("queue
+first", owner 2026-07-10).
 
 ## Diagnosis (code-confirmed logic defect; micro-mechanism labeled)
 The wiring is NOT the suspect, as the queue triage already noted: auto
@@ -250,3 +253,10 @@ it before the crop assertions — a lost shim now fails red regardless
 of the degradation masking. (The sed-red for the trigger-lost case had
 already been run and recorded; the marker covers the degradation-masked
 case.)
+
+**r3 — 2026-07-10 — verdict `accepted`, 0 comments** (reviewed_sha
+`7c419d0`, base `9f3b930`; read-only pass, implementation read as
+feasibility evidence). **Plan-review loop CLOSED.** Healthy converging
+loop: r1 (6) → r2 (1) → r3 (clean). Post-close verification: the
+marker-asserting scenario PASSES on the VM (rebuilt, resources
+restaged) and the full suite is 12/12.
