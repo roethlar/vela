@@ -32,6 +32,11 @@ package() {
   # same layout the deb/rpm bundles use. build:arch runs `tauri build --no-bundle`,
   # so Tauri does not stage resources itself; install them explicitly here.
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/autocrop.lua" "$pkgdir/usr/lib/Vela/mpv-scripts/autocrop.lua"
+  # Vela's own trigger shim (repo license, not upstream): auto mode loads the
+  # stock script with its trigger disabled and this shim fires detection after
+  # a settle delay — without it, resumed plays fall back to the broken stock
+  # trigger (see the shim header).
+  install -Dm644 "$repo/src-tauri/resources/mpv-scripts/vela-autocrop.lua" "$pkgdir/usr/lib/Vela/mpv-scripts/vela-autocrop.lua"
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/LICENSE.GPL" "$pkgdir/usr/lib/Vela/mpv-scripts/LICENSE.GPL"
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/PROVENANCE.md" "$pkgdir/usr/lib/Vela/mpv-scripts/PROVENANCE.md"
   # GPL license text for the bundled script (Arch license convention).

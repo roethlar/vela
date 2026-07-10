@@ -2223,22 +2223,30 @@ pub(crate) async fn play_by_key(
     // AppHandle; `playback::play` does not). Whether it's injected depends on the
     // `mpv_autocrop` config mode, decided in `play`. `resolve` only computes the
     // path; `play` existence-checks before use.
-    let autocrop_script = state.app_handle.get().and_then(|app| {
-        use tauri::Manager;
-        app.path()
-            .resolve(
-                "mpv-scripts/autocrop.lua",
-                tauri::path::BaseDirectory::Resource,
-            )
-            .ok()
-            .map(|p| p.to_string_lossy().into_owned())
-    });
+    let resolve_resource = |name: &str| {
+        state.app_handle.get().and_then(|app| {
+            use tauri::Manager;
+            app.path()
+                .resolve(
+                    format!("mpv-scripts/{name}"),
+                    tauri::path::BaseDirectory::Resource,
+                )
+                .ok()
+                .map(|p| p.to_string_lossy().into_owned())
+        })
+    };
+    let autocrop_script = resolve_resource("autocrop.lua");
+    // Vela's trigger shim rides next to the stock script (auto mode disables
+    // the stock trigger and lets the shim fire detection after a settle
+    // delay — the stock trigger breaks on --start resumes; see the shim).
+    let autocrop_shim = resolve_resource("vela-autocrop.lua");
     let spec = playback::PlaySpec {
         url: resolved.url,
         title: title.to_string(),
         http_headers: resolved.http_headers,
         start_seconds: resume_ms as f64 / 1000.0,
         autocrop_script,
+        autocrop_shim,
     };
     // End-of-session notifier → the `playback-ended` UI event, emitted after
     // the final server check-in so a re-fetch it triggers sees the new watch

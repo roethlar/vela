@@ -4,6 +4,12 @@
 runtime by the system `mpv` binary (a separate process) when the user enables
 black-bar cropping in Vela's Settings.
 
+`vela-autocrop.lua` in this directory is NOT an upstream file: it is
+Vela-authored (MIT, like the rest of the repo) and only invokes the stock
+script's public `script-binding` from a separate mpv script context. It exists
+so the stock file can stay byte-identical to upstream — see the shim's header
+and `.agents/plans/autocrop-resume.md`.
+
 - **Source:** mpv `TOOLS/lua/autocrop.lua`
   (https://github.com/mpv-player/mpv)
 - **Upstream commit:** `efb70d7f27780bbc7db2ad9a7f2fbf05e610c97e` (2025-08-29,

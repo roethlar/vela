@@ -431,26 +431,41 @@ pub struct PlaySpec {
     /// skipped even if enabled. Whether it's actually injected depends on the
     /// `mpv_autocrop` config mode, read in `play`.
     pub autocrop_script: Option<String>,
+    /// Absolute path to Vela's `vela-autocrop.lua` trigger shim (same resolver
+    /// and existence check). Auto mode loads the stock script with its own
+    /// auto trigger DISABLED and lets the shim fire detection after a settle
+    /// delay — the stock trigger skips its delay on `--start` resumes and
+    /// races hwdec init (see the shim header + `.agents/plans/autocrop-resume.md`).
+    pub autocrop_shim: Option<String>,
 }
 
 /// mpv launch args for the autocrop feature, given the config `mode`
-/// (`"off"|"manual"|"auto"`) and the resolved script path (already existence-
+/// (`"off"|"manual"|"auto"`) and the resolved script paths (already existence-
 /// checked by the caller; `None` when unresolved/missing). Pure so the injection
 /// is unit-testable without spawning mpv:
-/// - `off` / unknown, or no script → no args.
-/// - `manual` → load the script but disable its auto-crop, so it only crops on
-///   an explicit in-player `Shift+C`.
-/// - `auto` → load the script with its own crop-on-playback-start behaviour.
-fn autocrop_args(mode: &str, script: Option<&str>) -> Vec<String> {
+/// - `off` / unknown, or no stock script → no args.
+/// - `manual` → load the stock script but disable its auto-crop, so it only
+///   crops on an explicit in-player `Shift+C`.
+/// - `auto` → stock script with auto disabled + the Vela shim owning the
+///   trigger (settle delay covers fresh AND resumed plays).
+/// - `auto` with the shim missing → degrade to the stock script's own auto
+///   trigger (fresh plays keep cropping; resume stays broken) — the caller
+///   logs the degradation.
+fn autocrop_args(mode: &str, script: Option<&str>, shim: Option<&str>) -> Vec<String> {
     let Some(path) = script else {
         return Vec::new();
     };
-    match mode {
-        "manual" => vec![
+    match (mode, shim) {
+        ("manual", _) => vec![
             format!("--script={path}"),
             "--script-opts-append=autocrop-auto=no".to_string(),
         ],
-        "auto" => vec![format!("--script={path}")],
+        ("auto", Some(shim_path)) => vec![
+            format!("--script={path}"),
+            "--script-opts-append=autocrop-auto=no".to_string(),
+            format!("--script={shim_path}"),
+        ],
+        ("auto", None) => vec![format!("--script={path}")],
         _ => Vec::new(),
     }
 }
@@ -564,7 +579,17 @@ pub fn play(
                  did not resolve; skipping (playback continues uncropped)"
             );
         }
-        for arg in autocrop_args(autocrop_mode, script) {
+        let shim = spec
+            .autocrop_shim
+            .as_deref()
+            .filter(|p| std::path::Path::new(p).is_file());
+        if autocrop_mode == "auto" && script.is_some() && shim.is_none() {
+            eprintln!(
+                "vela: autocrop trigger shim (vela-autocrop.lua) did not resolve; \
+                 falling back to the stock auto trigger (resumed plays won't crop)"
+            );
+        }
+        for arg in autocrop_args(autocrop_mode, script, shim) {
             cmd.arg(arg);
         }
     }
@@ -1023,40 +1048,62 @@ mod tests {
 
     #[test]
     fn autocrop_off_injects_nothing() {
-        assert!(autocrop_args("off", Some("/x/autocrop.lua")).is_empty());
+        assert!(autocrop_args("off", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty());
         // Unknown/garbage mode is treated as off.
-        assert!(autocrop_args("wat", Some("/x/autocrop.lua")).is_empty());
+        assert!(autocrop_args("wat", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty());
     }
 
     #[test]
     fn autocrop_manual_loads_script_with_auto_disabled() {
-        let args = autocrop_args("manual", Some("/x/autocrop.lua"));
+        // Manual ignores the shim even when resolved: Shift+C is the trigger.
+        let args = autocrop_args("manual", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua"));
         assert_eq!(
             args,
             vec![
                 "--script=/x/autocrop.lua".to_string(),
                 "--script-opts-append=autocrop-auto=no".to_string(),
             ],
-            "manual must load the script AND disable its auto-crop"
+            "manual must load the stock script AND disable its auto-crop, shim excluded"
         );
     }
 
     #[test]
-    fn autocrop_auto_loads_script_without_disabling_auto() {
-        let args = autocrop_args("auto", Some("/x/autocrop.lua"));
+    fn autocrop_auto_disables_stock_trigger_and_loads_shim() {
+        // The stock auto trigger skips its settle delay on --start resumes and
+        // races hwdec init (plan autocrop-resume); auto mode therefore hands
+        // the trigger to the Vela shim.
+        let args = autocrop_args("auto", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua"));
+        assert_eq!(
+            args,
+            vec![
+                "--script=/x/autocrop.lua".to_string(),
+                "--script-opts-append=autocrop-auto=no".to_string(),
+                "--script=/x/vela-autocrop.lua".to_string(),
+            ],
+            "auto must load the stock script with auto OFF and the shim as trigger"
+        );
+    }
+
+    #[test]
+    fn autocrop_auto_without_shim_degrades_to_stock_trigger() {
+        // Missing shim (e.g. a package that only installed autocrop.lua):
+        // keep the stock auto behavior — fresh plays crop, resume stays broken —
+        // instead of losing autocrop entirely.
+        let args = autocrop_args("auto", Some("/x/autocrop.lua"), None);
         assert_eq!(args, vec!["--script=/x/autocrop.lua".to_string()]);
         assert!(
             !args.iter().any(|a| a.contains("autocrop-auto=no")),
-            "auto mode must NOT disable the script's crop-on-start"
+            "degraded auto must keep the stock crop-on-start trigger"
         );
     }
 
     #[test]
     fn autocrop_without_resolved_script_injects_nothing() {
-        // Even when enabled, an unresolved script yields no args (play() also
-        // existence-checks; here the path is simply absent).
-        assert!(autocrop_args("manual", None).is_empty());
-        assert!(autocrop_args("auto", None).is_empty());
+        // Even when enabled, an unresolved stock script yields no args (play()
+        // also existence-checks; here the path is simply absent). A shim alone
+        // is useless — it triggers a script that isn't loaded.
+        assert!(autocrop_args("manual", None, None).is_empty());
+        assert!(autocrop_args("auto", None, Some("/x/vela-autocrop.lua")).is_empty());
     }
 
     #[test]
