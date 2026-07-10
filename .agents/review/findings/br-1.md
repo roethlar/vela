@@ -5,7 +5,7 @@ source-agnostic via Vela's recents stamp, independent of server thresholds)
 is no longer what it proves; a recents-fallback regression stays green.
 **Status**: Verified
 **Branch**: n/a (no-branches adaptation — one finding ↔ one commit on `main`)
-**Commit**: (filled at commit)
+**Commit**: `8c596d0`
 
 ## Evidence
 `tests/e2e/scenarios/resume.mjs:64` (replay assertion) +
@@ -52,4 +52,7 @@ offset is not the resume driver; recorded here so nobody re-tries that layer.)
   10/10).
 
 ## Reviewer comments
-(appended after the per-finding verdict)
+codex-cli 0.144.0 (read-only), reviewed_sha `8c596d0`, base_sha `6f3e0b1`,
+`guard_confirmed:false` (Linux-only suite not runnable from the mac host —
+the coder's recorded red/vacuous-pass/green run stands), verdict
+**accepted**, 0 comments — 2026-07-10 (UTC).

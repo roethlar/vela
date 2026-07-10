@@ -5,7 +5,7 @@ dropped Recursive) passes against the mock while real Jellyfin/Emby returns
 different results; the eh-12 fail-closed class, unguarded on the new branch.
 **Status**: Verified
 **Branch**: n/a (no-branches adaptation)
-**Commit**: (filled at commit)
+**Commit**: `36dec5d`
 
 ## Evidence
 `tests/e2e/mockjf.mjs` search branch: matches on `searchTerm` only.
@@ -40,4 +40,6 @@ Run on the Linux VM 2026-07-09/10:
 - GREEN: hack reverted → search PASSES; full suite 10/10.
 
 ## Reviewer comments
-(appended after the per-finding verdict)
+codex-cli 0.144.0 (read-only), reviewed_sha `36dec5d`, base_sha `8c596d0`,
+`guard_confirmed:true` (contract verified against jellyfin.rs search()),
+verdict **accepted**, 0 comments — 2026-07-10 (UTC).
