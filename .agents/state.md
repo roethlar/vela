@@ -67,11 +67,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   (roethlar/AgentGovernanceBootstrap#2, 2026-07-09 — the handoff operator
   conflicts with the toolkit's own `*.local.*` convention); expect a future
   governance refresh to move it to an untracked `state.local.md`-style home.
-- Version 0.1.41 (bumped `4552a66`, 2026-07-09). **Both remotes (origin +
-  github) are at `a39be7f`** (verified via `ls-remote` 2026-07-09); local
-  is 19 commits ahead as of `18c5bcd` (owner pushes manually — policy
-  `.agents/push-policy.md`). GitHub CI was GREEN on the pushed head
-  `a39be7f` (verified via `gh run list` 2026-07-09).
+- Version 0.1.41 (bumped `4552a66`, 2026-07-09; owner-built
+  `Vela_0.1.41_universal.dmg` on the mac host 2026-07-09). As of
+  2026-07-10: **github is at `878f9c3` == local HEAD with CI GREEN**
+  (verified via `gh run list`); **origin (gitea) is at `c2ab703`** — 8
+  commits behind (owner pushes manually — policy
+  `.agents/push-policy.md`).
 
 ## Next
 
