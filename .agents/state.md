@@ -122,27 +122,21 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   within ~5s without Shift+C; fresh play still crops; Shift+C still
   toggles; and a manual Shift+C crop+undo right after resume stays
   undone.
-- **SHOW-SORT + PER-LIBRARY PERSISTENCE: STAGED-UNCOMMITTED, awaiting
-  TWO things** (plan `.agents/plans/show-last-episode-sort.md`): (1) an
-  explicit owner LANDING GO — plan-review r1 flagged that the item's
-  recorded instruction was "add that to the queue, but don't code" and
-  the later "continue with anything else you can do" shouldn't be
-  interpreted past it (coder believes it was a specific go; routed to
-  owner); (2) the `sortpersist` E2E red→green on the Linux VM, which
-  went OFFLINE mid-dispatch (watcher armed; run it when the VM
-  returns, red against the slice-1-only tree the VM already carries,
-  then sync + green + full suite). Everything else is DONE and
-  verified: slice 1 = "Last episode added" show-only sort (Plex
-  `episode.addedAt` LIVE-VERIFIED against the owner's server; JF
-  `DateLastContentAdded`); slice 2 = per-library sort persistence
-  (`section_sorts` config map, owner ask "sort should stick per
-  library"); 74 unit tests green incl. guard-proven new ones; local CI
-  set green; slice-1 full suite was 12/12 on the VM before it went
-  down. Landing = one commit + bump 0.1.44. The staged implementation is
-  the working tree's only diff: `src-tauri/src/{commands,config,lib}.rs`,
-  `src-tauri/src/source/{mod,plex,jellyfin}.rs`,
-  `src/routes/+page.svelte`, plus untracked
-  `tests/e2e/scenarios/sortpersist.mjs`.
+- **SHOW-SORT + PER-LIBRARY PERSISTENCE: LANDED 2026-07-10 on the
+  owner's explicit "go" (`9cd3323` on 0.1.44), awaiting owner playtest**
+  (plan `.agents/plans/show-last-episode-sort.md`). Show libraries get
+  "Last episode added" (Plex `episode.addedAt` LIVE-VERIFIED against
+  the owner's server; JF/Emby `DateLastContentAdded`; show-only,
+  excluded from the merged view), and every library's sort now persists
+  across restarts (`section_sorts` config map). Guards: 3 new unit
+  tests + the `sortpersist` restart E2E, all proven red→green; full
+  suite 13/13 on the VM; local CI green. The plan-review governance
+  question (recorded "don't code" vs "continue") was resolved by the
+  owner's explicit landing go. **Owner playtest ask (0.1.44, real
+  Plex):** show library → "Last episode added" → a show with a fresh
+  episode tops the list; movie libraries don't offer that option; set
+  different sorts on two libraries, restart → each reopens on its own
+  sort.
 - OPEN ADJUDICATION (owner, from the cw-watch-state plan-review r6): the
   contested residual queued-edit race class — accept the recorded
   disposition (documented accepted edge) or order the compare-and-swap

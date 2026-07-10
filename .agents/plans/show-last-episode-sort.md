@@ -1,19 +1,18 @@
 # Plan: TV "Date Last Episode Added" sort (owner ask, 2026-07-10)
 
 ## Status
-**IMPLEMENTED-UNCOMMITTED 2026-07-10 — landing gated on an explicit
-owner go (plan-review r1 governance finding).** The implementation is
-complete and verified (unit tests guard-proven red→green; local CI set
-green; Plex sort key live-verified against the owner's server) but NOT
-committed: the owner's recorded instruction on this item was "add that
-to the queue, but don't code", and while the later "continue with
-anything else you can do" was a direct reply to this sort being named
-next in the queue, the reviewer correctly flagged that a recorded
-do-not-code boundary should be lifted by the owner, not by
-interpretation. Routed to the owner; a "go" lands the staged commit.
-Owner report (sorting playtest, 2026-07-10): sorting works, but the
-date-added sort on SHOW libraries uses the series' own addedAt, so a
-show whose newest episode just arrived doesn't surface.
+**LANDED 2026-07-10 on the owner's explicit "go" (`9cd3323`, 0.1.44) —
+awaiting owner playtest.** Both slices (show-only "Last episode added"
+sort; per-library sort persistence) verified before landing: unit tests
+guard-proven red→green, `sortpersist` restart E2E red→green on the VM,
+full suite 13/13, local CI green, Plex key live-verified. The r1
+governance question (the item's recorded "add that to the queue, but
+don't code" vs the later "continue") was resolved exactly as the review
+demanded: the staged work was held uncommitted until the owner's
+explicit landing go. Owner report (sorting playtest, 2026-07-10):
+sorting works, but the date-added sort on SHOW libraries uses the
+series' own addedAt, so a show whose newest episode just arrived
+doesn't surface.
 
 ## Diagnosis (code-confirmed 2026-07-10)
 The owner's "it seems" reading is correct by construction: Vela's sort
