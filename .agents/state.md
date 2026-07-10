@@ -47,10 +47,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   `pb-s1` clean r1), slice 2 frontend `b290b31` (loop `pb-s2` clean r1),
   bumps `62fd927`/`8204a77`. No open defect; JF/Emby person browse stays
   deferred on an explicit owner go (same bar as JF/Emby `item_detail`).
-- Outstanding owner playtest asks (older builds): mpv autocrop 0.1.22 —
-  Shift+C / Automatic crop on the real HDR stack. (Library sorting:
-  owner-verified WORKING 2026-07-10 on 0.1.41 — see the queued
-  last-episode-added follow-up in ## Next.)
+- No outstanding playtest asks. Library sorting: owner-verified WORKING
+  2026-07-10 on 0.1.41 (last-episode-added follow-up queued in ## Next).
+  mpv autocrop: owner-tested 2026-07-10 — PARTIAL PASS, defect queued in
+  ## Next (fresh plays crop automatically; resume doesn't).
 - **machine-local (Windows dev host, `F:\dev\vela`):** the `ptk` MCP server
   (warm PowerShell runspace, `ptk_invoke`) is the DIRECT shell for agent
   harnesses on this host — probe it before assuming no shell / delegating
@@ -87,6 +87,14 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   updateInstead`; the mac clone has a `vm` remote — sync is `git push vm
   main` (VM tree must be clean: `ssh … git checkout -- .` first if a diff
   was applied), uncommitted work travels via `git diff | ssh … git apply -`.
+- QUEUED (owner, 2026-07-10, autocrop playtest): **Automatic autocrop
+  doesn't engage on RESUME — only on a fresh play; the owner has to hit
+  Shift+C.** Wiring is not the suspect: auto mode just loads the bundled
+  stock script (`playback.rs autocrop_args`), and resume differs only by
+  `--start=<seconds>` on the same command line — so the stock
+  `autocrop.lua`'s auto trigger vs the start-seek interaction is the place
+  to look (the script is bundled in-repo; read it at plan time). Untriaged
+  beyond that; no code without a plan + go.
 - QUEUED (owner, 2026-07-10, from the sorting playtest — "add that to the
   queue, but don't code"): **TV shows need a "Date Last Episode Added"
   sort.** Sorting is otherwise verified working, but the date-added sort on
