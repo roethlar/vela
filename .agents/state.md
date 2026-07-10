@@ -94,15 +94,6 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **v1.0.0 RELEASE TRACK (owner, 2026-07-10):** three items, in order —
-  (1) UI embellishments (graphical elements, animations; plan DRAFTED:
-  `.agents/plans/ui-embellishments.md`, 3 slices + optional macOS
-  vibrancy, open decisions await the owner); (2) docs polish — README
-  that entices users to try it; (3) graphics + screenshots for socials.
-  Items 2 and 3 are gated on 1 "and anything else that needs to be
-  finished first" — read as: the queued functional items below
-  (autocrop-on-resume, TV last-episode-added sort, the r6 adjudication
-  ruling) land before or alongside the UI slices; docs/socials go last.
 - No pending playtest ask from the 2026-07-09/10 work — both fixes
   (context-menu Play, hero episode Info) are owner-verified on 0.1.40/41.
 - **machine-local (mac host `/Users/michael/Dev/vela`):** the owner's Linux
@@ -141,6 +132,13 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   midway doesn't surface in Continue Watching. Surfaced by codex
   plan-review r1 on `.agents/plans/continue-watching-watch-state.md`;
   that plan fixes only the tombstone-lifecycle slice of it.
+- **v1.0.0 RELEASE TRACK (owner, 2026-07-10 — ordered LAST behind the
+  functional queue above, "queue first, v1 polish goes to the bottom"):**
+  (1) UI embellishments — plan QUEUED with decisions resolved
+  (`.agents/plans/ui-embellishments.md`: 3 slices; vibrancy CUT —
+  Linux/Wayland first; motion SUBTLE, binding); (2) docs polish — README
+  that entices users to try it; (3) graphics + screenshots for socials.
+  2 and 3 are gated on 1 and on the functional queue emptying.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 

@@ -1,12 +1,18 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**DRAFT 2026-07-10 — awaiting owner review of the open decisions, then a
-go per slice.** First item of the v1.0.0 release track (owner,
-2026-07-10): "1. UI embellishments … 2. polish docs … 3. graphics &
-screenshots for socials — 2 & 3 gated on 1 and anything else that needs
-finishing first." This plan covers item 1 only; the v1.0.0 ordering
-lives in `.agents/state.md ## Next`.
+**QUEUED 2026-07-10 — decisions resolved, parked at the BOTTOM of the
+queue on owner order ("queue first, v1 polish goes to the bottom");
+per-slice go still required when picked up.** Owner rulings 2026-07-10:
+slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
+carving out a macos specific style is probably not worth it unless it's
+trivial", and it is not trivial (private API + transparent window +
+per-theme translucent tokens); motion personality is SUBTLE, binding:
+"it should never get in the way." First item of the v1.0.0 release
+track (owner, 2026-07-10): "1. UI embellishments … 2. polish docs …
+3. graphics & screenshots for socials — 2 & 3 gated on 1 and anything
+else that needs finishing first." This plan covers item 1 only; the
+v1.0.0 ordering lives in `.agents/state.md ## Next`.
 
 ## Ground truth (frontend inventory, 2026-07-10)
 Five Svelte files + one global stylesheet; no CSS framework, no
@@ -102,12 +108,11 @@ No new visuals; makes every later slice land evenly across all themes.
    exists on some buttons — apply the pattern), hover affordance on
    episode rows, watched-badge pop-in (`vela-pop`).
 
-### Slice 4 (OPTIONAL, owner decision) — macOS vibrancy
-`window-vibrancy` crate + `macos-private-api` + transparent window;
-sidebar/header surfaces become translucent tokens over the blur. Ships
-dark-theme-first; the 9 alt themes need per-theme translucency values.
-Linux/Windows keep the current opaque look (explicit non-goal). Skip
-entirely if the owner prefers one identical look on all platforms.
+### Slice 4 — CUT (owner ruling 2026-07-10)
+macOS vibrancy via `window-vibrancy` — cut: the app is Linux/Wayland
+first and the implementation is not trivial (`macos-private-api`,
+transparent window, per-theme translucent surface tokens). Kept here as
+the record of what was evaluated; revisit only on a new owner ask.
 
 ## Non-goals
 - No animation/UI framework dependency (declined above, with reasons).
@@ -135,17 +140,14 @@ entirely if the owner prefers one identical look on all platforms.
 - Owner playtest per slice — visual polish is owner-judged; screenshots
   in the PR-style summary for before/after.
 
-## Open decisions for owner (none block slice 1)
-1. **Vibrancy (slice 4): in or out for v1.0.0?** macOS-only native
-   feel vs one consistent cross-platform look. Recommendation: IN, it
-   is the single biggest "feels native, screenshots well" item — and
-   the social-media screenshots (release item 3) come from macOS.
-2. **Motion personality:** proposed "subtle" (100–300ms, small
-   distances, existing easing) per the current app's restraint.
-   Alternative: showier (longer coverflow sweeps, springy overshoot) —
-   say so and slice 3 gets a motion-spec pass first.
-3. **Poster placeholder ambition:** fade-in only (proposed) vs the
-   ThumbHash cache pipeline now.
+## Decisions (resolved by owner 2026-07-10)
+1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling
+   only if trivial, and it is not. Slice 4 cut.
+2. **Motion personality: SUBTLE, binding** — "it should never get in
+   the way." Durations 100–300ms, small distances, existing `--ease`,
+   nothing that delays interactivity or requires new E2E waits.
+3. **Poster placeholder: fade-in only** (proposed default stands;
+   ThumbHash pipeline stays a recorded later option).
 
 ## Research trail (2026-07-10)
 Svelte 5 built-ins and ecosystem surveyed: svelte/transition + easing
