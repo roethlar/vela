@@ -1,72 +1,57 @@
 // Continue Watching curation: "Remove from Continue Watching" (hero context
 // menu) tombstones the item and empties the hero; the tombstone survives an
-// app restart; replaying the item clears it and the hero returns.
+// app restart; replaying the item clears it and the hero returns. Runs
+// against a mock server with no hub content (no Resume/Latest), so the hero
+// is fed by Vela's recents alone — exactly the feed the tombstone must
+// suppress. Plays go through the context menu's direct Play; the nav-flip
+// detail route is the playback scenario's job.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import playback from './playback.mjs';
+import { pollUntil, openLibraryGrid, goHome, playAndQuit, makeClips, mockSource, seedConfig } from '../helpers.mjs';
+import { startMockJellyfin } from '../mockjf.mjs';
 
-const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Play E2E Clip"]`;
+const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Play Mock Movie"]`;
 const EMPTY_HOME = 'Nothing on your home screen yet';
 
-async function pollUntil(fn, what, { timeoutMs = 15000, intervalMs = 250 } = {}) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const value = await fn();
-    if (value) return value;
-    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
-    await new Promise((r) => setTimeout(r, intervalMs));
-  }
-}
+let mock;
 
-// Lean play-and-quit: get an unfinished session into recents. The playback
-// scenario owns the detailed IPC assertions; here mpv is just a means.
+// Lean play-and-quit via the grid card's context-menu Play: get an
+// unfinished session into recents; mpv is just a means here.
 async function playClipAndQuit(driver) {
-  const before = mpvSocketSnapshot();
-  const card = await driver.find('css selector', 'button.poster[aria-label^="E2E Clip"]');
-  await driver.click(card);
-  const mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
-  try {
-    await pollUntil(
-      () => mpv.getProp('time-pos').then((t) => t > 0.5).catch(() => false),
-      'playback to progress',
+  await playAndQuit(driver, async () => {
+    await driver.exec(
+      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]');
+       const r = el.getBoundingClientRect();
+       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
     );
-    await mpv.setProp('time-pos', 6);
-    await new Promise((r) => setTimeout(r, 1500)); // let Vela observe ≥6s
-    mpv.quit();
-  } finally {
-    mpv.close();
-  }
-}
-
-async function openLibraryGrid(driver) {
-  await driver.waitFor(
-    `return document.readyState === 'complete' && [...document.querySelectorAll('button.sideitem')].some(b => b.textContent.trim() === 'E2E Media')`,
-    'seeded source in the sidebar',
-  );
-  const section = await driver.find(
-    'xpath',
-    `//button[contains(@class,'sideitem') and normalize-space(.)='E2E Media']`,
-  );
-  await driver.click(section);
-  await driver.waitFor(
-    `return !!document.querySelector('button.poster[aria-label^="E2E Clip"]')`,
-    'clip card in the grid',
-  );
-}
-
-async function goHome(driver) {
-  const home = await driver.find(
-    'xpath',
-    `//button[contains(@class,'sideitem') and normalize-space(.)='Home']`,
-  );
-  await driver.click(home);
+    const play = await driver
+      .waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu (play)')
+      .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='Play']`));
+    await driver.click(play);
+  });
 }
 
 export default {
   name: 'curation',
-  seed: playback.seed, // same local folder + generated clip + displayless mpv
+
+  async seed({ configRoot }) {
+    const mediaDir = makeClips(configRoot, ['stream.mp4']);
+    mock = await startMockJellyfin({
+      movies: [{
+        id: 'm1',
+        name: 'Mock Movie',
+        year: 2020,
+        runTimeTicks: 100_000_000, // 10s, matching the real clip
+        mediaFile: path.join(mediaDir, 'stream.mp4'),
+      }],
+    });
+    seedConfig(configRoot, [mockSource(mock)]);
+  },
+
+  async cleanup() {
+    await mock?.close();
+  },
 
   async run({ driver, screenshot, configRoot, restart }) {
     const configFile = path.join(configRoot, 'config', 'vela', 'config.json');
@@ -79,7 +64,7 @@ export default {
       }
     };
 
-    // An unfinished play lands the clip in the hero.
+    // An unfinished play lands the movie in the hero.
     await openLibraryGrid(driver);
     await playClipAndQuit(driver);
     await pollUntil(stampedRecent, 'the recents position stamp');
@@ -87,7 +72,7 @@ export default {
     // tombstone APPLICATION needs a feed item carrying the hidden key.
     const stampedEntry = readCfg().recents[0];
     await goHome(driver);
-    await driver.waitFor(`return !!document.querySelector('${HERO_CLIP}')`, 'clip in the hero');
+    await driver.waitFor(`return !!document.querySelector('${HERO_CLIP}')`, 'movie in the hero');
 
     // Remove from Continue Watching via the hero's real context menu.
     await driver.exec(
@@ -106,8 +91,8 @@ export default {
     );
     await driver.click(removeBtn);
 
-    // Hero empties (hub-less home falls back to the empty state) and the
-    // tombstone is persisted.
+    // Hero empties (the mock serves no hubs, so a recents-less home falls
+    // back to the empty state) and the tombstone is persisted.
     await driver.waitFor(
       `return !document.querySelector('${HERO_CLIP}') && document.body.innerText.includes('${EMPTY_HOME}')`,
       'hero to empty after removal',
@@ -174,7 +159,7 @@ export default {
       'the tombstone to clear on replay',
     );
     await goHome(driver);
-    await driver.waitFor(`return !!document.querySelector('${HERO_CLIP}')`, 'clip back in the hero');
+    await driver.waitFor(`return !!document.querySelector('${HERO_CLIP}')`, 'movie back in the hero');
     await screenshot('02-restored');
   },
 };

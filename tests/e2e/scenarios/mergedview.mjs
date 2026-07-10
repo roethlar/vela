@@ -1,18 +1,17 @@
-// Merged All view across two real sources (mock Jellyfin + local folder
-// carrying the same title): the consolidated Movies listing dedups to ONE
-// card marked "2 sources", the context menu offers "Play from" both
-// backings, each backing plays from its own source (local path vs mock
-// HTTP stream), and the per-title override persists in merged_overrides.
+// Merged All view across two real server sources (two mock Jellyfin
+// instances carrying the same title): the consolidated Movies listing
+// dedups to ONE card marked "2 sources", the context menu offers
+// "Play from" both backings, each backing plays from its own server's
+// stream, and the per-title override persists in merged_overrides.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { pollUntil, makeClips } from '../helpers.mjs';
+import { pollUntil, makeClips, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
-const CLIP = 'Mock Movie (2020).mp4'; // parses to title "Mock Movie", year 2020 — matches the mock item
-
-let mock;
+let mockA;
+let mockB;
 
 async function playFromMenu(driver, menuLabel) {
   const before = mpvSocketSnapshot();
@@ -33,7 +32,6 @@ async function playFromMenu(driver, menuLabel) {
   } finally {
     mpv.close();
   }
-  const { createConnection } = await import('node:net');
   return loaded;
 }
 
@@ -41,35 +39,27 @@ export default {
   name: 'mergedview',
 
   async seed({ configRoot }) {
-    const mediaDir = makeClips(configRoot, [CLIP]);
-    mock = await startMockJellyfin({
+    // Same title+year on both servers (no provider ids in the mock), so the
+    // merged view dedups them by normalized title+year.
+    const mediaDir = makeClips(configRoot, ['a.mp4', 'b.mp4']);
+    const movie = (file) => [{
+      id: 'm1',
+      name: 'Mock Movie',
+      year: 2020,
       runTimeTicks: 100_000_000,
-      mediaFile: path.join(mediaDir, CLIP),
-    });
-    const configDir = path.join(configRoot, 'config', 'vela');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(configDir, 'config.json'),
-      JSON.stringify({
-        local_folders: [{ id: 'e2e-local', name: 'E2E Media', path: mediaDir, kind: 'movie' }],
-        sources: [
-          {
-            id: 'jf-mock',
-            kind: 'jellyfin',
-            name: 'Mock JF',
-            base_url: `http://127.0.0.1:${mock.port}`,
-            access_token: 'mock-token',
-            user_id: mock.userId,
-            device_id: 'e2e-device',
-          },
-        ],
-        mpv_extra_args: '--vo=null\n--ao=null',
-      }),
-    );
+      mediaFile: path.join(mediaDir, file),
+    }];
+    mockA = await startMockJellyfin({ movies: movie('a.mp4') });
+    mockB = await startMockJellyfin({ movies: movie('b.mp4') });
+    seedConfig(configRoot, [
+      mockSource(mockA, { id: 'jf-a', name: 'Mock JF A' }),
+      mockSource(mockB, { id: 'jf-b', name: 'Mock JF B' }),
+    ]);
   },
 
   async cleanup() {
-    await mock?.close();
+    await mockA?.close();
+    await mockB?.close();
   },
 
   async run({ driver, screenshot, configRoot }) {
@@ -93,12 +83,11 @@ export default {
       `const cards = [...document.querySelectorAll('button.poster[aria-label^="Mock Movie"]')];
        return { count: cards.length, tag: cards[0]?.innerText.includes('2 sources') };`,
     );
-    assert.equal(view.count, 1, 'the two sources must dedup to one merged card');
+    assert.equal(view.count, 1, 'the two servers must dedup to one merged card');
     assert.ok(view.tag, 'the merged card must be marked "2 sources"');
     await screenshot('01-merged');
 
-    // Play from each backing: the local copy plays the file path, the
-    // server copy plays the mock stream — same card, routed per choice.
+    // Play from each backing: each choice must stream from its own server.
     // The override must persist under the exact canonical key with the
     // chosen source id (eh-14): the backend applies it by exact key, so a
     // wrong-key/wrong-value persist silently loses the user's choice.
@@ -112,15 +101,18 @@ export default {
       }
     };
 
-    const localPath = await playFromMenu(driver, 'Play from Local');
-    assert.equal(localPath, path.join(configRoot, 'media', CLIP));
-    await pollUntil(() => overrideValue() === 'local', `the override to persist as ${CANONICAL} → local`);
-
-    const streamUrl = await playFromMenu(driver, 'Play from Mock JF');
+    const streamA = await playFromMenu(driver, 'Play from Mock JF A');
     assert.ok(
-      streamUrl.startsWith(`http://127.0.0.1:${mock.port}/Videos/m1/stream`),
-      `server backing must play the mock stream, got ${streamUrl}`,
+      streamA.startsWith(`http://127.0.0.1:${mockA.port}/Videos/m1/stream`),
+      `backing A must play server A's stream, got ${streamA}`,
     );
-    await pollUntil(() => overrideValue() === 'jf-mock', `the override to flip to ${CANONICAL} → jf-mock`);
+    await pollUntil(() => overrideValue() === 'jf-a', `the override to persist as ${CANONICAL} → jf-a`);
+
+    const streamB = await playFromMenu(driver, 'Play from Mock JF B');
+    assert.ok(
+      streamB.startsWith(`http://127.0.0.1:${mockB.port}/Videos/m1/stream`),
+      `backing B must play server B's stream, got ${streamB}`,
+    );
+    await pollUntil(() => overrideValue() === 'jf-b', `the override to flip to ${CANONICAL} → jf-b`);
   },
 };

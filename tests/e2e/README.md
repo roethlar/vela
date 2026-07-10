@@ -12,8 +12,10 @@ npm run e2e -- smoke           # run one scenario by name
 ```
 
 - Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
-  (`xorg-server-xvfb`), `bsdtar`, `curl`, and — for the playback
-  scenario — `ffmpeg` and `mpv`.
+  (`xorg-server-xvfb`), `bsdtar`, `curl`, and — for the playback-driving
+  scenarios — `ffmpeg` and `mpv`. Server flows run against in-process mock
+  Jellyfin servers (`mockjf.mjs`) whose Range-capable streams serve
+  ffmpeg-generated clips; no real server or network is touched.
 - Runs headless on a private Xvfb display by default — screenshots on the
   live Wayland desktop hang whenever the test window is occluded/unfocused
   (no frame callbacks). `VELA_E2E_HEADED=1` opts into the real desktop to

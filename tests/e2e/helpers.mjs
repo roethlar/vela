@@ -1,13 +1,14 @@
-// Shared scenario plumbing for the seeded-local-source scenarios. The
-// playback scenario keeps its own detailed inline flow — it IS the mpv-IPC
-// probe test; these leaner helpers serve scenarios that use playback as a
-// means (curation, resume).
+// Shared scenario plumbing for the mock-server scenarios. The playback
+// scenario keeps its own detailed inline flow — it IS the mpv-IPC probe
+// test; these leaner helpers serve scenarios that use playback as a means
+// (curation, resume, queue, search).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from './mpv.mjs';
 
-// Generate 10s test clips into <configRoot>/media; returns the dir.
+// Generate 10s test clips into <configRoot>/media; returns the dir. The
+// clips back the mock servers' Range-capable /Videos/{id}/stream routes.
 export function makeClips(configRoot, clipNames) {
   const mediaDir = path.join(configRoot, 'media');
   fs.mkdirSync(mediaDir, { recursive: true });
@@ -23,18 +24,30 @@ export function makeClips(configRoot, clipNames) {
   return mediaDir;
 }
 
-// Seed the throwaway config with a local movie folder containing one
-// ffmpeg-generated 10s clip per name, and displayless mpv args (one option
-// per LINE — that is how Vela parses mpv_extra_args).
-export function seedLocalMedia(configRoot, clipNames) {
-  const mediaDir = makeClips(configRoot, clipNames);
+// Config `sources` entry for a started mock server.
+export function mockSource(mock, { id = 'jf-mock', name = 'Mock JF' } = {}) {
+  return {
+    id,
+    kind: 'jellyfin',
+    name,
+    base_url: `http://127.0.0.1:${mock.port}`,
+    access_token: 'mock-token',
+    user_id: mock.userId,
+    device_id: 'e2e-device',
+  };
+}
+
+// Seed the throwaway config: mock server sources + displayless mpv args
+// (one option per LINE — that is how Vela parses mpv_extra_args).
+export function seedConfig(configRoot, sources, extra = {}) {
   const configDir = path.join(configRoot, 'config', 'vela');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(
     path.join(configDir, 'config.json'),
     JSON.stringify({
-      local_folders: [{ id: 'e2e-local', name: 'E2E Media', path: mediaDir, kind: 'movie' }],
+      sources,
       mpv_extra_args: '--vo=null\n--ao=null',
+      ...extra,
     }),
   );
 }
@@ -49,19 +62,20 @@ export async function pollUntil(fn, what, { timeoutMs = 15000, intervalMs = 250 
   }
 }
 
-export async function openLibraryGrid(driver) {
+// Sidebar → the mock library's grid.
+export async function openLibraryGrid(driver, { section = 'Mock Library', cardPrefix = 'Mock Movie' } = {}) {
   await driver.waitFor(
-    `return document.readyState === 'complete' && [...document.querySelectorAll('button.sideitem')].some(b => b.textContent.trim() === 'E2E Media')`,
-    'seeded source in the sidebar',
+    `return document.readyState === 'complete' && [...document.querySelectorAll('button.sideitem')].some(b => b.textContent.trim() === '${section}')`,
+    'seeded library in the sidebar',
   );
-  const section = await driver.find(
+  const btn = await driver.find(
     'xpath',
-    `//button[contains(@class,'sideitem') and normalize-space(.)='E2E Media']`,
+    `//button[contains(@class,'sideitem') and normalize-space(.)='${section}']`,
   );
-  await driver.click(section);
+  await driver.click(btn);
   await driver.waitFor(
-    `return !!document.querySelector('button.poster[aria-label^="E2E Clip"]')`,
-    'clip card in the grid',
+    `return !!document.querySelector('button.poster[aria-label^="${cardPrefix}"]')`,
+    'movie card in the grid',
   );
 }
 
@@ -73,13 +87,33 @@ export async function goHome(driver) {
   await driver.click(home);
 }
 
-// Click `clickTarget`, then drive the resulting mpv session: seek to 6s, let
-// Vela observe it, quit, and prove the quit acted. Returns the first
-// time-pos sample observed after load (the resume-position evidence).
-export async function playAndQuit(driver, clickTarget) {
+// The nav flip (74ff385) routes library card clicks to the info page;
+// playback goes through the detail page's Play/Resume button.
+export async function openDetailAndPlay(driver, cardSelector) {
+  const card = await driver.find('css selector', cardSelector);
+  await driver.click(card);
+  await driver.waitFor(
+    `return !!document.querySelector('.detail button.playwide')`,
+    'detail page Play button',
+  );
+  const play = await driver.find('css selector', '.detail button.playwide');
+  await driver.click(play);
+}
+
+// Run `start()` (whatever triggers playback), then drive the resulting mpv
+// session: seek to 6s, let Vela observe it, quit, and prove the quit acted.
+// Returns the first time-pos sample observed after load (the
+// resume-position evidence).
+export async function playAndQuit(driver, start) {
   const before = mpvSocketSnapshot();
-  await driver.click(clickTarget);
-  const socketPath = await waitForNewMpvSocket(before);
+  await start();
+  const socketPath = await waitForNewMpvSocket(before).catch(async (err) => {
+    // The play error banner (play() sets `error`) is the usual culprit —
+    // surface the page state instead of a bare socket timeout.
+    const text = await driver.exec(`return document.body.innerText.slice(0, 400)`).catch(() => '?');
+    err.message += ` — page: ${JSON.stringify(text)}`;
+    throw err;
+  });
   const mpv = await MpvIpc.connect(socketPath);
   let firstPos;
   try {

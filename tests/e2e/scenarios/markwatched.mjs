@@ -4,9 +4,7 @@
 // state, and the card's watched badge must follow — surviving the refetch
 // that re-reads server state.
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-import { pollUntil } from '../helpers.mjs';
+import { pollUntil, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
 let mock; // seed → run → cleanup share the module instance
@@ -15,25 +13,8 @@ export default {
   name: 'markwatched',
 
   async seed({ configRoot }) {
-    mock = await startMockJellyfin();
-    const configDir = path.join(configRoot, 'config', 'vela');
-    fs.mkdirSync(configDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(configDir, 'config.json'),
-      JSON.stringify({
-        sources: [
-          {
-            id: 'jf-mock',
-            kind: 'jellyfin',
-            name: 'Mock JF',
-            base_url: `http://127.0.0.1:${mock.port}`,
-            access_token: 'mock-token',
-            user_id: mock.userId,
-            device_id: 'e2e-device',
-          },
-        ],
-      }),
-    );
+    mock = await startMockJellyfin(); // default single unwatched movie, no stream
+    seedConfig(configRoot, [mockSource(mock)]);
   },
 
   async cleanup() {
@@ -55,8 +36,10 @@ export default {
       `return !!document.querySelector('button.poster[aria-label^="Mock Movie"]')`,
       'movie card in the grid',
     );
+    // The fully-watched marker is the .watchedbadge check inside the card
+    // (played === true and no mid-resume progress).
     const watchedBefore = await driver.exec(
-      `return document.querySelector('button.poster[aria-label^="Mock Movie"]').classList.contains('watched')`,
+      `return !!document.querySelector('button.poster[aria-label^="Mock Movie"] .watchedbadge')`,
     );
     assert.equal(watchedBefore, false, 'seeded item starts unwatched');
 
@@ -100,7 +83,7 @@ export default {
       return false;
     })();
     assert.ok(posted, 'app must POST /Users/{u}/PlayedItems/m1');
-    assert.equal(mock.state.played, true, 'mock server watch state must flip');
+    assert.equal(mock.state.userData.m1.played, true, 'mock server watch state must flip');
 
     // UI side: prove the badge came from the server refetch, not a skipped
     // refetch leaving the optimistic mutation behind. Wait for the mark action's
@@ -112,7 +95,7 @@ export default {
       'a server Items refetch after mark-watched',
     );
     await driver.waitFor(
-      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]'); return !!el && el.classList.contains('watched');`,
+      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]'); return !!el && !!el.querySelector('.watchedbadge');`,
       'watched badge on the refetched card',
     );
     await screenshot('01-watched');
@@ -133,7 +116,7 @@ export default {
       () => mock.state.requests.some((r) => r.method === 'DELETE' && r.path === `/Users/${mock.userId}/PlayedItems/m1`),
       'the PlayedItems DELETE',
     );
-    assert.equal(mock.state.played, false, 'mock server watch state must flip back');
+    assert.equal(mock.state.userData.m1.played, false, 'mock server watch state must flip back');
     // Mirror of the watched leg. The OLD `!card?...watched` wait was vacuously
     // true while the card was missing during the refresh gap; gate on the
     // refetch, then assert the card is PRESENT and lacks the badge — catching a
@@ -144,7 +127,7 @@ export default {
       'a server Items refetch after mark-unwatched',
     );
     await driver.waitFor(
-      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]'); return !!el && !el.classList.contains('watched');`,
+      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]'); return !!el && !el.querySelector('.watchedbadge');`,
       'watched badge cleared on the refetched card',
     );
     await screenshot('02-unwatched');

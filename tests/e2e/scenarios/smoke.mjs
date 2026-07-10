@@ -36,7 +36,7 @@ export default {
       'Settings panel',
     );
     const missing = await driver.exec(
-      `return ['Connected','Servers','Folders','Player','Appearance']` +
+      `return ['Connected','Servers','Player','Appearance']` +
         `.filter(s => !Array.from(document.querySelectorAll('button,a,h2,h3'))` +
         `.some(e => e.textContent.trim() === s))`,
     );
