@@ -55,8 +55,16 @@ Per direction:
 
 One thin backend change. In `set_watched` (`commands.rs:2043`), after a
 successful `mark_played`, replace the `played=true`-only
-`recents::unrecord` with an **unconditional `recents::hide`** (both
-directions), discarding the returned server key:
+`recents::unrecord` with **`recents::hide_unless_playing`** (both
+directions) — `hide` semantics, guarded so a LIVE session wins
+(plan-review r2, finding 1): `mark_played` is awaited before curation, so
+a play can start inside that network window (grid replay, queue
+auto-advance) and record a fresh OPEN recents entry (`ended_at_ms == 0`);
+an unguarded hide would drop and tombstone that active session, leaving
+the just-played item missing from Continue Watching after quit. If the
+key's entry is open, the edit skips curation entirely — the session
+re-stamps at quit and newer play activity is the newer intent (matches
+server-side behavior, where fresh progress re-enters the hub):
 
 - `hide()` (`recents.rs:112`) already does exactly what's needed: drop the
   recents entry (matching either identity of a merged card) and tombstone
@@ -107,6 +115,12 @@ Accepted edges (called out, not blocking):
   watch-key tombstone isn't cleared by a queue play of the play key. Rare
   (requires a merged title marked watched/unwatched, then queue-played);
   self-heals on any direct play (`record` clears the full identity set).
+- The `hide_unless_playing` guard closes the edit-vs-play race only where
+  an open recents entry exists. Two slivers remain: a direct play between
+  mpv spawn and its `record_recent` landing, and a queue/auto-advance play
+  (which records no entry at all — the separately queued gap) can still be
+  tombstoned by an in-flight edit. Both self-heal on the next play
+  (`record`/`untombstone`); accepted.
 - Related gap observed while reviewing, NOT in this plan's scope: queue
   plays and auto-advance never enter Vela's recents at all, so a
   queue-interrupted session doesn't surface in Continue Watching. Queued
@@ -115,15 +129,20 @@ Accepted edges (called out, not blocking):
 ## Slice (single commit + version bump; reviewloop codex after landing)
 1. `commands.rs set_watched`: unconditional `hide`, doc comment updated to
    the new semantic.
-2. `recents.rs`: new `untombstone(cfg, key)` (exact-key tombstone
-   removal), unit-tested; `commands.rs play_by_key`: call it best-effort
+2. `recents.rs`: new `hide_unless_playing(cfg, key)` (open-session-guarded
+   hide) and `untombstone(cfg, key)` (exact-key tombstone removal), both
+   unit-tested; `commands.rs play_by_key`: call `untombstone` best-effort
    after a successful mpv spawn (covers queue plays and auto-advance).
 3. Mock fidelity (plan-review r1, finding 2): `mockjf.mjs` PlayedItems
    POST/DELETE also reset `positionTicks` to 0, matching real servers
-   (**ASSUMPTION, verify at implementation** against Jellyfin's
-   MarkUnplayed/MarkPlayed semantics; Plex scrobble/unscrobble likewise
-   clears the view offset). Without this, "full reset" would show green
-   while a real resume point survives.
+   (**VERIFIED 2026-07-10** against jellyfin/jellyfin master:
+   `BaseItem.MarkUnplayed` → `ResetPlayedState` unconditionally zeroes
+   `PlaybackPositionTicks`; the `PlayedItems` POST endpoint calls
+   `MarkPlayed(user, datePlayed, resetPosition: true)` —
+   `PlaystateController.UpdatePlayedStatus`. Plex scrobble/unscrobble
+   clearing the view offset is covered live by the owner playtest).
+   Without this, "full reset" would show green while a real resume point
+   survives.
 4. Mock hub feed (plan-review r1, finding 3): `mockjf.mjs` gains an
    OPT-IN `serveResume: true` — `/Users/{u}/Items/Resume` returns movies
    with `positionTicks > 0 && !played` (faithful server behavior).
@@ -154,10 +173,15 @@ Accepted edges (called out, not blocking):
      in place, mutate the mock's userData directly
      (`positionTicks > 0, played: false` — simulating a stale/cached or
      externally-revived server hub copy), force a home refresh, gate on
-     the Resume refetch, assert the hero card does NOT appear. This is
-     the first live guard that a tombstone suppresses the SERVER hub
-     feed (curation.mjs only ever proves recents-feed suppression — its
-     mock Resume is hardcoded empty and its restart leg reinserts only
+     the Resume refetch, then hold a bounded NEGATIVE watch (~3s) that
+     the hero card never appears (plan-review r2, finding 2: the mock
+     records the request before responding and the frontend applies hubs
+     after the response resolves, so a single immediate check right after
+     the request lands could pass in flight while broken tombstone
+     filtering renders the card a moment later). This is the first live
+     guard that a tombstone suppresses the SERVER hub feed
+     (curation.mjs only ever proves recents-feed suppression — its mock
+     Resume is hardcoded empty and its restart leg reinserts only
      `cfg.recents`).
 6. Rust unit tests: `untombstone` add/remove round-trip (guard-proven).
    No unit test for `set_watched` itself: the command layer needs `State`
@@ -223,3 +247,22 @@ against live code).** Base `4365fb3`, head `d810c02`,
    hardcoded empty, so hub-feed suppression had NO guard anywhere. Fixed:
    opt-in `serveResume` mock fidelity + leg 3 asserting a live hub copy
    stays suppressed while tombstoned; the false claim removed.
+
+**r2 — 2026-07-10 — verdict `reopened`, 2 findings, both ADMITTED.** Base
+`4365fb3`, head `61f666e`, `guard_confirmed:false`. (First r2 dispatch
+died mid-run on reviewer-side model capacity — `turn.failed`, no verdict;
+fail-closed, re-dispatched once per the playbook. The reviewer also
+correctly noted uncommitted implementation files in the shared worktree
+and isolated its evidence to the pinned SHA.)
+1. Edit-vs-play race: `set_watched` awaits `mark_played` before curating,
+   so a play starting inside that window records a fresh open entry that
+   the delayed hide would drop and tombstone — erasing an active session
+   from Continue Watching until the next play. Fixed: curation goes
+   through `hide_unless_playing` (open entry ⇒ skip; live playback wins);
+   remaining slivers documented as accepted edges.
+2. Leg 3's negative assertion could pass in flight (request recorded
+   before the response; hubs applied after it resolves; the card is
+   already absent from leg 2). Fixed: bounded ~3s negative watch that the
+   card NEVER appears, replacing the single immediate check. (The
+   implementation had this hardening from coder self-review before the r2
+   verdict arrived; the plan text now matches it.)
