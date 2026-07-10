@@ -25,6 +25,33 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop dls-s2 CLOSED 2026-07-09: **accepted clean at r1, no findings** (codex
+read-only, `guard_confirmed:false` — the Linux-only suite can't run from the
+mac host; the coder's red/green run is the recorded proof). Scope was
+**drop-local-sources slice 2 — the E2E re-home to mock servers** (base
+`ea3c410`, head `b41703a`; commits `80dd8e6` app fix + `b223951` suite +
+`b41703a` bump 0.1.40): `mockjf.mjs` generalized (multiple movies,
+`searchTerm` branch, per-item PlaybackInfo/PlayedItems/streams; the eh-12
+query contract and eh-13 Range semantics kept), every scenario mock-served
+and nav-flip-aware (card → info page → Play; ctx-menu play for
+queue/curation; hero click for resume), mergedview + sourcedeadend rebuilt
+as TWO-mock-server scenarios (server↔server dedup/override; hub-kept vs
+empty-home-auto-open legs), markwatched on the `.watchedbadge` markup,
+smoke's Settings tabs updated, `connectedtab` deleted with its SMB subject
+(sspf-12 zombie-share coverage recorded LOST), `fetch-driver.sh` arch-aware
+(arm64 debs pinned — the validation host is aarch64). The re-home
+immediately banked a REAL app bug, the class this harness exists to catch:
+the context-menu Play entry threw at click time (`mi` is a Svelte 5
+`{@const}` lazy read over `menu.item`; the inline handler ran `closeMenu()`
+first) — no play, no visible error; broken since the nav flip made the menu
+the grid's play affordance, unreachable by the old click-to-play suite. Fix
+`80dd8e6` (`playFromCtx` takes the item before closing, like every sibling
+entry). Guard-proven red/green on the real app: pre-fix full run 8/10 with
+EXACTLY the two ctx-menu-play scenarios red; post-fix 10/10; final 10/10 at
+the committed head on the owner's Linux VM (Ubuntu 25.10 aarch64, Xvfb).
+svelte-check 0/0, npm build clean, post-bump `cargo check --locked` clean.
+**drop-local-sources is COMPLETE — all three slices landed.**
+
 Loop dls-s3 CLOSED 2026-07-09: **accepted at r5** (codex read-only; rounds
 r1-r4 reopened with 6/4/5/4 comments, ALL admitted and fixed — fix commits
 `70a7a6a`+`02a918b`, `a76175c`, `95f340e`, `ec6a4b9` on slice head

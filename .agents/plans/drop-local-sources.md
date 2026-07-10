@@ -1,7 +1,13 @@
 # Plan: Drop local/SMB/SSH sources — Vela is a multi-server client
 
 ## Status
-**IMPLEMENTING — slices 1 and 3 landed, slice 2 in progress (2026-07-09).**
+**COMPLETE 2026-07-09 — all three slices landed.** Slice 2 (E2E re-home)
+landed `80dd8e6`+`b223951`+`b41703a` (0.1.40; loop `dls-s2` accepted clean
+r1): full suite 10/10 on the owner's Linux VM (Ubuntu 25.10 aarch64), and
+the re-home surfaced + fixed a real nav-flip regression (context-menu Play
+threw — see the loop trail in `.agents/review/index.md`).
+
+Landing history: **slices 1 and 3 landed first, slice 2 last (2026-07-09).**
 Slice 1 (turn-off-and-delete) landed 2026-07-08 (0.1.33, `6855df5`; loop
 `dls-s1` clean r1) and is owner-playtested. Slice 3 (docs sweep) landed
 2026-07-09 — README/ISSUES/repo-guidance de-localed, six obsolete plans

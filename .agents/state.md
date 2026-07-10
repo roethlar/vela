@@ -21,11 +21,14 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   repo-guidance de-localed, obsolete plans bannered, decision statuses
   closed/amended, config round-trip guard extended to legacy SMB
   credentials (guard-proven); repo-map refresh moot (file retired
-  2026-07-08). REMAINING: **slice 2 —
-  E2E re-home to mock servers (LINUX HOST ONLY; tests/e2e is knowingly
-  broken until then, and the re-home must also rewrite scenarios written
-  against click-to-play — since the nav flip, library card clicks open info
-  pages)** — in progress 2026-07-09 on the owner's Linux VM.
+  2026-07-08). **Slice 2 (E2E re-home) LANDED 2026-07-09, loop `dls-s2`
+  accepted clean r1** (`80dd8e6` app fix + `b223951` suite + `b41703a`
+  bump 0.1.40): all scenarios mock-served and nav-flip-aware, suite 10/10
+  on the owner's Linux VM. The re-home banked a real regression fix —
+  **context-menu Play threw since the nav flip** (Svelte 5 `{@const}` read
+  after `closeMenu()`; fixed `80dd8e6`, guard = queue/curation scenarios
+  red→green). **THE DLS PLAN IS COMPLETE.** Owner spot-check ask for the
+  next build: right-click → Play on a library card now works (0.1.40).
 - **ITEM-DETAIL TRACK: COMPLETE and owner-verified through 0.1.36
   (2026-07-09)** — nav flip (`74ff385`), episode navigation polish
   (`f1e36d3`+`cc9f060`), detail crumb trail (`496218e`); loops idv-s3/s4/s5
@@ -60,19 +63,24 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   (roethlar/AgentGovernanceBootstrap#2, 2026-07-09 — the handoff operator
   conflicts with the toolkit's own `*.local.*` convention); expect a future
   governance refresh to move it to an untracked `state.local.md`-style home.
-- Version 0.1.39 (bumped `8204a77`, 2026-07-09). **Both remotes (origin +
-  github) are at `a39be7f` == local HEAD as of 2026-07-09** (verified via
-  `ls-remote`; owner pushes manually — policy `.agents/push-policy.md`).
-  **GitHub CI is GREEN on the pushed head `a39be7f`** (verified via
-  `gh run list` 2026-07-09).
+- Version 0.1.40 (bumped `b41703a`, 2026-07-09). **Both remotes (origin +
+  github) are at `a39be7f`** (verified via `ls-remote` 2026-07-09); local
+  is 15 commits ahead as of `b41703a` (owner pushes manually — policy
+  `.agents/push-policy.md`). GitHub CI was GREEN on the pushed head
+  `a39be7f` (verified via `gh run list` 2026-07-09).
 
 ## Next
 
-- DLS slice 2 (E2E re-home) — the owner's Linux VM is the venue:
-  **machine-local (mac host `/Users/michael/Dev/vela`):** VM at
-  `michael@192.168.64.5` (Ubuntu 25.10 aarch64, 12 CPU, ~3.3 GiB RAM —
-  tight for the debug build; RAM bump requested), clone target `~/dev/vela`;
-  VM on hold 2026-07-09 while the owner installs OS updates.
+- Owner playtest asks on 0.1.40: the context-menu Play fix (right-click a
+  library card → Play), plus the older outstanding items below.
+- **machine-local (mac host `/Users/michael/Dev/vela`):** the owner's Linux
+  VM at `michael@192.168.64.5` is the standing E2E venue (Ubuntu 25.10
+  aarch64, 12 CPU; fully provisioned 2026-07-09: rustup, tauri-driver,
+  Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64 WebKitWebDriver, debug
+  binary built). Clone at `~/dev/vela` with `receive.denyCurrentBranch=
+  updateInstead`; the mac clone has a `vm` remote — sync is `git push vm
+  main` (VM tree must be clean: `ssh … git checkout -- .` first if a diff
+  was applied), uncommitted work travels via `git diff | ssh … git apply -`.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
@@ -92,15 +100,16 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - Canonical commands live in `.agents/repo-guidance.md` (Verification) —
   frontend `npm run check` / `npm run build`; Rust from `src-tauri/`:
   `cargo check --locked`, `cargo clippy --all-targets --locked -- -D
-  warnings`, `cargo test --locked`; `npm run e2e` (Linux only; broken until
-  DLS slice 2 re-homes it to mock servers).
+  warnings`, `cargo test --locked`; `npm run e2e` (Linux only; re-homed to
+  mock servers 2026-07-09, 10/10 green at `b41703a` on the owner's VM).
 
 ## Active Sources
 
 - `AGENTS.md` + `.agents/repo-guidance.md` (governance refreshed 2026-07-08,
   toolkit `6f08a67`; verification commands now live in repo-guidance)
 - `.agents/decisions.md`
-- `.agents/plans/drop-local-sources.md` (ACTIVE — slices 1+3 landed, 2 open)
+- `.agents/plans/drop-local-sources.md` (COMPLETE — all three slices landed
+  2026-07-08/09)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
 - `.agents/plans/person-browse.md` (COMPLETE — owner-verified 2026-07-09)
 - `.agents/review/index.md` (durable review trails)
