@@ -118,10 +118,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   playback time; `set_watched` drops the recents entry only on
   played=true and deliberately never on unwatched (`commands.rs
   set_watched`), so the stale in-progress snapshot keeps rendering no
-  matter where the state was changed from. Hypothesis is session triage,
-  NOT code-confirmed end-to-end — confirm at plan time. Strongly related
-  to the queued-last Continue Watching one-op curation item (same surface,
-  same ops); consider planning them together. No code without a plan + go.
+  matter where the state was changed from. **PLAN DRAFTED 2026-07-10:
+  `.agents/plans/continue-watching-watch-state.md`** (diagnosis
+  code-confirmed; folds in the queued-last one-op curation item) —
+  awaiting plan review + owner go. No code without the go.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
@@ -130,7 +130,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   unwatched, it stays in the carousel. if I remove it from continue watching,
   the watched status remains. so I have to do two ops to get what I want."
   Design when picked up (plan first; options include a combined context-menu
-  action or changing what each action implies) — not spec'd yet.
+  action or changing what each action implies) — FOLDED INTO
+  `.agents/plans/continue-watching-watch-state.md` (2026-07-10): the drafted
+  semantics make mark-unwatched a one-op full reset that also leaves the
+  carousel, resolving this by design if the plan is accepted.
 
 ## Blockers
 
@@ -153,6 +156,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   2026-07-08/09)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
 - `.agents/plans/person-browse.md` (COMPLETE — owner-verified 2026-07-09)
+- `.agents/plans/continue-watching-watch-state.md` (DRAFT — awaiting
+  review + owner go)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)
