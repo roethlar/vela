@@ -47,9 +47,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   `pb-s1` clean r1), slice 2 frontend `b290b31` (loop `pb-s2` clean r1),
   bumps `62fd927`/`8204a77`. No open defect; JF/Emby person browse stays
   deferred on an explicit owner go (same bar as JF/Emby `item_detail`).
-- Outstanding owner playtest asks (older builds): (1) library sorting
-  0.1.30 — sort dropdown on Plex libraries + merged All view; (2) mpv
-  autocrop 0.1.22 — Shift+C / Automatic crop on the real HDR stack.
+- Outstanding owner playtest asks (older builds): mpv autocrop 0.1.22 —
+  Shift+C / Automatic crop on the real HDR stack. (Library sorting:
+  owner-verified WORKING 2026-07-10 on 0.1.41 — see the queued
+  last-episode-added follow-up in ## Next.)
 - **machine-local (Windows dev host, `F:\dev\vela`):** the `ptk` MCP server
   (warm PowerShell runspace, `ptk_invoke`) is the DIRECT shell for agent
   harnesses on this host — probe it before assuming no shell / delegating
@@ -86,6 +87,14 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   updateInstead`; the mac clone has a `vm` remote — sync is `git push vm
   main` (VM tree must be clean: `ssh … git checkout -- .` first if a diff
   was applied), uncommitted work travels via `git diff | ssh … git apply -`.
+- QUEUED (owner, 2026-07-10, from the sorting playtest — "add that to the
+  queue, but don't code"): **TV shows need a "Date Last Episode Added"
+  sort.** Sorting is otherwise verified working, but the date-added sort on
+  shows appears to use the SERIES' own addedAt (when the show was added),
+  so a show whose newest episode just arrived doesn't surface. Plan first;
+  per-backend leaf-added semantics (e.g. Plex episode addedAt vs series
+  addedAt) are NOT investigated or spec'd — the "it seems" diagnosis is the
+  owner's observation, to be code-confirmed at plan time.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the

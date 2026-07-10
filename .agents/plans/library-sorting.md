@@ -8,7 +8,10 @@ Folder dropped; JF/local last-played population deferred (2026-07-09: the
 LOCAL half of that deferral is DEAD — local sources removed, decision
 `.agents/decisions.md` 2026-07-08; only the JF population remains deferred).
 Effective set delivered: date added, date last played, title, release date —
-per-source AND merged views. REMAINING: owner playtest.
+per-source AND merged views. Owner playtest VERIFIED 2026-07-10 ("sorting
+works"). Follow-up QUEUED the same day (see `.agents/state.md` ## Next):
+TV shows want a "Date Last Episode Added" sort — the delivered date-added
+sort on shows appears to use the series' own addedAt.
 
 ## Goal
 Sort options available in **all** library views: **date added, date last played,
