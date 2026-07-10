@@ -514,8 +514,8 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| br-1 | MEDIUM | Resume scenario green off the server offset — recents-fallback regressions invisible | `[~]` | (this commit) |
-| br-2 | MEDIUM | Mock search ignores IncludeItemTypes/Recursive — search-contract regressions pass | `[~]` | |
+| br-1 | MEDIUM | Resume scenario green off the server offset — recents-fallback regressions invisible | `[~]` | `8c596d0` |
+| br-2 | MEDIUM | Mock search ignores IncludeItemTypes/Recursive — search-contract regressions pass | `[~]` | (this commit) |
 | br-3 | LOW | bump.sh leaves package-lock version stale; npm install dirties fresh checkouts | `[x]` | `88ab605` |
 | cw-1 | MEDIUM | Merged items (local front, server watch key) survive mark-watched/remove in the hero | `[x]` | `5ce26db` |
 | cw-2 | LOW | Registry lock held across Plex removal await stalls unrelated UI up to 15s | `[x]` | `07167f1` |

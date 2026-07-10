@@ -33,9 +33,11 @@ scenario's existing final `contractViolations` assert then covers it.
 - `tests/e2e/mockjf.mjs` — search-branch contract
 
 ## Guard proof
-Red/green on the Linux VM: search scenario green as-is; a temporary client
-narrowing (`IncludeItemTypes=Series` in jellyfin.rs search) must turn the
-scenario RED (no results / violation), then restore green.
+Run on the Linux VM 2026-07-09/10:
+- RED: client narrowed to `IncludeItemTypes=Series` in jellyfin.rs search →
+  search scenario FAILS ("timed out … waiting for search hit in the results
+  grid") — the mock now filters like a real server.
+- GREEN: hack reverted → search PASSES; full suite 10/10.
 
 ## Reviewer comments
 (appended after the per-finding verdict)

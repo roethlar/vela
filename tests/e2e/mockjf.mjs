@@ -103,8 +103,17 @@ export function startMockJellyfin({
     }
     if (path === `/Users/${userId}/Items`) {
       // Search goes to the same endpoint with searchTerm and NO ParentId
-      // (jellyfin.rs search()); a real server filters by name.
+      // (jellyfin.rs search()); a real server filters by name. The client
+      // always sends Recursive + IncludeItemTypes — their absence is a
+      // client regression (eh-12 class, br-2), while a NARROWED type set is
+      // answered the way a real server answers: filtered, so a search that
+      // stopped asking for movies gets none back instead of a false pass.
       if (query.searchTerm !== undefined) {
+        if (query.Recursive !== 'true' || query.IncludeItemTypes === undefined) {
+          state.contractViolations.push({ path, query });
+          return json({ error: 'query contract violation' }, 400);
+        }
+        if (!query.IncludeItemTypes.includes('Movie')) return json({ Items: [] });
         const term = query.searchTerm.toLowerCase();
         return json({ Items: movies.filter((m) => m.name.toLowerCase().includes(term)).map(toJson) });
       }
