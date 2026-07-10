@@ -69,11 +69,21 @@ directions — **curate-first with rollback** (r2–r4 resolution):
 - On a FAILED `mark_played`, the undo token restores the exact
   pre-curation state (the dropped entry at its position; exactly the
   tombstone keys the hide added, pre-existing ones untouched), so a
-  failed server edit leaves no local trace. Newer play activity wins: if
-  the item was re-recorded between curation and the failed restore, the
-  fresh entry and its cleared tombstones are left alone. The frontend
-  never renders the transient state — it refetches only after the invoke
-  resolves, and on error shows the error banner without refetching.
+  failed server edit leaves no lasting local trace. Newer play activity
+  wins: if the item was re-recorded between curation and the failed
+  restore, the fresh entry and its cleared tombstones are left alone.
+- **Edit serialization (r5 finding 2):** `set_watched` holds a dedicated
+  `watch_edit_lock` (the `play_lock` pattern) across curate + server call
+  + rollback, so overlapping edits cannot interleave — without it, two
+  in-flight edits on one item share tombstones (`hide` is idempotent) and
+  a first-edit rollback could strip the tombstone a second, successful
+  edit relies on and restore stale recents over it.
+- **Transient render heals (r5 finding 3):** the transient curated state
+  CAN reach the screen — an unrelated `playback-ended` refresh during a
+  slow failing edit reads the temporary tombstone. The frontend's
+  `setWatched` error path therefore re-fetches after the backend rollback
+  (alongside the error banner), repainting the restored truth instead of
+  leaving the stale render until some later refresh.
 
 - `hide()` (`recents.rs:112`) already does exactly what's needed: drop the
   recents entry (matching either identity of a merged card) and tombstone
@@ -95,9 +105,10 @@ directions — **curate-first with rollback** (r2–r4 resolution):
   scrobble/unscrobble is the server-side op; the tombstone guards the
   local UX. The explicit remove action keeps sole ownership of the server
   hub-removal call.
-- No frontend change: the optimistic mutation and `refreshWatchState`
-  refetch stand; with the recents entry gone and the tombstone written,
-  the refetch drops the card from the carousel.
+- Frontend: the optimistic mutation and success-path `refreshWatchState`
+  refetch stand (the recents entry gone + tombstone written means the
+  refetch drops the card); the ONLY frontend change is the error-path
+  re-fetch above (r5 finding 3).
 
 Resulting one-op semantics (resolves owner report 2 by design — no new
 menu entries, no wording change):
@@ -130,6 +141,16 @@ Accepted edges (called out, not blocking):
   race: the user explicitly reset/completed the item mid-play; the server
   keeps any above-threshold position from the Stopped check-in, and the
   next play re-records normally.
+- A play launched DURING an edit's server round-trip starts from the
+  curated state — position 0 (r5 finding 1). Intent-aligned, not damage:
+  the user expressed "reset"/"completed" moments earlier, so the raced
+  play starting over matches the request even if the server edit later
+  fails; on that failure the rollback restores the old stamp for FUTURE
+  plays but cannot retroactively move the one already launched, and a
+  sub-threshold final position from a play overlapping a FAILED edit can
+  be lost (`finish` no-ops once the entry was dropped). Double-rare
+  (failing server + racing play on one item), self-heals on the next
+  play.
 - Rollback micro-losses on a FAILED server edit: tombstone keys the FIFO
   cap (200) evicted during the hide are not resurrected; and an explicit
   "Remove from Continue Watching" issued on the same item DURING the
@@ -145,8 +166,10 @@ Accepted edges (called out, not blocking):
 
 ## Slice (single commit + version bump; reviewloop codex after landing)
 1. `commands.rs set_watched`: curate-first via `hide_with_undo` (both
-   directions), rollback via `restore_hidden` on a failed `mark_played`;
-   doc comment updated to the new semantic.
+   directions), rollback via `restore_hidden` on a failed `mark_played`,
+   the whole body serialized on a new `AppState.watch_edit_lock`; doc
+   comment updated to the new semantic. `+page.svelte setWatched`: error
+   path re-fetches after the backend rollback.
 2. `recents.rs`: new `hide_with_undo`/`restore_hidden` (undo-token
    curation) and `untombstone(cfg, key)` (exact-key tombstone removal),
    all unit-tested (round-trip incl. entry position and
@@ -325,3 +348,25 @@ stop defending the edge; CLOSE the race with curate-first + rollback
 slice, and accepted-edges sections were rewritten accordingly; the
 remaining documented edges are the deliberate mid-play mark semantic and
 two rollback micro-losses on failed server edits.
+
+**r5 — 2026-07-10 — verdict `reopened`, 3 findings: two ADMITTED and
+fixed, one dispositioned as intent-aligned.** Base `4365fb3`, head
+`1de098b`, `guard_confirmed:false`.
+1. A raced play during the edit's round-trip launches from position 0
+   (the curated state) and a failed edit cannot retroactively fix it; a
+   sub-threshold stamp can be lost. Disposition: intent-aligned — the
+   user just asked for a reset/completion, so the raced play starting
+   over matches the expressed intent; the failed-edit variant is
+   double-rare and self-healing. Documented as an accepted edge, not
+   guarded.
+2. Undo tokens carry no generation, so overlapping edits could
+   interleave: a first-edit rollback strips the tombstone a second,
+   successful edit shares (`hide` is idempotent) and restores stale
+   recents over it. ADMITTED and fixed: `set_watched` serializes on a
+   dedicated `watch_edit_lock` (the `play_lock` pattern) across
+   curate + call + rollback.
+3. The "frontend never renders transient curation" claim was false — a
+   `playback-ended` refresh during a slow failing edit consumes the
+   temporary tombstone, and the error path never refetched. ADMITTED and
+   fixed: `setWatched`'s catch now re-fetches after the backend rollback;
+   the design text corrected.
