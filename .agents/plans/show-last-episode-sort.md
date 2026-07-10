@@ -91,6 +91,10 @@ no-persistence non-goal)
    the library → the FIRST listing request must already carry the
    persisted SortBy (a regression sends the default SortName) and the
    select must show the choice. Red→green proven per repo rule.
+   **STATUS 2026-07-10: red→green run PENDING — the Linux VM went
+   offline mid-dispatch (owner rearranging machines for the autocrop
+   playtest). Everything else is verified; this run fires as soon as
+   the VM returns and MUST complete before the slice is called done.**
 
 ## Non-goals
 - No merged All-view support (no DTO field; per-source only, like
