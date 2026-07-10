@@ -11,8 +11,10 @@ Refresh this repo's governance from the AgentGovernanceBootstrap toolkit.
    shipped artifact set, and makes one scoped commit. It never overwrites or
    deletes an owner-modified file - those come back as FLAG lines.
 3. Report the script's reconcile summary to the owner in plain English.
-   Surface every FLAG line; do not resolve a flagged file without an
-   explicit owner decision.
+   Surface every FLAG and LINT line; do not resolve a flagged file without
+   an explicit owner decision (LINT lines are read-only hygiene findings —
+   dead path references in governance prose, closed decisions awaiting
+   archive).
 4. If the script flags `AGENTS.md` as not a toolkit instance, this repo
    needs the bootstrap/migration procedure, not a refresh: read
    `<toolkit>/procedures/bootstrap.md` and follow it.
