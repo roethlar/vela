@@ -91,10 +91,11 @@ no-persistence non-goal)
    the library → the FIRST listing request must already carry the
    persisted SortBy (a regression sends the default SortName) and the
    select must show the choice. Red→green proven per repo rule.
-   **STATUS 2026-07-10: red→green run PENDING — the Linux VM went
-   offline mid-dispatch (owner rearranging machines for the autocrop
-   playtest). Everything else is verified; this run fires as soon as
-   the VM returns and MUST complete before the slice is called done.**
+   **Red→green COMPLETE 2026-07-10 (after the VM returned): RED against
+   the slice-1-only tree at exactly the persistence discriminator
+   ("timed out waiting for the section_sorts entry in config.json" —
+   the re-sort itself passed, proving the red is persistence, not
+   plumbing); GREEN with slice 2; full suite 13/13.**
 
 ## Non-goals
 - No merged All-view support (no DTO field; per-source only, like
