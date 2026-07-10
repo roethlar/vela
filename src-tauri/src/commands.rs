@@ -28,6 +28,11 @@ const ALLOWED_SORTS: &[&str] = &[
     "titleSort:asc",
     "year:desc",
     "addedAt:desc",
+    // Show sections only (UI-gated): newest-episode recency, translated
+    // per source (Plex `episode.addedAt`, JF/Emby `DateLastContentAdded`).
+    // Not in the merged-view whitelist — no DTO field to merge-sort on
+    // (the `rating:desc` class).
+    "episodeAddedAt:desc",
     "originallyAvailableAt:desc",
     "rating:desc",
     "lastViewedAt:desc",
@@ -974,7 +979,37 @@ pub async fn get_sections(
     state: State<'_, AppState>,
 ) -> Result<Vec<SectionDto>, String> {
     let sources = state.registry.lock().await.selected(source_id.as_deref());
-    aggregate(sources, true, |s| async move { s.sections().await }).await
+    let mut sections = aggregate(sources, true, |s| async move { s.sections().await }).await?;
+    // Stamp each library's persisted sort preference (sources construct
+    // `sort: None`). Fail-closed on the value: a stale or hand-edited entry
+    // that isn't in the whitelist is ignored, not surfaced.
+    if let Ok(cfg) = config::load_config() {
+        for s in &mut sections {
+            s.sort = cfg
+                .section_sorts
+                .get(&s.key)
+                .filter(|v| ALLOWED_SORTS.contains(&v.as_str()))
+                .cloned();
+        }
+    }
+    Ok(sections)
+}
+
+/// Persist a library's sort preference (`section_sorts`); the next
+/// `get_sections` hands it back on the SectionDto and the frontend applies
+/// it when the library is opened.
+#[tauri::command]
+pub async fn set_section_sort(section_key: String, sort: String) -> Result<(), String> {
+    if !ALLOWED_SORTS.contains(&sort.as_str()) {
+        return Err("unknown sort".into());
+    }
+    if section_key.is_empty() || section_key.len() > 512 {
+        return Err("bad section key".into());
+    }
+    config::update(move |cfg| {
+        cfg.section_sorts.insert(section_key, sort);
+        Ok(())
+    })
 }
 
 #[tauri::command]

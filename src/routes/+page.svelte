@@ -31,7 +31,7 @@
     return /^https?:\/\//.test(p) ? p : convertFileSrc(p);
   }
 
-  type Section = { key: string; title: string; sectionType: string; sourceName?: string };
+  type Section = { key: string; title: string; sectionType: string; sourceName?: string; sort?: string };
   // `Item` (the listing-card DTO mirror) lives in $lib/types, shared with the
   // detail components.
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
@@ -79,10 +79,14 @@
   let searchTerm = $state(""); // the query backing the current search results view
   const PAGE = 60;
 
-  const SORTS = [
+  // `showOnly` sorts exist only for show sections (server-side semantics:
+  // Plex `episode.addedAt`, JF `DateLastContentAdded`); the select filters
+  // them out elsewhere and select() resets a leaked one on section switch.
+  const SORTS: { key: string; label: string; showOnly?: boolean }[] = [
     { key: "titleSort:asc", label: "Title (A–Z)" },
     { key: "year:desc", label: "Year (newest)" },
     { key: "addedAt:desc", label: "Recently added" },
+    { key: "episodeAddedAt:desc", label: "Last episode added", showOnly: true },
     { key: "originallyAvailableAt:desc", label: "Release date" },
     { key: "rating:desc", label: "Rating" },
     { key: "lastViewedAt:desc", label: "Recently played" },
@@ -459,6 +463,16 @@
     personView = null;
     active = section;
     activeType = null;
+    // Entering a library sets its sort deterministically: the persisted
+    // per-library preference when valid for this section's type, else the
+    // default. This also guarantees a show-only sort can never leak in from
+    // the previously viewed section (the reset discipline selectType()
+    // applies via TYPE_SORTS).
+    const saved = SORTS.find((s) => s.key === section.sort);
+    sort =
+      saved && (!saved.showOnly || section.sectionType === "show")
+        ? saved.key
+        : "titleSort:asc";
     crumbs = [{ title: section.title, ratingKey: null }];
     await resetAndLoad();
   }
@@ -573,6 +587,16 @@
   }
 
   async function changeSort() {
+    // Per-library persistence (owner ask 2026-07-10): remember the choice on
+    // the section AND in config, so reopening the library — this session or
+    // after a restart — lands on it. Best-effort: a failed write must not
+    // block the re-sort. The merged type view stays session-only.
+    if (active) {
+      active.sort = sort;
+      const section = sections.find((s) => s.key === active!.key);
+      if (section) section.sort = sort;
+      invoke("set_section_sort", { sectionKey: active.key, sort }).catch(() => {});
+    }
     await resetAndLoad();
   }
 
@@ -1329,7 +1353,11 @@
       {/each}
       {#if (active || activeType) && crumbs.length === 1}
         <select class="sort" bind:value={sort} onchange={changeSort}>
-          {#each activeType ? SORTS.filter((s) => TYPE_SORTS.has(s.key)) : SORTS as s (s.key)}
+          <!-- Merged type view: DTO-sortable keys only. Section view: hide
+               show-only sorts outside show sections. -->
+          {#each activeType
+            ? SORTS.filter((s) => TYPE_SORTS.has(s.key))
+            : SORTS.filter((s) => !s.showOnly || active?.sectionType === "show") as s (s.key)}
             <option value={s.key}>{s.label}</option>
           {/each}
         </select>

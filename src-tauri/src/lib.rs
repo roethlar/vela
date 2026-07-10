@@ -228,6 +228,7 @@ pub fn run() {
             commands::link_poll,
             commands::get_hubs,
             commands::get_sections,
+            commands::set_section_sort,
             commands::get_items,
             commands::get_type_listing,
             commands::set_merged_override,

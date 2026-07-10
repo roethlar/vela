@@ -19,6 +19,12 @@ pub struct SectionDto {
     pub section_type: String,
     pub source_id: String,
     pub source_name: String,
+    /// The library's persisted sort preference, when one was saved and is
+    /// still a valid sort key. Sources always construct this as `None`; the
+    /// command layer stamps it from config in `get_sections` — sources know
+    /// nothing of sort persistence.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sort: Option<String>,
 }
 
 /// A playable/browsable item (movie, show, season, episode), source-tagged.

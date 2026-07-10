@@ -70,6 +70,15 @@ pub struct AppConfig {
     /// still carries the item; replaying an item clears its tombstone.
     #[serde(default)]
     pub hidden_from_continue: Vec<String>,
+    /// Per-library sort preference (owner ask 2026-07-10, "sort should stick
+    /// per library"): source-namespaced section key → Vela sort key. Written
+    /// on every sort change in a section view; stamped onto SectionDto when
+    /// sections are listed. Values are re-validated against the sort
+    /// whitelist on read (fail-closed to the default), so a stale or
+    /// hand-edited entry degrades instead of erroring. Entries for removed
+    /// sections linger harmlessly (bounded by how many libraries existed).
+    #[serde(default)]
+    pub section_sorts: std::collections::BTreeMap<String, String>,
 }
 
 /// A configured SMB share. INERT: kept only so old configs round-trip
@@ -293,6 +302,25 @@ pub fn save_config(cfg: &AppConfig) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Per-library sort preferences: absent in old configs (defaults empty),
+    // round-trips entries, unknown keys are the reader's problem (get_sections
+    // fail-closes against the sort whitelist — this layer just persists).
+    #[test]
+    fn section_sorts_default_empty_and_round_trip() {
+        let old: AppConfig = serde_json::from_str(r#"{"auth_token":"tok"}"#).expect("parses");
+        assert!(old.section_sorts.is_empty(), "missing field defaults empty");
+
+        let mut cfg = AppConfig::default();
+        cfg.section_sorts
+            .insert("plex-1:6".into(), "episodeAddedAt:desc".into());
+        let saved = serde_json::to_string(&cfg).expect("serializes");
+        let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
+        assert_eq!(
+            back.section_sorts.get("plex-1:6").map(String::as_str),
+            Some("episodeAddedAt:desc")
+        );
+    }
 
     // Rollback rail for the 2026-07-08 local-source removal: every inert
     // local-family field — including the legacy pre-migration SmbMount shape

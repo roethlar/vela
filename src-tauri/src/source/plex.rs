@@ -305,6 +305,7 @@ impl MediaSource for PlexSource {
                 section_type: s.section_type,
                 source_id: self.id.clone(),
                 source_name: self.name.clone(),
+                sort: None, // stamped from config by get_sections
             })
             .collect())
     }
@@ -373,7 +374,7 @@ impl MediaSource for PlexSource {
     ) -> Result<Vec<ItemDto>, String> {
         validate_plex_id("section key", section_key)?;
         let lib = self.ensure_ready().await?;
-        let sort_ref = sort.or(Some("titleSort:asc"));
+        let sort_ref = Some(plex_sort_key(sort.unwrap_or("titleSort:asc")));
         let fetch = |lib: PlexLibrary| async move {
             if section_type == "movie" {
                 lib.get_section_content_with_type_alpha_sorted(
@@ -646,6 +647,17 @@ impl MediaSource for PlexSource {
     }
 }
 
+/// Vela's sort keys are Plex-native EXCEPT the leaf-added recency sort: Plex
+/// exposes it on show sections as `episode.addedAt` (the key behind Plex
+/// Web's "Last Episode Date Added"). Translate at this one boundary; every
+/// other key passes through verbatim.
+fn plex_sort_key(sort: &str) -> &str {
+    match sort {
+        "episodeAddedAt:desc" => "episode.addedAt:desc",
+        other => other,
+    }
+}
+
 /// Extract the underlying part URLs from an mpv concat EDL (`edl://%N%url;...`),
 /// using each `%len%` quote to slice exactly (URLs may contain `;`/`&`/`?`).
 fn edl_part_urls(edl: &str) -> Vec<String> {
@@ -686,6 +698,26 @@ fn validate_plex_id(name: &str, value: &str) -> Result<(), String> {
 mod tests {
     use super::*;
     use crate::plex_library::{PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag};
+
+    #[test]
+    fn plex_sort_key_translates_only_the_leaf_added_sort() {
+        assert_eq!(
+            plex_sort_key("episodeAddedAt:desc"),
+            "episode.addedAt:desc",
+            "the one Vela key that isn't Plex-native must translate"
+        );
+        // Every other allowed key is Plex-native and passes through verbatim.
+        for key in [
+            "titleSort:asc",
+            "year:desc",
+            "addedAt:desc",
+            "originallyAvailableAt:desc",
+            "rating:desc",
+            "lastViewedAt:desc",
+        ] {
+            assert_eq!(plex_sort_key(key), key, "{key} must pass through");
+        }
+    }
 
     #[test]
     fn hdr_range_detection() {

@@ -597,6 +597,11 @@ fn map_sort(sort: Option<&str>) -> (String, String) {
     let by = match field {
         "year" => "ProductionYear,PremiereDate",
         "addedAt" => "DateCreated",
+        // Leaf-added recency for series ("Last episode added"): the server-
+        // side sort by newest content inside the container. Emby is assumed
+        // to accept the same name (shared client code); a server that
+        // ignores it returns its default order — degraded, not broken.
+        "episodeAddedAt" => "DateLastContentAdded",
         "originallyAvailableAt" => "PremiereDate",
         "rating" => "CommunityRating",
         "lastViewedAt" => "DatePlayed",
@@ -781,6 +786,7 @@ impl MediaSource for JellyfinSource {
                     section_type: section_type.to_string(),
                     source_id: self.id.clone(),
                     source_name: self.name.clone(),
+                    sort: None, // stamped from config by get_sections
                 })
             })
             .collect())
@@ -970,6 +976,16 @@ impl MediaSource for JellyfinSource {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn map_sort_maps_leaf_added_to_date_last_content_added() {
+        let (by, order) = map_sort(Some("episodeAddedAt:desc"));
+        assert_eq!(by, "DateLastContentAdded");
+        assert_eq!(order, "Descending");
+        // The series-level date-added sort stays distinct from the leaf one.
+        let (by, _) = map_sort(Some("addedAt:desc"));
+        assert_eq!(by, "DateCreated");
+    }
 
     fn media_source(
         id: &str,
