@@ -53,24 +53,27 @@ Per direction:
 
 ## Design: watched-state changes curate Continue Watching in the same op
 
-One thin backend change. In `set_watched` (`commands.rs:2043`), after a
-successful `mark_played`, replace the `played=true`-only
-`recents::unrecord` with an **unconditional `recents::hide`** (both
-directions), discarding the returned server key.
+One thin backend change. In `set_watched` (`commands.rs:2043`), replace
+the `played=true`-only `recents::unrecord` with curation in BOTH
+directions — **curate-first with rollback** (r2–r4 resolution):
 
-**Edit-vs-play race — deliberately left unguarded (r2/r3 resolution):**
-`mark_played` is awaited before curation, so a play of the same item can
-start inside that network window and be curated away when the response
-lands (r2 finding 1). The window is one server round-trip, the damage is
-cosmetic (item absent from Continue Watching), and the next play
-self-heals it (`untombstone`/`record`). An r2 amendment guarded this with
-an open-entry check (`ended_at_ms == 0` ⇒ skip), but r3 showed the guard
-is worse than the race: a kill/crash mid-playback leaves a permanently
-"open" entry (`finish` never runs — `lib.rs` shutdown kills without
-waiting), and the guard would then skip curation for that item forever —
-a persistent recurrence of the exact masking bug this plan fixes, versus
-a sub-second race whose damage heals on the next play. The guard was
-removed; the race is the documented accepted edge below.
+- Curation (`recents::hide_with_undo`) runs BEFORE the awaited
+  `mark_played`. The race the earlier drafts wrestled with — a play of
+  the same item recorded during the server round-trip (up to ~15s client
+  timeout, doubled by Plex's rediscover+retry) being dropped by the
+  delayed curation, losing the sub-threshold resume position only Vela's
+  stamp holds — has no window at all once curation is synchronous with
+  the command's start. (r2's open-entry liveness guard was the wrong
+  cure: r3 showed crash-stale "open" entries would skip curation forever,
+  persistently reproducing the masking bug. Removed.)
+- On a FAILED `mark_played`, the undo token restores the exact
+  pre-curation state (the dropped entry at its position; exactly the
+  tombstone keys the hide added, pre-existing ones untouched), so a
+  failed server edit leaves no local trace. Newer play activity wins: if
+  the item was re-recorded between curation and the failed restore, the
+  fresh entry and its cleared tombstones are left alone. The frontend
+  never renders the transient state — it refetches only after the invoke
+  resolves, and on error shows the error banner without refetching.
 
 - `hide()` (`recents.rs:112`) already does exactly what's needed: drop the
   recents entry (matching either identity of a merged card) and tombstone
@@ -121,26 +124,35 @@ Accepted edges (called out, not blocking):
   watch-key tombstone isn't cleared by a queue play of the play key. Rare
   (requires a merged title marked watched/unwatched, then queue-played);
   self-heals on any direct play (`record` clears the full identity set).
-- Edit-vs-play race (r2 finding 1, r3 findings 1–2 resolution): a play of
-  the same item that starts — or starts AND ends — inside `mark_played`'s
-  network window can be curated away when the delayed response lands,
-  leaving it out of Continue Watching until the next play clears the
-  tombstone. Accepted: the window is one server round-trip, reaching it
-  requires racing UI actions on the same item, the damage is cosmetic and
-  self-healing, and the attempted liveness guard (r2) provably created a
-  worse, persistent failure (crash-stale open entries skip curation
-  forever — r3 finding 2).
+- Marking the CURRENTLY-PLAYING item watched/unwatched (deliberate,
+  mid-session) curates its live entry: at quit, `finish` finds no entry
+  and the session's final position isn't stamped locally. Semantic, not a
+  race: the user explicitly reset/completed the item mid-play; the server
+  keeps any above-threshold position from the Stopped check-in, and the
+  next play re-records normally.
+- Rollback micro-losses on a FAILED server edit: tombstone keys the FIFO
+  cap (200) evicted during the hide are not resurrected; and an explicit
+  "Remove from Continue Watching" issued on the same item DURING the
+  failing edit's round-trip is undone by the rollback (the remove's own
+  hide adds no new tombstones — they are already present from the edit —
+  so the restore strips them and re-inserts the entry). Two conflicting
+  user actions on one item inside one failed server call, surfaced by the
+  edit's error banner; re-removing recovers. Accepted.
 - Related gap observed while reviewing, NOT in this plan's scope: queue
   plays and auto-advance never enter Vela's recents at all, so a
   queue-interrupted session doesn't surface in Continue Watching. Queued
   in `.agents/state.md ## Next` for a separate owner decision.
 
 ## Slice (single commit + version bump; reviewloop codex after landing)
-1. `commands.rs set_watched`: unconditional `hide`, doc comment updated to
-   the new semantic.
-2. `recents.rs`: new `untombstone(cfg, key)` (exact-key tombstone
-   removal), unit-tested; `commands.rs play_by_key`: call it best-effort
-   after a successful mpv spawn (covers queue plays and auto-advance).
+1. `commands.rs set_watched`: curate-first via `hide_with_undo` (both
+   directions), rollback via `restore_hidden` on a failed `mark_played`;
+   doc comment updated to the new semantic.
+2. `recents.rs`: new `hide_with_undo`/`restore_hidden` (undo-token
+   curation) and `untombstone(cfg, key)` (exact-key tombstone removal),
+   all unit-tested (round-trip incl. entry position and
+   only-added-tombstones; newer-play-wins restore; exact-key clear);
+   `commands.rs play_by_key`: call `untombstone` best-effort after a
+   successful mpv spawn (covers queue plays and auto-advance).
 3. Mock fidelity (plan-review r1, finding 2): `mockjf.mjs` PlayedItems
    POST/DELETE also reset `positionTicks` to 0, matching real servers
    (**VERIFIED 2026-07-10** against jellyfin/jellyfin master:
@@ -298,3 +310,18 @@ Base `4365fb3`, head `c71fd2e`, `guard_confirmed:false`.
    section said guarded — a real internal contradiction (the coder had
    amended one section and not the other). Fixed; with the r2 guard
    removed both sections now genuinely agree on unconditional `hide`.
+
+**r4 — 2026-07-10 — verdict `reopened`, 1 finding, ADMITTED (it refuted
+the accepted-edge justification with correct numbers).** Base `4365fb3`,
+head `f94ce8b`, `guard_confirmed:false`. The r3 resolution called the
+edit-vs-play window "sub-second" and the damage "cosmetic"; in fact the
+mark request runs on ~15s-timeout clients (`jellyfin.rs`,
+`plex_library.rs`) with a Plex rediscover+retry doubling it, Play stays
+enabled during the await, and a short raced play's sub-threshold resume
+position — which ONLY Vela's stamp holds (the 2026-07-04 hero decision) —
+is permanently lost when the delayed curation drops its entry. Resolution:
+stop defending the edge; CLOSE the race with curate-first + rollback
+(`hide_with_undo`/`restore_hidden`, newer-play-wins restore). The design,
+slice, and accepted-edges sections were rewritten accordingly; the
+remaining documented edges are the deliberate mid-play mark semantic and
+two rollback micro-losses on failed server edits.
