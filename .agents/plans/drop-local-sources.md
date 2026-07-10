@@ -148,10 +148,10 @@ decision); any Trakt integration (rejected).
    + 2026-07-04 SMB-native close as "code removed").
 
 ## Open decisions for owner
-- Slice 2 (E2E) timing: port E2E in the same push (needs a Linux session)
-  or accept a temporarily red/thinner e2e suite? Recommendation: slice 1
-  lands now; slice 2 immediately next from the Linux host, before any
-  further feature work.
+- Slice 2 (E2E) timing — **RESOLVED 2026-07-09**: slice 1 landed 2026-07-08
+  with the e2e suite accepted temporarily broken; slice 2 is in progress
+  from the owner's Linux VM (slices 2/3 reordered — see Status). No owner
+  decision remains here.
 - Nothing else — config tolerance and recents filtering above are the
   recommended defaults unless overridden.
 

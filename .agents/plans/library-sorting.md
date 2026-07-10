@@ -4,9 +4,11 @@
 **LANDED 2026-07-06.** All slices landed (`c368270`, `9a47d43`, `21552c9`) +
 `reviewloop codex` converged r1-r3 (r1 3 findings, r2 1 finding, r3 accepted;
 fixups `c904c66`, `19b2735`; trail `.agents/review/index.md` loop `sort-1`).
-Folder dropped; JF/local last-played population deferred. Effective set delivered:
-date added, date last played, title, release date — per-source AND merged views.
-REMAINING: owner playtest.
+Folder dropped; JF/local last-played population deferred (2026-07-09: the
+LOCAL half of that deferral is DEAD — local sources removed, decision
+`.agents/decisions.md` 2026-07-08; only the JF population remains deferred).
+Effective set delivered: date added, date last played, title, release date —
+per-source AND merged views. REMAINING: owner playtest.
 
 ## Goal
 Sort options available in **all** library views: **date added, date last played,
@@ -82,6 +84,8 @@ inconsistent across views/backends.
    the merged view ranking JF items correctly; JF per-source sorts server-side today.
    Local last-played is likewise unpopulated (recents aren't merged into library
    items) — a follow-up if the owner wants local last-played sorting.
+   (2026-07-09: the local follow-up is DEAD — local sources removed; the JF
+   half is the only live deferral.)
 
 ## Proportionality / "is this worth it?"
 - **Cheapest high-value chunk = slices 1-2** (local honors sorts + date-added

@@ -1,5 +1,15 @@
 # Plan: Library nav + "All" view rework (consolidated, deduped, cross-source)
 
+> **PARTIALLY OBSOLETE 2026-07-09:** the SMB/local halves of this plan —
+> the listing-cache performance prerequisite (phase A), every SMB/local
+> playtest obligation, and the SMB-labeling dependency — died with the
+> local/SMB/SSH source removal (decision `.agents/decisions.md`
+> 2026-07-08; the listing cache itself was deleted in slice 1). The
+> consolidated/deduped merged-view machinery this plan built SURVIVES for
+> server↔server overlap (it becomes live again at Plex→JF/Emby migration
+> time) and its design record stays authoritative. The open points below
+> were settled by implementation 2026-07-04; none remain live.
+
 Status: APPROVED 2026-07-04 (owner), with each plan's "proposed" defaults adopted. Covers the `ISSUES.md`
 owner-direction entry (2026-07-04): the "All" view must become a consolidated
 listing by content type — one entry per title backed by every source that

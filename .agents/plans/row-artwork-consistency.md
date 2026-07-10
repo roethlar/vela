@@ -124,6 +124,8 @@ they typically run long enough to enter the server hub anyway.
    server-backend-only at first. (Implemented 2026-07-04 as
    server-backend-only; local episodic entries fall back to their episode
    still / `.noart` in portrait boxes. Local series art remains a follow-up.)
+   (2026-07-09: the local series-art follow-up is DEAD — local sources
+   removed, decision `.agents/decisions.md` 2026-07-08.)
 3. Whether "Recently Added TV" should list shows/seasons instead of episodes
    (the reference shows series-level entries) — product call, separate from
    this plan's mechanics.

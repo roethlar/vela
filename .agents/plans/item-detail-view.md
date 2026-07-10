@@ -6,8 +6,10 @@ handoff's `next = Plex item detail view (awaiting go)`), and the repo-convention
 **codex plan-review loop CLOSED accepted at r3** (base=head `410fa4e`; three rounds,
 six findings idv-1..6 all resolved — see Review log). Implementing slices 1-5, each
 its own commit + `reviewloop codex` + version bump; nav stays old until the slice-5
-flip ("no half-built state"). One non-blocking owner open-decision remains (merged-
-show episode playback source, idv-5 — default set, needed only by slice 4/5).
+flip ("no half-built state"). One non-blocking owner open-decision remained
+(merged-show episode playback source, idv-5 — default set; CLOSED 2026-07-09:
+its local alternative died with the local sources, so the server-preferred
+default is final — no owner choice remains).
 Original framing: owner asked whether Plex exposes more metadata than we surface
 (yes — substantially) and to plan a detail view like Infuse / the Plex clients.
 **AMENDED 2026-07-08 (owner, Plex-first)** — see "Owner amendment 2026-07-08"

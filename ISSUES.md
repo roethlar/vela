@@ -72,7 +72,8 @@ unchecked for these):
   split policy: Continue Watching renders as the hero carousel (overlay
   arrows, backdrops for movies), On Deck as a uniform 16:9 row, catalog rows
   as uniform 2:3 with series posters for episodes (new seriesPoster/backdrop
-  fields from Plex and Jellyfin/Emby; local series art deferred).
+  fields from Plex and Jellyfin/Emby; local series art deferred — that
+  deferral died 2026-07-08 with the local-source removal).
   Unit-tested (guard-proven); owner playtest pending.
 
 - Hero carousel reads as static/broken (reported 2026-07-04, v0.1.7: ignored
