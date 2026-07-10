@@ -83,6 +83,11 @@ export type Detail = {
   parentIndex?: number;
   grandparentTitle?: string;
   parentTitle?: string;
+  // Episode parent keys (source-namespaced) when the backend reports them —
+  // they let an episode opened without season context upgrade to its shared
+  // season page.
+  parentRatingKey?: string;
+  grandparentRatingKey?: string;
   played?: boolean | null;
   viewOffsetMs?: number;
   media?: MediaVersion[];

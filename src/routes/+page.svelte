@@ -6,7 +6,7 @@
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
-  import { detailKeyOf, type Item } from "$lib/types";
+  import { detailKeyOf, type Detail, type Item } from "$lib/types";
 
   // Poster URLs that 404'd; fall back to the title placeholder for these.
   let failedPosters = $state(new Set<string>());
@@ -907,12 +907,28 @@
     if (item.mediaType === "season") {
       detailView = { kind: "season", seasonKey: detailKeyOf(item), seed: item };
     } else if (item.mediaType === "episode") {
-      detailView = {
+      const view: DetailView = {
         kind: "season",
         seasonKey: seasonKeyFor(item),
         seed: item,
         initialSelKey: item.ratingKey,
       };
+      detailView = view;
+      if (!view.seasonKey) {
+        // A key-less episode (e.g. a hero recents snapshot from before
+        // parent keys existed, kept stale by re-records) opens degraded;
+        // the detail response carries the season key, so upgrade to the
+        // full shared page when it arrives — unless the user navigated on.
+        invoke<Detail>("get_item_detail", { ratingKey: detailKeyOf(item) })
+          .then((d) => {
+            if (detailView === view && d.parentRatingKey) {
+              detailView = { ...view, seasonKey: d.parentRatingKey };
+            }
+          })
+          .catch(() => {
+            /* deferred/sparse backends: the degraded page stands */
+          });
+      }
     } else {
       detailView = { kind: "item", item };
     }

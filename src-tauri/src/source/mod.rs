@@ -145,6 +145,13 @@ pub struct DetailDto {
     pub parent_index: Option<u32>,
     pub grandparent_title: Option<String>,
     pub parent_title: Option<String>,
+    /// Episode parent keys (source-namespaced) when the backend reports them —
+    /// they let an episode opened without season context (e.g. a stale hero
+    /// recents snapshot) upgrade to its shared season page.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_rating_key: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub grandparent_rating_key: Option<String>,
     /// Watch state, when the source reports it — lets the info page show progress
     /// and choose Resume vs Play. `None` = unknown (e.g. a local file).
     pub played: Option<bool>,

@@ -257,6 +257,10 @@ pub struct PlexDetail {
     pub grandparent_title: Option<String>,
     #[serde(rename = "parentTitle")]
     pub parent_title: Option<String>,
+    #[serde(rename = "parentRatingKey")]
+    pub parent_rating_key: Option<String>,
+    #[serde(rename = "grandparentRatingKey")]
+    pub grandparent_rating_key: Option<String>,
     #[serde(rename = "Genre", default)]
     pub genres: Vec<PlexTag>,
     #[serde(rename = "Director", default)]

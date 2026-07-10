@@ -244,6 +244,14 @@ impl PlexSource {
             parent_index: d.parent_index,
             grandparent_title: d.grandparent_title,
             parent_title: d.parent_title,
+            parent_rating_key: d
+                .parent_rating_key
+                .as_deref()
+                .map(|k| namespace_key(&self.id, k)),
+            grandparent_rating_key: d
+                .grandparent_rating_key
+                .as_deref()
+                .map(|k| namespace_key(&self.id, k)),
             source_id: self.id.clone(),
         }
     }
@@ -768,6 +776,8 @@ mod tests {
                 ..Default::default()
             }],
             thumb: Some("/library/metadata/42/thumb/1".into()),
+            parent_rating_key: Some("150".into()),
+            grandparent_rating_key: Some("100".into()),
             ..Default::default()
         };
 
@@ -791,6 +801,11 @@ mod tests {
         assert_eq!(dto.writers[0].person_key.as_deref(), Some("plexA:789"));
         assert_eq!(dto.poster, None); // no server -> no URL
         assert_eq!(dto.played, Some(false)); // viewCount 0
+        // Episode parent keys are namespaced like every other key — they let
+        // an episode opened without season context (stale hero snapshot)
+        // upgrade to its shared season page.
+        assert_eq!(dto.parent_rating_key.as_deref(), Some("plexA:150"));
+        assert_eq!(dto.grandparent_rating_key.as_deref(), Some("plexA:100"));
         assert_eq!(dto.media.len(), 1);
         assert!(dto.media[0].hdr); // Dolby Vision
         assert_eq!(dto.media[0].video_resolution.as_deref(), Some("1080"));
