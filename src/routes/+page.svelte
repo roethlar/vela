@@ -757,6 +757,14 @@
     }
   }
 
+  // The menu's Play entry must take `mi` as an argument BEFORE closing the
+  // menu: `mi` is a template {@const} over `menu.item`, so an inline
+  // `closeMenu(); play(mi)` nulls `menu` first and the `mi` read throws.
+  function playFromCtx(item: Item) {
+    closeMenu();
+    play(item);
+  }
+
   async function playNext(item: Item) {
     closeMenu();
     try {
@@ -1344,7 +1352,7 @@
   {@const inProgress = (mi.viewOffsetMs ?? 0) > 0}
   {@const fullyWatched = mi.played === true && !inProgress}
   <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px;" role="menu">
-    <button role="menuitem" onclick={() => { closeMenu(); play(mi); }}>Play</button>
+    <button role="menuitem" onclick={() => playFromCtx(mi)}>Play</button>
     {#if mi.mediaType !== "show"}
       <!-- The info path for the Continue Watching flow, where click plays;
            shows get no entry — their info surface is the seasons drill. -->
