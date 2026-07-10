@@ -907,22 +907,26 @@
     if (item.mediaType === "season") {
       detailView = { kind: "season", seasonKey: detailKeyOf(item), seed: item };
     } else if (item.mediaType === "episode") {
-      const view: DetailView = {
+      const seasonKey = seasonKeyFor(item);
+      detailView = {
         kind: "season",
-        seasonKey: seasonKeyFor(item),
+        seasonKey,
         seed: item,
         initialSelKey: item.ratingKey,
       };
-      detailView = view;
-      if (!view.seasonKey) {
+      if (!seasonKey) {
         // A key-less episode (e.g. a hero recents snapshot from before
         // parent keys existed, kept stale by re-records) opens degraded;
         // the detail response carries the season key, so upgrade to the
         // full shared page when it arrives — unless the user navigated on.
+        // Identity-compare against the $state PROXY read back after the
+        // assignment: comparing against the raw pre-assignment object is
+        // always false (deep $state proxies) and the upgrade never runs.
+        const opened = detailView;
         invoke<Detail>("get_item_detail", { ratingKey: detailKeyOf(item) })
           .then((d) => {
-            if (detailView === view && d.parentRatingKey) {
-              detailView = { ...view, seasonKey: d.parentRatingKey };
+            if (detailView === opened && detailView.kind === "season" && d.parentRatingKey) {
+              detailView = { ...detailView, seasonKey: d.parentRatingKey };
             }
           })
           .catch(() => {
