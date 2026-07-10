@@ -55,16 +55,22 @@ Per direction:
 
 One thin backend change. In `set_watched` (`commands.rs:2043`), after a
 successful `mark_played`, replace the `played=true`-only
-`recents::unrecord` with **`recents::hide_unless_playing`** (both
-directions) — `hide` semantics, guarded so a LIVE session wins
-(plan-review r2, finding 1): `mark_played` is awaited before curation, so
-a play can start inside that network window (grid replay, queue
-auto-advance) and record a fresh OPEN recents entry (`ended_at_ms == 0`);
-an unguarded hide would drop and tombstone that active session, leaving
-the just-played item missing from Continue Watching after quit. If the
-key's entry is open, the edit skips curation entirely — the session
-re-stamps at quit and newer play activity is the newer intent (matches
-server-side behavior, where fresh progress re-enters the hub):
+`recents::unrecord` with an **unconditional `recents::hide`** (both
+directions), discarding the returned server key.
+
+**Edit-vs-play race — deliberately left unguarded (r2/r3 resolution):**
+`mark_played` is awaited before curation, so a play of the same item can
+start inside that network window and be curated away when the response
+lands (r2 finding 1). The window is one server round-trip, the damage is
+cosmetic (item absent from Continue Watching), and the next play
+self-heals it (`untombstone`/`record`). An r2 amendment guarded this with
+an open-entry check (`ended_at_ms == 0` ⇒ skip), but r3 showed the guard
+is worse than the race: a kill/crash mid-playback leaves a permanently
+"open" entry (`finish` never runs — `lib.rs` shutdown kills without
+waiting), and the guard would then skip curation for that item forever —
+a persistent recurrence of the exact masking bug this plan fixes, versus
+a sub-second race whose damage heals on the next play. The guard was
+removed; the race is the documented accepted edge below.
 
 - `hide()` (`recents.rs:112`) already does exactly what's needed: drop the
   recents entry (matching either identity of a merged card) and tombstone
@@ -115,12 +121,15 @@ Accepted edges (called out, not blocking):
   watch-key tombstone isn't cleared by a queue play of the play key. Rare
   (requires a merged title marked watched/unwatched, then queue-played);
   self-heals on any direct play (`record` clears the full identity set).
-- The `hide_unless_playing` guard closes the edit-vs-play race only where
-  an open recents entry exists. Two slivers remain: a direct play between
-  mpv spawn and its `record_recent` landing, and a queue/auto-advance play
-  (which records no entry at all — the separately queued gap) can still be
-  tombstoned by an in-flight edit. Both self-heal on the next play
-  (`record`/`untombstone`); accepted.
+- Edit-vs-play race (r2 finding 1, r3 findings 1–2 resolution): a play of
+  the same item that starts — or starts AND ends — inside `mark_played`'s
+  network window can be curated away when the delayed response lands,
+  leaving it out of Continue Watching until the next play clears the
+  tombstone. Accepted: the window is one server round-trip, reaching it
+  requires racing UI actions on the same item, the damage is cosmetic and
+  self-healing, and the attempted liveness guard (r2) provably created a
+  worse, persistent failure (crash-stale open entries skip curation
+  forever — r3 finding 2).
 - Related gap observed while reviewing, NOT in this plan's scope: queue
   plays and auto-advance never enter Vela's recents at all, so a
   queue-interrupted session doesn't surface in Continue Watching. Queued
@@ -129,9 +138,8 @@ Accepted edges (called out, not blocking):
 ## Slice (single commit + version bump; reviewloop codex after landing)
 1. `commands.rs set_watched`: unconditional `hide`, doc comment updated to
    the new semantic.
-2. `recents.rs`: new `hide_unless_playing(cfg, key)` (open-session-guarded
-   hide) and `untombstone(cfg, key)` (exact-key tombstone removal), both
-   unit-tested; `commands.rs play_by_key`: call `untombstone` best-effort
+2. `recents.rs`: new `untombstone(cfg, key)` (exact-key tombstone
+   removal), unit-tested; `commands.rs play_by_key`: call it best-effort
    after a successful mpv spawn (covers queue plays and auto-advance).
 3. Mock fidelity (plan-review r1, finding 2): `mockjf.mjs` PlayedItems
    POST/DELETE also reset `positionTicks` to 0, matching real servers
@@ -266,3 +274,27 @@ and isolated its evidence to the pinned SHA.)
    card NEVER appears, replacing the single immediate check. (The
    implementation had this hardening from coder self-review before the r2
    verdict arrived; the plan text now matches it.)
+
+**r3 — 2026-07-10 — verdict `reopened`, 3 findings: two exposed the r2
+amendment as an overshoot (removed), one text contradiction (fixed).**
+Base `4365fb3`, head `c71fd2e`, `guard_confirmed:false`.
+1. The open-entry guard misses a play that starts AND ends inside the
+   `mark_played` window (`finish` stamps `ended_at_ms > 0`, so the
+   delayed curation still drops it). Disposition: the full-session-
+   inside-one-round-trip case is not reachable by a human and its damage
+   self-heals on the next play — folded into the documented accepted
+   edge rather than guarded.
+2. **The strongest finding of the loop:** `ended_at_ms == 0` does not
+   prove liveness — a kill/crash mid-playback leaves a permanently
+   "open" entry, and the r2 guard would then skip curation for that item
+   on every future watched-state edit: a persistent recurrence of the
+   exact masking bug this plan exists to fix. ADMITTED; resolution:
+   REMOVE the r2 guard (back to unconditional `hide`) and document the
+   original race as an accepted edge — its worst case (rare, cosmetic,
+   self-healing) is strictly smaller than the guard's (uncommon but
+   persistent). Same loop shape as person-browse r2: the reviewer
+   correcting the coder's previous-round fix.
+3. The Slice section still said "unconditional `hide`" while the design
+   section said guarded — a real internal contradiction (the coder had
+   amended one section and not the other). Fixed; with the r2 guard
+   removed both sections now genuinely agree on unconditional `hide`.
