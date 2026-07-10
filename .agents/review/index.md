@@ -25,6 +25,16 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop br OPEN 2026-07-09 (owner-invoked `playbook reviewloop codex`): batch
+pass over the unpushed range `a39be7f..2f33185` (19 commits) returned 3
+candidates, **3 admitted, 0 declined** (br-1..br-3 — see
+`.agents/review/findings/`). All three are review-hardening/tooling, not
+app defects: two dls-s2 guard-strength gaps (resume's recents-fallback
+assertion satisfiable by the server offset; the mock search branch missing
+the eh-12 contract discipline) and the bump.sh/package-lock version drift.
+Per-finding fixes land one commit each (no-branches adaptation); e2e
+red/green legs need the Linux VM powered on.
+
 Loop idv-s6 CLOSED 2026-07-09: **accepted at r2** (codex read-only,
 `guard_confirmed:true` both rounds). Scope was the **owner-playtest polish
 round: hero episode Info routing** (base `c2ab703`, head `18c5bcd`;
@@ -504,6 +514,9 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
+| br-1 | MEDIUM | Resume scenario green off the server offset — recents-fallback regressions invisible | `[~]` | |
+| br-2 | MEDIUM | Mock search ignores IncludeItemTypes/Recursive — search-contract regressions pass | `[~]` | |
+| br-3 | LOW | bump.sh leaves package-lock version stale; npm install dirties fresh checkouts | `[~]` | |
 | cw-1 | MEDIUM | Merged items (local front, server watch key) survive mark-watched/remove in the hero | `[x]` | `5ce26db` |
 | cw-2 | LOW | Registry lock held across Plex removal await stalls unrelated UI up to 15s | `[x]` | `07167f1` |
 | cw-3 | LOW | Failed play clears a removal tombstone; item wrongly returns to hero | `[x]` | `f767ae4` |
