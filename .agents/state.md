@@ -29,18 +29,18 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   after `closeMenu()`; fixed `80dd8e6`, guard = queue/curation scenarios
   red→green). **THE DLS PLAN IS COMPLETE.** Owner spot-check ask for the
   next build: right-click → Play on a library card now works (0.1.40).
-- **ITEM-DETAIL TRACK: owner-verified through 0.1.36; two 2026-07-09
-  polish fixes AWAIT PLAYTEST on 0.1.41** — nav flip (`74ff385`), episode
-  navigation polish (`f1e36d3`+`cc9f060`), detail crumb trail (`496218e`);
-  NEW: context-menu Play un-broken (`80dd8e6`, found by the re-homed E2E —
-  owner-verified working 2026-07-09) and hero episode Info now upgrades to
-  the season page (`d7b938f`+`18c5bcd`, loop `idv-s6` accepted r2 — the
-  owner-reported degraded-page defect; playtest pending). Loops
+- **ITEM-DETAIL TRACK: COMPLETE and owner-verified through 0.1.41
+  (2026-07-10)** — nav flip (`74ff385`), episode navigation polish
+  (`f1e36d3`+`cc9f060`), detail crumb trail (`496218e`), context-menu Play
+  un-broken (`80dd8e6`, owner-verified 2026-07-09), hero episode Info →
+  season page (`d7b938f`+`18c5bcd`, loop `idv-s6` accepted r2;
+  owner-verified 2026-07-10 "info goes to series view"). Loops
   idv-s3/s4/s5/s6 in `.agents/review/index.md`; older history rotated to
-  the archive and `.agents/plans/item-detail-view.md`. JF/Emby
-  `item_detail` stays deferred on an explicit owner go. No automated
-  frontend guard for these flows (no JS runner; the mock E2E servers carry
-  no episodes) — owner playtests are the behavioral check.
+  the archive and `.agents/plans/item-detail-view.md`. No open defect;
+  further Plex polish only on the next owner report. JF/Emby `item_detail`
+  stays deferred on an explicit owner go. No automated frontend guard for
+  these flows (no JS runner; the mock E2E servers carry no episodes) —
+  owner playtests are the behavioral check.
 - **PERSON BROWSE (clickable actor/director/writer → filtered grid):
   COMPLETE — owner playtest VERIFIED 2026-07-09 ("works well") on 0.1.39.**
   Plan `.agents/plans/person-browse.md`; slice 1 backend `35fcc67` (loop
@@ -76,10 +76,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- Owner playtest ask on 0.1.41: hero episode Info — right-click a series
-  episode in the Continue Watching carousel → Info should open the shared
-  season page (episode selected), not a bare single-episode page. (The
-  0.1.40 context-menu Play fix is already owner-verified.)
+- No pending playtest ask from the 2026-07-09/10 work — both fixes
+  (context-menu Play, hero episode Info) are owner-verified on 0.1.40/41.
 - **machine-local (mac host `/Users/michael/Dev/vela`):** the owner's Linux
   VM at `michael@192.168.64.5` is the standing E2E venue (Ubuntu 25.10
   aarch64, 12 CPU; fully provisioned 2026-07-09: rustup, tauri-driver,
