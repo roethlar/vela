@@ -29,6 +29,11 @@ export default {
         runTimeTicks: 100_000_000, // 10s, matching the real clip
         mediaFile: path.join(mediaDir, 'stream.mp4'),
       }],
+      // Above the whole clip: the server NEVER stores a resume point (like
+      // a real sub-threshold play), so Vela's recents stamp is the only
+      // store and the resume assertion guards the source-agnostic fallback
+      // — a server-offset pass-through would mask its regression (br-1).
+      minResumeTicks: 200_000_000,
     });
     seedConfig(configRoot, [mockSource(mock)]);
   },

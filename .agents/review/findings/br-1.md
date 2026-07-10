@@ -37,10 +37,19 @@ original guard.
   comment states the guard
 
 ## Guard proof
-Red/green on the Linux VM: with the fix in place, temporarily strip
-`viewOffsetMs` from hero recents copies (app-side hack) → resume must FAIL;
-restore → PASS. (Old scenario shape stays green under the same hack — the
-weakening this closes.)
+Run on the Linux VM 2026-07-09/10. The fallback under guard turned out to be
+the BACKEND's: `commands.rs:2199` — when the source resolves `resume_ms == 0`,
+`play_item` falls back to `recents::resume_stamp_ms`. (A first hack nulling
+`view_offset_ms` in `recents::list()` left resume GREEN — the UI copy's
+offset is not the resume driver; recorded here so nobody re-tries that layer.)
+- RED: sever the backend fallback (`resume_stamp_ms` call → 0), rebuild →
+  new-shape resume FAILS: "resume must start at the stamped 7500ms, got
+  0.125s".
+- VACUOUS-PASS: same severed build, OLD scenario shape (no `minResumeTicks`,
+  server reflects Stopped) → resume PASSES — the exact weakening this
+  finding closes.
+- GREEN: hack reverted, fix in place → resume PASSES (and the full suite
+  10/10).
 
 ## Reviewer comments
 (appended after the per-finding verdict)

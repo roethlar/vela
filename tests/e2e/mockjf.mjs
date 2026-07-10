@@ -15,6 +15,11 @@ export function startMockJellyfin({
   userId = 'u1',
   movies = [{ id: 'm1', name: 'Mock Movie', year: 2020 }],
   latest = [], // items for /Users/{userId}/Items/Latest → the "Recently Added" Home hub
+  // Real servers don't persist sub-threshold positions (Plex's resume
+  // minimum is ~60s); a Stopped report below this many ticks is accepted
+  // but stores no resume point. Scenarios that must prove Vela's own
+  // recents stamp works WITHOUT server help (br-1) set it above the clip.
+  minResumeTicks = 0,
 } = {}) {
   const state = {
     // Per-movie UserData; Stopped check-ins update positionTicks like a real
@@ -141,8 +146,14 @@ export function startMockJellyfin({
         } catch {}
         state.checkins.push({ endpoint, body });
         // A real server records the reported position; Stopped is the
-        // authoritative final one that a refetch must reflect.
-        if (endpoint === '/Stopped' && typeof body.PositionTicks === 'number' && state.userData[body.ItemId]) {
+        // authoritative final one that a refetch must reflect — unless it
+        // falls under the server's resume minimum (see minResumeTicks).
+        if (
+          endpoint === '/Stopped' &&
+          typeof body.PositionTicks === 'number' &&
+          state.userData[body.ItemId] &&
+          body.PositionTicks >= minResumeTicks
+        ) {
           state.userData[body.ItemId].positionTicks = body.PositionTicks;
         }
         json({});
