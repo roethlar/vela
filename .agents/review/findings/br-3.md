@@ -5,7 +5,7 @@
 consumers see the wrong root version.
 **Status**: Verified
 **Branch**: n/a (no-branches adaptation)
-**Commit**: (filled at commit)
+**Commit**: `88ab605`
 
 ## Evidence
 `scripts/bump.sh` updates Cargo.toml, Cargo.lock, package.json,
@@ -38,4 +38,7 @@ diff. Reverting the bump.sh change and re-running reproduces the stale
 lockfile (red).
 
 ## Reviewer comments
-(appended after the per-finding verdict)
+codex-cli 0.144.0 (read-only), reviewed_sha `88ab605`, base_sha `382217f`,
+`guard_confirmed:true`, verdict **accepted**, 0 comments — 2026-07-10T04:0xZ
+(UTC). Reviewer independently confirmed the anchor hits only the two root
+entries of the actual lockfile.
