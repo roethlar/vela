@@ -139,6 +139,14 @@ crops); POST-FIX the same probe with the shim injection (stock script +
 gpu-resume cropping `320x140+0+20`. Both runs recorded in this plan.
 The owner playtest on a real HDR/letterbox title is the final check.
 
+POST-FIX probe result (2026-07-10, same host/args as the pre-fix
+table — **red→green COMPLETE**):
+
+| leg | vo | hwdec-current seen | video-crop |
+|---|---|---|---|
+| shim fresh | gpu | videotoolbox → no (guard fired) | `320x140+0+20` ✓ |
+| **shim resume `--start=10`** | **gpu** | **videotoolbox → no (guard fired)** | **`320x140+0+20` ✓ (was `''` pre-fix)** |
+
 **Part B — VM E2E scenario `autocrop.mjs`: a functional regression net
 for the shim wiring, explicitly NOT the hwdec-race guard.** It proves
 the injection + shim trigger + binding invocation end-to-end through
@@ -152,22 +160,28 @@ decode on the VM).
    given) with **`mpv_autocrop: "auto"`** and `mpv_extra_args`
    including `--script-opts-append=vela-autocrop-delay=1` (short waits;
    the value is not the behavior under test).
-2. Leg 1 (fresh): play from the grid, connect IPC, poll `video-crop` →
-   non-empty (≈ `320x140+0+20`) within delay+detect+margin; quit at ~6s
-   to store a resume point.
+2. Leg 1 (fresh): play from the grid, connect IPC, **assert the shim's
+   load marker** (`user-data/vela-autocrop/loaded`, published by the
+   shim at startup — ac-r2: cropping alone cannot prove the shim
+   resolved, because a lost shim degrades to the stock trigger which
+   ALSO crops under `--vo=null`; the marker fails red in exactly that
+   masked case), then poll `video-crop` → non-empty (≈ `320x140+0+20`)
+   within delay+detect+margin; quit at ~6s to store a resume point.
 3. Leg 2 (resume): play again; **assert the session actually resumed**
    (r1 finding 5 — first `time-pos` sample ≥ ~4s, the `resume.mjs`
    pattern; otherwise stale progress silently turns this into a second
    fresh leg); poll `video-crop` → non-empty within the window.
 4. Red→green honesty: leg 2 is NOT claimed red against stock code on
-   the VM (it is not — the probe proved stock passes there). The
-   scenario's red proof is against a BROKEN SHIM (e.g. revert the
-   `autocrop_args` auto shape to stock-only → with `auto_delay=4`
-   defaulted and the clip resumed at 6s of 30, stock immediate
-   detection still crops on the VM… so instead: revert the shim
-   `--script` injection AND set `autocrop-auto=no` — detection never
-   triggers → both legs fail). That proves the scenario detects a lost
-   or mis-wired shim, which is what it guards.
+   the VM (it is not — the probe proved stock passes there). Two red
+   proofs cover the two ways the shim can be lost:
+   - Trigger lost entirely (mis-wired injection): sed-delete the shim
+     `--script` line while `autocrop-auto=no` stays → detection never
+     triggers → the crop assertion fails. **RUN 2026-07-10: RED
+     confirmed on the VM** ("timed out waiting for fresh: video-crop").
+   - Shim lost but masked by degradation (ac-r2): the degradation path
+     re-enables the stock trigger, which still crops under `--vo=null`
+     — the load-marker assertion is the discriminator and fails red
+     with no shim loaded.
 
 ## Non-goals
 - No re-detection on every seek (`playback-restart` hook): re-cropping
@@ -224,3 +238,15 @@ eliminated) — converging independently with finding 6.
    the defect's true red→green, pre-fix output recorded) and Part B
    (VM E2E = shim-wiring regression net with an honest broken-shim red
    proof).
+
+**r2 — 2026-07-10 — verdict `reopened`, 1 finding, ADMITTED.** Base
+`9f3b930`, head `f8c616f`, `guard_confirmed:false`. Part B could not
+detect a MISSING/misresolved shim: the deliberate degradation path
+falls back to the stock trigger, which also crops under `--vo=null`,
+leaving the E2E green while real GPU resumes stay broken. Fixed: the
+shim publishes an observable load marker
+(`user-data/vela-autocrop/loaded`) at startup and the scenario asserts
+it before the crop assertions — a lost shim now fails red regardless
+of the degradation masking. (The sed-red for the trigger-lost case had
+already been run and recorded; the marker covers the degradation-masked
+case.)
