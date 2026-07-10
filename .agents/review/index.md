@@ -25,6 +25,34 @@ test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
 
+Loop idv-s6 CLOSED 2026-07-09: **accepted at r2** (codex read-only,
+`guard_confirmed:true` both rounds). Scope was the **owner-playtest polish
+round: hero episode Info routing** (base `c2ab703`, head `18c5bcd`;
+`d7b938f` fix + `4552a66` bump 0.1.41 + `18c5bcd` r1 fix). Owner-reported
+on 0.1.40: context-menu Info on a hero (Continue Watching) series episode
+opened the degraded single-episode page, not the season page. Root cause:
+the hero's recents copy wins the hero dedup, and a snapshot recorded
+before ItemDto carried parent keys (pre-0.1.35) never heals — re-plays
+from the hero re-record the same key-less copy — so `seasonKeyFor()` had
+nothing to route with. Fix in layers the snapshot's vintage can't defeat:
+`DetailDto` + the `PlexDetail` parse now carry namespaced
+`parentRatingKey`/`grandparentRatingKey` (guard:
+`to_detail_maps_and_namespaces` asserts them — proven red/green by nulling
+the `to_detail` mapping), and `openInfo`'s episode branch opens the
+degraded view immediately then UPGRADES `detailView` to the season page
+when the detail fetch resolves a parent key (deferred JF/Emby backends
+keep the degraded page via the graceful `Err`). **r1 reopened 1 MEDIUM,
+admitted — and it was load-bearing: the liveness guard compared the raw
+pre-assignment object against the deep-`$state` PROXY (always false; the
+upgrade would never have run).** Fixed `18c5bcd`: capture
+`opened = detailView` AFTER assignment and compare proxy identity. r2
+accepted clean. Verified: cargo test 67, clippy `-D warnings`,
+svelte-check 0/0, build clean; e2e 10/10 on the Linux VM with `d7b938f`
+applied (the VM was powered off before `18c5bcd` — frontend-only change,
+and the suite has no episode coverage anyway). NO automated frontend guard
+for the hero flow (recorded gap) — the owner playtest on 0.1.41 is the
+behavioral check.
+
 Loop dls-s2 CLOSED 2026-07-09: **accepted clean at r1, no findings** (codex
 read-only, `guard_confirmed:false` — the Linux-only suite can't run from the
 mac host; the coder's red/green run is the recorded proof). Scope was
