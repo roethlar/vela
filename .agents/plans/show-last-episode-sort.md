@@ -67,19 +67,48 @@ dropdown).
    `titleSort:asc` — today `select()` never resets `sort`, so the
    show-only key would otherwise leak into a movie-section request.
 
+## Slice 2 — per-library sort persistence (owner ask 2026-07-10, "sort
+should stick per library", superseding this plan's original
+no-persistence non-goal)
+1. Config: new `section_sorts: BTreeMap<String, String>` (namespaced
+   section key → Vela sort key), `#[serde(default)]` so old configs
+   load; entries for removed sections linger harmlessly. Round-trip
+   unit test.
+2. Backend: `set_section_sort(section_key, sort)` command (whitelist-
+   validated, key length-capped); `get_sections` stamps each
+   `SectionDto.sort` from config, fail-closed against `ALLOWED_SORTS`
+   (a stale/hand-edited value degrades to the default, never errors).
+   Sources construct `sort: None` — they know nothing of persistence.
+3. Frontend: `select()` sets the sort deterministically on entry — the
+   persisted value when valid for the section's type (the show-only
+   guard folds in here), else Title (A–Z); `changeSort()` writes the
+   choice to config best-effort and mirrors it onto the in-memory
+   section so re-entry within the session agrees. The merged type view
+   stays session-only (not a library).
+4. E2E `sortpersist.mjs` (restart machinery from `curation.mjs`):
+   change a library's sort → assert the mapped SortBy reaches the mock
+   AND `section_sorts` lands in config.json → restart the app → reopen
+   the library → the FIRST listing request must already carry the
+   persisted SortBy (a regression sends the default SortName) and the
+   select must show the choice. Red→green proven per repo rule.
+
 ## Non-goals
 - No merged All-view support (no DTO field; per-source only, like
   rating).
 - No episode-level data fetching or client-side recomputation — the
   server owns the semantics.
 - No new sort for movie/video sections.
-- No persistence of the selected sort across sessions (unchanged
-  behavior).
+- ~~No persistence of the selected sort across sessions~~ SUPERSEDED by
+  slice 2 (owner ask, 2026-07-10). The merged type view remains
+  session-only.
+- No per-type or global sort persistence (per LIBRARY only, as asked).
+- No pruning of `section_sorts` entries for removed sections.
 
 ## Verification
 - Unit tests (guard-proven red→green): the Plex key translation
   (new pure fn: the one divergent key + passthrough for every other
-  ALLOWED_SORTS entry) and `map_sort`'s new arm (JF `SortBy` name).
+  ALLOWED_SORTS entry) and `map_sort`'s new arm (JF `SortBy` name);
+  slice 2: `section_sorts` config round-trip + defaults-empty.
 - `npm run check` + `npm run build`; from `src-tauri/`: `cargo check
   --locked`, `cargo clippy --all-targets --locked -- -D warnings`,
   `cargo test --locked`.
@@ -92,7 +121,9 @@ dropdown).
   "Last episode added" → a show whose newest episode arrived recently
   surfaces at the top (the exact case from the report); movie sections
   don't offer the option; switching from a show section sorted this way
-  to a movie section lands on Title (A–Z), not an error.
+  to a movie section lands on that movie library's own remembered sort
+  (or Title A–Z); restart the app → each library reopens on its
+  remembered sort.
 
 ## Review log
 Plan-review loop (playbook `reviewloop`, reviewer `codex exec --json
