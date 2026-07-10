@@ -103,6 +103,25 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   per-backend leaf-added semantics (e.g. Plex episode addedAt vs series
   addedAt) are NOT investigated or spec'd — the "it seems" diagnosis is the
   owner's observation, to be code-confirmed at plan time.
+- QUEUED (owner, 2026-07-10): **Watched-status changes are masked while an
+  item sits in Continue Watching.** Owner report: right-click mark
+  watched/unwatched from the carousel "does not mark the video appropriately
+  until I also remove it from continue watching"; while a video is in
+  Continue Watching the watched status can't be changed *from anywhere*
+  until it's removed. Session triage (read-only, 2026-07-10): removing from
+  Continue Watching performs no scrobble (`commands.rs remove_from_continue`
+  → tombstone + recents drop only), yet the status comes right afterward —
+  so the server-side scrobble likely DID land and the defect is a *display
+  mask*: the carousel shows Vela's local recents snapshot, which wins the
+  hero dedup over the fresh server hub copy (`+page.svelte` `heroItems`,
+  "local copy wins") and whose `played`/`view_offset_ms` are frozen at
+  playback time; `set_watched` drops the recents entry only on
+  played=true and deliberately never on unwatched (`commands.rs
+  set_watched`), so the stale in-progress snapshot keeps rendering no
+  matter where the state was changed from. Hypothesis is session triage,
+  NOT code-confirmed end-to-end — confirm at plan time. Strongly related
+  to the queued-last Continue Watching one-op curation item (same surface,
+  same ops); consider planning them together. No code without a plan + go.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
