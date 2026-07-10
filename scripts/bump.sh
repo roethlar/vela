@@ -8,10 +8,12 @@
 #   scripts/bump.sh           # increment the patch (0.1.6 -> 0.1.7)
 #   scripts/bump.sh 0.2.0     # set an explicit version
 #
-# Updates: src-tauri/Cargo.toml, package.json, src-tauri/tauri.conf.json,
-# the BUILD_DATE constant, the vela entry in src-tauri/Cargo.lock (so
-# `cargo build --locked` / CI stays green), and packaging/arch/PKGBUILD's
-# pkgver (pkgrel reset to 1). Run it as part of a code change.
+# Updates: src-tauri/Cargo.toml, package.json, package-lock.json (npm's two
+# root version copies — else the next `npm install` rewrites the tracked
+# lockfile), src-tauri/tauri.conf.json, the BUILD_DATE constant, the vela
+# entry in src-tauri/Cargo.lock (so `cargo build --locked` / CI stays
+# green), and packaging/arch/PKGBUILD's pkgver (pkgrel reset to 1). Run it
+# as part of a code change.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -48,6 +50,20 @@ for path in (pkg, conf):
 if lock.exists():
     lock.write_text(
         re.sub(r'(name = "vela"\nversion = ")[^"]+(")', rf'\g<1>{new}\g<2>', lock.read_text())
+    )
+
+# package-lock.json — npm's two root version copies (top-level and
+# packages[""]), anchored on the vela name so dependency versions are never
+# touched.
+locknpm = pathlib.Path("package-lock.json")
+if locknpm.exists():
+    locknpm.write_text(
+        re.sub(
+            r'("name": "vela",\s*\n\s*"version": ")[^"]+(")',
+            rf"\g<1>{new}\g<2>",
+            locknpm.read_text(),
+            count=2,
+        )
     )
 
 # Arch PKGBUILD — pkgver tracks the app version; pkgrel resets to 1 on a bump.
