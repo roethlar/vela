@@ -2045,17 +2045,33 @@ pub async fn set_watched(
     played: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
+    // One edit at a time: overlapping curate-first hides and failure
+    // rollbacks must not interleave (undo tokens carry no generation).
+    let _edit = state.watch_edit_lock.lock().await;
     let (src, raw) = state.registry.lock().await.route(&rating_key)?;
-    src.mark_played(&raw, played).await?;
-    if played {
-        // Watched = not "continue watching": drop the recents entry so the
-        // hero flow lets go of it. Mark-UNwatched deliberately does not
-        // resurrect one — the item re-enters via the server hub if the
-        // server still lists it.
-        config::update(move |cfg| {
-            crate::recents::unrecord(cfg, &rating_key);
+    // Watched-state edits curate Continue Watching in the same op (owner
+    // decision 2026-07-10): watched OR reset-to-unwatched, the item is no
+    // longer "recently played and not finished". Drop the recents entry AND
+    // tombstone its identity set — the frozen local snapshot would otherwise
+    // keep masking the new server state in the hero merge, and a lagging
+    // server hub copy would resurface it. Playing the item again clears the
+    // tombstone; the explicit remove action stays the keep-progress dismiss.
+    //
+    // Curate BEFORE the server call: `mark_played` can take up to ~15s
+    // (client timeouts, Plex rediscover+retry), and a play recorded inside
+    // that window would be dropped by a delayed curation — losing a
+    // sub-threshold resume position that only Vela's stamp holds (plan
+    // review r4). On a failed server edit, the undo token restores the
+    // exact pre-curation state; newer play activity, if any landed
+    // meanwhile, wins over the restore.
+    let key = rating_key.clone();
+    let undo = config::update(move |cfg| Ok(crate::recents::hide_with_undo(cfg, &key)))?;
+    if let Err(e) = src.mark_played(&raw, played).await {
+        let _ = config::update(move |cfg| {
+            crate::recents::restore_hidden(cfg, undo);
             Ok(())
-        })?;
+        });
+        return Err(e);
     }
     Ok(())
 }
@@ -2266,6 +2282,17 @@ pub(crate) async fn play_by_key(
         .tracking_stop
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(stop);
+    // A play is the explicit opposite of "stop suggesting it": clear this
+    // key's Continue Watching tombstone. Direct plays already do this via
+    // record_recent (frontend); this covers queue plays and auto-advance,
+    // which record no snapshot. Deliberately post-spawn — a FAILED play must
+    // not clear a tombstone (the record_recent rule) — and best-effort: a
+    // config hiccup must not fail a playback that already started.
+    let key = rating_key.to_string();
+    let _ = config::update(move |cfg| {
+        crate::recents::untombstone(cfg, &key);
+        Ok(())
+    });
     Ok(())
 }
 

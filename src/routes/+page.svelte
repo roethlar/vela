@@ -830,12 +830,18 @@
       // watched (✓) or unwatched state instead of a contradictory bar + badge.
       item.played = played;
       item.viewOffsetMs = 0;
-      // Curate the hero without a restart: mark-watched drops the item from
-      // recents (backend) and the re-fetch drops the server hub copy;
-      // mark-unwatched just re-fetches (the hub decides if it returns).
+      // Curate the hero without a restart: the backend dropped the recents
+      // entry and tombstoned the key (both directions); the re-fetch drops
+      // any lingering server hub copy.
       refreshWatchState();
     } catch (e) {
       error = String(e);
+      // The backend curates BEFORE the server call and rolls back on
+      // failure — but an unrelated refresh (e.g. playback-ended) may have
+      // rendered the transient curated state meanwhile. Re-fetch so the
+      // rolled-back truth repaints; the error banner above still reports
+      // the failed edit.
+      refreshWatchState();
     }
   }
 

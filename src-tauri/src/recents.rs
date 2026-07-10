@@ -132,6 +132,69 @@ pub fn hide(cfg: &mut AppConfig, rating_key: &str) -> String {
     server_key
 }
 
+/// Undo token for a watched-state curation: enough to restore the exact
+/// pre-`hide` state when the server edit fails AFTER local curation.
+/// Curating first closes the edit-vs-play race (a delayed curation could
+/// drop a play recorded during the server round-trip — up to ~15s on the
+/// HTTP clients — losing a sub-threshold resume position for good).
+pub struct HideUndo {
+    /// The dropped entry and its position, when one existed.
+    entry: Option<(usize, RecentEntry)>,
+    /// Exactly the tombstone keys `hide` added (pre-existing ones are not
+    /// ours to remove on undo). Keys the FIFO cap evicted are not restored —
+    /// accepted micro-loss on a 200-deep list in an error path.
+    added_tombstones: Vec<String>,
+}
+
+/// `hide`, but returning an undo token for [`restore_hidden`].
+pub fn hide_with_undo(cfg: &mut AppConfig, key: &str) -> HideUndo {
+    let entry = cfg
+        .recents
+        .iter()
+        .position(|r| entry_matches(r, key))
+        .map(|i| (i, cfg.recents[i].clone()));
+    let pre = cfg.hidden_from_continue.clone();
+    hide(cfg, key);
+    let added_tombstones = cfg
+        .hidden_from_continue
+        .iter()
+        .filter(|k| !pre.contains(k))
+        .cloned()
+        .collect();
+    HideUndo {
+        entry,
+        added_tombstones,
+    }
+}
+
+/// Roll a [`hide_with_undo`] back after a failed server edit. Newer play
+/// activity wins: if the item was re-recorded since the hide, its fresh
+/// state (entry and cleared tombstones) is left untouched.
+pub fn restore_hidden(cfg: &mut AppConfig, undo: HideUndo) {
+    for k in &undo.added_tombstones {
+        untombstone(cfg, k);
+    }
+    if let Some((idx, entry)) = undo.entry {
+        if !cfg
+            .recents
+            .iter()
+            .any(|r| r.item.rating_key == entry.item.rating_key)
+        {
+            let at = idx.min(cfg.recents.len());
+            cfg.recents.insert(at, entry);
+        }
+    }
+}
+
+/// Clear a key's Continue Watching tombstone without recording a play
+/// snapshot — the backend play path's counterpart to `record`, which only
+/// the frontend's direct-play flow reaches. Exact-key match by design: a
+/// merged card's sibling identity stays tombstoned until the next direct
+/// play records the full identity set.
+pub fn untombstone(cfg: &mut AppConfig, key: &str) {
+    cfg.hidden_from_continue.retain(|k| k != key);
+}
+
 /// The hero feed: item snapshots, newest first. Each snapshot carries its
 /// session-end stamp so the frontend can interleave recents with server
 /// hub items by recency. A still-open session (`ended_at_ms == 0`) has no
@@ -317,6 +380,63 @@ mod tests {
             "playing again is the explicit opposite of 'stop suggesting it'"
         );
         assert_eq!(cfg.recents[0].item.rating_key, "back");
+    }
+
+    #[test]
+    fn hide_undo_restores_entry_position_and_only_added_tombstones() {
+        let mut cfg = AppConfig::default();
+        hide(&mut cfg, "pre-existing"); // an older explicit removal
+        record(&mut cfg, item("front", None));
+        record(&mut cfg, item("target", Some(100_000)));
+        record(&mut cfg, item("newest", None)); // target sits at index 1
+        finish(&mut cfg, "target", 30_000, 1111); // re-fronts: index 0
+        let undo = hide_with_undo(&mut cfg, "target");
+        assert!(!cfg.recents.iter().any(|r| r.item.rating_key == "target"));
+        assert!(cfg.hidden_from_continue.contains(&"target".to_string()));
+        restore_hidden(&mut cfg, undo);
+        assert_eq!(
+            cfg.recents[0].item.rating_key, "target",
+            "entry returns at its original position with its stamp"
+        );
+        assert_eq!(cfg.recents[0].item.view_offset_ms, Some(30_000));
+        assert!(
+            !cfg.hidden_from_continue.contains(&"target".to_string()),
+            "the tombstone the hide added is removed on undo"
+        );
+        assert!(
+            cfg.hidden_from_continue.contains(&"pre-existing".to_string()),
+            "tombstones the hide did NOT add survive the undo"
+        );
+    }
+
+    #[test]
+    fn restore_hidden_yields_to_newer_play_activity() {
+        let mut cfg = AppConfig::default();
+        record(&mut cfg, item("movie", Some(100_000)));
+        finish(&mut cfg, "movie", 30_000, 1111);
+        let undo = hide_with_undo(&mut cfg, "movie");
+        // A replay lands between the hide and the failed server edit: it
+        // clears the tombstone and records a fresh OPEN entry.
+        record(&mut cfg, item("movie", Some(100_000)));
+        restore_hidden(&mut cfg, undo);
+        assert_eq!(cfg.recents.len(), 1, "no duplicate entry");
+        assert_eq!(
+            cfg.recents[0].ended_at_ms, 0,
+            "the fresh open session wins over the restored snapshot"
+        );
+        assert!(cfg.hidden_from_continue.is_empty());
+    }
+
+    #[test]
+    fn untombstone_clears_only_the_named_key() {
+        let mut cfg = AppConfig::default();
+        hide(&mut cfg, "played-from-queue");
+        hide(&mut cfg, "other");
+        untombstone(&mut cfg, "played-from-queue");
+        assert_eq!(cfg.hidden_from_continue, vec!["other".to_string()]);
+        // Unknown key is a no-op, not an error.
+        untombstone(&mut cfg, "absent");
+        assert_eq!(cfg.hidden_from_continue, vec!["other".to_string()]);
     }
 
     #[test]

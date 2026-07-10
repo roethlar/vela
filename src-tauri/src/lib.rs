@@ -48,6 +48,11 @@ pub struct AppState {
     pub reap_queue: Arc<Mutex<Vec<std::process::Child>>>,
     /// Serializes play_item so overlapping clicks can't both spawn and orphan an mpv.
     pub play_lock: AsyncMutex<()>,
+    /// Serializes set_watched so overlapping edits can't interleave their
+    /// curate-first hides and failure rollbacks (an undo token has no
+    /// generation; two in-flight edits on one item could otherwise strip a
+    /// tombstone the other's success relies on).
+    pub watch_edit_lock: AsyncMutex<()>,
     /// Serializes source mutations (add/remove) so they apply in order
     /// without holding the registry lock across config file I/O.
     pub source_lock: AsyncMutex<()>,
@@ -110,6 +115,7 @@ pub fn run() {
         shutting_down: Arc::new(AtomicBool::new(false)),
         reap_queue: Arc::new(Mutex::new(Vec::new())),
         play_lock: AsyncMutex::new(()),
+        watch_edit_lock: AsyncMutex::new(()),
         source_lock: AsyncMutex::new(()),
         queue: Arc::new(Mutex::new(Vec::new())),
         queue_index: Arc::new(Mutex::new(None)),

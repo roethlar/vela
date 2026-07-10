@@ -20,6 +20,11 @@ export function startMockJellyfin({
   // but stores no resume point. Scenarios that must prove Vela's own
   // recents stamp works WITHOUT server help (br-1) set it above the clip.
   minResumeTicks = 0,
+  // Opt-in faithful Resume hub: /Users/{u}/Items/Resume returns in-progress
+  // unplayed movies (real-server behavior). Default stays the hardcoded
+  // empty list so pre-existing scenarios keep a recents-only hero feed and
+  // their EMPTY_HOME assertions.
+  serveResume = false,
 } = {}) {
   const state = {
     // Per-movie UserData; Stopped check-ins update positionTicks like a real
@@ -96,7 +101,12 @@ export function startMockJellyfin({
       return json({ Items: [{ Id: 'lib1', Name: 'Mock Library', CollectionType: 'movies' }] });
     }
     if (path === `/Users/${userId}/Items/Resume`) {
-      return json({ Items: [] });
+      if (!serveResume) return json({ Items: [] });
+      return json({
+        Items: movies
+          .filter((m) => state.userData[m.id].positionTicks > 0 && !state.userData[m.id].played)
+          .map(toJson),
+      });
     }
     if (path === `/Users/${userId}/Items/Latest`) {
       return json(latest); // bare array, per the Jellyfin API (seed the Recently Added hub)
@@ -133,8 +143,12 @@ export function startMockJellyfin({
     }
     const played = /^\/Users\/[^/]+\/PlayedItems\/([^/]+)$/.exec(path);
     if (played && path.startsWith(`/Users/${userId}/`) && byId[played[1]]) {
-      if (req.method === 'POST') state.userData[played[1]].played = true;
-      if (req.method === 'DELETE') state.userData[played[1]].played = false;
+      // Real servers reset the resume point on BOTH transitions (Jellyfin
+      // MarkPlayed/MarkUnplayed zero PlaybackPositionTicks; Plex scrobble/
+      // unscrobble clears the view offset) — keeping it would let a stale
+      // resume point survive a "full reset" and pass the old assertions.
+      if (req.method === 'POST') state.userData[played[1]] = { played: true, positionTicks: 0 };
+      if (req.method === 'DELETE') state.userData[played[1]] = { played: false, positionTicks: 0 };
       return json({});
     }
     const pbinfo = /^\/Items\/([^/]+)\/PlaybackInfo$/.exec(path);
