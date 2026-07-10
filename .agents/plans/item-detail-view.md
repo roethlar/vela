@@ -56,8 +56,10 @@ Amended slice order (slice 1 LANDED 0.1.31, unchanged):
 - **Slice 3 (was slice 5):** flip the navigation for all sources per the refined
   ruling above. — LANDED 2026-07-08 (`74ff385`, loop `idv-s3`).
 - **Then:** owner playtest → polish rounds ("get this perfect with plex").
-- **Deferred:** JF/Emby `item_detail` (old slice 2); local `.nfo` widening (old
-  slice 3). Resume only on owner go; they slot in with no nav change.
+- **Deferred:** JF/Emby `item_detail` (old slice 2) — resume only on owner go;
+  it slots in with no nav change. (2026-07-09: local `.nfo` widening, old
+  slice 3, is DEAD, not deferred — local sources removed, decision
+  `.agents/decisions.md` 2026-07-08.)
 
 The amendment itself gets no separate plan-review round; its technical content
 (sparse fallback, slice re-scope) is reviewed as part of the amended slice 2's

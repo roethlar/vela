@@ -70,7 +70,6 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   `michael@192.168.64.5` (Ubuntu 25.10 aarch64, 12 CPU, ~3.3 GiB RAM —
   tight for the debug build; RAM bump requested), clone target `~/dev/vela`;
   VM on hold 2026-07-09 while the owner installs OS updates.
-- DLS slice 3 (docs sweep) — scope list in the DLS entry above.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
 - QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
@@ -98,12 +97,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 - `AGENTS.md` + `.agents/repo-guidance.md` (governance refreshed 2026-07-08,
   toolkit `6f08a67`; verification commands now live in repo-guidance)
 - `.agents/decisions.md`
-- `.agents/plans/drop-local-sources.md` (ACTIVE — slice 1 landed, 2-3 open)
+- `.agents/plans/drop-local-sources.md` (ACTIVE — slices 1+3 landed, 2 open)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
 - `.agents/plans/person-browse.md` (COMPLETE — owner-verified 2026-07-09)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
-- `README.md`, `ISSUES.md` (drift-suspect until DLS slice 3 sweeps them)
+- `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)
 
 ## Unrecorded Repo Memory
 

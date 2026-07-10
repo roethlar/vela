@@ -83,7 +83,9 @@ None.
 
 ### 2026-06-10 - Standard agent guidance is canonical
 
-Status: Active
+Status: Active (amended 2026-07-08: `.agents/repo-map.json` was retired by
+that day's governance refresh — its verification commands were carved into
+`.agents/repo-guidance.md`, which joins the canonical set below)
 
 Decision:
 `AGENTS.md`, `.agents/state.md`, `.agents/decisions.md`, and
@@ -339,7 +341,9 @@ the rest of that decision stand.
 Status: Closed 2026-07-09 — code removed. The native SMB client, loopback
 proxy, and `velasmb:` scheme were deleted in drop-local-sources slice 1
 (0.1.33, `6855df5`; decision 2026-07-08 "Vela is a multi-server client").
-Historically accurate while the code existed.
+Kept as history; note the implementation used `pavao-sys`, not the `pavao`
+crate named below (deviation recorded in
+`.agents/plans/smb-native-client.md`).
 
 Decision:
 On Linux, Vela speaks SMB itself: browsing/listing/search through an
@@ -521,8 +525,8 @@ flip landing last, and the per-slice commit + reviewloop discipline.
 ### 2026-07-08 - Vela is a multi-server client: local/SMB/SSH playback dropped
 
 Status: Active (slice 1 — turn-off-and-delete — landed 2026-07-08, 0.1.33
-`6855df5`, owner-playtested; E2E re-home and docs sweep follow per
-`.agents/plans/drop-local-sources.md`)
+`6855df5`, owner-playtested; slice 3 docs sweep landed 2026-07-09; only
+slice 2, the E2E re-home, remains — `.agents/plans/drop-local-sources.md`)
 
 Decision:
 Vela will not play local files at all. The local-family sources (local
