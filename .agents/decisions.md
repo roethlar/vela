@@ -85,7 +85,9 @@ None.
 
 Status: Active (amended 2026-07-08: `.agents/repo-map.json` was retired by
 that day's governance refresh — its verification commands were carved into
-`.agents/repo-guidance.md`, which joins the canonical set below)
+`.agents/repo-guidance.md`. The CURRENT canonical set is `AGENTS.md`,
+`.agents/repo-guidance.md`, `.agents/state.md`, and `.agents/decisions.md`;
+the Decision text below predates the refresh and still names repo-map)
 
 Decision:
 `AGENTS.md`, `.agents/state.md`, `.agents/decisions.md`, and
@@ -488,7 +490,10 @@ reason for the `auto=no` guard on Off/Manual and the warning on Automatic.
 
 ### 2026-07-08 - Plex-first item detail: uniform nav flip, non-Plex detail backends deferred
 
-Status: Active
+Status: Active (amended 2026-07-09: the LOCAL `item_detail` deferral below
+is DEAD, not deferred — local sources were removed by the same-day
+"multi-server client" decision; JF/Emby is the only backend still deferred
+on an owner go)
 
 Decision:
 For the item-detail-view feature (`.agents/plans/item-detail-view.md`), sources

@@ -300,7 +300,9 @@ discipline by **building behind the current nav and flipping last**:
 - Backend order — **RESOLVED**: all backends before the nav flip (no half-built
   state). Slices land internally; the flip is last.
 - How much to widen the local `.nfo` parse (cast/crew adds real value only if the
-  owner's libraries carry it) — a scope dial, not a blocker.
+  owner's libraries carry it) — a scope dial, not a blocker. (2026-07-09: DEAD —
+  local sources removed, decision `.agents/decisions.md` 2026-07-08; no owner
+  choice remains here.)
 - **Merged-show episode playback source (idv-5, surfaced by plan-review r2).** The
   plan's default drills a merged local+server show through `detail_key` (the server),
   so its episodes both *show* rich detail and *play* from the server — even if a local
@@ -310,6 +312,9 @@ discipline by **building behind the current nav and flipping last**:
   the drill on the play face and accept a sparse (local) episode page. Rare for a
   Plex-first library (needs the *same show* on Plex **and** a local folder); default
   stands unless the owner says otherwise. Non-blocking for slices 1-3.
+  (2026-07-09: the local+server framing and the local direct-play alternative are
+  DEAD — local sources removed. The server-preferred `detail_key` default stands
+  as decided for server↔server merges, which become real at migration time.)
 - Info page presentation — **RESOLVED 2026-07-06 (owner-confirmed): full-screen
   route** (a dedicated info page with Back), NOT a floating overlay/popup. A movie's
   info page is just another drill-in level (like show→seasons→episodes), so Back

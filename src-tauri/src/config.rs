@@ -336,6 +336,14 @@ mod tests {
             back.smb_mounts[0].local_folder_id, "legacy-folder",
             "legacy local_folder_id survives save"
         );
+        assert_eq!(
+            back.smb_mounts[0].username, "user",
+            "legacy SMB username survives save (rollback credentials)"
+        );
+        assert_eq!(
+            back.smb_mounts[0].password, "pass",
+            "legacy SMB password survives save (rollback credentials)"
+        );
         assert_eq!(back.ssh_mounts[0].local_folder_id, "lf-ssh");
         assert_eq!(back.ssh_mounts[0].mountpoint, "/mnt/vela-ssh");
     }
