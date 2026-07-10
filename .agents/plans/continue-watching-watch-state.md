@@ -1,10 +1,16 @@
 # Plan: Continue Watching watched-state curation (defect + one-op curation)
 
 ## Status
-**DRAFT 2026-07-10 — awaiting plan review and owner go before any code.**
-Drafted on the owner's `plan` operator after the 2026-07-10 defect report,
-folding in the queued-last 2026-07-08 one-op-curation ask (same surface,
-same ops — `.agents/state.md ## Next`).
+**IMPLEMENTED 2026-07-10 — awaiting owner playtest + adjudication of the
+contested r6 finding (see Review log / Accepted edges).** Owner go given
+2026-07-10 ("go" after the drafted plan was summarized). Plan-review loop
+(codex, 6 rounds) closed same day: every admitted finding fixed, one
+final finding contested on materiality and routed to the owner. Guard:
+new `watchcurate` E2E scenario proven red→green on the owner's Linux VM
+(red at the exact defect assertion against the pre-fix binary; full suite
+11/11 green with the fix). Drafted on the owner's `plan` operator after
+the 2026-07-10 defect report, folding in the queued-last 2026-07-08
+one-op-curation ask (same surface, same ops).
 
 ## Owner reports (verbatim intent)
 1. 2026-07-10: right-click mark watched/unwatched from the carousel "does
@@ -151,6 +157,21 @@ Accepted edges (called out, not blocking):
   be lost (`finish` no-ops once the entry was dropped). Double-rare
   (failing server + racing play on one item), self-heals on the next
   play.
+- **Residual interleaving class (r6, CONTESTED — owner to adjudicate):**
+  an edit QUEUED behind a slow edit on the serialization lock has a
+  pre-curation wait window; a play of the queued edit's item inside that
+  window is curated away when the edit finally runs (same damage class
+  as the bullet above: temporary Continue Watching absence, a
+  sub-threshold stamp lost, self-heals on the next play). Reaching it
+  takes a slow/failing edit on one item PLUS an edit AND a play on
+  another item, all interleaved within the first edit's round-trip.
+  Coder judgment: this residual class is inherent to an actionable UI
+  over async server edits — each guard so far has produced its own new
+  interleaving (r2→r6) — and the next narrowing (persisted per-entry
+  timestamps + compare-and-swap curation) exceeds the cost-benefit line
+  for a local media client. Routed to the owner with the review trail;
+  ordering the CAS hardening as a follow-up plan reverses this
+  disposition.
 - Rollback micro-losses on a FAILED server edit: tombstone keys the FIFO
   cap (200) evicted during the hide are not resurrected; and an explicit
   "Remove from Continue Watching" issued on the same item DURING the
@@ -370,3 +391,24 @@ fixed, one dispositioned as intent-aligned.** Base `4365fb3`, head
    temporary tombstone, and the error path never refetched. ADMITTED and
    fixed: `setWatched`'s catch now re-fetches after the backend rollback;
    the design text corrected.
+
+**r6 — 2026-07-10 — verdict `reopened`, 1 finding, CONTESTED (recorded,
+routed to owner — loop closed by coder judgment, not agreement).** Base
+`4365fb3`, head `8eb0981`, `guard_confirmed:false`. Finding: the
+`watch_edit_lock` itself creates a pre-curation wait window for a QUEUED
+edit, inside which a play of that edit's item can record and untombstone,
+only to be curated away when the queued edit finally runs — factually
+correct, admitted as accurate. Contested on materiality, not accuracy:
+the window needs a slow/failing edit + a second edit + a raced play on
+the same item, all interleaved; the damage is the same bounded,
+self-healing class as the r5-1 accepted edge; and the rounds r2→r6 form
+an asymptote — every guard added produced a new interleaving of its own,
+because SOME window is inherent to an actionable UI over async server
+edits. The next narrowing (persisted per-entry timestamps +
+compare-and-swap curation) was judged past the cost-benefit line for
+this slice. Recorded in Accepted edges and routed to the owner for
+adjudication. Loop tally: r1 3 findings (all fixed), r2 2 (fixed), r3 3
+(two exposed the r2 fix as an overshoot — removed; one text fix), r4 1
+(fixed by design change), r5 3 (two fixed, one dispositioned), r6 1
+(contested). Core defect guard: E2E red→green proven on the target
+platform; full suite 11/11.

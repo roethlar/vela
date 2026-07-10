@@ -47,9 +47,31 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   `pb-s1` clean r1), slice 2 frontend `b290b31` (loop `pb-s2` clean r1),
   bumps `62fd927`/`8204a77`. No open defect; JF/Emby person browse stays
   deferred on an explicit owner go (same bar as JF/Emby `item_detail`).
-- No outstanding playtest asks. Library sorting: owner-verified WORKING
-  2026-07-10 on 0.1.41 (last-episode-added follow-up queued in ## Next).
-  mpv autocrop: owner-tested 2026-07-10 — PARTIAL PASS, defect queued in
+- **CW WATCH-STATE: IMPLEMENTED 2026-07-10, awaiting owner playtest**
+  (fix `02504be` on 0.1.42; plan
+  `.agents/plans/continue-watching-watch-state.md` — diagnosis was
+  code-confirmed: the frozen local recents snapshot wins the hero dedup
+  and masked every server-side watched-state change). Mark
+  watched/unwatched are now one-op curations (recents drop + identity
+  tombstone, curate-first with rollback; edits serialized; every play
+  path clears tombstones); "Remove from Continue Watching" stays the
+  keep-progress dismiss. Decision in `.agents/decisions.md`
+  (2026-07-10). Resolves BOTH the 2026-07-10 masking defect and the
+  2026-07-08 queued-last two-op curation annoyance. Guard: new
+  `watchcurate` E2E, red→green proven on the VM (red at the exact defect
+  assertion vs the pre-fix binary), full suite 11/11 with the fix; local
+  CI set green. Codex plan-review loop closed at r6 (six rounds; every
+  admitted finding fixed; one r6 finding CONTESTED and routed to the
+  owner — adjudication item in ## Next). **Owner playtest ask (real
+  Plex, 0.1.42):** (a) mark a mid-progress carousel item unwatched →
+  leaves the carousel in one op, library card clean; (b) replay it
+  partway → returns to the carousel, starts from 0; (c) mark it watched
+  from the carousel → leaves in one op, library ✓; (d) remove another
+  in-progress item from Continue Watching → progress preserved (Plex Web
+  still resumes it).
+- Other playtest state: library sorting owner-verified WORKING 2026-07-10
+  on 0.1.41 (last-episode-added follow-up queued in ## Next). mpv
+  autocrop: owner-tested 2026-07-10 — PARTIAL PASS, defect queued in
   ## Next (fresh plays crop automatically; resume doesn't).
 - **machine-local (Windows dev host, `F:\dev\vela`):** the `ptk` MCP server
   (warm PowerShell runspace, `ptk_invoke`) is the DIRECT shell for agent
@@ -68,12 +90,17 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   (roethlar/AgentGovernanceBootstrap#2, 2026-07-09 — the handoff operator
   conflicts with the toolkit's own `*.local.*` convention); expect a future
   governance refresh to move it to an untracked `state.local.md`-style home.
-- Version 0.1.41 (bumped `4552a66`, 2026-07-09; owner-built
-  `Vela_0.1.41_universal.dmg` on the mac host 2026-07-09). As of
-  2026-07-10: **github is at `878f9c3` == local HEAD with CI GREEN**
-  (verified via `gh run list`); **origin (gitea) is at `c2ab703`** — 8
-  commits behind (owner pushes manually — policy
-  `.agents/push-policy.md`).
+- Version 0.1.42 (bumped for the cw-watch-state fix, 2026-07-10; no
+  owner build yet). Remotes as of the cw-watch-state landing
+  (2026-07-10): **origin (gitea) was at `26f460f`** (caught up from the
+  earlier 8-behind note) and **github at `878f9c3` with CI green** —
+  both now behind local main (the day's plan/fix/docs commits); owner
+  pushes manually (policy `.agents/push-policy.md`: always ask).
+  machine-local (mac host): the owner's Linux VM clone (`vm` remote) is
+  at `26f460f` with the landed slice content applied as a WORKING-TREE
+  diff (not pushed — push policy); a later `git push vm main` needs
+  `ssh … git checkout -- . && rm tests/e2e/scenarios/watchcurate.mjs`
+  first, or the untracked/modified copies will block updateInstead.
 
 ## Next
 
@@ -103,25 +130,11 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   per-backend leaf-added semantics (e.g. Plex episode addedAt vs series
   addedAt) are NOT investigated or spec'd — the "it seems" diagnosis is the
   owner's observation, to be code-confirmed at plan time.
-- QUEUED (owner, 2026-07-10): **Watched-status changes are masked while an
-  item sits in Continue Watching.** Owner report: right-click mark
-  watched/unwatched from the carousel "does not mark the video appropriately
-  until I also remove it from continue watching"; while a video is in
-  Continue Watching the watched status can't be changed *from anywhere*
-  until it's removed. Session triage (read-only, 2026-07-10): removing from
-  Continue Watching performs no scrobble (`commands.rs remove_from_continue`
-  → tombstone + recents drop only), yet the status comes right afterward —
-  so the server-side scrobble likely DID land and the defect is a *display
-  mask*: the carousel shows Vela's local recents snapshot, which wins the
-  hero dedup over the fresh server hub copy (`+page.svelte` `heroItems`,
-  "local copy wins") and whose `played`/`view_offset_ms` are frozen at
-  playback time; `set_watched` drops the recents entry only on
-  played=true and deliberately never on unwatched (`commands.rs
-  set_watched`), so the stale in-progress snapshot keeps rendering no
-  matter where the state was changed from. **PLAN DRAFTED 2026-07-10:
-  `.agents/plans/continue-watching-watch-state.md`** (diagnosis
-  code-confirmed; folds in the queued-last one-op curation item) —
-  awaiting plan review + owner go. No code without the go.
+- OPEN ADJUDICATION (owner, from the cw-watch-state plan-review r6): the
+  contested residual queued-edit race class — accept the recorded
+  disposition (documented accepted edge) or order the compare-and-swap
+  hardening as a follow-up plan. Detail: plan Review log r6 + Accepted
+  edges.
 - QUEUED (agent-observed during plan review, 2026-07-10 — needs owner
   interest before any plan): queue plays and auto-advance never enter
   Vela's recents (`play_by_key` records nothing; only the frontend
@@ -131,16 +144,11 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   that plan fixes only the tombstone-lifecycle slice of it.
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
-- QUEUED LAST (owner, 2026-07-08, from the 0.1.33 playtest — "add this to the
-  bottom of the queue"): **Continue Watching carousel needs a one-op
-  curation.** Owner-reported annoyance: "if I mark a video in the carousel as
-  unwatched, it stays in the carousel. if I remove it from continue watching,
-  the watched status remains. so I have to do two ops to get what I want."
-  Design when picked up (plan first; options include a combined context-menu
-  action or changing what each action implies) — FOLDED INTO
-  `.agents/plans/continue-watching-watch-state.md` (2026-07-10): the drafted
-  semantics make mark-unwatched a one-op full reset that also leaves the
-  carousel, resolving this by design if the plan is accepted.
+- RESOLVED pending playtest (was QUEUED LAST, owner 2026-07-08): the
+  Continue Watching one-op curation ask — implemented by the cw-watch-state
+  fix (`02504be`, see ## Now): mark-unwatched is now a one-op full reset
+  that also leaves the carousel. Rotate to the archive once the owner
+  playtest verifies.
 
 ## Blockers
 
@@ -163,8 +171,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   2026-07-08/09)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
 - `.agents/plans/person-browse.md` (COMPLETE — owner-verified 2026-07-09)
-- `.agents/plans/continue-watching-watch-state.md` (DRAFT — awaiting
-  review + owner go)
+- `.agents/plans/continue-watching-watch-state.md` (IMPLEMENTED
+  2026-07-10 — awaiting owner playtest + r6 adjudication)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)

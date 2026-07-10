@@ -592,3 +592,37 @@ NOT superseded: multi-server support, the merged All view and its
 dedup/backing machinery (server-to-server overlap becomes real during the
 eventual Plex -> JF/Emby migration), mpv delegation, and the token-handling
 stance.
+
+### 2026-07-10 - Watched-state edits curate Continue Watching in one op
+
+Status: Active
+
+Decision:
+Mark watched and Mark unwatched (any surface: grid, carousel, search,
+person grid) both flip the server state AND remove the item from
+Continue Watching in the same operation - the recents entry is dropped
+and the item's identity set is tombstoned, curate-first with a rollback
+if the server edit fails. "Remove from Continue Watching" stays the
+dismiss-only op: it never touches watched state or progress. Any play of
+an item clears its tombstone, on every play path (direct plays via
+record_recent, queue/auto-advance via play_by_key untombstone).
+
+Reason:
+Owner reports 2026-07-08 ("two ops to get what I want") and 2026-07-10
+(watched status could not be changed from anywhere while an item sat in
+Continue Watching). The hero carousel merges Vela's local recents
+snapshot - frozen at playback time and deliberately winning the dedup -
+with the server continue/On Deck hubs; only tombstones suppress an item
+across all feeds. Without curation on both edit directions, the stale
+local snapshot masked every server-side watched-state change until the
+item was manually removed.
+
+Detail and residual-race dispositions:
+`.agents/plans/continue-watching-watch-state.md` (design, accepted
+edges, and the 6-round plan-review trail incl. one finding contested and
+routed to the owner).
+
+Supersedes:
+The implicit prior semantic (mark-watched dropped recents only,
+mark-unwatched deliberately left the entry; commands.rs set_watched
+comment before 02504be).
