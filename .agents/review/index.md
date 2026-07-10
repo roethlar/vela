@@ -1,8 +1,9 @@
 # Review status
 
 Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harness: `codex`
-(codex-cli 0.143.0, re-verified headless 2026-07-08 via
-`codex exec --json --sandbox read-only`).
+(codex-cli 0.143.0, re-verified headless 2026-07-08 on the Windows host;
+0.144.0 re-verified 2026-07-09 on the mac host — both via
+`codex exec --json --sandbox read-only`, prompt on stdin).
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
@@ -23,6 +24,32 @@ tokened poster path — accepted exposure class). Nav unwired (flip is slice 5).
 test 133 green, clippy -D warnings clean. Same no-branches adaptation. REMAINING for
 the feature: slices 2 (JF/Emby), 3 (local), 4 (info components), 5 (nav flip).
 (Superseded 2026-07-08 by the owner amendment — see the idv-s2 loop below.)
+
+Loop dls-s3 CLOSED 2026-07-09: **accepted at r5** (codex read-only; rounds
+r1-r4 reopened with 6/4/5/4 comments, ALL admitted and fixed — fix commits
+`70a7a6a`+`02a918b`, `a76175c`, `95f340e`, `ec6a4b9` on slice head
+`861442f`; r5 clean, `guard_confirmed:true`). Scope was **drop-local-sources
+slice 3 — the docs/guidance sweep** (base `96c5836`, head `ec6a4b9`;
+docs-only except one test hardening): README/ISSUES/repo-guidance
+de-localed (legacy-config preservation note added), six obsolete plans
+bannered CLOSED (smb-native-client, smb-share-root-autoadd,
+smb-source-labeling, ssh-macos-guidance, local-metadata-revalidation,
+smb-ssh-playtest-fixes), library-all-view-rework bannered PARTIALLY
+OBSOLETE (merged-view machinery survives server↔server), e2e-harness
+bannered RE-HOMED, and decision-log Status closures/amendments (2026-05-23
+×3, 2026-06-10 canonical set, 2026-07-04 ×4, 2026-07-08 ×2). The one code
+change: the config round-trip guard now asserts legacy SMB
+username/password survive save — guard-proven red/green (a
+`skip_serializing` on password fails exactly the new assertion), making
+repo-guidance's "credentials included … guarded" claim true. The r3/r4
+widening was the plan's non-exhaustive slice-3 file list, not churn — the
+same dead-local drift class in docs the plan didn't name. Verified: cargo
+test 67 + clippy `-D warnings` clean on BOTH the mac host and the Linux VM;
+svelte-check 0/0 + npm build clean (VM). No version bump (test-only Rust
+change, shipped binary identical; the bump folds into slice 2's landing).
+Note: `a76175c` also carries the slice-2 `connectedtab.mjs` deletion
+(staged early by mistake; acknowledged in-loop). REMAINING for DLS:
+slice 2 (E2E re-home) — code written, awaiting Linux-VM validation.
 
 Loop pb-s2 CLOSED 2026-07-09: **accepted clean at r1, no findings** (codex
 read-only, `guard_confirmed:false` — no JS runner; owner playtest is the
