@@ -94,6 +94,15 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
+- **v1.0.0 RELEASE TRACK (owner, 2026-07-10):** three items, in order —
+  (1) UI embellishments (graphical elements, animations; plan DRAFTED:
+  `.agents/plans/ui-embellishments.md`, 3 slices + optional macOS
+  vibrancy, open decisions await the owner); (2) docs polish — README
+  that entices users to try it; (3) graphics + screenshots for socials.
+  Items 2 and 3 are gated on 1 "and anything else that needs to be
+  finished first" — read as: the queued functional items below
+  (autocrop-on-resume, TV last-episode-added sort, the r6 adjudication
+  ruling) land before or alongside the UI slices; docs/socials go last.
 - No pending playtest ask from the 2026-07-09/10 work — both fixes
   (context-menu Play, hero episode Info) are owner-verified on 0.1.40/41.
 - **machine-local (mac host `/Users/michael/Dev/vela`):** the owner's Linux
@@ -156,8 +165,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   2026-07-08/09)
 - `.agents/plans/item-detail-view.md` (ACTIVE — nav flip landed; polish)
 - `.agents/plans/person-browse.md` (COMPLETE — owner-verified 2026-07-09)
-- `.agents/plans/continue-watching-watch-state.md` (IMPLEMENTED
-  2026-07-10 — awaiting owner playtest + r6 adjudication)
+- `.agents/plans/continue-watching-watch-state.md` (COMPLETE —
+  owner-verified 2026-07-10; r6 adjudication open)
+- `.agents/plans/ui-embellishments.md` (DRAFT — v1.0.0 item 1, awaiting
+  owner decisions + go)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)
