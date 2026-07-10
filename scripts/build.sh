@@ -15,6 +15,11 @@
 # supported path there; portable AppImages are built on ubuntu in CI. Pass
 # --bundles to override the host default (e.g. force appimage, or build deb,rpm).
 #
+# Final artifacts are also copied to a top-level dist/ (recreated on every
+# successful build, gitignored), so the installer is always at dist/<name>
+# regardless of the deep target-triple/profile/bundle path Tauri writes to.
+# dist/ lives outside src-tauri/target, so it survives a `cargo clean`.
+#
 # This script does NOT change the version. A build is only meaningfully unique
 # when the source is, so the version is bumped when the code changes (run
 # scripts/bump.sh as part of a code change), not here at build time.
@@ -122,17 +127,25 @@ else
   npm run tauri -- build --bundles "$bundles" "${extra_args[@]}"
 fi
 
-# --- Report artifacts --------------------------------------------------------
+# --- Collect artifacts into dist/ ---------------------------------------------
+# One stable, shallow location per build. Recreated wholesale so it only ever
+# holds the CURRENT build's output (stale versions accumulating would recreate
+# the very mess this exists to avoid). `rw.*` are bundle_dmg.sh temp images
+# that interrupted macOS builds leave behind — never artifacts.
+dist="dist"
+rm -rf "$dist"
+mkdir -p "$dist"
 echo
-echo "==> Artifacts in $bundle_dir:"
+echo "==> Artifacts (also in $bundle_dir):"
 found=0
 for d in "${subdirs[@]}"; do
   if [ "$d" = "." ]; then dir="$bundle_dir"; else dir="$bundle_dir/$d"; fi
   [ -d "$dir" ] || continue
   while IFS= read -r f; do
-    echo "    $f"
+    cp -R "$f" "$dist/"
+    echo "    $dist/$(basename "$f")"
     found=1
-  done < <(find "$dir" -mindepth 1 -maxdepth 1 \
+  done < <(find "$dir" -mindepth 1 -maxdepth 1 ! -name 'rw.*' \
             \( -name '*.AppImage' -o -name '*.dmg' -o -name '*.app' \
              -o -name '*-setup.exe' -o -name '*.msi' \
              -o -name '*.deb' -o -name '*.rpm' \

@@ -3,6 +3,7 @@
 # Tauri + frontend
 node_modules
 /build
+/dist
 /.svelte-kit
 /package
 src-tauri/target
