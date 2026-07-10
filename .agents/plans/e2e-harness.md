@@ -7,6 +7,21 @@ that design. Implementation may start without a further approval
 round-trip; anything that deviates materially from this plan needs a plan
 update first.
 
+> **RE-HOMED 2026-07-09 (drop-local-sources slice 2):** the local-folder
+> seeding this plan's scenarios were built on died with the local sources
+> (decision 2026-07-08). All scenarios now run against in-process mock
+> Jellyfin servers (`mockjf.mjs`, generalized to multiple movies/streams);
+> two-server flows (mergedview, sourcedeadend) use two mock instances;
+> `connectedtab` was deleted with its subject (its sspf-12 zombie-share
+> coverage is lost — the SMB Connected tab no longer exists). Scenarios
+> also reflect the nav flip (`74ff385`): library card clicks open the info
+> page; playback goes through its Play button or the context menu. DEAD
+> with the removal, not just re-homed: architecture leg 3's live SMB probe
+> (`VELA_SMB_LIVE`), the SMB credential env vars (`VELA_E2E_SMB*`), and
+> every SMB/local scenario in the backlog below. The local-seeding and SMB
+> references below are historical design record; nothing SMB/local remains
+> actionable in this plan.
+
 ## Why
 
 The owner is the throughput bottleneck for playtesting and explicitly asked

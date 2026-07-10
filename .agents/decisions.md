@@ -24,7 +24,10 @@ None.
 
 ### 2026-05-23 - Accept token-bearing media URLs as local-only exposure
 
-Status: Active
+Status: Active for server tokens (amended 2026-07-09: the SMB
+mount-argument clause below is historical — SMB mounting was removed
+2026-07-08 with the local/SMB/SSH sources; legacy SMB credentials persist
+only as inert config fields under the same local-only stance)
 
 Decision:
 Plex, Jellyfin, and Emby poster/stream URLs may carry access tokens locally, and
@@ -309,7 +312,10 @@ phases of `.agents/plans/library-all-view-rework.md`.
 
 ### 2026-07-04 - Hero is a cover-flow fed by Vela's own recency
 
-Status: Active
+Status: Active (amended 2026-07-09: the "local/SMB plays appear" clause
+below is historical — those sources were removed 2026-07-08. The
+source-agnostic recents mechanism itself is unchanged and now serves
+server items only)
 
 Decision:
 The Continue Watching hero becomes a cover-flow (owner reference: foobar2000
@@ -371,7 +377,12 @@ stance in that entry is unchanged.
 
 ### 2026-07-04 - Owner delegation: progress must not block on the owner
 
-Status: Active
+Status: Active as a working principle (amended 2026-07-09: of the named
+approvals below, the SMB share-root plan is CLOSED-obsolete and the E2E
+harness's "live SMB probe" leg died with the 2026-07-08 local/SMB/SSH
+removal — the harness itself landed and was re-homed to mock servers;
+continue-watching-curation landed 2026-07-04. The delegation rule and its
+owner-in-the-loop boundaries remain in force)
 
 Decision:
 The owner directed (2026-07-04, verbatim intent: "I need progress to pick
