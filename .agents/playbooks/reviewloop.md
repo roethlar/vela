@@ -37,7 +37,10 @@ finding has to predict an observable failure and a fix has to demonstrate it clo
 The whole loop rests on one rule: **one finding ↔ one branch ↔ one verdict**. That is
 what keeps each fix independently reviewable and bisectable. It is the same discipline
 as the repo's one-item-per-commit rule, applied across two roles. Broad multi-finding
-branches are forbidden unless the owner explicitly asks for a sweep.
+branches are forbidden unless the owner explicitly asks for a sweep. Per-finding
+branches are this loop's INTERNAL mechanics — its atomic unit and guard-proof
+isolation — not a repository branch policy: whether the repo uses branches for other
+work stays repository policy, per `AGENTS.md` (Git Safety).
 
 ## Governance alignment (read first)
 
@@ -65,9 +68,10 @@ create a parallel canon or bypass owner gates:
   guidance before any commit. The example commands in this playbook are illustrative
   only.
 - **Capabilities, not harness-specific tool or agent names.** Where this playbook
-  names `codex`/`agy`/`grok`, those are *examples* of reviewer harnesses. The loop
-  works with any agent CLI that can run headless; the per-harness specifics are
-  derived live (see below), never baked into this file.
+  names `codex`/`agy`/`grok`, those are *examples* of reviewer harnesses, never
+  guarantees. Participation is exactly what the live probe (see below) verifies on
+  this machine today — headless launch, prompt intake, structured output; a harness
+  that fails the probe is not a reviewer here, whatever its documentation claims.
 
 ## Operator
 
@@ -139,14 +143,16 @@ see the gate below):
    {"verdict":"accepted|reopened|invalid","guard_confirmed":true,
     "reviewed_sha":"<head-sha>","base_sha":"<base-sha>","comments":["file:line — …"]}
    ```
-   Parse the envelope's result field against this schema. **Fail closed:** any of
-   {non-zero exit, missing/!valid JSON envelope, payload not matching the schema,
-   `verdict` not in the enum, `reviewed_sha` ≠ the dispatched head SHA} → the outcome
-   is **not accepted**. Re-prompt once with the schema restated; if it still fails,
-   route the finding to the owner as contested. A parse miss never silently becomes an
-   accept. (The harness's JSON mode guarantees a valid *envelope*, not that the model
-   filled the *payload* to schema — hence the inner parse, not envelope-validity
-   alone.)
+   Parse the envelope's result field against this schema. **The orchestrator — never
+   the reviewer — computes acceptance**: reviewer-authored fields are inputs to these
+   checks, not the decision. **Fail closed:** any of {non-zero exit, missing/!valid
+   JSON envelope, payload not matching the schema, `verdict` not in the enum,
+   `reviewed_sha` ≠ the dispatched head SHA, `base_sha` ≠ the dispatched base SHA,
+   `guard_confirmed` not literally `true`} → the outcome is **not accepted**.
+   Re-prompt once with the schema restated; if it still fails, route the finding to
+   the owner as contested. A parse miss never silently becomes an accept. (The
+   harness's JSON mode guarantees a valid *envelope*, not that the model filled the
+   *payload* to schema — hence the inner parse, not envelope-validity alone.)
 4. **Record the verdict** into `.agents/review/findings/<id>.md` `## Reviewer
    comments` **before acting** — the durable trail. Capture: reviewer **harness name +
    version**, **reviewed head SHA + base SHA**, **`guard_confirmed`**, the

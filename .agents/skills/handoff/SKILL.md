@@ -1,10 +1,11 @@
 ---
 name: handoff
-description: Update .agents/state.md so the next session can resume without chat context. Use when the owner says handoff or a session is wrapping up.
+description: Fast save-my-place snapshot of .agents/state.md so the next session resumes without chat context. Use when the owner says handoff or a session is wrapping up.
 ---
 
 Run the `handoff` operator defined in this repo's `AGENTS.md` (Operator
-Requests): update `.agents/state.md` so the next session can resume without
-chat context, honoring the operator's rotation and write rules as defined
-there. `AGENTS.md` is the authoritative definition; this skill is only a
-pointer.
+Requests): a fast save-my-place snapshot — update `.agents/state.md` so the
+next session resumes without chat context; machine-specific facts go to the
+tracked `.agents/machines.md`, keyed by machine and dated. The slow
+document-hygiene pass belongs to the `drift` operator, not here.
+`AGENTS.md` is the authoritative definition; this skill is only a pointer.
