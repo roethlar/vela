@@ -154,7 +154,10 @@ impl PlexSource {
 
     fn to_detail(&self, lib: &PlexLibrary, d: PlexDetail) -> DetailDto {
         let tags = |v: Vec<crate::plex_library::PlexTag>| -> Vec<String> {
-            v.into_iter().map(|t| t.tag).filter(|s| !s.is_empty()).collect()
+            v.into_iter()
+                .map(|t| t.tag)
+                .filter(|s| !s.is_empty())
+                .collect()
         };
         let people = |v: Vec<crate::plex_library::PlexTag>| -> Vec<PersonRef> {
             v.into_iter()
@@ -278,6 +281,28 @@ impl MediaSource for PlexSource {
     }
     fn kind(&self) -> &'static str {
         "plex"
+    }
+
+    /// Ask the server to rescan one section for new files. The request path
+    /// MUST come from [`scan_path`] — validation and endpoint shape are
+    /// unit-tested there, and this is its only production call site.
+    async fn scan_library(&self, section_key: &str) -> Result<(), String> {
+        let path = scan_path(section_key)?;
+        let lib = self.ensure_ready().await?;
+        // map_err first so the non-Send error is dropped before the next await.
+        let first = lib
+            .request_library_scan(&path)
+            .await
+            .map_err(|e| e.to_string());
+        match first {
+            Ok(()) => Ok(()),
+            Err(_) => {
+                let lib = self.rediscover().await?;
+                lib.request_library_scan(&path)
+                    .await
+                    .map_err(|e| e.to_string())
+            }
+        }
     }
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
@@ -501,7 +526,14 @@ impl MediaSource for PlexSource {
             let mut start = 0;
             loop {
                 let page = lib
-                    .get_section_person_filtered(&s.key, filter, person_key, type_filter, start, PAGE)
+                    .get_section_person_filtered(
+                        &s.key,
+                        filter,
+                        person_key,
+                        type_filter,
+                        start,
+                        PAGE,
+                    )
                     .await
                     .map_err(|e| e.to_string())?;
                 let n = page.len();
@@ -694,10 +726,29 @@ fn validate_plex_id(name: &str, value: &str) -> Result<(), String> {
     }
 }
 
+/// Path for a section scan ("scan library files"). The ONLY way production
+/// may build this path — key validation and the endpoint shape are
+/// unit-tested here, so a hostile/garbled key can't reshape the URL.
+fn scan_path(key: &str) -> Result<String, String> {
+    validate_plex_id("section key", key)?;
+    Ok(format!("/library/sections/{key}/refresh"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plex_library::{PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag};
+    use crate::plex_library::{
+        PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag,
+    };
+
+    #[test]
+    fn scan_path_shape_and_rejections() {
+        assert_eq!(scan_path("42").unwrap(), "/library/sections/42/refresh");
+        // Non-numeric ids can't reshape the endpoint path or smuggle a query.
+        for bad in ["", "abc", "42/refresh", "../7", "42?x=1", "4 2"] {
+            assert!(scan_path(bad).is_err(), "{bad:?} must be rejected");
+        }
+    }
 
     #[test]
     fn plex_sort_key_translates_only_the_leaf_added_sort() {
@@ -776,15 +827,33 @@ mod tests {
             media_type: Some("movie".into()),
             view_count: Some(0),
             genres: vec![
-                PlexTag { tag: "Action".into(), id: None },
-                PlexTag { tag: String::new(), id: None }, // blank tag is dropped
+                PlexTag {
+                    tag: "Action".into(),
+                    id: None,
+                },
+                PlexTag {
+                    tag: String::new(),
+                    id: None,
+                }, // blank tag is dropped
             ],
             directors: vec![
-                PlexTag { tag: "Dir One".into(), id: Some("456".into()) },
-                PlexTag { tag: "Dir NoId".into(), id: None },
-                PlexTag { tag: "Dir BadId".into(), id: Some("abc".into()) }, // non-numeric id -> no key
+                PlexTag {
+                    tag: "Dir One".into(),
+                    id: Some("456".into()),
+                },
+                PlexTag {
+                    tag: "Dir NoId".into(),
+                    id: None,
+                },
+                PlexTag {
+                    tag: "Dir BadId".into(),
+                    id: Some("abc".into()),
+                }, // non-numeric id -> no key
             ],
-            writers: vec![PlexTag { tag: "Writer One".into(), id: Some("789".into()) }],
+            writers: vec![PlexTag {
+                tag: "Writer One".into(),
+                id: Some("789".into()),
+            }],
             roles: vec![
                 PlexRole {
                     tag: "Actor One".into(),
@@ -792,7 +861,12 @@ mod tests {
                     role: Some("Hero".into()),
                     thumb: Some("/library/metadata/42/role/1".into()),
                 },
-                PlexRole { tag: String::new(), id: None, role: None, thumb: None }, // nameless dropped
+                PlexRole {
+                    tag: String::new(),
+                    id: None,
+                    role: None,
+                    thumb: None,
+                }, // nameless dropped
             ],
             media: vec![PlexDetailMedia {
                 video_resolution: Some("1080".into()),
@@ -822,8 +896,8 @@ mod tests {
         assert_eq!(dto.cast[0].name, "Actor One");
         assert_eq!(dto.cast[0].role.as_deref(), Some("Hero"));
         assert_eq!(dto.cast[0].thumb, None); // no server -> no URL
-        // Person-browse keys: namespaced when the tag id is numeric; absent
-        // (plain text) when the id is missing or malformed.
+                                             // Person-browse keys: namespaced when the tag id is numeric; absent
+                                             // (plain text) when the id is missing or malformed.
         assert_eq!(dto.cast[0].person_key.as_deref(), Some("plexA:123"));
         assert_eq!(dto.directors.len(), 3);
         assert_eq!(dto.directors[0].name, "Dir One");
@@ -833,9 +907,9 @@ mod tests {
         assert_eq!(dto.writers[0].person_key.as_deref(), Some("plexA:789"));
         assert_eq!(dto.poster, None); // no server -> no URL
         assert_eq!(dto.played, Some(false)); // viewCount 0
-        // Episode parent keys are namespaced like every other key — they let
-        // an episode opened without season context (stale hero snapshot)
-        // upgrade to its shared season page.
+                                             // Episode parent keys are namespaced like every other key — they let
+                                             // an episode opened without season context (stale hero snapshot)
+                                             // upgrade to its shared season page.
         assert_eq!(dto.parent_rating_key.as_deref(), Some("plexA:150"));
         assert_eq!(dto.grandparent_rating_key.as_deref(), Some("plexA:100"));
         assert_eq!(dto.media.len(), 1);

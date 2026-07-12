@@ -613,7 +613,10 @@ pub fn play(
     // carry it. Asserted after the user's extra args so a user-set
     // --http-header-fields can't silently drop the auth the stream needs.
     if !spec.http_headers.is_empty() {
-        cmd.arg(format!("--include={}", write_header_include(&spec.http_headers)?));
+        cmd.arg(format!(
+            "--include={}",
+            write_header_include(&spec.http_headers)?
+        ));
     }
     if spec.start_seconds > 0.0 {
         cmd.arg(format!("--start={}", spec.start_seconds));
@@ -1048,15 +1051,23 @@ mod tests {
 
     #[test]
     fn autocrop_off_injects_nothing() {
-        assert!(autocrop_args("off", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty());
+        assert!(
+            autocrop_args("off", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty()
+        );
         // Unknown/garbage mode is treated as off.
-        assert!(autocrop_args("wat", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty());
+        assert!(
+            autocrop_args("wat", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua")).is_empty()
+        );
     }
 
     #[test]
     fn autocrop_manual_loads_script_with_auto_disabled() {
         // Manual ignores the shim even when resolved: Shift+C is the trigger.
-        let args = autocrop_args("manual", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua"));
+        let args = autocrop_args(
+            "manual",
+            Some("/x/autocrop.lua"),
+            Some("/x/vela-autocrop.lua"),
+        );
         assert_eq!(
             args,
             vec![
@@ -1072,7 +1083,11 @@ mod tests {
         // The stock auto trigger skips its settle delay on --start resumes and
         // races hwdec init (plan autocrop-resume); auto mode therefore hands
         // the trigger to the Vela shim.
-        let args = autocrop_args("auto", Some("/x/autocrop.lua"), Some("/x/vela-autocrop.lua"));
+        let args = autocrop_args(
+            "auto",
+            Some("/x/autocrop.lua"),
+            Some("/x/vela-autocrop.lua"),
+        );
         assert_eq!(
             args,
             vec![

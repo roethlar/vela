@@ -603,6 +603,23 @@ impl PlexLibrary {
         self.server = Some(server);
     }
 
+    /// Ask the server to rescan one library section for new files. `path`
+    /// must be built by `source::plex::scan_path` (validated and unit-tested
+    /// there) — never hand-format it here. A non-owner token gets a 401/403,
+    /// surfaced by `error_for_status`.
+    pub async fn request_library_scan(&self, path: &str) -> Result<(), Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let url = format!("{base}{path}");
+        self.client
+            .get(&url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .send()
+            .await?
+            .error_for_status()?;
+        Ok(())
+    }
+
     /// Top-level home hubs (Continue Watching, Recently Added, On Deck, …).
     pub async fn get_hubs(&self) -> Result<Vec<PlexHub>, Box<dyn std::error::Error>> {
         let base = self.server_base().ok_or("No server selected")?;
@@ -1561,7 +1578,10 @@ mod tests {
         let genres: Vec<_> = d.genres.iter().map(|t| t.tag.as_str()).collect();
         assert_eq!(genres, ["Science Fiction", "Drama"]);
         assert_eq!(
-            d.directors.iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(),
+            d.directors
+                .iter()
+                .map(|t| t.tag.as_str())
+                .collect::<Vec<_>>(),
             ["Denis Villeneuve"]
         );
         assert_eq!(
@@ -1569,7 +1589,10 @@ mod tests {
             ["Hampton Fancher", "Michael Green"]
         );
         assert_eq!(
-            d.countries.iter().map(|t| t.tag.as_str()).collect::<Vec<_>>(),
+            d.countries
+                .iter()
+                .map(|t| t.tag.as_str())
+                .collect::<Vec<_>>(),
             ["United States"]
         );
 
@@ -1648,7 +1671,10 @@ mod tests {
         );
         // A part key that already has a query keeps it and appends with '&'.
         assert_eq!(
-            part_url("https://plex.example:32400", "/library/parts/42/file.mkv?x=1"),
+            part_url(
+                "https://plex.example:32400",
+                "/library/parts/42/file.mkv?x=1"
+            ),
             "https://plex.example:32400/library/parts/42/file.mkv?x=1&download=1"
         );
         // An absolute part URL is re-rooted onto our chosen server origin.

@@ -67,6 +67,7 @@ export function startMockJellyfin({
     })),
     failNextVirtualFolders: false, // one-shot: 403 the next VirtualFolders GET
     failNextItemRefresh: false, // one-shot: 403 the next POST /Items/{id}/Refresh
+    itemRefreshDelayMs: 0, // one-shot delay for the next POST /Items/{id}/Refresh
     // Mutation helpers that keep `userData` coherent — pushing on the raw
     // array alone would leave toJson reading missing userData and crash the
     // next listing that includes the new movie.
@@ -316,14 +317,26 @@ export function startMockJellyfin({
     }
     const refresh = /^\/Items\/([^/]+)\/Refresh$/.exec(path);
     if (refresh && req.method === "POST") {
-      if (state.failNextItemRefresh) {
-        state.failNextItemRefresh = false; // one-shot
-        return json({ error: "mock: admin required" }, 403);
+      const respond = () => {
+        if (state.failNextItemRefresh) {
+          state.failNextItemRefresh = false; // one-shot
+          return json({ error: "mock: admin required" }, 403);
+        }
+        // The request (with its Recursive/RegenerateTrickplay query) is
+        // already in state.requests; scenarios assert on that log, not on
+        // this body.
+        res.writeHead(204);
+        return res.end();
+      };
+      // One-shot delay (scanlib out-of-order case): consumed at ARRIVAL so a
+      // second scan issued while this one is parked responds immediately.
+      const delay = state.itemRefreshDelayMs;
+      if (delay > 0) {
+        state.itemRefreshDelayMs = 0; // one-shot
+        setTimeout(respond, delay);
+        return;
       }
-      // The request (with its Recursive/RegenerateTrickplay query) is already
-      // in state.requests; scenarios assert on that log, not on this body.
-      res.writeHead(204);
-      return res.end();
+      return respond();
     }
     return json({ error: "not mocked" }, 404); // images etc.: no-art fallback
   });

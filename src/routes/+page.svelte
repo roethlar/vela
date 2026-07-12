@@ -1042,6 +1042,77 @@
     menu = null;
   }
 
+  // Right-click menu on a sidebar library entry (slice 2 of the
+  // library-refresh-scan plan): ask the section's server to rescan its
+  // files. Merged type tabs get no menu — there's no single section to scan.
+  let sectionMenu = $state<{ x: number; y: number; section: Section } | null>(null);
+  function openSectionMenu(e: MouseEvent, section: Section) {
+    e.preventDefault();
+    sectionMenu = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 80), section };
+  }
+  function closeSectionMenu() {
+    sectionMenu = null;
+  }
+
+  // Scan status: one neutral transient line ("Scan started — X"), auto-cleared
+  // after a few seconds; failures use the standard error banner. There is ONE
+  // published scan status, so ownership is a single GLOBAL attempt counter —
+  // only the LATEST attempt (across ALL sections) may publish its outcome. A
+  // per-key gate is not enough: scan lib1 (slow) then lib2 (fast) leaves
+  // lib1's gen unsuperseded under its own key, and its stale completion would
+  // overwrite lib2's newer notice. The auto-clear timer is attempt-owned too —
+  // a timer armed by an earlier success must never wipe a newer attempt's
+  // published notice. Per-key gens survive only for the `scanning` flag, so a
+  // superseded attempt still re-enables its own menu entry.
+  let scanNotice = $state<string | null>(null);
+  let scanning = $state<Record<string, boolean>>({}); // menu-entry feedback only
+  const scanGens: Record<string, number> = {};
+  let scanAttempt = 0; // global publication ownership
+  let scanNoticeOwner: number | null = null; // owning attempt of the visible notice
+  let scanNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  onDestroy(() => {
+    if (scanNoticeTimer) clearTimeout(scanNoticeTimer);
+  });
+
+  async function scanSection(s: Section) {
+    closeSectionMenu();
+    const gen = (scanGens[s.key] = (scanGens[s.key] ?? 0) + 1);
+    const attempt = ++scanAttempt;
+    scanning[s.key] = true;
+    // The action owns its status (refreshLibraries convention): clear any
+    // prior banner/notice immediately, and cancel an armed auto-clear so it
+    // can't fire mid-flight against the outcome we're about to publish.
+    error = null;
+    scanNotice = null;
+    scanNoticeOwner = null;
+    if (scanNoticeTimer) {
+      clearTimeout(scanNoticeTimer);
+      scanNoticeTimer = null;
+    }
+    try {
+      await invoke("scan_section", { sectionKey: s.key });
+      if (scanAttempt !== attempt) return; // superseded — stale outcome
+      // No auto-refresh afterward: the scan runs asynchronously server-side
+      // and completion is unknowable without polling (non-goal). The slice-1
+      // refresh button is the companion action once the scan has landed.
+      scanNotice = `Scan started — ${s.title}`;
+      scanNoticeOwner = attempt;
+      scanNoticeTimer = setTimeout(() => {
+        // Only the owning attempt may clear — a timer armed by an earlier
+        // success must not wipe a newer attempt's notice.
+        if (scanNoticeOwner === attempt) {
+          scanNotice = null;
+          scanNoticeOwner = null;
+        }
+      }, 4000);
+    } catch (e) {
+      if (scanAttempt !== attempt) return;
+      error = String(e);
+    } finally {
+      if (scanGens[s.key] === gen) scanning[s.key] = false;
+    }
+  }
+
   async function setWatched(item: Item, played: boolean) {
     closeMenu();
     try {
@@ -1201,6 +1272,12 @@
 
   {#if error}
     <div class="error" role="alert">{friendlyError(error)}</div>
+  {/if}
+
+  {#if scanNotice}
+    <!-- Transient scan acknowledgement (slice 2) — neutral, auto-clears;
+         scan COMPLETION is unknowable without polling (non-goal). -->
+    <div class="notice" role="status">{scanNotice}</div>
   {/if}
 
   {#if showSettings}
@@ -1445,7 +1522,12 @@
             {/each}
           {:else}
             {#each sections as s (s.key)}
-              <button class="sideitem" class:active={mode === "browse" && active?.key === s.key} onclick={() => select(s)}>
+              <button
+                class="sideitem"
+                class:active={mode === "browse" && active?.key === s.key}
+                onclick={() => select(s)}
+                oncontextmenu={(e) => openSectionMenu(e, s)}
+              >
                 {s.title}
               </button>
             {/each}
@@ -1650,6 +1732,17 @@
         </button>
       {/each}
     {/if}
+  </div>
+{/if}
+
+{#if sectionMenu}
+  {@const sm = sectionMenu.section}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="menubackdrop" role="presentation" onclick={closeSectionMenu} oncontextmenu={(e) => { e.preventDefault(); closeSectionMenu(); }}></div>
+  <div class="ctxmenu" style="left:{sectionMenu.x}px; top:{sectionMenu.y}px;" role="menu">
+    <!-- Disabled-while-in-flight is feedback only; correctness comes from
+         the per-section generation in scanSection. -->
+    <button role="menuitem" disabled={scanning[sm.key]} onclick={() => scanSection(sm)}>Scan Library</button>
   </div>
 {/if}
 
@@ -2364,6 +2457,15 @@
   .error {
     background: var(--danger-bg);
     color: var(--danger-text);
+    padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+    animation: vela-slide-down 0.2s var(--ease);
+  }
+
+  /* Neutral transient status (scan started) — same slot as .error, calmer. */
+  .notice {
+    background: rgba(255, 255, 255, 0.06);
+    color: var(--text-muted);
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
     animation: vela-slide-down 0.2s var(--ease);

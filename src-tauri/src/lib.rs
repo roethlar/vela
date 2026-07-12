@@ -199,9 +199,13 @@ pub fn run() {
                     };
                     let Some(item) = next else { continue };
                     let state = handle_for_advance.state::<AppState>();
-                    if let Err(e) =
-                        commands::play_by_key(&state, &item.rating_key, &item.title, item.duration_ms)
-                            .await
+                    if let Err(e) = commands::play_by_key(
+                        &state,
+                        &item.rating_key,
+                        &item.title,
+                        item.duration_ms,
+                    )
+                    .await
                     {
                         eprintln!("vela: auto-advance to {:?} failed: {e}", item.title);
                     }
@@ -229,6 +233,7 @@ pub fn run() {
             commands::get_hubs,
             commands::get_sections,
             commands::set_section_sort,
+            commands::scan_section,
             commands::get_items,
             commands::get_type_listing,
             commands::set_merged_override,
@@ -286,4 +291,3 @@ pub fn run() {
             }
         });
 }
-

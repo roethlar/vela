@@ -300,6 +300,14 @@ pub trait MediaSource: Send + Sync {
         Ok(())
     }
 
+    /// Ask the server to rescan a library section for new/removed files (the
+    /// dashboard "scan library files" action — no forced metadata or artwork
+    /// refresh). Defaults to unsupported; server backends opt in. Local-family
+    /// sources don't need it: their listings re-index on ordinary refresh.
+    async fn scan_library(&self, _section_key: &str) -> Result<(), String> {
+        Err("this source doesn't support server-side library scans".to_string())
+    }
+
     /// Full metadata for one item, for the detail / "more info" surface. Defaults
     /// to unsupported; backends that can enrich an item override this (Plex first,
     /// then Jellyfin/Emby, then local). Callers degrade gracefully on `Err`.
@@ -477,8 +485,14 @@ mod tests {
     #[test]
     fn registry_ids_lists_every_registered_source() {
         let mut reg = SourceRegistry::default();
-        reg.upsert(std::sync::Arc::new(Fake { id: "plex", kind: "plex" }));
-        reg.upsert(std::sync::Arc::new(Fake { id: "jf", kind: "jellyfin" }));
+        reg.upsert(std::sync::Arc::new(Fake {
+            id: "plex",
+            kind: "plex",
+        }));
+        reg.upsert(std::sync::Arc::new(Fake {
+            id: "jf",
+            kind: "jellyfin",
+        }));
         assert_eq!(reg.ids(), vec!["plex".to_string(), "jf".to_string()]);
     }
 }

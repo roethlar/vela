@@ -18,6 +18,10 @@ const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// we have no credential to retry with, so P2f must prompt for reconnection.
 pub const RECONNECT_REQUIRED: &str = "RECONNECT_REQUIRED";
 
+/// Library scans are admin-gated on Jellyfin/Emby even when browsing works —
+/// map FORBIDDEN to something a non-admin user can act on.
+const SCAN_FORBIDDEN: &str = "the server refused the scan (administrator permission required)";
+
 /// Which server dialect we're talking to. Only the auth headers differ today,
 /// but keeping this explicit lets the two diverge further later.
 #[derive(Clone, Copy, PartialEq)]
@@ -64,6 +68,40 @@ fn auth_headers(flavor: Flavor, device_id: &str, token: &str) -> Vec<(String, St
             ("X-Emby-Token".to_string(), token.to_string()),
         ],
     }
+}
+
+/// How a flavor lists its concrete server libraries (the valid scan targets).
+#[derive(Clone, Copy, PartialEq, Debug)]
+enum VfEnvelope {
+    /// Bare JSON array (Jellyfin's `GET /Library/VirtualFolders`).
+    Bare,
+    /// `{"Items": […]}` wrapper (Emby's `GET /Library/VirtualFolders/Query`).
+    Items,
+}
+
+/// Each flavor's documented virtual-folders route. Emby's 4.9 REST reference
+/// only documents the `/Query` form (an `Items` envelope); Jellyfin only the
+/// bare route. Sharing either shape would break the other server, so the
+/// mapping is explicit and unit-tested per flavor.
+fn vf_route(flavor: Flavor) -> (&'static str, VfEnvelope) {
+    match flavor {
+        Flavor::Jellyfin => ("/Library/VirtualFolders", VfEnvelope::Bare),
+        Flavor::Emby => ("/Library/VirtualFolders/Query", VfEnvelope::Items),
+    }
+}
+
+/// Query for `POST /Items/{id}/Refresh` matching the dashboard's plain "scan
+/// for new files": recursive, no forced metadata/artwork replacement. Servers
+/// ignore params they don't know (Emby predates `RegenerateTrickplay`).
+fn scan_query() -> [(&'static str, &'static str); 6] {
+    [
+        ("Recursive", "true"),
+        ("MetadataRefreshMode", "Default"),
+        ("ImageRefreshMode", "Default"),
+        ("ReplaceAllMetadata", "false"),
+        ("ReplaceAllImages", "false"),
+        ("RegenerateTrickplay", "false"),
+    ]
 }
 
 // ---- HTTP client ---------------------------------------------------------
@@ -233,6 +271,71 @@ impl JellyfinClient {
         )
     }
 
+    /// Concrete server libraries — the valid scan targets. Mirrors
+    /// [`Self::get_json`]'s auth/timeout/401 handling but ALSO maps
+    /// FORBIDDEN, because scans are admin-gated even when browsing works.
+    async fn get_virtual_folders(&self) -> Result<Vec<VirtualFolderInfo>, String> {
+        let (path, envelope) = vf_route(self.flavor);
+        let url = format!("{}{}", self.base_url, path);
+        let mut rb = self
+            .http
+            .get(&url)
+            .timeout(std::time::Duration::from_secs(15));
+        for (k, v) in self.auth_headers() {
+            rb = rb.header(k, v);
+        }
+        let resp = rb.send().await.map_err(|e| e.to_string())?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(RECONNECT_REQUIRED.to_string());
+        }
+        if resp.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(SCAN_FORBIDDEN.to_string());
+        }
+        let resp = resp.error_for_status().map_err(|e| e.to_string())?;
+        match envelope {
+            VfEnvelope::Bare => resp
+                .json::<Vec<VirtualFolderInfo>>()
+                .await
+                .map_err(|e| e.to_string()),
+            VfEnvelope::Items => Ok(resp
+                .json::<VirtualFoldersEnvelope>()
+                .await
+                .map_err(|e| e.to_string())?
+                .items),
+        }
+    }
+
+    /// Scan-trigger URL for one concrete library. Rejects empty/dot ids up
+    /// front — `PathSegmentsMut::extend` silently drops `""`/`"."`/`".."`
+    /// segments, which would mutate the endpoint shape instead of failing.
+    fn scan_url(&self, item_id: &str) -> Result<String, String> {
+        if item_id.is_empty() || item_id == "." || item_id == ".." {
+            return Err("invalid library id".to_string());
+        }
+        Ok(self.build_url(&["Items", item_id, "Refresh"], &scan_query()))
+    }
+
+    /// POST with an empty body (the scan trigger). Same auth/timeout/401/403
+    /// mapping as [`Self::get_virtual_folders`].
+    async fn post_empty_url(&self, url: &str) -> Result<(), String> {
+        let mut rb = self
+            .http
+            .post(url)
+            .timeout(std::time::Duration::from_secs(15));
+        for (k, v) in self.auth_headers() {
+            rb = rb.header(k, v);
+        }
+        let resp = rb.send().await.map_err(|e| e.to_string())?;
+        if resp.status() == reqwest::StatusCode::UNAUTHORIZED {
+            return Err(RECONNECT_REQUIRED.to_string());
+        }
+        if resp.status() == reqwest::StatusCode::FORBIDDEN {
+            return Err(SCAN_FORBIDDEN.to_string());
+        }
+        resp.error_for_status().map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
     /// Build a URL from path segments + query pairs, percent-encoding both so an
     /// id/tag/token containing `&`, `?`, `#`, or a space can't malform the URL
     /// or leak a token into an adjacent parameter.
@@ -380,6 +483,23 @@ async fn public_server_name(http: &reqwest::Client, base_url: &str) -> Option<St
 }
 
 // ---- response DTOs -------------------------------------------------------
+
+/// One concrete server library from the virtual-folders route — the valid
+/// scan targets. User views usually share ids with these; grouped/merged
+/// views don't appear here (no single scan target exists for them).
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct VirtualFolderInfo {
+    item_id: Option<String>,
+}
+
+/// Emby's `/Library/VirtualFolders/Query` envelope.
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct VirtualFoldersEnvelope {
+    #[serde(default)]
+    items: Vec<VirtualFolderInfo>,
+}
 
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -764,6 +884,25 @@ impl MediaSource for JellyfinSource {
         self.client.flavor.kind()
     }
 
+    /// Trigger a server-side scan of one library. The user view must map to
+    /// a concrete server library (same id in the virtual-folders list) —
+    /// grouped views have no single scan target, so they're rejected with
+    /// guidance instead of blind-POSTing an id the endpoint may misread.
+    async fn scan_library(&self, section_key: &str) -> Result<(), String> {
+        let folders = self.client.get_virtual_folders().await?;
+        let known = folders
+            .iter()
+            .any(|f| f.item_id.as_deref() == Some(section_key));
+        if !known {
+            return Err(
+                "this view groups multiple server libraries; scan them individually from the server dashboard"
+                    .to_string(),
+            );
+        }
+        let url = self.client.scan_url(section_key)?;
+        self.client.post_empty_url(&url).await
+    }
+
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
         let r: ItemsResponse = self
             .client
@@ -985,6 +1124,53 @@ mod tests {
         // The series-level date-added sort stays distinct from the leaf one.
         let (by, _) = map_sort(Some("addedAt:desc"));
         assert_eq!(by, "DateCreated");
+    }
+
+    #[test]
+    fn vf_route_is_flavor_specific() {
+        // Branch-flip guard: each flavor must map to ITS documented route —
+        // swapping the match arms fails both assertions.
+        assert_eq!(
+            vf_route(Flavor::Jellyfin),
+            ("/Library/VirtualFolders", VfEnvelope::Bare)
+        );
+        assert_eq!(
+            vf_route(Flavor::Emby),
+            ("/Library/VirtualFolders/Query", VfEnvelope::Items)
+        );
+    }
+
+    #[test]
+    fn virtual_folders_parse_both_envelope_shapes() {
+        let bare: Vec<VirtualFolderInfo> =
+            serde_json::from_str(r#"[{"Name":"Movies","ItemId":"lib1"}]"#).unwrap();
+        assert_eq!(bare[0].item_id.as_deref(), Some("lib1"));
+
+        let wrapped: VirtualFoldersEnvelope = serde_json::from_str(
+            r#"{"Items":[{"Name":"Movies","ItemId":"lib2"}],"TotalRecordCount":1}"#,
+        )
+        .unwrap();
+        assert_eq!(wrapped.items[0].item_id.as_deref(), Some("lib2"));
+    }
+
+    #[test]
+    fn scan_url_shape_and_rejections() {
+        let c = JellyfinClient::new(Flavor::Jellyfin, "http://s:8096", "dev", "sekrit", "u1");
+        let url = c.scan_url("lib1").unwrap();
+        assert!(
+            url.starts_with("http://s:8096/Items/lib1/Refresh?"),
+            "unexpected endpoint shape: {url}"
+        );
+        for (k, v) in scan_query() {
+            assert!(url.contains(&format!("{k}={v}")), "{k} missing from {url}");
+        }
+        // Auth travels in headers; the token must never leak into the URL.
+        assert!(!url.contains("sekrit"));
+        // Ids that PathSegmentsMut::extend would silently drop are rejected
+        // up front instead of mutating the endpoint shape.
+        for bad in ["", ".", ".."] {
+            assert!(c.scan_url(bad).is_err(), "{bad:?} must be rejected");
+        }
     }
 
     fn media_source(

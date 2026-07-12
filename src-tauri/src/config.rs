@@ -349,17 +349,27 @@ mod tests {
         let cfg: AppConfig = serde_json::from_str(legacy).expect("legacy config parses");
 
         // Loaded untouched: no migrator moves/strips legacy fields anymore.
-        assert_eq!(cfg.local_folders.len(), 1, "local_folders preserved on load");
+        assert_eq!(
+            cfg.local_folders.len(),
+            1,
+            "local_folders preserved on load"
+        );
         assert_eq!(cfg.smb_mounts[0].kind, "movie");
         assert_eq!(cfg.smb_mounts[0].local_folder_id, "legacy-folder");
-        assert!(cfg.smb_mounts[0].folders.is_empty(), "no synthesized folders");
+        assert!(
+            cfg.smb_mounts[0].folders.is_empty(),
+            "no synthesized folders"
+        );
 
         // Saved with everything intact: a rollback build sees its data.
         let saved = serde_json::to_string(&cfg).expect("serializes");
         let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
         assert_eq!(back.local_folders.len(), 1);
         assert_eq!(back.local_folders[0].path, "/Volumes/media");
-        assert_eq!(back.smb_mounts[0].kind, "movie", "legacy kind survives save");
+        assert_eq!(
+            back.smb_mounts[0].kind, "movie",
+            "legacy kind survives save"
+        );
         assert_eq!(
             back.smb_mounts[0].local_folder_id, "legacy-folder",
             "legacy local_folder_id survives save"

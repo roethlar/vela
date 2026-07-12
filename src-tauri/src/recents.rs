@@ -283,7 +283,11 @@ mod tests {
         record(&mut cfg, item("movie", Some(100_000)));
         finish(&mut cfg, "movie", 30_000, 1111);
         assert_eq!(resume_stamp_ms(&cfg, "movie"), 30_000);
-        assert_eq!(resume_stamp_ms(&cfg, "unknown"), 0, "no entry ⇒ start from 0");
+        assert_eq!(
+            resume_stamp_ms(&cfg, "unknown"),
+            0,
+            "no entry ⇒ start from 0"
+        );
         // An open session (no finish yet) has no stamp to resume from.
         record(&mut cfg, item("playing", None));
         assert_eq!(resume_stamp_ms(&cfg, "playing"), 0);
@@ -342,7 +346,10 @@ mod tests {
         merged.watch_key = Some("plex:42".into());
         record(&mut cfg, merged);
         let server = hide(&mut cfg, "local:/movies/Heat.mkv");
-        assert_eq!(server, "plex:42", "server removal must target the watch key");
+        assert_eq!(
+            server, "plex:42",
+            "server removal must target the watch key"
+        );
         assert!(cfg.recents.is_empty());
         assert!(cfg
             .hidden_from_continue
@@ -404,7 +411,8 @@ mod tests {
             "the tombstone the hide added is removed on undo"
         );
         assert!(
-            cfg.hidden_from_continue.contains(&"pre-existing".to_string()),
+            cfg.hidden_from_continue
+                .contains(&"pre-existing".to_string()),
             "tombstones the hide did NOT add survive the undo"
         );
     }

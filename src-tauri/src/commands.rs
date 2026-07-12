@@ -1012,6 +1012,16 @@ pub async fn set_section_sort(section_key: String, sort: String) -> Result<(), S
     })
 }
 
+/// Ask a section's backend server to rescan that library for new files.
+/// Routed by the namespaced section key; the registry lock is released
+/// before the (network) call. Local-family sources reject with a friendly
+/// error (their listings re-index on ordinary refresh).
+#[tauri::command]
+pub async fn scan_section(section_key: String, state: State<'_, AppState>) -> Result<(), String> {
+    let (src, raw) = state.registry.lock().await.route(&section_key)?;
+    src.scan_library(&raw).await
+}
+
 #[tauri::command]
 pub async fn get_items(
     section_key: String,
@@ -1471,7 +1481,11 @@ fn merge_sort_page(mut items: Vec<ItemDto>, sort: &str, start: usize, size: usiz
         }
         "addedAt:desc" => {
             // None (source didn't populate it) sorts last in a desc order.
-            items.sort_by(|a, b| b.added_at_ms.cmp(&a.added_at_ms).then_with(|| title(a).cmp(&title(b))));
+            items.sort_by(|a, b| {
+                b.added_at_ms
+                    .cmp(&a.added_at_ms)
+                    .then_with(|| title(a).cmp(&title(b)))
+            });
         }
         "lastViewedAt:desc" => {
             items.sort_by(|a, b| {
@@ -1771,7 +1785,11 @@ mod merge_tests {
         let out = rt
             .block_on(fetch_all_merged(&refs, "movie", "titleSort:asc"))
             .expect("fetch succeeds");
-        assert_eq!(out.len(), 3, "same-source versions all kept; loop terminates");
+        assert_eq!(
+            out.len(),
+            3,
+            "same-source versions all kept; loop terminates"
+        );
     }
 
     #[test]
@@ -1801,7 +1819,7 @@ mod merge_tests {
         let mut face = with_ids(item("Dune", Some(2021), "jf"), &["imdb:tt1"]);
         face.poster = Some("p.jpg".into());
         face.summary = Some("sand".into()); // richer → becomes the face
-        // Backing seen first, then the richer face swaps in — the fragile path.
+                                            // Backing seen first, then the richer face swaps in — the fragile path.
         let out = dedup_across_sources(vec![backing, face]);
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].added_at_ms, Some(500));
@@ -1821,7 +1839,11 @@ mod merge_tests {
         c.rating_key = "plex:42".into();
 
         let out = dedup_across_sources(vec![a, b, c]);
-        assert_eq!(out.len(), 2, "two cards: merged cross-source + solo version");
+        assert_eq!(
+            out.len(),
+            2,
+            "two cards: merged cross-source + solo version"
+        );
         let merged = out
             .iter()
             .find(|g| g.backing.as_ref().unwrap().len() == 2)
@@ -1877,12 +1899,9 @@ mod merge_tests {
     }
 
     fn kinds() -> std::collections::HashMap<String, &'static str> {
-        [
-            ("plex".to_string(), "plex"),
-            ("jf".to_string(), "jellyfin"),
-        ]
-        .into_iter()
-        .collect()
+        [("plex".to_string(), "plex"), ("jf".to_string(), "jellyfin")]
+            .into_iter()
+            .collect()
     }
 
     #[test]
@@ -2315,7 +2334,14 @@ pub(crate) async fn play_by_key(
     let shutting_down = state.shutting_down.clone();
     let advance = state.queue_advance.clone();
     let played = tauri::async_runtime::spawn_blocking(move || {
-        playback::play(&spec, progress, &child_slot, &shutting_down, &advance, on_end)
+        playback::play(
+            &spec,
+            progress,
+            &child_slot,
+            &shutting_down,
+            &advance,
+            on_end,
+        )
     })
     .await
     .map_err(|e| format!("playback task failed: {e}"))
