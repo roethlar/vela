@@ -209,8 +209,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   decisions resolved, parked at queue bottom)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner
   playtest)
-- `.agents/plans/library-refresh-scan.md` (DRAFT — in codex plan-review
-  loop, not owner-approved)
+- `.agents/plans/library-refresh-scan.md` (APPROVED at r7 — slice 1
+  frontend committed; slice 2 scan trigger + VM E2E + codex diff review
+  pending)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)

@@ -212,6 +212,7 @@
       sourceGen++; // discard any in-flight section load
       homeGen++; // and any in-flight home load
       loadGen++; // and any in-flight browse/search load
+      navEpoch++; // and any pending refresh reconciliation
       linkGen++; // and any in-flight Plex link poll
       pin = null;
       hubs = [];
@@ -328,6 +329,11 @@
   $effect(() => {
     if (
       mode === "home" &&
+      // Deferral (library-refresh-scan plan): never redirect while a detail
+      // is open — the forced-Home cleanup can land UNDER an open detail, and
+      // select() would close it and open another library beneath the user.
+      // Once the detail closes this effect re-evaluates and may fire.
+      detailView === null &&
       activeSource !== null &&
       !loading &&
       hubs.length === 0 &&
@@ -346,6 +352,15 @@
   // a pending section refresh survives a browse and still populates the tabs.
   let sourceGen = 0;
   let homeGen = 0;
+
+  // Bumped by EVERY user navigation — select/selectType, goHome, running a
+  // search, opening a person view, drilling into children, opening or closing
+  // the detail surface, and source switches. The existing generations don't
+  // cover all of navigation (in-source navigation bumps `loadGen` but not
+  // `sourceGen`; detail open/close bumps none of them), and a delayed refresh
+  // outcome must neither force Home nor publish a banner underneath a view
+  // the user navigated to meanwhile (library-refresh-scan plan, slice 1).
+  let navEpoch = 0;
 
   async function loadEverything() {
     loadGen++; // a full home reload supersedes any in-flight browse/search load
@@ -394,6 +409,7 @@
   }
 
   function goHome() {
+    navEpoch++; // navigation: a delayed refresh outcome must not land on the new root
     detailView = null;
     loadGen++; // invalidate any in-flight browse load so it can't append after we leave
     loadingMore = false;
@@ -406,6 +422,179 @@
     // Entering a browse earlier may have discarded an in-flight hub load (via the
     // homeGen bump). If we have no hubs, re-fetch so Home isn't stuck empty.
     if (hubs.length === 0) loadHome(++homeGen);
+  }
+
+  // ---- Library refresh (library-refresh-scan plan, slice 1) ----------------
+  // One user action that refreshes the section list AND the content the user
+  // is looking at. Legs are ACTION-LOCAL: no leg writes or clears the shared
+  // `error` banner; the action aggregates and publishes ONCE at settlement,
+  // gated on the action-start `navEpoch` (navigation wins) and each failed
+  // leg's claimed generation (a leg superseded by a newer same-root load
+  // contributes neither data nor failure).
+  let refreshing = $state(false);
+
+  type RootKind = "home" | "section-grid" | "type-grid" | "search" | "person" | "drill" | "detail";
+
+  // What the user is actually looking at — derived from visible state, never
+  // residual state: goHome() leaves `active` set, and a search retains
+  // `activeType`, so "has an active section/type" does not mean "is looking
+  // at that grid".
+  function visibleRootKind(): RootKind {
+    if (detailView) return "detail";
+    if (mode === "home") return "home";
+    if (personView) return "person";
+    if (searchTerm) return "search";
+    const here = crumbs[crumbs.length - 1];
+    if (here?.ratingKey) return "drill";
+    if (active) return "section-grid";
+    if (activeType) return "type-grid";
+    // Browse mode always has one of the roots above; degrade to the
+    // no-content-leg treatment if a new root family ever misses this map.
+    return "drill";
+  }
+
+  // The browse root RIGHT NOW — visible, or hidden under an open detail —
+  // when (and only when) it is a bare section grid, the one root the
+  // disappearance fallback may reconcile. Home/search/person/drill roots
+  // never qualify.
+  function currentSectionRootKey(): string | null {
+    if (mode === "home" || personView || searchTerm || !active) return null;
+    const here = crumbs[crumbs.length - 1];
+    return here?.ratingKey ? null : active.key;
+  }
+
+  // Forced-Home reconciliation for a browse root whose library disappeared
+  // from a complete single-source sections response: goHome()'s reset MINUS
+  // the detail surface (never touched — closing it must reveal Home, not the
+  // orphan) and MINUS its hubs-empty conditional re-fetch, plus exactly one
+  // unconditional Home re-fetch: cached rails may still feature the removed
+  // library.
+  function forceHomeForRemovedRoot() {
+    navEpoch++; // the root changes: any pending refresh publication yields
+    loadGen++; // invalidate any in-flight browse load
+    loadingMore = false;
+    loading = false;
+    searchTerm = "";
+    personView = null;
+    activeType = null;
+    mode = "home";
+    loadHome(++homeGen);
+  }
+
+  async function refreshLibraries() {
+    if (refreshing) return; // double-fire guard; correctness comes from the gens
+    refreshing = true;
+    try {
+      // (a) the action owns its status: clear any prior banner immediately.
+      error = null;
+      // Snapshot what this action reconciles against.
+      const epoch = navEpoch;
+      const kind = visibleRootKind();
+      const rootKey = kind === "section-grid" ? active!.key : null;
+      // The fallback needs a COMPLETE sections response: a single-source
+      // fetch either errors or returns that source's complete list. A merged
+      // aggregate is partial by design (failing sources are skipped), so
+      // absence proves nothing and no fallback may run there.
+      const singleSource = activeSource !== null || sources.length === 1;
+      // Failures aggregate action-locally; each records whether its leg's
+      // claimed generation is STILL current at publication time — a
+      // superseded leg contributes neither data nor failure.
+      const legFailures: { msg: string; current: () => boolean }[] = [];
+
+      // Sections leg (always). The swap is `sourceGen`-gated only — a fresher
+      // section list is valid regardless of navigation. Unlike
+      // loadEverything(), never blank `sections` first: a refresh must not
+      // flash the sidebar empty.
+      const sg = ++sourceGen;
+      const sectionsLeg = (async (): Promise<Section[] | null> => {
+        try {
+          const s = await invoke<Section[]>("get_sections", { sourceId: activeSource });
+          if (sg !== sourceGen) return null;
+          sections = s;
+          // Disappearance fallback — gated on settlement-time ROOT IDENTITY,
+          // never the epoch: still rooted (bare grid, possibly under an open
+          // detail) on a key missing from a complete refreshed list →
+          // reconcile to Home; navigated elsewhere meanwhile → untouched.
+          if (singleSource) {
+            const rootNow = currentSectionRootKey();
+            if (rootNow !== null && !s.some((sec) => sec.key === rootNow)) {
+              forceHomeForRemovedRoot();
+            }
+          }
+          return s;
+        } catch (e) {
+          if (sg === sourceGen) {
+            legFailures.push({ msg: String(e), current: () => sg === sourceGen });
+          }
+          return null;
+        }
+      })();
+
+      // Content leg — exactly one, chosen by the snapshot's visible root.
+      let contentLeg: Promise<void> = Promise.resolve();
+      if (kind === "home") {
+        // Claim a Home generation like every Home load: an unclaimed leg
+        // would let an older in-flight Home load overwrite the refreshed
+        // rails — or publish its stale failure — after settlement, and a
+        // newer same-root load (e.g. playback-ended) must supersede US.
+        const hg = ++homeGen;
+        contentLeg = (async () => {
+          try {
+            const [h, r, t] = await Promise.all([
+              invoke<Hub[]>("get_hubs", { sourceId: activeSource }),
+              invoke<Item[]>("get_recents").catch(() => [] as Item[]),
+              invoke<string[]>("get_continue_tombstones").catch(() => [] as string[]),
+            ]);
+            if (hg === homeGen && epoch === navEpoch) {
+              hubs = h;
+              recents = r;
+              continueTombstones = t;
+            }
+          } catch (e) {
+            legFailures.push({ msg: String(e), current: () => hg === homeGen });
+          }
+        })();
+      } else if (kind === "section-grid" || kind === "type-grid") {
+        // Grid roots reload from offset zero AFTER the current-generation
+        // sections response lands (on a grid root the content leg DEPENDS on
+        // the sections result), REPLACING the items — the reset half of the
+        // listing machinery. `navEpoch`-gated: navigation meanwhile wins.
+        contentLeg = (async () => {
+          const list = await sectionsLeg;
+          if (list === null) return; // sections failed or superseded
+          if (epoch !== navEpoch) return; // navigation wins
+          if (kind === "section-grid" && !list.some((sec) => sec.key === rootKey)) {
+            return; // root gone: the disappearance fallback owns this outcome
+          }
+          const myGen = ++loadGen;
+          loadingMore = false;
+          offset = 0;
+          hasMore = true;
+          items = [];
+          failedPosters = new Set();
+          loading = true;
+          await loadMore(myGen, (msg) => {
+            legFailures.push({ msg, current: () => myGen === loadGen });
+          });
+          if (myGen === loadGen) loading = false;
+        })();
+      }
+      // search/person/drill/detail roots: sidebar only — those views are
+      // query-scoped, not library-list-scoped; reloading here would e.g.
+      // replace filtered search results with a full type listing.
+
+      await Promise.all([sectionsLeg, contentLeg]);
+
+      // (b)+(c)+(d): publish the aggregate ONCE — only if the user hasn't
+      // navigated since the click, and only failures whose leg is still the
+      // current claimant of its generation.
+      if (epoch === navEpoch) {
+        const live = legFailures.filter((f) => f.current());
+        if (live.length > 0) error = live.map((f) => f.msg).join("; ");
+      }
+    } finally {
+      refreshing = false;
+    }
   }
 
   // Bumped on each begin/link so a superseded poll loop stops touching the
@@ -457,6 +646,7 @@
   }
 
   async function select(section: Section) {
+    navEpoch++; // navigation (see navEpoch)
     detailView = null;
     mode = "browse";
     searchTerm = "";
@@ -479,6 +669,7 @@
 
   // Open a consolidated content-type listing (All view's Library).
   async function selectType(t: string) {
+    navEpoch++; // navigation (see navEpoch)
     detailView = null;
     mode = "browse";
     searchTerm = "";
@@ -509,7 +700,7 @@
 
   // Load the next page for the current level (section root or a parent's children)
   // and append it. Drives infinite scroll. Discards results if navigation moved on.
-  async function loadMore(myGen: number = loadGen) {
+  async function loadMore(myGen: number = loadGen, onError: ((msg: string) => void) | null = null) {
     if (loadingMore || !hasMore || myGen !== loadGen) return;
     const here = crumbs[crumbs.length - 1];
     if (!here || (!here.ratingKey && !active && !activeType)) return;
@@ -537,7 +728,10 @@
       hasMore = page.length >= PAGE;
     } catch (e) {
       if (myGen === loadGen) {
-        error = String(e);
+        // The refresh action aggregates its legs' failures action-locally
+        // (library-refresh-scan plan); navigation loads keep the direct publish.
+        if (onError) onError(String(e));
+        else error = String(e);
         hasMore = false;
       }
     } finally {
@@ -551,7 +745,7 @@
     // Bounded — each pass advances offset and clears hasMore on a short page.
     await tick();
     if (myGen === loadGen && hasMore && gridEl && gridEl.scrollHeight <= gridEl.clientHeight) {
-      await loadMore(myGen);
+      await loadMore(myGen, onError);
     }
   }
 
@@ -570,6 +764,7 @@
       openInfo(item);
       return;
     }
+    navEpoch++; // drilling into children is navigation (see navEpoch)
     detailView = null;
     // Merged shows drill through the metadata-richest backing (idv-5) so
     // seasons/episodes come from — and play on — the rich server source;
@@ -605,6 +800,7 @@
     if (q.length < 2) {
       error = "Search needs at least 2 characters.";
       if (searchTerm) {
+        navEpoch++; // tearing down the search root is navigation (see navEpoch)
         items = [];
         crumbs = [];
         active = null;
@@ -612,6 +808,7 @@
       }
       return;
     }
+    navEpoch++; // navigation (see navEpoch)
     homeGen++; // leaving home: invalidate any in-flight home/sections load
     const myGen = ++loadGen; // invalidate any in-flight load; guard our own result
     loadingMore = false;
@@ -642,6 +839,7 @@
   }
 
   async function goCrumb(index: number) {
+    navEpoch++; // crumb moves are navigation (see navEpoch)
     crumbs = crumbs.slice(0, index + 1);
     const here = crumbs[crumbs.length - 1];
     // Returning to a search/person root (no section, no rating key) re-runs
@@ -673,6 +871,7 @@
   }
 
   async function runPersonView(p: PersonView) {
+    navEpoch++; // navigation (see navEpoch)
     homeGen++; // leaving home: invalidate any in-flight home/sections load
     const myGen = ++loadGen; // invalidate any in-flight load; guard our own result
     loadingMore = false;
@@ -891,6 +1090,7 @@
   let detailView = $state<DetailView | null>(null);
 
   function closeDetail() {
+    navEpoch++; // closing the detail surface is navigation (see navEpoch)
     detailView = null;
   }
 
@@ -933,6 +1133,7 @@
   // shared page for its season (see seasonKeyFor). Shows keep their seasons
   // drill, so no entry is offered for them.
   function openInfo(item: Item) {
+    navEpoch++; // opening the detail surface is navigation (see navEpoch)
     closeMenu();
     if (item.mediaType === "season") {
       detailView = { kind: "season", seasonKey: detailKeyOf(item), seed: item };
@@ -1220,7 +1421,22 @@
       <aside class="sidebar">
         <nav class="sidenav" aria-label="Library">
           <button class="sideitem" class:active={mode === "home"} onclick={goHome}>Home</button>
-          <div class="sidegroup">Library</div>
+          <div class="sidegroup sidegroup-row">
+            <span>Library</span>
+            <!-- Slice 1 (library-refresh-scan plan): one action refreshes the
+                 section list and the content the user is looking at. Disabled
+                 while in flight; re-enable is the settled signal for E2E. -->
+            <button
+              class="refreshbtn"
+              class:spinning={refreshing}
+              aria-label="Refresh libraries"
+              title="Refresh libraries"
+              disabled={refreshing}
+              onclick={refreshLibraries}
+            >
+              <Icon name="refresh" size={12} />
+            </button>
+          </div>
           {#if activeSource === null && sources.length > 1}
             {#each typeTabs as t (t)}
               <button class="sideitem" class:active={mode === "browse" && activeType === t} onclick={() => selectType(t)}>
@@ -1309,8 +1525,10 @@
           onPlay={play}
           onMenu={openMenu}
           onShow={(key, title) => open({ ratingKey: key, title, mediaType: "show" })}
-          onSeason={(key, seed, sel) =>
-            (detailView = { kind: "season", seasonKey: key, seed, initialSelKey: sel })}
+          onSeason={(key, seed, sel) => {
+            navEpoch++; // swapping the open detail surface is navigation
+            detailView = { kind: "season", seasonKey: key, seed, initialSelKey: sel };
+          }}
           onPerson={(key, kind, name) => runPersonView({ key, kind, name })}
         />
       {/key}
@@ -1562,6 +1780,37 @@
     color: var(--text-dim);
     margin: 0.95rem 0.65rem 0.3rem;
     user-select: none;
+  }
+  .sidegroup-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.4rem;
+  }
+  .refreshbtn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    color: var(--text-dim);
+    cursor: pointer;
+    padding: 0.15rem;
+    border-radius: 4px;
+  }
+  .refreshbtn:hover {
+    color: var(--text-bright);
+  }
+  .refreshbtn:disabled {
+    cursor: default;
+  }
+  .refreshbtn.spinning :global(svg) {
+    animation: refresh-spin 0.9s linear infinite;
+  }
+  @keyframes refresh-spin {
+    to {
+      transform: rotate(360deg);
+    }
   }
   .sideitem {
     background: transparent;
