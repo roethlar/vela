@@ -7,17 +7,24 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 ## Now
 
 - **LIBRARY-REFRESH-SCAN: plan in codex plan-review loop, PAUSED after
-  r6 on the owner's instruction (session restart), 2026-07-12**
+  r7 pending the owner's convergence call, 2026-07-12**
   (`.agents/plans/library-refresh-scan.md` — refresh button +
   per-library server scan trigger; owner ask 2026-07-12 while testing
-  Jellyfin). Six rounds run, all findings ADMITTED and fixed, no repeat
-  findings; NOT yet converged (r6 reopened) and NOT owner-approved; no
-  implementation until the owner approves after convergence. Resume =
-  dispatch review round r7 against current HEAD: reviewer `codex exec
-  --sandbox read-only -o <outfile>` one-shot with prompt on stdin
-  (0.144.1, mac host), whole-plan fresh-eyes review, JSON verdict
-  contract + full round trail in the plan's Review log. The owner also
-  asked for the plan's exec summary in chat once the loop converges.
+  Jellyfin). Seven rounds run, 34 findings, all ADMITTED and fixed, no
+  repeat findings; NOT converged (r7 reopened: 5 MEDIUM, three of them
+  against the r6 amendments) and NOT owner-approved; no implementation
+  until the owner approves after convergence. Severity has been
+  MEDIUM-only since r5 while each round grows the verification surface
+  (scope accretion), so the operator paused instead of auto-dispatching
+  r8 and put the call to the owner: (a) dispatch r8 unchanged (`codex
+  exec --sandbox read-only -o <outfile>` one-shot, prompt file passed
+  as arg, 0.144.1, mac host, whole-plan fresh-eyes, JSON verdict
+  contract, trail in the plan's Review log); (b) dispatch r8 with a
+  severity floor (new-scope MEDIUMs go to comments; findings only for
+  HIGH+/broken-fix); or (c) stop the loop, take the exec summary in
+  chat, and treat residual review as implementation-time checks. The
+  owner also asked for the plan's exec summary in chat once the loop
+  converges.
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted

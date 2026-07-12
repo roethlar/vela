@@ -67,10 +67,11 @@ discover new files, after which a refresh shows the result.
      navigation bumps `loadGen` but not `sourceGen`, and detail
      open/close bumps none of them — a delayed refresh outcome could
      otherwise force Home or publish a banner underneath a view the user
-     navigated to meanwhile. ALL refresh reconciliation — the content
-     leg, the disappearance fallback, and the final error publication —
-     is gated on `navEpoch` being unchanged from the action-start
-     snapshot (the sidebar `sections` swap alone stays
+     navigated to meanwhile. The content leg and the final
+     error publication are gated on `navEpoch` being unchanged from
+     the action-start snapshot; the disappearance fallback is NOT —
+     its gate is settlement-time root identity (contract below), never
+     the epoch (the sidebar `sections` swap alone stays
      `sourceGen`-gated: a fresher section list is valid regardless of
      navigation).
    - At action start: clear the shared `error` banner once (the action
@@ -96,8 +97,13 @@ discover new files, after which a refresh shows the result.
        `navEpoch` — without the claim, an older in-flight Home load
        (startup, source switch) could overwrite the refreshed rails
        after settlement, or publish its stale failure over a successful
-       refresh. Its error still aggregates action-locally (contract
-       below), never via `loadHome`'s own publish path.
+       refresh. Its error aggregates action-locally (contract
+       below), never via `loadHome`'s own publish path — and the claim
+       gates the FAILURE too: a leg whose generation was superseded
+       contributes neither data nor failure to the action aggregate (a
+       newer successful same-root load, e.g. playback-ended, bumps
+       `homeGen` without touching `navEpoch`; the refresh's stale
+       failure must not publish over it).
      - `section-grid` → after the current-generation sections response
        lands (`sg === sourceGen`) and the section still exists, reload
        the grid from offset zero with the current sort, REPLACING the
@@ -120,7 +126,7 @@ discover new files, after which a refresh shows the result.
      "missing" really means deleted. A MERGED-scope aggregate is partial
      BY DESIGN — `get_sections` skips failing sources, surfacing an
      error only when the combined result is empty and a source failed
-     (`commands.rs:964-996` aggregate semantics) — so absence proves
+     (`commands.rs:2447-2490` aggregate semantics) — so absence proves
      nothing there and NO disappearance fallback runs for `type-grid`
      roots (which only exist in the merged multi-source scope,
      `+page.svelte:1224`) or any merged refresh: a transient failure of
@@ -172,8 +178,13 @@ discover new files, after which a refresh shows the result.
      shows that failure even when sibling legs succeeded; (c) a later
      successful refresh clears a stale failure banner (via (a)); (d) the
      aggregate publishes only if the snapshot's `navEpoch` is still
-     current — a refresh superseded by ANY navigation (including opening
-     a detail page) stays silent (navigation wins).
+     current AND every failed leg's claimed generation is still
+     current — a refresh superseded by ANY navigation (including
+     opening a detail page) stays silent (navigation wins), and a
+     failed leg superseded by a newer same-root load (which bumps the
+     leg's generation, not `navEpoch`) contributes nothing. Both
+     orderings are guarded: older load → Refresh, and Refresh → newer
+     load (case 14 and its reverse phase).
 2. **UI:** an icon button beside the "Library" group heading in the sidebar
    (`.sidegroup`, `+page.svelte:1223` — becomes a flex row), aria-label
    "Refresh libraries", `title` tooltip. New `refresh` glyph in
@@ -294,9 +305,15 @@ discover new files, after which a refresh shows the result.
    LATEST attempt's outcome may publish its notice/banner or arm the
    auto-clear timer — otherwise a slow scan A completing after a quick
    scan B would overwrite B's status with stale news (out-of-order
-   completions). The menu entry for a section with a scan already in
-   flight is disabled as feedback; correctness comes from the
-   generation, not the disable. No auto-refresh afterward — the
+   completions). The auto-clear timer is generation-owned too: starting
+   a new attempt CANCELS any already-armed timer, and a firing
+   callback clears the notice only if its generation still owns the
+   published notice — otherwise a timer armed by an earlier success
+   (A) would clear the newer attempt's (B's) notice almost
+   immediately. The timer is also cleared on component destruction.
+   The menu entry for a section with a scan already in flight is
+   disabled as feedback; correctness comes from the generation, not
+   the disable. No auto-refresh afterward — the
    scan is asynchronous server-side and completion is unknowable without
    polling (non-goal); the slice-1 button is the companion action.
    Type tabs in the merged multi-source scope get no menu (no single
@@ -416,11 +433,14 @@ discover new files, after which a refresh shows the result.
      while in flight → NO banner is published over the revealed grid
      after settlement (detail CLOSE must bump `navEpoch` too — an
      open-only implementation passes case 6 but fails this one).
-  8. *Navigation wins (fallback), destructive:* browsing A → set
-     `viewsDelayMs`, remove A from `state.views` → Refresh → open
-     library B while in flight → the delayed response must NOT force
-     Home; B's grid stays (the disappearance fallback is
-     `navEpoch`-gated). RESTORE A, settling Refresh.
+  8. *Root-identity mismatch (fallback), destructive:* browsing A → set
+      `viewsDelayMs`, remove A from `state.views` → Refresh → open
+      library B while in flight → the delayed response must NOT force
+      Home; B's grid stays because the settlement-time root (B) does
+      not match the missing key (A) — the fallback's root-identity
+      gate. (A `navEpoch` gate would pass here too, but would wrongly
+      suppress the same-root detail cleanup of cases 11-12.) RESTORE
+      A, settling Refresh.
   9. *Positive deleted-library fallback, destructive:* browsing A with NO
      further navigation → remove A's view → record the mock's hub-request
      count → Refresh → app lands on Home (or the standard empty-Home
@@ -446,22 +466,33 @@ discover new files, after which a refresh shows the result.
      Back while in flight → at settlement the revealed root reconciles
      to Home (still rooted on the missing key), not A's orphan grid.
      RESTORE A, settling Refresh.
-  13. *Empty-Home redirect deferral, destructive:* empty the Latest
-     seed (Home rails empty) → open an A card's detail → remove A's
-     view → Refresh → the detail STAYS OPEN (the empty-Home
-     `select(sections[0])` redirect, `+page.svelte:328-340`, must be
-     deferred while `detailView` is open — it would otherwise close the
-     detail and open library B underneath) → Back → the standard
-     empty-Home redirect may now fire (B's grid or Home both valid).
-     RESTORE A and the Latest seed, settling Refresh.
+  13. *Empty-Home redirect deferral, destructive (two sources, explicit
+      selection):* the redirect requires `activeSource !== null`
+      (`+page.svelte:331`); with a single mock and no selection it is
+      ineligible and the deferral assertion is vacuous. Run this case
+      with TWO configured mock sources and `activeSource` set to the
+      mock containing A and B. Guard-prove eligibility first: empty
+      the Latest seed (Home rails empty) with the source selected and
+      NO detail open → the `select(sections[0])` redirect
+      (`+page.svelte:328-341`) fires. Then the deferral: same
+      empty-Home state → open an A card's detail → remove A's view →
+      Refresh → the detail STAYS OPEN (the redirect must be deferred
+      while `detailView` is open — it would otherwise close the
+      detail and open library B underneath) → Back → the redirect may
+      now fire (B's grid or Home both valid). RESTORE A, the Latest
+      seed, and the selection, settling Refresh.
   14. *Stale older Home load, non-destructive:* arm one-shot
      `state.delayNextLatestMs` + `state.failNextLatest` → trigger a
      plain Home load that consumes them (an in-flight, slow, WILL-FAIL
      Home fetch) → immediately Refresh on Home → the refresh's Home leg
      (new `homeGen`) completes: rails present, and the older load's
      late failure publishes NO banner and overwrites nothing (the Home
-     leg must CLAIM a generation; an unclaimed leg lets the stale
-     result land).
+      leg must CLAIM a generation; an unclaimed leg lets the stale
+      result land). Reverse phase, same case: arm a one-shot slow
+      FAILING refresh Home leg → while it is in flight trigger a newer
+      successful Home reload (playback-ended path) → the refresh's
+      late failure publishes NO banner at settlement (a superseded leg
+      contributes neither data nor failure).
   RED without slice 1 (no refresh control exists to click).
   Mock knob additions for the above: `state.viewsDelayMs`, one-shot
   `state.delayNextLatestMs` + `state.failNextLatest`, and the mutable
@@ -472,12 +503,20 @@ discover new files, after which a refresh shows the result.
   1. *Merged type-grid reload:* All scope → open the Movies type grid →
      `addMovie` on mock 2 → Refresh → the new card appears without
      re-entering (the `type-grid` content leg).
-  2. *Partial aggregate must not force Home:* browsing the merged type
-     grid → one-shot fail mock 2's `/Users/{id}/Views` → Refresh → the
-     user is NOT forced Home (merged scope runs no disappearance
-     fallback; a transient one-server failure is indistinguishable from
-     deletion in a partial aggregate), and the surviving source's
-     content still renders.
+  2. *Partial aggregate must not force Home (sole-provider failure):*
+      seed mock 1 with only a non-Movies section (shows) so mock 2 is
+      the SOLE Movies provider — both mocks default to Movies
+      (`mockjf.mjs:100-102`), and with a shared type the merged grid
+      would retain Movies from mock 1, letting a faulty
+      force-Home-when-the-active-type-disappears implementation pass.
+      Browsing the merged Movies type grid → one-shot fail mock 2's
+      `/Users/{id}/Views` at refresh time → Movies disappears from
+      the refreshed type tabs BUT the user is NOT forced Home (merged
+      scope runs no disappearance fallback; a transient one-server
+      failure is indistinguishable from deletion in a partial
+      aggregate), mock 1's shows content still renders, and a
+      follow-up Refresh with mock 2 recovered reloads the Movies
+      content leg.
 - **E2E `scanlib.mjs`:** mock gains `GET /Library/VirtualFolders`
   (returns one entry with `ItemId: 'lib1'`, matching the served view) and
   answers `POST /Items/{id}/Refresh` with 204 (requests are already
@@ -508,8 +547,13 @@ discover new files, after which a refresh shows the result.
      (slow) → immediately scan lib2 (fast) → lib2's success notice
      appears; when lib1's delayed response lands, the published status
      must NOT change (latest-attempt `scanGen` ownership — a stale
-     attempt may not overwrite the newer one's banner/notice or re-arm
-     the auto-clear timer).
+      attempt may not overwrite the newer one's banner/notice or
+      re-arm the auto-clear timer). Second phase, both successful:
+      scan lib1 (fast success, timer armed) → immediately scan lib2
+      (success) → lib2's notice is still visible after lib1's
+      original ~4s deadline passes (lib1's armed timer was cancelled
+      or its callback generation-gated; it may not clear lib2's
+      notice).
   RED without slice 2 (no menu entry, no request).
 - Full local CI set (`npm run check`, `npm run build`; from `src-tauri/`:
   `cargo check --locked`, `cargo clippy --all-targets --locked -- -D
@@ -702,3 +746,34 @@ corrected (errors when the combined result is empty AND a source
 failed); case 6 opens detail without `openDetailAndPlay`'s play half;
 scanlib's grouped view seeded before launch (or refreshed into the
 sidebar) before right-clicking it.
+
+**r7 — 2026-07-12 — codex-cli 0.144.1 (gpt-5.6-sol), verdict `reopened`,
+5 findings, all MEDIUM, all ADMITTED.** Base `5aa560c`, head `0c852c9`.
+1. MEDIUM — the overview and case 8 still called the disappearance
+   fallback `navEpoch`-gated, contradicting r6's root-identity contract
+   (an epoch gate also suppresses the same-root detail cleanup of cases
+   11-12). Fixed: overview excludes the fallback from the epoch rule;
+   case 8 rewritten as a root-identity-mismatch test.
+2. MEDIUM — action-local leg errors weren't generation-owned: a newer
+   same-root load (bumps `homeGen`, not `navEpoch`) couldn't stop a
+   superseded refresh leg's failure from publishing. Fixed: aggregate
+   clause (d) now also requires current leg generations; case 14 gained
+   the reverse-ordering phase.
+3. MEDIUM — `scanGen` gated publishing/arming but not an already-armed
+   timer: A's leftover auto-clear could wipe B's fresh notice. Fixed:
+   new attempts cancel armed timers, callbacks are generation-gated and
+   cleared on component destruction; scanlib case 5 gained a
+   success-then-success timing phase.
+4. MEDIUM — case 13 was vacuous: the empty-Home redirect requires
+   `activeSource !== null` (`+page.svelte:331`), never eligible in a
+   single-mock run. Fixed: two-source variant with explicit selection
+   and an eligibility guard-proof before the deferral assertion.
+5. MEDIUM — mergedrefresh case 2 couldn't detect its target regression:
+   both mocks default to Movies, so the active type never disappears.
+   Fixed: mock 1 is non-Movies-only, mock 2 the sole Movies provider;
+   assert tabs lose Movies, no forced Home, recovery reload.
+Non-blocking comments applied: aggregate-semantics citation corrected to
+`commands.rs:2447-2490`; external JF/Emby/Plex route claims validated by
+the reviewer against upstream docs; the `scenarios.js` path in the review
+prompt was the operator's error — the loader is `tests/e2e/run.mjs` +
+`tests/e2e/scenarios/`.
