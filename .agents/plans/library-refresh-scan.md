@@ -43,7 +43,12 @@ Server-side scan triggers exist on all three backends:
   `.agents/plans/show-last-episode-sort.md`): Emby accepts the identical
   refresh call; a refusal degrades to the error banner, non-fatal. Vela is
   Plex-first and the owner is currently testing JF; no Emby server is
-  available to verify.
+  available to verify. Version note: Emby's generated 4.9 reference also
+  documents a flavor-specific `/Library/VirtualFolders/Query` (Items
+  wrapper) — the plan uses the bare `/Library/VirtualFolders` route, which
+  current compatibility evidence supports; if a real Emby rejects it, the
+  scan errors visibly (no false success) and the flavor-specific route is
+  the recorded follow-up.
 
 These are two features that pair: **refresh** re-asks the server what it
 already knows (fixes the restart annoyance); **scan** tells the server to go
@@ -163,8 +168,15 @@ discover new files, after which a refresh shows the result.
    prefer `POST` — record only; no dual-verb logic.
 3. **Jellyfin/Emby (shared client)** — one exact production chain, in
    `JellyfinSource::scan_library(view_id)`:
-   - **(i) Target resolution:** GET `/Library/VirtualFolders` (existing
-     `get_json`; admin-gated like the scan itself, so no new privilege).
+   - **(i) Target resolution:** GET `/Library/VirtualFolders` via a
+     scan-scoped client helper (`get_virtual_folders`) that mirrors
+     `get_json`'s auth/timeout/401 handling but ALSO maps `FORBIDDEN` to
+     the same friendly administrator-permission message as step (iii) —
+     the resolution GET is itself elevation-gated, so a NON-ADMIN'S SCAN
+     DIES HERE, before the POST: without this mapping every non-admin
+     would see a raw technical 403 error and the step-(iii) friendly
+     message would be unreachable in practice. (Admin-gated like the scan
+     itself, so no new privilege is required.)
      Find the `VirtualFolderInfo` whose `ItemId` equals the raw view id —
      for an ordinary library the user-view id IS the virtual folder's
      `ItemId`, and that `ItemId` is what jellyfin-web's own dashboard
@@ -267,55 +279,77 @@ discover new files, after which a refresh shows the result.
     hostile-id and dot-segment assertions FAIL.
 - **E2E `libraryrefresh.mjs`:** `mockjf.mjs` gains scenario-mutable
   machinery: `state.views` (today hardcoded, `mockjf.mjs:100`; initialize
-  to the current single view — existing scenarios unaffected); a
-  `state.addMovie(movie)` operation that appends to the served movie
-  collection AND initializes the associated `byId`/`userData` entries
-  coherently (the raw arrays are closure-held snapshots today,
-  `mockjf.mjs:29-49` — pushing on an exposed array alone would leave
-  `toJson` reading missing `userData` and 500 the next listing) and a
-  matching `state.removeMovie(id)`; a one-shot `state.failNextViews` flag
-  (500 on the next `/Users/{id}/Views`) and a `state.viewsDelayMs` knob;
-  and the Items listing handler HONORS `StartIndex`/`Limit` (today it
-  ignores `StartIndex` and returns everything, `mockjf.mjs:114-139` —
-  with an ignore-pagination mock, an implementation that appends instead
-  of replacing would pass). The scenario SEEDS a non-empty Latest rail so
-  Home has cached content to go stale. Cases, one app session, in
-  sequence (each asserts only after the refresh control re-enables — the
-  action-settled signal):
-  1. *Sidebar:* load → one library → push a second view → Refresh → new
-     sidebar entry appears without restart.
-  2. *Visible grid replaced from offset zero:* open the library grid →
-     `state.addMovie(...)` AND `state.removeMovie(...)` an existing one →
-     Refresh → the post-refresh listing request carries `StartIndex=0`,
-     the new card appears, the removed card is GONE, and the visible card
-     set matches the mock's current collection exactly (count + titles) —
-     WITHOUT re-entering the library. Appending or reloading from a stale
-     offset fails the exact-set assertion (the post-scan pairing case,
-     non-vacuous by construction).
+  to the current single view — existing scenarios unaffected) with
+  PER-VIEW movie collections — the Items listing serves each view's own
+  collection keyed by the requested `ParentId` (today everything belongs
+  to lib1 and other parents are rejected, so a second library would 400
+  on open); `state.addMovie(viewId, movie)` /
+  `state.removeMovie(viewId, id)` operations that maintain the associated
+  `byId`/`userData` entries coherently (the raw arrays are closure-held
+  snapshots today, `mockjf.mjs:29-49` — pushing on an exposed array alone
+  would leave `toJson` reading missing `userData` and 500 the next
+  listing); a one-shot `state.failNextViews` flag (500 on the next
+  `/Users/{id}/Views`) and a `state.viewsDelayMs` knob; a mutable Latest
+  rail seed; and the Items listing handler HONORS `StartIndex`/`Limit`
+  (today it ignores `StartIndex` and returns everything,
+  `mockjf.mjs:114-139` — with an ignore-pagination mock, an
+  implementation that appends instead of replacing would pass). The
+  scenario SEEDS a non-empty Latest rail so Home has cached content to go
+  stale. Cases, one app session, in sequence (each asserts only after the
+  refresh control re-enables — the action-settled signal):
+  1. *Sidebar + Home rails:* on Home → mutate the Latest seed AND push a
+     second view (library B, with its own movie collection) → Refresh →
+     the new sidebar entry appears without restart AND the Home rail
+     reflects the mutated Latest (the `home` content leg re-fetches; a
+     sidebar-only implementation fails the rail assertion).
+  2. *Visible grid replaced from offset zero:* open library A's grid →
+     `state.addMovie(A, ...)` AND `state.removeMovie(A, ...)` an existing
+     one → Refresh → the post-refresh listing request carries
+     `StartIndex=0`, the new card appears, the removed card is GONE, and
+     the visible card set matches the mock's current collection exactly
+     (count + titles) — WITHOUT re-entering the library. Appending or
+     reloading from a stale offset fails the exact-set assertion (the
+     post-scan pairing case, non-vacuous by construction).
   3. *Failure then success:* set `failNextViews` → Refresh → settled →
      error banner shows; Refresh again → banner clears and content is
      current (contract (a)–(c)).
   4. *Navigation wins (error):* set `failNextViews` + `viewsDelayMs` →
-     Refresh → navigate (open the library / go Home) while the refresh is
+     Refresh → navigate (open a library / go Home) while the refresh is
      in flight → the delayed failure must NOT surface a banner after
      navigation (contract (d), `navEpoch`).
-  5. *Navigation wins (fallback):* browsing library A → set
-     `viewsDelayMs`, remove A from `state.views` → Refresh → immediately
-     open library B while the sections response is in flight → the
-     delayed response must NOT force Home; B's grid stays (the
-     disappearance fallback is `navEpoch`-gated).
-  6. *Deleted active library:* while browsing it, remove its view from
-     `state.views` → record the mock's hub-request count → Refresh → app
-     lands on Home AND the mock log shows a NEW hub fetch after the
-     refresh. Because Home rails were seeded non-empty, `goHome`'s
-     hubs-empty conditional alone will NOT re-fetch — this assertion fails
-     unless the forced-Home path exists (non-vacuous by construction).
+  5. *Navigation wins (content leg):* browsing library A (A still
+     exists) → set `viewsDelayMs` → Refresh → immediately open library B
+     while the response is in flight → after settlement B's own cards are
+     visible, unreplaced (a content-leg reload not gated on `navEpoch`
+     would overwrite B's grid with A's listing), and no error banner or
+     mock contract violation was recorded.
+  6. *Navigation wins (fallback):* same as 5 but with A removed from
+     `state.views` before the Refresh → the delayed response must NOT
+     force Home; B's grid stays (the disappearance fallback is
+     `navEpoch`-gated).
+  7. *Detail root is not a grid root:* open a card's detail surface (the
+     harness already drives it — `openDetailAndPlay`,
+     `tests/e2e/helpers.mjs:92`) → remove the underlying library from
+     `state.views` → Refresh → the detail surface STAYS OPEN with no
+     forced Home (visible-root kind `detail`: no content leg, no
+     fallback, whatever residual `active` points at).
+  8. *Detail opened mid-refresh:* browsing A → set `failNextViews` +
+     `viewsDelayMs` → Refresh → open an A card's detail while in
+     flight → the detail remains open and the delayed failure surfaces NO
+     banner after settlement (detail open/close must bump `navEpoch`;
+     goHome/select-based navigation alone cannot prove this — those paths
+     already bump the existing gens).
   RED without slice 1 (no refresh control exists to click).
+  Recorded gap: the merged `type-grid` content leg is not E2E-covered
+  (needs a second mock server à la `mergedview.mjs`); it shares the
+  reconcile implementation with `section-grid`, and the owner playtest is
+  the behavioral check — same accepted class as the item-detail flows.
 - **E2E `scanlib.mjs`:** mock gains `GET /Library/VirtualFolders`
   (returns one entry with `ItemId: 'lib1'`, matching the served view) and
   answers `POST /Items/{id}/Refresh` with 204 (requests are already
-  recorded, `mockjf.mjs:93`), plus a one-shot `state.failNextItemRefresh`
-  flag (403). Cases:
+  recorded, `mockjf.mjs:93`), plus one-shot `state.failNextItemRefresh`
+  (403 on the POST) and `state.failNextVirtualFolders` (403 on the
+  resolution GET) flags. Cases:
   1. *Happy path:* right-click the library sidebar entry → "Scan
      library" → the mock log shows the `VirtualFolders` resolution GET
      followed by `POST /Items/lib1/Refresh` carrying `Recursive=true` and
@@ -325,7 +359,12 @@ discover new files, after which a refresh shows the result.
      grouped-libraries message, and NO `POST /Items/grouped1/Refresh` in
      the mock log (the false-success case this guards is a 204 with
      nothing scanned).
-  3. *Retry lifecycle:* set `failNextItemRefresh` → scan lib1 → error
+  3. *Non-admin at resolution:* set `failNextVirtualFolders` → scan →
+     the FRIENDLY administrator-permission banner (not a raw technical
+     403), and NO refresh POST occurs — this is the step every real
+     non-admin actually hits, since the resolution GET is elevation-gated
+     before the POST is ever reached.
+  4. *Retry lifecycle:* set `failNextItemRefresh` → scan lib1 → error
      banner (admin-refusal message class); scan again → success notice
      shown and the stale failure banner gone (per-attempt exclusivity).
   RED without slice 2 (no menu entry, no request).
@@ -432,3 +471,28 @@ scan per-attempt banner/notice exclusivity + scanlib retry case.
    cases added.
 Non-blocking comment applied: playtest wording now allows the existing
 empty-Home first-section redirect.
+
+**r4 — 2026-07-12 — codex-cli 0.144.1, verdict `reopened`, 3 findings,
+all ADMITTED.** Base `5aa560c`, head `2178344`.
+1. MEDIUM — the elevation-gated `/Library/VirtualFolders` resolution GET
+   meant every real non-admin died there with a raw 403, making the
+   step-(iii) friendly message unreachable. Fixed: scan-scoped
+   `get_virtual_folders` maps FORBIDDEN to the same friendly message;
+   scanlib gained the non-admin-at-resolution case (asserts no POST
+   follows).
+2. MEDIUM — the delayed-success E2E was unimplementable (the mock serves
+   only lib1's `ParentId`, so library B's grid would 400) and no case
+   exercised `navEpoch` gating of the SUCCESSFUL content leg. Fixed:
+   per-view mock collections; the case split into content-leg (A
+   present) and fallback (A removed) phases with B's-cards-unreplaced
+   assertions.
+3. MEDIUM — the root-kind/navEpoch fixes weren't guard-proven for detail
+   navigation (both planned cases used goHome/select, which bump existing
+   gens; detail open/close bumps none). Fixed: two detail-focused cases —
+   refresh with detail open over a removed section (root classification),
+   and detail opened mid-delayed-refresh (epoch bump on detail open).
+Non-blocking comments applied: case 1 now also asserts the Home rail
+re-fetch (Home content leg); merged type-grid leg recorded as an accepted
+E2E gap (shares the section-grid implementation; owner playtest covers
+it); Emby `/Library/VirtualFolders/Query` variant recorded as a version
+note with visible-failure fallback semantics.
