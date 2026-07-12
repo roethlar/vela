@@ -43,12 +43,12 @@ Server-side scan triggers exist on all three backends:
   `.agents/plans/show-last-episode-sort.md`): Emby accepts the identical
   refresh call; a refusal degrades to the error banner, non-fatal. Vela is
   Plex-first and the owner is currently testing JF; no Emby server is
-  available to verify. Version note: Emby's generated 4.9 reference also
-  documents a flavor-specific `/Library/VirtualFolders/Query` (Items
-  wrapper) — the plan uses the bare `/Library/VirtualFolders` route, which
-  current compatibility evidence supports; if a real Emby rejects it, the
-  scan errors visibly (no false success) and the flavor-specific route is
-  the recorded follow-up.
+  available to verify. The resolver route is flavor-branched (design
+  §Slice 2.3(i)): Emby's documented endpoint is
+  `/Library/VirtualFolders/Query` with an `Items` wrapper, unlike
+  Jellyfin's bare-array `/Library/VirtualFolders`; Vela follows each
+  flavor's documentation, and an Emby mismatch in practice errors visibly
+  (no false success).
 
 These are two features that pair: **refresh** re-asks the server what it
 already knows (fixes the restart annoyance); **scan** tells the server to go
@@ -106,12 +106,34 @@ discover new files, after which a refresh shows the result.
        (Reloading here would, e.g., replace filtered search results with
        the full type listing under a Search crumb.)
    - **Disappearance fallback (one forced-Home path):** applies ONLY when
-     the snapshot's visible-root kind is `section-grid` (and its section
-     key is missing from the new list) or `type-grid` (and its type no
-     longer exists among the tabs derived from the new list) — never for
-     `home`/`search`/`person`/`drill`/`detail` roots, whatever residual
+     the snapshot's visible-root kind is `section-grid` AND the refresh
+     ran in a SINGLE-SOURCE scope (an `activeSource` is set, or exactly
+     one source is configured) AND the section key is missing from the
+     new list. Completeness is the precondition: a single-source
+     `get_sections` either errors (→ the error contract; no
+     reconciliation) or returns that source's complete list, so "missing"
+     really means deleted. A MERGED-scope aggregate is partial BY DESIGN —
+     `get_sections` skips failing sources and errors only when all fail
+     (`commands.rs:964-996` aggregate semantics) — so absence proves
+     nothing there and NO disappearance fallback runs for `type-grid`
+     roots (which only exist in the merged multi-source scope,
+     `+page.svelte:1224`) or any merged refresh: a transient failure of
+     one server must not yank the user Home. Accepted edge (recorded in
+     Non-goals): a library genuinely deleted mid-merged-view leaves the
+     user on its grid until they navigate; the content-leg reload still
+     runs and shows the surviving items. Never for
+     `home`/`search`/`person`/`drill` roots, whatever residual
      `active`/`activeType` state they retain. Gated on `navEpoch`
-     unchanged. The routine is a SINGLE forced-Home: goHome's state reset
+     unchanged.
+   - **Detail over a vanished library:** when the snapshot root is
+     `detail`, the detail surface itself is never touched — but if the
+     HIDDEN browse state beneath it is a single-source-scope section grid
+     whose section vanished (same completeness precondition as above),
+     reconcile that hidden state to Home at settlement (same snapshot
+     epoch gate): the detail stays open, and closing it reveals Home
+     (the detail crumb bar degrades to its existing Back-only-over-Home
+     form) instead of an orphaned grid for a library that no longer
+     exists. The routine is a SINGLE forced-Home: goHome's state reset
      plus one unconditional Home re-fetch (bump `homeGen`, fetch) — NOT
      `goHome()` followed by `loadHome(++homeGen)`, which would
      double-fetch when hubs happen to be empty, and NOT bare `goHome()`,
@@ -168,15 +190,23 @@ discover new files, after which a refresh shows the result.
    prefer `POST` — record only; no dual-verb logic.
 3. **Jellyfin/Emby (shared client)** — one exact production chain, in
    `JellyfinSource::scan_library(view_id)`:
-   - **(i) Target resolution:** GET `/Library/VirtualFolders` via a
-     scan-scoped client helper (`get_virtual_folders`) that mirrors
-     `get_json`'s auth/timeout/401 handling but ALSO maps `FORBIDDEN` to
-     the same friendly administrator-permission message as step (iii) —
-     the resolution GET is itself elevation-gated, so a NON-ADMIN'S SCAN
-     DIES HERE, before the POST: without this mapping every non-admin
-     would see a raw technical 403 error and the step-(iii) friendly
-     message would be unreachable in practice. (Admin-gated like the scan
-     itself, so no new privilege is required.)
+   - **(i) Target resolution:** a scan-scoped client helper
+     (`get_virtual_folders`) that mirrors `get_json`'s auth/timeout/401
+     handling but ALSO maps `FORBIDDEN` to the same friendly
+     administrator-permission message as step (iii) — the resolution GET
+     is itself elevation-gated, so a NON-ADMIN'S SCAN DIES HERE, before
+     the POST: without this mapping every non-admin would see a raw
+     technical 403 error and the step-(iii) friendly message would be
+     unreachable in practice. (Admin-gated like the scan itself, so no
+     new privilege is required.) **The route branches by `Flavor`
+     (`jellyfin.rs:33-40`):** Jellyfin → `GET /Library/VirtualFolders`
+     (bare JSON array); Emby → `GET /Library/VirtualFolders/Query` with
+     an `Items` envelope, per Emby's own 4.9 REST reference — mandating
+     Jellyfin's bare route for both would make every docs-conforming Emby
+     server 404 before the POST. Each envelope gets a serde parse unit
+     test; the Emby branch stays live-unverified (no Emby server
+     available) but is now aligned WITH its documentation rather than
+     against it, and any real-world failure still surfaces visibly.
      Find the `VirtualFolderInfo` whose `ItemId` equals the raw view id —
      for an ordinary library the user-view id IS the virtual folder's
      `ItemId`, and that `ItemId` is what jellyfin-web's own dashboard
@@ -256,6 +286,11 @@ discover new files, after which a refresh shows the result.
 - No scan of synthetic grouped Jellyfin user views — Vela refuses with an
   explicit message (scanning the underlying physical folders of a grouped
   view is out of scope until an owner asks).
+- No disappearance fallback in the merged multi-source scope: its section
+  aggregate is partial by design when a source transiently fails, so
+  absence there is not evidence of deletion. A genuinely deleted library
+  leaves the merged grid in place (content reload shows survivors) until
+  the user navigates.
 
 ## Verification
 - **Unit (guard-proven red→green; every test targets the PRODUCTION
@@ -295,14 +330,25 @@ discover new files, after which a refresh shows the result.
   `mockjf.mjs:114-139` — with an ignore-pagination mock, an
   implementation that appends instead of replacing would pass). The
   scenario SEEDS a non-empty Latest rail so Home has cached content to go
-  stale. Cases, one app session, in sequence (each asserts only after the
-  refresh control re-enables — the action-settled signal):
+  stale. Cases run in ONE app session in this exact order —
+  non-destructive first, view-destroying last, with EXPLICIT state
+  restoration (re-add the removed view + collection, then run one
+  settling Refresh) between the destructive phases; each case asserts
+  only after the refresh control re-enables (the action-settled signal):
   1. *Sidebar + Home rails:* on Home → mutate the Latest seed AND push a
-     second view (library B, with its own movie collection) → Refresh →
-     the new sidebar entry appears without restart AND the Home rail
-     reflects the mutated Latest (the `home` content leg re-fetches; a
-     sidebar-only implementation fails the rail assertion).
-  2. *Visible grid replaced from offset zero:* open library A's grid →
+     second view (library B, with its own movie collection; A and B both
+     exist from here on) → Refresh → the new sidebar entry appears
+     without restart AND the Home rail reflects the mutated Latest (the
+     `home` content leg re-fetches; a sidebar-only implementation fails
+     the rail assertion).
+  2. *Mixed-success aggregation (contract (b)), on Home:* set
+     `failNextViews` → Refresh → the mock log shows the HOME leg's
+     request succeeded, yet the banner reports the sections failure — a
+     successful sibling leg must not mask it (on a grid root the content
+     leg DEPENDS on the sections result, so only the Home root runs two
+     independent legs and can prove this). Refresh again → banner clears,
+     content current (contracts (a)+(c)).
+  3. *Visible grid replaced from offset zero:* open library A's grid →
      `state.addMovie(A, ...)` AND `state.removeMovie(A, ...)` an existing
      one → Refresh → the post-refresh listing request carries
      `StartIndex=0`, the new card appears, the removed card is GONE, and
@@ -310,11 +356,8 @@ discover new files, after which a refresh shows the result.
      (count + titles) — WITHOUT re-entering the library. Appending or
      reloading from a stale offset fails the exact-set assertion (the
      post-scan pairing case, non-vacuous by construction).
-  3. *Failure then success:* set `failNextViews` → Refresh → settled →
-     error banner shows; Refresh again → banner clears and content is
-     current (contract (a)–(c)).
-  4. *Navigation wins (error):* set `failNextViews` + `viewsDelayMs` →
-     Refresh → navigate (open a library / go Home) while the refresh is
+  4. *Navigation wins (error):* on A's grid, set `failNextViews` +
+     `viewsDelayMs` → Refresh → navigate (go Home) while the refresh is
      in flight → the delayed failure must NOT surface a banner after
      navigation (contract (d), `navEpoch`).
   5. *Navigation wins (content leg):* browsing library A (A still
@@ -323,27 +366,43 @@ discover new files, after which a refresh shows the result.
      visible, unreplaced (a content-leg reload not gated on `navEpoch`
      would overwrite B's grid with A's listing), and no error banner or
      mock contract violation was recorded.
-  6. *Navigation wins (fallback):* same as 5 but with A removed from
-     `state.views` before the Refresh → the delayed response must NOT
-     force Home; B's grid stays (the disappearance fallback is
-     `navEpoch`-gated).
-  7. *Detail root is not a grid root:* open a card's detail surface (the
-     harness already drives it — `openDetailAndPlay`,
-     `tests/e2e/helpers.mjs:92`) → remove the underlying library from
-     `state.views` → Refresh → the detail surface STAYS OPEN with no
-     forced Home (visible-root kind `detail`: no content leg, no
-     fallback, whatever residual `active` points at).
-  8. *Detail opened mid-refresh:* browsing A → set `failNextViews` +
-     `viewsDelayMs` → Refresh → open an A card's detail while in
-     flight → the detail remains open and the delayed failure surfaces NO
-     banner after settlement (detail open/close must bump `navEpoch`;
-     goHome/select-based navigation alone cannot prove this — those paths
-     already bump the existing gens).
+  6. *Detail opened mid-refresh:* browsing A → set `failNextViews` +
+     `viewsDelayMs` → Refresh → open an A card's detail while in flight
+     (the harness already drives the detail surface —
+     `openDetailAndPlay`, `tests/e2e/helpers.mjs:92`) → the detail
+     remains open and the delayed failure surfaces NO banner after
+     settlement (detail OPEN must bump `navEpoch`; goHome/select-based
+     navigation alone cannot prove this — those paths already bump the
+     existing gens).
+  7. *Detail closed mid-refresh:* with detail open over A → set
+     `failNextViews` + `viewsDelayMs` → Refresh → close the detail (Back)
+     while in flight → NO banner is published over the revealed grid
+     after settlement (detail CLOSE must bump `navEpoch` too — an
+     open-only implementation passes case 6 but fails this one).
+  8. *Navigation wins (fallback), destructive:* browsing A → set
+     `viewsDelayMs`, remove A from `state.views` → Refresh → open
+     library B while in flight → the delayed response must NOT force
+     Home; B's grid stays (the disappearance fallback is
+     `navEpoch`-gated). RESTORE A, settling Refresh.
+  9. *Positive deleted-library fallback, destructive:* browsing A with NO
+     further navigation → remove A's view → record the mock's hub-request
+     count → Refresh → app lands on Home (or the standard empty-Home
+     redirect) AND the mock log shows a NEW hub fetch after the refresh.
+     Because Home rails were seeded non-empty, `goHome`'s hubs-empty
+     conditional alone will NOT re-fetch — an implementation with no
+     fallback, or bare `goHome()`, fails here (non-vacuous by
+     construction). RESTORE A, settling Refresh.
+  10. *Detail over a removed library, destructive:* open an A card's
+     detail → remove A's view → Refresh → the detail surface STAYS OPEN
+     with no forced Home (root kind `detail`) → THEN press Back → it
+     reveals HOME (the hidden parent was reconciled), not the dead grid
+     of a library with no sidebar entry.
   RED without slice 1 (no refresh control exists to click).
   Recorded gap: the merged `type-grid` content leg is not E2E-covered
   (needs a second mock server à la `mergedview.mjs`); it shares the
   reconcile implementation with `section-grid`, and the owner playtest is
   the behavioral check — same accepted class as the item-detail flows.
+  The merged scope's NO-fallback rule is likewise playtest-covered.
 - **E2E `scanlib.mjs`:** mock gains `GET /Library/VirtualFolders`
   (returns one entry with `ItemId: 'lib1'`, matching the served view) and
   answers `POST /Items/{id}/Refresh` with 204 (requests are already
@@ -496,3 +555,34 @@ re-fetch (Home content leg); merged type-grid leg recorded as an accepted
 E2E gap (shares the section-grid implementation; owner playtest covers
 it); Emby `/Library/VirtualFolders/Query` variant recorded as a version
 note with visible-failure fallback semantics.
+
+**r5 — 2026-07-12 — codex-cli 0.144.1, verdict `reopened`, 7 findings,
+all ADMITTED** (count rose because the r4 amendments created new
+surface — including one regression the coder introduced). Base
+`5aa560c`, head `fb96562`.
+1. MEDIUM — merged-scope disappearance was inferred from a PARTIAL
+   aggregate (`get_sections` skips failing sources by design), so a
+   transient one-server failure would force Home. Fixed: disappearance
+   fallback now requires the single-source completeness precondition;
+   merged scope gets NO fallback (recorded non-goal / accepted edge).
+2. MEDIUM — r4 dropped the POSITIVE deleted-library case, leaving only
+   must-not-run guards (a no-fallback implementation would pass). Fixed:
+   restored as case 9 with the hub-request-count assertion.
+3. MEDIUM — preserving detail over a removed library orphaned the hidden
+   parent grid (Back revealed a dead view). Fixed: hidden-parent
+   reconciliation to Home at settlement; case 10 asserts through Back.
+4. MEDIUM — detail CLOSE was outside the navEpoch guard proof. Fixed:
+   case 7 (close mid-refresh, no banner over the revealed grid).
+5. MEDIUM — the one-session case order destroyed state later cases
+   needed. Fixed: explicit order (destructive last) + restore-and-settle
+   steps between destructive phases.
+6. MEDIUM — the failure-then-success case ran on a grid root, where the
+   content leg depends on sections, so contract (b) (sibling success
+   must not mask failure) was never exercised. Fixed: moved to Home
+   (case 2), asserting the Home leg succeeded while the banner reports
+   the sections failure.
+7. MEDIUM — the Emby resolver mandated Jellyfin's bare route against
+   Emby's own documented `/Library/VirtualFolders/Query` + `Items`
+   envelope. Fixed: flavor-branched resolver with per-envelope serde
+   unit tests; Emby branch remains live-unverified but docs-aligned,
+   failures visible.
