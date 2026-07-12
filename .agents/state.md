@@ -6,8 +6,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Now
 
-- **LIBRARY-REFRESH-SCAN: plan in codex plan-review loop, PAUSED after
-  r7 pending the owner's convergence call, 2026-07-12**
+- **LIBRARY-REFRESH-SCAN: APPROVED — implementation in progress
+  (owner "go" 2026-07-12).** Loop closed at r7 by owner decision:
+  implement both slices per the plan as frozen at `3306c7f`, then run
+  the standard codex code reviewloop on the diff (repo history: code
+  loops converge r1-r2). Superseded loop detail below stands as the
+  review record.
   (`.agents/plans/library-refresh-scan.md` — refresh button +
   per-library server scan trigger; owner ask 2026-07-12 while testing
   Jellyfin). Seven rounds run, 34 findings, all ADMITTED and fixed, no

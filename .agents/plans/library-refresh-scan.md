@@ -1,8 +1,11 @@
 # Plan: library view refresh + server library-scan trigger (owner ask, 2026-07-12)
 
 ## Status
-**DRAFT — in codex plan-review loop; not owner-approved; no implementation
-until the owner approves.** Owner ask (2026-07-12, while testing Jellyfin):
+**APPROVED — owner "go" 2026-07-12. Review loop closed at r7 on the
+owner's implement-then-code-review call: residual review moves to the
+standard codex code reviewloop on the implementation diff; E2E RED
+checks settle test-vacuity questions mechanically. Implementation in
+progress.** Owner ask (2026-07-12, while testing Jellyfin):
 (1) "there's no way to refresh the library view in vela … there needs to be
 a refresh option"; (2) "can we trigger a library scan from within vela?"
 followed by "plan" on the agent's refresh-first/scan-second scoping.
