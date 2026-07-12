@@ -25,13 +25,19 @@ Server-side scan triggers exist on all three backends:
   key is the numeric Plex section id Vela already holds). Requires the
   server owner's token; a shared user gets 401. The owner's linked account
   owns the server, so this works for the primary use case.
-- **Jellyfin:** `POST /Items/{viewId}/Refresh` with
-  `Recursive=true&MetadataRefreshMode=Default&ImageRefreshMode=Default&ReplaceAllImages=false&ReplaceAllMetadata=false`
-  — the call Jellyfin's own web UI "Scan Library" button makes. The raw
-  section key IS the view id (`jellyfin.rs sections()`, `namespace_key(&self.id,
-  &v.id)` at `src-tauri/src/source/jellyfin.rs:784`). Admin-gated
-  (RequiresElevation): a non-admin user gets 403, which must surface
-  politely, not crash.
+- **Jellyfin:** `POST /Items/{itemId}/Refresh` (with the jellyfin-web
+  scan-dialog params) — but the reliable `itemId` is the physical
+  library's `VirtualFolderInfo.ItemId` from `GET /Library/VirtualFolders`,
+  which is what jellyfin-web's dashboard scan uses. For an ordinary
+  (ungrouped) library, the `/Users/{id}/Views` id Vela already holds as
+  the raw section key (`jellyfin.rs sections()`,
+  `namespace_key(&self.id, &v.id)` at `src-tauri/src/source/jellyfin.rs:784`)
+  equals that `ItemId`. But Jellyfin can serve SYNTHETIC grouped user
+  views ("group into one view" server option): posting Refresh at a
+  synthetic view id returns success while scanning nothing. The scan path
+  therefore resolves the target through `/Library/VirtualFolders` first
+  (design §Slice 2.3). Both endpoints are admin-gated (RequiresElevation):
+  a non-admin user gets 403, which must surface politely, not crash.
 - **Emby:** same client code path and same endpoints as Jellyfin.
   **ASSUMPTION** (same class as the JF/Emby notes in
   `.agents/plans/show-last-episode-sort.md`): Emby accepts the identical
@@ -48,45 +54,67 @@ discover new files, after which a refresh shows the result.
 ### Slice 1 — library view refresh (frontend-only)
 1. **`refreshLibraries()` in `+page.svelte`:** one user action that
    refreshes the section list AND the content the user is looking at.
+   - **Navigation epoch (new):** a single counter, `navEpoch`, bumped by
+     EVERY user navigation — `select`/`selectType`, `goHome`, running a
+     search, opening a person view, drilling into children, opening or
+     closing the detail surface, and source switches. It exists because
+     the current generations don't cover all navigation: in-source
+     navigation bumps `loadGen` but not `sourceGen`, and detail
+     open/close bumps none of them — a delayed refresh outcome could
+     otherwise force Home or publish a banner underneath a view the user
+     navigated to meanwhile. ALL refresh reconciliation — the content
+     leg, the disappearance fallback, and the final error publication —
+     is gated on `navEpoch` being unchanged from the action-start
+     snapshot (the sidebar `sections` swap alone stays
+     `sourceGen`-gated: a fresher section list is valid regardless of
+     navigation).
    - At action start: clear the shared `error` banner once (the action
-     owns its status — contract below) and SNAPSHOT the navigation state
-     it will reconcile against (mode, `active?.key`, `activeType`, plus
-     the current `loadGen`/`sourceGen`/`homeGen` values it issues).
+     owns its status — contract below) and SNAPSHOT the state it will
+     reconcile against: the `navEpoch`, the VISIBLE-ROOT KIND — exactly
+     one of `home | section-grid | type-grid | search | person | drill |
+     detail` — plus the root's identity (`active?.key` for
+     `section-grid`, `activeType` for `type-grid`). The kind must be
+     derived from what is actually visible, not from residual state:
+     `goHome` leaves `active` set (line 396-409) and a search retains
+     `activeType` (line 603-623), so "has an active section/type" does
+     NOT mean "is looking at that grid".
    - Re-fetch sections: bump `sourceGen`, fetch WITHOUT clearing
      `sections` first (unlike `loadEverything`, which blanks the sidebar
      for a source switch — a refresh must not flash the nav; the gen
      counter already discards a stale in-flight response).
-   - **Content-leg precedence — exactly one of, chosen from the visible
-     root captured at action start:**
-     - *Home* (`mode === "home"`) → re-fetch the Home data set
-       (hubs/recents/tombstones) concurrently with sections.
-     - *Plain library grid root* (`mode === "browse"`, an active section,
-       crumbs at the section root, no search/person/drill context) →
-       after the current-generation sections response lands
-       (`sg === sourceGen`) and the section still exists, reload the grid
-       from offset zero with the current sort, replacing the items —
-       gen-gated so navigation performed meanwhile wins. Without this, a
-       post-scan refresh would update the sidebar but leave the grid
-       stale — the "scan then refresh" pairing this plan promises.
-     - *Merged type grid root* (`mode === "browse"`, `activeType` set with
-       no active section, no search/person/drill context) → same, via the
-       type-listing reload.
-     - *Search results, person view, or any drill level (children of a
-       show/season)* → NO content leg. These views are query-scoped, not
-       library-list-scoped; refresh updates the sidebar only and leaves
-       the visible content untouched. (Reloading here would, e.g., replace
-       filtered search results with the full type listing under a Search
-       crumb.)
-   - **Disappearance fallback (one forced-Home path):** if the snapshot's
-     active section key is missing from the new section list, or the
-     snapshot's `activeType` no longer exists among the type tabs derived
-     from the new list (the last library of that type was removed), run a
-     SINGLE forced-Home routine: goHome's state reset plus one
-     unconditional Home re-fetch (bump `homeGen`, fetch) — NOT
-     `goHome()` followed by `loadHome(++homeGen)`, which would double-fetch
-     when hubs happen to be empty, and NOT bare `goHome()`, whose
-     hubs-empty conditional (line 408) would keep cached rails that may
-     still feature the removed library.
+   - **Content-leg precedence — exactly one, chosen by the snapshot's
+     visible-root kind:**
+     - `home` → re-fetch the Home data set (hubs/recents/tombstones)
+       concurrently with sections.
+     - `section-grid` → after the current-generation sections response
+       lands (`sg === sourceGen`) and the section still exists, reload
+       the grid from offset zero with the current sort, REPLACING the
+       items (not appending; the reset half of the existing
+       reset-vs-append listing machinery) — `navEpoch`-gated so
+       navigation performed meanwhile wins. Without this, a post-scan
+       refresh would update the sidebar but leave the grid stale — the
+       "scan then refresh" pairing this plan promises.
+     - `type-grid` → same, via the type-listing reload.
+     - `search`, `person`, `drill`, `detail` → NO content leg. These
+       views are query-scoped, not library-list-scoped; refresh updates
+       the sidebar only and leaves the visible content untouched.
+       (Reloading here would, e.g., replace filtered search results with
+       the full type listing under a Search crumb.)
+   - **Disappearance fallback (one forced-Home path):** applies ONLY when
+     the snapshot's visible-root kind is `section-grid` (and its section
+     key is missing from the new list) or `type-grid` (and its type no
+     longer exists among the tabs derived from the new list) — never for
+     `home`/`search`/`person`/`drill`/`detail` roots, whatever residual
+     `active`/`activeType` state they retain. Gated on `navEpoch`
+     unchanged. The routine is a SINGLE forced-Home: goHome's state reset
+     plus one unconditional Home re-fetch (bump `homeGen`, fetch) — NOT
+     `goHome()` followed by `loadHome(++homeGen)`, which would
+     double-fetch when hubs happen to be empty, and NOT bare `goHome()`,
+     whose hubs-empty conditional (line 408) would keep cached rails that
+     may still feature the removed library. (After landing, the existing
+     empty-Home redirect at lines 328-340 may auto-open the first
+     remaining section when the scoped source has no rails — accepted,
+     existing behavior.)
    - **Error-lifecycle contract** (observable, guard-tested): the refresh
      legs are ACTION-LOCAL — no leg writes or clears the shared `error`
      itself (today `loadSections` publishes directly on failure, line
@@ -97,9 +125,9 @@ discover new files, after which a refresh shows the result.
      clears any prior banner; (b) if any leg failed, the aggregated banner
      shows that failure even when sibling legs succeeded; (c) a later
      successful refresh clears a stale failure banner (via (a)); (d) the
-     aggregate publishes only if the snapshot generations are still
-     current — a refresh superseded by navigation stays silent
-     (navigation wins).
+     aggregate publishes only if the snapshot's `navEpoch` is still
+     current — a refresh superseded by ANY navigation (including opening
+     a detail page) stays silent (navigation wins).
 2. **UI:** an icon button beside the "Library" group heading in the sidebar
    (`.sidegroup`, `+page.svelte:1223` — becomes a flex row), aria-label
    "Refresh libraries", `title` tooltip. New `refresh` glyph in
@@ -133,29 +161,45 @@ discover new files, after which a refresh shows the result.
    **Version note:** `GET` is the long-standing verb (Plex Web still uses
    it; Plex staff confirm it stays backward-compatible) though newer docs
    prefer `POST` — record only; no dual-verb logic.
-3. **Jellyfin/Emby (shared client):** new `post_empty(segments, query)`
-   helper mirroring `get_json` (`jellyfin.rs:113`) for status/timeout/auth
-   handling but building the URL via the existing `build_url`
-   (`jellyfin.rs:239`) — **never raw path interpolation**. `build_url`
-   percent-encodes each path segment, so a hostile view id
-   (`../System/Shutdown?x=`, backslashes, fragments) cannot escape the
-   `/Items/{id}/Refresh` shape into a different authenticated endpoint —
-   this matters here more than on the GET paths because the scan call
-   carries admin-capable credentials. Status mapping: `UNAUTHORIZED →
-   RECONNECT_REQUIRED`, plus `FORBIDDEN → "the server refused the scan
-   (administrator permission required)"` so the JF non-admin case reads as
-   policy, not failure. **The tested surface is the production URL
-   builder:** the client gains `scan_url(&self, view_id) -> String`
-   (composing `build_url(&["Items", view_id, "Refresh"], &scan_query())`),
-   and `JellyfinSource::scan_library` is a thin call that posts to
-   `self.scan_url(view_id)` — unit tests target `scan_url` itself, NOT
-   `build_url` in isolation: a hostile-id test against the pre-existing
-   generic helper would stay green even if `scan_library` interpolated the
-   raw id (the repo's vacuous-guard rule). Query set: `Recursive=true`,
-   `MetadataRefreshMode=Default`, `ImageRefreshMode=Default`,
-   `ReplaceAllImages=false`, `ReplaceAllMetadata=false`,
-   `RegenerateTrickplay=false` (the set jellyfin-web's scan dialog sends),
-   returned by a pure `scan_query()` for unit testing.
+3. **Jellyfin/Emby (shared client)** — one exact production chain, in
+   `JellyfinSource::scan_library(view_id)`:
+   - **(i) Target resolution:** GET `/Library/VirtualFolders` (existing
+     `get_json`; admin-gated like the scan itself, so no new privilege).
+     Find the `VirtualFolderInfo` whose `ItemId` equals the raw view id —
+     for an ordinary library the user-view id IS the virtual folder's
+     `ItemId`, and that `ItemId` is what jellyfin-web's own dashboard
+     scan posts to. No match means the section is a SYNTHETIC grouped
+     user view: return `Err("this library groups multiple server
+     libraries; scan them individually from the server dashboard")` — an
+     honest, observable refusal instead of the false "Scan started" a
+     blind POST at the synthetic id would produce.
+   - **(ii) URL construction:** `JellyfinClient::scan_url(&self, item_id)
+     -> Result<String, String>` — REJECTS empty, `"."`, and `".."` ids
+     before building (the `url` crate's `PathSegmentsMut::extend`, used
+     by `build_url`, silently DROPS exact dot segments — url 2.5.8
+     documented behavior — so `".."` would otherwise collapse the path to
+     `/Items/Refresh` instead of staying one encoded segment); then
+     composes `build_url(&["Items", item_id, "Refresh"], &scan_query())`
+     (`build_url`, `jellyfin.rs:239`, percent-encodes each segment, so a
+     hostile id like `../System/Shutdown?x=` — path-shaped, backslashes,
+     fragments — cannot escape the `/Items/{id}/Refresh` shape into a
+     different authenticated endpoint; this matters more than on the GET
+     paths because the scan call carries admin-capable credentials).
+     **Never raw path interpolation.** Unit tests target `scan_url`
+     itself, NOT `build_url` in isolation — a hostile-id test against
+     the pre-existing generic helper would stay green even if the scan
+     path interpolated the raw id (the repo's vacuous-guard rule).
+   - **(iii) Dispatch:** `JellyfinClient::post_empty_url(&self, url)`
+     owns the POST mechanics — auth headers, 15s timeout (mirroring
+     `get_json`, `jellyfin.rs:113`), status mapping `UNAUTHORIZED →
+     RECONNECT_REQUIRED` plus `FORBIDDEN → "the server refused the scan
+     (administrator permission required)"` so the JF non-admin case reads
+     as policy, not failure.
+   - Query set: `Recursive=true`, `MetadataRefreshMode=Default`,
+     `ImageRefreshMode=Default`, `ReplaceAllImages=false`,
+     `ReplaceAllMetadata=false`, `RegenerateTrickplay=false` (the set
+     jellyfin-web's scan dialog sends), returned by a pure `scan_query()`
+     for unit testing.
    **Version note:** current Jellyfin servers default
    `RegenerateTrickplay=false` and no longer declare `Recursive` on the
    controller; unknown/undeclared params are ignored server-side, so this
@@ -197,6 +241,9 @@ discover new files, after which a refresh shows the result.
 - No mock support for Plex-flavor scan in E2E (the harness's mock is
   JF-shaped; Plex path is covered by unit test + owner playtest, the same
   split the repo already accepts for sort-key mapping).
+- No scan of synthetic grouped Jellyfin user views — Vela refuses with an
+  explicit message (scanning the underlying physical folders of a grouped
+  view is out of scope until an owner asks).
 
 ## Verification
 - **Unit (guard-proven red→green; every test targets the PRODUCTION
@@ -206,16 +253,18 @@ discover new files, after which a refresh shows the result.
     beside it): exact `/library/sections/{key}/refresh` shape for a valid
     id, and REJECTION of hostile keys — empty, `all`, `1/../2`,
     `12?force=1`, `12#f`, `1\2`, non-digits (via `validate_plex_id`).
-  - JF `scan_url` (the client method `scan_library` posts to, not
-    `build_url` in isolation): a valid view id yields
-    `…/Items/<id>/Refresh` carrying the full `scan_query` param set
-    (`Recursive=true`, both refresh modes `Default`, both
-    `ReplaceAll*=false`, `RegenerateTrickplay=false`); a hostile view id
-    (`../System/Shutdown?x=`, backslash, fragment) stays ONE encoded path
-    segment — the result still matches `…/Items/<encoded>/Refresh` with no
-    raw `../`, `?`, or `#` from the id. Guard proof: replace `scan_url`'s
-    body with raw `format!` interpolation → the hostile-id assertions
-    FAIL.
+  - JF `scan_url` (the production step (ii) helper, not `build_url` in
+    isolation): a valid item id yields `…/Items/<id>/Refresh` carrying
+    the full `scan_query` param set (`Recursive=true`, both refresh modes
+    `Default`, both `ReplaceAll*=false`, `RegenerateTrickplay=false`); a
+    hostile id (`../System/Shutdown?x=`, backslash, fragment) stays ONE
+    encoded path segment — the result still matches
+    `…/Items/<encoded>/Refresh` with no raw `../`, `?`, or `#` from the
+    id; and REJECTION (`Err`) of empty, `"."`, and `".."` ids — the `url`
+    crate drops exact dot segments, so without local rejection `".."`
+    would silently collapse the path to `/Items/Refresh`. Guard proof:
+    replace `scan_url`'s body with raw `format!` interpolation → the
+    hostile-id and dot-segment assertions FAIL.
 - **E2E `libraryrefresh.mjs`:** `mockjf.mjs` gains scenario-mutable
   machinery: `state.views` (today hardcoded, `mockjf.mjs:100`; initialize
   to the current single view — existing scenarios unaffected); a
@@ -223,41 +272,63 @@ discover new files, after which a refresh shows the result.
   collection AND initializes the associated `byId`/`userData` entries
   coherently (the raw arrays are closure-held snapshots today,
   `mockjf.mjs:29-49` — pushing on an exposed array alone would leave
-  `toJson` reading missing `userData` and 500 the next listing); a
-  one-shot `state.failNextViews` flag (500 on the next `/Users/{id}/Views`)
-  and a `state.viewsDelayMs` knob. The scenario SEEDS a non-empty Latest
-  rail so Home has cached content to go stale. Cases, one app session, in
+  `toJson` reading missing `userData` and 500 the next listing) and a
+  matching `state.removeMovie(id)`; a one-shot `state.failNextViews` flag
+  (500 on the next `/Users/{id}/Views`) and a `state.viewsDelayMs` knob;
+  and the Items listing handler HONORS `StartIndex`/`Limit` (today it
+  ignores `StartIndex` and returns everything, `mockjf.mjs:114-139` —
+  with an ignore-pagination mock, an implementation that appends instead
+  of replacing would pass). The scenario SEEDS a non-empty Latest rail so
+  Home has cached content to go stale. Cases, one app session, in
   sequence (each asserts only after the refresh control re-enables — the
   action-settled signal):
   1. *Sidebar:* load → one library → push a second view → Refresh → new
      sidebar entry appears without restart.
-  2. *Visible grid:* open the library grid → `state.addMovie(...)` →
-     Refresh → the new card appears WITHOUT re-entering the library (the
-     post-scan pairing case).
+  2. *Visible grid replaced from offset zero:* open the library grid →
+     `state.addMovie(...)` AND `state.removeMovie(...)` an existing one →
+     Refresh → the post-refresh listing request carries `StartIndex=0`,
+     the new card appears, the removed card is GONE, and the visible card
+     set matches the mock's current collection exactly (count + titles) —
+     WITHOUT re-entering the library. Appending or reloading from a stale
+     offset fails the exact-set assertion (the post-scan pairing case,
+     non-vacuous by construction).
   3. *Failure then success:* set `failNextViews` → Refresh → settled →
      error banner shows; Refresh again → banner clears and content is
      current (contract (a)–(c)).
-  4. *Navigation wins:* set `failNextViews` + `viewsDelayMs` → Refresh →
-     navigate (open the library / go Home) while the refresh is in
-     flight → the delayed failure must NOT surface a banner after
-     navigation (contract (d)).
-  5. *Deleted active library:* while browsing it, remove its view from
+  4. *Navigation wins (error):* set `failNextViews` + `viewsDelayMs` →
+     Refresh → navigate (open the library / go Home) while the refresh is
+     in flight → the delayed failure must NOT surface a banner after
+     navigation (contract (d), `navEpoch`).
+  5. *Navigation wins (fallback):* browsing library A → set
+     `viewsDelayMs`, remove A from `state.views` → Refresh → immediately
+     open library B while the sections response is in flight → the
+     delayed response must NOT force Home; B's grid stays (the
+     disappearance fallback is `navEpoch`-gated).
+  6. *Deleted active library:* while browsing it, remove its view from
      `state.views` → record the mock's hub-request count → Refresh → app
      lands on Home AND the mock log shows a NEW hub fetch after the
      refresh. Because Home rails were seeded non-empty, `goHome`'s
      hubs-empty conditional alone will NOT re-fetch — this assertion fails
      unless the forced-Home path exists (non-vacuous by construction).
   RED without slice 1 (no refresh control exists to click).
-- **E2E `scanlib.mjs`:** mock answers `POST /Items/{id}/Refresh` with 204
-  (requests are already recorded, `mockjf.mjs:93`) plus a one-shot
-  `state.failNextItemRefresh` flag (403). Scenario: right-click the
-  library sidebar entry → "Scan library" → poll `mock.state.requests` for
-  `POST /Items/lib1/Refresh` carrying `Recursive=true` and
-  `RegenerateTrickplay=false` → assert the transient notice rendered.
-  Then the retry lifecycle: set `failNextItemRefresh` → scan → error
-  banner (admin-refusal message class); scan again → success notice shown
-  and the stale failure banner gone (per-attempt exclusivity). RED without
-  slice 2 (no menu entry, no request).
+- **E2E `scanlib.mjs`:** mock gains `GET /Library/VirtualFolders`
+  (returns one entry with `ItemId: 'lib1'`, matching the served view) and
+  answers `POST /Items/{id}/Refresh` with 204 (requests are already
+  recorded, `mockjf.mjs:93`), plus a one-shot `state.failNextItemRefresh`
+  flag (403). Cases:
+  1. *Happy path:* right-click the library sidebar entry → "Scan
+     library" → the mock log shows the `VirtualFolders` resolution GET
+     followed by `POST /Items/lib1/Refresh` carrying `Recursive=true` and
+     `RegenerateTrickplay=false` → the transient notice rendered.
+  2. *Grouped view refused:* add a second view (`Id: 'grouped1'`) with NO
+     matching `VirtualFolders` entry → scan it → error banner with the
+     grouped-libraries message, and NO `POST /Items/grouped1/Refresh` in
+     the mock log (the false-success case this guards is a 204 with
+     nothing scanned).
+  3. *Retry lifecycle:* set `failNextItemRefresh` → scan lib1 → error
+     banner (admin-refusal message class); scan again → success notice
+     shown and the stale failure banner gone (per-attempt exclusivity).
+  RED without slice 2 (no menu entry, no request).
 - Full local CI set (`npm run check`, `npm run build`; from `src-tauri/`:
   `cargo check --locked`, `cargo clippy --all-targets --locked -- -D
   warnings`, `cargo test --locked`); full E2E suite on the owner's Linux VM
@@ -266,7 +337,9 @@ discover new files, after which a refresh shows the result.
   it appears without restart; right-click a JF library → Scan library →
   JF dashboard shows the scan running; same scan on Plex (owner token) →
   Plex shows the section scanning; delete/hide a library server-side →
-  Refresh while browsing it → Vela lands on Home instead of a dead grid.
+  Refresh while browsing it → Vela lands on Home (or, when the scoped
+  source has no Home rails, on the app's standard empty-Home redirect to
+  the first remaining library) instead of a dead grid.
 
 ## Review log
 Plan-review loop (playbook `reviewloop`, adapted to plan review; reviewer
@@ -325,3 +398,37 @@ gaps.
 Non-blocking comments applied: single forced-Home fetch path (no
 goHome+loadHome double-fetch — folded into the disappearance fallback);
 scan per-attempt banner/notice exclusivity + scanlib retry case.
+
+**r3 — 2026-07-12 — codex-cli 0.144.1, verdict `reopened`, 5 findings +
+1 LOW, all ADMITTED.** Base `5aa560c`, head `c4d6d50`.
+1. HIGH — JF user-view ids are unreliable scan targets: synthetic grouped
+   views accept the POST and scan nothing (false "Scan started").
+   Fixed: scan resolves the physical library via `/Library/VirtualFolders`
+   `ItemId` (jellyfin-web parity, same admin privilege); no match →
+   explicit grouped-view refusal (new non-goal records the boundary);
+   scanlib E2E gained the grouped-view case.
+2. MEDIUM — r2 left an internal contradiction (`post_empty(segments,
+   query)` vs a prebuilt `scan_url`; `build_url` lives on the client, not
+   the source). Fixed: one exact production chain —
+   `client.scan_url(item_id)?` → `client.post_empty_url(&url)` — with
+   ownership stated per step.
+3. MEDIUM — the disappearance fallback triggered on residual
+   `active`/`activeType` (Home retains `active`, search retains
+   `activeType`), forcing Home from views the plan promised to leave
+   alone. Fixed: snapshot captures an explicit visible-root KIND; the
+   fallback applies only to `section-grid`/`type-grid` roots.
+4. MEDIUM — generation gating didn't cover all navigation (in-source nav
+   bumps only `loadGen`; detail open/close bumps nothing). Fixed: new
+   `navEpoch` bumped by every navigation gates the content leg, the
+   fallback, and error publication; E2E gained the delayed-success
+   navigate-to-B case.
+5. MEDIUM — the visible-grid E2E couldn't distinguish replace-from-zero
+   from append (mock ignored `StartIndex`). Fixed: mock honors
+   pagination; case asserts `StartIndex=0`, exact card set, and that a
+   removed movie's card disappears.
+6. LOW — `url::PathSegmentsMut::extend` silently drops exact `.`/`..`
+   segments, falsifying the one-encoded-segment invariant for `".."`.
+   Fixed: `scan_url` is fallible and rejects empty/`.`/`..` ids; unit
+   cases added.
+Non-blocking comment applied: playtest wording now allows the existing
+empty-Home first-section redirect.
