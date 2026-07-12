@@ -6,8 +6,11 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Now
 
-- **LIBRARY-REFRESH-SCAN: APPROVED — implementation in progress
-  (owner "go" 2026-07-12).** Loop closed at r7 by owner decision:
+- **LIBRARY-REFRESH-SCAN: both slices committed — verification in
+  progress (owner "go" 2026-07-12; slice 1 `2609579`, slice 2
+  `46277a5`).** Local CI green at slice 2 commit (fmt/clippy/cargo
+  test 78 passed, svelte-check 0/0, prettier); VM E2E suite + codex
+  diff reviewloop pending. Loop closed at r7 by owner decision:
   implement both slices per the plan as frozen at `3306c7f`, then run
   the standard codex code reviewloop on the diff (repo history: code
   loops converge r1-r2). Superseded loop detail below stands as the
@@ -209,9 +212,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   decisions resolved, parked at queue bottom)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner
   playtest)
-- `.agents/plans/library-refresh-scan.md` (APPROVED at r7 — slice 1
-  frontend committed; slice 2 scan trigger + VM E2E + codex diff review
-  pending)
+- `.agents/plans/library-refresh-scan.md` (APPROVED at r7 — slices 1+2
+  committed `2609579` + `46277a5`; VM E2E + codex diff review pending)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)
