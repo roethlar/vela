@@ -90,7 +90,14 @@ discover new files, after which a refresh shows the result.
    - **Content-leg precedence — exactly one, chosen by the snapshot's
      visible-root kind:**
      - `home` → re-fetch the Home data set (hubs/recents/tombstones)
-       concurrently with sections.
+       concurrently with sections. The Home leg CLAIMS a new `homeGen`
+       (like every existing Home load, `+page.svelte:371-393`) and
+       applies data/loading only for that generation plus the captured
+       `navEpoch` — without the claim, an older in-flight Home load
+       (startup, source switch) could overwrite the refreshed rails
+       after settlement, or publish its stale failure over a successful
+       refresh. Its error still aggregates action-locally (contract
+       below), never via `loadHome`'s own publish path.
      - `section-grid` → after the current-generation sections response
        lands (`sg === sourceGen`) and the section still exists, reload
        the grid from offset zero with the current sort, REPLACING the
@@ -105,15 +112,14 @@ discover new files, after which a refresh shows the result.
        the sidebar only and leaves the visible content untouched.
        (Reloading here would, e.g., replace filtered search results with
        the full type listing under a Search crumb.)
-   - **Disappearance fallback (one forced-Home path):** applies ONLY when
-     the snapshot's visible-root kind is `section-grid` AND the refresh
-     ran in a SINGLE-SOURCE scope (an `activeSource` is set, or exactly
-     one source is configured) AND the section key is missing from the
-     new list. Completeness is the precondition: a single-source
-     `get_sections` either errors (→ the error contract; no
-     reconciliation) or returns that source's complete list, so "missing"
-     really means deleted. A MERGED-scope aggregate is partial BY DESIGN —
-     `get_sections` skips failing sources and errors only when all fail
+   - **Disappearance fallback (one forced-Home path):** runs at
+     settlement of a COMPLETE single-source sections response (an
+     `activeSource` is set, or exactly one source is configured): a
+     single-source `get_sections` either errors (→ the error contract;
+     no reconciliation) or returns that source's complete list, so
+     "missing" really means deleted. A MERGED-scope aggregate is partial
+     BY DESIGN — `get_sections` skips failing sources, surfacing an
+     error only when the combined result is empty and a source failed
      (`commands.rs:964-996` aggregate semantics) — so absence proves
      nothing there and NO disappearance fallback runs for `type-grid`
      roots (which only exist in the merged multi-source scope,
@@ -121,19 +127,32 @@ discover new files, after which a refresh shows the result.
      one server must not yank the user Home. Accepted edge (recorded in
      Non-goals): a library genuinely deleted mid-merged-view leaves the
      user on its grid until they navigate; the content-leg reload still
-     runs and shows the surviving items. Never for
-     `home`/`search`/`person`/`drill` roots, whatever residual
-     `active`/`activeType` state they retain. Gated on `navEpoch`
-     unchanged.
-   - **Detail over a vanished library:** when the snapshot root is
-     `detail`, the detail surface itself is never touched — but if the
-     HIDDEN browse state beneath it is a single-source-scope section grid
-     whose section vanished (same completeness precondition as above),
-     reconcile that hidden state to Home at settlement (same snapshot
-     epoch gate): the detail stays open, and closing it reveals Home
+     runs and shows the surviving items.
+     **The fallback's gate is CURRENT ROOT IDENTITY, not the epoch:** at
+     settlement, apply the forced-Home cleanup iff the browse root AT
+     THAT MOMENT — the visible one, or the one hidden under an open
+     detail — is a section grid rooted on the now-missing key. A pure
+     `navEpoch` gate is wrong in both directions here: it would let a
+     pre-navigation snapshot force Home after the user moved to B
+     (r3's fix), but it would ALSO discard a cleanup the user still
+     needs when the only mid-flight "navigation" was opening or closing
+     a detail over the SAME dead section — leaving the sidebar without A
+     while A's orphaned grid sits on or under the screen. Root-identity
+     matching handles both: still rooted on the missing section (bare,
+     or under detail) → clean up; moved to B/Home/search/anything else →
+     untouched. Never applies to `home`/`search`/`person`/`drill` roots.
+     When the dead root is hidden under an open detail, the detail
+     surface itself is never touched: reconcile the HIDDEN state to Home
      (the detail crumb bar degrades to its existing Back-only-over-Home
-     form) instead of an orphaned grid for a library that no longer
-     exists. The routine is a SINGLE forced-Home: goHome's state reset
+     form), so closing the detail reveals Home instead of the orphan.
+   - **Empty-Home redirect deferral:** the existing empty-Home effect
+     (`+page.svelte:328-340`) auto-opens the first section when Home has
+     no rails — and `select()` clears `detailView`. If the forced-Home
+     cleanup lands under an open detail while the scoped Home is empty,
+     that effect would CLOSE the detail the rule above promises to
+     preserve and open some other library beneath the user. The redirect
+     must not run while `detailView` is open; it may fire normally once
+     the detail closes. The routine is a SINGLE forced-Home: goHome's state reset
      plus one unconditional Home re-fetch (bump `homeGen`, fetch) — NOT
      `goHome()` followed by `loadHome(++homeGen)`, which would
      double-fetch when hubs happen to be empty, and NOT bare `goHome()`,
@@ -203,10 +222,16 @@ discover new files, after which a refresh shows the result.
      (bare JSON array); Emby → `GET /Library/VirtualFolders/Query` with
      an `Items` envelope, per Emby's own 4.9 REST reference — mandating
      Jellyfin's bare route for both would make every docs-conforming Emby
-     server 404 before the POST. Each envelope gets a serde parse unit
-     test; the Emby branch stays live-unverified (no Emby server
-     available) but is now aligned WITH its documentation rather than
-     against it, and any real-world failure still surfaces visibly.
+     server 404 before the POST. The branch itself is a tested
+     PRODUCTION selector — a pure `vf_route(flavor) -> (path,
+     envelope-kind)` (or equivalent) that `get_virtual_folders`
+     consumes — unit-tested for BOTH flavor values with a branch-flip
+     guard proof (swap the match arms → both tests fail); envelope parse
+     tests alone would stay green while Emby silently rode Jellyfin's
+     route. Each envelope also gets a serde parse unit test; the Emby
+     branch stays live-unverified (no Emby server available) but is
+     aligned WITH its documentation rather than against it, and any
+     real-world failure still surfaces visibly.
      Find the `VirtualFolderInfo` whose `ItemId` equals the raw view id —
      for an ordinary library the user-view id IS the virtual folder's
      `ItemId`, and that `ItemId` is what jellyfin-web's own dashboard
@@ -264,7 +289,14 @@ discover new files, after which a refresh shows the result.
    routes to the existing `error` banner. **Per-attempt exclusivity:**
    initiating a scan clears any prior scan-produced banner and notice, so
    a failed attempt followed by a successful retry shows the success
-   notice alone, never beside the stale failure. No auto-refresh afterward — the
+   notice alone, never beside the stale failure. **Latest-attempt
+   ownership:** scan attempts carry a generation (`scanGen`); only the
+   LATEST attempt's outcome may publish its notice/banner or arm the
+   auto-clear timer — otherwise a slow scan A completing after a quick
+   scan B would overwrite B's status with stale news (out-of-order
+   completions). The menu entry for a section with a scan already in
+   flight is disabled as feedback; correctness comes from the
+   generation, not the disable. No auto-refresh afterward — the
    scan is asynchronous server-side and completion is unknowable without
    polling (non-goal); the slice-1 button is the companion action.
    Type tabs in the merged multi-source scope get no menu (no single
@@ -312,6 +344,11 @@ discover new files, after which a refresh shows the result.
     would silently collapse the path to `/Items/Refresh`. Guard proof:
     replace `scan_url`'s body with raw `format!` interpolation → the
     hostile-id and dot-segment assertions FAIL.
+  - JF/Emby `vf_route` (the production resolver-route selector consumed
+    by `get_virtual_folders`): both flavor arms asserted (Jellyfin →
+    bare `/Library/VirtualFolders`; Emby → `/Library/VirtualFolders/
+    Query` + `Items` envelope), plus serde parse tests for each envelope
+    shape. Guard proof: swapping the match arms fails both tests.
 - **E2E `libraryrefresh.mjs`:** `mockjf.mjs` gains scenario-mutable
   machinery: `state.views` (today hardcoded, `mockjf.mjs:100`; initialize
   to the current single view — existing scenarios unaffected) with
@@ -368,12 +405,12 @@ discover new files, after which a refresh shows the result.
      mock contract violation was recorded.
   6. *Detail opened mid-refresh:* browsing A → set `failNextViews` +
      `viewsDelayMs` → Refresh → open an A card's detail while in flight
-     (the harness already drives the detail surface —
-     `openDetailAndPlay`, `tests/e2e/helpers.mjs:92`) → the detail
-     remains open and the delayed failure surfaces NO banner after
-     settlement (detail OPEN must bump `navEpoch`; goHome/select-based
-     navigation alone cannot prove this — those paths already bump the
-     existing gens).
+     (the detail-OPEN half of the interaction `openDetailAndPlay` drives,
+     `tests/e2e/helpers.mjs:92` — WITHOUT its play step; factor the
+     helper or inline the open) → the detail remains open and the
+     delayed failure surfaces NO banner after settlement (detail OPEN
+     must bump `navEpoch`; goHome/select-based navigation alone cannot
+     prove this — those paths already bump the existing gens).
   7. *Detail closed mid-refresh:* with detail open over A → set
      `failNextViews` + `viewsDelayMs` → Refresh → close the detail (Back)
      while in flight → NO banner is published over the revealed grid
@@ -396,13 +433,51 @@ discover new files, after which a refresh shows the result.
      detail → remove A's view → Refresh → the detail surface STAYS OPEN
      with no forced Home (root kind `detail`) → THEN press Back → it
      reveals HOME (the hidden parent was reconciled), not the dead grid
-     of a library with no sidebar entry.
+     of a library with no sidebar entry. RESTORE A, settling Refresh.
+  11. *Deletion racing a detail OPEN, destructive:* browsing A → set
+     `viewsDelayMs` (success, no failure flag), remove A's view →
+     Refresh → open an A card's detail while the response is in
+     flight → at settlement the sidebar drops A AND the hidden parent
+     reconciles (Back → Home, not A's orphan) — the root-identity gate:
+     a pure epoch gate would discard this cleanup because detail-open
+     bumped `navEpoch`. RESTORE A, settling Refresh.
+  12. *Deletion racing a detail CLOSE, destructive:* open an A card's
+     detail → set `viewsDelayMs`, remove A's view → Refresh → press
+     Back while in flight → at settlement the revealed root reconciles
+     to Home (still rooted on the missing key), not A's orphan grid.
+     RESTORE A, settling Refresh.
+  13. *Empty-Home redirect deferral, destructive:* empty the Latest
+     seed (Home rails empty) → open an A card's detail → remove A's
+     view → Refresh → the detail STAYS OPEN (the empty-Home
+     `select(sections[0])` redirect, `+page.svelte:328-340`, must be
+     deferred while `detailView` is open — it would otherwise close the
+     detail and open library B underneath) → Back → the standard
+     empty-Home redirect may now fire (B's grid or Home both valid).
+     RESTORE A and the Latest seed, settling Refresh.
+  14. *Stale older Home load, non-destructive:* arm one-shot
+     `state.delayNextLatestMs` + `state.failNextLatest` → trigger a
+     plain Home load that consumes them (an in-flight, slow, WILL-FAIL
+     Home fetch) → immediately Refresh on Home → the refresh's Home leg
+     (new `homeGen`) completes: rails present, and the older load's
+     late failure publishes NO banner and overwrites nothing (the Home
+     leg must CLAIM a generation; an unclaimed leg lets the stale
+     result land).
   RED without slice 1 (no refresh control exists to click).
-  Recorded gap: the merged `type-grid` content leg is not E2E-covered
-  (needs a second mock server à la `mergedview.mjs`); it shares the
-  reconcile implementation with `section-grid`, and the owner playtest is
-  the behavioral check — same accepted class as the item-detail flows.
-  The merged scope's NO-fallback rule is likewise playtest-covered.
+  Mock knob additions for the above: `state.viewsDelayMs`, one-shot
+  `state.delayNextLatestMs` + `state.failNextLatest`, and the mutable
+  Latest seed.
+- **E2E `mergedrefresh.mjs` (two mock sources, harness pattern from
+  `mergedview.mjs`):** covers the merged-scope behaviors no
+  single-source case can:
+  1. *Merged type-grid reload:* All scope → open the Movies type grid →
+     `addMovie` on mock 2 → Refresh → the new card appears without
+     re-entering (the `type-grid` content leg).
+  2. *Partial aggregate must not force Home:* browsing the merged type
+     grid → one-shot fail mock 2's `/Users/{id}/Views` → Refresh → the
+     user is NOT forced Home (merged scope runs no disappearance
+     fallback; a transient one-server failure is indistinguishable from
+     deletion in a partial aggregate), and the surviving source's
+     content still renders.
 - **E2E `scanlib.mjs`:** mock gains `GET /Library/VirtualFolders`
   (returns one entry with `ItemId: 'lib1'`, matching the served view) and
   answers `POST /Items/{id}/Refresh` with 204 (requests are already
@@ -413,11 +488,12 @@ discover new files, after which a refresh shows the result.
      library" → the mock log shows the `VirtualFolders` resolution GET
      followed by `POST /Items/lib1/Refresh` carrying `Recursive=true` and
      `RegenerateTrickplay=false` → the transient notice rendered.
-  2. *Grouped view refused:* add a second view (`Id: 'grouped1'`) with NO
-     matching `VirtualFolders` entry → scan it → error banner with the
-     grouped-libraries message, and NO `POST /Items/grouped1/Refresh` in
-     the mock log (the false-success case this guards is a 204 with
-     nothing scanned).
+  2. *Grouped view refused:* a second view (`Id: 'grouped1'`) with NO
+     matching `VirtualFolders` entry — seeded BEFORE app launch (or
+     added live followed by a Refresh) so its sidebar entry exists to
+     right-click → scan it → error banner with the grouped-libraries
+     message, and NO `POST /Items/grouped1/Refresh` in the mock log (the
+     false-success case this guards is a 204 with nothing scanned).
   3. *Non-admin at resolution:* set `failNextVirtualFolders` → scan →
      the FRIENDLY administrator-permission banner (not a raw technical
      403), and NO refresh POST occurs — this is the step every real
@@ -426,6 +502,14 @@ discover new files, after which a refresh shows the result.
   4. *Retry lifecycle:* set `failNextItemRefresh` → scan lib1 → error
      banner (admin-refusal message class); scan again → success notice
      shown and the stale failure banner gone (per-attempt exclusivity).
+  5. *Out-of-order completions:* the mock serves a second scannable
+     library (`lib2` view + matching `VirtualFolders` entry) and a
+     one-shot `state.itemRefreshDelayMs`. Arm the delay → scan lib1
+     (slow) → immediately scan lib2 (fast) → lib2's success notice
+     appears; when lib1's delayed response lands, the published status
+     must NOT change (latest-attempt `scanGen` ownership — a stale
+     attempt may not overwrite the newer one's banner/notice or re-arm
+     the auto-clear timer).
   RED without slice 2 (no menu entry, no request).
 - Full local CI set (`npm run check`, `npm run build`; from `src-tauri/`:
   `cargo check --locked`, `cargo clippy --all-targets --locked -- -D
@@ -586,3 +670,35 @@ surface — including one regression the coder introduced). Base
    envelope. Fixed: flavor-branched resolver with per-envelope serde
    unit tests; Emby branch remains live-unverified but docs-aligned,
    failures visible.
+
+**r6 — 2026-07-12 — codex-cli 0.144.1, verdict `reopened`, 6 findings,
+all ADMITTED; codex confirmed the r5 fixes sound.** Base `5aa560c`,
+head `4b9686f`. LOOP PAUSED after this round on the owner's
+instruction (session restart); resume = fix-verify round r7.
+1. MEDIUM — a pure `navEpoch` gate on the disappearance fallback
+   SUPPRESSES cleanup when the mid-flight "navigation" was a detail
+   open/close over the same dead section (sidebar drops A, A's orphan
+   grid remains). Fixed: the fallback's gate is now CURRENT ROOT
+   IDENTITY at settlement (visible or hidden under detail), not the
+   epoch; cases 11-12 guard the two transition races.
+2. MEDIUM — the empty-Home `select(sections[0])` redirect would CLOSE a
+   preserved detail and open another library when the reconciled Home is
+   empty. Fixed: redirect deferred while `detailView` is open; case 13.
+3. MEDIUM — the Home refresh leg claimed no `homeGen`, so an older
+   in-flight Home load could overwrite refreshed rails or publish a
+   stale failure. Fixed: the leg claims a generation like every Home
+   load; case 14 with one-shot delay/fail knobs.
+4. MEDIUM — concurrent scans could publish out-of-order status. Fixed:
+   latest-attempt `scanGen` ownership of notice/banner/timer (+ menu
+   disable as feedback); scanlib case 5.
+5. MEDIUM — the Emby route branch wasn't guard-proven (envelope parse
+   tests pass while Emby rides Jellyfin's route). Fixed: production
+   `vf_route(flavor)` selector with branch-flip guard proof.
+6. MEDIUM — merged type-grid reload and no-fallback had NO verification
+   step anywhere (claimed playtest didn't list them). Fixed: new
+   two-mock `mergedrefresh.mjs` (reload + partial-aggregate-no-Home).
+Non-blocking comments applied: aggregate error-semantics wording
+corrected (errors when the combined result is empty AND a source
+failed); case 6 opens detail without `openDetailAndPlay`'s play half;
+scanlib's grouped view seeded before launch (or refreshed into the
+sidebar) before right-clicking it.

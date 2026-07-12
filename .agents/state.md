@@ -6,11 +6,18 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Now
 
-- **LIBRARY-REFRESH-SCAN: plan drafted 2026-07-12, in codex plan-review
-  loop** (`.agents/plans/library-refresh-scan.md` — refresh button +
+- **LIBRARY-REFRESH-SCAN: plan in codex plan-review loop, PAUSED after
+  r6 on the owner's instruction (session restart), 2026-07-12**
+  (`.agents/plans/library-refresh-scan.md` — refresh button +
   per-library server scan trigger; owner ask 2026-07-12 while testing
-  Jellyfin). NOT owner-approved; no implementation until the owner
-  approves after loop convergence. Round trail in the plan's Review log.
+  Jellyfin). Six rounds run, all findings ADMITTED and fixed, no repeat
+  findings; NOT yet converged (r6 reopened) and NOT owner-approved; no
+  implementation until the owner approves after convergence. Resume =
+  dispatch review round r7 against current HEAD: reviewer `codex exec
+  --sandbox read-only -o <outfile>` one-shot with prompt on stdin
+  (0.144.1, mac host), whole-plan fresh-eyes review, JSON verdict
+  contract + full round trail in the plan's Review log. The owner also
+  asked for the plan's exec summary in chat once the loop converges.
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted
