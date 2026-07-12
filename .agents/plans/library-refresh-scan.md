@@ -48,38 +48,58 @@ discover new files, after which a refresh shows the result.
 ### Slice 1 — library view refresh (frontend-only)
 1. **`refreshLibraries()` in `+page.svelte`:** one user action that
    refreshes the section list AND the content the user is looking at.
-   - Clear the shared `error` banner once, at action start (the action owns
-     its status — see the error-lifecycle contract below).
-   - Re-fetch sections: bump `sourceGen`, call `loadSections(sg)` WITHOUT
-     clearing `sections` first (unlike `loadEverything`, which blanks the
-     sidebar for a source switch — a refresh must not flash the nav; the
-     gen counter already discards a stale in-flight response).
-   - **Mode `"home"`:** also re-fetch hubs/recents (the `loadHome` fetch
-     set) concurrently. Already on Home, so a `mode = "home"` write is a
-     no-op.
-   - **Mode `"browse"`:** after the CURRENT-generation sections response
-     lands (`sg === sourceGen`), reconcile the visible content:
-     - active section (or merged type view) still exists → reload the
-       visible grid from offset zero with the current sort, replacing the
-       items (the `loadGen`-guarded listing machinery; gen-gate the reload
-       so navigation performed meanwhile wins and a stale listing response
-       is discarded). Without this, a post-scan refresh would update the
-       sidebar but leave the grid stale — the exact "scan then refresh"
-       pairing this plan promises.
-     - active section's key no longer present → the library was deleted
-       server-side; `goHome()` and FORCE a hub re-fetch (bump `homeGen`,
-       call `loadHome` unconditionally — `goHome`'s hubs-empty conditional
-       at line 408 would otherwise show cached rails that may still feature
-       the removed library).
-   - **Error-lifecycle contract** (observable, guard-tested): (a) clicking
-     Refresh clears any prior banner; (b) if any refresh leg fails, the
-     banner shows that failure even when a sibling leg succeeded — a
-     successful leg must never null a sibling's error (note `loadHome`
-     today sets `error = null` on entry, line 374: the hub leg invoked from
-     refresh must not route through that clearing, e.g. by parameterizing
-     it or inlining the hub fetch); (c) a later successful refresh clears
-     the stale failure banner (via (a)); (d) errors publish only if the
-     action's generations are still current.
+   - At action start: clear the shared `error` banner once (the action
+     owns its status — contract below) and SNAPSHOT the navigation state
+     it will reconcile against (mode, `active?.key`, `activeType`, plus
+     the current `loadGen`/`sourceGen`/`homeGen` values it issues).
+   - Re-fetch sections: bump `sourceGen`, fetch WITHOUT clearing
+     `sections` first (unlike `loadEverything`, which blanks the sidebar
+     for a source switch — a refresh must not flash the nav; the gen
+     counter already discards a stale in-flight response).
+   - **Content-leg precedence — exactly one of, chosen from the visible
+     root captured at action start:**
+     - *Home* (`mode === "home"`) → re-fetch the Home data set
+       (hubs/recents/tombstones) concurrently with sections.
+     - *Plain library grid root* (`mode === "browse"`, an active section,
+       crumbs at the section root, no search/person/drill context) →
+       after the current-generation sections response lands
+       (`sg === sourceGen`) and the section still exists, reload the grid
+       from offset zero with the current sort, replacing the items —
+       gen-gated so navigation performed meanwhile wins. Without this, a
+       post-scan refresh would update the sidebar but leave the grid
+       stale — the "scan then refresh" pairing this plan promises.
+     - *Merged type grid root* (`mode === "browse"`, `activeType` set with
+       no active section, no search/person/drill context) → same, via the
+       type-listing reload.
+     - *Search results, person view, or any drill level (children of a
+       show/season)* → NO content leg. These views are query-scoped, not
+       library-list-scoped; refresh updates the sidebar only and leaves
+       the visible content untouched. (Reloading here would, e.g., replace
+       filtered search results with the full type listing under a Search
+       crumb.)
+   - **Disappearance fallback (one forced-Home path):** if the snapshot's
+     active section key is missing from the new section list, or the
+     snapshot's `activeType` no longer exists among the type tabs derived
+     from the new list (the last library of that type was removed), run a
+     SINGLE forced-Home routine: goHome's state reset plus one
+     unconditional Home re-fetch (bump `homeGen`, fetch) — NOT
+     `goHome()` followed by `loadHome(++homeGen)`, which would double-fetch
+     when hubs happen to be empty, and NOT bare `goHome()`, whose
+     hubs-empty conditional (line 408) would keep cached rails that may
+     still feature the removed library.
+   - **Error-lifecycle contract** (observable, guard-tested): the refresh
+     legs are ACTION-LOCAL — no leg writes or clears the shared `error`
+     itself (today `loadSections` publishes directly on failure, line
+     366-368, `resetAndLoad`-style listing loads and `goHome` clear it on
+     entry — the refresh action must not reuse those error paths as-is;
+     parameterize or inline). `refreshLibraries` aggregates its legs'
+     outcomes and publishes ONCE, at action end: (a) clicking Refresh
+     clears any prior banner; (b) if any leg failed, the aggregated banner
+     shows that failure even when sibling legs succeeded; (c) a later
+     successful refresh clears a stale failure banner (via (a)); (d) the
+     aggregate publishes only if the snapshot generations are still
+     current — a refresh superseded by navigation stays silent
+     (navigation wins).
 2. **UI:** an icon button beside the "Library" group heading in the sidebar
    (`.sidegroup`, `+page.svelte:1223` — becomes a flex row), aria-label
    "Refresh libraries", `title` tooltip. New `refresh` glyph in
@@ -107,7 +127,9 @@ discover new files, after which a refresh shows the result.
    `ensure_ready` → on-error `rediscover` retry used by `sections()`
    (`src-tauri/src/source/plex.rs:283`). A small pure fn builds the path
    (`scan_path(key) -> Result<String, String>`, validation folded in) so
-   the endpoint shape and the rejections are unit-testable.
+   the endpoint shape and the rejections are unit-testable — and the
+   production request MUST be built through `scan_path` (a hand-formatted
+   path beside it would make the test vacuous).
    **Version note:** `GET` is the long-standing verb (Plex Web still uses
    it; Plex staff confirm it stays backward-compatible) though newer docs
    prefer `POST` — record only; no dual-verb logic.
@@ -122,12 +144,18 @@ discover new files, after which a refresh shows the result.
    carries admin-capable credentials. Status mapping: `UNAUTHORIZED →
    RECONNECT_REQUIRED`, plus `FORBIDDEN → "the server refused the scan
    (administrator permission required)"` so the JF non-admin case reads as
-   policy, not failure. `JellyfinSource::scan_library` posts
-   `["Items", view_id, "Refresh"]` with query `Recursive=true`,
+   policy, not failure. **The tested surface is the production URL
+   builder:** the client gains `scan_url(&self, view_id) -> String`
+   (composing `build_url(&["Items", view_id, "Refresh"], &scan_query())`),
+   and `JellyfinSource::scan_library` is a thin call that posts to
+   `self.scan_url(view_id)` — unit tests target `scan_url` itself, NOT
+   `build_url` in isolation: a hostile-id test against the pre-existing
+   generic helper would stay green even if `scan_library` interpolated the
+   raw id (the repo's vacuous-guard rule). Query set: `Recursive=true`,
    `MetadataRefreshMode=Default`, `ImageRefreshMode=Default`,
    `ReplaceAllImages=false`, `ReplaceAllMetadata=false`,
-   `RegenerateTrickplay=false` (the set jellyfin-web's scan dialog sends).
-   A pure fn returns the param list (`scan_query()`) for unit testing.
+   `RegenerateTrickplay=false` (the set jellyfin-web's scan dialog sends),
+   returned by a pure `scan_query()` for unit testing.
    **Version note:** current Jellyfin servers default
    `RegenerateTrickplay=false` and no longer declare `Recursive` on the
    controller; unknown/undeclared params are ignored server-side, so this
@@ -147,7 +175,10 @@ discover new files, after which a refresh shows the result.
    library"** → `invoke("scan_section", { sectionKey })`. Success sets a
    transient neutral notice ("Scan started: <title>", auto-clears ~4s,
    rendered beside/like the error banner but not error-styled); failure
-   routes to the existing `error` banner. No auto-refresh afterward — the
+   routes to the existing `error` banner. **Per-attempt exclusivity:**
+   initiating a scan clears any prior scan-produced banner and notice, so
+   a failed attempt followed by a successful retry shows the success
+   notice alone, never beside the stale failure. No auto-refresh afterward — the
    scan is asynchronous server-side and completion is unknowable without
    polling (non-goal); the slice-1 button is the companion action.
    Type tabs in the merged multi-source scope get no menu (no single
@@ -168,42 +199,65 @@ discover new files, after which a refresh shows the result.
   split the repo already accepts for sort-key mapping).
 
 ## Verification
-- **Unit (guard-proven red→green):**
-  - Plex `scan_path`: exact `/library/sections/{key}/refresh` shape for a
-    valid id, and REJECTION of hostile keys — empty, `all`, `1/../2`,
+- **Unit (guard-proven red→green; every test targets the PRODUCTION
+  helper the request is built through — reverting that helper's body to
+  naive interpolation/formatting must turn the test RED):**
+  - Plex `scan_path` (used by `scan_library`, no hand-formatted path
+    beside it): exact `/library/sections/{key}/refresh` shape for a valid
+    id, and REJECTION of hostile keys — empty, `all`, `1/../2`,
     `12?force=1`, `12#f`, `1\2`, non-digits (via `validate_plex_id`).
-  - JF `scan_query`: the full param set (`Recursive=true`, both refresh
-    modes `Default`, both `ReplaceAll*=false`, `RegenerateTrickplay=false`).
-  - JF URL construction: a hostile view id (`../System/Shutdown?x=`)
-    passed through `build_url(["Items", id, "Refresh"], …)` stays ONE
-    encoded path segment — the result still matches
-    `…/Items/<encoded>/Refresh` and contains no raw `../` or `?` from the
-    id.
-- **E2E `libraryrefresh.mjs`:** `mockjf.mjs` gains mutable state the
-  scenario can edit live: `state.views` (today hardcoded,
-  `mockjf.mjs:100`; initialize to the current single view — existing
-  scenarios unaffected), the movie list already in `state`, and a one-shot
-  `state.failNextViews` flag (500 on the next `/Users/{id}/Views`).
-  Scenario, one app session, four cases in sequence:
+  - JF `scan_url` (the client method `scan_library` posts to, not
+    `build_url` in isolation): a valid view id yields
+    `…/Items/<id>/Refresh` carrying the full `scan_query` param set
+    (`Recursive=true`, both refresh modes `Default`, both
+    `ReplaceAll*=false`, `RegenerateTrickplay=false`); a hostile view id
+    (`../System/Shutdown?x=`, backslash, fragment) stays ONE encoded path
+    segment — the result still matches `…/Items/<encoded>/Refresh` with no
+    raw `../`, `?`, or `#` from the id. Guard proof: replace `scan_url`'s
+    body with raw `format!` interpolation → the hostile-id assertions
+    FAIL.
+- **E2E `libraryrefresh.mjs`:** `mockjf.mjs` gains scenario-mutable
+  machinery: `state.views` (today hardcoded, `mockjf.mjs:100`; initialize
+  to the current single view — existing scenarios unaffected); a
+  `state.addMovie(movie)` operation that appends to the served movie
+  collection AND initializes the associated `byId`/`userData` entries
+  coherently (the raw arrays are closure-held snapshots today,
+  `mockjf.mjs:29-49` — pushing on an exposed array alone would leave
+  `toJson` reading missing `userData` and 500 the next listing); a
+  one-shot `state.failNextViews` flag (500 on the next `/Users/{id}/Views`)
+  and a `state.viewsDelayMs` knob. The scenario SEEDS a non-empty Latest
+  rail so Home has cached content to go stale. Cases, one app session, in
+  sequence (each asserts only after the refresh control re-enables — the
+  action-settled signal):
   1. *Sidebar:* load → one library → push a second view → Refresh → new
      sidebar entry appears without restart.
-  2. *Visible grid:* open the library grid → add a movie to the mock's
-     list → Refresh → the new card appears WITHOUT re-entering the library
-     (the post-scan pairing case).
-  3. *Failure then success:* set `failNextViews` → Refresh → error banner
-     shows; Refresh again → banner clears and content is current (the
-     error-lifecycle contract, (a)–(c)).
-  4. *Deleted active library:* while browsing it, remove its view →
-     Refresh → app lands on Home AND the mock log shows a fresh hub fetch
-     after the refresh (forced `loadHome`, not the cached-rails
-     conditional).
+  2. *Visible grid:* open the library grid → `state.addMovie(...)` →
+     Refresh → the new card appears WITHOUT re-entering the library (the
+     post-scan pairing case).
+  3. *Failure then success:* set `failNextViews` → Refresh → settled →
+     error banner shows; Refresh again → banner clears and content is
+     current (contract (a)–(c)).
+  4. *Navigation wins:* set `failNextViews` + `viewsDelayMs` → Refresh →
+     navigate (open the library / go Home) while the refresh is in
+     flight → the delayed failure must NOT surface a banner after
+     navigation (contract (d)).
+  5. *Deleted active library:* while browsing it, remove its view from
+     `state.views` → record the mock's hub-request count → Refresh → app
+     lands on Home AND the mock log shows a NEW hub fetch after the
+     refresh. Because Home rails were seeded non-empty, `goHome`'s
+     hubs-empty conditional alone will NOT re-fetch — this assertion fails
+     unless the forced-Home path exists (non-vacuous by construction).
   RED without slice 1 (no refresh control exists to click).
 - **E2E `scanlib.mjs`:** mock answers `POST /Items/{id}/Refresh` with 204
-  (requests are already recorded, `mockjf.mjs:93`). Scenario: right-click
-  the library sidebar entry → click "Scan library" → poll
-  `mock.state.requests` for `POST /Items/lib1/Refresh` carrying
-  `Recursive=true` and `RegenerateTrickplay=false` → assert the transient
-  notice rendered. RED without slice 2 (no menu entry, no request).
+  (requests are already recorded, `mockjf.mjs:93`) plus a one-shot
+  `state.failNextItemRefresh` flag (403). Scenario: right-click the
+  library sidebar entry → "Scan library" → poll `mock.state.requests` for
+  `POST /Items/lib1/Refresh` carrying `Recursive=true` and
+  `RegenerateTrickplay=false` → assert the transient notice rendered.
+  Then the retry lifecycle: set `failNextItemRefresh` → scan → error
+  banner (admin-refusal message class); scan again → success notice shown
+  and the stale failure banner gone (per-attempt exclusivity). RED without
+  slice 2 (no menu entry, no request).
 - Full local CI set (`npm run check`, `npm run build`; from `src-tauri/`:
   `cargo check --locked`, `cargo clippy --all-targets --locked -- -D
   warnings`, `cargo test --locked`); full E2E suite on the owner's Linux VM
@@ -240,3 +294,34 @@ all ADMITTED.** Base `5aa560c`, head `489f632`.
 Non-blocking comments applied: diagnosis call-site wording; Plex GET/POST
 and JF `RegenerateTrickplay`/`Recursive` version notes; `.agents/state.md`
 now points at this draft while the loop is active.
+
+**r2 — 2026-07-12 — codex-cli 0.144.1, verdict `reopened`, 5 findings,
+all ADMITTED.** Base `5aa560c`, head `77dc722`. Three are applications of
+the repo's vacuous-guard rule to the plan's own test specs; two are spec
+gaps.
+1. HIGH — the JF hostile-key test targeted the pre-existing generic
+   `build_url`, so an interpolating `scan_library` would still pass.
+   Fixed: production `scan_url` helper is the tested surface; explicit
+   revert-to-interpolation guard proof; same must-use rule stated for
+   Plex `scan_path`.
+2. MEDIUM — browse reconciliation ignored real browse variants (search
+   retains `activeType`; person/drill views; a merged type whose last
+   library vanished). Fixed: explicit content-leg precedence (Home /
+   section grid root / type grid root / no-content-leg for search,
+   person, drill) + one forced-Home disappearance fallback covering both
+   missing section and missing type.
+3. MEDIUM — error contract wasn't connected to the helpers that clear
+   `error` today (`resetAndLoad`/`goHome`), and clause (d) had no guard.
+   Fixed: action-local legs, aggregate-and-publish-once, settle-gated E2E
+   assertions, new navigation-wins E2E case with delayed failing Views.
+4. MEDIUM — the visible-grid E2E assumed a mutable mock movie list that
+   doesn't exist (closure-held snapshots, `userData` preinit). Fixed:
+   specified `state.addMovie(movie)` maintaining `byId`/`userData`
+   coherently.
+5. MEDIUM — the deleted-library E2E was vacuous (default mock rails are
+   empty, so `goHome`'s hubs-empty conditional alone would pass it).
+   Fixed: seed non-empty Latest, count hub requests, require a new fetch
+   after Refresh.
+Non-blocking comments applied: single forced-Home fetch path (no
+goHome+loadHome double-fetch — folded into the disappearance fallback);
+scan per-attempt banner/notice exclusivity + scanlib retry case.
