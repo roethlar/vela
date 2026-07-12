@@ -6,6 +6,11 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Now
 
+- **LIBRARY-REFRESH-SCAN: plan drafted 2026-07-12, in codex plan-review
+  loop** (`.agents/plans/library-refresh-scan.md` — refresh button +
+  per-library server scan trigger; owner ask 2026-07-12 while testing
+  Jellyfin). NOT owner-approved; no implementation until the owner
+  approves after loop convergence. Round trail in the plan's Review log.
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted
@@ -186,6 +191,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   decisions resolved, parked at queue bottom)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner
   playtest)
+- `.agents/plans/library-refresh-scan.md` (DRAFT — in codex plan-review
+  loop, not owner-approved)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)
