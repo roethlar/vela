@@ -180,7 +180,16 @@ export default {
     // lib1's delayed response lands, the published status must NOT change
     // (latest-attempt ownership across ALL sections, not per key).
     mock.state.itemRefreshDelayMs = DELAY;
+    const lib1Before = refreshPosts("lib1").length;
     await scanVia(driver, "Library One"); // POST parked for DELAY ms
+    // The one-shot delay binds to whichever POST ARRIVES first, and scanVia
+    // returns at menu click — before the app's GET→POST chain. Wait until
+    // lib1's POST is logged so lib2's cannot capture the delay and false-pass
+    // the out-of-order case (codex code review r1, finding 3).
+    await pollUntil(
+      async () => (refreshPosts("lib1").length > lib1Before ? true : null),
+      "lib1's POST arrived and captured the one-shot delay",
+    );
     await scanVia(driver, "Library Two"); // responds immediately
     await pollUntil(
       async () => (await notice(driver)) === "Scan started — Library Two",

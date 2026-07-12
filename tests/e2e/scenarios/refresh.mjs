@@ -58,6 +58,9 @@ async function posterLabels(driver) {
     `return [...document.querySelectorAll('button.poster')].map((b) => b.getAttribute('aria-label'))`,
   );
 }
+// Node-side request log (case 14 needs arrival ordering, not UI state).
+const latestGets = () =>
+  mockA.state.requests.filter((r) => r.path.endsWith("/Items/Latest"));
 async function onHome(driver) {
   return driver.exec(
     `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
@@ -490,8 +493,16 @@ export default {
     );
     mockA.state.delayNextLatestMs = DELAY;
     mockA.state.failNextLatest = true;
+    const latestBefore = latestGets().length;
     await clickSide(driver, "Mock JF A"); // plain Home load consumes the flags
-    await clickRefresh(driver); // immediately: refresh claims a NEW homeGen
+    // The flags bind at request ARRIVAL; wait for the older load's Latest to
+    // be logged before refreshing, or the refresh's own Latest request could
+    // capture the delay+failure instead (codex code review r1, finding 2).
+    await pollUntil(
+      async () => (latestGets().length > latestBefore ? true : null),
+      "older Home load's Latest request arrived (flags bound)",
+    );
+    await clickRefresh(driver); // refresh claims a NEW homeGen
     await settle(driver);
     await driver.waitFor(
       `return !!document.querySelector('button.poster[aria-label^="Alpha"]')`,

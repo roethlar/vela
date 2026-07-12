@@ -181,16 +181,19 @@ export function startMockJellyfin({
       });
     }
     if (path === `/Users/${userId}/Items/Latest`) {
+      // BOTH one-shot flags are captured at ARRIVAL so they bind to THIS
+      // request: consuming failure at respond time would hand a delayed older
+      // request's failure to a newer concurrent one (codex code review r1,
+      // finding 2).
+      const fail = state.failNextLatest;
+      if (fail) state.failNextLatest = false; // one-shot
+      const delay = state.delayNextLatestMs;
+      if (delay > 0) state.delayNextLatestMs = 0; // one-shot
       const respond = () => {
-        if (state.failNextLatest) {
-          state.failNextLatest = false; // one-shot
-          return json({ error: "mock Latest failure" }, 500);
-        }
+        if (fail) return json({ error: "mock Latest failure" }, 500);
         return json(state.latest); // bare array, per the Jellyfin API (Recently Added hub)
       };
-      const delay = state.delayNextLatestMs;
       if (delay > 0) {
-        state.delayNextLatestMs = 0; // one-shot
         setTimeout(respond, delay);
         return;
       }

@@ -552,6 +552,14 @@
             }
           } catch (e) {
             legFailures.push({ msg: String(e), current: () => hg === homeGen });
+          } finally {
+            // Claiming `homeGen` above orphans any in-flight plain Home load —
+            // its finally is gen-gated and can no longer clear `loading`. This
+            // leg owns the flag now and must release it, or a load pending at
+            // click time strands the skeleton and blocks the empty-Home
+            // redirect, which is gated on `!loading` (codex code review r1,
+            // finding 1).
+            if (hg === homeGen) loading = false;
           }
         })();
       } else if (kind === "section-grid" || kind === "type-grid") {
@@ -1035,6 +1043,7 @@
   let menu = $state<{ x: number; y: number; item: Item; hero: boolean } | null>(null);
   function openMenu(e: MouseEvent, item: Item, hero = false) {
     e.preventDefault();
+    sectionMenu = null; // only one context menu at a time (codex code review r1, finding 4)
     // Clamp so the menu stays on screen near the right/bottom edges.
     menu = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 160), item, hero };
   }
@@ -1048,6 +1057,7 @@
   let sectionMenu = $state<{ x: number; y: number; section: Section } | null>(null);
   function openSectionMenu(e: MouseEvent, section: Section) {
     e.preventDefault();
+    menu = null; // only one context menu at a time (codex code review r1, finding 4)
     sectionMenu = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 80), section };
   }
   function closeSectionMenu() {
@@ -1692,7 +1702,11 @@
 <svelte:window
   onkeydown={(e) => {
     if (e.key === "Escape") {
+      // Menus first (topmost surfaces), then the drawer, then the detail —
+      // Escape with the scan menu open must not close a detail underneath it
+      // (codex code review r1, finding 4).
       if (menu) closeMenu();
+      else if (sectionMenu) closeSectionMenu();
       else if (queueOpen) toggleQueue();
       else if (detailView) closeDetail();
     }
