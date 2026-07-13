@@ -759,6 +759,25 @@ export default {
     );
     await screenshot("08-no-midrefresh-redirect");
 
+    // ── 18. A refresh that fails must not strand the grid on its skeleton ─
+    // Claiming `loadGen` at the click ORPHANS the in-flight listing: its own
+    // release is generation-gated, so it can no longer clear `loading` /
+    // `loadingMore`. If the action then returns early — sections failed — and
+    // nobody releases them, the grid sits on its skeleton forever, unable to
+    // paginate, until the user navigates away (codex r4).
+    mockA.state.itemsDelayMs = 700; // a listing is in flight at click time...
+    await clickSide(driver, "Library A");
+    mockA.state.failNextViews = true; // ...and the refresh's sections leg dies
+    await clickRefresh(driver);
+    await settle(driver);
+    await pollUntil(
+      async () =>
+        (await driver.exec(`return !document.querySelector('.skelgrid')`))
+          ? true
+          : null,
+      "the grid released its loading skeleton (the action owns the flags it orphaned)",
+    );
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,

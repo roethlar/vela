@@ -591,24 +591,38 @@
         // the sections result), REPLACING the items — the reset half of the
         // listing machinery. `navEpoch`-gated: navigation meanwhile wins.
         contentLeg = (async () => {
-          const list = await sectionsLeg;
-          if (list === null) return; // sections failed or superseded
-          if (epoch !== navEpoch) return; // navigation wins
-          if (kind === "section-grid" && !list.some((sec) => sec.key === rootKey)) {
-            return; // root gone: the disappearance fallback owns this outcome
-          }
           const myGen = gridGen; // claimed at click, above
-          if (myGen !== loadGen) return; // navigation claimed a newer one meanwhile
-          loadingMore = false;
-          offset = 0;
-          hasMore = true;
-          items = [];
-          failedPosters = new Set();
-          loading = true;
-          await loadMore(myGen, (msg) => {
-            legFailures.push({ msg, current: () => myGen === loadGen });
-          });
-          if (myGen === loadGen) loading = false;
+          try {
+            const list = await sectionsLeg;
+            if (list === null) return; // sections failed or superseded
+            if (epoch !== navEpoch) return; // navigation wins
+            if (kind === "section-grid" && !list.some((sec) => sec.key === rootKey)) {
+              return; // root gone: the disappearance fallback owns this outcome
+            }
+            if (myGen !== loadGen) return; // navigation claimed a newer one meanwhile
+            loadingMore = false;
+            offset = 0;
+            hasMore = true;
+            items = [];
+            failedPosters = new Set();
+            loading = true;
+            await loadMore(myGen, (msg) => {
+              legFailures.push({ msg, current: () => myGen === loadGen });
+            });
+          } finally {
+            // Claiming `loadGen` at the click ORPHANED whatever load was in
+            // flight: its own release is generation-gated, so it can no longer
+            // clear `loading`/`loadingMore` — this action owns them now and
+            // MUST release them on EVERY exit, including the early returns
+            // above (sections failed, root gone, navigation won). Otherwise a
+            // refresh whose sections fetch fails leaves the grid stuck on its
+            // skeleton, unable to paginate, until the user navigates away
+            // (codex r4).
+            if (myGen === loadGen) {
+              loading = false;
+              loadingMore = false;
+            }
+          }
         })();
       }
       // search/person/drill/detail roots: sidebar only — those views are
