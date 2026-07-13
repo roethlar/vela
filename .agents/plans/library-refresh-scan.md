@@ -780,3 +780,91 @@ Non-blocking comments applied: aggregate-semantics citation corrected to
 the reviewer against upstream docs; the `scenarios.js` path in the review
 prompt was the operator's error — the loader is `tests/e2e/run.mjs` +
 `tests/e2e/scenarios/`.
+
+## Code review log
+The IMPLEMENTATION diff's review loop (playbook `reviewloop.md`, batch
+adaptation: one round over a pinned commit range, no per-finding branches).
+Reviewer codex, headless one-shot, read-only sandbox, mac host. Distinct
+from the plan-review loop above, which reviewed the PLAN.
+
+**r1 — 2026-07-12 — verdict `reopened`, 4 findings, all ADMITTED and
+fixed (`e9edac8`).** Trail was in the commit message only until r2; recorded
+here retroactively.
+1. The refresh Home leg orphaned the `loading` flag it stole by claiming
+   `homeGen` — a plain Home load pending at click time could no longer clear
+   it (its finally is generation-gated), stranding the skeleton and blocking
+   the `!loading`-gated empty-Home redirect.
+2. `mockjf` bound its Latest fail/delay one-shots at RESPOND time, so a
+   concurrent request could steal a flag armed for another.
+3. `scanlib` did not wait for lib1's parked POST before scanning lib2.
+4. Escape closed the detail before the context menus, and the two menus were
+   not mutually exclusive.
+
+**r2 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 8 findings, all
+MEDIUM.** Base `63560a6` (plan APPROVED), head `ca84f5b` (both slices + the
+r1 fixes + the two E2E commits). `guard_confirmed:false` — read-only, and
+the E2E suite is Linux-only so the reviewer could not run it. Fresh eyes
+over the whole implementation, r1's fixes included. Triage: **7 ADMITTED,
+1 SPLIT (half admitted, half DECLINED)**. Exactly one finding is a
+behavior defect; the other seven are the repo's vacuous-guard rule applied
+to this plan's own required tests — the app is correct, but nothing would
+catch it ceasing to be.
+
+- **lrs-1 (ADMITTED) — the empty-Home redirect silently swallows a refresh
+  failure.** When a refresh's sections leg fails AND its Home leg returns
+  empty, `hubs` becomes `[]`, the empty-Home `$effect`
+  (`+page.svelte:329`) fires `select(sections[0])`, and `select`'s
+  `navEpoch++` makes the action's publish gate (`+page.svelte:599`) read
+  "the user navigated" — so the sections failure is suppressed and the user
+  lands in a grid built from the STALE section list with no error. The
+  plan's navigation-wins rule (contract (d)) was written for USER
+  navigation; an APP-initiated redirect satisfies it by accident. Contract
+  (b) — a failed leg must surface even when a sibling succeeded — loses.
+- **lrs-2 (ADMITTED) — refresh case 5 cannot detect its target.**
+  `loadMore` reads LIVE `active`/`activeType` (`+page.svelte:727`), so an
+  ungated content leg landing after the user opened library B would simply
+  clear and reload B with B's own cards; every assertion still passes.
+- **lrs-3 (ADMITTED) — refresh case 14 is missing the plan's required
+  reverse-ordering phase** (slow FAILING refresh leg, then a newer
+  successful same-root Home reload). The leg-failure generation ownership
+  added by plan-review r7 finding 2 therefore has no guard at all.
+- **lrs-4 (ADMITTED) — the r1 `loading` fix has no guard.** Case 14 asserts
+  rails and the refresh control; neither observes `loading` stuck true.
+  Delete the Home leg's `finally` (`+page.svelte:562`) and the suite stays
+  green while a later empty-Home refresh hangs on the skeleton forever and
+  never redirects.
+- **lrs-5 (ADMITTED) — the scan out-of-order case only covers a stale
+  SUCCESS.** The stale-FAILURE gate (`+page.svelte:1119`) is unguarded, and
+  the mock cannot even express the case: `failNextItemRefresh` is consumed
+  at RESPOND time (`mockjf.mjs`), so a fast scan B steals the failure armed
+  for a delayed scan A — the same binding bug r1 fixed for the Latest flags.
+- **lrs-6 (ADMITTED) — `scan_url` is never tested with a hostile id.**
+  `scan_url_shape_and_rejections` (`jellyfin.rs:1156`) covers only `""`,
+  `"."`, `".."`. The plan REQUIRED slash/backslash/query/fragment ids
+  (`../System/Shutdown?x=`). Replace segment-safe construction with raw
+  interpolation, keep the dot precheck, and every assertion stays green —
+  on the one request that carries admin-capable credentials.
+- **lrs-7 (ADMITTED) — the `scan_query` assertion is tautological.** The
+  unit test derives its expected pairs from `scan_query()` itself
+  (`jellyfin.rs:1164`) and the E2E checks only two of the six params, so
+  flipping `ReplaceAllMetadata` to `true` — turning a cheap scan into a
+  destructive metadata rewrite on the owner's real server — stays green.
+- **lrs-8 (SPLIT).**
+  - *ADMITTED half:* refresh case 13's deferral assertion is vacuous. The
+    fallback's Home re-fetch is fire-and-forget (`forceHomeForRemovedRoot`,
+    `+page.svelte:481`), so `settle()` (which waits only on the refresh
+    control) returns before it lands; the scenario can assert "detail still
+    open" and press Back while `loading` is still true — passing even with
+    the detail-deferral guard removed.
+  - *DECLINED half:* the reviewer also called `loadHome`'s direct error
+    publish (`+page.svelte:405`) a defect of this work ("a late error can
+    appear over a subsequently opened detail"). That is pre-existing
+    `goHome`→`loadHome` semantics, unchanged by this diff and reachable
+    without any refresh; the fallback's re-fetch is a normal Home load and
+    the plan specifies it as such ("goHome's state reset plus one
+    unconditional Home re-fetch"). Declined as out of scope for this loop,
+    not as wrong — if the owner wants Home-load errors epoch-gated, that is
+    its own plan.
+
+Fixes land one finding per commit, each guard-proven red→green on the Linux
+VM, then r3 re-reviews.

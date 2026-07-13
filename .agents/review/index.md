@@ -9,6 +9,18 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `lrs-code` OPEN (library-refresh-scan IMPLEMENTATION review; batch
+adaptation, no per-finding branches). Base `63560a6` (plan APPROVED), head
+`ca84f5b`. **r1 reopened 4, all fixed (`e9edac8`); r2 (codex-cli 0.144.1,
+2026-07-13) reopened 8 MEDIUM — 7 admitted, 1 split (half admitted, half
+declined).** One behavior defect (lrs-1: the empty-Home redirect's
+`navEpoch` bump suppresses the refresh error aggregate); the other seven are
+vacuous-guard findings against the plan's own required tests. Full trail and
+the DECLINED reason: the plan's `## Code review log`
+(`.agents/plans/library-refresh-scan.md`) — not restated here. Fixes land one
+per commit, guard-proven on the Linux VM; r3 re-reviews. E2E suite 16/16 at
+`ca84f5b` (VM); local CI green.
+
 Item-detail-view PLAN-review loop CLOSED 2026-07-06: **accepted at r3** (base=head
 `410fa4e`; three codex rounds, six findings idv-1..6 — full trail in the plan's
 `.agents/plans/item-detail-view.md` `## Review log`, not restated here). A healthy
@@ -518,6 +530,14 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
+| lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[ ]` | |
+| lrs-2 | MEDIUM | Refresh case 5 passes with the content-leg navEpoch gate removed (loadMore reads live state) | `[ ]` | |
+| lrs-3 | MEDIUM | Refresh case 14 omits the plan's reverse-ordering phase: leg-failure generation ownership unguarded | `[ ]` | |
+| lrs-4 | MEDIUM | The r1 `loading` fix has no guard; a stranded skeleton blocks the empty-Home redirect undetected | `[ ]` | |
+| lrs-5 | MEDIUM | Scan stale-FAILURE gate unguarded; mock consumes failNextItemRefresh at respond time so the case can't be written | `[ ]` | |
+| lrs-6 | MEDIUM | scan_url never tested with a hostile id; raw interpolation would stay green on an admin-credentialed POST | `[ ]` | |
+| lrs-7 | MEDIUM | scan_query assertion is tautological; a destructive ReplaceAllMetadata=true refresh stays green | `[ ]` | |
+| lrs-8 | MEDIUM | Refresh case 13's deferral assertion runs before the fallback's Home fetch settles — vacuous | `[ ]` | |
 | br-1 | MEDIUM | Resume scenario green off the server offset — recents-fallback regressions invisible | `[x]` | `8c596d0` |
 | br-2 | MEDIUM | Mock search ignores IncludeItemTypes/Recursive — search-contract regressions pass | `[x]` | `36dec5d` |
 | br-3 | LOW | bump.sh leaves package-lock version stale; npm install dirties fresh checkouts | `[x]` | `88ab605` |
