@@ -944,6 +944,44 @@ is exactly what a fresh-eyes round is for.
   to 8-10s passed. Fixed: measured from when the owning notice is armed, 6s
   budget (4s promise + jitter).
 
+**r5 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 4 MEDIUM + 1 LOW,
+ALL ADMITTED.** Base `63560a6`, head `befbd86`. The round that found the
+DESIGN error, not just its symptoms.
+
+- **r5-2 (`7da85e6`) — r3-2's design was WRONG, and r4-1/r4-2 were props under
+  it.** Claiming `loadGen` at the click invalidated the in-flight listing; when
+  the action then returned early (sections failed), that listing's result was
+  discarded with NOTHING to replace it — a healthy library rendered EMPTY
+  ("Nothing in this view yet"), unable to paginate, until the user navigated
+  away. r4's case 18 passed straight through it because it asserted only that
+  the skeleton disappeared: a released flag is not a usable grid. Fixed by
+  reverting the design: the listing is left alone, the leg claims its
+  generation only when it actually resets, and the narrow problem the early
+  claim was for (an orphaned load publishing its banner over the action's
+  result) is solved narrowly with `gridActionActive` suppression. Case 18 now
+  requires CARDS; case 19 asserts no stale page survives the reset.
+- **r5-1 (`a232e1d`) — a slow refresh stranded a source the user switched to.**
+  `refreshing` was a GLOBAL gate on the empty-Home redirect, so an action still
+  running against source A blocked source B's auto-open for A's whole timeout.
+  Fixed: the gate is scoped to the action's root (`refreshEpoch === navEpoch`).
+  **`navEpoch` also had to become `$state`** — the gate short-circuits on it, so
+  as a plain `let` the effect registered NO dependency on navigation and never
+  re-ran on a source switch; the scoped gate was inert until that changed. Both
+  halves are independently red-proven (case 20).
+- **r5-3 + r5-4 (`136ed21`) — r4-3 was pinned in the wrong place, and its guard
+  was vacuous.** Only the RETRY was pinned, so a scan's FIRST attempt still went
+  wherever an unrelated read's rediscover had repointed the source; and
+  reverting the production call to the unfiltered rediscover left both unit
+  tests green. Fixed at the root: `rediscover()` itself derives its pin from the
+  installed server, so a source can never silently swap machines under the
+  server-local ids it has handed out. This also closes the read-path class r4-3
+  recorded as a known gap. Remaining gap (recorded): the async call site has no
+  unit coverage — discovery/reachability are network calls with no fake in this
+  repo — so the footgun was removed structurally instead.
+- **r5-5 (`53b862a`, LOW) — the expiry clock still started ~2.8s late**, so a
+  4s→7-8s timer regression still passed. Now measured from when the owning
+  notice is armed.
+
 Operator note (process, not code): two guard proofs in this round initially
 came back GREEN against an injected regression — both times the harness was
 at fault, not the guard. A proof script ended with `git checkout --
