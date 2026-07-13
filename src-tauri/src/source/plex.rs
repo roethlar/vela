@@ -54,7 +54,7 @@ impl PlexSource {
     async fn rediscover(&self) -> Result<PlexLibrary, String> {
         let (lib, pin) = {
             let guard = self.lib.lock().await;
-            (guard.clone(), guard.server_machine_id())
+            (guard.clone(), rediscovery_pin(guard.server_machine_id()))
         };
         let all = lib.discover_servers().await.map_err(|e| e.to_string())?;
         let servers = same_machine_candidates(all, pin.as_deref());
@@ -68,11 +68,23 @@ impl PlexSource {
                     "no reachable direct HTTPS Plex server found; check Plex Remote Access or connect to the server's network. Plex Relay is not used by default for HDR playback.".to_string()
                 }
             })?;
-        let updated = {
+        let (updated, installed) = {
             let mut guard = self.lib.lock().await;
-            guard.set_server(chosen.clone());
-            guard.clone()
+            // Don't clobber a server another task installed while we were
+            // discovering. Two UNPINNED rediscoveries (first connect) can pick
+            // DIFFERENT machines on a multi-server account; whoever loses would
+            // otherwise overwrite the winner, and ids already handed to the
+            // frontend would silently refer to the wrong server (codex r6).
+            if should_install(pin.is_some(), guard.server_machine_id().as_deref()) {
+                guard.set_server(chosen.clone());
+                (guard.clone(), true)
+            } else {
+                (guard.clone(), false)
+            }
         };
+        if !installed {
+            return Ok(updated); // another task got there first — use its server
+        }
         let (host, port, scheme) = (chosen.host.clone(), chosen.port, chosen.scheme.clone());
         if let Err(e) = crate::config::update(move |cfg| {
             cfg.last_server_host = Some(host);
@@ -778,6 +790,27 @@ fn same_machine_candidates(servers: Vec<PlexServer>, machine: Option<&str>) -> V
     }
 }
 
+/// Which machine rediscovery must pin to, given the installed server's id.
+///
+/// An EMPTY id means we do not know the machine: `set_server_manual` (the
+/// startup path that restores a saved host/port, `lib.rs`) stores no machine
+/// identifier. Pinning on "" would match nothing, filter out every discovery
+/// candidate, and leave Plex unable to recover from a stale saved address at
+/// all (codex r6). Unknown machine -> no pin -> discover freely, as before.
+fn rediscovery_pin(installed: Option<String>) -> Option<String> {
+    installed.filter(|m| !m.is_empty())
+}
+
+/// May this rediscovery install the server it chose? A PINNED one always may —
+/// it can only have chosen the same machine. An UNPINNED one (nothing known
+/// installed yet) must not overwrite a server that appeared meanwhile: two such
+/// calls racing on a multi-server account can choose DIFFERENT machines, and
+/// the loser would repoint the source under ids the winner already handed out
+/// (codex r6). An empty installed id is "nothing known", same as None.
+fn should_install(pinned: bool, installed_now: Option<&str>) -> bool {
+    pinned || installed_now.is_none_or(|m| m.is_empty())
+}
+
 /// May a failed scan be retried against the server we just landed on? Section
 /// keys are numeric ids that mean nothing off the server they came from. A
 /// final assertion behind [`same_machine_candidates`]: even if the filter were
@@ -813,6 +846,54 @@ mod tests {
             machine_identifier: machine.to_string(),
             version: "1.0".to_string(),
         }
+    }
+
+    /// The startup path restores a saved host/port through `set_server_manual`,
+    /// which stores NO machine identifier. Pinning rediscovery on that empty id
+    /// would match nothing and leave Plex unable to recover from a stale saved
+    /// address — browsing and scanning dead until the user relinks (codex r6).
+    #[test]
+    fn an_unknown_machine_does_not_pin_rediscovery() {
+        assert_eq!(rediscovery_pin(Some(String::new())), None, "empty = unknown");
+        assert_eq!(rediscovery_pin(None), None);
+        assert_eq!(
+            rediscovery_pin(Some("machine-A".to_string())).as_deref(),
+            Some("machine-A")
+        );
+        // And an unknown machine must not filter the candidate set away.
+        let servers = vec![
+            server_with_id("machine-A", "a.example"),
+            server_with_id("machine-B", "b.example"),
+        ];
+        assert_eq!(
+            same_machine_candidates(servers, rediscovery_pin(Some(String::new())).as_deref()).len(),
+            2,
+            "an unknown machine discovers freely"
+        );
+    }
+
+    /// Two UNPINNED rediscoveries (first connect) racing on a multi-server
+    /// account can choose different machines; the loser must not overwrite the
+    /// winner, or ids already handed to the frontend would refer to the wrong
+    /// server (codex r6).
+    #[test]
+    fn an_unpinned_rediscovery_does_not_clobber_an_installed_server() {
+        assert!(
+            !should_install(false, Some("machine-A")),
+            "another task already installed a server: keep it"
+        );
+        assert!(
+            should_install(false, None),
+            "nothing installed yet: this call installs"
+        );
+        assert!(
+            should_install(false, Some("")),
+            "a manual endpoint has no machine: still nothing known"
+        );
+        assert!(
+            should_install(true, Some("machine-A")),
+            "a pinned rediscovery can only have chosen the same machine"
+        );
     }
 
     #[test]
