@@ -982,6 +982,34 @@ DESIGN error, not just its symptoms.
   4s→7-8s timer regression still passed. Now measured from when the owning
   notice is armed.
 
+**r6 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 4 MEDIUM, ALL
+ADMITTED.** Base `63560a6`, head `4fd181a`. Two are regressions from the r5
+fixes; one of those would have broken Plex outright.
+
+- **r6-3 (`7f6919f`) — the r5-3 pin BROKE Plex recovery.** The startup path
+  restores a saved host/port via `set_server_manual`, which stores NO machine
+  identifier (empty string). Pinning rediscovery on "" matched nothing, filtered
+  every candidate away, and left browsing and scanning dead after a saved
+  address went stale — until the user relinked. Fixed: `rediscovery_pin()`
+  treats an empty id as UNKNOWN → discover freely, as before r5-3.
+- **r6-4 (`7f6919f`) — unpinned rediscoveries could clobber each other.** Two
+  first-connect calls can race, choose DIFFERENT machines, and both install; the
+  loser repoints the source under section keys the winner already handed out.
+  Fixed: `should_install()` — an unpinned call installs only while nothing is
+  installed.
+- **r6-1 (`6fc8c4f`) — a regression from r5-2.** The grid-action banner
+  suppression was GLOBAL, so after the user navigated away the still-running
+  action went on swallowing the NEW view's errors while its own outcome was
+  discarded on the epoch mismatch: library B rendered empty and silent. Fixed:
+  the suppression is scoped to the action's root, like the redirect gate. Guard:
+  case 21.
+- **r6-2 (`44a5b44`) — a Settings source change reset the view without bumping
+  `navEpoch`**, so an in-flight refresh kept owning the epoch and went on
+  blocking the redirect over a view it no longer related to. Fixed: bump it.
+  **Recorded gap:** no automated guard — driving Settings add/remove mid-refresh
+  needs a real source-add flow the mock harness does not have; the mechanism
+  itself is guard-proven by case 20.
+
 Operator note (process, not code): two guard proofs in this round initially
 came back GREEN against an injected regression — both times the harness was
 at fault, not the guard. A proof script ended with `git checkout --
