@@ -1181,6 +1181,34 @@ impl PlexLibrary {
         Some(self.server.as_ref()?.machine_identifier.clone())
     }
 
+    /// Ask the installed server who it is. A server restored from config
+    /// (`set_server_manual`) carries NO machine identifier, which leaves this
+    /// source unable to pin rediscovery — and an unpinned rediscovery can
+    /// silently repoint it at another account server, under section keys that
+    /// only mean anything on the original (codex r7). One `/identity` call at
+    /// first contact removes that whole class.
+    pub async fn fetch_machine_identifier(&self) -> Result<String, String> {
+        let base = self.server_base().ok_or("no server selected")?;
+        let resp = self
+            .client
+            .get(format!("{base}/identity"))
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await
+            .map_err(|e| e.to_string())?;
+        let body = resp.text().await.map_err(|e| e.to_string())?;
+        identity_machine_identifier(&body).ok_or_else(|| "no machine identifier".to_string())
+    }
+
+    pub fn set_machine_identifier(&mut self, id: String) {
+        if let Some(s) = self.server.as_mut() {
+            s.machine_identifier = id;
+        }
+    }
+
     pub fn auth_token_clone(&self) -> String {
         self.auth_token.clone()
     }

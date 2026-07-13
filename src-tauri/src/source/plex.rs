@@ -33,7 +33,23 @@ impl PlexSource {
         {
             let guard = self.lib.lock().await;
             if guard.server_base().is_some() {
-                return Ok(guard.clone());
+                let lib = guard.clone();
+                drop(guard); // never hold the lock across the network call below
+                // A server restored from config carries no machine identifier
+                // (`set_server_manual`), which would leave rediscovery UNPINNED
+                // and free to repoint this source at another account server —
+                // under section keys that only mean anything on the original
+                // (codex r7). Learn who we are talking to, once.
+                if rediscovery_pin(lib.server_machine_id()).is_none() {
+                    if let Ok(id) = lib.fetch_machine_identifier().await {
+                        let mut guard = self.lib.lock().await;
+                        if rediscovery_pin(guard.server_machine_id()).is_none() {
+                            guard.set_machine_identifier(id);
+                        }
+                        return Ok(guard.clone());
+                    }
+                }
+                return Ok(lib);
             }
         }
         self.rediscover().await
@@ -337,8 +353,12 @@ impl MediaSource for PlexSource {
                 // is a belt-and-braces assertion on that invariant: a scan is
                 // an authenticated ACTION, so it refuses to run anywhere but
                 // the machine whose section key it holds.
-                if before.is_none() {
-                    return Err(first_err); // no known server to pin to
+                // Unknown machine (a restored endpoint whose /identity probe
+                // failed): rediscovery would be UNPINNED and could install a
+                // different account server, which a later scan would then hit
+                // with THIS server's section key (codex r7). Don't retry.
+                if rediscovery_pin(before.clone()).is_none() {
+                    return Err(first_err);
                 }
                 let lib = match self.rediscover().await {
                     Ok(l) => l,
