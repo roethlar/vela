@@ -102,7 +102,7 @@ export default {
 
     // ── 1. Happy path ───────────────────────────────────────────────────
     // Scan lib1 → resolution GET precedes POST /Items/lib1/Refresh carrying
-    // Recursive=true + RegenerateTrickplay=false → transient notice rendered.
+    // the FULL scan_query param set → transient notice rendered.
     await scanVia(driver, "Library One");
     await pollUntil(
       async () => (await notice(driver)) === "Scan started — Library One",
@@ -111,8 +111,29 @@ export default {
     assert.equal(await banner(driver), null, "happy path must not banner");
     const posts1 = refreshPosts("lib1");
     assert.equal(posts1.length, 1, "exactly one refresh POST for lib1");
-    assert.equal(posts1[0].query.Recursive, "true");
-    assert.equal(posts1[0].query.RegenerateTrickplay, "false");
+    // Assert what Vela SENDS, param for param. Checking only Recursive and
+    // RegenerateTrickplay let a scan silently become a destructive metadata
+    // rewrite (ReplaceAllMetadata=true) on the user's real server without a
+    // single test going red (lrs-7).
+    assert.deepEqual(
+      {
+        Recursive: posts1[0].query.Recursive,
+        MetadataRefreshMode: posts1[0].query.MetadataRefreshMode,
+        ImageRefreshMode: posts1[0].query.ImageRefreshMode,
+        ReplaceAllMetadata: posts1[0].query.ReplaceAllMetadata,
+        ReplaceAllImages: posts1[0].query.ReplaceAllImages,
+        RegenerateTrickplay: posts1[0].query.RegenerateTrickplay,
+      },
+      {
+        Recursive: "true",
+        MetadataRefreshMode: "Default",
+        ImageRefreshMode: "Default",
+        ReplaceAllMetadata: "false",
+        ReplaceAllImages: "false",
+        RegenerateTrickplay: "false",
+      },
+      "the scan must stay a plain non-destructive scan",
+    );
     const vfGet = mock.state.requests.findIndex(
       (r) => r.method === "GET" && r.path === "/Library/VirtualFolders",
     );

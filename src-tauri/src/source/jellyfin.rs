@@ -1157,13 +1157,16 @@ mod tests {
     fn scan_url_shape_and_rejections() {
         let c = JellyfinClient::new(Flavor::Jellyfin, "http://s:8096", "dev", "sekrit", "u1");
         let url = c.scan_url("lib1").unwrap();
-        assert!(
-            url.starts_with("http://s:8096/Items/lib1/Refresh?"),
-            "unexpected endpoint shape: {url}"
+        // LITERAL expectations, not a loop over scan_query(): deriving them
+        // from the function under test is tautological — flipping
+        // ReplaceAllMetadata to true (a destructive metadata rewrite on the
+        // user's server, not a scan) would stay green (lrs-7).
+        assert_eq!(
+            url,
+            "http://s:8096/Items/lib1/Refresh?Recursive=true&MetadataRefreshMode=Default\
+             &ImageRefreshMode=Default&ReplaceAllMetadata=false&ReplaceAllImages=false\
+             &RegenerateTrickplay=false"
         );
-        for (k, v) in scan_query() {
-            assert!(url.contains(&format!("{k}={v}")), "{k} missing from {url}");
-        }
         // Auth travels in headers; the token must never leak into the URL.
         assert!(!url.contains("sekrit"));
         // Ids that PathSegmentsMut::extend would silently drop are rejected
@@ -1219,6 +1222,23 @@ mod tests {
         }
     }
 
+    #[test]
+    fn scan_query_is_a_plain_nondestructive_scan() {
+        // A scan must not become a destructive metadata/image rewrite: these
+        // are the values jellyfin-web's own scan dialog sends. Literal by
+        // design (see scan_url_shape_and_rejections).
+        assert_eq!(
+            scan_query(),
+            [
+                ("Recursive", "true"),
+                ("MetadataRefreshMode", "Default"),
+                ("ImageRefreshMode", "Default"),
+                ("ReplaceAllMetadata", "false"),
+                ("ReplaceAllImages", "false"),
+                ("RegenerateTrickplay", "false"),
+            ]
+        );
+    }
 
     fn media_source(
         id: &str,
