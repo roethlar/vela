@@ -289,6 +289,16 @@ impl MediaSource for PlexSource {
     async fn scan_library(&self, section_key: &str) -> Result<(), String> {
         let path = scan_path(section_key)?;
         let lib = self.ensure_ready().await?;
+        // The section key is a numeric id that is only meaningful ON THE SERVER
+        // IT CAME FROM. `rediscover()` re-runs discovery and takes the first
+        // REACHABLE server on the account, which on a multi-server account need
+        // not be the one we just failed against — so the read paths' blind
+        // rediscover-and-retry would fire a scan at a DIFFERENT server's section
+        // with the same number (an unrelated library) and report success for the
+        // one the user actually clicked. A scan is an authenticated server
+        // action, so it retries only when the rediscovered server is provably
+        // the SAME machine (codex r3).
+        let before = lib.server_machine_id();
         // map_err first so the non-Send error is dropped before the next await.
         let first = lib
             .request_library_scan(&path)
@@ -296,8 +306,13 @@ impl MediaSource for PlexSource {
             .map_err(|e| e.to_string());
         match first {
             Ok(()) => Ok(()),
-            Err(_) => {
+            Err(first_err) => {
                 let lib = self.rediscover().await?;
+                if !may_retry_scan_on(before.as_deref(), lib.server_machine_id().as_deref()) {
+                    // Don't scan a stranger's library: report the original
+                    // failure instead of acting on the wrong server.
+                    return Err(first_err);
+                }
                 lib.request_library_scan(&path)
                     .await
                     .map_err(|e| e.to_string())
@@ -726,6 +741,18 @@ fn validate_plex_id(name: &str, value: &str) -> Result<(), String> {
     }
 }
 
+/// May a failed scan be retried against the server `rediscover()` just landed
+/// on? Section keys are numeric ids that mean nothing off the server they came
+/// from, and discovery returns whichever account server answers first — which
+/// on a multi-server account can be a DIFFERENT machine. Retrying blindly there
+/// would scan an unrelated library that happens to share the number and report
+/// success for the one the user clicked. Only an identical machine id may
+/// retry; an unknown id on either side is not a match. The ONLY decision point
+/// for the scan retry (`PlexSource::scan_library`).
+fn may_retry_scan_on(before: Option<&str>, after: Option<&str>) -> bool {
+    matches!((before, after), (Some(b), Some(a)) if b == a && !b.is_empty())
+}
+
 /// Path for a section scan ("scan library files"). The ONLY way production
 /// may build this path — key validation and the endpoint shape are
 /// unit-tested here, so a hostile/garbled key can't reshape the URL.
@@ -740,6 +767,23 @@ mod tests {
     use crate::plex_library::{
         PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag,
     };
+
+    #[test]
+    fn scan_retry_never_crosses_to_another_server() {
+        // Same machine: the rediscover just re-resolved the SAME server's
+        // address (the case the retry exists for — a stale saved URI).
+        assert!(may_retry_scan_on(Some("machine-A"), Some("machine-A")));
+        // Different machine: discovery fell through to another server on the
+        // account. Its section "2" is an UNRELATED library — retrying there
+        // would scan a stranger's files and report success for the one the user
+        // clicked. This is the guard: making the fn return true unconditionally
+        // fails right here.
+        assert!(!may_retry_scan_on(Some("machine-A"), Some("machine-B")));
+        // Unknown on either side is not a match.
+        assert!(!may_retry_scan_on(None, Some("machine-A")));
+        assert!(!may_retry_scan_on(Some("machine-A"), None));
+        assert!(!may_retry_scan_on(Some(""), Some("")));
+    }
 
     #[test]
     fn scan_path_shape_and_rejections() {

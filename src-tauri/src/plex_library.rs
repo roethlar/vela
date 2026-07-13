@@ -1173,6 +1173,14 @@ impl PlexLibrary {
         Some(server_origin(s))
     }
 
+    /// Which physical server this handle is pointed at. Section keys are
+    /// server-LOCAL numeric ids, so any caller that reuses a key across a
+    /// rediscover must check this first: discovery picks the first reachable
+    /// server on the account, which need not be the one the key came from.
+    pub fn server_machine_id(&self) -> Option<String> {
+        Some(self.server.as_ref()?.machine_identifier.clone())
+    }
+
     pub fn auth_token_clone(&self) -> String {
         self.auth_token.clone()
     }
