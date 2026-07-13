@@ -155,8 +155,9 @@
       // update. The person root re-runs its own query, gated to the ROOT
       // level (plan-review r2): a drilled level under it refreshes through
       // resetAndLoad, whose crumb has a ratingKey.
-      if (searchTerm) runSearch(searchTerm);
-      else if (personView && crumbs.length === 1) runPersonView(personView);
+      if (searchTerm) runSearch(searchTerm, { rerun: true });
+      else if (personView && crumbs.length === 1)
+        runPersonView(personView, { rerun: true });
       else resetAndLoad();
     }
   }
@@ -919,7 +920,12 @@
     await resetAndLoad();
   }
 
-  async function runSearch(query: string = searchQuery) {
+  // `rerun`: refreshWatchState() re-enters the CURRENT root to pick up new watch
+  // state. The user has not navigated — the visible root is identical — so it
+  // must not bump `navEpoch`, or an in-flight refresh would read it as
+  // navigation and silently drop its own failure: the spinner would stop with a
+  // stale sidebar and no error at all (codex r9).
+  async function runSearch(query: string = searchQuery, { rerun = false } = {}) {
     const q = query.trim();
     if (q.length < 2) {
       error = "Search needs at least 2 characters.";
@@ -932,7 +938,7 @@
       }
       return;
     }
-    navEpoch++; // navigation (see navEpoch)
+    if (!rerun) navEpoch++; // navigation (see navEpoch); a re-run is not (r9)
     homeGen++; // leaving home: invalidate any in-flight home/sections load
     const myGen = ++loadGen; // invalidate any in-flight load; guard our own result
     loadingMore = false;
@@ -994,8 +1000,8 @@
         : `Written by ${p.name}`;
   }
 
-  async function runPersonView(p: PersonView) {
-    navEpoch++; // navigation (see navEpoch)
+  async function runPersonView(p: PersonView, { rerun = false } = {}) {
+    if (!rerun) navEpoch++; // navigation (see navEpoch); a re-run is not (r9)
     homeGen++; // leaving home: invalidate any in-flight home/sections load
     const myGen = ++loadGen; // invalidate any in-flight load; guard our own result
     loadingMore = false;

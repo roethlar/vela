@@ -18,6 +18,8 @@ import {
 } from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
 
+const ENTER = "\uE007"; // WebDriver Enter (see search.mjs)
+
 let mockA;
 let mockB;
 
@@ -116,10 +118,27 @@ async function markWatchedFromHome(driver, prefix) {
     );
   await driver.click(item);
 }
-// Mark a GRID card watched: on a grid root refreshWatchState() runs
-// resetAndLoad(), i.e. a NEWER same-root listing load.
+// Toggle a card's watch state from its context menu. EITHER label runs
+// refreshWatchState(), which re-enters the current root — which is the point.
+// Which label is offered depends on the card's current state, so callers pass it.
+async function watchToggle(driver, prefix, label) {
+  await driver.exec(
+    `const el = document.querySelector('button.poster[aria-label^="${prefix}"]');
+     const r = el.getBoundingClientRect();
+     el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
+  );
+  const item = await driver
+    .waitFor(`return !!document.querySelector('.ctxmenu')`, "context menu")
+    .then(() =>
+      driver.find(
+        "xpath",
+        `//button[@role='menuitem' and normalize-space(.)='${label}']`,
+      ),
+    );
+  await driver.click(item);
+}
 async function markWatchedFromGrid(driver, prefix) {
-  await markWatchedFromHome(driver, prefix); // same context-menu interaction
+  await watchToggle(driver, prefix, "Mark watched");
 }
 function removeViewA() {
   const at = mockA.state.views.findIndex((v) => v.id === "libA");
@@ -923,6 +942,35 @@ export default {
     );
     await settle(driver);
     mockA.state.viewsDelayMs = 0;
+
+    // ── 23. A re-run of the SAME root is not navigation ─────────────────
+    // refreshWatchState() re-enters the current root to pick up new watch state.
+    // On a search/person root it did that through helpers that bumped
+    // `navEpoch` unconditionally — so an in-flight Refresh read it as
+    // navigation and silently dropped its own failure: the spinner stopped with
+    // a stale sidebar and NO error, even though the user never moved (codex r9).
+    await goHome(driver);
+    const box = await driver.find(
+      "css selector",
+      'input[aria-label="Search your libraries"]',
+    );
+    await driver.type(box, `Alpha${ENTER}`); // the real interaction (see search.mjs)
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha"]')`,
+      "search results for Alpha",
+    );
+    mockA.state.failNextViews = true; // the refresh's sections leg will fail...
+    mockA.state.viewsDelayMs = 1500; // ...slowly
+    await clickRefresh(driver);
+    // Case 22 marked Alpha Three watched, so the menu now offers "Mark
+    // unwatched" — either way the edit re-runs the SAME search root.
+    await watchToggle(driver, "Alpha Three", "Mark unwatched");
+    await settle(driver);
+    mockA.state.viewsDelayMs = 0;
+    assert.ok(
+      await banner(driver),
+      "the refresh's sections failure must still surface: re-running the same root is not navigation",
+    );
 
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
