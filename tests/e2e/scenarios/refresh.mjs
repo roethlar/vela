@@ -22,6 +22,9 @@ let mockA;
 let mockB;
 
 const DELAY = 900; // in-flight window; WebDriver roundtrips are ~10ms each
+// UserData like a real server's /Items/Latest: without it `played` is null and
+// the card's context menu hides "Mark watched" — the edit the reverse phase of
+// case 14 needs to trigger a newer same-root Home load.
 const LATEST_SEED = [
   {
     Id: "a1",
@@ -29,6 +32,7 @@ const LATEST_SEED = [
     Type: "Movie",
     ProductionYear: 2020,
     RunTimeTicks: 100_000_000,
+    UserData: { Played: false, PlaybackPositionTicks: 0 },
   },
 ];
 
@@ -91,6 +95,26 @@ async function openDetail(driver, prefix) {
 async function pressBack(driver) {
   const b = await driver.find("css selector", ".crumbs button.back");
   await driver.click(b);
+}
+// Mark a Home rail card watched via the real context menu. The edit runs
+// refreshWatchState(), which on Home is loadHome(++homeGen): a newer
+// SUCCESSFUL same-root Home load that bumps no navEpoch — the only way to
+// supersede a refresh leg by generation rather than by navigation.
+async function markWatchedFromHome(driver, prefix) {
+  await driver.exec(
+    `const el = document.querySelector('button.poster[aria-label^="${prefix}"]');
+     const r = el.getBoundingClientRect();
+     el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
+  );
+  const item = await driver
+    .waitFor(`return !!document.querySelector('.ctxmenu')`, "context menu")
+    .then(() =>
+      driver.find(
+        "xpath",
+        `//button[@role='menuitem' and normalize-space(.)='Mark watched']`,
+      ),
+    );
+  await driver.click(item);
 }
 function removeViewA() {
   const at = mockA.state.views.findIndex((v) => v.id === "libA");
@@ -176,6 +200,7 @@ export default {
       Type: "Movie",
       ProductionYear: 2021,
       RunTimeTicks: 100_000_000,
+      UserData: { Played: false, PlaybackPositionTicks: 0 },
     });
     // Push the view empty, then addMovie so userData stays coherent.
     mockA.state.views.push({
@@ -576,6 +601,42 @@ export default {
       "the empty-Home redirect still fires (loading was released, not stranded)",
     );
     mockA.state.latest = [...LATEST_SEED, mockAExtraLatest()]; // rails back
+
+    // ── 14 (reverse phase). A SUPERSEDED refresh leg publishes nothing ───
+    // The plan requires both orderings; only the one above was implemented,
+    // so leg-failure generation ownership (`current: () => hg === homeGen`)
+    // had no guard at all (lrs-3). Here the REFRESH's Home leg is the slow
+    // failing one, and a newer successful same-root Home load supersedes it:
+    // marking watched from a Home rail card runs refreshWatchState(), which
+    // on Home does loadHome(++homeGen) — a new homeGen WITHOUT a navEpoch
+    // bump, so only the leg's generation check can suppress the stale failure.
+    await goHome(driver); // 14b redirected us into A's grid
+    await pollUntil(async () => {
+      const rails = (await posterLabels(driver)).some((l) =>
+        l?.startsWith("Alpha"),
+      );
+      return (await onHome(driver)) && rails ? true : null;
+    }, "back on Home with rails (the reverse phase needs a rail card to edit)");
+    mockA.state.delayNextLatestMs = DELAY;
+    mockA.state.failNextLatest = true;
+    const latestBeforeRefresh = latestGets().length;
+    await clickRefresh(driver); // ITS Home leg binds the delay + failure
+    await pollUntil(
+      async () => (latestGets().length > latestBeforeRefresh ? true : null),
+      "the refresh's Home leg Latest request arrived (flags bound to IT)",
+    );
+    await markWatchedFromHome(driver, "Alpha One"); // newer successful Home load
+    await settle(driver);
+    await new Promise((r) => setTimeout(r, DELAY + 600)); // the refresh's failure lands late
+    assert.equal(
+      await banner(driver),
+      null,
+      "a refresh leg superseded by a newer same-root Home load must publish NO failure",
+    );
+    assert.ok(
+      (await posterLabels(driver)).some((l) => l?.startsWith("Alpha")),
+      "the newer Home load's rails survive",
+    );
 
     // ── 15. The app's own redirect must not swallow the failure ─────────
     // Sections FAIL while the Home leg comes back EMPTY: Home settles with no

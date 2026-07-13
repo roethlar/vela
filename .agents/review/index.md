@@ -532,7 +532,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 |----|----------|-------------------|--------|------------|
 | lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[x]` | see log |
 | lrs-2 | MEDIUM | Refresh case 5 passes with the content-leg navEpoch gate removed (loadMore reads live state) | `[x]` | see log |
-| lrs-3 | MEDIUM | Refresh case 14 omits the plan's reverse-ordering phase: leg-failure generation ownership unguarded | `[ ]` | |
+| lrs-3 | MEDIUM | Refresh case 14 omits the plan's reverse-ordering phase: leg-failure generation ownership unguarded | `[x]` | see log |
 | lrs-4 | MEDIUM | The r1 `loading` fix has no guard; a stranded skeleton blocks the empty-Home redirect undetected | `[x]` | see log |
 | lrs-5 | MEDIUM | Scan stale-FAILURE gate unguarded; mock consumes failNextItemRefresh at respond time so the case can't be written | `[ ]` | |
 | lrs-6 | MEDIUM | scan_url never tested with a hostile id; raw interpolation would stay green on an admin-credentialed POST | `[x]` | see log |
