@@ -553,6 +553,30 @@ export default {
     );
     await screenshot("06-stale-load-superseded");
 
+    // ── 14b. The stranded `loading` flag has an observable guard ────────
+    // The older Home load above set `loading = true`, and the refresh STOLE
+    // its `homeGen` — so that load's own generation-gated finally can no
+    // longer clear the flag, and ONLY the refresh leg's finally can (the r1
+    // fix). Nothing above observes it: rails render and the control
+    // re-enables either way (lrs-4). A stranded flag is observable in exactly
+    // one place — the `!loading`-gated empty-Home redirect stops working
+    // forever.
+    //
+    // ORDER IS LOAD-BEARING: this must stay the FIRST thing after the
+    // stale-load phase. goHome() clears `loading`, and so does ANY later
+    // SUCCESSFUL Home load (loadHome's own finally) — so anything that
+    // reloads Home first heals the stranded flag and hides the bug. Placed
+    // after one, this very assertion passed with the r1 fix deleted (proven
+    // vacuous on the VM).
+    mockA.state.latest = [];
+    await clickRefresh(driver);
+    await settle(driver);
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha"]')`,
+      "the empty-Home redirect still fires (loading was released, not stranded)",
+    );
+    mockA.state.latest = [...LATEST_SEED, mockAExtraLatest()]; // rails back
+
     // ── 15. The app's own redirect must not swallow the failure ─────────
     // Sections FAIL while the Home leg comes back EMPTY: Home settles with no
     // rails, so the empty-Home effect redirects into sections[0] — using the
@@ -563,6 +587,16 @@ export default {
     // navigated" and publishes nothing — the user browses a stale library
     // with no error (codex code review r2, lrs-1).
     await goHome(driver);
+    // 14b left Home rail-less and us in A's grid; goHome re-fetches with the
+    // restored seed. Wait for the rails to LAND before emptying them again —
+    // otherwise the redirect could fire before this case's Refresh, making it
+    // a grid refresh that never runs the Home leg this case is about.
+    await pollUntil(async () => {
+      const rails = (await posterLabels(driver)).some((l) =>
+        l?.startsWith("Alpha"),
+      );
+      return (await onHome(driver)) && rails ? true : null;
+    }, "Home rails restored before emptying them again");
     mockA.state.latest = [];
     mockA.state.failNextViews = true;
     await clickRefresh(driver);
