@@ -87,10 +87,22 @@ export function startMockJellyfin({
 
   const allMovies = () => state.views.flatMap((v) => v.movies);
   const findMovie = (id) => allMovies().find((m) => m.id === id);
+  // A view's item TYPE follows its collectionType, because Vela asks each
+  // library for the types that library holds (jellyfin.rs items(): a "show"
+  // section is listed with IncludeItemTypes=Series, a "movie" one with
+  // Movie). A movies-only mock behaves exactly as before; a tvshows view
+  // lets a scenario stand up a NON-Movies provider (mergedrefresh needs one
+  // so the merged Movies type can disappear when its sole provider fails).
+  const itemTypeOf = (view) =>
+    view.collectionType === "tvshows" ? "Series" : "Movie";
+  const typeOfItem = (id) => {
+    const view = state.views.find((v) => v.movies.some((m) => m.id === id));
+    return view ? itemTypeOf(view) : "Movie";
+  };
   const toJson = (m) => ({
     Id: m.id,
     Name: m.name,
-    Type: "Movie",
+    Type: typeOfItem(m.id),
     ProductionYear: m.year ?? 2020,
     RunTimeTicks: m.runTimeTicks ?? 6_000_000_000, // default 10 min in 100ns ticks
     Overview: "A film that exists only for the harness.",
@@ -214,12 +226,14 @@ export function startMockJellyfin({
           state.contractViolations.push({ path, query });
           return json({ error: "query contract violation" }, 400);
         }
-        if (!query.IncludeItemTypes.includes("Movie"))
-          return json({ Items: [] });
         const term = query.searchTerm.toLowerCase();
         return json({
           Items: allMovies()
-            .filter((m) => m.name.toLowerCase().includes(term))
+            .filter(
+              (m) =>
+                query.IncludeItemTypes.includes(typeOfItem(m.id)) &&
+                m.name.toLowerCase().includes(term),
+            )
             .map(toJson),
         });
       }
@@ -228,7 +242,7 @@ export function startMockJellyfin({
       // ParentId or a missing IncludeItemTypes — an ignore-all mock would
       // hide exactly that class of regression.
       const view = state.views.find((v) => v.id === query.ParentId);
-      if (!view || !(query.IncludeItemTypes ?? "").includes("Movie")) {
+      if (!view || !(query.IncludeItemTypes ?? "").includes(itemTypeOf(view))) {
         state.contractViolations.push({ path, query });
         return json({ error: "query contract violation" }, 400);
       }
