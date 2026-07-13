@@ -114,6 +114,11 @@ async function restoreA(driver, { saved, at }) {
 const latestRequests = () =>
   mockA.state.requests.filter((r) => r.path === "/Users/u1/Items/Latest")
     .length;
+// Listing requests for one view — the only way to see a content leg that ran.
+const listingsFor = (viewId) =>
+  mockA.state.requests.filter(
+    (r) => r.path === "/Users/u1/Items" && r.query.ParentId === viewId,
+  ).length;
 
 export default {
   name: "refresh",
@@ -286,8 +291,19 @@ export default {
       `return !!document.querySelector('button.poster[aria-label^="Beta One"]')`,
       "library B's own cards",
     );
+    // The CARDS cannot prove the gate: loadMore reads LIVE `active`
+    // (+page.svelte:727), so an ungated stale leg would simply clear B's grid
+    // and re-list B — same cards, every assertion green (lrs-8/codex r2:
+    // lrs-2). The request log is what distinguishes them: the superseded leg
+    // must issue NO listing at all.
+    const bListingsBefore = listingsFor("libB");
     await settle(driver);
     mockA.state.viewsDelayMs = 0;
+    assert.equal(
+      listingsFor("libB"),
+      bListingsBefore,
+      "the superseded content leg must not re-list B (it must be dropped, not redirected at the new root)",
+    );
     const bLabels = (await posterLabels(driver)).filter((l) =>
       l?.startsWith("Alpha"),
     );
@@ -572,5 +588,6 @@ function mockAExtraLatest() {
     Type: "Movie",
     ProductionYear: 2021,
     RunTimeTicks: 100_000_000,
+    UserData: { Played: false, PlaybackPositionTicks: 0 },
   };
 }
