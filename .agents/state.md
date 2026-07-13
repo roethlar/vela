@@ -6,32 +6,33 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Now
 
-- **LIBRARY-REFRESH-SCAN: both slices committed — verification in
-  progress (owner "go" 2026-07-12; slice 1 `2609579`, slice 2
-  `46277a5`).** Local CI green at slice 2 commit (fmt/clippy/cargo
-  test 78 passed, svelte-check 0/0, prettier); VM E2E suite + codex
-  diff reviewloop pending. Loop closed at r7 by owner decision:
-  implement both slices per the plan as frozen at `3306c7f`, then run
-  the standard codex code reviewloop on the diff (repo history: code
-  loops converge r1-r2). Superseded loop detail below stands as the
-  review record.
-  (`.agents/plans/library-refresh-scan.md` — refresh button +
-  per-library server scan trigger; owner ask 2026-07-12 while testing
-  Jellyfin). Seven rounds run, 34 findings, all ADMITTED and fixed, no
-  repeat findings; NOT converged (r7 reopened: 5 MEDIUM, three of them
-  against the r6 amendments) and NOT owner-approved; no implementation
-  until the owner approves after convergence. Severity has been
-  MEDIUM-only since r5 while each round grows the verification surface
-  (scope accretion), so the operator paused instead of auto-dispatching
-  r8 and put the call to the owner: (a) dispatch r8 unchanged (`codex
-  exec --sandbox read-only -o <outfile>` one-shot, prompt file passed
-  as arg, 0.144.1, mac host, whole-plan fresh-eyes, JSON verdict
-  contract, trail in the plan's Review log); (b) dispatch r8 with a
-  severity floor (new-scope MEDIUMs go to comments; findings only for
-  HIGH+/broken-fix); or (c) stop the loop, take the exec summary in
-  chat, and treat residual review as implementation-time checks. The
-  owner also asked for the plan's exec summary in chat once the loop
-  converges.
+- **LIBRARY-REFRESH-SCAN: both slices IMPLEMENTED and verified; the CODE
+  review loop is open at r10** (owner "go" 2026-07-12 to implement, and
+  2026-07-13 to run the reviewloop for fixes autonomously). Plan:
+  `.agents/plans/library-refresh-scan.md` — refresh button + per-library
+  server scan trigger (owner ask while testing Jellyfin).
+  - **Where the trail lives:** the plan's `## Code review log` records
+    every round (r1-r9), each finding, each fix commit, the ONE declined
+    finding (r8-4) with its reason, and the recorded guard gaps. Do not
+    reconstruct any of it from chat.
+  - **State as of `f9c30b6`:** E2E suite 16/16 on the Linux VM; local CI
+    green (svelte-check 0/0, npm build, cargo check/clippy `-D warnings`,
+    cargo test 86). Every fix is its own commit, each guard-proven
+    red→green on the VM.
+  - **Rounds so far:** r1 4, r2 8, r3 5, r4 4, r5 5, r6 4, r7 3, r8 4
+    (3 fixed + 1 declined), r9 2 — all fixed. The loop repeatedly caught
+    regressions in its OWN fixes (r4 caught two from r3; r6 caught two
+    from r5, one of which would have left Plex unable to recover from a
+    stale saved address). Real defects found and fixed include: a scan
+    that could hit the WRONG Plex server; a refresh that emptied a healthy
+    library when its sections fetch failed; the app's own redirect
+    swallowing a failure banner; hostile section keys steering an
+    admin-credentialed POST.
+  - **NEXT:** r10 verdict (dispatched at `f9c30b6`). If it finds nothing
+    material, CLOSE the loop, then: version bump (still 0.1.44 — the
+    feature is unreleased), update this entry, and hand the owner the
+    playtest ask in the plan's Verification section. Nothing is pushed to
+    `origin`/`github` (push policy: always ask).
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted
@@ -212,8 +213,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   decisions resolved, parked at queue bottom)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner
   playtest)
-- `.agents/plans/library-refresh-scan.md` (APPROVED at r7 — slices 1+2
-  committed `2609579` + `46277a5`; VM E2E + codex diff review pending)
+- `.agents/plans/library-refresh-scan.md` (IMPLEMENTED — both slices landed;
+  code-review loop r1-r9 recorded in its `## Code review log`; r10 open)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)
