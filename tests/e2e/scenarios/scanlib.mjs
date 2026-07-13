@@ -196,6 +196,23 @@ export default {
       "retry success must clear the stale failure banner",
     );
 
+    // Exclusivity runs BOTH ways. Only failure-then-success was covered, so
+    // deleting `scanNotice = null` at attempt start left every assertion green
+    // while a failing scan displayed its banner NEXT TO the previous attempt's
+    // "Scan started" — reporting a scan that failed as if it had begun
+    // (codex r3). A success notice is on screen right now; fail the next one.
+    mock.state.failNextItemRefresh = true;
+    await scanVia(driver, "Library One");
+    await pollUntil(
+      async () => ((await banner(driver)) ?? "").includes(FORBIDDEN_MSG),
+      "the failing attempt banners",
+    );
+    assert.equal(
+      await notice(driver),
+      null,
+      "a failing attempt must clear the previous attempt's success notice",
+    );
+
     // ── 5. Out-of-order completions ─────────────────────────────────────
     // Phase 1: lib1 slow, lib2 fast — lib2's success notice appears; when
     // lib1's delayed response lands, the published status must NOT change
