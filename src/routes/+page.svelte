@@ -464,6 +464,9 @@
   let refreshEpoch = $state(-1);
   // A grid-root refresh owns the error banner for its duration (see below).
   let gridActionActive = $state(false);
+  // The listing generation that was current when the action started: it may
+  // silence THOSE loads (the ones it orphans), never newer ones.
+  let gridActionBaseGen = $state(0);
 
   type RootKind = "home" | "section-grid" | "type-grid" | "search" | "person" | "drill" | "detail";
 
@@ -543,6 +546,12 @@
       // that was ever needed; the load itself is left to run, so nothing is
       // stranded or discarded (codex r5).
       gridActionActive = kind === "section-grid" || kind === "type-grid";
+      // Only loads that already existed when we clicked are ours to silence. A
+      // NEWER same-root load (playback-ended -> refreshWatchState -> resetAndLoad)
+      // claims a higher generation, and OUR leg is the one that will be dropped
+      // as stale — so swallowing its failure too would leave an empty grid with
+      // no banner at all (codex r8).
+      gridActionBaseGen = loadGen;
 
       // Sections leg (always). The swap is `sourceGen`-gated only — a fresher
       // section list is valid regardless of navigation. Unlike
@@ -669,6 +678,7 @@
       refreshing = false;
       refreshEpoch = -1;
       gridActionActive = false;
+      gridActionBaseGen = 0;
     }
   }
 
@@ -832,7 +842,13 @@
         // is discarded on the epoch mismatch, so it must not go on swallowing
         // the NEW view's errors, which would leave that view empty and silent
         // (codex r6).
-        else if (!(gridActionActive && refreshEpoch === navEpoch))
+        else if (
+          !(
+            gridActionActive &&
+            refreshEpoch === navEpoch &&
+            myGen <= gridActionBaseGen
+          )
+        )
           error = String(e);
         hasMore = false;
       }

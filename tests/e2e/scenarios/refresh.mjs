@@ -116,6 +116,11 @@ async function markWatchedFromHome(driver, prefix) {
     );
   await driver.click(item);
 }
+// Mark a GRID card watched: on a grid root refreshWatchState() runs
+// resetAndLoad(), i.e. a NEWER same-root listing load.
+async function markWatchedFromGrid(driver, prefix) {
+  await markWatchedFromHome(driver, prefix); // same context-menu interaction
+}
 function removeViewA() {
   const at = mockA.state.views.findIndex((v) => v.id === "libA");
   assert.ok(at >= 0, "libA must exist before a destructive removal");
@@ -893,6 +898,31 @@ export default {
     await settle(driver);
     mockA.state.viewsDelayMs = 0;
     await screenshot("10-scoped-suppression");
+
+    // ── 22. A NEWER same-root load's failure must not be swallowed ──────
+    // The action silences the loads it ORPHANS, so an in-flight listing cannot
+    // banner over the result the action is about to load. But a NEWER same-root
+    // load — a watch-state edit runs refreshWatchState(), which on a grid root
+    // calls resetAndLoad() — claims a higher generation, and it is the ACTION's
+    // leg that gets dropped as stale. Swallowing that newer load's failure too
+    // left an empty grid with no banner at all (codex r8).
+    await clickSide(driver, "Library A");
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
+      "library A's grid",
+    );
+    mockA.state.viewsDelayMs = 2000; // the action stays in flight...
+    await clickRefresh(driver);
+    mockA.state.failNextItems = true; // ...and the NEWER load will fail
+    // "Alpha One" was marked watched back in case 14, so its menu now offers
+    // "Mark unwatched"; use the still-unwatched card added in case 3.
+    await markWatchedFromGrid(driver, "Alpha Three"); // -> refreshWatchState -> resetAndLoad
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the newer same-root load's failure must surface (the action may only silence what it orphaned)",
+    );
+    await settle(driver);
+    mockA.state.viewsDelayMs = 0;
 
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
