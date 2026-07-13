@@ -481,8 +481,20 @@ export default {
     // Deferral: detail open must hold the redirect back.
     await openDetail(driver, "Alpha One");
     saved = removeViewA();
+    const latestBeforeFallback = latestRequests();
     await clickRefresh(driver);
     await settle(driver);
+    // settle() watches only the refresh control, and the fallback's Home
+    // re-fetch is FIRE-AND-FORGET (forceHomeForRemovedRoot), so the redirect's
+    // `!loading` gate may still be shut here: asserting now would pass even
+    // with the detail-deferral guard deleted (lrs-8). Wait for that fetch to
+    // arrive AND be applied — the window in which a missing guard closes the
+    // detail.
+    await pollUntil(
+      async () => (latestRequests() > latestBeforeFallback ? true : null),
+      "the fallback's Home re-fetch arrived (the redirect's gate can now open)",
+    );
+    await new Promise((r) => setTimeout(r, 600)); // let it apply: loading clears, the effect re-runs
     assert.ok(
       await detailOpen(driver),
       "the redirect must be DEFERRED while the detail is open",

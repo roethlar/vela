@@ -537,7 +537,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | lrs-5 | MEDIUM | Scan stale-FAILURE gate unguarded; mock consumes failNextItemRefresh at respond time so the case can't be written | `[ ]` | |
 | lrs-6 | MEDIUM | scan_url never tested with a hostile id; raw interpolation would stay green on an admin-credentialed POST | `[x]` | see log |
 | lrs-7 | MEDIUM | scan_query assertion is tautological; a destructive ReplaceAllMetadata=true refresh stays green | `[x]` | see log |
-| lrs-8 | MEDIUM | Refresh case 13's deferral assertion runs before the fallback's Home fetch settles — vacuous | `[ ]` | |
+| lrs-8 | MEDIUM | Refresh case 13's deferral assertion runs before the fallback's Home fetch settles — vacuous | `[x]` | see log |
 | br-1 | MEDIUM | Resume scenario green off the server offset — recents-fallback regressions invisible | `[x]` | `8c596d0` |
 | br-2 | MEDIUM | Mock search ignores IncludeItemTypes/Recursive — search-contract regressions pass | `[x]` | `36dec5d` |
 | br-3 | LOW | bump.sh leaves package-lock version stale; npm install dirties fresh checkouts | `[x]` | `88ab605` |
