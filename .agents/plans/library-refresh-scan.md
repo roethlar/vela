@@ -1010,6 +1010,29 @@ fixes; one of those would have broken Plex outright.
   needs a real source-add flow the mock harness does not have; the mechanism
   itself is guard-proven by case 20.
 
+**r7 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 3 MEDIUM, ALL
+ADMITTED.** Base `63560a6`, head `43a412e`. Narrower than r6 — the loop is
+converging.
+
+- **r7-1 (`163b958`) — an endpoint of UNKNOWN identity could still drift.** r6-3
+  correctly stopped pinning on a restored endpoint's empty machine id, but that
+  left such a source free to be repointed: a failed scan rediscovered UNPINNED,
+  could install account server B, and although the retry was refused, the NEXT
+  scan's first attempt would send A's still-visible section key to B. Fixed at
+  the root: the source LEARNS its machine (one `/identity` call at first contact,
+  lock never held across it), so rediscovery is pinned from then on; and while
+  identity is unknown a scan does not rediscover at all.
+- **r7-2 (`e04a880`) — Plex linking is navigation.** The link screen replaces the
+  root and its completion calls `loadEverything()`, neither bumping `navEpoch`,
+  so an obsolete refresh kept owning the epoch. Both points now bump it.
+  **Recorded gap:** no automated guard (linking needs plex.tv; the harness is
+  hermetic). Same class as r6-2's Settings gap.
+- **r7-3 (`0220ffc`) — the mock accepted UNAUTHENTICATED scans.** The scan routes
+  are the only writes Vela makes and carry admin-capable credentials, yet the
+  mock never checked the Authorization header: dropping auth from either
+  production request left every scan guard green while a real server answers 401
+  and Scan Library is unusable. The mock now demands auth on both routes.
+
 Operator note (process, not code): two guard proofs in this round initially
 came back GREEN against an injected regression — both times the harness was
 at fault, not the guard. A proof script ended with `git checkout --
