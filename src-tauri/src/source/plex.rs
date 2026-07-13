@@ -39,30 +39,25 @@ impl PlexSource {
         self.rediscover().await
     }
 
-    /// Run discovery, pick a server, persist it. Recovers from a stale saved server.
+    /// Run discovery, pick a server, persist it. Recovers from a stale saved
+    /// server — the SAME machine at a new address.
+    ///
+    /// It never silently repoints this source at a DIFFERENT machine. Discovery
+    /// returns every server on the account and picks the first reachable one,
+    /// then installs and persists it; but a Vela source is one server, and the
+    /// ids it hands the frontend (section keys, rating keys) are server-LOCAL.
+    /// Swapping the machine underneath them makes every one of those ids mean
+    /// something else — a scan fired at "section 2" would scan a stranger's
+    /// library and report success (codex r4/r5). So once a server is installed,
+    /// rediscovery is pinned to its machine; only a source that has never
+    /// connected discovers freely.
     async fn rediscover(&self) -> Result<PlexLibrary, String> {
-        self.rediscover_on(None).await
-    }
-
-    /// Rediscover, but only among servers whose machine id matches `machine`
-    /// (when given). Discovery normally takes the first REACHABLE server on the
-    /// account and PERSISTS it — so on a multi-server account an unfiltered
-    /// rediscover can silently repoint this source at a different machine. Any
-    /// caller holding a server-LOCAL id (a section key) must pin the machine,
-    /// or its id will be applied to a stranger's library. Rejecting the result
-    /// afterwards is NOT enough: by then the new server is already installed
-    /// and persisted, and the next call would use it (codex r4).
-    async fn rediscover_same_machine(&self, machine: &str) -> Result<PlexLibrary, String> {
-        self.rediscover_on(Some(machine)).await
-    }
-
-    async fn rediscover_on(&self, machine: Option<&str>) -> Result<PlexLibrary, String> {
-        let lib = {
+        let (lib, pin) = {
             let guard = self.lib.lock().await;
-            guard.clone()
+            (guard.clone(), guard.server_machine_id())
         };
         let all = lib.discover_servers().await.map_err(|e| e.to_string())?;
-        let servers = same_machine_candidates(all, machine);
+        let servers = same_machine_candidates(all, pin.as_deref());
         let chosen = lib
             .choose_reachable_server(&servers, false)
             .await
@@ -324,21 +319,21 @@ impl MediaSource for PlexSource {
         match first {
             Ok(()) => Ok(()),
             Err(first_err) => {
-                // Retry only against the SAME machine. The plain rediscover()
-                // would install and persist whichever account server answers
-                // first, so refusing the retry afterwards would be too late:
-                // this source would already be repointed, and the next scan
-                // would send the user's section key to a stranger's server
-                // (codex r4). Pin the machine BEFORE the choice is made.
-                let Some(machine) = before.as_deref() else {
+                // rediscover() is pinned to the installed machine by
+                // construction, so it can only ever come back with the SAME
+                // server (at a possibly new address) or fail. The check below
+                // is a belt-and-braces assertion on that invariant: a scan is
+                // an authenticated ACTION, so it refuses to run anywhere but
+                // the machine whose section key it holds.
+                if before.is_none() {
                     return Err(first_err); // no known server to pin to
-                };
-                let lib = match self.rediscover_same_machine(machine).await {
+                }
+                let lib = match self.rediscover().await {
                     Ok(l) => l,
                     Err(_) => return Err(first_err), // that server is gone/unreachable
                 };
                 if !may_retry_scan_on(before.as_deref(), lib.server_machine_id().as_deref()) {
-                    return Err(first_err); // belt-and-braces: never act off-machine
+                    return Err(first_err); // never act off-machine
                 }
                 lib.request_library_scan(&path)
                     .await

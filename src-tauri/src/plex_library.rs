@@ -1656,6 +1656,19 @@ mod tests {
         assert_eq!(v.last_viewed_at, Some(1_751_000_000));
     }
 
+    /// The pin `PlexSource::rediscover` derives comes from here: if this stopped
+    /// reflecting the installed server, rediscovery would silently go unpinned
+    /// and could repoint the source at another machine (codex r5).
+    #[test]
+    fn server_machine_id_reflects_the_installed_server() {
+        let mut lib = PlexLibrary::new("tok".into(), "dev".into());
+        assert_eq!(lib.server_machine_id(), None, "no server installed yet");
+        lib.set_server(server("alpha", "https", "a.example", false, false));
+        assert_eq!(lib.server_machine_id().as_deref(), Some("alpha-id"));
+        lib.set_server(server("beta", "https", "b.example", false, false));
+        assert_eq!(lib.server_machine_id().as_deref(), Some("beta-id"));
+    }
+
     fn server(name: &str, scheme: &str, host: &str, local: bool, relay: bool) -> PlexServer {
         PlexServer {
             name: name.to_string(),
