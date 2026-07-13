@@ -678,6 +678,13 @@
 
   async function beginLink() {
     const gen = ++linkGen;
+    // Linking REPLACES the visible root with the device-code screen, and its
+    // completion calls loadEverything() — both reset the view underneath any
+    // refresh already in flight. That is navigation: without the bump the
+    // obsolete action still owns the epoch, so it could publish its old view's
+    // error over the link screen, or keep the empty-Home redirect blocked after
+    // the new source lands (codex r7).
+    navEpoch++;
     if (pollTimer) clearTimeout(pollTimer); // drop any pending poll from a prior attempt
     pin = null; // abandon any previously shown code immediately, so a failed
     // (or superseded) begin can't leave a dead, unpolled code on screen
@@ -704,6 +711,7 @@
       if (ok) {
         pin = null;
         authenticated = true;
+        navEpoch++; // the linked source resets the view (see beginLink)
         await loadSourceList(); // surface the new Plex source in the switcher
         await loadEverything();
         return;
