@@ -443,6 +443,8 @@
   // leg's claimed generation (a leg superseded by a newer same-root load
   // contributes neither data nor failure).
   let refreshing = $state(false);
+  // A grid-root refresh owns the error banner for its duration (see below).
+  let gridActionActive = $state(false);
 
   type RootKind = "home" | "section-grid" | "type-grid" | "search" | "person" | "drill" | "detail";
 
@@ -512,26 +514,15 @@
       // superseded leg contributes neither data nor failure.
       const legFailures: { msg: string; current: () => boolean }[] = [];
 
-      // Grid roots claim `loadGen` NOW, synchronously at the click — NOT when
-      // the content leg finally runs (it must wait for the sections response).
-      // An ordinary listing load still in flight owns the current generation
-      // and publishes its own failures DIRECTLY (loadMore's `else error = ...`
-      // path, +page.svelte:754). If it fails during a slow sections fetch, its
-      // banner lands after this action cleared the surface, and the action's
-      // own successful reload adds no failure to clear it: a false error over
-      // fresh cards. Claiming here invalidates that load — it can neither
-      // append nor publish (codex r3).
-      const gridGen =
-        kind === "section-grid" || kind === "type-grid" ? ++loadGen : 0;
-      // ...and HOLD the in-flight lock from this moment. `onScroll` calls
-      // loadMore() with the DEFAULT generation — which is now OURS — so a
-      // scroll during a slow sections fetch would start a second load on this
-      // very generation: it appends a page at the pre-reset offset (corrupting
-      // card order) or publishes its own failure over our result. `loadingMore`
-      // is the only thing loadMore checks before claiming, so take it at the
-      // click; the leg releases it when it resets the grid, and its finally
-      // releases it on every other exit (codex r4).
-      if (gridGen) loadingMore = true;
+      // A grid-root action OWNS the status surface for its duration: an
+      // ordinary listing load in flight (or one a scroll starts meanwhile)
+      // publishes its failures DIRECTLY (loadMore's `else error = ...` path),
+      // which would land a false error over the cards this action is about to
+      // load — and the action, having no failure of its own, would have
+      // nothing to clear it with (codex r3). Suppressing that publish is all
+      // that was ever needed; the load itself is left to run, so nothing is
+      // stranded or discarded (codex r5).
+      gridActionActive = kind === "section-grid" || kind === "type-grid";
 
       // Sections leg (always). The swap is `sourceGen`-gated only — a fresher
       // section list is valid regardless of navigation. Unlike
@@ -599,8 +590,21 @@
         // sections response lands (on a grid root the content leg DEPENDS on
         // the sections result), REPLACING the items — the reset half of the
         // listing machinery. `navEpoch`-gated: navigation meanwhile wins.
+        //
+        // The generation is claimed HERE, not at the click. Claiming it early
+        // (the r3-2 design) invalidated whatever listing was already in
+        // flight — and when this leg then returned early because the sections
+        // fetch FAILED, that listing's result was discarded with nothing to
+        // replace it: the library rendered as EMPTY ("Nothing in this view
+        // yet"), unable to paginate, until the user navigated away (codex r5).
+        // The in-flight load is left alone; it populates the grid normally,
+        // and if this leg does reach its reset, the older generation is
+        // discarded then — the machinery's ordinary behavior. What the early
+        // claim was really for — an orphaned load publishing its own failure
+        // banner over the action's result — is handled by `gridActionActive`
+        // below instead, which costs nothing and breaks nothing.
         contentLeg = (async () => {
-          const myGen = gridGen; // claimed at click, above
+          let myGen = 0;
           try {
             const list = await sectionsLeg;
             if (list === null) return; // sections failed or superseded
@@ -608,7 +612,7 @@
             if (kind === "section-grid" && !list.some((sec) => sec.key === rootKey)) {
               return; // root gone: the disappearance fallback owns this outcome
             }
-            if (myGen !== loadGen) return; // navigation claimed a newer one meanwhile
+            myGen = ++loadGen; // NOW we own the grid: discard any older load
             loadingMore = false;
             offset = 0;
             hasMore = true;
@@ -619,15 +623,9 @@
               legFailures.push({ msg, current: () => myGen === loadGen });
             });
           } finally {
-            // Claiming `loadGen` at the click ORPHANED whatever load was in
-            // flight: its own release is generation-gated, so it can no longer
-            // clear `loading`/`loadingMore` — this action owns them now and
-            // MUST release them on EVERY exit, including the early returns
-            // above (sections failed, root gone, navigation won). Otherwise a
-            // refresh whose sections fetch fails leaves the grid stuck on its
-            // skeleton, unable to paginate, until the user navigates away
-            // (codex r4).
-            if (myGen === loadGen) {
+            // Only release what we claimed: an early return never touched the
+            // in-flight load, which still owns (and will clear) these flags.
+            if (myGen && myGen === loadGen) {
               loading = false;
               loadingMore = false;
             }
@@ -649,6 +647,7 @@
       }
     } finally {
       refreshing = false;
+      gridActionActive = false;
     }
   }
 
@@ -797,7 +796,10 @@
         // The refresh action aggregates its legs' failures action-locally
         // (library-refresh-scan plan); navigation loads keep the direct publish.
         if (onError) onError(String(e));
-        else error = String(e);
+        // A grid-root refresh owns the banner while it runs: this load's own
+        // failure must not land over the result the action is loading (r3-2),
+        // and the action publishes its own legs' failures itself.
+        else if (!gridActionActive) error = String(e);
         hasMore = false;
       }
     } finally {

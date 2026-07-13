@@ -759,31 +759,39 @@ export default {
     );
     await screenshot("08-no-midrefresh-redirect");
 
-    // ── 18. A refresh that fails must not strand the grid on its skeleton ─
-    // Claiming `loadGen` at the click ORPHANS the in-flight listing: its own
-    // release is generation-gated, so it can no longer clear `loading` /
-    // `loadingMore`. If the action then returns early — sections failed — and
-    // nobody releases them, the grid sits on its skeleton forever, unable to
-    // paginate, until the user navigates away (codex r4).
+    // ── 18. A failed refresh must not empty a healthy library ───────────
+    // A listing is in flight when Refresh is clicked, and the action's sections
+    // leg then FAILS. The r3-2 design claimed `loadGen` at the click, which
+    // invalidated that listing — and since the leg returned early, its result
+    // was discarded with nothing to replace it: the library rendered EMPTY
+    // ("Nothing in this view yet"), unable to paginate, until the user
+    // navigated away (codex r5; r4's skeleton assertion passed straight
+    // through it, because a released flag is not the same as a usable grid).
+    // The in-flight load is now left alone: it populates the grid, and the
+    // sections failure is reported on top.
     mockA.state.itemsDelayMs = 700; // a listing is in flight at click time...
     await clickSide(driver, "Library A");
     mockA.state.failNextViews = true; // ...and the refresh's sections leg dies
     await clickRefresh(driver);
     await settle(driver);
-    await pollUntil(
-      async () =>
-        (await driver.exec(`return !document.querySelector('.skelgrid')`))
-          ? true
-          : null,
-      "the grid released its loading skeleton (the action owns the flags it orphaned)",
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
+      "the library's own cards arrive: a failed refresh must not empty a healthy library",
     );
+    assert.equal(
+      await driver.exec(`return !!document.querySelector('.skelgrid')`),
+      false,
+      "and the grid is not left on its loading skeleton",
+    );
+    assert.ok(await banner(driver), "the sections failure is still reported");
 
-    // ── 19. A scroll mid-refresh must not load on the action's generation ─
-    // `onScroll` calls loadMore() with the DEFAULT generation — which, since
-    // the action claims at the click, is now the ACTION'S. A scroll during a
-    // slow sections fetch would start a second load on that very generation:
-    // it appends a page at the pre-reset offset (corrupting card order) or
-    // publishes its own failure over the action's result (codex r4).
+    // ── 19. A scroll mid-refresh must not corrupt the reloaded grid ─────
+    // `onScroll` starts a paged load with the CURRENT generation. It must not
+    // be able to append that page across the action's reset — which is what
+    // the r3-2 click-time claim allowed, by handing the scroll the action's own
+    // generation (codex r4). The scroll's page is parked so it lands AFTER the
+    // action has reset and reloaded: its generation is stale by then and it
+    // must be dropped, leaving exactly the reloaded first page.
     for (let i = 0; i < 70; i++) {
       mockA.state.addMovie("libB", {
         id: `bulk${i}`,
@@ -796,14 +804,9 @@ export default {
       `return document.querySelectorAll('button.poster').length >= 60`,
       "library B's first page (PAGE=60) is on screen and scrollable",
     );
-    const pagedBefore = mockA.state.requests.filter(
-      (r) =>
-        r.path === "/Users/u1/Items" &&
-        r.query.ParentId === "libB" &&
-        Number(r.query.StartIndex) > 0,
-    ).length;
-    mockA.state.viewsDelayMs = 1200; // hold the action open
+    mockA.state.viewsDelayMs = 1200; // hold the action open...
     await clickRefresh(driver);
+    mockA.state.itemsDelayMs = 2400; // ...and park the scroll's page past the reset
     await driver.exec(
       `const g = document.querySelector('main.grid');
        g.scrollTop = g.scrollHeight;
@@ -811,16 +814,21 @@ export default {
     );
     await settle(driver);
     mockA.state.viewsDelayMs = 0;
-    const pagedAfter = mockA.state.requests.filter(
-      (r) =>
-        r.path === "/Users/u1/Items" &&
-        r.query.ParentId === "libB" &&
-        Number(r.query.StartIndex) > 0,
-    ).length;
+    await driver.waitFor(
+      `return document.querySelectorAll('button.poster').length === 60`,
+      "the action's reloaded first page is on screen",
+    );
+    await new Promise((r) => setTimeout(r, 2600)); // the parked page lands here
+    const after = await posterLabels(driver);
     assert.equal(
-      pagedAfter,
-      pagedBefore,
-      "a scroll during the refresh must not start a paged load on the action's generation",
+      after.length,
+      60,
+      "a stale paged load must not append across the action's reset",
+    );
+    assert.equal(
+      new Set(after).size,
+      60,
+      "no duplicate cards (a stale page appended over the reloaded one)",
     );
     assert.equal(
       await banner(driver),
