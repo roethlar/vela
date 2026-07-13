@@ -10,7 +10,7 @@ use super::{
     MediaVersionDto, PersonRef, SectionDto, StreamResolution,
 };
 use crate::playback::{ProgressTarget, TrackInfo};
-use crate::plex_library::{PlexDetail, PlexLibrary, PlexVideo};
+use crate::plex_library::{PlexDetail, PlexLibrary, PlexServer, PlexVideo};
 
 pub struct PlexSource {
     id: String,
@@ -41,11 +41,28 @@ impl PlexSource {
 
     /// Run discovery, pick a server, persist it. Recovers from a stale saved server.
     async fn rediscover(&self) -> Result<PlexLibrary, String> {
+        self.rediscover_on(None).await
+    }
+
+    /// Rediscover, but only among servers whose machine id matches `machine`
+    /// (when given). Discovery normally takes the first REACHABLE server on the
+    /// account and PERSISTS it — so on a multi-server account an unfiltered
+    /// rediscover can silently repoint this source at a different machine. Any
+    /// caller holding a server-LOCAL id (a section key) must pin the machine,
+    /// or its id will be applied to a stranger's library. Rejecting the result
+    /// afterwards is NOT enough: by then the new server is already installed
+    /// and persisted, and the next call would use it (codex r4).
+    async fn rediscover_same_machine(&self, machine: &str) -> Result<PlexLibrary, String> {
+        self.rediscover_on(Some(machine)).await
+    }
+
+    async fn rediscover_on(&self, machine: Option<&str>) -> Result<PlexLibrary, String> {
         let lib = {
             let guard = self.lib.lock().await;
             guard.clone()
         };
-        let servers = lib.discover_servers().await.map_err(|e| e.to_string())?;
+        let all = lib.discover_servers().await.map_err(|e| e.to_string())?;
+        let servers = same_machine_candidates(all, machine);
         let chosen = lib
             .choose_reachable_server(&servers, false)
             .await
@@ -307,11 +324,21 @@ impl MediaSource for PlexSource {
         match first {
             Ok(()) => Ok(()),
             Err(first_err) => {
-                let lib = self.rediscover().await?;
+                // Retry only against the SAME machine. The plain rediscover()
+                // would install and persist whichever account server answers
+                // first, so refusing the retry afterwards would be too late:
+                // this source would already be repointed, and the next scan
+                // would send the user's section key to a stranger's server
+                // (codex r4). Pin the machine BEFORE the choice is made.
+                let Some(machine) = before.as_deref() else {
+                    return Err(first_err); // no known server to pin to
+                };
+                let lib = match self.rediscover_same_machine(machine).await {
+                    Ok(l) => l,
+                    Err(_) => return Err(first_err), // that server is gone/unreachable
+                };
                 if !may_retry_scan_on(before.as_deref(), lib.server_machine_id().as_deref()) {
-                    // Don't scan a stranger's library: report the original
-                    // failure instead of acting on the wrong server.
-                    return Err(first_err);
+                    return Err(first_err); // belt-and-braces: never act off-machine
                 }
                 lib.request_library_scan(&path)
                     .await
@@ -741,14 +768,25 @@ fn validate_plex_id(name: &str, value: &str) -> Result<(), String> {
     }
 }
 
-/// May a failed scan be retried against the server `rediscover()` just landed
-/// on? Section keys are numeric ids that mean nothing off the server they came
-/// from, and discovery returns whichever account server answers first — which
-/// on a multi-server account can be a DIFFERENT machine. Retrying blindly there
-/// would scan an unrelated library that happens to share the number and report
-/// success for the one the user clicked. Only an identical machine id may
-/// retry; an unknown id on either side is not a match. The ONLY decision point
-/// for the scan retry (`PlexSource::scan_library`).
+/// Narrow a discovery result to one machine. `None` keeps every candidate (the
+/// ordinary rediscover: any reachable account server will do). `Some(id)` keeps
+/// only that physical server — the filter a caller holding a server-LOCAL id
+/// must apply BEFORE the choice is installed and persisted. The ONLY place the
+/// candidate set is narrowed (`PlexSource::rediscover_on`).
+fn same_machine_candidates(servers: Vec<PlexServer>, machine: Option<&str>) -> Vec<PlexServer> {
+    match machine {
+        None => servers,
+        Some(id) => servers
+            .into_iter()
+            .filter(|s| s.machine_identifier == id)
+            .collect(),
+    }
+}
+
+/// May a failed scan be retried against the server we just landed on? Section
+/// keys are numeric ids that mean nothing off the server they came from. A
+/// final assertion behind [`same_machine_candidates`]: even if the filter were
+/// ever loosened, the scan still refuses to act on a different machine.
 fn may_retry_scan_on(before: Option<&str>, after: Option<&str>) -> bool {
     matches!((before, after), (Some(b), Some(a)) if b == a && !b.is_empty())
 }
@@ -767,6 +805,43 @@ mod tests {
     use crate::plex_library::{
         PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag,
     };
+
+    fn server_with_id(machine: &str, host: &str) -> PlexServer {
+        PlexServer {
+            name: machine.to_string(),
+            host: host.to_string(),
+            port: 32400,
+            scheme: "https".to_string(),
+            uri: format!("https://{host}:32400"),
+            local: false,
+            relay: false,
+            machine_identifier: machine.to_string(),
+            version: "1.0".to_string(),
+        }
+    }
+
+    #[test]
+    fn scan_rediscover_only_considers_the_same_machine() {
+        // Two servers on one account. Discovery would hand back both, and
+        // choose_reachable_server takes the first REACHABLE one — installing
+        // AND persisting it. A caller holding server A's section key must never
+        // let B into the candidate set: by the time a post-hoc check could
+        // reject it, this source is already repointed at B (codex r4).
+        let servers = vec![
+            server_with_id("machine-A", "a.example"),
+            server_with_id("machine-B", "b.example"),
+        ];
+        let pinned = same_machine_candidates(servers.clone(), Some("machine-A"));
+        assert_eq!(pinned.len(), 1, "only A's server may be a candidate");
+        assert_eq!(pinned[0].machine_identifier, "machine-A");
+
+        // A machine that has vanished from the account yields NO candidate —
+        // the retry then fails rather than silently landing elsewhere.
+        assert!(same_machine_candidates(servers.clone(), Some("machine-Z")).is_empty());
+
+        // Unpinned (the ordinary rediscover) keeps everything, as before.
+        assert_eq!(same_machine_candidates(servers, None).len(), 2);
+    }
 
     #[test]
     fn scan_retry_never_crosses_to_another_server() {
