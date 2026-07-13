@@ -341,8 +341,9 @@
       sections.length > 0
     ) {
       // select() sets mode = "browse" synchronously, so the condition is false
-      // on the next run — no loop, no double-open.
-      select(sections[0]);
+      // on the next run — no loop, no double-open. `auto`: this is the app
+      // navigating, not the user (lrs-1).
+      select(sections[0], { auto: true });
     }
   });
 
@@ -653,8 +654,15 @@
     if (gen === linkGen) pollTimer = setTimeout(() => pollLink(gen), 2000);
   }
 
-  async function select(section: Section) {
-    navEpoch++; // navigation (see navEpoch)
+  // `auto`: the APP is navigating (the empty-Home redirect below), not the
+  // user. It must not bump `navEpoch` and must not clear `error`, or a
+  // refresh whose sections leg failed while its Home leg came back empty
+  // would redirect the user into a grid built from the STALE section list
+  // and then read its own redirect as "the user navigated" — suppressing the
+  // failure banner that explains the empty Home (codex code review r2,
+  // lrs-1). Navigation-wins (contract (d)) is about USER navigation.
+  async function select(section: Section, { auto = false }: { auto?: boolean } = {}) {
+    if (!auto) navEpoch++; // navigation (see navEpoch)
     detailView = null;
     mode = "browse";
     searchTerm = "";
@@ -672,7 +680,7 @@
         ? saved.key
         : "titleSort:asc";
     crumbs = [{ title: section.title, ratingKey: null }];
-    await resetAndLoad();
+    await resetAndLoad({ keepError: auto });
   }
 
   // Open a consolidated content-type listing (All view's Library).
@@ -692,7 +700,7 @@
   // Bumped on every navigation; in-flight loads from an older generation are discarded.
   let loadGen = 0;
 
-  async function resetAndLoad() {
+  async function resetAndLoad({ keepError = false }: { keepError?: boolean } = {}) {
     homeGen++; // leaving home: invalidate any in-flight home/sections load
     const myGen = ++loadGen;
     loadingMore = false; // abandon any in-flight load (its results are now stale)
@@ -701,7 +709,11 @@
     items = [];
     failedPosters = new Set(); // bounded to the current view's posters
     loading = true;
-    error = null;
+    // An auto-redirect keeps the banner: the refresh action publishes its
+    // aggregate AFTER both legs settle, and Svelte's effect flush may land
+    // either side of that — clearing here would race the publish away
+    // (lrs-1). A user-driven select still clears, as before.
+    if (!keepError) error = null;
     await loadMore(myGen);
     if (myGen === loadGen) loading = false;
   }

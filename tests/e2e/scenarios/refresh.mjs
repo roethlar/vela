@@ -525,6 +525,30 @@ export default {
     );
     await screenshot("06-stale-load-superseded");
 
+    // ── 15. The app's own redirect must not swallow the failure ─────────
+    // Sections FAIL while the Home leg comes back EMPTY: Home settles with no
+    // rails, so the empty-Home effect redirects into sections[0] — using the
+    // STALE section list, since the refresh of it just failed. That redirect
+    // is the APP navigating, not the user, so contract (b) still holds: the
+    // sections failure must surface. With select()'s navEpoch bump applied to
+    // the auto path (the pre-lrs-1 behavior), the action reads "the user
+    // navigated" and publishes nothing — the user browses a stale library
+    // with no error (codex code review r2, lrs-1).
+    await goHome(driver);
+    mockA.state.latest = [];
+    mockA.state.failNextViews = true;
+    await clickRefresh(driver);
+    await settle(driver);
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha"]')`,
+      "the empty-Home redirect lands in library A (the app navigated)",
+    );
+    assert.ok(
+      await banner(driver),
+      "the sections failure must still banner after the app's own redirect",
+    );
+    await screenshot("07-autoredirect-keeps-banner");
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,
