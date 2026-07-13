@@ -913,6 +913,37 @@ were failing to see.
   timer phases only proved an older timer cannot clear a newer notice, so a
   dead auto-clear passed while "Scan started" stuck on screen forever.
 
+**r4 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 3 MEDIUM + 1 LOW,
+ALL ADMITTED.** Base `63560a6`, head `615c94c`. TWO of the four are
+REGRESSIONS THE r3 FIXES INTRODUCED — the loop catching its own tail, which
+is exactly what a fresh-eyes round is for.
+
+- **r4-1 (`c485e6d`) — the action orphaned the loading flags it stole.**
+  r3-2's click-time `loadGen` claim orphans the in-flight listing, whose own
+  release is generation-gated — so on every early return (sections failed,
+  root gone, navigation won) NOBODY released `loading`/`loadingMore`. A
+  refresh whose sections fetch failed left the grid stuck on its skeleton,
+  unable to paginate, until the user navigated away. Fixed: the leg owns the
+  flags and releases them in a `finally`. Guard: refresh case 18.
+- **r4-2 (`f282a74`) — a scroll could load on the ACTION's generation.**
+  `onScroll` calls `loadMore()` with the DEFAULT generation, which after
+  r3-2 is the action's own: a scroll during a slow sections fetch started a
+  second load on that generation, appending a page at the pre-reset offset
+  (corrupt order/offset) or publishing its failure over the action's result.
+  Fixed: the action takes `loadingMore` at the click. Guard: refresh case 19
+  (70 movies in library B so PAGE=60 actually paginates, then a real scroll).
+- **r4-3 (`4504a8b`) — the r3-3 fix was INCOMPLETE.** `rediscover()` installs
+  AND PERSISTS its chosen server before returning, so refusing a cross-machine
+  retry afterwards was too late: the source was already repointed at server B,
+  and the NEXT scan would succeed on its first attempt against B's
+  same-numbered unrelated library. Fixed: discovery is filtered BEFORE the
+  choice — `rediscover_on(machine)` via `same_machine_candidates()`. Guard:
+  `scan_rediscover_only_considers_the_same_machine`.
+- **r4-4 (`ba4f4a1`, LOW) — the notice-expiry deadline had too much slack.**
+  Measured from the wrong attempt's t0 plus a 9s window, so a timer stretched
+  to 8-10s passed. Fixed: measured from when the owning notice is armed, 6s
+  budget (4s promise + jitter).
+
 Operator note (process, not code): two guard proofs in this round initially
 came back GREEN against an injected regression — both times the harness was
 at fault, not the guard. A proof script ended with `git checkout --
