@@ -1033,6 +1033,37 @@ converging.
   production request left every scan guard green while a real server answers 401
   and Scan Library is unusable. The mock now demands auth on both routes.
 
+**r8 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 4 MEDIUM. 3
+ADMITTED, 1 DECLINED.**  Base `63560a6`, head `b2b19db`.
+
+- **r8-1 (`3bb70ce`) — a FAILED identity probe still left the source unpinned.**
+  r7-1 learns the machine at first contact, but the probe can fail and
+  ensure_ready returned the endpoint anyway; a later rediscover could then
+  install another account server, and the scan's FIRST attempt would hit it with
+  this server's section key. Fixed: if Vela cannot say which server a library
+  belongs to, it refuses to scan and says so.
+- **r8-2 (`c4dcb08`) — the PIN screen transition is the navigation.** `beginLink`
+  bumped `navEpoch` before awaiting `link_begin`, but Settings closes at once, so
+  a Refresh started during that await still owned the epoch and could render an
+  obsolete library error over the link screen. The bump now also happens when the
+  PIN is assigned. (Guard gap unchanged: linking needs plex.tv.)
+- **r8-3 (`baaac10`) — the suppression silenced NEWER same-root loads too.** A
+  watch-state edit runs `refreshWatchState` → `resetAndLoad`, claiming a higher
+  generation; that load WINS (the action's leg is dropped as stale), so swallowing
+  its failure left an empty grid with no banner. Fixed: the action records the
+  generation current at the click (`gridActionBaseGen`) and may silence only
+  loads at or below it — exactly the ones it orphaned. Guard: case 22.
+- **r8-4 — DECLINED (recorded, not silently dropped).** *Claim:* opening a detail
+  while page 2 of a library is loading, when that page then FAILS, leaves
+  `hasMore = false` while the error is (correctly) suppressed because the user
+  navigated away; on Back the library looks silently truncated until re-entered.
+  *Reason for declining:* the consequence is recoverable (re-entering the library
+  runs `resetAndLoad` and restores full pagination), no wrong data and no wrong
+  action result, and `hasMore = false` on a failed page is PRE-EXISTING
+  pagination-failure semantics this work did not introduce. Fixing it properly
+  means reworking those semantics — out of scope for this plan. If the owner
+  wants failed pages to remain retryable, that is its own plan.
+
 Operator note (process, not code): two guard proofs in this round initially
 came back GREEN against an injected regression — both times the harness was
 at fault, not the guard. A proof script ended with `git checkout --
