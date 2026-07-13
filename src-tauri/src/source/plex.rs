@@ -16,6 +16,12 @@ pub struct PlexSource {
     id: String,
     name: String,
     lib: AsyncMutex<PlexLibrary>,
+    /// The machine that served the section list the frontend is currently
+    /// holding. Section keys are server-LOCAL numeric ids, so a scan must go to
+    /// the server the KEY came from — not merely to a server we can name. If the
+    /// source drifted between the sections load and the scan, this catches it
+    /// (codex r9).
+    sections_machine: AsyncMutex<Option<String>>,
 }
 
 impl PlexSource {
@@ -24,6 +30,7 @@ impl PlexSource {
             id: id.into(),
             name: name.into(),
             lib: AsyncMutex::new(lib),
+            sections_machine: AsyncMutex::new(None),
         }
     }
 
@@ -329,15 +336,19 @@ impl MediaSource for PlexSource {
     async fn scan_library(&self, section_key: &str) -> Result<(), String> {
         let path = scan_path(section_key)?;
         let lib = self.ensure_ready().await?;
-        // ensure_ready() probes /identity for an endpoint of unknown identity,
-        // but the probe can fail — and an unpinned source can be repointed at
-        // another account server by ANY later rediscover, after which this
-        // server-LOCAL section key would address a stranger's library. A scan is
-        // an authenticated ACTION: if we cannot say which server this key
-        // belongs to, we do not fire it (codex r8).
-        if rediscovery_pin(lib.server_machine_id()).is_none() {
+        // A scan is an authenticated ACTION and the section key is server-LOCAL,
+        // so it must reach the server the KEY CAME FROM. Naming the current
+        // server is not enough: if the source drifted after the sections load
+        // (an unpinned rediscover following a failed /identity probe), the key
+        // would address a stranger's same-numbered library and we would report
+        // success (codex r8, r9). Both sides must be known AND identical.
+        let served_by = self.sections_machine.lock().await.clone();
+        if !scan_target_ok(
+            served_by.as_deref(),
+            rediscovery_pin(lib.server_machine_id()).as_deref(),
+        ) {
             return Err(
-                "can't confirm which Plex server this library belongs to — reconnect the server and try again"
+                "can't confirm which Plex server this library belongs to — refresh libraries, or reconnect the server, and try again"
                     .to_string(),
             );
         }
@@ -388,6 +399,8 @@ impl MediaSource for PlexSource {
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
         let lib = self.ensure_ready().await?;
+        // Remember whose keys these are (see `sections_machine`).
+        *self.sections_machine.lock().await = rediscovery_pin(lib.server_machine_id());
         // A saved server endpoint can go stale (changed IP / plex.direct host).
         // map_err first so the non-Send error is dropped before the next await.
         let first = lib.get_library_sections().await.map_err(|e| e.to_string());
@@ -843,6 +856,15 @@ fn should_install(pinned: bool, installed_now: Option<&str>) -> bool {
     pinned || installed_now.is_none_or(|m| m.is_empty())
 }
 
+/// May a scan fire? The section key came from `served_by`; the request would go
+/// to `current`. Both must be KNOWN and IDENTICAL — an unidentified server, or a
+/// source that drifted to another machine since the section list was fetched,
+/// means the key no longer addresses the library the user clicked. The ONLY
+/// decision point for whether a scan runs at all (`PlexSource::scan_library`).
+fn scan_target_ok(served_by: Option<&str>, current: Option<&str>) -> bool {
+    matches!((served_by, current), (Some(a), Some(b)) if a == b && !a.is_empty())
+}
+
 /// May a failed scan be retried against the server we just landed on? Section
 /// keys are numeric ids that mean nothing off the server they came from. A
 /// final assertion behind [`same_machine_candidates`]: even if the filter were
@@ -949,6 +971,21 @@ mod tests {
 
         // Unpinned (the ordinary rediscover) keeps everything, as before.
         assert_eq!(same_machine_candidates(servers, None).len(), 2);
+    }
+
+    /// The scan must reach the server the KEY came from, not merely a server we
+    /// can name: a source that drifted between the sections load and the scan
+    /// would otherwise fire a server-local key at a stranger's same-numbered
+    /// library and report success (codex r9).
+    #[test]
+    fn a_scan_must_go_to_the_server_its_key_came_from() {
+        assert!(scan_target_ok(Some("machine-A"), Some("machine-A")));
+        // Drifted since the sections were fetched — the key means nothing here.
+        assert!(!scan_target_ok(Some("machine-A"), Some("machine-B")));
+        // Either side unknown: we cannot prove the key belongs to this server.
+        assert!(!scan_target_ok(None, Some("machine-A")));
+        assert!(!scan_target_ok(Some("machine-A"), None));
+        assert!(!scan_target_ok(Some(""), Some("")));
     }
 
     #[test]
