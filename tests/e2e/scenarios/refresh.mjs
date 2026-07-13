@@ -778,6 +778,56 @@ export default {
       "the grid released its loading skeleton (the action owns the flags it orphaned)",
     );
 
+    // ── 19. A scroll mid-refresh must not load on the action's generation ─
+    // `onScroll` calls loadMore() with the DEFAULT generation — which, since
+    // the action claims at the click, is now the ACTION'S. A scroll during a
+    // slow sections fetch would start a second load on that very generation:
+    // it appends a page at the pre-reset offset (corrupting card order) or
+    // publishes its own failure over the action's result (codex r4).
+    for (let i = 0; i < 70; i++) {
+      mockA.state.addMovie("libB", {
+        id: `bulk${i}`,
+        name: `Bulk ${String(i).padStart(2, "0")}`,
+        year: 2000 + (i % 20),
+      });
+    }
+    await clickSide(driver, "Library B");
+    await driver.waitFor(
+      `return document.querySelectorAll('button.poster').length >= 60`,
+      "library B's first page (PAGE=60) is on screen and scrollable",
+    );
+    const pagedBefore = mockA.state.requests.filter(
+      (r) =>
+        r.path === "/Users/u1/Items" &&
+        r.query.ParentId === "libB" &&
+        Number(r.query.StartIndex) > 0,
+    ).length;
+    mockA.state.viewsDelayMs = 1200; // hold the action open
+    await clickRefresh(driver);
+    await driver.exec(
+      `const g = document.querySelector('main.grid');
+       g.scrollTop = g.scrollHeight;
+       g.dispatchEvent(new Event('scroll'));`,
+    );
+    await settle(driver);
+    mockA.state.viewsDelayMs = 0;
+    const pagedAfter = mockA.state.requests.filter(
+      (r) =>
+        r.path === "/Users/u1/Items" &&
+        r.query.ParentId === "libB" &&
+        Number(r.query.StartIndex) > 0,
+    ).length;
+    assert.equal(
+      pagedAfter,
+      pagedBefore,
+      "a scroll during the refresh must not start a paged load on the action's generation",
+    );
+    assert.equal(
+      await banner(driver),
+      null,
+      "no stray failure from a scroll-triggered load",
+    );
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,

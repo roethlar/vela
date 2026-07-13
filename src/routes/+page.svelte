@@ -523,6 +523,15 @@
       // append nor publish (codex r3).
       const gridGen =
         kind === "section-grid" || kind === "type-grid" ? ++loadGen : 0;
+      // ...and HOLD the in-flight lock from this moment. `onScroll` calls
+      // loadMore() with the DEFAULT generation — which is now OURS — so a
+      // scroll during a slow sections fetch would start a second load on this
+      // very generation: it appends a page at the pre-reset offset (corrupting
+      // card order) or publishes its own failure over our result. `loadingMore`
+      // is the only thing loadMore checks before claiming, so take it at the
+      // click; the leg releases it when it resets the grid, and its finally
+      // releases it on every other exit (codex r4).
+      if (gridGen) loadingMore = true;
 
       // Sections leg (always). The swap is `sourceGen`-gated only — a fresher
       // section list is valid regardless of navigation. Unlike
