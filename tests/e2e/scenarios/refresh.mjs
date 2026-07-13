@@ -93,14 +93,17 @@ async function pressBack(driver) {
   await driver.click(b);
 }
 function removeViewA() {
-  const saved = mockA.state.views.find((v) => v.id === "libA");
-  assert.ok(saved, "libA must exist before a destructive removal");
-  mockA.state.views = mockA.state.views.filter((v) => v.id !== "libA");
-  return saved;
+  const at = mockA.state.views.findIndex((v) => v.id === "libA");
+  assert.ok(at >= 0, "libA must exist before a destructive removal");
+  const [saved] = mockA.state.views.splice(at, 1);
+  return { saved, at };
 }
 // RESTORE A + settling Refresh (the between-phases contract of the plan).
-async function restoreA(driver, saved) {
-  mockA.state.views.push(saved);
+// A goes back at its ORIGINAL index: sections render in server order, so
+// appending would leave Library B first and change what `sections[0]` means
+// for every later case (the empty-Home redirect opens sections[0]).
+async function restoreA(driver, { saved, at }) {
+  mockA.state.views.splice(at, 0, saved);
   await clickRefresh(driver);
   await settle(driver);
   await driver.waitFor(
