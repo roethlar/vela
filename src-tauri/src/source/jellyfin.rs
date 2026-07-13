@@ -1173,6 +1173,53 @@ mod tests {
         }
     }
 
+    /// The scan POST carries admin-capable credentials, and the raw section key
+    /// is frontend-supplied, so a hostile id must stay ONE path segment and
+    /// never steer the request at another authenticated endpoint. Guard proof:
+    /// rebuild `scan_url` with `format!` interpolation and every case below
+    /// fails (the plan's required coverage; the old test only rejected dot ids,
+    /// so raw interpolation stayed green — lrs-6).
+    #[test]
+    fn scan_url_keeps_a_hostile_id_in_one_path_segment() {
+        let c = JellyfinClient::new(Flavor::Jellyfin, "http://s:8096", "dev", "sekrit", "u1");
+        for bad in [
+            "../System/Shutdown?x=",
+            "..\\System\\Shutdown",
+            "a/b",
+            "lib1?ReplaceAllMetadata=true",
+            "lib1#frag",
+        ] {
+            let raw = c
+                .scan_url(bad)
+                .unwrap_or_else(|e| panic!("{bad:?} should be encoded, not rejected: {e}"));
+            // Re-parse the way reqwest will: escapes that survive serialization
+            // but collapse on parse are exactly the hole we are guarding.
+            let u = url::Url::parse(&raw).unwrap_or_else(|e| panic!("{bad:?} -> {raw}: {e}"));
+            let segs: Vec<&str> = u.path_segments().expect("cannot-be-a-base").collect();
+            assert_eq!(
+                segs.len(),
+                3,
+                "{bad:?} escaped the /Items/<id>/Refresh shape: {}",
+                u.path()
+            );
+            assert_eq!(segs[0], "Items", "{bad:?} moved the endpoint: {}", u.path());
+            assert_eq!(
+                segs[2], "Refresh",
+                "{bad:?} moved the endpoint: {}",
+                u.path()
+            );
+            assert!(u.fragment().is_none(), "{bad:?} smuggled a fragment");
+            // Only scan_query's own pairs may appear — no smuggled overrides.
+            let q = u.query().unwrap_or_default();
+            assert_eq!(
+                q.split('&').count(),
+                scan_query().len(),
+                "{bad:?} smuggled query params: {q}"
+            );
+        }
+    }
+
+
     fn media_source(
         id: &str,
         direct_play: bool,

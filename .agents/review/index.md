@@ -535,7 +535,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | lrs-3 | MEDIUM | Refresh case 14 omits the plan's reverse-ordering phase: leg-failure generation ownership unguarded | `[ ]` | |
 | lrs-4 | MEDIUM | The r1 `loading` fix has no guard; a stranded skeleton blocks the empty-Home redirect undetected | `[ ]` | |
 | lrs-5 | MEDIUM | Scan stale-FAILURE gate unguarded; mock consumes failNextItemRefresh at respond time so the case can't be written | `[ ]` | |
-| lrs-6 | MEDIUM | scan_url never tested with a hostile id; raw interpolation would stay green on an admin-credentialed POST | `[ ]` | |
+| lrs-6 | MEDIUM | scan_url never tested with a hostile id; raw interpolation would stay green on an admin-credentialed POST | `[x]` | see log |
 | lrs-7 | MEDIUM | scan_query assertion is tautological; a destructive ReplaceAllMetadata=true refresh stays green | `[ ]` | |
 | lrs-8 | MEDIUM | Refresh case 13's deferral assertion runs before the fallback's Home fetch settles — vacuous | `[ ]` | |
 | br-1 | MEDIUM | Resume scenario green off the server offset — recents-fallback regressions invisible | `[x]` | `8c596d0` |
