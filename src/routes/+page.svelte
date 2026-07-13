@@ -702,6 +702,12 @@
       const p = await invoke<Pin>("link_begin");
       if (gen !== linkGen) return; // a newer attempt started while we were requesting
       pin = p;
+      // The bump at the top of beginLink() invalidates whatever was in flight
+      // THEN — but Settings closes immediately, so the user can start a Refresh
+      // while link_begin is still awaiting. THIS is the moment the PIN screen
+      // replaces the view, so it is the moment that refresh must stop owning it
+      // (codex r8).
+      navEpoch++;
       pollLink(gen);
     } catch (e) {
       // e.g. invoked from Settings while offline — surface it instead of an
