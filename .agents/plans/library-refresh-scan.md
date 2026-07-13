@@ -1091,3 +1091,49 @@ under test; and one injection removed the late `loadGen` claim while leaving
 the new click-time claim in place, so the pre-fix behavior was never
 restored. Rules now: land the fix BEFORE injecting, and restore from a file
 backup, never `git checkout`.
+
+**r10 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM. 1
+ADMITTED, 1 DECLINED.** Base `63560a6`, head `7e81619`.
+
+- **r10-2 (`8e474a7`) — the section list's server was recorded before the list
+  existed.** `sections()` stamped `sections_machine` from the PRE-REQUEST client.
+  An attempt that failed — or was merely still in flight — therefore relabelled
+  the keys the user was still looking at: they came from A, the source had since
+  drifted to account server B (an unpinned rediscovery after a failed read), and
+  `scan_target_ok(B, B)` then passed, rescanning B's same-numbered library while
+  reporting success for the one the user clicked. The same bug refused legitimate
+  scans in the other direction (an A-fail → B-retry-success stamped neither
+  server that could have served the list). Fixed: the stamp comes from the client
+  that ACTUALLY SERVED the returned list, written only once that list is in hand;
+  a failed attempt leaves it alone. Guard:
+  `a_scan_never_reaches_a_server_that_did_not_serve_the_key` — the FIRST
+  end-to-end guard over the scan-safety family (two mock Plex servers on
+  loopback, no network and no new deps; A serves the list, the source drifts to
+  B, B's refresh is parked mid-flight, and the scan must be refused). Proven red:
+  with the stamp back in its pre-fetch position the scan SUCCEEDS against B.
+  Rationale for the harness: every previous finding in this family (r3-3, r4-3,
+  r6, r7-1, r8-1, r9-2) could only ever be guarded by a pure decision helper —
+  which is precisely why the ORDERING of the call into those helpers kept
+  regressing undetected. Extend this mock rather than adding another pure test
+  when the next scan-safety finding lands.
+- **r10-1 — DECLINED (recorded, not silently dropped).** *Claim:*
+  `refreshWatchState()` passes `rerun: true` off residual `searchTerm`/
+  `personView`, but `searchTerm` survives child drills and the re-entry helpers
+  clear an open detail — so on a drilled/detail root the re-run changes what is
+  on screen WITHOUT bumping `navEpoch`, letting a failing in-flight Refresh
+  publish its banner over the "new" root instead of navigation winning. *Reason
+  for declining:* on every root the claim covers, `visibleRootKind()` returns
+  `detail`/`search`/`person`, which take NO content leg and never set
+  `gridActionActive` — the action's only publishable failure there is the
+  sidebar `get_sections` fetch, a library-LIST failure that is equally true
+  whichever browse root is on screen, and the disappearance fallback cannot fire
+  (`currentSectionRootKey()` returns null whenever `searchTerm`/`personView` is
+  set). So the predicted outcome is a TRUTHFUL banner reporting the failure of a
+  Refresh the user themselves clicked, shown over the same query's results. No
+  wrong data, no wrong action result, nothing stranded or swallowed. The
+  re-entry is APP-initiated, and the navigation-wins contract is explicitly about
+  USER navigation (see the `select({auto})` comment, lrs-1); treating an
+  app-initiated detail-close as navigation would resurrect exactly the silent
+  failure-swallowing that r9-1 fixed. Note also that closing a detail / popping a
+  drill on a watch-state edit is PRE-EXISTING behavior (base `63560a6` called
+  `runSearch(searchTerm)` unconditionally); this work only removed the epoch bump.
