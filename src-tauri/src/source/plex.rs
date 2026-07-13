@@ -329,6 +329,18 @@ impl MediaSource for PlexSource {
     async fn scan_library(&self, section_key: &str) -> Result<(), String> {
         let path = scan_path(section_key)?;
         let lib = self.ensure_ready().await?;
+        // ensure_ready() probes /identity for an endpoint of unknown identity,
+        // but the probe can fail — and an unpinned source can be repointed at
+        // another account server by ANY later rediscover, after which this
+        // server-LOCAL section key would address a stranger's library. A scan is
+        // an authenticated ACTION: if we cannot say which server this key
+        // belongs to, we do not fire it (codex r8).
+        if rediscovery_pin(lib.server_machine_id()).is_none() {
+            return Err(
+                "can't confirm which Plex server this library belongs to — reconnect the server and try again"
+                    .to_string(),
+            );
+        }
         // The section key is a numeric id that is only meaningful ON THE SERVER
         // IT CAME FROM. `rediscover()` re-runs discovery and takes the first
         // REACHABLE server on the account, which on a multi-server account need
