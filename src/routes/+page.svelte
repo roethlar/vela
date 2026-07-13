@@ -206,6 +206,12 @@
     if (authenticated) {
       linkGen++; // abandon any in-flight Plex link poll tied to the old pin
       pin = null;
+      // loadEverything() resets the view underneath the user — that IS
+      // navigation. Without the bump, a refresh still in flight keeps owning
+      // the epoch, so its gate would go on blocking the empty-Home redirect
+      // (and swallowing errors) over a view it no longer has anything to do
+      // with (codex r6).
+      navEpoch++;
       await loadEverything();
     } else {
       // Last source removed — clear stale content and show the neutral empty state.
