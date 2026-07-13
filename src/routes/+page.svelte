@@ -343,7 +343,7 @@
       // resetAndLoad). The action re-evaluates this effect when it settles, so a
       // Home that really is empty still redirects (codex r3). Deliberately NOT
       // `loading`: that would restore the skeleton flash the plan forbids.
-      !refreshing &&
+      !(refreshing && refreshEpoch === navEpoch) &&
       activeSource !== null &&
       !loading &&
       hubs.length === 0 &&
@@ -371,7 +371,13 @@
   // `sourceGen`; detail open/close bumps none of them), and a delayed refresh
   // outcome must neither force Home nor publish a banner underneath a view
   // the user navigated to meanwhile (library-refresh-scan plan, slice 1).
-  let navEpoch = 0;
+  // `$state` because the empty-Home effect READS it: its gate short-circuits on
+  // `refreshing && refreshEpoch === navEpoch`, so if navEpoch were a plain let,
+  // the effect would register no dependency on navigation and would not re-run
+  // when the user switched away from the refreshing root — leaving the redirect
+  // asleep until the refresh settled, which is the very stranding the scoped
+  // gate exists to prevent (codex r5).
+  let navEpoch = $state(0);
 
   async function loadEverything() {
     loadGen++; // a full home reload supersedes any in-flight browse/search load
@@ -443,6 +449,13 @@
   // leg's claimed generation (a leg superseded by a newer same-root load
   // contributes neither data nor failure).
   let refreshing = $state(false);
+  // Which navigation epoch the in-flight refresh belongs to. The empty-Home
+  // redirect must yield to a refresh that owns the CURRENT root — but not to
+  // one the user has already navigated away from: a slow source A refresh
+  // would otherwise keep blocking source B's auto-open and Refresh control for
+  // A's whole timeout, stranding a healthy source behind an unrelated one
+  // (codex r5).
+  let refreshEpoch = $state(-1);
   // A grid-root refresh owns the error banner for its duration (see below).
   let gridActionActive = $state(false);
 
@@ -502,6 +515,7 @@
       error = null;
       // Snapshot what this action reconciles against.
       const epoch = navEpoch;
+      refreshEpoch = epoch;
       const kind = visibleRootKind();
       const rootKey = kind === "section-grid" ? active!.key : null;
       // The fallback needs a COMPLETE sections response: a single-source
@@ -647,6 +661,7 @@
       }
     } finally {
       refreshing = false;
+      refreshEpoch = -1;
       gridActionActive = false;
     }
   }

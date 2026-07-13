@@ -836,6 +836,35 @@ export default {
       "no stray failure from a scroll-triggered load",
     );
 
+    // ── 20. A slow refresh on A must not strand a healthy source B ──────
+    // `refreshing` was a GLOBAL gate on the empty-Home redirect, so an action
+    // still running against source A kept blocking B's auto-open after the user
+    // switched to B — for as long as A's request took to time out. The gate is
+    // now scoped to the root the action belongs to: once the user navigates
+    // away, the action no longer owns the view and cannot hold it hostage
+    // (codex r5). Source B's Home has sections and no rails, so it is exactly
+    // the empty-Home case the redirect exists for.
+    await goHome(driver);
+    mockA.state.viewsDelayMs = 2500; // A's refresh will be in flight for a while
+    const tRefresh = Date.now();
+    await clickRefresh(driver);
+    await clickSide(driver, "Mock JF B"); // switch to a healthy source mid-action
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Remote One"]')`,
+      "source B's empty Home auto-opens its library while A's refresh is still running",
+    );
+    const opened = Date.now() - tRefresh;
+    assert.equal(
+      await driver.exec(
+        `const b = document.querySelector('button.refreshbtn'); return !!b && b.disabled`,
+      ),
+      true,
+      `…and A's refresh really was still in flight (else this proves nothing) [opened after ${opened}ms of a 2500ms sections delay]`,
+    );
+    await settle(driver);
+    mockA.state.viewsDelayMs = 0;
+    await screenshot("09-slow-refresh-does-not-strand-source-b");
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,
