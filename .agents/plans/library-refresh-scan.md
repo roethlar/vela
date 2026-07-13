@@ -868,3 +868,56 @@ catch it ceasing to be.
 
 Fixes land one finding per commit, each guard-proven red→green on the Linux
 VM, then r3 re-reviews.
+
+**r3 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 4 MEDIUM + 1 LOW,
+ALL ADMITTED.** Base `63560a6`, head `b160ef1`. `guard_confirmed:false`
+(read-only; Linux-only suite). Fresh eyes over the whole implementation,
+r1/r2 fixes included. THREE are behavior defects — r2's vacuity sweep had
+hardened the guards, and with the tests no longer blind, r3 found what they
+were failing to see.
+
+- **r3-1 (`afca8c5`) — the empty-Home redirect fired MID-ACTION.** The Home
+  leg deliberately never raises `loading` (a refresh must not blank the UI),
+  so a sections leg landing first with a newly added library satisfied the
+  effect (`sections > 0`, `hubs` still empty, `!loading`): the user was
+  thrown into the new library while the Home leg was in flight, and the
+  redirect's `resetAndLoad` bumped `homeGen`, so the arriving rails were
+  discarded as stale — and a Home leg that FAILED was dropped silently for
+  the same reason. Fixed: the effect is gated on `!refreshing` and
+  re-evaluates when the action settles. Guard: refresh case 17. The
+  instrumented VM run reproduced the defect exactly (`hg=45` vs
+  `homeGen=46`, epoch unchanged, `hLen=1` fetched and thrown away).
+- **r3-2 (`538ce78`) — a dying listing bannered over fresh cards.** The
+  content leg claimed `loadGen` only after the sections response, so an
+  ordinary listing load that failed during a slow sections fetch published
+  its own error (loadMore's direct-publish path) AFTER the action had
+  cleared the surface — and the action's successful reload contributed no
+  failure to clear it. Fixed: the action claims the generation at the CLICK
+  (`gridGen`). Guard: refresh case 16 + mock one-shots `failNextItems` /
+  `itemsDelayMs` (bound at ARRIVAL).
+- **r3-3 (`58dfa0b`) — a Plex scan could hit the WRONG SERVER.** Section
+  keys are server-local numeric ids; `rediscover()` returns the first
+  REACHABLE server on the account. A scan that failed on server A could be
+  retried against server B's section with the same number — an unrelated
+  library — and report success for the one the user clicked. Fixed: the
+  retry goes through `may_retry_scan_on` and proceeds only on a provably
+  identical machine id. Guard:
+  `scan_retry_never_crosses_to_another_server`. **Recorded gap:** the READ
+  paths share the same blind rediscover-and-retry shape (pre-existing, out
+  of scope; the scan was fixed first because it ACTS on the server).
+- **r3-4 (`948762b`) — per-attempt exclusivity was proven one way only.**
+  Only failure→success was covered, so deleting `scanNotice = null` at
+  attempt start left a failing scan's banner sitting NEXT TO the previous
+  attempt's "Scan started".
+- **r3-5 (`91fa2b5`, LOW) — nothing proved a notice ever EXPIRES.** The
+  timer phases only proved an older timer cannot clear a newer notice, so a
+  dead auto-clear passed while "Scan started" stuck on screen forever.
+
+Operator note (process, not code): two guard proofs in this round initially
+came back GREEN against an injected regression — both times the harness was
+at fault, not the guard. A proof script ended with `git checkout --
+src/routes/+page.svelte`, which silently reverted the UNCOMMITTED fixes
+under test; and one injection removed the late `loadGen` claim while leaving
+the new click-time claim in place, so the pre-fix behavior was never
+restored. Rules now: land the fix BEFORE injecting, and restore from a file
+backup, never `git checkout`.
