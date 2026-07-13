@@ -399,20 +399,33 @@ impl MediaSource for PlexSource {
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
         let lib = self.ensure_ready().await?;
-        // Remember whose keys these are (see `sections_machine`).
-        *self.sections_machine.lock().await = rediscovery_pin(lib.server_machine_id());
         // A saved server endpoint can go stale (changed IP / plex.direct host).
         // map_err first so the non-Send error is dropped before the next await.
         let first = lib.get_library_sections().await.map_err(|e| e.to_string());
-        let sections = match first {
-            Ok(s) => s,
+        let (served_by, sections) = match first {
+            Ok(s) => (lib.server_machine_id(), s),
             Err(_) => {
                 let lib = self.rediscover().await?;
-                lib.get_library_sections()
+                let s = lib
+                    .get_library_sections()
                     .await
-                    .map_err(|e| e.to_string())?
+                    .map_err(|e| e.to_string())?;
+                // The RETRY's server served these keys — not the one we started
+                // against. Recording the pre-request machine here would refuse a
+                // legitimate scan of the list actually on screen.
+                (lib.server_machine_id(), s)
             }
         };
+        // Remember whose keys these are (see `sections_machine`) — taken from the
+        // server that ACTUALLY SERVED this list, and only now that it is in hand.
+        // Stamping the CURRENT server up front instead relabelled keys the user
+        // was still looking at: an attempt that fails (or is merely still in
+        // flight) leaves the PREVIOUS list on screen, so if the source had
+        // drifted to another account server meanwhile, an A-local key would pass
+        // `scan_target_ok(B, B)` and rescan B's same-numbered library while we
+        // reported success for the one the user clicked (codex r10). A failed
+        // attempt changes nothing on screen and so must leave the stamp alone.
+        *self.sections_machine.lock().await = rediscovery_pin(served_by);
         Ok(sections
             .into_iter()
             // Only video libraries — skip music/photo sections so non-playable
@@ -887,6 +900,146 @@ mod tests {
     use crate::plex_library::{
         PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag,
     };
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::sync::mpsc::{channel, Receiver, Sender};
+    use std::sync::{Arc, Mutex};
+    use std::time::Duration;
+
+    /// A gate a mock server's `/library/sections` handler parks on: it announces
+    /// the request's ARRIVAL, then waits to be released. That lets a test act
+    /// while a sections fetch is genuinely in flight.
+    type Gate = (Sender<()>, Arc<Mutex<Receiver<()>>>);
+
+    /// A minimal Plex-shaped HTTP server on 127.0.0.1, enough for `/identity`,
+    /// the section list, and a scan. Every request path is recorded on ARRIVAL,
+    /// so a test can assert a request was never made. One thread per connection:
+    /// a parked sections fetch must not block a concurrent scan (a real server
+    /// would answer both).
+    fn spawn_mock_plex(machine: &str, gate: Option<Gate>) -> (u16, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let (machine, out) = (machine.to_string(), hits.clone());
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let (machine, hits, gate) = (machine.clone(), out.clone(), gate.clone());
+                std::thread::spawn(move || {
+                    let mut buf = [0u8; 2048];
+                    let n = stream.read(&mut buf).unwrap_or(0);
+                    if n == 0 {
+                        return;
+                    }
+                    let req = String::from_utf8_lossy(&buf[..n]);
+                    let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
+                    hits.lock().unwrap().push(path.clone());
+                    let body = if path.starts_with("/identity") {
+                        format!(r#"<MediaContainer machineIdentifier="{machine}" />"#)
+                    } else if path.starts_with("/library/sections/") {
+                        // a scan: /library/sections/{key}/refresh
+                        r#"<MediaContainer size="0" />"#.to_string()
+                    } else if path.starts_with("/library/sections") {
+                        if let Some((arrived, release)) = gate.as_ref() {
+                            let _ = arrived.send(());
+                            let _ = release.lock().unwrap().recv();
+                        }
+                        r#"<MediaContainer size="1"><Directory key="2" type="movie" title="Movies" /></MediaContainer>"#.to_string()
+                    } else {
+                        r#"<MediaContainer size="0" />"#.to_string()
+                    };
+                    let resp = format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                        body.len()
+                    );
+                    let _ = stream.write_all(resp.as_bytes());
+                });
+            }
+        });
+        (port, hits)
+    }
+
+    fn mock_server(machine: &str, port: u16) -> PlexServer {
+        PlexServer {
+            name: machine.to_string(),
+            host: "127.0.0.1".to_string(),
+            port,
+            scheme: "http".to_string(),
+            uri: format!("http://127.0.0.1:{port}"),
+            local: true,
+            relay: false,
+            machine_identifier: machine.to_string(),
+            version: "1".to_string(),
+        }
+    }
+
+    /// A scan must reach the server the section KEY came from. The guard that
+    /// enforces it (`scan_target_ok`) is only as good as the machine recorded
+    /// for the list on screen: recording it BEFORE the fetch meant a refresh
+    /// that had merely STARTED against another server (after the source drifted)
+    /// relabelled the keys still displayed, and the scan then sailed through
+    /// `scan_target_ok(B, B)` into B's same-numbered library (codex r10).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_scan_never_reaches_a_server_that_did_not_serve_the_key() {
+        let (port_a, _hits_a) = spawn_mock_plex("machine-A", None);
+        // B's sections fetch parks on the gate, so the scan below happens while
+        // that refresh is in flight and B's list is NOT yet in hand.
+        let (arrived_tx, arrived_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let gate = (arrived_tx, Arc::new(Mutex::new(release_rx)));
+        let (port_b, hits_b) = spawn_mock_plex("machine-B", Some(gate));
+
+        // The list on screen came from A (whose identity we learn on first use:
+        // a server restored from config carries no machine id).
+        let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
+        lib.set_server_manual("127.0.0.1".to_string(), port_a, false, Some("A".to_string()));
+        let source = Arc::new(PlexSource::new("plex", "Plex", lib));
+        let secs = source.sections().await.expect("A serves its sections");
+        assert_eq!(secs.len(), 1);
+        assert_eq!(
+            *source.sections_machine.lock().await,
+            Some("machine-A".to_string()),
+            "the list on screen came from A"
+        );
+
+        // The source drifts to another account server (in production: an
+        // unpinned rediscovery after a failed read). A's keys are STILL on screen.
+        source
+            .lib
+            .lock()
+            .await
+            .set_server(mock_server("machine-B", port_b));
+
+        // A refresh is now in flight against B...
+        let refreshing = tokio::spawn({
+            let source = source.clone();
+            async move { source.sections().await }
+        });
+        arrived_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("B received the sections request");
+
+        // ...and the user scans the library A gave them. Key "2" is A-local; B
+        // has a section 2 of its own, and it is not this one.
+        let err = source
+            .scan_library("2")
+            .await
+            .expect_err("a key of unprovable provenance must not be scanned");
+        assert!(err.contains("can't confirm"), "unexpected error: {err}");
+        let seen = hits_b.lock().unwrap().clone();
+        assert!(
+            !seen.iter().any(|p| p.contains("refresh")),
+            "server B was sent a scan for a key it never served: {seen:?}"
+        );
+
+        release_tx.send(()).unwrap();
+        refreshing.await.unwrap().expect("B serves its sections");
+        // Now that B's list IS on screen, B's keys are B's to scan.
+        assert_eq!(
+            *source.sections_machine.lock().await,
+            Some("machine-B".to_string())
+        );
+    }
 
     fn server_with_id(machine: &str, host: &str) -> PlexServer {
         PlexServer {
