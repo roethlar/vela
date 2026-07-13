@@ -275,15 +275,23 @@ export default {
       "lib1's expired timer must not clear lib2's notice",
     );
 
-    // ...and the OWNING notice must actually expire. Everything above only
-    // proves an older timer cannot clear a newer notice, so a no-op (or
-    // deleted) auto-clear passed while "Scan started" stuck on screen forever
-    // (codex r3). lib2's notice was armed when its delayed POST landed; it must
-    // clear itself ~4s later, with no further interaction.
+    // ...and the OWNING notice must actually expire, on the ~4s the app
+    // PROMISES. Everything above only proves an older timer cannot clear a
+    // newer notice, so a no-op auto-clear passed while "Scan started" stuck on
+    // screen forever (codex r3). The deadline is measured from when lib2's
+    // notice APPEARED (that is when its timer is armed) — measuring from lib1's
+    // t0 left so much slack that a timer stretched to 8-10s still passed
+    // (codex r4). Budget: 4s promise + 2s for WebDriver/CI jitter.
+    const armed = Date.now(); // lib2's notice is on screen right now
     await pollUntil(
       async () => ((await notice(driver)) === null ? true : null),
-      "the owning attempt's notice auto-clears (~4s)",
-      { timeoutMs: 9000 },
+      "the owning attempt's notice auto-clears on its promised ~4s deadline",
+      { timeoutMs: 6000 },
+    );
+    const took = Date.now() - armed;
+    assert.ok(
+      took <= 6000,
+      `the notice must clear on its ~4s promise, not linger (took ${took}ms)`,
     );
 
     // Phase 3: stale FAILURE. Phases 1-2 only ever superseded a stale
