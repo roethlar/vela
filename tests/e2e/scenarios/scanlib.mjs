@@ -267,6 +267,11 @@ export default {
       async () => (await notice(driver)) === "Scan started — Library Two",
       "lib2 notice supersedes lib1's",
     );
+    // lib2's timer is armed NOW — the expiry deadline below is measured from
+    // here, not from t0. Measuring from lib1's t0 (after first waiting past
+    // lib1's deadline) left ~2.8s of slack, so a timer stretched to 7-8s still
+    // cleared inside the window and passed (codex r5).
+    const armed = Date.now();
     const past = t0 + 4300 - Date.now();
     if (past > 0) await sleep(past);
     assert.equal(
@@ -282,16 +287,17 @@ export default {
     // notice APPEARED (that is when its timer is armed) — measuring from lib1's
     // t0 left so much slack that a timer stretched to 8-10s still passed
     // (codex r4). Budget: 4s promise + 2s for WebDriver/CI jitter.
-    const armed = Date.now(); // lib2's notice is on screen right now
+    const budget = 6000; // the app's 4s promise + WebDriver/CI jitter
+    const left = Math.max(budget - (Date.now() - armed), 500);
     await pollUntil(
       async () => ((await notice(driver)) === null ? true : null),
       "the owning attempt's notice auto-clears on its promised ~4s deadline",
-      { timeoutMs: 6000 },
+      { timeoutMs: left },
     );
     const took = Date.now() - armed;
     assert.ok(
-      took <= 6000,
-      `the notice must clear on its ~4s promise, not linger (took ${took}ms)`,
+      took <= budget,
+      `the notice must clear on its ~4s promise, not linger (took ${took}ms from arming)`,
     );
 
     // Phase 3: stale FAILURE. Phases 1-2 only ever superseded a stale
