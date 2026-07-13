@@ -275,6 +275,17 @@ export default {
       "lib1's expired timer must not clear lib2's notice",
     );
 
+    // ...and the OWNING notice must actually expire. Everything above only
+    // proves an older timer cannot clear a newer notice, so a no-op (or
+    // deleted) auto-clear passed while "Scan started" stuck on screen forever
+    // (codex r3). lib2's notice was armed when its delayed POST landed; it must
+    // clear itself ~4s later, with no further interaction.
+    await pollUntil(
+      async () => ((await notice(driver)) === null ? true : null),
+      "the owning attempt's notice auto-clears (~4s)",
+      { timeoutMs: 9000 },
+    );
+
     // Phase 3: stale FAILURE. Phases 1-2 only ever superseded a stale
     // SUCCESS, so the failure half of latest-attempt ownership
     // (`if (scanAttempt !== attempt) return` in scanSection's catch) had no
