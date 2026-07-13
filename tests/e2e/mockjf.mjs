@@ -334,22 +334,22 @@ export function startMockJellyfin({
     }
     const refresh = /^\/Items\/([^/]+)\/Refresh$/.exec(path);
     if (refresh && req.method === "POST") {
+      // BOTH one-shots are consumed at ARRIVAL so they bind to THIS request.
+      // Binding the failure at RESPOND time instead let a fast scan B steal
+      // the 403 armed for a parked scan A — making the stale-FAILURE ordering
+      // case unwritable (lrs-5; same class as the Latest flags, codex r1 f2).
+      const fail = state.failNextItemRefresh;
+      if (fail) state.failNextItemRefresh = false; // one-shot
+      const delay = state.itemRefreshDelayMs;
+      if (delay > 0) state.itemRefreshDelayMs = 0; // one-shot
       const respond = () => {
-        if (state.failNextItemRefresh) {
-          state.failNextItemRefresh = false; // one-shot
-          return json({ error: "mock: admin required" }, 403);
-        }
-        // The request (with its Recursive/RegenerateTrickplay query) is
-        // already in state.requests; scenarios assert on that log, not on
-        // this body.
+        if (fail) return json({ error: "mock: admin required" }, 403);
+        // The request (with its full scan query) is already in state.requests;
+        // scenarios assert on that log, not on this body.
         res.writeHead(204);
         return res.end();
       };
-      // One-shot delay (scanlib out-of-order case): consumed at ARRIVAL so a
-      // second scan issued while this one is parked responds immediately.
-      const delay = state.itemRefreshDelayMs;
       if (delay > 0) {
-        state.itemRefreshDelayMs = 0; // one-shot
         setTimeout(respond, delay);
         return;
       }

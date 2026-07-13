@@ -534,7 +534,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 | lrs-2 | MEDIUM | Refresh case 5 passes with the content-leg navEpoch gate removed (loadMore reads live state) | `[x]` | see log |
 | lrs-3 | MEDIUM | Refresh case 14 omits the plan's reverse-ordering phase: leg-failure generation ownership unguarded | `[x]` | see log |
 | lrs-4 | MEDIUM | The r1 `loading` fix has no guard; a stranded skeleton blocks the empty-Home redirect undetected | `[x]` | see log |
-| lrs-5 | MEDIUM | Scan stale-FAILURE gate unguarded; mock consumes failNextItemRefresh at respond time so the case can't be written | `[ ]` | |
+| lrs-5 | MEDIUM | Scan stale-FAILURE gate unguarded; mock consumes failNextItemRefresh at respond time so the case can't be written | `[x]` | see log |
 | lrs-6 | MEDIUM | scan_url never tested with a hostile id; raw interpolation would stay green on an admin-credentialed POST | `[x]` | see log |
 | lrs-7 | MEDIUM | scan_query assertion is tautological; a destructive ReplaceAllMetadata=true refresh stays green | `[x]` | see log |
 | lrs-8 | MEDIUM | Refresh case 13's deferral assertion runs before the fallback's Home fetch settles — vacuous | `[x]` | see log |

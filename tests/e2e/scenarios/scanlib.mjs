@@ -257,5 +257,38 @@ export default {
       "Scan started — Library Two",
       "lib1's expired timer must not clear lib2's notice",
     );
+
+    // Phase 3: stale FAILURE. Phases 1-2 only ever superseded a stale
+    // SUCCESS, so the failure half of latest-attempt ownership
+    // (`if (scanAttempt !== attempt) return` in scanSection's catch) had no
+    // guard: delete it and everything above stays green while a slow scan's
+    // 403 lands on top of a newer scan's success notice (lrs-5). This phase
+    // is only expressible because the mock now binds failNextItemRefresh at
+    // request ARRIVAL — bound at respond time, fast lib2 would steal the 403
+    // armed for parked lib1.
+    mock.state.itemRefreshDelayMs = DELAY;
+    mock.state.failNextItemRefresh = true; // both bind to lib1's POST on arrival
+    const lib1Before3 = refreshPosts("lib1").length;
+    await scanVia(driver, "Library One"); // parked, WILL FAIL 403
+    await pollUntil(
+      async () => (refreshPosts("lib1").length > lib1Before3 ? true : null),
+      "lib1's POST arrived and captured BOTH one-shots (delay + failure)",
+    );
+    await scanVia(driver, "Library Two"); // fast success, supersedes lib1
+    await pollUntil(
+      async () => (await notice(driver)) === "Scan started — Library Two",
+      "lib2's success notice while lib1's failure is still parked",
+    );
+    await sleep(DELAY + 500); // lib1's 403 lands late
+    assert.equal(
+      await banner(driver),
+      null,
+      "a superseded scan's FAILURE must not banner over a newer success",
+    );
+    assert.equal(
+      await notice(driver),
+      "Scan started — Library Two",
+      "the newer scan's notice survives the stale failure",
+    );
   },
 };
