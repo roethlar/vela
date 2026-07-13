@@ -865,6 +865,35 @@ export default {
     mockA.state.viewsDelayMs = 0;
     await screenshot("09-slow-refresh-does-not-strand-source-b");
 
+    // ── 21. A refresh on A must not swallow B's error after navigation ──
+    // The banner suppression a grid-root action holds (so an orphaned load
+    // cannot publish over the action's own result) was GLOBAL: after the user
+    // navigated to another library, the still-running action went on swallowing
+    // the NEW view's failures — while its own outcome was discarded on the
+    // epoch mismatch. B rendered an empty grid with no error at all (codex r6).
+    // The suppression is now scoped to the action's own root.
+    await clickSide(driver, "Mock JF A"); // case 20 left us on source B
+    await driver.waitFor(
+      `return [...document.querySelectorAll('button.sideitem')].some((b) => b.textContent.trim() === 'Library A')`,
+      "back on source A",
+    );
+    await clickSide(driver, "Library A");
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
+      "library A's grid",
+    );
+    mockA.state.viewsDelayMs = 2500; // A's refresh stays in flight...
+    await clickRefresh(driver);
+    mockA.state.failNextItems = true; // ...and B's own listing will fail
+    await clickSide(driver, "Library B"); // navigate away from the refreshing root
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "library B's own listing failure must surface (the old action may not swallow it)",
+    );
+    await settle(driver);
+    mockA.state.viewsDelayMs = 0;
+    await screenshot("10-scoped-suppression");
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,

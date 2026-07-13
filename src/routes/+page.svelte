@@ -813,8 +813,13 @@
         if (onError) onError(String(e));
         // A grid-root refresh owns the banner while it runs: this load's own
         // failure must not land over the result the action is loading (r3-2),
-        // and the action publishes its own legs' failures itself.
-        else if (!gridActionActive) error = String(e);
+        // and the action publishes its own legs' failures itself. It owns it for
+        // its OWN root only — once the user navigates away the action's outcome
+        // is discarded on the epoch mismatch, so it must not go on swallowing
+        // the NEW view's errors, which would leave that view empty and silent
+        // (codex r6).
+        else if (!(gridActionActive && refreshEpoch === navEpoch))
+          error = String(e);
         hasMore = false;
       }
     } finally {
