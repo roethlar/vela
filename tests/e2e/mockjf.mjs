@@ -151,6 +151,15 @@ export function startMockJellyfin({
     fs.createReadStream(mediaFile, { start, end }).pipe(res);
   };
 
+  // The admin-gated scan routes are the ONLY writes Vela makes, and they carry
+  // admin-capable credentials — so the mock demands them. Without this, dropping
+  // the auth headers from the production scan request would leave every scan
+  // guard green while a real Jellyfin/Emby answered 401 and Scan library became
+  // unusable (codex r7). Jellyfin sends Authorization, Emby X-Emby-Token.
+  const authed = (req) =>
+    (req.headers.authorization ?? "").includes('Token="') ||
+    !!req.headers["x-emby-token"];
+
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, "http://mock");
     const path = url.pathname;
@@ -160,6 +169,10 @@ export function startMockJellyfin({
     const json = (body, status = 200) => {
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
+    };
+    const unauthorized = (p) => {
+      state.contractViolations.push({ path: p, query: { auth: "missing" } });
+      return json({ error: "unauthenticated" }, 401);
     };
 
     if (path === `/Users/${userId}/Views`) {
@@ -343,6 +356,7 @@ export function startMockJellyfin({
     // here is exactly what a real non-admin token gets, since the route is
     // elevation-gated before any refresh POST is reached.
     if (path === "/Library/VirtualFolders" && req.method === "GET") {
+      if (!authed(req)) return unauthorized(path);
       if (state.failNextVirtualFolders) {
         state.failNextVirtualFolders = false; // one-shot
         return json({ error: "mock: admin required" }, 403);
@@ -351,6 +365,7 @@ export function startMockJellyfin({
     }
     const refresh = /^\/Items\/([^/]+)\/Refresh$/.exec(path);
     if (refresh && req.method === "POST") {
+      if (!authed(req)) return unauthorized(path);
       // BOTH one-shots are consumed at ARRIVAL so they bind to THIS request.
       // Binding the failure at RESPOND time instead let a fast scan B steal
       // the 403 armed for a parked scan A — making the stale-FAILURE ordering
