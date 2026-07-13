@@ -1064,6 +1064,25 @@ ADMITTED, 1 DECLINED.**  Base `63560a6`, head `b2b19db`.
   means reworking those semantics — out of scope for this plan. If the owner
   wants failed pages to remain retryable, that is its own plan.
 
+**r9 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM, both
+ADMITTED.** Base `63560a6`, head `b40728f`. Narrowing again (4 → 2).
+
+- **r9-1 (`a0ef142`) — a same-root RE-RUN was read as navigation.**
+  `refreshWatchState()` re-enters the current root to pick up new watch state,
+  but on a search/person root it went through helpers that bumped `navEpoch`
+  unconditionally — so an in-flight Refresh treated it as the user navigating
+  away and silently dropped its own failure: spinner stops, sidebar stale, no
+  error, though the user never moved. Fixed: `runSearch`/`runPersonView` take a
+  `rerun` flag. Guard: case 23.
+- **r9-2 (`e9eeba1`) — a scan must reach the server its KEY came from.** r8-1
+  proved only that the current server could be NAMED. If a restored server's
+  /identity probe failed while its sections loaded, a later read failure could
+  install account server B, and A's still-visible key would pass the check and
+  scan B's same-numbered library while Vela reported success. Fixed: the source
+  records which machine served the section list (`sections_machine`), and a scan
+  fires only when that machine and the current one are both known and IDENTICAL
+  (`scan_target_ok`).
+
 Operator note (process, not code): two guard proofs in this round initially
 came back GREEN against an injected regression — both times the harness was
 at fault, not the guard. A proof script ended with `git checkout --
