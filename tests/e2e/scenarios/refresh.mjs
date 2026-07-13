@@ -672,11 +672,48 @@ export default {
     );
     await screenshot("07-autoredirect-keeps-banner");
 
+    // ── 16. A failing older listing must not banner over the refresh ─────
+    // An ordinary listing load (entering a library) publishes its own failures
+    // DIRECTLY. The refresh's content leg used to claim `loadGen` only after
+    // the sections response, so a listing that died during a slow sections
+    // fetch landed a banner the action could no longer clear — a false failure
+    // over the fresh cards the action then loaded (codex r3). The action now
+    // claims the generation at the CLICK, invalidating that load.
+    //
+    // Restore the rails BEFORE going Home: case 15 left Home rail-less, so a
+    // bare goHome() would (correctly) auto-redirect into library A, and that
+    // redirect's own listing would race — and swallow — the one-shot listing
+    // flags this case arms below.
+    mockA.state.latest = [...LATEST_SEED, mockAExtraLatest()];
+    await goHome(driver);
+    await pollUntil(async () => {
+      const rails = (await posterLabels(driver)).some((l) =>
+        l?.startsWith("Alpha"),
+      );
+      return (await onHome(driver)) && rails ? true : null;
+    }, "Home with rails (so no auto-redirect races the listing flags)");
+    mockA.state.itemsDelayMs = 600; // the doomed listing is parked...
+    mockA.state.failNextItems = true; // ...and will 500
+    mockA.state.viewsDelayMs = 1400; // sections lands well AFTER that failure
+    await clickSide(driver, "Library A"); // starts the doomed listing
+    await clickRefresh(driver); // must claim loadGen HERE, not later
+    await settle(driver);
+    mockA.state.viewsDelayMs = 0;
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
+      "the refresh's own listing lands",
+    );
+    assert.equal(
+      await banner(driver),
+      null,
+      "the superseded failing listing must not banner over the refreshed cards",
+    );
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,
       0,
-      "mock A contract clean",
+      `mock A contract clean — got ${JSON.stringify(mockA.state.contractViolations)}`,
     );
     assert.equal(
       mockB.state.contractViolations.length,

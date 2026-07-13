@@ -502,6 +502,18 @@
       // superseded leg contributes neither data nor failure.
       const legFailures: { msg: string; current: () => boolean }[] = [];
 
+      // Grid roots claim `loadGen` NOW, synchronously at the click — NOT when
+      // the content leg finally runs (it must wait for the sections response).
+      // An ordinary listing load still in flight owns the current generation
+      // and publishes its own failures DIRECTLY (loadMore's `else error = ...`
+      // path, +page.svelte:754). If it fails during a slow sections fetch, its
+      // banner lands after this action cleared the surface, and the action's
+      // own successful reload adds no failure to clear it: a false error over
+      // fresh cards. Claiming here invalidates that load — it can neither
+      // append nor publish (codex r3).
+      const gridGen =
+        kind === "section-grid" || kind === "type-grid" ? ++loadGen : 0;
+
       // Sections leg (always). The swap is `sourceGen`-gated only — a fresher
       // section list is valid regardless of navigation. Unlike
       // loadEverything(), never blank `sections` first: a refresh must not
@@ -575,7 +587,8 @@
           if (kind === "section-grid" && !list.some((sec) => sec.key === rootKey)) {
             return; // root gone: the disappearance fallback owns this outcome
           }
-          const myGen = ++loadGen;
+          const myGen = gridGen; // claimed at click, above
+          if (myGen !== loadGen) return; // navigation claimed a newer one meanwhile
           loadingMore = false;
           offset = 0;
           hasMore = true;

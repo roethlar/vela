@@ -55,6 +55,8 @@ export function startMockJellyfin({
     viewsDelayMs: 0,
     failNextLatest: false, // one-shot: 500 the next /Users/{id}/Items/Latest
     delayNextLatestMs: 0, // one-shot delay for the next Latest request
+    failNextItems: false, // one-shot: 500 the next listing (a doomed loadMore)
+    itemsDelayMs: 0, // one-shot delay for the next listing
     // Scan-trigger machinery (library-refresh-scan plan): VirtualFolders is
     // seeded from the served views but kept SEPARATE — a grouped view added
     // to state.views without a matching entry here reproduces the real
@@ -246,6 +248,13 @@ export function startMockJellyfin({
         state.contractViolations.push({ path, query });
         return json({ error: "query contract violation" }, 400);
       }
+      // One-shots bound at ARRIVAL (like the Latest flags): a scenario can park
+      // a listing and make it FAIL, to exercise an ordinary in-flight load that
+      // dies while a refresh is running (codex r3).
+      const failItems = state.failNextItems;
+      if (failItems) state.failNextItems = false;
+      const itemsDelay = state.itemsDelayMs;
+      if (itemsDelay > 0) state.itemsDelayMs = 0;
       // HONOR StartIndex/Limit (library-refresh-scan plan): with an
       // ignore-pagination mock, a refresh that APPENDS instead of replacing
       // (or reloads from a stale offset) would still pass exact-set
@@ -253,7 +262,15 @@ export function startMockJellyfin({
       const start = Number(query.StartIndex ?? 0);
       const end =
         query.Limit !== undefined ? start + Number(query.Limit) : undefined;
-      return json({ Items: view.movies.slice(start, end).map(toJson) });
+      const respondItems = () => {
+        if (failItems) return json({ error: "mock listing failure" }, 500);
+        return json({ Items: view.movies.slice(start, end).map(toJson) });
+      };
+      if (itemsDelay > 0) {
+        setTimeout(respondItems, itemsDelay);
+        return;
+      }
+      return respondItems();
     }
     const single = /^\/Users\/[^/]+\/Items\/([^/]+)$/.exec(path);
     if (
