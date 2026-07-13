@@ -334,6 +334,16 @@
       // select() would close it and open another library beneath the user.
       // Once the detail closes this effect re-evaluates and may fire.
       detailView === null &&
+      // Never redirect MID-REFRESH. The refresh's Home leg deliberately does
+      // not raise `loading` (a refresh must not blank the UI), so without this
+      // the sections leg landing first — with a newly added library — fires the
+      // redirect while the Home leg is still in flight: the user is thrown into
+      // a grid instead of the rails that were about to arrive, and a Home leg
+      // that then FAILS is discarded silently (its generation was superseded by
+      // resetAndLoad). The action re-evaluates this effect when it settles, so a
+      // Home that really is empty still redirects (codex r3). Deliberately NOT
+      // `loading`: that would restore the skeleton flash the plan forbids.
+      !refreshing &&
       activeSource !== null &&
       !loading &&
       hubs.length === 0 &&

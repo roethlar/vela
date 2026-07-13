@@ -709,6 +709,56 @@ export default {
       "the superseded failing listing must not banner over the refreshed cards",
     );
 
+    // ── 17. The redirect must not fire MID-refresh ──────────────────────
+    // Settled Home with NO libraries and NO rails: the redirect is ineligible
+    // (no sections). Add the first library and make the Home leg slow. The
+    // sections leg lands first, and without the `!refreshing` gate the effect
+    // sees sections>0 + empty hubs + !loading (the Home leg deliberately never
+    // raises `loading`) and throws the user into the new library — discarding
+    // the rails that were about to arrive (codex r3).
+    //
+    // Reach Home WITH rails first (case 16 left us in a grid): stripping the
+    // server while Home is empty but its sections are still cached would let
+    // the legitimate empty-Home redirect fire and list a library the mock no
+    // longer serves — a mock contract violation, not a bug under test.
+    await goHome(driver);
+    await pollUntil(async () => {
+      const rails = (await posterLabels(driver)).some((l) =>
+        l?.startsWith("Alpha"),
+      );
+      return (await onHome(driver)) && rails ? true : null;
+    }, "Home with rails before stripping the server bare");
+    const savedViews = mockA.state.views;
+    mockA.state.views = [];
+    mockA.state.latest = [];
+    await clickRefresh(driver);
+    await settle(driver);
+    await pollUntil(async () => {
+      const side = await sidebarNames(driver);
+      return !side.includes("Library A") && (await onHome(driver))
+        ? true
+        : null;
+    }, "settled on an empty Home with no libraries");
+    // Now the server gains its first library AND rails, but Home answers slowly.
+    mockA.state.views = savedViews;
+    mockA.state.latest = [...LATEST_SEED];
+    mockA.state.delayNextLatestMs = DELAY;
+    await clickRefresh(driver);
+    await settle(driver);
+    await driver.waitFor(
+      `return [...document.querySelectorAll('button.sideitem')].some((b) => b.textContent.trim() === 'Library A')`,
+      "the new library appears in the sidebar",
+    );
+    assert.ok(
+      await onHome(driver),
+      "the refresh must NOT redirect mid-action: the Home leg's rails were still in flight",
+    );
+    assert.ok(
+      (await posterLabels(driver)).some((l) => l?.startsWith("Alpha")),
+      "the Home leg's rails landed (and were not discarded by a mid-action redirect)",
+    );
+    await screenshot("08-no-midrefresh-redirect");
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,
