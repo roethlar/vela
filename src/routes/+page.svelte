@@ -254,6 +254,14 @@
     navEpoch++;
     if (!sources.some((s) => s.id === activeSource)) activeSource = null;
     authenticated = sources.length > 0;
+    // A scan in flight belongs to a library in the list that just changed — it may
+    // be a library of a source that is no longer configured. Its outcome is about
+    // to be meaningless whichever branch we take: dropping the LAST source leaves
+    // it publishing over Welcome, and dropping ONE of several leaves it publishing
+    // over whatever the user is looking at now, naming a library they no longer
+    // have (codex r15, r16). Abandon it here, once, for both.
+    scanAttempt++; // its publication check now fails
+    clearScanStatus();
     if (authenticated) {
       linkGen++; // abandon any in-flight Plex link poll tied to the old pin
       pin = null;
@@ -276,13 +284,9 @@
       mode = "home";
       loading = false;
       // The view this banner described no longer exists, and the Welcome screen
-      // offers nothing that could clear it (codex r14).
+      // offers nothing that could clear it (codex r14). In-flight scans were
+      // already abandoned above, for both branches.
       setError(null);
-      // A scan still in flight would land its outcome here — an error about a
-      // library that is gone, or a "Scan started" for a server the user just
-      // removed, on the Welcome screen, with nothing to clear it (codex r15).
-      scanAttempt++; // its publication check now fails
-      clearScanStatus();
     }
   }
 
@@ -643,6 +647,22 @@
             const rootNow = currentSectionRoot();
             if (rootNow !== null && !s.some((sec) => sameSection(sec, rootNow))) {
               forceHomeForRemovedRoot();
+            }
+          }
+          // The root the user is standing on survived the refresh — but `active`
+          // and its crumb are still the objects from the PREVIOUS list. If the
+          // library was renamed on the server, the sidebar would show the new
+          // title while the grid above it still carried the old one (codex r16).
+          // Re-bind to the refreshed section: same library (sameSection), current
+          // facts.
+          const here = active;
+          if (here) {
+            const fresh = s.find((sec) => sameSection(sec, here));
+            if (fresh) {
+              active = fresh;
+              if (crumbs.length > 0 && !crumbs[0].ratingKey) {
+                crumbs = [{ ...crumbs[0], title: fresh.title }, ...crumbs.slice(1)];
+              }
             }
           }
           return s;

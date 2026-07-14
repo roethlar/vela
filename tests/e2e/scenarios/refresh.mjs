@@ -1154,10 +1154,44 @@ export default {
     await settle(driver);
     mockA.state.itemsDelayMs = 0;
     mockA.state.viewsDelayMs = 0;
+    // BOTH failures are 500s, so "the banner mentions 500" cannot tell them apart —
+    // the sections leg alone would satisfy it, and the guard would pass with the
+    // fix reverted (it did, first time out). Assert on what only the LISTING's
+    // failure can say: its URL carries the library it was paging.
     const said = await banner(driver);
     assert.ok(
-      said && said.includes("500"),
-      `the silenced listing's failure must be published once nothing replaced it — got ${JSON.stringify(said)}`,
+      said && said.includes("ParentId=libA"),
+      `the silenced listing's own failure must be published once nothing replaced it — got ${JSON.stringify(said)}`,
+    );
+    assert.ok(
+      said.includes("Views"),
+      "and the sections failure it was waiting on must still be there too",
+    );
+
+    // ── 28. A renamed library must not keep its old title above the grid ──
+    // The root survives the refresh (same key, same binding — sameSection), but
+    // `active` and its crumb were still the objects from the PREVIOUS list. Rename
+    // the library server-side and the sidebar showed the new title while the grid's
+    // own breadcrumb still carried the old one (codex r16).
+    await goHome(driver);
+    await pollUntil(
+      async () => ((await onHome(driver)) ? true : null),
+      "Home before re-entering the library",
+    );
+    await clickSide(driver, "Library A");
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
+      "library A's grid",
+    );
+    mockA.state.views[0].name = "Library A (renamed)";
+    await clickRefresh(driver);
+    await settle(driver);
+    assert.equal(
+      await driver.exec(
+        `return document.querySelector('.crumbs')?.textContent?.includes('Library A (renamed)') ?? false`,
+      ),
+      true,
+      "the crumb above the grid must carry the library's CURRENT name, not the one it had when the user entered",
     );
 
     // Session-wide invariant: no listing contract violations anywhere.
