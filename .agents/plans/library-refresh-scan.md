@@ -1282,3 +1282,64 @@ Base `63560a6`, head `8d4e5d7`.
   *Reachability:* a Plex server restored from config whose `/identity` never
   answers, on a multi-server account, where a read failure rediscovers onto a
   different server. Scans are already refused throughout (r11-1).
+
+**r14 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM + 2 LOW, all
+four ADMITTED.** Base `63560a6`, head `7110890`. The round that found the loop's
+own guards decaying.
+
+- **r14-1 (`3922913`) — a list from a server we are no longer bound to was still
+  served.** r13-1 made the client and its binding agree with each other; it did
+  not make them agree with REALITY. While one caller talks to A (the `/identity`
+  probe failing is the widest window), another task's failed read can install B.
+  A's fetch then succeeds, carrying A's keys and A's binding — internally
+  consistent, and a report about a server this source has stopped being. A's
+  libraries sit in the sidebar while every read behind them routes to B. Fixed: a
+  rebind landing during the fetch invalidates the fetch (`sections_once` returns
+  `None`); `sections()` asks again, of whoever it is bound to now, bounded to two
+  attempts. Guard: `a_list_from_a_server_we_no_longer_are_is_not_served` — B is
+  really INSTALLED mid-probe, the production state r13's guard could not reach.
+  It is red BOTH without the staleness check AND with the client/binding read
+  apart, so it SUBSUMES the r13 guard, which is deleted.
+
+  Note what r13's guard got wrong, because the shape recurs: it simulated a rebind
+  by bumping the counter WITHOUT installing a server — a state production never
+  reaches. It passed, and it could not have failed. A guard whose setup cannot
+  occur in production tests nothing.
+
+- **r14-2 (`4cb6b2a`) — a scan must not erase a listing's failure.** `scanSection`
+  cleared the banner unconditionally, borrowing the refresh's "the action owns its
+  status" convention. But a refresh RELOADS the cards its banner is about; a scan
+  reloads nothing. The banner EXPLAINS the empty grid on screen, and wiping it left
+  the user with an empty view and a cheerful "Scan started" accounting for none of
+  it. Fixed: `setError` records WHO published the banner (`errorOwner`), and a scan
+  may only take down a previous scan's.
+
+- **r14-3 (`4cb6b2a`) — CASE 16 HAD GONE VACUOUS, and this is the lesson of the
+  round.** Case 16 guards r3-2: a doomed listing must not banner over the refresh
+  that superseded it. It arms a listing that dies ~600ms in and a refresh that
+  settles ~1400ms in, then asserted no banner AFTER settlement. When r11-2/r12-2
+  taught the refresh to RETRACT a banner it superseded, that retraction began
+  tidying away the very banner case 16 was watching for — so deleting the
+  suppression still passed, while the false failure sat over the grid for 800ms.
+  **A fix in one round silently disarmed a guard written six rounds earlier, and
+  nothing failed.** Fixed: the case now watches the WHOLE in-flight window (polls
+  while the control is disabled) and asserts the doomed listing really was served
+  its failure, so the window cannot prove nothing. Re-proven red.
+
+  **Reusable rule: when a fix teaches the app to CLEAN UP a bad state, every guard
+  that asserts the absence of that state after settlement is now suspect — it may
+  be observing the cleanup, not the prevention. Re-prove those guards red, do not
+  assume they still bite.**
+
+- **r14-4 (`4cb6b2a`) — removing the last source could strand a banner on the
+  Welcome screen.** `onSourcesChanged` bumped `navEpoch` only AFTER awaiting the
+  source list, so a refresh settling during that await published against a matching
+  epoch; the no-source teardown then cleared every surface except the banner,
+  leaving a dead server's failure with nothing on screen to explain it and no way
+  to clear it. Fixed: the bump happens before the await, and the teardown clears
+  the banner.
+
+Process note: r14-2, r14-3 and r14-4 were committed TOGETHER in `4cb6b2a`, which
+violates the repo's one-item-per-commit rule for findings lists (AGENTS.md, Git
+Safety). Flagged to the owner rather than rewritten (history rewrite needs an
+explicit go). Not repeated.
