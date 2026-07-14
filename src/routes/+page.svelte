@@ -109,9 +109,23 @@
   // as `RECONNECT_REQUIRED`, which friendlyError maps to one constant sentence. The
   // refresh then retracted a scan failure it never superseded and the user was left
   // with no status at all (codex r12).
-  // `app` marks a part that belongs to a surface OUTLIVING the current view — today
-  // only the queue drawer, which renders above the device-code screen and stays usable
-  // there. Everything else is view-scoped and dies with the view it describes.
+  // Each part names the SURFACE that owns it. A failure is cleared by the surface it
+  // belongs to and by nothing else — because the banner is shared by writers whose
+  // surfaces have completely different lifetimes:
+  //
+  //   view    the grid / rails / search results. Dies with the view.
+  //   queue   the play queue. Its drawer and chip outlive every view, and render above
+  //           the device-code screen too. Cleared by the next queue action, or by
+  //           closing the drawer.
+  //   mpv     the mpv setup bar. Global, and blocks playback until resolved.
+  //   detail  the open detail surface. Survives a search teardown underneath it.
+  //
+  // A boolean (`app`) could not express this, and each surface it lumped together lost
+  // its diagnostic to some other surface's clear: `setError(null)` — which every load
+  // start calls — wiped the queue's failure on any navigation, the search teardown
+  // deleted a Play failure while its detail was still open, and an mpv setup failure
+  // vanished under a one-character search while the mpv bar stayed mounted (codex +
+  // grok, r24).
   //
   // Without that distinction there was no honest answer to "the view was replaced —
   // what goes?": clearing everything erased a queue failure that was still on screen and
@@ -121,14 +135,18 @@
   // false when a link FAILED and silently dropped an edit made on a grid the user never
   // left; it stuck true whenever a source change abandoned a link; and it could only
   // reject FUTURE publishes, never retract one already on screen (codex + grok, r23).
-  let errorParts = $state<{ msg: string; gen: number; app: boolean }[]>([]);
+  type ErrorOwner = "view" | "queue" | "mpv" | "detail";
+  let errorParts = $state<{ msg: string; gen: number; owner: ErrorOwner }[]>([]);
   const error = $derived(
     errorParts.length === 0 ? null : errorParts.map((p) => p.msg).join("; "),
   );
   function setError(msg: string | null, gen = 0) {
-    // null is the CLEAR: a fresh load, or a navigation, starts the surface empty.
+    // null is the CLEAR — but only of the VIEW. Every load start calls this, and a load
+    // starting fresh says nothing about the queue drawer, the mpv bar, or an open detail;
+    // wiping their failures here is how the scope introduced in r23 was defeated on the
+    // very next navigation (codex + grok, r24).
     if (msg === null) {
-      errorParts = [];
+      clearOwned("view");
       return;
     }
     // Publishing a failure supersedes the LISTING diagnostics it replaces — a newer
@@ -144,20 +162,24 @@
     errorParts = errorParts.filter((p) => p.gen === 0);
     addError(msg, gen);
   }
+  // A surface is gone, or is starting over: everything it was saying goes with it, and
+  // nothing else is touched.
+  function clearOwned(owner: ErrorOwner) {
+    errorParts = errorParts.filter((p) => p.owner !== owner);
+  }
   // The view has been REPLACED (the device-code screen, a torn-down search root) while
-  // the banner itself stays on screen. Everything the old view was saying goes with it;
-  // anything belonging to a surface that survived does not.
+  // the banner itself stays on screen.
   function clearViewErrors() {
-    errorParts = errorParts.filter((p) => p.app);
+    clearOwned("view");
   }
   // Say something without ERASING what is already there: the two writers are reporting
   // different failures and the user needs both. Identical text is not repeated — a
   // retried offset can fail the same way twice, and a superseded banner could
   // otherwise appear twice in one message (codex r18, LOW).
-  function addError(msg: string, gen = 0, app = false) {
+  function addError(msg: string, gen = 0, owner: ErrorOwner = "view") {
     const at = errorParts.findIndex((p) => p.msg === msg);
     if (at === -1) {
-      errorParts = [...errorParts, { msg, gen, app }];
+      errorParts = [...errorParts, { msg, gen, owner }];
       return;
     }
     // The same sentence, now true for a SECOND reason. Two unrelated failures really do
@@ -171,16 +193,14 @@
     // The WEAKER claim wins. If either reason is owned by no load, no refresh may take
     // the line back — repairing the grid does not make the edit's failure untrue. If
     // both are listing failures, it survives until the LATER one is superseded too.
-    // Scope merges the same way, and for the same reason: if EITHER reason for this
-    // sentence lives on a surface that outlives the view, the line outlives the view —
-    // replacing the view does not make the queue's failure untrue.
+    // The same sentence from a DIFFERENT surface keeps the one already there: two
+    // surfaces reporting the identical text is not a reason to make one of them
+    // unclearable by the other. Only the load-ownership weakens.
     const held = errorParts[at].gen;
-    const heldApp = errorParts[at].app;
-    const owner = held === 0 || gen === 0 ? 0 : Math.max(held, gen);
-    const scope = heldApp || app;
-    if (owner !== held || scope !== heldApp)
+    const weaker = held === 0 || gen === 0 ? 0 : Math.max(held, gen);
+    if (weaker !== held)
       errorParts = errorParts.map((p, i) =>
-        i === at ? { msg, gen: owner, app: scope } : p,
+        i === at ? { ...p, msg, gen: weaker } : p,
       );
   }
   // Retract every part owned by a load through `claimedGen` — and nothing else. An
@@ -236,11 +256,13 @@
   async function installMpv() {
     if (installingMpv) return;
     installingMpv = true;
-    setError(null);
+    clearOwned("mpv"); // this attempt supersedes the last one's failure
     try {
       mpvInfo = await invoke<MpvInfo>("install_mpv");
     } catch (e) {
-      setError(String(e));
+      // The mpv bar stays mounted and playback stays blocked until this is resolved, so
+      // no view's clear may take the reason away (codex r24).
+      addError(String(e), 0, "mpv");
     } finally {
       installingMpv = false;
     }
@@ -597,16 +619,12 @@
     }
   }
 
-  async function loadHome(
-    gen: number = homeGen,
-    { keepError = false }: { keepError?: boolean } = {},
-  ) {
+  async function loadHome(gen: number = homeGen) {
     mode = "home";
     loading = true;
-    // `keepError`: a QUIET heal re-fetches Home's content without taking the surface with
-    // it. The failure already on screen belongs to the view the user is standing on, not
-    // to the edit that triggered this (see setWatched, codex r22/r23).
-    if (!keepError) setError(null);
+    // Clears the VIEW's parts only — the queue drawer, the mpv bar and an open detail are
+    // not this load's to silence (see setError).
+    setError(null);
     try {
       const [h, r, t] = await Promise.all([
         invoke<Hub[]>("get_hubs", { sourceId: activeSource }),
@@ -1397,6 +1415,9 @@
   }
   function toggleQueue() {
     queueOpen = !queueOpen;
+    // Closing the drawer dismisses what it was reporting — otherwise a queue failure has
+    // nothing that can ever clear it, and sits over every view forever (codex r24).
+    if (!queueOpen) clearOwned("queue");
     if (queueOpen) {
       refreshQueue();
       // While the drawer is visible, poll lightly so auto-advances (which run
@@ -1417,7 +1438,9 @@
       invoke("record_recent", { item }).catch(() => {});
       if (queueOpen) refreshQueue();
     } catch (e) {
-      setError(String(e));
+      // A Play started from an open detail is reported ON that detail, which survives a
+      // search teardown underneath it — so the view's clear is not its owner (codex r24).
+      addError(String(e), 0, detailView ? "detail" : "view");
       // A failure may mean mpv went missing — re-check so the install prompt shows.
       invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     }
@@ -1447,54 +1470,64 @@
 
   async function playNext(item: Item) {
     closeMenu();
+    clearOwned("queue"); // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_play_next", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives the view (it renders above the link screen too), so
-      // its failure is not the view's to take away — app-scoped (codex r22/r23).
-      addError(String(e), 0, true);
+      // The queue drawer outlives every view (it renders above the link screen too), so
+      // its failure is not the view's to take away — and no view's clear may take it
+      // (codex r22/r23/r24).
+      addError(String(e), 0, "queue");
     }
   }
   async function addToQueue(item: Item) {
     closeMenu();
+    clearOwned("queue"); // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_append", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives the view (it renders above the link screen too), so
-      // its failure is not the view's to take away — app-scoped (codex r22/r23).
-      addError(String(e), 0, true);
+      // The queue drawer outlives every view (it renders above the link screen too), so
+      // its failure is not the view's to take away — and no view's clear may take it
+      // (codex r22/r23/r24).
+      addError(String(e), 0, "queue");
     }
   }
   async function queueJumpTo(index: number) {
+    clearOwned("queue"); // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_play_at", { index });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives the view (it renders above the link screen too), so
-      // its failure is not the view's to take away — app-scoped (codex r22/r23).
-      addError(String(e), 0, true);
+      // The queue drawer outlives every view (it renders above the link screen too), so
+      // its failure is not the view's to take away — and no view's clear may take it
+      // (codex r22/r23/r24).
+      addError(String(e), 0, "queue");
     }
   }
   async function queueRemove(index: number) {
+    clearOwned("queue"); // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_remove", { index });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives the view (it renders above the link screen too), so
-      // its failure is not the view's to take away — app-scoped (codex r22/r23).
-      addError(String(e), 0, true);
+      // The queue drawer outlives every view (it renders above the link screen too), so
+      // its failure is not the view's to take away — and no view's clear may take it
+      // (codex r22/r23/r24).
+      addError(String(e), 0, "queue");
     }
   }
   async function queueClearAll() {
+    clearOwned("queue"); // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_clear");
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives the view (it renders above the link screen too), so
-      // its failure is not the view's to take away — app-scoped (codex r22/r23).
-      addError(String(e), 0, true);
+      // The queue drawer outlives every view (it renders above the link screen too), so
+      // its failure is not the view's to take away — and no view's clear may take it
+      // (codex r22/r23/r24).
+      addError(String(e), 0, "queue");
     }
   }
 
@@ -1645,11 +1678,21 @@
       // Continue Watching keeps showing the item as gone — falsely, and until a restart
       // (codex r23).
       //
-      // So HEAL, quietly: re-fetch the watch state without clearing the banner and
-      // without resetting the grid the user walked to. Neither of those is ours.
+      // So HEAL: re-fetch the watch state, and do not touch the grid the user walked to.
+      // A library is left alone entirely — dropping the hubs is enough, because goHome()
+      // re-fetches them. Home is rebuilt in place, and rebuilding it RETRACTS the failure
+      // it repairs: a Home load that succeeds must not leave the previous load's
+      // diagnostic sitting under fresh rails (the r11 rule). The `keepError` version of
+      // this did exactly that, permanently — nothing retracts an untagged Home failure
+      // (codex + grok, r24). Every OTHER surface's failure survives, because loadHome now
+      // clears only the view's (see setError).
+      //
+      // Not on Welcome: with the last source gone there is no Home to rebuild, and
+      // loadHome would deterministically fail and paint a dead-source error over a screen
+      // that offers nothing to clear it — the r14 hole (codex r24).
       if (rootSig() !== myRoot) {
         hubs = []; // stale: a later goHome() re-fetches (see refreshWatchState)
-        if (mode === "home") loadHome(++homeGen, { keepError: true });
+        if (authenticated && mode === "home") loadHome(++homeGen);
         return;
       }
       await refreshWatchState();
@@ -1700,6 +1743,7 @@
   function closeDetail() {
     navEpoch++; // closing the detail surface is navigation (see navEpoch)
     detailView = null;
+    clearOwned("detail"); // its surface is gone; so is what it was saying
     // The grid comes back. If it still has pages but cannot SCROLL — a tall or
     // hi-dpi viewport where the cards already fit — then nothing will ever ask for
     // them: `onScroll` cannot fire on a grid that does not scroll, and the
@@ -1761,6 +1805,7 @@
   // drill, so no entry is offered for them.
   function openInfo(item: Item) {
     navEpoch++; // opening the detail surface is navigation (see navEpoch)
+    clearOwned("detail"); // a new detail supersedes what the last one was saying
     closeMenu();
     if (item.mediaType === "season") {
       detailView = { kind: "season", seasonKey: detailKeyOf(item), seed: item };
