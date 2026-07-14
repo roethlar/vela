@@ -1637,3 +1637,60 @@ source is removed).
 **What r17+r18 established beyond argument: in this subsystem the author's FIXES carry
 defects at the same rate as the original code.** r18's HIGH was in an r17 fix that was
 itself fixing an r16 finding. The two-reviewer protocol caught it twice over.
+
+**r19 — 2026-07-14 — two reviewers on the r18 fixes. codex: 1 HIGH + 3 MEDIUM. grok: 1
+MEDIUM.** Base `63560a6`, head `64547a8`. Both reviewers, independently, landed on the
+SAME two lines — the `setWatched` catch that r18 had just rewritten. Every r19 finding
+was in code written during r17/r18. Nothing in the original slices was faulted.
+
+- **r19-1 (`563b2fb`) HIGH — an identity answer was written onto the server that
+  REPLACED the one it described** (codex). The probe answers for the server it was sent
+  to; the write-back took the lock afterwards and stamped whatever was under it, with no
+  proof the two were the same server. A rebind landing mid-probe installs a replacement,
+  and discovery really does yield servers with no `machineIdentifier` (the reachability
+  probe accepts an empty id outright, `plex_library.rs:437`). That replacement is
+  UNNAMED, so the "do we already know who we are?" test passes and A's name lands on B.
+  The misnaming is worse than the ignorance it replaces: it PINS rediscovery to A, and a
+  pinned install is the one case that does NOT void outstanding keys — so B's section
+  "2" reaches the real A as a provable, unvoided key. **The wrong-server scan, arrived at
+  through the machinery built to forbid it — the third distinct mechanism for it found in
+  this plan, and the second one introduced by a fix for the previous one.** The binding
+  is the proof of sameness and every other reader consults it; this was the one writer
+  that never did. Guard:
+  `an_identity_answer_is_never_written_onto_the_server_that_replaced_it` — parks A's
+  probe, installs an unnamed B through the real install path, releases the probe.
+  Red-proven (without the fix the source reports `machine-A` while bound to B, and B's
+  library key is stamped with A's provenance).
+- **r19-2 (`91045cb`) MEDIUM — the r18 `setWatched` fix was wrong in both directions**
+  (BOTH reviewers, independently). r18 made the catch await its recovery repaint and then
+  publish. But the publish was unconditional, so: (a) if the repaint ALSO failed, it had
+  already published the only thing explaining the empty grid it left behind — and the
+  edit's message overwrote it. **That is exactly the swap r18 made, pointing the other
+  way**: r18 stopped the repaint erasing the edit and left the edit erasing the repaint.
+  And (b) the await is a long window the user does not wait in — going Home or selecting
+  another library clears the surface, and the edit's failure then landed on a view it says
+  nothing about, covering that view's status. Fixed: COMBINE (keep theirs, say ours after
+  it, leave the tag with the load that owns the grid — as the refresh settlement does),
+  gated on the user still being on the same root.
+
+  **The gate is deliberately NOT `navEpoch` alone.** A modal opening bumps `navEpoch`
+  while leaving the grid — and the item the edit was about — exactly where they were, so
+  gating on it would have silently dropped the very failure r18 was fixed to preserve,
+  because the user happened to open a card. Leaving is the surface changing AND a
+  different load owning the content: `select`, `goHome`, drill, crumb and search all bump
+  both; `openDetail`/`closeDetail` bump neither `loadGen` nor the content.
+- **r19-3 (`91045cb`) MEDIUM — pagefail cases 2 and 3 did not guard the r18 ordering at
+  all** (codex). Both let the edit's recovery repaint SUCCEED, so removing the `await`
+  left both green. **SEVENTH vacuous guard in this plan.** Closed by the same new case as
+  r19-2 (it is the same test), which arms a 401 edit against a 500 repaint — two failures
+  that RENDER differently, because two 401s collapse into one sentence and no assertion
+  could then tell which survived (the way refresh case 27 came to guard nothing).
+
+New guards, red-proven three separate ways, each on its own assertion: drop the combine
+and the repaint's 500 is erased; drop the `await` and the edit's message is erased; drop
+the currency gate and the edit's banner paints itself on Home. `cargo test` 95, e2e 17/17.
+
+**r19 is the round where the pattern stopped being a coincidence.** Three consecutive
+rounds in which the newest fix carried a defect of the same class it was fixing, through
+another door — and in r19 both reviewers found the same one without seeing each other.
+A single reviewer, or the author alone, ships all three.
