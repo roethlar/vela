@@ -470,6 +470,41 @@ export default {
       `the user never left — they re-entered the library they were standing in, and their edit still failed — got ${JSON.stringify(afterReselect)}`,
     );
 
+    // ── 9. The root is the one the edit was MADE in, not the one it lands in ──
+    // The edit's own server call is the LONGEST wait in setWatched, and the user can
+    // leave during it. Reading the root in the catch — after the call has already
+    // failed — reads whatever root they walked to, compares it against itself, and
+    // always matches: the failure then lands on a view it says nothing about, covering
+    // that view's status (codex r20). The signature has to be taken BEFORE the call.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "a healthy grid to edit from",
+    );
+    mock.state.unauthNextPlayed = true; // the edit 401s...
+    mock.state.playedDelayMs = 6000; // ...but not for six seconds
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () =>
+        !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
+      "the parked, doomed edit to reach the server",
+    );
+    // Leave while it is still in flight — the failure has not happened yet.
+    await goHome(driver);
+    await driver.waitFor(
+      `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
+      "Home",
+    );
+    await new Promise((r) => setTimeout(r, 8000)); // past the parked 401
+    assert.equal(
+      await banner(driver),
+      null,
+      "the edit was made in a library the user has since left: its failure belongs to that grid, not to the Home they are standing on",
+    );
+
     assert.equal(
       mock.state.contractViolations.length,
       0,

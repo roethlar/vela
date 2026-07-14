@@ -1493,6 +1493,12 @@
 
   async function setWatched(item: Item, played: boolean) {
     closeMenu();
+    // The root the user made this edit IN — captured BEFORE the server call, because
+    // that call is the longest wait here and they can leave during it. Reading the
+    // signature in the catch instead reads whatever root they landed on, compares it
+    // to itself, and always matches: the edit's failure then lands on a view it says
+    // nothing about, covering that view's own status (codex r20).
+    const myRoot = rootSig();
     try {
       // Merged cards may front a local file while a server backing owns the
       // watch state — route the action where it can actually be recorded.
@@ -1520,7 +1526,6 @@
       // its own: the user would learn the reload failed and never learn their edit
       // had (codex r18). The edit is what they asked for; its failure is the one
       // they need.
-      const myRoot = rootSig();
       await refreshWatchState();
       // The await is a long window and the user does not wait in it. If they LEFT,
       // this failure describes a grid that is gone — it does not belong on the screen

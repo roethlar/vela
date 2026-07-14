@@ -67,6 +67,7 @@ export function startMockJellyfin({
     // to one constant sentence) — which is what makes the banner-ownership case
     // writable at all (grok r17; refresh case 25).
     unauthNextPlayed: false,
+    playedDelayMs: 0, // one-shot delay for the next watch-state edit
     itemsDelayMs: 0, // one-shot delay for the next listing
     // Scan-trigger machinery (library-refresh-scan plan): VirtualFolders is
     // seeded from the served views but kept SEPARATE — a grouped view added
@@ -337,19 +338,30 @@ export function startMockJellyfin({
       path.startsWith(`/Users/${userId}/`) &&
       findMovie(played[1])
     ) {
-      if (state.unauthNextPlayed) {
-        state.unauthNextPlayed = false; // one-shot
-        return json({ error: "unauthenticated" }, 401);
+      // Bound at ARRIVAL. The edit's own server call is the longest wait in
+      // `setWatched` and the user can leave DURING it — so a scenario has to be able
+      // to park the edit itself, not just its recovery repaint (r20, pagefail case 9).
+      const unauthPlayed = state.unauthNextPlayed;
+      if (unauthPlayed) state.unauthNextPlayed = false; // one-shot
+      const playedDelay = state.playedDelayMs;
+      if (playedDelay > 0) state.playedDelayMs = 0; // one-shot
+      const respondPlayed = () => {
+        if (unauthPlayed) return json({ error: "unauthenticated" }, 401);
+        // Real servers reset the resume point on BOTH transitions (Jellyfin
+        // MarkPlayed/MarkUnplayed zero PlaybackPositionTicks; Plex scrobble/
+        // unscrobble clears the view offset) — keeping it would let a stale
+        // resume point survive a "full reset" and pass the old assertions.
+        if (req.method === "POST")
+          state.userData[played[1]] = { played: true, positionTicks: 0 };
+        if (req.method === "DELETE")
+          state.userData[played[1]] = { played: false, positionTicks: 0 };
+        return json({});
+      };
+      if (playedDelay > 0) {
+        setTimeout(respondPlayed, playedDelay);
+        return;
       }
-      // Real servers reset the resume point on BOTH transitions (Jellyfin
-      // MarkPlayed/MarkUnplayed zero PlaybackPositionTicks; Plex scrobble/
-      // unscrobble clears the view offset) — keeping it would let a stale
-      // resume point survive a "full reset" and pass the old assertions.
-      if (req.method === "POST")
-        state.userData[played[1]] = { played: true, positionTicks: 0 };
-      if (req.method === "DELETE")
-        state.userData[played[1]] = { played: false, positionTicks: 0 };
-      return json({});
+      return respondPlayed();
     }
     const pbinfo = /^\/Items\/([^/]+)\/PlaybackInfo$/.exec(path);
     if (pbinfo && findMovie(pbinfo[1])) {
