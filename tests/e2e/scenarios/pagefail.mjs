@@ -69,6 +69,12 @@ async function watchToggle(driver, prefix, label) {
 }
 // The grid loads the next page when scrolled near its end (onScroll -> loadMore).
 async function scrollGridToEnd(driver) {
+  // The grid is only in the DOM once it has cards — a reload in flight replaces it
+  // with a skeleton, so wait rather than assume.
+  await driver.waitFor(
+    `return !!document.querySelector('main.grid')`,
+    "the browse grid",
+  );
   await driver.exec(
     `const g = document.querySelector('main.grid');
      g.scrollTop = g.scrollHeight;

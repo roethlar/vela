@@ -972,6 +972,12 @@
       items = [...items, ...page];
       offset += page.length;
       hasMore = page.length >= PAGE;
+      // This generation just loaded successfully, so any failure we were HOLDING
+      // for it no longer describes anything: the cards are here. Settlement would
+      // otherwise publish a diagnostic for a page that arrived (codex r17).
+      if (suppressedFailures.length > 0) {
+        suppressedFailures = suppressedFailures.filter((f) => f.gen !== myGen);
+      }
     } catch (e) {
       failed = true;
       if (myGen === loadGen) {
