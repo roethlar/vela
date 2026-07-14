@@ -39,10 +39,15 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     view while bumping no load generation, and re-entering the library you are standing
     in bumps both counters while going nowhere (`39ead92` — `rootSig()` asks the view
     what root it is on, instead of inferring it from counters).
-  - **IN FLIGHT: review round r21**, dispatched to BOTH reviewers over
-    `91045cb..39ead92`, results not yet read. Prompts + outputs in the session
-    scratchpad; if lost, re-dispatch (the incantations are in ## Next). r21 targets
-    the r20 fixes — which is where the last FOUR rounds each found their worst bug.
+  - **r21 + r22 LANDED (2026-07-14).** r21: codex 5 MEDIUM + 3 LOW, grok 1 HIGH + 3
+    MEDIUM + 1 LOW. r22: codex 3 MEDIUM, grok 1 MEDIUM. Both rounds' top finding was
+    found independently by BOTH reviewers, and both were in the PREVIOUS round's fixes.
+    Nine fix commits, `d7cb3ef`..`74fc3ad`, each with a red-proven guard where the
+    harness can reach it. Detail in the plan's `## Code review log`.
+  - **IN FLIGHT: review round r23**, dispatched to BOTH reviewers over
+    `a29a0f7..74fc3ad`, results not yet read. Prompts + outputs in the session
+    scratchpad; if lost, re-dispatch (the incantations are in ## Next). r23 targets
+    the r22 fixes — which is where the last SIX rounds each found their worst bug.
   - **REVIEW PROTOCOL (owner, 2026-07-14) — now standing:** TWO independent
     reviewers (`codex` and `grok`) on the same pinned diff, neither seeing the
     other's findings; the author writes the fixes and runs every guard, red-proof
@@ -50,14 +55,18 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     the reviewer that did not raise it. That rule exists because author
     self-adjudication was tested twice and failed twice (r12-1, r8-4, both
     overturned). Reviewer-vs-reviewer disagreement goes to the owner.
-  - **Why it is still running (r17-r20 evidence):** in this subsystem the author's
-    FIXES carry defects at the same rate as the original code. FOUR rounds running, the
+  - **Why it is still running (r17-r22 evidence):** in this subsystem the author's
+    FIXES carry defects at the same rate as the original code. SIX rounds running, the
     newest fix has carried a defect of the same CLASS it was fixing, through another
-    door: r18's HIGH was an r17 fix reintroducing the wrong-server scan; r19's HIGH was
-    an r18 fix doing it again by another route; r19's MEDIUM was the r18 banner fix,
-    which stopped the repaint erasing the edit and left the edit erasing the repaint;
-    and r20's was the r19 banner fix reopening THAT loss through the retract door. A
-    single reviewer — or the author alone — ships every one of them.
+    door — and the class never changes: **a failure the user needs is silently lost.**
+    It has now been reached through the publish door, the ordering door, the retract
+    door, the dedup door and the setError door, each opened by the fix for the last
+    (plus, twice, a wrong-server scan reintroduced by the fix for the previous
+    wrong-server scan). The two reviewers have converged, independently, on the same top
+    finding in FOUR straight rounds. A single reviewer — or the author alone — ships
+    every one of them.
+  - **THE FIX IS THE MOST DANGEROUS CODE IN THE REPO.** Not the original. Review the
+    newest fix hardest, and never treat "this one is simple" as a reason to skip it.
   - **A SELF-AUDIT IS NOT A CHECK.** r20-2 is a defect the author looked straight at
     during his own r19 audit, in a message claiming every writer had been traced, and
     waved through on an assumption (that the Plex link screen was a modal over the grid;
@@ -171,16 +180,18 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **NEXT ACTION (library-refresh-scan): read r21's two verdicts** (codex JSON + grok
-  JSON, both over `91045cb..39ead92`), merge and dedupe the findings, then fix each in
+- **NEXT ACTION (library-refresh-scan): read r23's two verdicts** (codex JSON + grok
+  JSON, both over `a29a0f7..74fc3ad`), merge and dedupe the findings, then fix each in
   ONE commit with a red-proven guard. Decline nothing without sending it to the OTHER
   reviewer — the author does not adjudicate his own declines (see ## Now). If a round
   comes back clean from BOTH, the loop can close; nothing else is outstanding on this
   feature except the recorded gaps.
   - Reviewer incantations: `codex exec --sandbox read-only -o <out.json> "$(cat
     <prompt>)" < /dev/null` (stdin MUST be closed or it hangs; it has hung once) and
-    `grok --sandbox read-only -p "$(cat <prompt>)"`. E2E is Linux-only: see
-    `.agents/machines.md` for the VM (login-shell cargo).
+    `grok --sandbox read-only -p "$(cat <prompt>)"`. **grok has twice returned only its
+    preamble with no JSON verdict — that is a FAILED run, not a clean pass. Re-dispatch
+    it; never read silence as agreement.** E2E is Linux-only: see `.agents/machines.md`
+    for the VM (login-shell cargo).
   - E2E without pushing: the push policy is ASK, and that includes the `vm` remote.
     Sync the changed files with `scp` into `~/dev/vela` and verify by checksum before
     running — no `git push`, no `git checkout -- .` on the VM's tree.
