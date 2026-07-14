@@ -1,3 +1,25 @@
+- **PER-SURFACE-STATUS: COMPLETE — all five slices landed 2026-07-14 (0.1.46), awaiting
+  owner playtest.** Plan `.agents/plans/per-surface-status.md`; decision
+  `.agents/decisions.md` (2026-07-14). Every failure now reports on the surface it belongs
+  to: the view's banner keeps listing/refresh/search failures, and the watch-state edit
+  (`fee7f0e`), the queue (`67358fd`), the mpv bar (`0f41c7b`) and the detail page
+  (`40dfc40`) each report their own. Slice 5 (`282702b`) then DELETED the whole refereeing
+  apparatus — the `owner` field, `ErrorOwner`, `clearOwned`, per-surface clearing, the scope
+  merge — net -67 lines. e2e 17/17, cargo test 95, clippy/svelte-check/build clean.
+  - **What it bought:** the defect class that ran for EIGHT review rounds (r17-r24, each fix
+    opening the next door, always the same loss — a failure the user needed, silently gone)
+    is structurally gone, because the fight over one surface is gone. Slice 1 alone
+    collapsed SIX e2e cases, three of which had asserted that a failed edit must be
+    SUPPRESSED when the user navigated away — never right, just the price of sharing.
+  - **OWNER PLAYTEST ASK (0.1.46) — the ONLY real check on slices 2, 3 and 4**, which the
+    harness cannot guard (it cannot fail a queue action, an mpv install or a Play; evidence
+    in the plan's outcome table): (1) kill the server mid-edit, mark watched — the failure
+    lands on its own line, follows you when you navigate, and a second edit replaces it;
+    (2) a failed queue action reports inside the drawer and marks the chip when it is shut;
+    (3) a failed mpv install reports on the mpv bar and a search no longer wipes it;
+    (4) a failed Play from an open detail reports on the detail.
+  - The library-refresh-scan review loop is CLOSED at r24; its log is the evidence for this
+    plan. Do not reopen it against the shared banner.
 # Agent State
 
 This file is the first place future agents should read for current repo state.

@@ -1,6 +1,8 @@
 # Plan: failures report on the surface that owns them
 
-Status: **APPROVED** (owner, 2026-07-14). Two decisions taken in the owner's words:
+Status: **COMPLETE** — all five slices landed 2026-07-14 (`fee7f0e`, `67358fd`,
+`0f41c7b`, `40dfc40`, `282702b`; version 0.1.46). Awaiting owner playtest.
+Originally APPROVED (owner, 2026-07-14). Two decisions taken in the owner's words:
 
 1. *"Own surfaces"* — the play queue, the mpv setup bar and the open detail page each
    report their own failures. The top banner keeps only VIEW-scoped ones.
@@ -164,3 +166,41 @@ disagreement goes to the owner, but only when the two positions genuinely cannot
 
 **Review the newest fix hardest.** In the predecessor loop the author's fixes carried
 defects at the same rate as the original code, for eight rounds running.
+
+
+## Outcome (2026-07-14)
+
+All five slices landed. The banner's refereeing apparatus — the `owner` field, `ErrorOwner`,
+`clearOwned`, per-surface clearing, the scope merge — is **gone** (net -67 lines in slice 5).
+What remains on the banner is view-vs-view and load-scoped: `gen`, `retractThrough`, and the
+weaker-claim merge. Those are real rules about one surface with one kind of writer, and they
+stayed.
+
+Slice 1 also collapsed SIX e2e cases. Three of them had asserted that a failed edit must be
+SUPPRESSED when the user navigated away — which was never right; it was only ever the price
+of sharing a surface with the view's banner.
+
+**What is guarded, and what is not — stated plainly rather than implied:**
+
+| slice | guard |
+| --- | --- |
+| 1 — the edit's own line | GUARDED. pagefail cases 4/5/6 + the heal's 8/9. Red-proven three ways. |
+| 2 — the queue | NOT GUARDED. `queue_remove`/`queue_play_at` can fail (`commands.rs:2454, 2474`) but not deterministically through the UI — the drawer only ever renders indices that exist. `queue_append`/`queue_clear` cannot fail at all. |
+| 3 — the mpv bar | NOT GUARDED. The harness either has mpv or it does not. |
+| 4 — the detail | NOT GUARDED. `play_item` resolves at mpv spawn, so a bad stream still succeeds where this catch would fire. |
+| 5 — the collapse | Covered by the 17 existing scenarios (no behaviour change intended). |
+
+Also unguarded, recorded in place in pagefail: `onSourcesChanged` abandoning an edit in
+flight (this scenario cannot remove a source). A first draft of that case called a hook that
+did not exist — it asserted nothing while looking like a guard, and was deleted rather than
+shipped.
+
+**Owner playtest (0.1.46) — this is the only real check on slices 2, 3 and 4:**
+
+1. Kill the server mid-edit, mark something watched: the failure appears on its OWN line and
+   does not disturb the grid's banner. Navigate away — it follows you (it is your action's
+   outcome, not a fact about the grid). A second edit replaces it.
+2. Fail a queue action: it reports INSIDE the drawer, and the queue chip is marked when the
+   drawer is shut. Navigating no longer erases it.
+3. A failed mpv install reports on the mpv bar, next to Retry — and a search no longer wipes it.
+4. A failed Play from an open detail reports on the detail, not underneath it.
