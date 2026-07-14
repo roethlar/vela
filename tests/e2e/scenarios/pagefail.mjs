@@ -505,6 +505,50 @@ export default {
       "the edit was made in a library the user has since left: its failure belongs to that grid, not to the Home they are standing on",
     );
 
+    // ── 10. Two failures, ONE sentence — the survivor must be the weaker claim ──
+    // A 401 on a listing and a 401 on an edit both collapse into the same constant
+    // RECONNECT_REQUIRED sentence. Deduplicating the banner on TEXT alone silently
+    // decides ownership: the tagged listing part is already there, the edit's untagged
+    // part is dropped as a duplicate, and the refresh then retracts the only line left —
+    // the grid is repaired and nothing says the edit failed (codex r21).
+    //
+    // Case 6 cannot see this: it deliberately uses a 500 against a 401 so its assertions
+    // can tell the two apart. The identical-text case is the one that breaks.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "a healthy grid to edit from",
+    );
+    mock.state.viewsDelayMs = 6000; // a refresh that will SUCCEED, slowly
+    const refresh5 = await driver.find("css selector", "button.refreshbtn");
+    await driver.click(refresh5);
+
+    mock.state.unauthNextPlayed = true; // the edit 401s...
+    mock.state.unauthNextItems = true; // ...and its repaint 401s with the SAME sentence
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () => {
+        const b = await banner(driver);
+        return b && b.includes("reconnect") ? true : null;
+      },
+      "the one sentence both failures produce",
+    );
+
+    await settle(driver);
+    mock.state.viewsDelayMs = 0;
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "the refresh repairs the grid",
+    );
+    const survivor = await banner(driver);
+    assert.ok(
+      survivor && survivor.includes("reconnect"),
+      `the refresh repaired the grid, which retires the LISTING's reason for this sentence — but the edit's reason still holds, and dropping the line leaves the user with no sign their change failed — got ${JSON.stringify(survivor)}`,
+    );
+
     assert.equal(
       mock.state.contractViolations.length,
       0,

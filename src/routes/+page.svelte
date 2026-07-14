@@ -121,7 +121,26 @@
   // retried offset can fail the same way twice, and a superseded banner could
   // otherwise appear twice in one message (codex r18, LOW).
   function addError(msg: string, gen = 0) {
-    if (!errorParts.some((p) => p.msg === msg)) errorParts = [...errorParts, { msg, gen }];
+    const at = errorParts.findIndex((p) => p.msg === msg);
+    if (at === -1) {
+      errorParts = [...errorParts, { msg, gen }];
+      return;
+    }
+    // The same sentence, now true for a SECOND reason. Two unrelated failures really do
+    // render identically here — a 401 on a listing and a 401 on an edit both collapse
+    // into the one constant RECONNECT_REQUIRED sentence — so deduplicating on the text
+    // alone silently decides who owns what is left on screen. Deduplicating and keeping
+    // the FIRST owner is how the edit's failure went back to being retractable: the
+    // listing part was already there, the edit's untagged part was dropped as a
+    // duplicate, and the refresh then retracted the only line left (codex r21).
+    //
+    // The WEAKER claim wins. If either reason is owned by no load, no refresh may take
+    // the line back — repairing the grid does not make the edit's failure untrue. If
+    // both are listing failures, it survives until the LATER one is superseded too.
+    const held = errorParts[at].gen;
+    const owner = held === 0 || gen === 0 ? 0 : Math.max(held, gen);
+    if (owner !== held)
+      errorParts = errorParts.map((p, i) => (i === at ? { msg, gen: owner } : p));
   }
   // Retract every part owned by a load through `claimedGen` — and nothing else. An
   // untagged part is not the refresh's to take back, and a NEWER load's failure
