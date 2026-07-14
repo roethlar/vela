@@ -1017,9 +1017,18 @@ pub async fn set_section_sort(section_key: String, sort: String) -> Result<(), S
 /// before the (network) call. Local-family sources reject with a friendly
 /// error (their listings re-index on ordinary refresh).
 #[tauri::command]
-pub async fn scan_section(section_key: String, state: State<'_, AppState>) -> Result<(), String> {
+pub async fn scan_section(
+    section_key: String,
+    provenance: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    // `provenance` is the section's own, handed straight back from the list the
+    // caller is holding — the source decides what it proves (see
+    // `SectionDto::provenance`). Not a trust boundary: the user may scan any
+    // library they can already see. It exists so a source whose keys are
+    // server-local can refuse to act on a key it no longer issues.
     let (src, raw) = state.registry.lock().await.route(&section_key)?;
-    src.scan_library(&raw).await
+    src.scan_library(&raw, provenance.as_deref()).await
 }
 
 #[tauri::command]

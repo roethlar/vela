@@ -16,12 +16,6 @@ pub struct PlexSource {
     id: String,
     name: String,
     lib: AsyncMutex<PlexLibrary>,
-    /// The machine that served the section list the frontend is currently
-    /// holding. Section keys are server-LOCAL numeric ids, so a scan must go to
-    /// the server the KEY came from — not merely to a server we can name. If the
-    /// source drifted between the sections load and the scan, this catches it
-    /// (codex r9).
-    sections_machine: AsyncMutex<Option<String>>,
 }
 
 impl PlexSource {
@@ -30,7 +24,6 @@ impl PlexSource {
             id: id.into(),
             name: name.into(),
             lib: AsyncMutex::new(lib),
-            sections_machine: AsyncMutex::new(None),
         }
     }
 
@@ -333,7 +326,7 @@ impl MediaSource for PlexSource {
     /// Ask the server to rescan one section for new files. The request path
     /// MUST come from [`scan_path`] — validation and endpoint shape are
     /// unit-tested there, and this is its only production call site.
-    async fn scan_library(&self, section_key: &str) -> Result<(), String> {
+    async fn scan_library(&self, section_key: &str, provenance: Option<&str>) -> Result<(), String> {
         let path = scan_path(section_key)?;
         let lib = self.ensure_ready().await?;
         // A scan is an authenticated ACTION and the section key is server-LOCAL,
@@ -342,9 +335,15 @@ impl MediaSource for PlexSource {
         // (an unpinned rediscover following a failed /identity probe), the key
         // would address a stranger's same-numbered library and we would report
         // success (codex r8, r9). Both sides must be known AND identical.
-        let served_by = self.sections_machine.lock().await.clone();
+        //
+        // The key's origin travels WITH IT (`SectionDto::provenance`), because
+        // the source cannot tell from its own state which list the caller is
+        // holding: an open menu, or a listing a failed refresh left on screen,
+        // both outlive the note "who served the last list I returned" (codex
+        // r11). Provenance the source never issued (or issued while it could
+        // not name the server) is `None`, and fails closed here.
         if !scan_target_ok(
-            served_by.as_deref(),
+            provenance,
             rediscovery_pin(lib.server_machine_id()).as_deref(),
         ) {
             return Err(
@@ -416,16 +415,15 @@ impl MediaSource for PlexSource {
                 (lib.server_machine_id(), s)
             }
         };
-        // Remember whose keys these are (see `sections_machine`) — taken from the
-        // server that ACTUALLY SERVED this list, and only now that it is in hand.
-        // Stamping the CURRENT server up front instead relabelled keys the user
-        // was still looking at: an attempt that fails (or is merely still in
-        // flight) leaves the PREVIOUS list on screen, so if the source had
-        // drifted to another account server meanwhile, an A-local key would pass
-        // `scan_target_ok(B, B)` and rescan B's same-numbered library while we
-        // reported success for the one the user clicked (codex r10). A failed
-        // attempt changes nothing on screen and so must leave the stamp alone.
-        *self.sections_machine.lock().await = rediscovery_pin(served_by);
+        // Stamp each key with the machine that ACTUALLY SERVED it (the
+        // rediscovered one, on the retry path above). These numbers are
+        // server-local, so the key alone is not enough to act on later: it
+        // travels with its origin, and a scan of a key this source can no
+        // longer vouch for fails closed (see `SectionDto::provenance`). When we
+        // cannot name the server — a restored endpoint whose /identity probe
+        // failed — every key it serves is unprovable and unscannable, by
+        // design (codex r8).
+        let provenance = rediscovery_pin(served_by);
         Ok(sections
             .into_iter()
             // Only video libraries — skip music/photo sections so non-playable
@@ -438,6 +436,7 @@ impl MediaSource for PlexSource {
                 source_id: self.id.clone(),
                 source_name: self.name.clone(),
                 sort: None, // stamped from config by get_sections
+                provenance: provenance.clone(),
             })
             .collect())
     }
@@ -902,21 +901,15 @@ mod tests {
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
-    use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::{Arc, Mutex};
-    use std::time::Duration;
-
-    /// A gate a mock server's `/library/sections` handler parks on: it announces
-    /// the request's ARRIVAL, then waits to be released. That lets a test act
-    /// while a sections fetch is genuinely in flight.
-    type Gate = (Sender<()>, Arc<Mutex<Receiver<()>>>);
 
     /// A minimal Plex-shaped HTTP server on 127.0.0.1, enough for `/identity`,
     /// the section list, and a scan. Every request path is recorded on ARRIVAL,
-    /// so a test can assert a request was never made. One thread per connection:
-    /// a parked sections fetch must not block a concurrent scan (a real server
-    /// would answer both).
-    fn spawn_mock_plex(machine: &str, gate: Option<Gate>) -> (u16, Arc<Mutex<Vec<String>>>) {
+    /// so a test can assert a request was never made — the point of a scan guard
+    /// is the request the wrong server never receives, which a return value alone
+    /// cannot prove. Both mock servers serve a section "2": that collision is the
+    /// whole hazard, since a Plex section key is only a number.
+    fn spawn_mock_plex(machine: &str) -> (u16, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
@@ -924,7 +917,7 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
-                let (machine, hits, gate) = (machine.clone(), out.clone(), gate.clone());
+                let (machine, hits) = (machine.clone(), out.clone());
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 2048];
                     let n = stream.read(&mut buf).unwrap_or(0);
@@ -940,10 +933,6 @@ mod tests {
                         // a scan: /library/sections/{key}/refresh
                         r#"<MediaContainer size="0" />"#.to_string()
                     } else if path.starts_with("/library/sections") {
-                        if let Some((arrived, release)) = gate.as_ref() {
-                            let _ = arrived.send(());
-                            let _ = release.lock().unwrap().recv();
-                        }
                         r#"<MediaContainer size="1"><Directory key="2" type="movie" title="Movies" /></MediaContainer>"#.to_string()
                     } else {
                         r#"<MediaContainer size="0" />"#.to_string()
@@ -973,71 +962,60 @@ mod tests {
         }
     }
 
-    /// A scan must reach the server the section KEY came from. The guard that
-    /// enforces it (`scan_target_ok`) is only as good as the machine recorded
-    /// for the list on screen: recording it BEFORE the fetch meant a refresh
-    /// that had merely STARTED against another server (after the source drifted)
-    /// relabelled the keys still displayed, and the scan then sailed through
-    /// `scan_target_ok(B, B)` into B's same-numbered library (codex r10).
+    /// A scan must reach the server the section KEY came from — and the key the
+    /// caller holds need not be from the list currently on screen. A context
+    /// menu opened on A's library outlives the refresh that replaces the sidebar
+    /// with B's; a failed refresh leaves A's list up after the source has already
+    /// moved on. No source-global "who served the last list" note can tell those
+    /// keys apart, because "2" is a real section on BOTH servers — so the origin
+    /// travels WITH the key (codex r10, r11).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_scan_never_reaches_a_server_that_did_not_serve_the_key() {
-        let (port_a, _hits_a) = spawn_mock_plex("machine-A", None);
-        // B's sections fetch parks on the gate, so the scan below happens while
-        // that refresh is in flight and B's list is NOT yet in hand.
-        let (arrived_tx, arrived_rx) = channel();
-        let (release_tx, release_rx) = channel();
-        let gate = (arrived_tx, Arc::new(Mutex::new(release_rx)));
-        let (port_b, hits_b) = spawn_mock_plex("machine-B", Some(gate));
+    async fn a_stale_key_never_scans_the_server_that_replaced_it() {
+        let (port_a, _hits_a) = spawn_mock_plex("machine-A");
+        let (port_b, hits_b) = spawn_mock_plex("machine-B");
 
-        // The list on screen came from A (whose identity we learn on first use:
-        // a server restored from config carries no machine id).
+        // The sidebar the user is looking at was built from A (whose identity we
+        // learn on first use: a server restored from config carries no machine id).
         let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
         lib.set_server_manual("127.0.0.1".to_string(), port_a, false, Some("A".to_string()));
-        let source = Arc::new(PlexSource::new("plex", "Plex", lib));
-        let secs = source.sections().await.expect("A serves its sections");
-        assert_eq!(secs.len(), 1);
-        assert_eq!(
-            *source.sections_machine.lock().await,
-            Some("machine-A".to_string()),
-            "the list on screen came from A"
-        );
+        let source = PlexSource::new("plex", "Plex", lib);
+        let from_a = source.sections().await.expect("A serves its sections");
+        assert_eq!(from_a.len(), 1);
+        assert_eq!(from_a[0].provenance.as_deref(), Some("machine-A"));
 
-        // The source drifts to another account server (in production: an
-        // unpinned rediscovery after a failed read). A's keys are STILL on screen.
+        // The source drifts to another account server (in production: an unpinned
+        // rediscovery after a failed read) and B's list replaces the sidebar. The
+        // menu the user opened still holds A's section.
         source
             .lib
             .lock()
             .await
             .set_server(mock_server("machine-B", port_b));
+        let from_b = source.sections().await.expect("B serves its sections");
+        assert_eq!(from_b[0].provenance.as_deref(), Some("machine-B"));
 
-        // A refresh is now in flight against B...
-        let refreshing = tokio::spawn({
-            let source = source.clone();
-            async move { source.sections().await }
-        });
-        arrived_rx
-            .recv_timeout(Duration::from_secs(10))
-            .expect("B received the sections request");
-
-        // ...and the user scans the library A gave them. Key "2" is A-local; B
-        // has a section 2 of its own, and it is not this one.
+        // Scanning the library A gave them must not touch B.
         let err = source
-            .scan_library("2")
+            .scan_library("2", from_a[0].provenance.as_deref())
             .await
-            .expect_err("a key of unprovable provenance must not be scanned");
+            .expect_err("a key server B never issued must not be scanned");
         assert!(err.contains("can't confirm"), "unexpected error: {err}");
         let seen = hits_b.lock().unwrap().clone();
         assert!(
             !seen.iter().any(|p| p.contains("refresh")),
-            "server B was sent a scan for a key it never served: {seen:?}"
+            "server B was sent a scan for a key it never issued: {seen:?}"
         );
 
-        release_tx.send(()).unwrap();
-        refreshing.await.unwrap().expect("B serves its sections");
-        // Now that B's list IS on screen, B's keys are B's to scan.
-        assert_eq!(
-            *source.sections_machine.lock().await,
-            Some("machine-B".to_string())
+        // ...while B's OWN key still scans B: the guard refuses stale keys, not
+        // every key.
+        source
+            .scan_library("2", from_b[0].provenance.as_deref())
+            .await
+            .expect("B's own key scans B");
+        let seen = hits_b.lock().unwrap().clone();
+        assert!(
+            seen.iter().any(|p| p == "/library/sections/2/refresh"),
+            "B never received the scan it should have: {seen:?}"
         );
     }
 

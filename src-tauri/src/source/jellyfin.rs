@@ -888,7 +888,14 @@ impl MediaSource for JellyfinSource {
     /// a concrete server library (same id in the virtual-folders list) —
     /// grouped views have no single scan target, so they're rejected with
     /// guidance instead of blind-POSTing an id the endpoint may misread.
-    async fn scan_library(&self, section_key: &str) -> Result<(), String> {
+    ///
+    /// Provenance is unused: this source is pinned to ONE server address for
+    /// its whole life (no discovery, no rediscovery), and a Jellyfin/Emby
+    /// library id is a server-issued GUID rather than a small server-local
+    /// number — so a key cannot silently come to mean another server's library
+    /// the way a Plex section key can. The virtual-folders check above already
+    /// proves the id belongs to the server being asked.
+    async fn scan_library(&self, section_key: &str, _provenance: Option<&str>) -> Result<(), String> {
         let folders = self.client.get_virtual_folders().await?;
         let known = folders
             .iter()
@@ -926,6 +933,9 @@ impl MediaSource for JellyfinSource {
                     source_id: self.id.clone(),
                     source_name: self.name.clone(),
                     sort: None, // stamped from config by get_sections
+                    // Not needed here (see `scan_library`): one fixed server,
+                    // and library ids are server-issued GUIDs.
+                    provenance: None,
                 })
             })
             .collect())

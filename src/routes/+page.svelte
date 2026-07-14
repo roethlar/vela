@@ -31,7 +31,18 @@
     return /^https?:\/\//.test(p) ? p : convertFileSrc(p);
   }
 
-  type Section = { key: string; title: string; sectionType: string; sourceName?: string; sort?: string };
+  // `provenance`: opaque server-of-origin token, handed back with any action on
+  // this section so the backend can refuse one whose key it no longer issues
+  // (a menu open across a library refresh, a listing a failed refresh left on
+  // screen). Never interpreted here.
+  type Section = {
+    key: string;
+    title: string;
+    sectionType: string;
+    sourceName?: string;
+    sort?: string;
+    provenance?: string;
+  };
   // `Item` (the listing-card DTO mirror) lives in $lib/types, shared with the
   // detail components.
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
@@ -1222,7 +1233,10 @@
       scanNoticeTimer = null;
     }
     try {
-      await invoke("scan_section", { sectionKey: s.key });
+      // Hand back the provenance issued WITH this key: `s` is the section object
+      // from the list this menu was opened on, which may no longer be the list
+      // on screen (codex r11).
+      await invoke("scan_section", { sectionKey: s.key, provenance: s.provenance ?? null });
       if (scanAttempt !== attempt) return; // superseded — stale outcome
       // No auto-refresh afterward: the scan runs asynchronously server-side
       // and completion is unknowable without polling (non-goal). The slice-1

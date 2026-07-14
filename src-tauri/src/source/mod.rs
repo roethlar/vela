@@ -25,6 +25,23 @@ pub struct SectionDto {
     /// nothing of sort persistence.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub sort: Option<String>,
+    /// WHICH SERVER ISSUED THIS KEY, when the source can say. Opaque to the
+    /// frontend, which only has to hand it back with any action taken on this
+    /// section (see [`MediaSource::scan_library`]).
+    ///
+    /// A Plex section key is a server-LOCAL number, so "section 2" means a
+    /// different library on every server; a source that has repointed at
+    /// another server on the same account (rediscovery) would happily act on
+    /// a key the user is still looking at but which it no longer issued. The
+    /// source cannot detect that from a global "who served the last list"
+    /// note, because the key held by an open menu — or by a listing a failed
+    /// refresh left on screen — is exactly the one such a note no longer
+    /// describes (codex r10, r11). So provenance travels WITH the key.
+    ///
+    /// `None` = the source cannot vouch for this key's origin; actions that
+    /// need provenance must fail closed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub provenance: Option<String>,
 }
 
 /// A playable/browsable item (movie, show, season, episode), source-tagged.
@@ -304,7 +321,14 @@ pub trait MediaSource: Send + Sync {
     /// dashboard "scan library files" action — no forced metadata or artwork
     /// refresh). Defaults to unsupported; server backends opt in. Local-family
     /// sources don't need it: their listings re-index on ordinary refresh.
-    async fn scan_library(&self, _section_key: &str) -> Result<(), String> {
+    ///
+    /// `provenance` is [`SectionDto::provenance`] as issued with this key,
+    /// handed back unchanged by the caller. A scan is an authenticated ACTION
+    /// on a server-local id, so a source whose keys are server-local MUST
+    /// refuse when it cannot prove the key came from the server it is now
+    /// talking to — the caller may be holding a key from a list this source no
+    /// longer serves.
+    async fn scan_library(&self, _section_key: &str, _provenance: Option<&str>) -> Result<(), String> {
         Err("this source doesn't support server-side library scans".to_string())
     }
 
