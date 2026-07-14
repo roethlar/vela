@@ -363,6 +363,27 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   midway doesn't surface in Continue Watching. Surfaced by codex
   plan-review r1 on `.agents/plans/continue-watching-watch-state.md`;
   that plan fixes only the tombstone-lifecycle slice of it.
+- **QUEUE PERSISTENCE + VELA PLAYLISTS (owner feature request, 2026-07-14 —
+  needs a plan and owner approval of scope before any code).** The in-app play
+  queue does not survive an app restart, which limits how useful it can be: the
+  backend holds it as pure in-memory state (`src-tauri/src/lib.rs:61`,
+  `queue: Arc<Mutex<Vec<commands::QueueItem>>>`), and nothing in `config.rs`
+  ever writes it to disk. Owner direction, two parts and the second is the
+  larger one:
+  - Persist the queue across restarts (the queue's `QueueItem`s already carry
+    the source id, rating key and display fields — `commands.rs:2148` — so the
+    data needed to rebuild one is already in hand).
+  - **Vela-owned playlists that span sources.** Not Plex/Jellyfin/Emby
+    playlists — a Vela-native saved list whose entries may come from DIFFERENT
+    servers in one list, which no single server's playlist API can represent.
+    This is the reason the feature is not just "serialize the queue".
+  - Open questions for the plan (not decided): whether a saved playlist and the
+    live queue are one concept or two; what happens to an entry whose source is
+    removed, offline, or whose rating key no longer resolves; and whether these
+    persist in `config.json` (owner-only perms, atomic save, fail-closed parse
+    — see repo-guidance Earned Practices) or in their own store.
+  - Related, already queued: queue plays never enter Vela's recents (previous
+    item). Both touch the queue; sequence them deliberately.
 - **v1.0.0 RELEASE TRACK (owner, 2026-07-10 — ordered LAST behind the
   functional queue above, "queue first, v1 polish goes to the bottom"):**
   (1) UI embellishments — plan QUEUED with decisions resolved
