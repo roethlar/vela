@@ -109,7 +109,19 @@
   // as `RECONNECT_REQUIRED`, which friendlyError maps to one constant sentence. The
   // refresh then retracted a scan failure it never superseded and the user was left
   // with no status at all (codex r12).
-  let errorParts = $state<{ msg: string; gen: number }[]>([]);
+  // `app` marks a part that belongs to a surface OUTLIVING the current view — today
+  // only the queue drawer, which renders above the device-code screen and stays usable
+  // there. Everything else is view-scoped and dies with the view it describes.
+  //
+  // Without that distinction there was no honest answer to "the view was replaced —
+  // what goes?": clearing everything erased a queue failure that was still on screen and
+  // still true, and clearing nothing left a library's diagnostic stranded on the link
+  // screen with no way to dismiss it (the r14 hole). Trying to paper over it with a
+  // `linking` process flag in rootSig produced three defects of its own — it flipped
+  // false when a link FAILED and silently dropped an edit made on a grid the user never
+  // left; it stuck true whenever a source change abandoned a link; and it could only
+  // reject FUTURE publishes, never retract one already on screen (codex + grok, r23).
+  let errorParts = $state<{ msg: string; gen: number; app: boolean }[]>([]);
   const error = $derived(
     errorParts.length === 0 ? null : errorParts.map((p) => p.msg).join("; "),
   );
@@ -132,14 +144,20 @@
     errorParts = errorParts.filter((p) => p.gen === 0);
     addError(msg, gen);
   }
+  // The view has been REPLACED (the device-code screen, a torn-down search root) while
+  // the banner itself stays on screen. Everything the old view was saying goes with it;
+  // anything belonging to a surface that survived does not.
+  function clearViewErrors() {
+    errorParts = errorParts.filter((p) => p.app);
+  }
   // Say something without ERASING what is already there: the two writers are reporting
   // different failures and the user needs both. Identical text is not repeated — a
   // retried offset can fail the same way twice, and a superseded banner could
   // otherwise appear twice in one message (codex r18, LOW).
-  function addError(msg: string, gen = 0) {
+  function addError(msg: string, gen = 0, app = false) {
     const at = errorParts.findIndex((p) => p.msg === msg);
     if (at === -1) {
-      errorParts = [...errorParts, { msg, gen }];
+      errorParts = [...errorParts, { msg, gen, app }];
       return;
     }
     // The same sentence, now true for a SECOND reason. Two unrelated failures really do
@@ -153,10 +171,17 @@
     // The WEAKER claim wins. If either reason is owned by no load, no refresh may take
     // the line back — repairing the grid does not make the edit's failure untrue. If
     // both are listing failures, it survives until the LATER one is superseded too.
+    // Scope merges the same way, and for the same reason: if EITHER reason for this
+    // sentence lives on a surface that outlives the view, the line outlives the view —
+    // replacing the view does not make the queue's failure untrue.
     const held = errorParts[at].gen;
+    const heldApp = errorParts[at].app;
     const owner = held === 0 || gen === 0 ? 0 : Math.max(held, gen);
-    if (owner !== held)
-      errorParts = errorParts.map((p, i) => (i === at ? { msg, gen: owner } : p));
+    const scope = heldApp || app;
+    if (owner !== held || scope !== heldApp)
+      errorParts = errorParts.map((p, i) =>
+        i === at ? { msg, gen: owner, app: scope } : p,
+      );
   }
   // Retract every part owned by a load through `claimedGen` — and nothing else. An
   // untagged part is not the refresh's to take back, and a NEWER load's failure
@@ -532,7 +557,6 @@
     return JSON.stringify([
       authenticated,
       pin !== null, // the device-code screen replaces the view entirely
-      linking, // ...and it is ALREADY on its way during link_begin's await
       mode,
       activeSource,
       // A Plex section key is a server-LOCAL number, so the key alone does not name a
@@ -925,20 +949,9 @@
   // (global) pin — no duplicate polling or stale errors from an old attempt.
   let linkGen = 0;
 
-  // The link flow REPLACES the view — but not until `pin` lands, and `link_begin` is a
-  // network round-trip. Through that whole window the view is still the old grid, so
-  // rootSig would say nothing had changed and a delayed publication would land there
-  // legitimately, then RIDE onto the device-code screen when the pin arrived (codex r21).
-  //
-  // Declare the intent at the START, the way onSourcesChanged declares navigation before
-  // its own await. Clearing the banner when the pin lands is the wrong cure: the queue
-  // drawer renders OVER the link screen, so a queue action's failure is still on a
-  // surface the user can see, still true, and not the link flow's to erase (codex r22).
-  let linking = $state(false);
 
   async function beginLink() {
     const gen = ++linkGen;
-    linking = true;
     // Linking REPLACES the visible root with the device-code screen, and its
     // completion calls loadEverything() — both reset the view underneath any
     // refresh already in flight. That is navigation: without the bump the
@@ -953,7 +966,12 @@
       const p = await invoke<Pin>("link_begin");
       if (gen !== linkGen) return; // a newer attempt started while we were requesting
       pin = p;
-      linking = false; // `pin !== null` carries the same fact to rootSig from here on
+      // The device-code screen has REPLACED the view, so everything the old view was
+      // saying goes with it — including a failure published during this very await,
+      // while the grid was still up and rootSig still described it (codex r21). What
+      // does NOT go is the queue's: its drawer renders above this screen, still usable,
+      // and its failure is still true and never superseded (codex r22).
+      clearViewErrors();
       // The bump at the top of beginLink() invalidates whatever was in flight
       // THEN — but Settings closes immediately, so the user can start a Refresh
       // while link_begin is still awaiting. THIS is the moment the PIN screen
@@ -964,10 +982,9 @@
     } catch (e) {
       // e.g. invoked from Settings while offline — surface it instead of an
       // unhandled rejection, but only if this attempt is still the current one.
-      if (gen === linkGen) {
-        linking = false; // no pin is coming; the old view is what the user is left on
-        setError(String(e));
-      }
+      // No pin is coming: the user is left on the view they were already on, which is
+      // still theirs and still described by whatever it was saying.
+      if (gen === linkGen) setError(String(e));
     }
   }
 
@@ -1226,14 +1243,20 @@
   async function runSearch(query: string = searchQuery, { rerun = false } = {}) {
     const q = query.trim();
     if (q.length < 2) {
-      setError("Search needs at least 2 characters.");
       if (searchTerm) {
+        // This tears the search root DOWN and replaces it. Anything the old root was
+        // saying — a failed edit made in those results, its own listing diagnostic —
+        // describes a view that is gone, and `setError` alone would keep every untagged
+        // part (gen 0 says no LOAD owns it, not that it belongs here). Only the queue's
+        // survives (codex r23).
+        clearViewErrors();
         navEpoch++; // tearing down the search root is navigation (see navEpoch)
         items = [];
         crumbs = [];
         active = null;
         searchTerm = "";
       }
+      setError("Search needs at least 2 characters.");
       return;
     }
     if (!rerun) navEpoch++; // navigation (see navEpoch); a re-run is not (r9)
@@ -1422,7 +1445,9 @@
       await invoke("queue_play_next", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      setError(String(e));
+      // The queue drawer outlives the view (it renders above the link screen too), so
+      // its failure is not the view's to take away — app-scoped (codex r22/r23).
+      addError(String(e), 0, true);
     }
   }
   async function addToQueue(item: Item) {
@@ -1431,7 +1456,9 @@
       await invoke("queue_append", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      setError(String(e));
+      // The queue drawer outlives the view (it renders above the link screen too), so
+      // its failure is not the view's to take away — app-scoped (codex r22/r23).
+      addError(String(e), 0, true);
     }
   }
   async function queueJumpTo(index: number) {
@@ -1439,7 +1466,9 @@
       await invoke("queue_play_at", { index });
       refreshQueue();
     } catch (e) {
-      setError(String(e));
+      // The queue drawer outlives the view (it renders above the link screen too), so
+      // its failure is not the view's to take away — app-scoped (codex r22/r23).
+      addError(String(e), 0, true);
     }
   }
   async function queueRemove(index: number) {
@@ -1447,7 +1476,9 @@
       await invoke("queue_remove", { index });
       refreshQueue();
     } catch (e) {
-      setError(String(e));
+      // The queue drawer outlives the view (it renders above the link screen too), so
+      // its failure is not the view's to take away — app-scoped (codex r22/r23).
+      addError(String(e), 0, true);
     }
   }
   async function queueClearAll() {
@@ -1455,7 +1486,9 @@
       await invoke("queue_clear");
       refreshQueue();
     } catch (e) {
-      setError(String(e));
+      // The queue drawer outlives the view (it renders above the link screen too), so
+      // its failure is not the view's to take away — app-scoped (codex r22/r23).
+      addError(String(e), 0, true);
     }
   }
 

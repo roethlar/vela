@@ -687,6 +687,56 @@ export default {
       "an edit made in a library the user has left must not reset Home, nor clear the failure Home is reporting",
     );
 
+    // ── 13. Tearing the search root down takes its failures with it ──
+    // `gen: 0` says no LOAD owns a part — NOT that the part belongs to the view on
+    // screen. setError keeps every untagged part, so a failed edit made in search results
+    // survived the teardown of the very root it was made in and sat over the replacement
+    // view until the next navigation (codex r23).
+    //
+    // Case 7 cannot see this: there the edit publishes AFTER the teardown and is dropped
+    // by rootSig. Here it publishes BEFORE, legitimately, and must be cleared away WITH
+    // the root it describes.
+    const box2 = await driver.find(
+      "css selector",
+      'input[aria-label="Search your libraries"]',
+    );
+    // Case 7 left its one-character query in the box; typing appends, so clear it first
+    // or the query becomes "MMovie 05" and matches nothing.
+    await driver.exec(
+      `const i = document.querySelector('input[aria-label="Search your libraries"]');
+       i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await driver.type(box2, `Movie 05${ENTER}`);
+    await pollUntil(
+      async () => ((await cardCount(driver)) > 0 ? true : null),
+      "the search root, with results",
+    );
+    mock.state.unauthNextPlayed = true; // the edit 401s; its re-run repaint SUCCEEDS
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () => {
+        const b = await banner(driver);
+        return b && b.includes("reconnect") ? true : null;
+      },
+      "the edit's failure, published on the search root it was made in",
+    );
+
+    // Now tear that root down.
+    await driver.exec(
+      `const i = document.querySelector('input[aria-label="Search your libraries"]');
+       i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await driver.type(box2, `M${ENTER}`);
+    await driver.waitFor(
+      `return document.body.innerText.includes('Search needs at least 2 characters.')`,
+      "the search root torn down",
+    );
+    const afterTorn = await banner(driver);
+    assert.ok(
+      afterTorn && !afterTorn.includes("reconnect"),
+      `the search root this edit was made in is gone — its failure does not belong over whatever replaced it — got ${JSON.stringify(afterTorn)}`,
+    );
+
     assert.equal(
       mock.state.contractViolations.length,
       0,
