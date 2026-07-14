@@ -1589,3 +1589,51 @@ This closes the plan's Verification requirement. What it does NOT and CANNOT cov
 `sameSection` (the frontend half of the rebind protection) — triggering it needs a Plex
 server to change identity mid-session, which cannot be staged. It stays guarded only by
 inspection and by the backend invariants feeding it. Recorded, not hidden.
+
+**r18 — 2026-07-14 — two reviewers on the r17 fixes. grok: 1 HIGH + 2 MEDIUM.
+codex: 5 MEDIUM + 3 LOW. BOTH INDEPENDENTLY FOUND THE SAME HIGH.**
+
+- **HIGH (`54ae3a7`) — my r17 probe-race fix reintroduced the wrong-server scan.**
+  It checked "am I still bound to the server that served this list?" and THEN,
+  separately, read the shared machine id. That check proves nothing about an id
+  fetched after it: a rebind landing in the gap stamps THIS server's keys with the
+  NEXT server's id, and a scan then compares B against B, passes, and rescans B's
+  same-numbered library reporting success. **The exact hazard this subsystem exists
+  to forbid, reintroduced by its own guard.** Without the fallback, that race had
+  failed closed. Fixed: the machine id and the binding are now read in ONE critical
+  section — the same lock `install_under_lock` bumps the binding under — so the
+  equality genuinely proves the id names the server that served the list. **Both
+  reviewers found this independently**, which is the strongest signal the
+  two-reviewer protocol has produced.
+  GUARD GAP, stated plainly: the window lay BETWEEN two statements and no test can
+  inject a rebind there. The fix removes it by construction, not by detection.
+- **MEDIUM (`f93dc14`) — my r17 storm fix traded a storm for a STALL.** Stopping the
+  auto-fill after a failed page prevents hammering the server — but on a viewport
+  where the cards already fit, the grid cannot scroll, `onScroll` can never fire, and
+  nothing else asks for the missing page. A page silenced by a refresh and abandoned
+  when the user opened a detail left the library silently truncated on Back: **the
+  very bug r8-4 fixed, through another door, two rounds later.** Closing the detail
+  now re-establishes the fill-the-viewport invariant once, on the user's own action.
+- **MEDIUM (`f93dc14`) — `setWatched` published without awaiting its own repaint**, so
+  a repaint that ALSO failed overwrote the edit's message with its own: the user
+  learned the reload failed and never learned their edit had. `refreshWatchState` now
+  RETURNS its reload — an `await` on a void function is a no-op that reads as correct.
+- **MEDIUM (`8e955e2`) — pagefail case 3 was VACUOUS for the widening it was written
+  for** (both reviewers). It armed a TAGGED listing failure, which the narrow
+  predicate the widening replaced already preserved — restore the narrow condition and
+  the case stayed green. It now arms an UNTAGGED failed edit. Red-proven.
+- **MEDIUM (`8e955e2`) — refresh case 25 no longer guards r12-2 and no longer claims
+  to.** After r15 its colliding writer is a scan on its own surface, which settlement
+  never touches. It guards the surface separation; `pagefail` case 2 owns the funnel.
+
+RECORDED, NOT FIXED (codex LOWs): the tall-viewport request storm is unguarded (the
+harness viewport makes 60 cards scrollable, so the auto-fill recursion never fires in
+test); a superseded tagged banner can appear twice in a combined message (bounded,
+clears on the next refresh); `pagefail` case 1's retry happens after settlement so the
+successful-load cleanup is unguarded; scanlib case 4 cannot see the initiation-time
+`clearScanStatus`. Plus the still-open r16-3 gap (no guard on scan invalidation when a
+source is removed).
+
+**What r17+r18 established beyond argument: in this subsystem the author's FIXES carry
+defects at the same rate as the original code.** r18's HIGH was in an r17 fix that was
+itself fixing an r16 finding. The two-reviewer protocol caught it twice over.
