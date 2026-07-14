@@ -1137,3 +1137,49 @@ ADMITTED, 1 DECLINED.** Base `63560a6`, head `7e81619`.
   failure-swallowing that r9-1 fixed. Note also that closing a detail / popping a
   drill on a watch-state edit is PRE-EXISTING behavior (base `63560a6` called
   `runSearch(searchTerm)` unconditionally); this work only removed the epoch bump.
+
+**r11 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM, both
+ADMITTED.** Base `63560a6`, head `5c9dce6`.
+
+This round overturned the DESIGN of the r10-2 fix, which is why the loop was
+still worth running after two straight rounds of one admitted finding.
+
+- **r11-1 (`4af195d`) — a section key's origin must travel WITH the key.** r10-2
+  had the source record which server served the section list. r11 showed no such
+  record can be right: the key a caller holds need not come from the list
+  currently on screen. A right-click menu opened on server A's library outlives
+  the refresh that replaces the sidebar with B's; a failed refresh leaves A's
+  listing up after the source has moved on. In both cases the record truthfully
+  says "B served the last list I returned", so a scan of A's still-visible
+  "Movies" passed `scan_target_ok(B, B)` and rescanned B's same-numbered library,
+  reporting success for the one the user clicked. A Plex section key is only a
+  number — B has a section 2 of its own — so the source cannot tell the two apart
+  from its own state, at any point in time. Fixed: `SectionDto::provenance`
+  records the issuing server, the frontend hands it back unchanged with the scan
+  (`scan_section`), and Plex refuses any key it cannot prove came from the server
+  it is talking to now. `sections_machine` and its ordering hazards are DELETED.
+  A source that could not name its server when it served the list issues `None`,
+  which fails closed exactly as r8-1 intended. Jellyfin/Emby ignore provenance:
+  one fixed server address for the source's life, and library ids are
+  server-issued GUIDs, not small server-local numbers. Guard:
+  `a_stale_key_never_scans_the_server_that_replaced_it` (extends the r10-2 mock
+  harness; both mocks serve a section "2", and the assertion is that B never
+  RECEIVES the request, not merely that the call returned an error).
+- **r11-2 (`8916388`) — a refresh must retract the banner of a load it
+  superseded.** A watch-state edit mid-refresh claims a newer listing generation;
+  if that load fails it banners (correctly — r8-3). But when the refresh's
+  sections leg lands, its content leg claims a generation HIGHER still, replaces
+  the cards and succeeds. Nothing of the action's own failed, so settlement
+  published nothing and never took the stale message down: fresh cards under a
+  "couldn't load" banner. Fixed: `loadMore` tags a banner with the generation
+  that published it, and settlement retracts exactly one the action superseded
+  (`errorGen <= claimedGen`) — a NEWER load supersedes the ACTION in turn, and
+  its failure is the one the user needs. Guard: refresh case 24.
+
+Guard-quality note (the reusable lesson of this round): case 22 already ran
+r11-2's exact interleaving and passed, because it asserts only the INTERMEDIATE
+state (the banner appears) and never the settled one. A guard that stops
+watching before the action settles will sit and watch the bug happen. When a
+case's subject is an action with a settlement step, assert the SETTLED state —
+what the user is finally left looking at — not just the transient it passes
+through.
