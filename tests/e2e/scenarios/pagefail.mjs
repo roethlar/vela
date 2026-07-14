@@ -77,6 +77,29 @@ const ENTER = ""; // WebDriver Enter (search.mjs uses the literal char)
 async function armedShotsBound() {
   return !mock.state.unauthNextPlayed && mock.state.itemsDelayMs === 0 ? true : null;
 }
+const servedCount = (endsWith) =>
+  mock.state.served.filter((s) => s.path.endsWith(endsWith)).length;
+// An ABSENCE assertion ("the edit's failure must NOT be published here") passes just as
+// well by asking too early as by being right. A fixed sleep measured from the PARK is
+// not a witness: it says when the request arrived, never when the client was handed the
+// answer and ran the code under test (codex + grok, r21).
+//
+// So: wait for the parked response to actually be SERVED — the catch resumes on it, and
+// deciding whether to publish is the very next thing it does — and then hold the window
+// OPEN, failing the moment a banner appears rather than sampling once at the end.
+async function noEditBannerAfterParked(driver, { endsWith, before, what }) {
+  await pollUntil(
+    async () => (servedCount(endsWith) > before ? true : null),
+    `the parked ${endsWith} response to be SERVED (${what})`,
+  );
+  const deadline = Date.now() + 5000;
+  while (Date.now() < deadline) {
+    const b = await banner(driver);
+    if (b && b.includes("reconnect"))
+      assert.fail(`${what} — got ${JSON.stringify(b)}`);
+    await new Promise((r) => setTimeout(r, 250));
+  }
+}
 // The grid loads the next page when scrolled near its end (onScroll -> loadMore).
 async function scrollGridToEnd(driver) {
   // The grid is only in the DOM once it has cards — a reload in flight replaces it
@@ -330,6 +353,7 @@ export default {
     );
     mock.state.unauthNextPlayed = true; // the edit 401s...
     mock.state.itemsDelayMs = 6000; // ...and its recovery repaint parks
+    const served5 = servedCount("/Items");
     await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(armedShotsBound, "the 401 edit and its parked repaint to both bind");
     await goHome(driver);
@@ -337,15 +361,11 @@ export default {
       `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
       "Home",
     );
-    // Sit past the parked repaint's landing and the publish it would have made.
-    // Polling for "the banner is null" would pass instantly — before the race this
-    // case exists to guard has even run.
-    await new Promise((r) => setTimeout(r, 8000));
-    assert.equal(
-      await banner(driver),
-      null,
-      "the user left the grid this edit was about: its failure describes a view that is gone, and does not belong pasted over the one they are standing on",
-    );
+    await noEditBannerAfterParked(driver, {
+      endsWith: "/Items",
+      before: served5,
+      what: "the user left the grid this edit was about: its failure describes a view that is gone, and does not belong pasted over the one they are standing on",
+    });
 
     // ── 6. A successful refresh must not RETRACT a failed edit's message ──
     // The banner can hold two failures with different OWNERS: a listing failure, owned
@@ -421,6 +441,7 @@ export default {
     );
     mock.state.unauthNextPlayed = true; // the edit 401s...
     mock.state.itemsDelayMs = 6000; // ...and the search re-run it kicks off parks
+    const served7 = servedCount("/Items");
     await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(armedShotsBound, "the 401 edit and its parked re-run to both bind");
     // Tear the search root down: a one-character query. No load; only navEpoch moves.
@@ -433,12 +454,11 @@ export default {
       `return document.body.innerText.includes('Search needs at least 2 characters.')`,
       "the search root torn down",
     );
-    await new Promise((r) => setTimeout(r, 8000)); // past the parked re-run
-    const afterTeardown = await banner(driver);
-    assert.ok(
-      afterTeardown && !afterTeardown.includes("reconnect"),
-      `the search root the edit was made in is gone — its failure does not belong on what replaced it, and no load generation moved to say so — got ${JSON.stringify(afterTeardown)}`,
-    );
+    await noEditBannerAfterParked(driver, {
+      endsWith: "/Items",
+      before: served7,
+      what: "the search root the edit was made in is gone — its failure does not belong on what replaced it, and no load generation moved to say so",
+    });
 
     // ── 8. Re-entering the SAME root must not drop the edit ──
     // The other direction. Re-selecting the library you are already in bumps BOTH
@@ -463,11 +483,14 @@ export default {
       section: "Big Library",
       cardPrefix: "Movie 000",
     });
-    await new Promise((r) => setTimeout(r, 8000)); // past the parked repaint
-    const afterReselect = await banner(driver);
-    assert.ok(
-      afterReselect && afterReselect.includes("reconnect"),
-      `the user never left — they re-entered the library they were standing in, and their edit still failed — got ${JSON.stringify(afterReselect)}`,
+    // A POSITIVE assertion can simply wait for the thing it wants, so poll rather than
+    // sleep: a late publish should not read as a failure.
+    await pollUntil(
+      async () => {
+        const b = await banner(driver);
+        return b && b.includes("reconnect") ? true : null;
+      },
+      "the user never left — they re-entered the library they were standing in, and their edit still failed, so it must be reported",
     );
 
     // ── 9. The root is the one the edit was MADE in, not the one it lands in ──
@@ -486,6 +509,7 @@ export default {
     );
     mock.state.unauthNextPlayed = true; // the edit 401s...
     mock.state.playedDelayMs = 6000; // ...but not for six seconds
+    const served9 = servedCount("/PlayedItems/m59");
     await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(
       async () =>
@@ -498,12 +522,11 @@ export default {
       `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
       "Home",
     );
-    await new Promise((r) => setTimeout(r, 8000)); // past the parked 401
-    assert.equal(
-      await banner(driver),
-      null,
-      "the edit was made in a library the user has since left: its failure belongs to that grid, not to the Home they are standing on",
-    );
+    await noEditBannerAfterParked(driver, {
+      endsWith: "/PlayedItems/m59",
+      before: served9,
+      what: "the edit was made in a library the user has since left: its failure belongs to that grid, not to the Home they are standing on",
+    });
 
     // ── 10. Two failures, ONE sentence — the survivor must be the weaker claim ──
     // A 401 on a listing and a 401 on an edit both collapse into the same constant

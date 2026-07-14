@@ -43,6 +43,7 @@ export function startMockJellyfin({
         .map((m) => [m.id, { played: false, positionTicks: 0 }]),
     ),
     requests: [], // { method, path, query } in arrival order
+    served: [], // { method, path, status } in RESPONSE order (see json())
     checkins: [], // parsed /Sessions/Playing* bodies: { endpoint, body }
     contractViolations: [], // Items requests whose query broke the client contract
     // Scenario-mutable machinery (library-refresh-scan plan). Handlers read
@@ -182,6 +183,13 @@ export function startMockJellyfin({
     state.requests.push({ method: req.method, path, query });
 
     const json = (body, status = 200) => {
+      // Record the response as it goes OUT, not just the request as it came in. A
+      // scenario that parks a response and then asserts an ABSENCE (no banner) needs a
+      // positive witness that the client has actually been given something to react to
+      // — a wait measured from the request's ARRIVAL proves nothing about when the
+      // parked answer was delivered, so the assertion can simply run too early and pass
+      // (codex + grok, r21).
+      state.served.push({ method: req.method, path, status });
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
     };
