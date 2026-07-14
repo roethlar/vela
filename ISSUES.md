@@ -248,10 +248,14 @@ where the original claim was overstated.
   fewer codegen units, and strip settings after confirming they do not hurt debug
   symbol needs.
 
-- Bound and decouple metadata cache writes.
-  The metadata cache grows indefinitely and writes the full JSON file while
-  holding its map lock. Add an eviction policy and avoid long disk writes under
-  the lock.
+- ~~Bound and decouple metadata cache writes.~~ **MOOT 2026-07-14 — the cache no
+  longer exists.** `metadata_cache.json` and the listing cache died with the
+  local/SMB/SSH source removal (decision `.agents/decisions.md` 2026-07-08;
+  landed in 0.1.33). `config.json` is now the only persistent file in the app,
+  and it is small and bounded (recents capped at 20, tombstones at 200). If a
+  persistent metadata cache is ever reintroduced, this concern — unbounded
+  growth, whole-file writes under a lock — comes back with it, and is the one
+  thing in this repo that would justify an embedded database.
 
 - Render the QR code without raw `{@html}` where possible.
   The current SVG is backend-generated, so this is low risk, but an `<img>` data
