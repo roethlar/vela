@@ -1694,3 +1694,59 @@ the currency gate and the edit's banner paints itself on Home. `cargo test` 95, 
 rounds in which the newest fix carried a defect of the same class it was fixing, through
 another door — and in r19 both reviewers found the same one without seeing each other.
 A single reviewer, or the author alone, ships all three.
+
+**r20 — 2026-07-14 — two reviewers on the r19 fixes. codex: 3 MEDIUM + 1 LOW. grok: 2
+MEDIUM.** Base `64547a8`, head `91045cb`. Both reviewers, independently, again found the
+same two defects — both in the r19 fixes, and the first one is r19's own bug returning
+through a door r19 opened.
+
+- **r20-1 (`64972ac`) — the r19 combine handed the edit's failure to the REFRESH'S
+  RETRACT** (both reviewers). The banner holds failures with different OWNERS: a listing
+  failure is owned by the load that produced it, and a refresh replacing those cards must
+  retract it (r11); an edit's failure is owned by no load, and no refresh may retract it.
+  r19 combined the two into one string under the LISTING's tag — so when the refresh
+  succeeded and retracted, it took the edit's message with it. The user's grid was
+  repaired and their failed edit was erased. grok named it exactly: *pre-r19 the edit's
+  message was UNTAGGED and survived this retract* — **the fix for one door opened
+  another, and it is the same loss r18 and r19 were each spent fixing.** Fixed: the banner
+  is a LIST of `{msg, gen}` parts; `addError` appends without erasing (and without
+  repeating — which also closes the r18 LOW about a superseded banner appearing twice);
+  `retractThrough` drops only the parts a superseded load owned. Settlement's own combine
+  had the same latent shape and is fixed with it. Guard: pagefail case 6, red BOTH ways
+  (make an appended part inherit the tag on screen — r19's bug verbatim — and the banner
+  goes to `null`; make the retract take the whole banner and case 2 falls over too).
+- **r20-2 (`39ead92`) — the r19 currency gate was a proxy, not a proof, and wrong in BOTH
+  directions** (both reviewers). (a) A leave that moves NO load generation: `beginLink`
+  REPLACES the entire view with the Plex device-code screen (`{#if authenticated && !pin}`
+  gates the main view) while bumping no load at all; a search teardown does the same. The
+  gate kept the edit's failure and painted it on the view that had replaced the one it
+  described. **I dismissed exactly this in my own r19 self-audit by ASSUMING Settings was
+  a modal layered over the grid. It is not, and I never checked** — the third time an
+  unverified assumption of mine has been overturned by a reviewer (r12-1, r8-4, this).
+  (b) A stay that moves BOTH: re-selecting the library you are already standing in bumps
+  `navEpoch` and runs a fresh `resetAndLoad`, so the gate read "left" and silently dropped
+  a real edit failure. Fixed: `rootSig()` asks the view what root it is standing on
+  instead of inferring it from counters. Guards: pagefail case 7 (a nav-only leave must
+  drop) and case 8 (a same-root re-entry must keep), red in opposite directions under the
+  r19 conjunction.
+- **r20-3 (folded into `39ead92`) — case 5's own guard gaps** (codex LOW). Its one-shots
+  were never proven to have BOUND before it navigated (arm, click, navigate — if the
+  request had not arrived, nothing was armed and the case guarded nothing), and its fixed
+  8s wait was measured from the click rather than from the parked request's arrival. Cases
+  5, 7 and 8 now poll `armedShotsBound` first, so every timed wait starts from a confirmed
+  arrival. Folded into the r20-2 commit because it is the same guard family; disclosed
+  here rather than hidden.
+
+Harness gap closed on the way: the Jellyfin mock's SEARCH branch returned before its
+one-shot block, so a search root's recovery repaint could never be parked or failed —
+**the entire search root was untestable for delayed-publication races.** It now honours the
+same arrival-bound one-shots as the listing branch, which is what makes case 7 possible at
+all.
+
+**What r20 establishes.** FOUR consecutive rounds where the newest fix carried a defect of
+the class it was fixing. The two reviewers have now converged on the same finding, without
+seeing each other, in three rounds running (r18, r19, r20) — and in r20 the convergent
+finding was that my fix had reopened its own bug. The author is not a reliable reviewer of
+the author, and a self-audit is not a check: r20-2 is a defect I looked straight at, in a
+message that said I had traced every writer, and waved through on an assumption I could
+have tested in one grep.
