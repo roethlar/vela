@@ -1429,13 +1429,18 @@
       // any lingering server hub copy.
       refreshWatchState();
     } catch (e) {
-      setError(String(e));
       // The backend curates BEFORE the server call and rolls back on
       // failure — but an unrelated refresh (e.g. playback-ended) may have
       // rendered the transient curated state meanwhile. Re-fetch so the
-      // rolled-back truth repaints; the error banner above still reports
-      // the failed edit.
+      // rolled-back truth repaints.
+      //
+      // Publish AFTER that, not before: the re-fetch goes through
+      // `resetAndLoad`, which clears the banner as it starts. Reporting first
+      // meant the edit's own repaint wiped the report — the comment here used
+      // to claim the banner survived, and it did not. A failed mark-watched
+      // flashed an error and swallowed it.
       refreshWatchState();
+      setError(String(e));
     }
   }
 
