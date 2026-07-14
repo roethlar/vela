@@ -64,12 +64,13 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     it REPLACES the view) that one grep would have falsified. That is the third
     unverified author assumption a reviewer has overturned (r12-1, r8-4, r20-2). When
     the author's reasoning says "this one is fine", that is the moment to go and look.
-  - **Guard discipline (the transferable lesson):** SEVEN guards in this plan were
-    VACUOUS — three disarmed by the author's own later fixes, two written vacuous
-    while actively trying not to, one racing a fix just made, one (r19-3) that let the
-    behavior it guarded be deleted outright. **None ever failed or warned. Every one
-    was caught only by injecting the regression and demanding the test go red.**
-    Re-prove a guard whenever behavior around it changes.
+  - **Guard discipline (the transferable lesson):** a long and still-growing list of
+    guards in this plan turned out VACUOUS — disarmed by the author's own later fixes,
+    written vacuous while actively trying not to, or left guarding a behavior that could
+    be deleted outright with the suite green. The plan's review log owns the roll-call.
+    **Not one ever failed or warned. Every one was caught only by injecting the
+    regression and demanding the test go red.** Re-prove a guard whenever behavior
+    around it changes, and prove each behavior a fix claims SEPARATELY.
   - **OPEN, recorded, not fixed:** r13-2 (reads carry no binding — owner-DEFERRED to
     a follow-up plan, do not re-raise in review); the tall-viewport request storm is
     untestable at the harness viewport; no guard on scan invalidation when a source
@@ -183,11 +184,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   - E2E without pushing: the push policy is ASK, and that includes the `vm` remote.
     Sync the changed files with `scp` into `~/dev/vela` and verify by checksum before
     running — no `git push`, no `git checkout -- .` on the VM's tree.
-- **RED-PROOF EVERY GUARD, ALWAYS.** Eight vacuous guards in this plan; not one was
-  caught by review, CI or a green run. Land the fix, THEN inject the regression, THEN
-  demand the test fail for the RIGHT reason — and prove EACH behavior the fix claims
-  separately (r19's frontend fix claimed three, and needed three injections). Restore
-  from a committed state, never a stale file backup (that silently reverted work once).
+- **RED-PROOF EVERY GUARD, ALWAYS.** Every vacuous guard in this plan (the log has the
+  roll-call) was caught this way and no other — never by review, CI or a green run. Land
+  the fix, THEN inject the regression, THEN demand the test fail for the RIGHT reason —
+  and prove EACH behavior the fix claims separately (r19's frontend fix claimed three and
+  needed three injections; r20's needed four). Restore from a committed state, never a
+  stale file backup (that silently reverted work once).
 - No pending playtest ask from the 2026-07-09/10 work — both fixes
   (context-menu Play, hero episode Info) are owner-verified on 0.1.40/41.
 - **machine-local (mac host `/Users/michael/Dev/vela`):** the owner's Linux
