@@ -46,6 +46,24 @@ async function settle(driver) {
     "refresh to settle",
   );
 }
+// Toggle a card's watch state from its context menu (refresh.mjs:162). Used here
+// as a NON-listing writer to the shared error banner.
+async function watchToggle(driver, prefix, label) {
+  await driver.exec(
+    `const el = document.querySelector('button.poster[aria-label^="${prefix}"]');
+     const r = el.getBoundingClientRect();
+     el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
+  );
+  const item = await driver
+    .waitFor(`return !!document.querySelector('.ctxmenu')`, "context menu")
+    .then(() =>
+      driver.find(
+        "xpath",
+        `//button[@role='menuitem' and normalize-space(.)='${label}']`,
+      ),
+    );
+  await driver.click(item);
+}
 // The grid loads the next page when scrolled near its end (onScroll -> loadMore).
 async function scrollGridToEnd(driver) {
   await driver.exec(
@@ -145,6 +163,49 @@ export default {
     await pollUntil(
       async () => ((await cardCount(driver)) > 60 ? true : null),
       "the library must still be able to load the page the refresh silenced but never replaced — otherwise it is truncated forever, with no banner to say why",
+    );
+
+    // ── 2. The refresh may only retract a banner it SUPERSEDED ─────────
+    // `setError` clears the generation tag on every NON-listing write, so a
+    // gen-scoped retraction cannot take down a banner that merely shares its text
+    // (r12-2). Nothing guarded that any more: refresh case 25 was written when a
+    // scan wrote to the shared banner, and r15 moved scans onto their own surface,
+    // so the case went vacuous — revert the funnel and it still passes (grok r17).
+    //
+    // The collision needs a LISTING failure (tagged) replaced by a NON-listing
+    // failure with the SAME rendered text, on a grid root, with cards still on
+    // screen. Only a library that PAGES can do that: a failed first page leaves an
+    // empty grid and nothing to act on. A 401 gives both writers the identical
+    // sentence via friendlyError.
+    mock.state.unauthNextItems = true;
+    await scrollGridToEnd(driver); // page 3 dies 401 -> TAGGED banner
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the listing's 401 must banner",
+    );
+
+    // A watch-state edit now fails with the same 401 — a NON-listing writer taking
+    // over the banner. It must clear the listing's tag with it.
+    mock.state.unauthNextPlayed = true;
+    await watchToggle(driver, "Movie 000", "Mark watched");
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the watch-state 401 must banner",
+    );
+
+    // The refresh now claims the grid at a HIGHER generation and succeeds. It
+    // superseded the listing — but the banner on screen is the watch-state
+    // failure's, which it never superseded and must not touch. If the tag survived
+    // the non-listing write, the refresh retracts it by generation and the user is
+    // left with no sign their edit failed.
+    const beforeRefresh = await banner(driver);
+    const refresh2 = await driver.find("css selector", "button.refreshbtn");
+    await driver.click(refresh2);
+    await settle(driver);
+    assert.equal(
+      await banner(driver),
+      beforeRefresh,
+      "the refresh superseded the LISTING, not the watch-state edit: it must not retract a banner it never superseded, however alike the two messages read",
     );
 
     assert.equal(

@@ -61,6 +61,12 @@ export function startMockJellyfin({
     // friendlyError maps to one constant sentence) — which is what makes the
     // banner-ownership case writable (codex r12; refresh case 25).
     unauthNextItems: false,
+    // one-shot: 401 the next watch-state edit (PlayedItems POST/DELETE). A 401 is
+    // the one failure a LISTING and a NON-listing writer report with the SAME
+    // rendered text (both surface as RECONNECT_REQUIRED, which friendlyError maps
+    // to one constant sentence) — which is what makes the banner-ownership case
+    // writable at all (grok r17; refresh case 25).
+    unauthNextPlayed: false,
     itemsDelayMs: 0, // one-shot delay for the next listing
     // Scan-trigger machinery (library-refresh-scan plan): VirtualFolders is
     // seeded from the served views but kept SEPARATE — a grouped view added
@@ -310,6 +316,10 @@ export function startMockJellyfin({
       path.startsWith(`/Users/${userId}/`) &&
       findMovie(played[1])
     ) {
+      if (state.unauthNextPlayed) {
+        state.unauthNextPlayed = false; // one-shot
+        return json({ error: "unauthenticated" }, 401);
+      }
       // Real servers reset the resume point on BOTH transitions (Jellyfin
       // MarkPlayed/MarkUnplayed zero PlaybackPositionTicks; Plex scrobble/
       // unscrobble clears the view offset) — keeping it would let a stale
