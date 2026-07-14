@@ -114,7 +114,6 @@
   // surfaces have completely different lifetimes:
   //
   //   view    the grid / rails / search results. Dies with the view.
-  //   mpv     the mpv setup bar. Global, and blocks playback until resolved.
   //   detail  the open detail surface. Survives a search teardown underneath it.
   //
   // A boolean (`app`) could not express this, and each surface it lumped together lost
@@ -132,7 +131,7 @@
   // false when a link FAILED and silently dropped an edit made on a grid the user never
   // left; it stuck true whenever a source change abandoned a link; and it could only
   // reject FUTURE publishes, never retract one already on screen (codex + grok, r23).
-  type ErrorOwner = "view" | "mpv" | "detail";
+  type ErrorOwner = "view" | "detail";
   let errorParts = $state<{ msg: string; gen: number; owner: ErrorOwner }[]>([]);
   const error = $derived(
     errorParts.length === 0 ? null : errorParts.map((p) => p.msg).join("; "),
@@ -253,13 +252,13 @@
   async function installMpv() {
     if (installingMpv) return;
     installingMpv = true;
-    clearOwned("mpv"); // this attempt supersedes the last one's failure
+    mpvStatus = null; // this attempt supersedes the last one's failure
     try {
       mpvInfo = await invoke<MpvInfo>("install_mpv");
     } catch (e) {
-      // The mpv bar stays mounted and playback stays blocked until this is resolved, so
-      // no view's clear may take the reason away (codex r24).
-      addError(String(e), 0, "mpv");
+      // On the BAR's own surface, never the view's banner (slice 3). It sits with the
+      // Retry button it is telling the user to press.
+      mpvStatus = String(e);
     } finally {
       installingMpv = false;
     }
@@ -1599,6 +1598,13 @@
   let queueStatus = $state<string | null>(null);
   let queueAttempt = 0;
 
+  // The mpv setup bar's own status (per-surface-status slice 3). The bar is global and
+  // stays mounted until mpv is resolved — it does not belong to any view — so a view's
+  // clear must not take its failure away. It did: a one-character search deleted the
+  // reason an install had failed while the bar, and its Retry button, stayed on screen
+  // (codex r24).
+  let mpvStatus = $state<string | null>(null);
+
   let scanStatus = $state<{ text: string; failed: boolean } | null>(null);
   let scanning = $state<Record<string, boolean>>({}); // menu-entry feedback only
   const scanGens: Record<string, number> = {};
@@ -1913,6 +1919,10 @@
           <code>{mpvInfo.installCommand}</code>
         {/if}
       </div>
+      {#if mpvStatus}
+        <!-- The BAR's own surface (slice 3), never the view's error banner. -->
+        <div class="mpverror" role="alert">{friendlyError(mpvStatus)}</div>
+      {/if}
       <div class="mpvactions">
         {#if mpvInfo.canAutoInstall}
           <button class="primary" disabled={installingMpv} onclick={installMpv}>
@@ -3085,6 +3095,14 @@
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
     animation: vela-slide-down 0.2s var(--ease);
+  }
+
+  /* The mpv BAR's own failure — never .error, which is the VIEW's. */
+  .mpverror {
+    margin: 6px 0 0;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--errfg, #ffb4a9);
   }
 
   /* The QUEUE's own failure, inside its drawer — never .error, which is the VIEW's.
