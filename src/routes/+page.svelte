@@ -232,7 +232,15 @@
       // update. The person root re-runs its own query, gated to the ROOT
       // level (plan-review r2): a drilled level under it refreshes through
       // resetAndLoad, whose crumb has a ratingKey.
-      if (searchTerm) return runSearch(searchTerm, { rerun: true });
+      // Both gated to the ROOT level. A drilled level BELOW a search or a person view
+      // refreshes through resetAndLoad, whose crumb carries a ratingKey (plan-review r2
+      // established this for the person root; the search root never got it). Ungated,
+      // the search re-run REPLACES a multi-crumb drill trail with the one-crumb search
+      // root — so changing watch state on a drilled item yanked the user back out to the
+      // search results, and `setWatched` then saw its own repaint move the root and
+      // silently dropped the very failure it was about to report (codex r21).
+      if (searchTerm && crumbs.length === 1)
+        return runSearch(searchTerm, { rerun: true });
       if (personView && crumbs.length === 1)
         return runPersonView(personView, { rerun: true });
       return resetAndLoad();
