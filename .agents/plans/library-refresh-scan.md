@@ -1343,3 +1343,56 @@ Process note: r14-2, r14-3 and r14-4 were committed TOGETHER in `4cb6b2a`, which
 violates the repo's one-item-per-commit rule for findings lists (AGENTS.md, Git
 Safety). Flagged to the owner rather than rewritten (history rewrite needs an
 explicit go). Not repeated.
+
+**r15 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM + 4 LOW, all
+six ADMITTED.** Base `63560a6`, head `ee4e4ce`. HALF of this round was the loop
+auditing its own guards, and finding them wanting.
+
+Guard defects (the tests, not the code):
+
+- **r15-1 (`5787873`) — production's ONLY binding increment had no coverage.**
+  `rebind_voids_keys` was unit-tested as a predicate, but nothing exercised the
+  place that CALLS it: the real path reaches it only through plex.tv discovery.
+  Delete the increment and all 91 Rust tests stayed green — while an unpinned A→B
+  install kept binding 0, so the frontend accepted B's colliding section key as A's
+  library and showed B's content under A's title, durably. Fixed: the install is
+  extracted to `install_under_lock` (rediscover_bound's only install site, behavior
+  unchanged) so it can be driven directly; the guard walks all three cases (first
+  connect, pinned recovery, unpinned rebind). Red-proven.
+- **r15-2 (`eeb45d0`) — the rebind guard could not tell a refetch from a
+  restamp.** Both mock servers answered the SAME section body and B's request log
+  was discarded, so an implementation that served A's completed list and merely
+  relabelled it with B's provenance/binding would have passed. Fixed: the mocks now
+  serve DIFFERENT libraries behind the SAME key (the collision is the hazard; the
+  title distinguishes them), and the guard asserts B was actually ASKED.
+- **r15-5 (`171b828`) — the only listing-banner-vs-scan case forced the scan to
+  FAIL**, so restoring the bug still passed: the scan's own failure simply replaced
+  the banner it had just erased. A SUCCESSFUL scan replaces nothing, which is
+  exactly when the loss shows. Guard: refresh case 26.
+
+Code defects:
+
+- **r15-3 + r15-4 (`171b828`) — one root cause, fixed as one.** The view's error
+  banner and the scan's status shared a slot. That coupling had already produced
+  r14-2; here it produced two more (a scan's failure permanently DESTROYING a
+  listing's diagnostic by overwriting it, so a later successful scan left an empty
+  grid with no explanation; and a scan completing after its source was removed
+  republishing over the Welcome screen). Fixed at the root: a scan's status has its
+  own surface. Failure is an alert that stays until the next scan and sits ALONGSIDE
+  any listing failure — both are true, and the listing's is the one that explains the
+  grid. The last-source teardown invalidates in-flight scans. `errorOwner` (the r14-2
+  patch) is deleted: scans no longer touch `error` at all.
+- **r15-6 (`0b49c09`) — my r14-4 fix opened the window it closed.** Moving
+  `onSourcesChanged`'s `navEpoch` bump BEFORE the await stopped a settling refresh
+  publishing into the teardown — but Settings does not await `onChanged`, so a
+  refresh STARTED during that await then owned the post-change epoch and blocked the
+  empty-Home redirect until it settled or timed out. Fixed with the double bump the
+  link flow already uses (r8-2): declare the intent before the await, the fact after.
+
+**The lesson of r14 and r15 together, and the one most worth carrying out of this
+plan: a guard is not a guard until it has been proven red AGAINST THE BUG IT NAMES,
+and it stops being one the moment surrounding behavior changes.** Three guards here
+were vacuous for three different reasons — a setup production cannot reach (r13's),
+an assertion that could not distinguish the fix from the bug (r14-1's), and a
+scenario that hid the loss behind a second failure (r14-2's). None of them failed.
+Nothing warned. Re-prove guards when the behavior around them moves.
