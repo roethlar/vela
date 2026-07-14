@@ -1389,12 +1389,16 @@
   }
   function toggleQueue() {
     queueOpen = !queueOpen;
-    // Closing the drawer dismisses what it was reporting — otherwise a queue failure has
-    // nothing that can ever clear it, and sits over every view forever (codex r24).
-    if (!queueOpen) {
-      queueAttempt++; // abandon an action still in flight: its surface is gone
-      queueStatus = null;
-    }
+    // Closing the drawer dismisses what it is REPORTING — the user has seen it, and
+    // otherwise a queue failure has nothing that can ever clear it (codex r24).
+    //
+    // It must NOT abandon an action still IN FLIGHT. That failure has not happened yet, and
+    // when it does it is just as real as if the drawer were open — the user asked for a
+    // play and did not get one. Bumping the attempt here dropped it silently, and made the
+    // chip's failure mark dead code: with the drawer shut there was no other way to reach
+    // it, and with it open you cannot navigate (the backdrop swallows the sidebar). The
+    // outcome lands; the CHIP is where it shows.
+    if (!queueOpen) queueStatus = null;
     if (queueOpen) {
       refreshQueue();
       // While the drawer is visible, poll lightly so auto-advances (which run

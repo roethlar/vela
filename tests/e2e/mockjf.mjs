@@ -86,6 +86,13 @@ export function startMockJellyfin({
     // reports (see unauthNextItems).
     unauthNextItemRefresh: false,
     itemRefreshDelayMs: 0, // one-shot delay for the next POST /Items/{id}/Refresh
+    // Fail EVERY PlaybackInfo until reset (not a one-shot: a scenario that needs several
+    // failed plays should not have to re-arm between them). This is the only deterministic
+    // way to fail a Play: `play_by_key` resolves the stream BEFORE it spawns mpv
+    // (commands.rs:2247), and a bogus `mpv_path` does NOT work — `resolve_mpv` validates it
+    // and silently falls back to mpv on PATH (playback.rs:207).
+    failPlaybackInfo: false,
+    playbackInfoDelayMs: 0, // one-shot: park the next PlaybackInfo (bound at arrival)
     // Mutation helpers that keep `userData` coherent — pushing on the raw
     // array alone would leave toJson reading missing userData and crash the
     // next listing that includes the new movie.
@@ -377,6 +384,16 @@ export function startMockJellyfin({
       return respondPlayed();
     }
     const pbinfo = /^\/Items\/([^/]+)\/PlaybackInfo$/.exec(path);
+    if (pbinfo && findMovie(pbinfo[1]) && state.failPlaybackInfo) {
+      const delay = state.playbackInfoDelayMs;
+      if (delay > 0) state.playbackInfoDelayMs = 0; // one-shot, bound at ARRIVAL
+      const respond = () => json({ error: "mock: cannot resolve a stream" }, 500);
+      if (delay > 0) {
+        setTimeout(respond, delay);
+        return;
+      }
+      return respond();
+    }
     if (pbinfo && findMovie(pbinfo[1])) {
       return json({
         MediaSources: [
