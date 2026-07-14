@@ -1133,6 +1133,33 @@ export default {
       "the scan reloaded nothing: the banner explaining this empty grid must still be there",
     );
 
+    // ── 27. A silenced load the action never replaced must speak ───────
+    // The action silences a listing already in flight, because it means to
+    // REPLACE that grid. If its sections leg then fails, its content leg returns
+    // before ever claiming the grid — so nothing replaced anything, and the load
+    // it silenced is the reason the grid is empty. Publishing only the sections
+    // diagnostic left the user staring at an empty library, its own failure
+    // swallowed, pagination dead (codex r16).
+    await goHome(driver);
+    await pollUntil(
+      async () => ((await onHome(driver)) ? true : null),
+      "Home, so the click below starts a fresh listing",
+    );
+    mockA.state.itemsDelayMs = 600; // the listing is in flight at the click...
+    mockA.state.failNextItems = true; // ...and dies
+    mockA.state.viewsDelayMs = 1200; // the action's sections leg lands later...
+    mockA.state.failNextViews = true; // ...and fails, so it never claims the grid
+    await clickSide(driver, "Library A");
+    await clickRefresh(driver);
+    await settle(driver);
+    mockA.state.itemsDelayMs = 0;
+    mockA.state.viewsDelayMs = 0;
+    const said = await banner(driver);
+    assert.ok(
+      said && said.includes("500"),
+      `the silenced listing's failure must be published once nothing replaced it — got ${JSON.stringify(said)}`,
+    );
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,

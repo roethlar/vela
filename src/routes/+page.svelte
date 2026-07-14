@@ -520,6 +520,10 @@
   // The listing generation that was current when the action started: it may
   // silence THOSE loads (the ones it orphans), never newer ones.
   let gridActionBaseGen = $state(0);
+  // Failures the action silenced on the promise of replacing their result. If it
+  // never claims the grid, that promise is broken and they must be published:
+  // the load that failed is the reason the grid is empty (codex r16).
+  let suppressedFailures: { msg: string; gen: number }[] = [];
 
   type RootKind = "home" | "section-grid" | "type-grid" | "search" | "person" | "drill" | "detail";
 
@@ -587,6 +591,7 @@
     try {
       // (a) the action owns its status: clear any prior banner immediately.
       setError(null);
+      suppressedFailures = [];
       // Snapshot what this action reconciles against.
       const epoch = navEpoch;
       refreshEpoch = epoch;
@@ -746,7 +751,16 @@
       // current claimant of its generation.
       if (epoch === navEpoch) {
         const live = legFailures.filter((f) => f.current());
-        if (live.length > 0) setError(live.map((f) => f.msg).join("; "));
+        // A load we silenced but never replaced still owns the grid. We only
+        // silenced it because we meant to take that grid over; if our content leg
+        // never claimed it (the sections leg failed, so it returned early), the
+        // grid is empty BECAUSE that load failed, and no one else is going to say
+        // so (codex r16).
+        const abandoned = claimedGen
+          ? []
+          : suppressedFailures.filter((f) => f.gen === loadGen);
+        const msgs = [...live.map((f) => f.msg), ...abandoned.map((f) => f.msg)];
+        if (msgs.length > 0) setError(msgs.join("; "));
         // Nothing of ours failed — but a load we SUPERSEDED may have published a
         // banner after the click cleared the surface. Its cards are gone,
         // replaced by ours, so its failure no longer describes anything on
@@ -932,12 +946,19 @@
         // the NEW view's errors, which would leave that view empty and silent
         // (codex r6).
         else if (
-          !(
-            gridActionActive &&
-            refreshEpoch === navEpoch &&
-            myGen <= gridActionBaseGen
-          )
+          gridActionActive &&
+          refreshEpoch === navEpoch &&
+          myGen <= gridActionBaseGen
         ) {
+          // Silenced only because the action EXPECTS to replace this load's
+          // result. It may not get that far — if its sections leg fails, its
+          // content leg returns before ever claiming the grid, and then nothing
+          // replaced this load: the grid is empty (or truncated) precisely
+          // BECAUSE this load failed, and the user is owed that reason. Hold the
+          // failure; settlement publishes it if the action never took the grid
+          // (codex r16).
+          suppressedFailures.push({ msg: String(e), gen: myGen });
+        } else {
           // The ONLY tagged write: a refresh that goes on to SUPERSEDE this
           // load owns its cards, so it must take this message down with it
           // (see refreshLibraries settlement, codex r11).
