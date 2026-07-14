@@ -1585,6 +1585,14 @@
       // its own: the user would learn the reload failed and never learn their edit
       // had (codex r18). The edit is what they asked for; its failure is the one
       // they need.
+      // ...but only if the grid this edit was made in is still the one on screen. The
+      // repaint re-enters the CURRENT root, whatever that now is — so if the user left
+      // while the edit was in flight, it resets a library they merely walked into,
+      // clearing that view's own still-applicable diagnostic, before the check below
+      // ever notices the root moved. The repaint is for the edit's grid; when that grid
+      // is gone, there is nothing to repaint and it reloads on return anyway (codex
+      // r22).
+      if (rootSig() !== myRoot) return;
       await refreshWatchState();
       // The await is a long window and the user does not wait in it. If they LEFT,
       // this failure describes a grid that is gone — it does not belong on the screen

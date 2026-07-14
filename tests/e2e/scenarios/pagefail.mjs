@@ -20,6 +20,7 @@ import {
   seedConfig,
   openLibraryGrid,
   goHome,
+  holdsFor,
 } from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
 
@@ -633,6 +634,57 @@ export default {
     assert.ok(
       afterPageFail && afterPageFail.includes("reconnect"),
       `a page failure that renders the same sentence as the edit's must not hand the edit's message to the refresh's retract — got ${JSON.stringify(afterPageFail)}`,
+    );
+
+    // ── 12. The recovery repaint belongs to the edit's grid, not to wherever the ──
+    //         user ended up
+    // The catch repainted the CURRENT root before checking whether it was still the
+    // edit's root. So an edit parked in a library, with the user since gone Home, reset
+    // HOME — clearing Home's own still-applicable failure — and only then noticed the
+    // root had moved and bailed. The user loses a diagnostic that was nothing to do with
+    // the edit, on a view they are actually looking at (codex r22).
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "a healthy grid to edit from",
+    );
+    mock.state.unauthNextPlayed = true; // the edit will 401...
+    mock.state.playedDelayMs = 6000; // ...but not for six seconds
+    const served12 = servedCount("/PlayedItems/m59");
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () =>
+        !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
+      "the parked, doomed edit to reach the server",
+    );
+
+    // Leave for Home, and give Home a failure of its OWN — nothing to do with the edit,
+    // and not superseded by anything.
+    mock.state.failNextLatest = true;
+    await goHome(driver);
+    await pollUntil(
+      async () => {
+        const b = await banner(driver);
+        return b && b.includes("500") ? true : null;
+      },
+      "Home's own failure, on the view the user is now looking at",
+    );
+
+    // The parked edit now fails. It must not touch this view at all.
+    await pollUntil(
+      async () => (servedCount("/PlayedItems/m59") > served12 ? true : null),
+      "the parked 401 to be delivered",
+    );
+    await holdsFor(
+      async () => {
+        const b = await banner(driver);
+        return b && b.includes("500") ? null : `Home's failure is gone (banner: ${JSON.stringify(b)})`;
+      },
+      4000,
+      "an edit made in a library the user has left must not reset Home, nor clear the failure Home is reporting",
     );
 
     assert.equal(
