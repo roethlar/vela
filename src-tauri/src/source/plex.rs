@@ -3,7 +3,7 @@
 //! previously lived in the command handlers.
 
 use async_trait::async_trait;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
@@ -28,6 +28,21 @@ pub struct PlexSource {
     /// and could not tell a source that REBOUND to another server from one whose
     /// `/identity` probe merely recovered on the SAME server (codex r12).
     binding: AtomicU64,
+    /// Whether a READ has already paid for an `/identity` probe. Reads make at
+    /// most one attempt in the source's lifetime; the sections path keeps trying
+    /// while the machine is unknown (see `ensure_ready`, codex r16).
+    identity_probed: AtomicBool,
+}
+
+/// How hard a caller is willing to work to learn WHICH server this is.
+#[derive(Clone, Copy)]
+enum Probe {
+    /// Reads: at most one attempt, ever. A probe that times out must not tax
+    /// every click for the life of the session.
+    Once,
+    /// The sections path: keep trying while the machine is unknown — the keys it
+    /// issues are the ones a scan will act on, and the user's Refresh is the retry.
+    WhileUnknown,
 }
 
 impl PlexSource {
@@ -37,13 +52,22 @@ impl PlexSource {
             name: name.into(),
             lib: AsyncMutex::new(lib),
             binding: AtomicU64::new(0),
+            identity_probed: AtomicBool::new(false),
         }
     }
 
     /// A clone of the client with a server already selected, discovering one on
     /// first use. Cloned out so we don't hold the lock across network calls.
+    ///
+    /// A read never RE-probes `/identity`. Retrying it on every call cost five
+    /// seconds — the probe's timeout — on every browse, search, detail open,
+    /// playback start and watch-state edit, for as long as the probe kept timing
+    /// out, which is forever for a server behind something that blackholes
+    /// `/identity` while serving library routes fine. The app appeared to hang on
+    /// every click (codex r16). One attempt is made; after that, reads take the
+    /// server as they find it.
     async fn ensure_ready(&self) -> Result<PlexLibrary, String> {
-        Ok(self.ensure_ready_bound().await?.0)
+        Ok(self.ensure_ready_inner(Probe::Once).await?.0)
     }
 
     /// The client to use AND the binding it is bound under, captured in the SAME
@@ -56,7 +80,18 @@ impl PlexSource {
     /// B's, evict the live root it is standing on, and offer A's library as
     /// B-current (codex r13). Every read of `binding` must be under the lib lock,
     /// paired with the clone it describes.
+    ///
+    /// This is the SECTIONS path, so it always retries the identity probe while
+    /// the machine is unknown: the list it is about to issue carries the keys a
+    /// scan will act on, and a server that could not be named cannot be scanned
+    /// (r8-1). Retrying here is also what lets a transient probe failure recover —
+    /// the user's own Refresh is the retry, which is exactly what the refusal
+    /// message tells them to do.
     async fn ensure_ready_bound(&self) -> Result<(PlexLibrary, u64), String> {
+        self.ensure_ready_inner(Probe::WhileUnknown).await
+    }
+
+    async fn ensure_ready_inner(&self, probe: Probe) -> Result<(PlexLibrary, u64), String> {
         {
             let guard = self.lib.lock().await;
             if guard.server_base().is_some() {
@@ -67,8 +102,16 @@ impl PlexSource {
                 // (`set_server_manual`), which would leave rediscovery UNPINNED
                 // and free to repoint this source at another account server —
                 // under section keys that only mean anything on the original
-                // (codex r7). Learn who we are talking to, once.
-                if rediscovery_pin(lib.server_machine_id()).is_none() {
+                // (codex r7). Learn who we are talking to.
+                let may_probe = rediscovery_pin(lib.server_machine_id()).is_none()
+                    && match probe {
+                        Probe::WhileUnknown => true,
+                        // First caller through takes the cost; everyone after it
+                        // finds the flag set and goes straight to the server. This
+                        // also collapses a concurrent storm of probes into one.
+                        Probe::Once => !self.identity_probed.swap(true, Ordering::SeqCst),
+                    };
+                if may_probe {
                     if let Ok(id) = lib.fetch_machine_identifier().await {
                         let mut guard = self.lib.lock().await;
                         if rediscovery_pin(guard.server_machine_id()).is_none() {
@@ -82,9 +125,9 @@ impl PlexSource {
                         return Ok((guard.clone(), binding));
                     }
                 }
-                // The probe FAILED: we return the clone we took above, so we must
-                // return the binding we took with it — a rebind that landed while
-                // we probed belongs to a server this clone is not.
+                // No probe, or it FAILED: we return the clone we took above, so we
+                // must return the binding we took with it — a rebind that landed
+                // while we probed belongs to a server this clone is not.
                 return Ok((lib, binding));
             }
         }
@@ -1315,6 +1358,55 @@ mod tests {
         assert_eq!(
             after[0].binding, 1,
             "keys issued after a rebind must not be mistakable for the ones before it"
+        );
+    }
+
+    /// A server whose `/identity` never answers must not tax every click.
+    ///
+    /// The probe exists so a scan can name its server. It was retried on EVERY
+    /// `ensure_ready` while the machine stayed unknown — and `ensure_ready` is the
+    /// front door for every read: browse, search, detail, playback, watch-state.
+    /// A server that blackholes `/identity` while serving library routes fine (a
+    /// reverse proxy, a firewall rule) therefore charged the probe's five-second
+    /// timeout to every single action, forever. Reads now attempt it once
+    /// (codex r16).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_read_probes_identity_at_most_once() {
+        // 99 failures: this server will never identify itself.
+        let (port, hits) = spawn_mock_plex_with("machine-A", 99, None);
+        let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
+        lib.set_server_manual("127.0.0.1".to_string(), port, false, Some("A".to_string()));
+        let source = PlexSource::new("plex", "Plex", lib);
+
+        for _ in 0..5 {
+            let _ = source.items("2", "movie", None, 0, 10).await;
+        }
+        let probes = hits
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.starts_with("/identity"))
+            .count();
+        assert_eq!(
+            probes, 1,
+            "five reads must not pay for five identity probes — a server that never \
+             answers this would make every click in the app wait for its timeout"
+        );
+
+        // The sections path still retries: it issues the keys a scan acts on, so
+        // it must keep trying to learn whose keys they are — and the user's own
+        // Refresh is that retry.
+        let _ = source.sections().await;
+        let probes = hits
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|p| p.starts_with("/identity"))
+            .count();
+        assert!(
+            probes > 1,
+            "a refresh must still try to identify the server, or a transient failure \
+             could never recover and scans would stay refused forever"
         );
     }
 
