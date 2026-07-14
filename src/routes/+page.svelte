@@ -275,7 +275,9 @@
         return runSearch(searchTerm, { rerun: true });
       if (personView && crumbs.length === 1)
         return runPersonView(personView, { rerun: true });
-      return resetAndLoad();
+      // PRESERVE: a failed re-fetch must not take the user's library away from them (see
+      // resetAndLoad).
+      return resetAndLoad({ preserve: true });
     }
   }
 
@@ -1082,12 +1084,25 @@
   // Bumped on every navigation; in-flight loads from an older generation are discarded.
   let loadGen = 0;
 
-  async function resetAndLoad({ keepError = false }: { keepError?: boolean } = {}) {
+  async function resetAndLoad({
+    keepError = false,
+    preserve = false,
+  }: { keepError?: boolean; preserve?: boolean } = {}) {
     homeGen++; // leaving home: invalidate any in-flight home/sections load
     const myGen = ++loadGen;
     loadingMore = false; // abandon any in-flight load (its results are now stale)
+    // `preserve`: this is a RE-ENTRY of the root the user is already standing on (a
+    // watch-state repaint), not a navigation to a new one. Blanking the grid up front is
+    // right when you are LEAVING a view — the old cards would be a lie — but here the user
+    // asked to change one item's watch state, and if the re-fetch fails, emptying their
+    // library is not an outcome they asked for or can undo. It cost the owner their whole
+    // view on a failed mark-watched against a stopped server (playtest, 0.1.47).
+    const held = preserve ? { items, offset, hasMore } : null;
     offset = 0;
     hasMore = true;
+    // The blank stays, even when preserving: `loadMore` APPENDS, so keeping the old cards
+    // here makes a SUCCESSFUL repaint show every item twice (it did — markwatched and
+    // watchstate both went red). What must not survive is the EMPTY RESULT of a failure.
     items = [];
     failedPosters = new Set(); // bounded to the current view's posters
     loading = true;
@@ -1096,17 +1111,31 @@
     // either side of that — clearing here would race the publish away
     // (lrs-1). A user-driven select still clears, as before.
     if (!keepError) setError(null);
-    await loadMore(myGen);
-    if (myGen === loadGen) loading = false;
+    const ok = await loadMore(myGen);
+    if (myGen === loadGen) {
+      if (held && !ok) {
+        // Put the view back exactly as it was. The failure is still reported — the user
+        // is told — but they keep the library they were looking at.
+        items = held.items;
+        offset = held.offset;
+        hasMore = held.hasMore;
+      }
+      loading = false;
+    }
   }
 
   // Load the next page for the current level (section root or a parent's children)
   // and append it. Drives infinite scroll. Discards results if navigation moved on.
-  async function loadMore(myGen: number = loadGen, onError: ((msg: string) => void) | null = null) {
-    if (loadingMore || !hasMore || myGen !== loadGen) return;
+  // Returns false ONLY if the request failed. A no-op (nothing to ask for, already
+  // loading, superseded) is not a failure — the caller must not read it as one.
+  async function loadMore(
+    myGen: number = loadGen,
+    onError: ((msg: string) => void) | null = null,
+  ): Promise<boolean> {
+    if (loadingMore || !hasMore || myGen !== loadGen) return true;
     let failed = false;
     const here = crumbs[crumbs.length - 1];
-    if (!here || (!here.ratingKey && !active && !activeType)) return;
+    if (!here || (!here.ratingKey && !active && !activeType)) return true;
     loadingMore = true;
     try {
       const page = here.ratingKey
@@ -1125,7 +1154,7 @@
               start: offset,
               size: PAGE,
             });
-      if (myGen !== loadGen) return; // navigated away while awaiting; drop these
+      if (myGen !== loadGen) return true; // navigated away while awaiting; drop these
       items = [...items, ...page];
       offset += page.length;
       hasMore = page.length >= PAGE;
@@ -1205,8 +1234,9 @@
       gridEl &&
       gridEl.scrollHeight <= gridEl.clientHeight
     ) {
-      await loadMore(myGen, onError);
+      return await loadMore(myGen, onError);
     }
+    return !failed;
   }
 
   function onScroll(e: Event) {
@@ -1289,16 +1319,23 @@
     personView = null;
     searchTerm = q;
     crumbs = [{ title: `Search: "${q}"`, ratingKey: null }];
-    items = [];
+    // A RE-RUN re-enters the root the user is already standing on (a watch-state repaint),
+    // so a failure must not take their results away — same rule as resetAndLoad's
+    // `preserve`, same reason (playtest, 0.1.47).
+    const held = rerun ? items : null;
+    if (!rerun) items = [];
     hasMore = false;
-    loading = true;
+    loading = !rerun;
     setError(null);
     try {
       const results = await invoke<Item[]>("search", { query: q, sourceId: activeSource });
       if (myGen !== loadGen) return; // user navigated away while searching
       items = results;
     } catch (e) {
-      if (myGen === loadGen) setError(String(e));
+      if (myGen === loadGen) {
+        if (held) items = held; // put the view back; the failure is still reported
+        setError(String(e));
+      }
     } finally {
       if (myGen === loadGen) loading = false;
     }
@@ -1353,16 +1390,22 @@
     searchTerm = "";
     personView = p;
     crumbs = [{ title: personLabel(p), ratingKey: null }];
-    items = [];
+    // A RE-RUN re-enters the root the user is standing on: a failure must not empty it
+    // (same rule as resetAndLoad's `preserve`).
+    const held = rerun ? items : null;
+    if (!rerun) items = [];
     hasMore = false; // one-shot: the backend returns the full merged list
-    loading = true;
+    loading = !rerun;
     setError(null);
     try {
       const results = await invoke<Item[]>("get_person_items", { personKey: p.key, kind: p.kind });
       if (myGen !== loadGen) return; // user navigated away while loading
       items = results;
     } catch (e) {
-      if (myGen === loadGen) setError(String(e));
+      if (myGen === loadGen) {
+        if (held) items = held; // put the view back; the failure is still reported
+        setError(String(e));
+      }
     } finally {
       if (myGen === loadGen) loading = false;
     }

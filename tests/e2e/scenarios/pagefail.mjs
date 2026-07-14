@@ -311,6 +311,16 @@ export default {
       },
       "both failures, each on its own surface",
     );
+    // ...AND THE LIBRARY IS STILL THERE. The repaint is a RE-ENTRY of the root the user is
+    // already standing on, not a navigation away from it: blanking the grid before the
+    // fetch means a failed re-fetch leaves them with nothing. They asked to mark ONE item
+    // watched, and it cost them the whole view — with the server down they could not even
+    // retry, because there was nothing left to right-click (owner playtest, 0.1.47).
+    assert.equal(
+      await cardCount(driver),
+      60,
+      "a failed watch-state repaint must not empty the library: the user asked to change one item, not to lose the view",
+    );
     assert.ok(
       (await editLine(driver)).includes("reconnect"),
       "the edit the user ASKED for failed: that is reported on the edit's line",
