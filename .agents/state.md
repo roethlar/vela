@@ -356,34 +356,41 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   disposition (documented accepted edge) or order the compare-and-swap
   hardening as a follow-up plan. Detail: plan Review log r6 + Accepted
   edges.
-- QUEUED (agent-observed during plan review, 2026-07-10 — needs owner
-  interest before any plan): queue plays and auto-advance never enter
-  Vela's recents (`play_by_key` records nothing; only the frontend
-  direct-play path calls `record_recent`), so a queue session stopped
-  midway doesn't surface in Continue Watching. Surfaced by codex
-  plan-review r1 on `.agents/plans/continue-watching-watch-state.md`;
-  that plan fixes only the tombstone-lifecycle slice of it.
-- **QUEUE PERSISTENCE + VELA PLAYLISTS (owner feature request, 2026-07-14 —
-  needs a plan and owner approval of scope before any code).** The in-app play
-  queue does not survive an app restart, which limits how useful it can be: the
-  backend holds it as pure in-memory state (`src-tauri/src/lib.rs:61`,
-  `queue: Arc<Mutex<Vec<commands::QueueItem>>>`), and nothing in `config.rs`
-  ever writes it to disk. Owner direction, two parts and the second is the
-  larger one:
-  - Persist the queue across restarts (the queue's `QueueItem`s already carry
-    the source id, rating key and display fields — `commands.rs:2148` — so the
-    data needed to rebuild one is already in hand).
-  - **Vela-owned playlists that span sources.** Not Plex/Jellyfin/Emby
-    playlists — a Vela-native saved list whose entries may come from DIFFERENT
-    servers in one list, which no single server's playlist API can represent.
-    This is the reason the feature is not just "serialize the queue".
-  - Open questions for the plan (not decided): whether a saved playlist and the
-    live queue are one concept or two; what happens to an entry whose source is
-    removed, offline, or whose rating key no longer resolves; and whether these
-    persist in `config.json` (owner-only perms, atomic save, fail-closed parse
-    — see repo-guidance Earned Practices) or in their own store.
-  - Related, already queued: queue plays never enter Vela's recents (previous
-    item). Both touch the queue; sequence them deliberately.
+- (The 2026-07-10 QUEUED defect — queue plays and auto-advance never enter
+  Vela's recents — is now **owned by `.agents/plans/queue-playlists.md` S2**,
+  which is the plan that explains why it matters: it is the reason the carousel
+  cannot reflect the queue. Do not track it separately.)
+- **QUEUE + PLAYLISTS + CONTINUE PLAYING: PLAN DRAFTED 2026-07-14, awaiting
+  owner go before any code.** Plan `.agents/plans/queue-playlists.md`; the
+  product model and the two durable rulings are in `.agents/decisions.md`
+  (2026-07-14: the Up Next / playlists model, and video stays external). Scope
+  approved by the owner ("everything we discussed"); seven slices, S1-S7.
+  - **Origin:** the queue does not survive a restart (`lib.rs:61` holds it in
+    memory; nothing writes it to disk). Tracing that found the larger defect —
+    **the Continue Watching carousel does not reflect the queue at all**,
+    because `play_by_key` records no recent (`commands.rs:2365` says so
+    outright), so Vela's half of the hero merge stays empty and only the
+    server's hub half moves. That is the previously-queued 2026-07-10 defect;
+    this plan's S2 closes it, and it is no longer tracked separately.
+  - **Already true, and it is what makes this cheap:** item keys are namespaced
+    `<source_id>:<raw>` and `Registry::route` (`source/mod.rs:414`) dispatches
+    per item, so **a queue mixing Plex and Jellyfin items already plays
+    today**. Mixed-source playlists need no new dispatch machinery. Episode
+    walking for "Only TV" needs no new server API either — `children()` plus the
+    season/show keys already on `ItemDto` cover it.
+  - **Two shipped behaviours change** (call these out in the playtest ask):
+    `play_item` stops clearing the queue (`commands.rs:2380` — harmless only
+    because the queue currently dies at exit), and the queue's cursor
+    (`queue_index`) becomes consumption.
+  - **The sharpest hazard:** the `on` continue-playing mode can replay an item
+    the server never marks watched, forever. It needs a no-repeat guard, and it
+    must walk the SAME melded list the carousel renders — a second source of
+    truth for "what plays next" is exactly the failure class per-surface-status
+    was built to kill.
+  - Watch-state is already correct and must not be rebuilt: `finish()`
+    (`recents.rs:61`) already drops an entry past the 95% threshold
+    (`recents.rs:17`), so stopping in the end credits already counts as watched
+    and keeps no resume position.
 - **v1.0.0 RELEASE TRACK (owner, 2026-07-10 — ordered LAST behind the
   functional queue above, "queue first, v1 polish goes to the bottom"):**
   (1) UI embellishments — plan QUEUED with decisions resolved
