@@ -231,7 +231,7 @@
     } catch (e) {
       // On the BAR's own surface, never the view's banner (slice 3). It sits with the
       // Retry button it is telling the user to press.
-      mpvStatus = String(e);
+      mpvStatus = `Couldn't install mpv — ${String(e)}`;
     } finally {
       installingMpv = false;
     }
@@ -386,9 +386,31 @@
   // the user was told to reconnect and never told what else had gone wrong
   // (codex r17, found via the guard for the settlement publish).
   function friendlyError(e: string): string {
-    return e.replaceAll(
-      "RECONNECT_REQUIRED",
-      "A server needs reconnecting — open Settings (⚙) and reconnect it.",
+    return (
+      e
+        .replaceAll(
+          "RECONNECT_REQUIRED",
+          "A server needs reconnecting — open Settings (⚙) and reconnect it.",
+        )
+        // A transport failure carries the ENTIRE request URL into its message, and that
+        // URL has no business on screen. It tells the user nothing they can act on, and it
+        // carries things that must never be displayed: a Jellyfin user GUID and item key,
+        // and — the reason this is a rule and not a preference — Plex builds URLs with
+        // `?X-Plex-Token=…` in the query (plex_library.rs:878, playback.rs:599). Repo
+        // guidance forbids putting a token-bearing URL in an error or any UI text, and the
+        // only way to keep that promise is to never let a raw URL through the funnel.
+        //
+        // (Owner playtest, 0.1.46: a stopped Jellyfin produced
+        //  "error sending request for url (http://localhost:8096/Users/817e…/PlayedItems/…)".)
+        .replace(
+          /error sending request for url \([^)]*\)/gi,
+          "the server could not be reached",
+        )
+        // An HTTP-status failure carries the url too, and THAT is where the token lives:
+        // Plex puts `?X-Plex-Token=…` in the query. Redact every query string rather than
+        // try to enumerate the parameter names a secret might hide behind. The path stays —
+        // it is genuinely diagnostic ("…/Views", "…/PlaybackInfo") and carries no secret.
+        .replace(/(https?:\/\/[^\s)?]+)\?[^\s)]*/gi, "$1")
     );
   }
 
@@ -1422,8 +1444,9 @@
       // A Play started from an open detail is reported ON that detail, which survives a
       // search teardown underneath it — so the view's clear is not its owner (slice 4).
       // From the grid, the view IS the surface, and its banner is right.
-      if (detailView) detailStatus = String(e);
-      else setError(String(e));
+      const said = `Couldn't play “${item.title}” — ${String(e)}`;
+      if (detailView) detailStatus = said;
+      else setError(said);
       // A failure may mean mpv went missing — re-check so the install prompt shows.
       invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     }
@@ -1442,8 +1465,9 @@
       // Only the source-preference write can land here — `play` reports its own failure
       // and does not rethrow. Same rule either way: report on the surface the user is
       // actually looking at (slice 4).
-      if (detailView) detailStatus = String(e);
-      else setError(String(e));
+      const said = `Couldn't play “${item.title}” — ${String(e)}`;
+      if (detailView) detailStatus = said;
+      else setError(said);
     }
   }
 
@@ -1464,7 +1488,7 @@
       refreshQueue();
     } catch (e) {
       // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = String(e);
+      if (attempt === queueAttempt) queueStatus = `Couldn't queue “${item.title}” to play next — ${String(e)}`;
     }
   }
   async function addToQueue(item: Item) {
@@ -1476,7 +1500,7 @@
       refreshQueue();
     } catch (e) {
       // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = String(e);
+      if (attempt === queueAttempt) queueStatus = `Couldn't add “${item.title}” to the queue — ${String(e)}`;
     }
   }
   async function queueJumpTo(index: number) {
@@ -1487,7 +1511,7 @@
       refreshQueue();
     } catch (e) {
       // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = String(e);
+      if (attempt === queueAttempt) queueStatus = `Couldn't play “${queue.items[index]?.title ?? "that item"}” — ${String(e)}`;
     }
   }
   async function queueRemove(index: number) {
@@ -1498,7 +1522,7 @@
       refreshQueue();
     } catch (e) {
       // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = String(e);
+      if (attempt === queueAttempt) queueStatus = `Couldn't remove “${queue.items[index]?.title ?? "that item"}” from the queue — ${String(e)}`;
     }
   }
   async function queueClearAll() {
@@ -1509,7 +1533,7 @@
       refreshQueue();
     } catch (e) {
       // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = String(e);
+      if (attempt === queueAttempt) queueStatus = `Couldn't clear the queue — ${String(e)}`;
     }
   }
 
@@ -1702,7 +1726,8 @@
       // looking at. No currency gate, no ownership algebra, no retract — the machinery all
       // of that needed is exactly what having a second writer on the view's banner cost.
       // Only a NEWER edit may supersede this one.
-      if (attempt === editAttempt) editStatus = String(e);
+      if (attempt === editAttempt)
+        editStatus = `Couldn't mark “${item.title}” ${played ? "watched" : "unwatched"} — ${String(e)}`;
     }
   }
 
@@ -1717,7 +1742,8 @@
       refreshWatchState();
     } catch (e) {
       // A watch-state edit, so the same surface (see editStatus).
-      if (attempt === editAttempt) editStatus = String(e);
+      if (attempt === editAttempt)
+        editStatus = `Couldn't remove “${item.title}” from Continue Watching — ${String(e)}`;
     }
   }
 

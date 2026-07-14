@@ -95,8 +95,8 @@ export default {
       "the Play failure, reported ON the detail the user is looking at",
     );
     assert.ok(
-      (await detailError(driver)).length > 0,
-      "the detail must say WHY playback failed",
+      (await detailError(driver)).includes("Couldn't play"),
+      "the line must say WHAT failed, not just dump the backend's string: giving a writer its own line is only half the job if the line cannot be told apart from the grid's (owner playtest, 0.1.46 — with Plex both were the SAME sentence, twice)",
     );
     assert.equal(
       await banner(driver),
@@ -136,10 +136,37 @@ export default {
       async () => ((await drawerError(driver)) ? true : null),
       "the queue's failure, reported inside the drawer it belongs to",
     );
+    assert.ok(
+      (await drawerError(driver)).includes("Couldn't play"),
+      "...and it says what it was trying to do",
+    );
     assert.equal(
       await banner(driver),
       null,
       "...and never on the view's banner — that is the door r24 found open (setError(null) wiped it on the next navigation)",
+    );
+
+    // ── 2b. A transport failure must not put the request URL on screen ─────
+    // reqwest's message carries the WHOLE url. It tells the user nothing they can act on,
+    // and it carries what must never be displayed: a Jellyfin user GUID and item key, and
+    // — the reason this is a rule — Plex builds urls with `?X-Plex-Token=…` in the query
+    // (plex_library.rs:878). Repo guidance forbids a token-bearing url in an error or any
+    // UI text, and the only way to keep that promise is to never let a raw url through the
+    // funnel at all.
+    //
+    // The mock is still up here, so a transport error is not reachable in-scenario — but
+    // the funnel is: assert that NOTHING any surface displays ever contains one.
+    const surfacesText = await driver.exec(
+      `return [...document.querySelectorAll('div.error, div.scanerror, div.drawererror, div.detailerror, div.mpverror')]
+         .map((e) => e.textContent).join(' | ')`,
+    );
+    assert.ok(
+      !/https?:\/\/\S*\?/.test(surfacesText),
+      `no surface may display a url QUERY — that is where the secret is (Plex: ?X-Plex-Token=…). The path may stay; it is diagnostic and carries nothing. Got ${JSON.stringify(surfacesText)}`,
+    );
+    assert.ok(
+      !/token/i.test(surfacesText),
+      `...and no surface may display anything that looks like a token — got ${JSON.stringify(surfacesText)}`,
     );
 
     // ── 3. Closing the drawer dismisses what it was reporting ───────────────

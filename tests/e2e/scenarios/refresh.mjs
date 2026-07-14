@@ -1186,10 +1186,16 @@ export default {
     // BOTH failures are 500s, so "the banner mentions 500" cannot tell them apart —
     // the sections leg alone would satisfy it, and the guard would pass with the
     // fix reverted (it did, first time out). Assert on what only the LISTING's
-    // failure can say: its URL carries the library it was paging.
+    // failure can say.
+    //
+    // That USED to be `ParentId=libA`, out of the url's QUERY. The query is now redacted
+    // before anything reaches the screen, because that is where a secret hides (Plex puts
+    // `?X-Plex-Token=…` there) — so the discriminator moved to the PATH, which survives
+    // redaction and is still unique to the listing: the sections leg fails on `/Views`,
+    // the listing on `/Items`.
     const said = await banner(driver);
     assert.ok(
-      said && said.includes("ParentId=libA"),
+      said && said.includes("/Items") && said.includes("/Views"),
       `the silenced listing's own failure must be published once nothing replaced it — got ${JSON.stringify(said)}`,
     );
     assert.ok(
