@@ -1449,3 +1449,74 @@ plan (the first was `4cb6b2a`), and worse than the first because the message hid
 what the commit contains. Not rewritten — history rewrite needs the owner's explicit
 go (AGENTS.md, Git Safety). Recorded here so the log is not the only account of what
 those commits hold. Root cause both times: `git add -A` instead of naming the paths.
+
+## Review protocol change (owner, 2026-07-14)
+
+From r17, the loop runs TWO independent reviewers (codex and grok) on the same
+pinned diff — they do not see each other's findings — with the author (Claude) still
+writing the fixes and running every guard, red-proof and E2E run.
+
+**An author may not adjudicate their own decline.** A finding the author wants to
+decline goes to the reviewer that did NOT raise it. This rule exists because the
+author's self-adjudication has been tested twice and failed twice (r12-1 and r8-4,
+both overturned). If the two reviewers disagree with each other about whether a fix
+is correct, that goes to the owner, not to the author.
+
+**r17 — 2026-07-14 — two reviewers. grok: 2 MEDIUM. codex: pending.** Base
+`63560a6`. The protocol paid for itself on its first round.
+
+Re-adjudication of the two remaining author-decided declines (grok, independent):
+
+- **r8-4 — DECLINE OVERTURNED. Fixed (`1c52373`).** I had declined it as
+  "pre-existing pagination semantics, recoverable by re-entry, out of scope". Grok
+  verified the pre-existing claim was true ONLY of the form that shows a banner, and
+  found that this plan's own suppress-and-settle machinery had created a SILENT form
+  that did not exist at base: a page fails while the action silences it (expecting to
+  replace the grid); the user opens a detail, so the epoch moves; the content leg
+  never claims; settlement drops the held failure as belonging to a view the user
+  left. Back lands on a library truncated at 60, unable to paginate, with nothing on
+  screen to say why — and "re-entry recovers it" is false for the path the finding
+  names, because Back is not re-entry (`closeDetail` only clears the overlay). Grok's
+  judgment, recorded verbatim because it is the useful part: *"a true adjacent fact
+  used to make stopping feel clean"* — the same shape as the overturned r12-1. Fixed:
+  a SILENCED failure no longer ends the library (the two PUBLISHING branches still
+  do — a failure the user can see may stop pagination, because they can see why).
+  Guard: new `pagefail` scenario (a 130-movie library — no other scenario pages).
+  Red-proven.
+- **r10-1 — DECLINE UPHELD**, with every load-bearing claim verified line by line,
+  including a specific check that r16-1 had not staled it (it had not: held listing
+  failures only exist when `gridActionActive` was true, which never happens on the
+  detail/search/person/drill roots the finding covers).
+
+grok's r17 findings:
+
+- **r17-1 (`1c52373`) — settlement's PUBLISH branch stomped a newer load's banner.**
+  The retract branch already knew not to touch a banner from a load NEWER than the
+  action's (it supersedes the action; its failure is the one that matters). The
+  publish branch did not — so a newer load could fail and correctly banner, the
+  action's sections leg could then fail, and settlement would overwrite the true
+  reason the grid was empty with only the sections diagnostic. Fixed: keep the newer
+  banner, append our own, leave the tag with the load that still owns the grid.
+- **r17-2 (`1c52373`, guard `3f21757`) — case 25 was VACUOUS: the r12-2 tag funnel
+  had been UNGUARDED since r15.** Case 25 was written when a scan wrote to the shared
+  banner; r15 moved scans to their own surface, so nothing was left in the suite that
+  could distinguish the funnel's presence from its absence — it could have been
+  reverted at any time with the suite green. **Fourth vacuous guard in this plan, and
+  the third disarmed by one of the author's own later fixes.**
+
+  Building a real one took THREE attempts, each caught only by red-proving:
+  (1) a watch-state edit whose banner turned out not to persist; (2) writes that
+  happened BEFORE the refresh, which clears the banner at the click, so nothing could
+  survive to be wrongly retracted; (3) the working one — both writes DURING the
+  action, with the tagged listing failure being a failed PAGE (cards survive) rather
+  than a failed reload (which empties the grid, leaving nothing to drive the second
+  write with). `pagefail` case 2. Red-proven.
+
+- **Found while building that guard (`a3bac2e`) — a failed mark-watched swallowed its
+  own error.** `setWatched`'s catch published the failure and then called
+  `refreshWatchState()`, which goes through `resetAndLoad`, which clears the banner as
+  it starts. The edit's own repaint wiped its own report; the comment there claimed
+  the banner survived. Publish after the repaint, not before. **Neither reviewer found
+  this — the GUARD did**, by requiring a non-listing writer whose banner persists and
+  exposing that this one's did not. A test you cannot fake makes you check what the
+  code actually does.
