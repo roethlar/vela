@@ -518,7 +518,15 @@
       pin !== null, // the device-code screen replaces the view entirely
       mode,
       activeSource,
+      // A Plex section key is a server-LOCAL number, so the key alone does not name a
+      // library: `sameSection` defines one by key AND binding, and this must agree with
+      // it. An unprovable rebind can put server B under us while a recovery is parked;
+      // B's section "2" is a different library with the same number, and comparing keys
+      // alone would call the two roots identical and publish A's edit failure over B's
+      // library (codex r21 — the same server-local-key hazard as r10/r12, reaching the
+      // frontend's own root test).
       active?.key ?? null,
+      active?.binding ?? 0,
       activeType,
       searchTerm,
       personView?.key ?? null,
