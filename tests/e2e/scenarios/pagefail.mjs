@@ -737,6 +737,54 @@ export default {
       `the search root this edit was made in is gone — its failure does not belong over whatever replaced it — got ${JSON.stringify(afterTorn)}`,
     );
 
+    // ── 14. Skipping the repaint must not skip the HEAL ──
+    // The backend curates BEFORE the server call: the recents entry is already gone and
+    // the tombstone already written when the request goes out, and it rolls both back if
+    // the request fails. A Home load that runs inside that window captures the transient
+    // state — so if the edit's failure then declines to re-fetch anything (because the
+    // user left the grid it was made in), Continue Watching keeps showing the item as
+    // gone. Falsely, and until a restart (codex r23).
+    //
+    // Case 12 proves the destination's BANNER is not clobbered. This proves the content
+    // is still healed — the two pull in opposite directions and both have to hold.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "a healthy grid to edit from",
+    );
+    mock.state.unauthNextPlayed = true;
+    mock.state.playedDelayMs = 6000;
+    const served14 = servedCount("/PlayedItems/m59");
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () =>
+        !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
+      "the parked, doomed edit to reach the server",
+    );
+    await goHome(driver);
+    await driver.waitFor(
+      `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
+      "Home",
+    );
+    // Home has loaded (possibly inside the curated window). Count from HERE.
+    await pollUntil(
+      async () => (servedCount("/Items/Latest") > 0 ? true : null),
+      "Home's own load",
+    );
+    const latestBeforeHeal = servedCount("/Items/Latest");
+
+    await pollUntil(
+      async () => (servedCount("/PlayedItems/m59") > served14 ? true : null),
+      "the parked 401 to be delivered",
+    );
+    await pollUntil(
+      async () => (servedCount("/Items/Latest") > latestBeforeHeal ? true : null),
+      "the rolled-back edit must re-fetch the watch state, or Continue Watching keeps showing an item the server still has",
+    );
+
     assert.equal(
       mock.state.contractViolations.length,
       0,

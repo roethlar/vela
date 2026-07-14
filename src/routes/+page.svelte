@@ -597,10 +597,16 @@
     }
   }
 
-  async function loadHome(gen: number = homeGen) {
+  async function loadHome(
+    gen: number = homeGen,
+    { keepError = false }: { keepError?: boolean } = {},
+  ) {
     mode = "home";
     loading = true;
-    setError(null);
+    // `keepError`: a QUIET heal re-fetches Home's content without taking the surface with
+    // it. The failure already on screen belongs to the view the user is standing on, not
+    // to the edit that triggered this (see setWatched, codex r22/r23).
+    if (!keepError) setError(null);
     try {
       const [h, r, t] = await Promise.all([
         invoke<Hub[]>("get_hubs", { sourceId: activeSource }),
@@ -1629,12 +1635,23 @@
       // they need.
       // ...but only if the grid this edit was made in is still the one on screen. The
       // repaint re-enters the CURRENT root, whatever that now is — so if the user left
-      // while the edit was in flight, it resets a library they merely walked into,
-      // clearing that view's own still-applicable diagnostic, before the check below
-      // ever notices the root moved. The repaint is for the edit's grid; when that grid
-      // is gone, there is nothing to repaint and it reloads on return anyway (codex
-      // r22).
-      if (rootSig() !== myRoot) return;
+      // while the edit was in flight, it would reset a library they merely walked into
+      // and clear that view's own still-applicable diagnostic (codex r22).
+      //
+      // It cannot simply be skipped, though. The backend curates BEFORE the server call:
+      // the recents entry is already gone and the tombstone already written when the
+      // request goes out, and a Home load that ran inside that window captured the
+      // transient state. The rollback restores the server's truth, and without a re-fetch
+      // Continue Watching keeps showing the item as gone — falsely, and until a restart
+      // (codex r23).
+      //
+      // So HEAL, quietly: re-fetch the watch state without clearing the banner and
+      // without resetting the grid the user walked to. Neither of those is ours.
+      if (rootSig() !== myRoot) {
+        hubs = []; // stale: a later goHome() re-fetches (see refreshWatchState)
+        if (mode === "home") loadHome(++homeGen, { keepError: true });
+        return;
+      }
       await refreshWatchState();
       // The await is a long window and the user does not wait in it. If they LEFT,
       // this failure describes a grid that is gone — it does not belong on the screen
