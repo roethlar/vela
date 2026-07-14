@@ -1435,7 +1435,11 @@
       }
       await play({ ...item, ratingKey: b.ratingKey, sourceId: b.sourceId });
     } catch (e) {
-      setError(String(e));
+      // Only the source-preference write can land here — `play` reports its own failure
+      // and does not rethrow. Same rule either way: report on the surface the user is
+      // actually looking at (slice 4).
+      if (detailView) detailStatus = String(e);
+      else setError(String(e));
     }
   }
 
