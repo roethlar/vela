@@ -130,32 +130,7 @@ impl PlexSource {
             })?;
         let (updated, installed, binding) = {
             let mut guard = self.lib.lock().await;
-            // Don't clobber a server another task installed while we were
-            // discovering. Two UNPINNED rediscoveries (first connect) can pick
-            // DIFFERENT machines on a multi-server account; whoever loses would
-            // otherwise overwrite the winner, and ids already handed to the
-            // frontend would silently refer to the wrong server (codex r6).
-            if should_install(pin.is_some(), guard.server_machine_id().as_deref()) {
-                // Void the keys already in the frontend's hands if this install
-                // REBINDS the source to a server we cannot prove is the one that
-                // issued them. Pinned: provably the same machine, keys stand.
-                // Unpinned with no server yet (first connect): nothing was ever
-                // issued. Unpinned OVER an existing server (a restored endpoint
-                // whose /identity never answered): the new server may be another
-                // account server whose section 2 is a different library — every
-                // outstanding key is now a guess (codex r12).
-                if rebind_voids_keys(pin.is_some(), guard.server_base().is_some()) {
-                    self.binding.fetch_add(1, Ordering::SeqCst);
-                }
-                guard.set_server(chosen.clone());
-                // Read under the install's own lock: this is the binding OF the
-                // server we just installed (codex r13).
-                (guard.clone(), true, self.binding.load(Ordering::SeqCst))
-            } else {
-                // Someone else installed while we discovered — take their server
-                // AND their binding, still under the one lock.
-                (guard.clone(), false, self.binding.load(Ordering::SeqCst))
-            }
+            self.install_under_lock(&mut guard, pin.is_some(), chosen.clone())
         };
         if !installed {
             return Ok((updated, binding)); // another task got there first — use its server
@@ -174,6 +149,47 @@ impl PlexSource {
             );
         }
         Ok((updated, binding))
+    }
+
+    /// Install the discovered server (or decline to), and bump the binding if
+    /// doing so VOIDS the keys already in the frontend's hands. Returns the client
+    /// to use, whether we installed it, and the binding it is bound under — all
+    /// read under the caller's lock, so they describe one server.
+    ///
+    /// This is `rediscover_bound`'s only install, extracted so it can be TESTED:
+    /// the real path reaches it only through plex.tv discovery, so the increment
+    /// had no coverage at all — delete it and every Rust test still passed, while
+    /// an unpinned A→B install silently kept binding 0 and the frontend accepted
+    /// B's colliding section key as A's library (codex r15).
+    ///
+    /// Don't clobber a server another task installed while we were discovering:
+    /// two UNPINNED rediscoveries (first connect) can pick DIFFERENT machines on a
+    /// multi-server account, and whoever loses would otherwise overwrite the
+    /// winner, leaving ids already handed to the frontend pointing at the wrong
+    /// server (codex r6).
+    fn install_under_lock(
+        &self,
+        guard: &mut PlexLibrary,
+        pinned: bool,
+        chosen: PlexServer,
+    ) -> (PlexLibrary, bool, u64) {
+        if !should_install(pinned, guard.server_machine_id().as_deref()) {
+            // Someone else installed while we discovered — take their server AND
+            // their binding, still under the one lock.
+            return (guard.clone(), false, self.binding.load(Ordering::SeqCst));
+        }
+        // Pinned: provably the same machine, keys stand. Unpinned with no server
+        // yet (first connect): nothing was ever issued. Unpinned OVER an existing
+        // server (a restored endpoint whose /identity never answered): the new
+        // server may be another account server whose section 2 is a different
+        // library — every outstanding key is now a guess (codex r12).
+        if rebind_voids_keys(pinned, guard.server_base().is_some()) {
+            self.binding.fetch_add(1, Ordering::SeqCst);
+        }
+        guard.set_server(chosen);
+        // Read under the install's own lock: this is the binding OF the server we
+        // just installed (codex r13).
+        (guard.clone(), true, self.binding.load(Ordering::SeqCst))
     }
 
     /// One attempt at [`MediaSource::sections`]. `Ok(None)` means the source
@@ -1300,6 +1316,58 @@ mod tests {
             after[0].binding, 1,
             "keys issued after a rebind must not be mistakable for the ones before it"
         );
+    }
+
+    /// The PRODUCTION increment, not the predicate. `rebind_voids_keys` was
+    /// unit-tested, but nothing exercised the one place that CALLS it: the real
+    /// path reaches it only through plex.tv discovery. Delete the increment and
+    /// every other test still passed — while an unpinned A→B install kept binding
+    /// 0, so the frontend accepted B's colliding section key as A's library and
+    /// showed B's content under A's title, durably (codex r15).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn the_install_that_rebinds_us_is_the_one_that_voids_the_keys() {
+        let source = PlexSource::new(
+            "plex",
+            "Plex",
+            PlexLibrary::new("token".to_string(), "client".to_string()),
+        );
+
+        // First connect: nothing has been issued, so nothing is voided.
+        {
+            let mut guard = source.lib.lock().await;
+            let (_, installed, binding) =
+                source.install_under_lock(&mut guard, false, server_with_id("machine-A", "a.example"));
+            assert!(installed);
+            assert_eq!(binding, 0, "a first connect voids no keys — there are none");
+        }
+
+        // Rediscovery PINNED to our own machine: provably the same server at a new
+        // address. The keys it issued are still its keys.
+        {
+            let mut guard = source.lib.lock().await;
+            let (_, installed, binding) =
+                source.install_under_lock(&mut guard, true, server_with_id("machine-A", "a2.example"));
+            assert!(installed);
+            assert_eq!(
+                binding, 0,
+                "a stale-address recovery on the SAME machine must not void its own keys (r6)"
+            );
+        }
+
+        // An UNPINNED install over a server we already had: the machine was never
+        // identified, so discovery was free to land anywhere on the account. Every
+        // key we handed out may now name a different library.
+        {
+            let mut guard = source.lib.lock().await;
+            guard.set_machine_identifier(String::new()); // unidentifiable again
+            let (_, installed, binding) =
+                source.install_under_lock(&mut guard, false, server_with_id("machine-B", "b.example"));
+            assert!(installed);
+            assert_eq!(
+                binding, 1,
+                "this install may have swapped the server underneath the keys on screen: void them"
+            );
+        }
     }
 
     #[test]
