@@ -1892,3 +1892,54 @@ clearest specimen yet: invented to fix a review finding, it shipped three new de
 of them the same silent loss it was standing next to — and every one was caught by the
 reviewers, none by the author. Its replacement (a scope on the part) is what the model
 needed from the start, and only became obvious after three rounds of being wrong about it.
+
+**r24 — 2026-07-14 — two reviewers on the r23 fixes. codex: 6 MEDIUM. grok: 3 MEDIUM.**
+Base `74fc3ad`, head `f61bc71`. Sixth round running with both reviewers converging
+independently; every finding was in an r23 fix or an r23 guard.
+
+- **r24-1 (`da99a46`) — the r23 scope was defeated on the very next navigation.** It closed
+  `clearViewErrors` and left `setError(null)` — which EVERY load start calls — wiping
+  app-scoped parts. A queue failure vanished on any navigation while its drawer was open
+  and its failure still true. **The seventh door into the same silent loss, opened by the
+  fix for the sixth.** And `app: boolean` was too coarse: codex found the other surfaces it
+  had lumped together — a Play failure raised on an open DETAIL, deleted by a search
+  teardown while that detail was still rendered; an mpv setup failure, deleted by a
+  one-character search while the mpv bar stayed mounted and playback stayed blocked. Fixed:
+  a part names the SURFACE that owns it (view / queue / mpv / detail) and is cleared by
+  that surface and nothing else. **NOT GUARDED** — this harness cannot fail a queue action,
+  an mpv install or a Play, so none of the three surfaces has an automated guard.
+- **r24-2 (in `da99a46`, guard `49a2141`) — the heal kept the failure it had just
+  repaired** (both reviewers). r23's `keepError` rebuilt Home and left the previous load's
+  500 sitting under fresh rails — the r11 lie — and since nothing retracts an untagged Home
+  failure, permanently. **Case 12 was ASSERTING this bug**: it required the stale
+  diagnostic to survive. Fixed and the case reversed.
+- **r24-3 (in `da99a46`) — the heal could paint over Welcome** (codex). It checked
+  `mode === "home"` but not `authenticated`; with the last source removed, loadHome fails
+  deterministically and paints a dead-source error over a screen with nothing to clear it —
+  the r14 hole from a new direction.
+- **r24-4 (`49a2141`) — case 14 was vacuous BOTH ways** (both reviewers). It snapshotted
+  `servedCount > 0`, already true from boot, and never emptied the hubs — so goHome served
+  Home from cache, the curated window was never captured, and an ordinary Home load could
+  satisfy it with the heal deleted.
+
+**Case 12's replacement was itself vacuous on the first attempt** — it polled for the
+ABSENCE of the stale banner and passed on the transient blank while the heal's reload was
+still in flight, so restoring `keepError` left it green. It now HOLDS the absence.
+**Ninth vacuous guard, and again the injection is the only thing that found it.**
+
+**PROCESS DISCLOSURE — `da99a46` is mis-described.** Its message covers only the
+banner-owner model, but it also contains r24-2 and r24-3 (both production fixes to the
+heal). Root cause: staging the whole of `+page.svelte` instead of the hunks just written.
+This is the THIRD one-item-per-commit violation in this plan and the SECOND mis-described
+commit (after `878c92e`), with the same root cause as both earlier ones. Not rewritten —
+history rewrite needs the owner's go.
+
+**WHAT r24 SETTLES, AND WHY THE LOOP SHOULD STOP HERE ON THIS AXIS.** The findings have
+migrated out of library-refresh-scan entirely. They are now about a PRE-EXISTING design
+weakness: one shared error banner carrying failures from four surfaces with four different
+lifetimes (the view, the queue drawer, the mpv bar, the open detail). Every round patches
+one door and the next round finds another — `linking` (r23), `app: boolean` (r24), and now
+a four-way owner enum. **The durable fix is per-surface status, exactly as r15 already did
+for scans, and that is a product change: an OWNER DECISION, not one to take mid-loop.**
+The owner model committed here is coherent and type-checked, but three of its four surfaces
+have no automated guard and cannot get one in this harness.
