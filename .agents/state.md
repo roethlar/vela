@@ -6,50 +6,53 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Now
 
-- **LIBRARY-REFRESH-SCAN: both slices IMPLEMENTED and verified; code review
-  loop ran r1-r16** (owner "go" 2026-07-12 to implement, 2026-07-13 to run the
-  reviewloop for fixes autonomously). Plan:
-  `.agents/plans/library-refresh-scan.md` — refresh button + per-library
-  server scan trigger (owner ask while testing Jellyfin).
-  - **Where the trail lives:** the plan's `## Code review log` records every
-    round, every finding, every fix commit, the two DECLINED findings (r8-4,
-    r10-1) with their reasons, the ONE open follow-up (r13-2, owner-deferred),
-    the recorded guard gaps, and the process disclosures. Do not reconstruct
-    any of it from chat.
-  - **Rounds:** r1 4, r2 8, r3 5, r4 5, r5 4, r6 5, r7 4, r8 4, r9 2, r10 2,
-    r11 2, r12 2, r13 2, r14 4, r15 6, r16 8. The loop repeatedly found defects
-    in its OWN fixes — r11 overturned r10's DESIGN, r12 broke r11's tag, r14
-    holed r13's fix, r15 holed r14's. **Finding counts ROSE in the last four
-    rounds (2, 4, 6, 8): the loop is NOT converging.** An owner decision on
-    whether to keep running it is OPEN (## Next).
-  - **The two findings most worth knowing about:** a Plex server that
-    blackholes `/identity` while serving library routes charged a FIVE-SECOND
-    timeout to every click, forever (r16-2, `8d95fd0`) — nine rounds missed it.
-    And the Plex test mock never checked auth, so deleting the scan's token
-    header left every Plex guard green while the real feature 401s (r16-5).
-  - **Guard discipline (the transferable lesson):** THREE guards in this plan
-    were VACUOUS — a setup production cannot reach, an assertion that could not
-    distinguish fix from bug, a case that hid the loss behind a second failure.
-    None failed. None warned. Every one was caught ONLY by injecting the
-    regression and demanding the test go red. Re-prove a guard whenever the
-    behavior around it changes; a fix that teaches the app to CLEAN UP a bad
-    state silently disarms every guard asserting that state's absence after
-    settlement.
-  - **Two process violations, disclosed, not rewritten** (history rewrite needs
-    an owner go): `4cb6b2a` batches three findings; `878c92e` is MIS-DESCRIBED —
-    its message covers only an E2E fix but a `git add -A` swept two production
-    fixes and another E2E case into it. Both recorded in the plan log.
-  - **Verified at `1c2c6b1`+ (as of the r16 fixes):** E2E 16/16 on the Linux VM
-    (28 refresh cases; scanlib against an auth-demanding Plex mock), `cargo test`
-    93, clippy `-D warnings` clean, svelte-check 0/0, npm build. Every fix is
-    guard-proven red→green.
-  - **Version is still 0.1.44 — the feature is UNRELEASED and unbumped.** The
-    plan does not define a bump step, so it was not done unilaterally.
-  - **OWNER PLAYTEST OWED (the plan's Verification section, and it matters more
-    than usual):** the Plex path has no automated coverage of the frontend
-    rebind check (`sameSection`) — the E2E mock is Jellyfin, which never rebinds.
-    A human clicking through a real Plex library refresh is the only check that
-    code gets before release.
+- **LIBRARY-REFRESH-SCAN: COMPLETE — owner playtest VERIFIED on REAL PLEX
+  2026-07-14 (0.1.45).** Refresh button + per-library server scan trigger. Plan:
+  `.agents/plans/library-refresh-scan.md`. CI green at `64547a8`; E2E 17/17 on the
+  VM; `cargo test` 94; clippy `-D warnings`, svelte-check, npm build all clean.
+  - **Owner playtest (all six green, real Plex):** refresh while in a library;
+    library RENAMED then refresh (sidebar + breadcrumb both update); library
+    DELETED while standing in it then refresh (reconciled to Home); right-click →
+    Scan Library (Plex really scans — **the Plex scan path had never touched a real
+    server before this**); general use with no ~5s stalls (confirms the r16-2
+    `/identity` fix); footer 0.1.45. Detail in the plan's `## Owner playtest`.
+  - **Where the trail lives:** the plan's `## Code review log` — every round r1-r19,
+    every finding, every fix commit, the declines (r10-1 UPHELD; r8-4 and r12-1
+    OVERTURNED on independent adjudication), the guard gaps, and the process
+    disclosures. Do not reconstruct any of it from chat.
+  - **IN FLIGHT: review round r19**, dispatched to BOTH reviewers over
+    `63560a6..64547a8`, results not yet read. Prompts + outputs in the session
+    scratchpad; re-dispatch from the r18 prompt if lost (the plan's log has the
+    incantation). r19 targets the r18 fixes.
+  - **REVIEW PROTOCOL (owner, 2026-07-14) — now standing:** TWO independent
+    reviewers (`codex` and `grok`) on the same pinned diff, neither seeing the
+    other's findings; the author writes the fixes and runs every guard, red-proof
+    and E2E run. **An author may NEVER adjudicate their own decline** — it goes to
+    the reviewer that did not raise it. That rule exists because author
+    self-adjudication was tested twice and failed twice (r12-1, r8-4, both
+    overturned). Reviewer-vs-reviewer disagreement goes to the owner.
+  - **Why it is still running (r17-r18 evidence):** in this subsystem the author's
+    FIXES carry defects at the same rate as the original code. r18's HIGH — BOTH
+    reviewers found it independently — was that an r17 fix had REINTRODUCED the
+    wrong-server scan the subsystem exists to forbid; and the r17 storm fix had
+    traded a storm for the same silent truncation it was fixing. A single reviewer
+    would have shipped both.
+  - **Guard discipline (the transferable lesson):** SIX guards in this plan were
+    VACUOUS — three disarmed by the author's own later fixes, two written vacuous
+    while actively trying not to, one racing a fix just made. **None ever failed or
+    warned. Every one was caught only by injecting the regression and demanding the
+    test go red.** Re-prove a guard whenever behavior around it changes.
+  - **OPEN, recorded, not fixed:** r13-2 (reads carry no binding — owner-DEFERRED to
+    a follow-up plan, do not re-raise in review); the tall-viewport request storm is
+    untestable at the harness viewport; no guard on scan invalidation when a source
+    is removed (r16-3); a doubled RECONNECT_REQUIRED in a combined banner (bounded).
+    **`sameSection` (the frontend half of the Plex rebind protection) has NO
+    automated guard and cannot get one** — the E2E mock is Jellyfin, which never
+    rebinds. Inspection + the owner playtest are its only checks.
+  - **Two process violations, disclosed, NOT rewritten** (rewrite needs owner go):
+    `4cb6b2a` batches three findings; `878c92e` is MIS-DESCRIBED — a `git add -A`
+    swept two production fixes and an E2E case into a commit whose message covers
+    only a test fix. Root cause both times: `git add -A` instead of naming paths.
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted
@@ -139,6 +142,20 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
+- **NEXT ACTION (library-refresh-scan): read r19's two verdicts** (codex JSON +
+  grok JSON, both over `63560a6..64547a8`), merge and dedupe the findings, then fix
+  each in ONE commit with a red-proven guard. Decline nothing without sending it to
+  the OTHER reviewer — the author does not adjudicate his own declines (see ## Now).
+  If a round comes back clean from BOTH, the loop can close; nothing else is
+  outstanding on this feature except the recorded gaps.
+  - Reviewer incantations: `codex exec --sandbox read-only -o <out.json> "$(cat
+    <prompt>)" < /dev/null` (stdin MUST be closed or it hangs; it has hung once) and
+    `grok --sandbox read-only -p "$(cat <prompt>)"`. E2E is Linux-only: see
+    `.agents/machines.md` for the VM (login-shell cargo).
+- **RED-PROOF EVERY GUARD, ALWAYS.** Six vacuous guards in this plan; not one was
+  caught by review, CI or a green run. Land the fix, THEN inject the regression, THEN
+  demand the test fail for the RIGHT reason. Restore from a committed state, never a
+  stale file backup (that silently reverted work once).
 - No pending playtest ask from the 2026-07-09/10 work — both fixes
   (context-menu Play, hero episode Info) are owner-verified on 0.1.40/41.
 - **machine-local (mac host `/Users/michael/Dev/vela`):** the owner's Linux
