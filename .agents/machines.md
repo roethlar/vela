@@ -38,14 +38,26 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   `localhost`, which is the VM itself. The suite does not stop it: a TCP proxy in the
   runner forwards to it and killing the proxy is an instant, deterministic "server went
   away". Never touch the owner's running server to make a test fail.
-- **Plex (NOT COVERED, and cannot be from here):** `michael@altiera` (10.1.10.59:32400,
-  Arch, `plexmediaserver.service`). The VM can reach it by IP; there is no DNS for the
-  name. But it CANNOT be scripted offline: `sudo` needs a password on both boxes, so
-  neither a `systemctl stop` nor a VM-side firewall rule is available — and a
-  `plex-watchdog.timer` restarts it every 5 minutes, which would race any test that got
-  that far. It also cannot be proxied: it is HTTPS behind a `plex.direct` certificate,
-  so interposing needs a hosts entry (root). **The Plex-only gaps — `sameSection`, the
-  section binding, the rebind path — therefore remain inspection + owner playtest.**
+- **Plex (COVERED as of 2026-07-14):** `michael@altiera` (10.1.10.59:32400, Arch,
+  `plexmediaserver.service`). The VM reaches it over its `plex.direct` HTTPS name; there
+  is no DNS for the short name, so use the IP or the plex.direct host.
+  - It CANNOT be proxied (HTTPS behind a `plex.direct` certificate), so a live test stops
+    the REAL service. The owner installed a NOPASSWD sudoers rule scoped to FOUR literal
+    commands — start/stop `plexmediaserver.service` and `plex-watchdog.timer`, nothing
+    else (`/etc/sudoers.d/vela-e2e`; remove with `sudo rm` to revoke).
+  - **`plex-watchdog.timer` restarts Plex every 5 minutes.** It must be stopped for the
+    window and restored after, or a test is racing a robot.
+  - **Plex is restored on EVERY exit path** — scenario cleanup, the control server's
+    signal handlers, and the launcher's trap. A crashed test must never leave the owner's
+    server down. If you ever see `FAILED TO RESTORE PLEX`, start it by hand.
+  - The VM was deliberately NOT given an SSH key on the Plex box: that is persistent
+    access to the owner's server, granted for a test. The Mac (which already has access)
+    runs `scripts/live-control.mjs` for the length of one run — host-only address,
+    ephemeral port, per-run secret in the path, two argument-less verbs.
+- **STILL NOT COVERED, anywhere:** a Plex REBIND. It needs a SECOND Plex server, which
+  does not exist here — so `sameSection` and the section-binding comparison remain
+  inspection-only. Everything else on the Plex path (real section keys, provenance, a
+  real scan, the offline path) is now exercised by `live-plex`.
 - **Credentials:** extracted from `~/Library/Application Support/com.vela.vela/config.json`
   at run time by `scripts/e2e-live.sh`, written 0600 to the VM's `/tmp`, and deleted on
   exit. Gitignored. Never printed, never logged, never committed.
