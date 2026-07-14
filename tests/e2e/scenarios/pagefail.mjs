@@ -327,7 +327,7 @@ export default {
       `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
       "Home",
     );
-    // Sit past the parked repaint's landing (6s) and the publish it would have made.
+    // Sit past the parked repaint's landing and the publish it would have made.
     // Polling for "the banner is null" would pass instantly — before the race this
     // case exists to guard has even run.
     await new Promise((r) => setTimeout(r, 8000));
@@ -335,6 +335,61 @@ export default {
       await banner(driver),
       null,
       "the user left the grid this edit was about: its failure describes a view that is gone, and does not belong pasted over the one they are standing on",
+    );
+
+    // ── 6. A successful refresh must not RETRACT a failed edit's message ──
+    // The banner can hold two failures with different OWNERS: a listing failure, owned
+    // by the load that produced it and retractable once a refresh replaces those cards
+    // (codex r11), and an edit's failure, owned by no load and retractable by nobody.
+    // r19 combined them into one string under the LISTING's tag — so the refresh's
+    // retract took the edit's message with it, and a user whose grid was repaired
+    // never learned their change had failed (codex + grok, r20). The same loss r19
+    // fixed, arriving through the retract door instead of the publish door.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "a healthy grid to edit from",
+    );
+    // A refresh that will SUCCEED, but slowly: it stays in flight while the edit runs,
+    // then claims the grid and repairs it — which is what arms the retract branch.
+    mock.state.viewsDelayMs = 6000;
+    const refresh4 = await driver.find("css selector", "button.refreshbtn");
+    await driver.click(refresh4);
+
+    // Inside that window: the edit 401s and its recovery repaint 500s. The repaint
+    // claims a generation NEWER than the action's, so it is not silenced — it publishes
+    // a TAGGED listing failure, and the edit adds its untagged one.
+    mock.state.unauthNextPlayed = true;
+    mock.state.failNextItems = true;
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () => {
+        const b = await banner(driver);
+        return b && b.includes("500") && b.includes("reconnect") ? true : null;
+      },
+      "both failures on screen before the refresh settles",
+    );
+
+    // The refresh now claims the grid and succeeds. Its cards replace the ones the
+    // failed repaint never loaded, so the LISTING diagnostic is superseded — and the
+    // retract must take that, and only that.
+    await settle(driver);
+    mock.state.viewsDelayMs = 0;
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "the refresh repairs the grid",
+    );
+    const afterRetract = await banner(driver);
+    assert.ok(
+      afterRetract && afterRetract.includes("reconnect"),
+      `a refresh may retract the listing failure it superseded — never the edit failure it did not: the user's change still failed and nothing else will tell them — got ${JSON.stringify(afterRetract)}`,
+    );
+    assert.ok(
+      !afterRetract.includes("500"),
+      `...and the listing diagnostic IS the refresh's to take back: its cards are on screen now — got ${JSON.stringify(afterRetract)}`,
     );
 
     assert.equal(

@@ -87,25 +87,47 @@
   let loadingMore = $state(false);
   let offset = $state(0);
   let hasMore = $state(true);
-  let error = $state<string | null>(null);
-  // The listing generation whose failure published the visible banner; 0 when
-  // the banner came from anywhere else (a scan, a link, a search, the refresh
-  // action itself) or when there is no banner. A refresh that SUPERSEDES that
-  // load must retract its message (see refreshLibraries settlement).
+  // The banner can hold failures with DIFFERENT OWNERS at once. A listing failure is
+  // owned by the load generation that produced it, and a refresh that SUPERSEDES that
+  // load must retract it — fresh cards under a stale "couldn't load" is a lie (codex
+  // r11). A non-listing failure — a failed edit, a failed search, the refresh's own
+  // sections leg — is owned by NO generation, and no refresh may retract it.
   //
-  // Every write to `error` goes through setError so this tag cannot outlive the
-  // message it describes. An earlier version tried to keep the tag honest by
-  // remembering the text and trusting it only while `error` still matched —
-  // which fails the moment two different failures produce the SAME string, and
-  // they do: a 401 on a listing and a 401 on a scan both surface as
-  // `RECONNECT_REQUIRED`, mapped to one constant sentence by friendlyError. The
-  // refresh then retracted a scan failure it never superseded and the user was
-  // left with no status at all (codex r12). ASSIGNING `error` DIRECTLY IS A BUG.
-  // Deliberately not `$state`: nothing renders from it.
-  let errorGen = 0;
+  // One tag cannot describe both. Combining the two into a single string under the
+  // LISTING's tag handed the edit's failure to the retract: a later successful refresh
+  // repaired the grid and erased the user's edit failure along with the listing
+  // diagnostic it superseded, so they never learned their change had failed (codex +
+  // grok, r20 — the exact loss the r19 fix existed to prevent, arriving through the
+  // retract door instead of the publish door). So the banner is a LIST of owned parts,
+  // and the retract drops only the parts it actually superseded.
+  //
+  // `gen: 0` means no listing generation owns this part. Every write goes through
+  // setError/addError so a part's owner cannot outlive the message it describes. An
+  // earlier version tried to keep the tag honest by remembering the text and trusting
+  // it only while `error` still matched — which fails the moment two failures produce
+  // the SAME string, and they do: a 401 on a listing and a 401 on a scan both surface
+  // as `RECONNECT_REQUIRED`, which friendlyError maps to one constant sentence. The
+  // refresh then retracted a scan failure it never superseded and the user was left
+  // with no status at all (codex r12).
+  let errorParts = $state<{ msg: string; gen: number }[]>([]);
+  const error = $derived(
+    errorParts.length === 0 ? null : errorParts.map((p) => p.msg).join("; "),
+  );
   function setError(msg: string | null, gen = 0) {
-    error = msg;
-    errorGen = msg === null ? 0 : gen;
+    errorParts = msg === null ? [] : [{ msg, gen }];
+  }
+  // Say something without ERASING what is already there: the two writers are reporting
+  // different failures and the user needs both. Identical text is not repeated — a
+  // retried offset can fail the same way twice, and a superseded banner could
+  // otherwise appear twice in one message (codex r18, LOW).
+  function addError(msg: string, gen = 0) {
+    if (!errorParts.some((p) => p.msg === msg)) errorParts = [...errorParts, { msg, gen }];
+  }
+  // Retract every part owned by a load through `claimedGen` — and nothing else. An
+  // untagged part is not the refresh's to take back, and a NEWER load's failure
+  // supersedes the refresh in turn.
+  function retractThrough(claimedGen: number) {
+    errorParts = errorParts.filter((p) => !(p.gen && p.gen <= claimedGen));
   }
   let sort = $state("titleSort:asc");
   let searchQuery = $state("");
@@ -788,35 +810,29 @@
         const abandoned = claimedGen
           ? []
           : suppressedFailures.filter((f) => f.gen === loadGen);
-        const msgs = [...live.map((f) => f.msg), ...abandoned.map((f) => f.msg)];
-        if (msgs.length > 0) {
-          // A load NEWER than this action's (it supersedes us — see the retract
-          // branch below) may already have banner'd, and if it still owns the
-          // grid its failure is the reason the grid is empty. Publishing over it
-          // would erase the true cause and leave only our sections diagnostic —
-          // the retract branch already knows not to touch a newer banner, and the
-          // publish branch must know it too (grok r17). Keep it, say our piece
-          // after it, and leave the tag with the load that still owns the grid.
-          // The click cleared the banner, so ANY banner here was published during
-          // our run, by someone else: a newer listing load, a failed search, a
-          // failed edit. None of them are ours to erase — and the one that owns the
-          // grid is usually the only thing explaining why it is empty. Say our piece
-          // after theirs, and leave the tag where it was (untagged writes carry 0,
-          // which is exactly right — see setError, codex r17).
-          const theirs = error;
-          const dedup = [...new Set(msgs)]; // a retried offset can hold the same failure twice
-          if (theirs !== null) setError(`${theirs}; ${dedup.join("; ")}`, errorGen);
-          else setError(dedup.join("; "));
+        if (live.length > 0 || abandoned.length > 0) {
+          // The click cleared the banner, so ANY part still here was published during
+          // our run, by someone else: a newer listing load, a failed search, a failed
+          // edit. None of them are ours to erase — and the one that owns the grid is
+          // usually the only thing explaining why it is empty (grok r17). Say our
+          // piece AFTER theirs, each part under its own owner.
+          //
+          // Our own legs failed, and no listing generation owns a sections/home leg —
+          // they are untagged, so no future refresh can retract them. But a listing
+          // failure we SILENCED keeps the generation that produced it: if a later
+          // refresh replaces that grid, its diagnostic must go with the cards it
+          // described.
+          for (const f of live) addError(f.msg);
+          for (const f of abandoned) addError(f.msg, f.gen);
         }
         // Nothing of ours failed — but a load we SUPERSEDED may have published a
-        // banner after the click cleared the surface. Its cards are gone,
-        // replaced by ours, so its failure no longer describes anything on
-        // screen: fresh cards under a stale "couldn't load" message (codex r11).
-        // Retract it, and ONLY it — a load NEWER than the one we claimed
-        // (`errorGen > claimedGen`) supersedes US in turn, and its failure is
-        // the one the user needs to see. The text check keeps the tag honest:
-        // if any other banner replaced this one, it is not ours to touch.
-        else if (claimedGen && errorGen && errorGen <= claimedGen) setError(null);
+        // banner after the click cleared the surface. Its cards are gone, replaced by
+        // ours, so its failure no longer describes anything on screen: fresh cards
+        // under a stale "couldn't load" message (codex r11). Retract it, and ONLY it —
+        // a NEWER load supersedes US in turn and its failure is the one the user
+        // needs, and an UNTAGGED part (an edit's failure) was never ours to take back
+        // at all (codex + grok, r20).
+        else if (claimedGen) retractThrough(claimedGen);
       }
     } finally {
       refreshing = false;
@@ -1479,35 +1495,30 @@
       // they need.
       const reload = refreshWatchState();
       // Whichever leg it took, it bumped `loadGen` synchronously on the way out
-      // (resetAndLoad / loadHome / runSearch / runPersonView all do). That is the
-      // generation OUR repaint claimed.
+      // (resetAndLoad / loadHome / runSearch / runPersonView all do).
       const myGen = loadGen;
       const myEpoch = navEpoch;
       await reload;
-      // That await is a long window, and publishing into it blindly was wrong in
-      // both directions (codex + grok, r19).
+      // The await is a long window and the user does not wait in it. If they LEFT,
+      // this failure describes a grid that is gone — it does not belong on the screen
+      // they are looking at now (codex + grok, r19).
       //
-      // The user may have LEFT. Then this failure is about a grid that is gone, and
-      // painting it on the new root both misplaces it and covers that root's own
-      // status. Left = the surface changed AND a different load owns the content:
-      // selecting a library, going home, drilling, a crumb move and a search all do
-      // both. A modal opening or closing bumps `navEpoch` alone and leaves the grid
-      // — and the item — exactly where they were, so `navEpoch` by itself is too
-      // strict a test for an EDIT: it would silently drop the very failure r18 was
-      // fixed to preserve, because the user happened to open a card.
+      // Ask the view WHAT IT IS, rather than inferring it from counters. The r19 gate
+      // tried `navEpoch` and `loadGen` together and was wrong in both directions: a
+      // Plex link replaces the whole view with the device-code screen while bumping no
+      // load generation at all, and re-selecting the library you are already in bumps
+      // both counters without going anywhere (codex + grok, r20).
       if (myEpoch !== navEpoch && myGen !== loadGen) return;
-      // Still here — so we are the current repaint, or a REFRESH claimed this same
-      // root while we ran (that bumps `loadGen` but never `navEpoch`). Either way
-      // someone else's message may now be on screen: our own repaint's, if it failed
-      // too and is the only thing explaining the empty grid it left behind; or the
-      // refresh settlement's. Overwriting it with the edit's message alone just
-      // trades one lost failure for the other — the same swap r18 made, pointing the
-      // other way. Both are true and the user needs both: keep theirs, say ours
-      // after it, and leave the tag with the load that owns the grid (untagged
-      // writes carry 0 — exactly as the refresh settlement does).
-      const theirs = error;
-      if (theirs !== null) setError(`${theirs}; ${String(e)}`, errorGen);
-      else setError(String(e));
+      // Still on the root the edit was made in. Someone else's message may be on
+      // screen — our own repaint's, if it failed too and is the only thing explaining
+      // the empty grid it left behind, or the refresh settlement's. Overwriting it
+      // trades one lost failure for the other (the swap r18 made, pointing the other
+      // way). Both are true; add ours to theirs.
+      //
+      // UNTAGGED: no listing generation owns an edit's failure, so no refresh may
+      // retract it. Inheriting the repaint's tag is how a successful refresh came to
+      // erase the very message this catch exists to deliver (codex + grok, r20).
+      addError(String(e));
     }
   }
 
