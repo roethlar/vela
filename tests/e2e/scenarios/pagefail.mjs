@@ -14,7 +14,12 @@
 // other scenario has — hence its own mock rather than disturbing refresh.mjs's
 // 28 cases.
 import assert from "node:assert/strict";
-import { pollUntil, mockSource, seedConfig } from "../helpers.mjs";
+import {
+  pollUntil,
+  mockSource,
+  seedConfig,
+  openLibraryGrid,
+} from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
 
 let mock;
