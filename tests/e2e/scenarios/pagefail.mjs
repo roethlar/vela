@@ -241,14 +241,16 @@ export default {
     await driver.click(refresh3);
     mock.state.failNextViews = true; // ...and its own leg will fail (consumed at respond)
 
-    // A newer generation takes the grid and its listing dies: a TAGGED banner the
-    // action did not silence and will not supersede. The grid empties — which is
-    // the whole point: that failure is the only thing explaining the emptiness.
-    mock.state.unauthNextItems = true;
-    await watchToggle(driver, "Movie 059", "Mark watched");
+    // The banner published during the run must be UNTAGGED — a failed EDIT, not a
+    // failed listing. A tagged listing banner was already preserved by the narrow
+    // predicate this widening replaced (`errorGen > gridActionBaseGen &&
+    // errorGen === loadGen`), so arming one would leave the widening unguarded:
+    // restore the narrow condition and the case would still pass (grok r18).
+    mock.state.unauthNextPlayed = true;
+    await watchToggle(driver, "Movie 059", "Mark watched"); // the EDIT 401s
     await pollUntil(
       async () => ((await banner(driver)) ? true : null),
-      "the newer load's 401 must banner",
+      "the failed edit's banner (untagged — nobody's generation owns it)",
     );
 
     await settle(driver);

@@ -1061,7 +1061,14 @@ export default {
       "...and the grid must be showing the refreshed cards, not an empty view",
     );
 
-    // ── 25. The refresh may only retract the banner it SUPERSEDED ───────
+    // ── 25. A scan's status is not the refresh's to retract ────────────
+    // NOTE (grok r18): this case no longer guards r12-2's generation-tag funnel,
+    // and must not claim to. After r15 the colliding writer is a SCAN, which lives
+    // on `div.scanerror`; settlement only ever touches `error`, so reverting the
+    // funnel cannot turn this red. What it DOES guard is the surface separation:
+    // the refresh must not reach across and clear a scan's status, under the exact
+    // text collision that defeated the old text-scoped tag. The funnel itself is
+    // guarded by `pagefail` case 2, which is the only case that can distinguish it.
     // Case 24's retraction is scoped by generation. The first attempt scoped it
     // by TEXT as well — remembering what the superseded load wrote and clearing
     // only while the banner still said exactly that. Two different failures can
