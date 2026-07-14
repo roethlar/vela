@@ -170,47 +170,58 @@ export default {
 
     // ── 2. The refresh may only retract a banner it SUPERSEDED ─────────
     // `setError` clears the generation tag on every NON-listing write, so a
-    // gen-scoped retraction cannot take down a banner that merely shares its text
-    // (r12-2). Nothing guarded that any more: refresh case 25 was written when a
-    // scan wrote to the shared banner, and r15 moved scans onto their own surface,
-    // so the case went vacuous — revert the funnel and it still passes (grok r17).
+    // gen-scoped retraction cannot take down a banner that merely shares its
+    // generation lineage (r12-2). Nothing guarded that any more: case 25 was
+    // written when a scan wrote to the shared banner, and r15 moved scans onto
+    // their own surface, so it went vacuous — revert the funnel and it still
+    // passed (grok r17).
     //
-    // The collision needs a LISTING failure (tagged) replaced by a NON-listing
-    // failure with the SAME rendered text, on a grid root, with cards still on
-    // screen. Only a library that PAGES can do that: a failed first page leaves an
-    // empty grid and nothing to act on. A 401 gives both writers the identical
-    // sentence via friendlyError.
-    mock.state.unauthNextItems = true;
-    await scrollGridToEnd(driver); // page 3 dies 401 -> TAGGED banner
-    await pollUntil(
-      async () => ((await banner(driver)) ? true : null),
-      "the listing's 401 must banner",
-    );
-
-    // A watch-state edit now fails with the same 401 — a NON-listing writer taking
-    // over the banner. It must clear the listing's tag with it.
-    mock.state.unauthNextPlayed = true;
-    // A card that is actually ON SCREEN: the grid is scrolled to its end, so the
-    // first card's context menu would open above the viewport and be unclickable.
-    await watchToggle(driver, "Movie 119", "Mark watched");
-    await pollUntil(
-      async () => ((await banner(driver)) ? true : null),
-      "the watch-state 401 must banner",
-    );
-
-    // The refresh now claims the grid at a HIGHER generation and succeeds. It
-    // superseded the listing — but the banner on screen is the watch-state
-    // failure's, which it never superseded and must not touch. If the tag survived
-    // the non-listing write, the refresh retracts it by generation and the user is
-    // left with no sign their edit failed.
-    const beforeRefresh = await banner(driver);
+    // Both writes must happen DURING the action: the refresh clears the banner at
+    // the click, so nothing published before it can survive to be wrongly
+    // retracted. And the tagged listing failure must leave CARDS on screen, or
+    // there is nothing left to drive a non-listing write with — which rules out a
+    // failed reload (it empties the grid) and leaves a failed PAGE, on a
+    // generation newer than the action's (so it is published, not silenced).
+    mock.state.viewsDelayMs = 6000; // the action stays in flight throughout
     const refresh2 = await driver.find("css selector", "button.refreshbtn");
     await driver.click(refresh2);
+
+    // A successful edit re-enters the root, claiming a generation NEWER than the
+    // action's. Its reload succeeds, so the grid keeps cards.
+    await watchToggle(driver, "Movie 119", "Mark watched");
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "the edit's reload lands (a newer generation now owns the grid)",
+    );
+
+    // Now its NEXT page fails. Newer than the action's generation, so the action
+    // does not silence it: a TAGGED banner, with the cards still there.
+    mock.state.unauthNextItems = true;
+    await scrollGridToEnd(driver);
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the newer load's 401 must banner (tagged)",
+    );
+
+    // A failing edit now takes the banner over — a NON-listing write, which must
+    // carry the tag away with it.
+    mock.state.unauthNextPlayed = true;
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the failed edit's banner",
+    );
+    const beforeSettle = await banner(driver);
+
+    // The action finally claims the grid and succeeds. It superseded the LISTING —
+    // not the edit. If the tag survived the non-listing write, it retracts by
+    // generation and the user never learns their edit failed.
     await settle(driver);
+    mock.state.viewsDelayMs = 0;
     assert.equal(
       await banner(driver),
-      beforeRefresh,
-      "the refresh superseded the LISTING, not the watch-state edit: it must not retract a banner it never superseded, however alike the two messages read",
+      beforeSettle,
+      "the refresh superseded the listing, not the edit: a banner it never published and never superseded is not its to retract",
     );
 
     assert.equal(
