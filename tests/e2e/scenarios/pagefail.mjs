@@ -232,25 +232,20 @@ export default {
 
     // ── 3. A failing refresh must not erase the banner that explains the grid ──
     // Case 2's refresh SUCCEEDS, so settlement publishes nothing and never runs the
-    // preservation branch at all — remove it and case 2 stays green (codex r17).
-    // Here the action's own sections leg FAILS, so it has something to say; a
-    // banner published during the run (by a load it never superseded) must survive
-    // that, because it is the one explaining the empty grid.
-    mock.state.viewsDelayMs = 6000;
+    // preservation branch at all — remove that branch and case 2 stays green
+    // (codex r17). Here the action's own sections leg FAILS, so it has something to
+    // say, and a banner published DURING the run by a load it never superseded must
+    // survive that — it is the one explaining why the grid is empty.
+    mock.state.viewsDelayMs = 6000; // the action is in flight throughout
     const refresh3 = await driver.find("css selector", "button.refreshbtn");
     await driver.click(refresh3);
-    mock.state.failNextViews = true; // the action's OWN leg will fail
+    mock.state.failNextViews = true; // ...and its own leg will fail (consumed at respond)
 
-    // A newer generation takes the grid and its next page dies: a tagged banner
-    // the action did not silence and will not supersede.
-    // Case 2's edit on this card FAILED (401), so it is still unwatched.
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "the edit's reload lands",
-    );
+    // A newer generation takes the grid and its listing dies: a TAGGED banner the
+    // action did not silence and will not supersede. The grid empties — which is
+    // the whole point: that failure is the only thing explaining the emptiness.
     mock.state.unauthNextItems = true;
-    await scrollGridToEnd(driver);
+    await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(
       async () => ((await banner(driver)) ? true : null),
       "the newer load's 401 must banner",
@@ -261,11 +256,11 @@ export default {
     const both = await banner(driver);
     assert.ok(
       both && both.includes("reconnect"),
-      `the listing failure that explains this empty grid must survive the refresh's own diagnostic — got ${JSON.stringify(both)}`,
+      `the failure that explains this empty grid must survive the refresh's own diagnostic — got ${JSON.stringify(both)}`,
     );
     assert.ok(
-      both.includes("500") || both.includes("Views"),
-      "...and the refresh must still report its own failure alongside it",
+      both.includes("Views"),
+      `...and the refresh must still report its own failure alongside it — got ${JSON.stringify(both)}`,
     );
 
     assert.equal(
