@@ -794,3 +794,36 @@ finding - it means embedding cannot be planned, only prototyped.
 Supersedes:
 Nothing. Extends the 2026-05-23 external-mpv decision from a preference into a
 researched position, and closes the owner's standing open question.
+
+## 2026-07-14 - Code review runs TWO independent reviewers; an author never adjudicates their own decline
+
+Status: APPROVED (owner, 2026-07-14). STANDING - applies to every review loop,
+not just the one that produced it. Carved out of `.agents/state.md` on
+2026-07-14 so it survives that entry's rotation to the archive.
+
+Decision:
+TWO independent reviewers (`codex` and `grok`) review the same pinned diff,
+neither seeing the other's findings. The author writes the fixes and runs every
+guard, red-proof and E2E run.
+
+AN AUTHOR MAY NEVER ADJUDICATE THEIR OWN DECLINE. A declined finding goes to the
+reviewer that did NOT raise it. Reviewer-vs-reviewer disagreement goes to the
+owner - but only when the two positions genuinely cannot both hold; if both are
+satisfiable at once, fix both rather than escalating (r23 precedent).
+
+Reason:
+Author self-adjudication was tested twice and failed twice: r8-4 and r12-1 were
+both declined by the author and both OVERTURNED on independent adjudication.
+
+The two-reviewer requirement is not belt-and-braces. Across the r17-r24 loop the
+two reviewers converged, independently, on the same top finding in FOUR straight
+rounds - and in each of those rounds the finding was in the PREVIOUS round's fix.
+A single reviewer, or the author alone, ships every one of them.
+
+Evidence:
+`.agents/plans/library-refresh-scan.md` `## Code review log` (r1-r24), and the
+guard-discipline practices carved into `.agents/repo-guidance.md` at the same
+time.
+
+Supersedes:
+Nothing. Formalizes the protocol that the library-refresh-scan loop arrived at.

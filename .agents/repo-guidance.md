@@ -92,3 +92,35 @@ Rules the command list doesn't carry on its own:
 - Generated outputs and dependency/build directories are not source of truth.
   Do not edit `build/`, `.svelte-kit/`, `node_modules/`, `src-tauri/target/`,
   `src-tauri/gen/`, or packaged Arch output under `packaging/arch/pkg/`.
+
+### Guard discipline (earned the hard way, r17-r24 of library-refresh-scan)
+
+Carved out of `.agents/state.md` 2026-07-14 so it survives that entry's
+rotation. The evidence is the `## Code review log` in
+`.agents/plans/library-refresh-scan.md`; the summary is in
+`docs/history/state-archive.md`.
+
+- **Red-proof every guard, always.** Land the fix, THEN inject the regression,
+  THEN demand the test fail for the RIGHT reason. Restore from a committed
+  state, never a stale file backup (that silently reverted work once). A long
+  and still-growing list of guards in that loop turned out VACUOUS — disarmed by
+  the author's own later fixes, written vacuous while actively trying not to, or
+  left guarding a behavior that could be deleted outright with the suite green.
+  **Not one ever failed or warned.** Every one was caught only by injecting the
+  regression. Re-prove a guard whenever behavior around it changes.
+- **Prove each behavior a fix claims SEPARATELY.** One fix claiming three
+  behaviors needs three injections (r19 needed three; r20 needed four).
+- **The newest fix is the most dangerous code in the repo — not the original.**
+  Across eight consecutive rounds, the author's fixes carried defects at the same
+  rate as the code they fixed, each one opening the next door into the same
+  failure class. Review the newest fix hardest; never treat "this one is simple"
+  as a reason to skip it.
+- **A self-audit is not a check.** Three unverified author assumptions were
+  overturned by reviewers (r8-4, r12-1, r20-2). r20-2 was a defect the author
+  looked straight at during his own audit and waved through on an assumption one
+  grep would have falsified. When the author's reasoning says "this one is fine",
+  that is the moment to go and look.
+- **Before recording anything as unguardable, go and read the failure path.**
+  Two surfaces were recorded as unguardable and both were wrong, both times
+  because the author reasoned about the code instead of reading it. Building the
+  guard then found a real bug.
