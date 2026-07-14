@@ -35,7 +35,7 @@ const MOVIES = Array.from({ length: 130 }, (_, i) => ({
 
 async function cardCount(driver) {
   return driver.exec(
-    `return document.querySelectorAll('button.poster').length`,
+    `return document.querySelectorAll('main.grid button.poster').length`,
   );
 }
 async function banner(driver) {
