@@ -360,37 +360,46 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   Vela's recents — is now **owned by `.agents/plans/queue-playlists.md` S2**,
   which is the plan that explains why it matters: it is the reason the carousel
   cannot reflect the queue. Do not track it separately.)
-- **QUEUE + PLAYLISTS + CONTINUE PLAYING: PLAN DRAFTED 2026-07-14, awaiting
-  owner go before any code.** Plan `.agents/plans/queue-playlists.md`; the
-  product model and the two durable rulings are in `.agents/decisions.md`
-  (2026-07-14: the Up Next / playlists model, and video stays external). Scope
-  approved by the owner ("everything we discussed"); seven slices, S1-S7.
-  - **Origin:** the queue does not survive a restart (`lib.rs:61` holds it in
-    memory; nothing writes it to disk). Tracing that found the larger defect —
-    **the Continue Watching carousel does not reflect the queue at all**,
-    because `play_by_key` records no recent (`commands.rs:2365` says so
-    outright), so Vela's half of the hero merge stays empty and only the
-    server's hub half moves. That is the previously-queued 2026-07-10 defect;
-    this plan's S2 closes it, and it is no longer tracked separately.
+- **PLAYLISTS + CONTINUE PLAYING: PLAN DRAFTED 2026-07-14, awaiting owner go
+  before any code.** Plan `.agents/plans/playlists.md`; the product model and
+  the two durable rulings are in `.agents/decisions.md` (2026-07-14: no play
+  queue, and video stays external). Five slices, S1-S5.
+  - **THE PLAY QUEUE IS BEING DELETED** (owner ruling). Ephemeral queues are a
+    music idiom; the only preset video sequence worth having is a show binge,
+    and there the sequence IS the show's episode order — which Continue Playing
+    walks. Anything larger is a named playlist. Infuse's model, and the owner's.
+    **S1 deletes the chip, the drawer, the six `queue_*` commands, and
+    per-surface-status slice 2 (`67358fd`, landed two days earlier) with them.**
+  - **THEREFORE: step 2 of the 0.1.48 playtest ask below (the queue drawer) IS
+    MOOT.** Do not ask the owner to test a surface that is being removed. Steps
+    1 and 3 (the edit's own line, the detail page) still stand.
+  - **The real defect, and it outlives the queue:** the Continue Watching
+    carousel does not reflect anything played through the dispatcher, because
+    `play_by_key` records no recent (`commands.rs:2365` says so outright), so
+    Vela's half of the hero merge stays empty and only the server's hub half
+    moves. That is the previously-queued 2026-07-10 defect; **S2 closes it, is
+    independent of playlists, and can land first.** No longer tracked
+    separately.
   - **Already true, and it is what makes this cheap:** item keys are namespaced
     `<source_id>:<raw>` and `Registry::route` (`source/mod.rs:414`) dispatches
-    per item, so **a queue mixing Plex and Jellyfin items already plays
-    today**. Mixed-source playlists need no new dispatch machinery. Episode
-    walking for "Only TV" needs no new server API either — `children()` plus the
-    season/show keys already on `ItemDto` cover it.
-  - **Two shipped behaviours change** (call these out in the playtest ask):
-    `play_item` stops clearing the queue (`commands.rs:2380` — harmless only
-    because the queue currently dies at exit), and the queue's cursor
-    (`queue_index`) becomes consumption.
+    per item, so **a list mixing Plex and Jellyfin items already plays today**.
+    Mixed-source playlists need no new dispatch machinery. Episode walking for
+    `only-tv` needs no new server API either — `children()` plus the season/show
+    keys already on `ItemDto` cover it.
   - **The sharpest hazard:** the `on` continue-playing mode can replay an item
     the server never marks watched, forever. It needs a no-repeat guard, and it
-    must walk the SAME melded list the carousel renders — a second source of
-    truth for "what plays next" is exactly the failure class per-surface-status
-    was built to kill.
+    must walk the SAME Continue Watching list the carousel renders — a second
+    source of truth for "what plays next" is exactly the failure class
+    per-surface-status was built to kill.
   - Watch-state is already correct and must not be rebuilt: `finish()`
     (`recents.rs:61`) already drops an entry past the 95% threshold
     (`recents.rs:17`), so stopping in the end credits already counts as watched
-    and keeps no resume position.
+    and keeps no resume position — which is also the signal for Play vs
+    Resume + Play from Beginning.
+  - **The design churned hard before settling** (an "Up Next" consumption queue,
+    a melded carousel, a 5-second resume countdown — all proposed, all rejected
+    by the owner the same day). The decisions entry records what was rejected
+    and why; do not resurrect any of it from git history without reading that.
 - **v1.0.0 RELEASE TRACK (owner, 2026-07-10 — ordered LAST behind the
   functional queue above, "queue first, v1 polish goes to the bottom"):**
   (1) UI embellishments — plan QUEUED with decisions resolved

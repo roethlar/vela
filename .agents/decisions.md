@@ -667,41 +667,52 @@ The `owner`-enum-on-a-shared-part model landed in `da99a46` as the interim fix.
 That model is coherent and stays until this plan lands - it is the thing this
 plan replaces, not a thing to build on.
 
-## 2026-07-14 - Up Next is a consumption queue; playlists are durable objects
+## 2026-07-14 - There is no play queue; playlists are the only sequence
 
 Status: APPROVED (owner, 2026-07-14). Implementation plan:
-`.agents/plans/queue-playlists.md`, which owns the full model and the slices.
+`.agents/plans/playlists.md`, which owns the full model and the slices.
 
 Decision:
-Vela has two kinds of list, and they are different in kind, not just in name.
+VELA HAS NO PLAY QUEUE. "Add to queue", "Play Next", the queue chip and the
+queue drawer are DELETED. Playback context is a single item, or a named
+playlist. Do not reintroduce an ephemeral queue in any form without an explicit
+owner decision.
 
-UP NEXT is an ephemeral consumption queue behind the queue icon. It persists
-across restarts, but items fall off as they are played and do not repeat unless
-the user added them twice. Clicking the Nth item in the drawer is a SKIP-AHEAD:
-it plays, and the items above it are dropped with it. Up Next only moves
-forward.
+The owner's reasoning, recorded because it is the justification for deleting
+shipped code: an ephemeral queue is a MUSIC idiom, not a video one. The only
+preset video sequence worth having is a show binge - and there the sequence IS
+the show's own episode order, which Continue Playing already walks. Anything
+larger (a movie series; a meta-series like "all Star Trek shows in order") is a
+real named playlist. Infuse has no Up Next queue for exactly this reason: its
+verbs are play, or add to a named playlist. That is the model people expect.
 
-NAMED PLAYLISTS are durable, live in a Playlists sidebar entry, and are never
-consumed by being played. Vela's own playlists may mix items from DIFFERENT
-servers in one list - the thing no single server's playlist API can represent,
-and the reason this is a Vela-native feature. The servers' own playlists appear
-alongside them, READ-ONLY. Playing a playlist COPIES its items into Up Next;
-only playing a playlist or an explicit Clear ever wipes Up Next.
+NAMED PLAYLISTS are durable objects in a Playlists sidebar entry. PLAYING ONE
+NEVER MUTATES IT - a cursor walks the list; the list does not change. Vela's own
+playlists may mix items from DIFFERENT servers in one list, the thing no single
+server's playlist API can represent, and the reason this is a Vela-native
+feature. The servers' own playlists appear alongside them, READ-ONLY.
 
-THE CONTINUE WATCHING CAROUSEL IS ONE STRIP WITH TWO REGIONS: Up Next at the
-head, Continue Watching (recents union server hubs) behind it. Up Next flows
-into Continue Watching as it drains. A click in the queue region is a
-skip-ahead; a click in the shelf region plays that item and leaves the queue
-intact, because nothing on the shelf was ordered by the user and so nothing
-there can be "passed over". Named playlists never appear in the strip; their
-items do, once played into Up Next.
+THE PLAY VERBS ARE: Play (item with no resume position); Resume AND Play from
+Beginning, as two explicit choices (item in progress); Add to Playlist ->.
+Everywhere playback can be started.
 
-CONTINUE PLAYING is a three-mode setting consulted only when Up Next drains
-(the queue always wins while it has items): `off` stops; `on` keeps walking
-down the Continue Watching strip; `only-tv` plays the next episode in order,
-rolls into the next season, and stops when the show runs out. Default
-`only-tv`. "Next episode" means strictly the next in order, watched or not, so
-a deliberate rewatch keeps rolling.
+THERE IS NO RESUME PROMPT AND NO COUNTDOWN. It was only ever wanted for an
+in-progress item reached by AUTO-ADVANCE, and mpv owns the screen by then, so
+there is nowhere to draw it. Auto-advance onto an in-progress item resumes
+silently. This is a direct consequence of the external-video decision below; if
+embedded video were ever adopted, revisit it.
+
+THE CONTINUE WATCHING CAROUSEL IS UNCHANGED - recents union server hubs, as
+today. Playlists never appear in it. What DOES change is that plays finally
+register in it (see Reason).
+
+CONTINUE PLAYING is a three-mode setting consulted when a playlist ends or a
+single item finishes: `off` stops; `on` keeps walking down Continue Watching;
+`only-tv` plays the next episode in order, rolls into the next season, and stops
+when the show runs out. Default `only-tv`. "Next episode" means strictly the
+next in order, watched or not, so a deliberate rewatch keeps rolling. THIS IS
+THE BINGE MECHANISM, and it is what replaces the queue for the only preset video
+sequence the owner wants.
 
 PLAYLISTS ARE STORED IN THEIR OWN JSON FILE, not in `config.json` and not in a
 database. The criterion for splitting a store out of `config.json`: the data
@@ -712,28 +723,36 @@ neither, and stay in `config.json`.
 
 Reason:
 The owner's complaint was that the queue does not survive a restart. Tracing it
-found a second, larger defect: the carousel does not reflect the queue AT ALL,
-because `play_by_key` records no recent (`commands.rs:2365` says so), so Vela's
-half of the merge stays empty and only the server's hub half moves. The unified
-strip resolves what looked like an incompatibility between the queue's
-semantics and the server's next-up semantics - they are not competing answers
-to one question, they are two regions of one answer.
+found a second, INDEPENDENT defect the queue was hiding: the carousel does not
+reflect anything played through the dispatcher AT ALL, because `play_by_key`
+records no recent (`commands.rs:2365` says so outright), so Vela's half of the
+hero merge stays empty and only the server's hub half moves. That bug survives
+the queue's deletion and is the plan's S2.
 
-The `on` mode must walk the SAME melded list the carousel renders, never a
-fresh server query. A second source of truth for "what plays next" would
+The `on` mode must walk the SAME Continue Watching list the carousel renders,
+never a fresh server query. A second source of truth for "what plays next" would
 diverge from the first, which is precisely the failure class the per-surface
 status decision (above) was created to kill.
 
-SQLite was considered and rejected: it is a new native dependency touching
-every packaging target, and playlists need none of what a database provides
-(indexed queries, partial reads, concurrent writers, transactions). The one
-store that would have justified it - an unbounded metadata cache - no longer
-exists; it died with the local-source removal (2026-07-08).
+SQLite was considered and rejected: it is a new native dependency touching every
+packaging target, and playlists need none of what a database provides (indexed
+queries, partial reads, concurrent writers, transactions). The one store that
+would have justified it - an unbounded metadata cache - no longer exists; it
+died with the local-source removal (2026-07-08).
 
 Supersedes:
-The cursor-based queue (`AppState.queue_index`) and `play_item`'s
-queue-clearing behavior (`commands.rs:2380`), both of which are harmless only
-because the queue currently dies at exit.
+- The play queue itself: `AppState.queue` / `queue_index` (`lib.rs:61`), the six
+  `queue_*` commands (`commands.rs:2396-2477`), the chip and drawer, and
+  `play_item`'s queue-clearing behavior (`commands.rs:2380`). Also
+  per-surface-status slice 2 (`67358fd`), which gave the queue drawer and chip
+  their own status line - it goes with the queue, as does step 2 of the 0.1.48
+  playtest ask.
+- An earlier SAME-DAY draft of this decision (committed `9426f75`, never
+  implemented) recorded an "Up Next" ephemeral consumption queue persisted
+  alongside named playlists, with a carousel melding the two. The owner rejected
+  that model on the same day: it is a music idiom, and a scratch list that exists
+  only to protect saved playlists from playback edits is unnecessary once the
+  queue verbs it served are gone. Git history holds the original.
 
 ## 2026-07-14 - Video stays external; embedding mpv is a spike, not a plan
 
