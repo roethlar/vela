@@ -532,6 +532,7 @@
     return JSON.stringify([
       authenticated,
       pin !== null, // the device-code screen replaces the view entirely
+      linking, // ...and it is ALREADY on its way during link_begin's await
       mode,
       activeSource,
       // A Plex section key is a server-LOCAL number, so the key alone does not name a
@@ -924,8 +925,20 @@
   // (global) pin — no duplicate polling or stale errors from an old attempt.
   let linkGen = 0;
 
+  // The link flow REPLACES the view — but not until `pin` lands, and `link_begin` is a
+  // network round-trip. Through that whole window the view is still the old grid, so
+  // rootSig would say nothing had changed and a delayed publication would land there
+  // legitimately, then RIDE onto the device-code screen when the pin arrived (codex r21).
+  //
+  // Declare the intent at the START, the way onSourcesChanged declares navigation before
+  // its own await. Clearing the banner when the pin lands is the wrong cure: the queue
+  // drawer renders OVER the link screen, so a queue action's failure is still on a
+  // surface the user can see, still true, and not the link flow's to erase (codex r22).
+  let linking = $state(false);
+
   async function beginLink() {
     const gen = ++linkGen;
+    linking = true;
     // Linking REPLACES the visible root with the device-code screen, and its
     // completion calls loadEverything() — both reset the view underneath any
     // refresh already in flight. That is navigation: without the bump the
@@ -940,14 +953,7 @@
       const p = await invoke<Pin>("link_begin");
       if (gen !== linkGen) return; // a newer attempt started while we were requesting
       pin = p;
-      // THIS assignment replaces the whole view, so whatever the banner was saying is
-      // now about a screen the user cannot see — and the device-code screen offers
-      // nothing that could clear it (the r14 rule, which the Welcome teardown already
-      // follows). The bump above cannot cover this on its own: during the `link_begin`
-      // await the view is still the old grid, so a delayed publication lands there
-      // legitimately and then RIDES onto the pin screen when this line runs (codex
-      // r21).
-      setError(null);
+      linking = false; // `pin !== null` carries the same fact to rootSig from here on
       // The bump at the top of beginLink() invalidates whatever was in flight
       // THEN — but Settings closes immediately, so the user can start a Refresh
       // while link_begin is still awaiting. THIS is the moment the PIN screen
@@ -958,7 +964,10 @@
     } catch (e) {
       // e.g. invoked from Settings while offline — surface it instead of an
       // unhandled rejection, but only if this attempt is still the current one.
-      if (gen === linkGen) setError(String(e));
+      if (gen === linkGen) {
+        linking = false; // no pin is coming; the old view is what the user is left on
+        setError(String(e));
+      }
     }
   }
 
