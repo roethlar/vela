@@ -19,6 +19,7 @@ import {
   mockSource,
   seedConfig,
   openLibraryGrid,
+  goHome,
 } from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
 
@@ -268,6 +269,72 @@ export default {
     assert.ok(
       both.includes("Views"),
       `...and the refresh must still report its own failure alongside it — got ${JSON.stringify(both)}`,
+    );
+
+    // ── 4. A failed edit whose own repaint ALSO fails must report BOTH ──
+    // Cases 2 and 3 both let the edit's recovery repaint SUCCEED, so neither one
+    // exercises the ordering at all: delete the `await` in setWatched and both stay
+    // green (codex r19). The repaint CLEARS the banner as it starts and publishes
+    // its OWN failure when it lands, so the edit and its recovery are two writers
+    // racing for one surface — and whoever loses it, the user is missing something
+    // they need: what became of the change they asked for, or why the grid it left
+    // behind is empty. Both are true. Both have to be on screen.
+    //
+    // The two failures must RENDER DIFFERENTLY or no assertion can tell which one
+    // survived — two 401s collapse into the same RECONNECT_REQUIRED sentence (codex
+    // r12), which is how case 27 in refresh.mjs came to guard nothing. So: a 401
+    // edit against a 500 listing.
+    mock.state.unauthNextPlayed = true; // the edit 401s...
+    mock.state.failNextItems = true; // ...and the repaint it kicks off 500s
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () =>
+        (await cardCount(driver)) === 0 && (await banner(driver)) ? true : null,
+      "the repaint fails too, leaving an empty grid and a banner",
+    );
+    const bothWriters = await banner(driver);
+    assert.ok(
+      bothWriters.includes("reconnect"),
+      `the edit is what the user ASKED for, and its failure must survive its own recovery — drop the await and the failing repaint publishes last, erasing it — got ${JSON.stringify(bothWriters)}`,
+    );
+    assert.ok(
+      bothWriters.includes("500"),
+      `...and the repaint's failure is the only thing explaining the empty grid it left behind — publish the edit alone and it is erased — got ${JSON.stringify(bothWriters)}`,
+    );
+
+    // ── 5. A failed edit must not paint on a root the user has LEFT ──
+    // The publish waits for the repaint; the user does not. A slow recovery leaves
+    // time to go Home, whose own load clears the surface — and the edit's failure
+    // then lands on a view it says nothing about, covering that view's status
+    // (codex + grok, r19).
+    //
+    // LEAVING is the surface changing AND a new load taking over the content, which
+    // is what goHome does. A modal opening moves `navEpoch` alone and must NOT drop
+    // the message: the grid, and the item the edit was about, are still right there.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "a healthy grid to edit from",
+    );
+    mock.state.unauthNextPlayed = true; // the edit 401s...
+    mock.state.itemsDelayMs = 6000; // ...and its recovery repaint parks
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await goHome(driver);
+    await driver.waitFor(
+      `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
+      "Home",
+    );
+    // Sit past the parked repaint's landing (6s) and the publish it would have made.
+    // Polling for "the banner is null" would pass instantly — before the race this
+    // case exists to guard has even run.
+    await new Promise((r) => setTimeout(r, 8000));
+    assert.equal(
+      await banner(driver),
+      null,
+      "the user left the grid this edit was about: its failure describes a view that is gone, and does not belong pasted over the one they are standing on",
     );
 
     assert.equal(

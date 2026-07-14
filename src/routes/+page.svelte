@@ -1477,8 +1477,37 @@
       // its own: the user would learn the reload failed and never learn their edit
       // had (codex r18). The edit is what they asked for; its failure is the one
       // they need.
-      await refreshWatchState();
-      setError(String(e));
+      const reload = refreshWatchState();
+      // Whichever leg it took, it bumped `loadGen` synchronously on the way out
+      // (resetAndLoad / loadHome / runSearch / runPersonView all do). That is the
+      // generation OUR repaint claimed.
+      const myGen = loadGen;
+      const myEpoch = navEpoch;
+      await reload;
+      // That await is a long window, and publishing into it blindly was wrong in
+      // both directions (codex + grok, r19).
+      //
+      // The user may have LEFT. Then this failure is about a grid that is gone, and
+      // painting it on the new root both misplaces it and covers that root's own
+      // status. Left = the surface changed AND a different load owns the content:
+      // selecting a library, going home, drilling, a crumb move and a search all do
+      // both. A modal opening or closing bumps `navEpoch` alone and leaves the grid
+      // — and the item — exactly where they were, so `navEpoch` by itself is too
+      // strict a test for an EDIT: it would silently drop the very failure r18 was
+      // fixed to preserve, because the user happened to open a card.
+      if (myEpoch !== navEpoch && myGen !== loadGen) return;
+      // Still here — so we are the current repaint, or a REFRESH claimed this same
+      // root while we ran (that bumps `loadGen` but never `navEpoch`). Either way
+      // someone else's message may now be on screen: our own repaint's, if it failed
+      // too and is the only thing explaining the empty grid it left behind; or the
+      // refresh settlement's. Overwriting it with the edit's message alone just
+      // trades one lost failure for the other — the same swap r18 made, pointing the
+      // other way. Both are true and the user needs both: keep theirs, say ours
+      // after it, and leave the tag with the load that owns the grid (untagged
+      // writes carry 0 — exactly as the refresh settlement does).
+      const theirs = error;
+      if (theirs !== null) setError(`${theirs}; ${String(e)}`, errorGen);
+      else setError(String(e));
     }
   }
 
