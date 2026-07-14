@@ -2564,7 +2564,10 @@ fn attr(xml: &str, name: &str) -> Option<String> {
             Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
                 for a in e.attributes().flatten() {
                     if a.key.as_ref() == name.as_bytes() {
-                        return a.unescape_value().ok().map(|v| v.into_owned());
+                        return a
+                            .normalized_value(quick_xml::XmlVersion::Implicit1_0)
+                            .ok()
+                            .map(|v| v.into_owned());
                     }
                 }
             }

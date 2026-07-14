@@ -790,7 +790,11 @@ impl PlexLibrary {
         let mut order_keys: Vec<String> = Vec::new();
         {
             let mut rdr = quick_xml::Reader::from_str(&body);
-            rdr.trim_text(true);
+            // 0.41 moved the reader's knobs behind `config_mut()`. This one is not
+            // load-bearing — the loop below reads only Start/Empty events and pulls
+            // ATTRIBUTES off them, never a text node — but keep it, so the parse is
+            // configured exactly as it was rather than silently differently.
+            rdr.config_mut().trim_text(true);
             let mut buf = Vec::new();
             loop {
                 match rdr.read_event_into(&mut buf) {
@@ -1399,8 +1403,14 @@ fn identity_machine_identifier(xml: &str) -> Option<String> {
 }
 
 /// Decode an attribute value, unescaping XML entities (e.g. `&amp;` -> `&`).
+///
+/// quick-xml 0.41 deprecated `unescape_value` in favour of `normalized_value`. It is not a
+/// behaviour change: the deprecated method's whole body is
+/// `normalized_value_with(XmlVersion::Implicit1_0, ..)`, so passing `Implicit1_0` here is
+/// byte-for-byte what it already did. Spelling it out rather than taking the new default,
+/// because the new default is a different XML version and this parses whatever Plex sends.
 fn av(a: &quick_xml::events::attributes::Attribute) -> String {
-    a.unescape_value()
+    a.normalized_value(quick_xml::XmlVersion::Implicit1_0)
         .map(|c| c.into_owned())
         .unwrap_or_else(|_| String::from_utf8_lossy(&a.value).into_owned())
 }
