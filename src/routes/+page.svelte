@@ -177,10 +177,13 @@
   // Shared by the playback-ended event and watched-state edits: anything
   // that changes watch state re-fetches hubs + recents so the hero flow and
   // progress bars reflect it without a restart.
-  function refreshWatchState() {
+  // Returns the reload it kicked off, so a caller that must publish AFTER the
+  // repaint can actually wait for it (an un-awaited `await` on a void function is
+  // a no-op that looks correct — see setWatched, codex r18).
+  function refreshWatchState(): Promise<unknown> {
     heroPos = 0; // the most recent change should be front and center
     if (mode === "home") {
-      loadHome(++homeGen);
+      return loadHome(++homeGen);
     } else {
       // The hidden Home hubs are stale now; empty them so goHome() re-fetches.
       hubs = [];
@@ -188,10 +191,10 @@
       // update. The person root re-runs its own query, gated to the ROOT
       // level (plan-review r2): a drilled level under it refreshes through
       // resetAndLoad, whose crumb has a ratingKey.
-      if (searchTerm) runSearch(searchTerm, { rerun: true });
-      else if (personView && crumbs.length === 1)
-        runPersonView(personView, { rerun: true });
-      else resetAndLoad();
+      if (searchTerm) return runSearch(searchTerm, { rerun: true });
+      if (personView && crumbs.length === 1)
+        return runPersonView(personView, { rerun: true });
+      return resetAndLoad();
     }
   }
 
@@ -1466,12 +1469,15 @@
       // rendered the transient curated state meanwhile. Re-fetch so the
       // rolled-back truth repaints.
       //
-      // Publish AFTER that, not before: the re-fetch goes through
-      // `resetAndLoad`, which clears the banner as it starts. Reporting first
-      // meant the edit's own repaint wiped the report — the comment here used
-      // to claim the banner survived, and it did not. A failed mark-watched
-      // flashed an error and swallowed it.
-      refreshWatchState();
+      // Publish AFTER that, and after it has SETTLED. The re-fetch goes through
+      // `resetAndLoad`, which clears the banner as it starts — reporting first
+      // meant the edit's own repaint wiped the report (a failed mark-watched
+      // flashed an error and swallowed it). And reporting without awaiting it
+      // meant a repaint that ALSO failed would overwrite the edit's message with
+      // its own: the user would learn the reload failed and never learn their edit
+      // had (codex r18). The edit is what they asked for; its failure is the one
+      // they need.
+      await refreshWatchState();
       setError(String(e));
     }
   }
@@ -1500,6 +1506,25 @@
   function closeDetail() {
     navEpoch++; // closing the detail surface is navigation (see navEpoch)
     detailView = null;
+    // The grid comes back. If it still has pages but cannot SCROLL — a tall or
+    // hi-dpi viewport where the cards already fit — then nothing will ever ask for
+    // them: `onScroll` cannot fire on a grid that does not scroll, and the
+    // auto-fill tail stops after a failed page (it must, or it storms the server).
+    // So re-establish the fill-the-viewport invariant here, once, on the user's own
+    // action. Without this, the very case r8-4 fixed comes back through another
+    // door: a page silenced by a refresh, abandoned when the user opened a detail,
+    // and a library left silently truncated on Back (codex r18).
+    tick().then(() => {
+      if (
+        mode === "browse" &&
+        hasMore &&
+        !loadingMore &&
+        gridEl &&
+        gridEl.scrollHeight <= gridEl.clientHeight
+      ) {
+        loadMore();
+      }
+    });
   }
 
   // The detail page's own crumb in the trail: a movie's title, a season
