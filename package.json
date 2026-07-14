@@ -11,7 +11,8 @@
     "preview": "vite preview",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "e2e": "node tests/e2e/run.mjs",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "e2e:live": "bash scripts/e2e-live.sh"
   },
   "license": "MIT",
   "dependencies": {

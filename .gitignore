@@ -51,3 +51,6 @@ $RECYCLE.BIN/
 *.lnk
 *.tmp
 .agents/review/*.local.json
+
+# live-e2e credentials (extracted at run time; never committed)
+vela-live-creds*.json

@@ -152,7 +152,13 @@ if (!fs.existsSync(appBinary)) {
 fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
 
-const scenarioDir = path.join(e2eDir, 'scenarios');
+// LIVE runs load from tests/e2e/live/ instead: those drive REAL servers, so they are not
+// hermetic, they are not deterministic in the way the mocks are, and they must never gate
+// an ordinary change. They are opt-in (`npm run e2e:live`) and never part of the default
+// suite — a flaky test in the gate is worse than no test, because it teaches you to ignore
+// red.
+const live = argv.includes('--live');
+const scenarioDir = path.join(e2eDir, live ? 'live' : 'scenarios');
 const allScenarios = [];
 for (const file of fs.readdirSync(scenarioDir).filter((f) => f.endsWith('.mjs')).sort()) {
   const { default: scenario } = await import(pathToFileURL(path.join(scenarioDir, file)).href);
