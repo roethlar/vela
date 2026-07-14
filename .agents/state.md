@@ -6,33 +6,50 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Now
 
-- **LIBRARY-REFRESH-SCAN: both slices IMPLEMENTED and verified; the CODE
-  review loop is open at r10** (owner "go" 2026-07-12 to implement, and
-  2026-07-13 to run the reviewloop for fixes autonomously). Plan:
+- **LIBRARY-REFRESH-SCAN: both slices IMPLEMENTED and verified; code review
+  loop ran r1-r16** (owner "go" 2026-07-12 to implement, 2026-07-13 to run the
+  reviewloop for fixes autonomously). Plan:
   `.agents/plans/library-refresh-scan.md` — refresh button + per-library
   server scan trigger (owner ask while testing Jellyfin).
-  - **Where the trail lives:** the plan's `## Code review log` records
-    every round (r1-r9), each finding, each fix commit, the ONE declined
-    finding (r8-4) with its reason, and the recorded guard gaps. Do not
-    reconstruct any of it from chat.
-  - **State as of `f9c30b6`:** E2E suite 16/16 on the Linux VM; local CI
-    green (svelte-check 0/0, npm build, cargo check/clippy `-D warnings`,
-    cargo test 86). Every fix is its own commit, each guard-proven
-    red→green on the VM.
-  - **Rounds so far:** r1 4, r2 8, r3 5, r4 4, r5 5, r6 4, r7 3, r8 4
-    (3 fixed + 1 declined), r9 2 — all fixed. The loop repeatedly caught
-    regressions in its OWN fixes (r4 caught two from r3; r6 caught two
-    from r5, one of which would have left Plex unable to recover from a
-    stale saved address). Real defects found and fixed include: a scan
-    that could hit the WRONG Plex server; a refresh that emptied a healthy
-    library when its sections fetch failed; the app's own redirect
-    swallowing a failure banner; hostile section keys steering an
-    admin-credentialed POST.
-  - **NEXT:** r10 verdict (dispatched at `f9c30b6`). If it finds nothing
-    material, CLOSE the loop, then: version bump (still 0.1.44 — the
-    feature is unreleased), update this entry, and hand the owner the
-    playtest ask in the plan's Verification section. Nothing is pushed to
-    `origin`/`github` (push policy: always ask).
+  - **Where the trail lives:** the plan's `## Code review log` records every
+    round, every finding, every fix commit, the two DECLINED findings (r8-4,
+    r10-1) with their reasons, the ONE open follow-up (r13-2, owner-deferred),
+    the recorded guard gaps, and the process disclosures. Do not reconstruct
+    any of it from chat.
+  - **Rounds:** r1 4, r2 8, r3 5, r4 5, r5 4, r6 5, r7 4, r8 4, r9 2, r10 2,
+    r11 2, r12 2, r13 2, r14 4, r15 6, r16 8. The loop repeatedly found defects
+    in its OWN fixes — r11 overturned r10's DESIGN, r12 broke r11's tag, r14
+    holed r13's fix, r15 holed r14's. **Finding counts ROSE in the last four
+    rounds (2, 4, 6, 8): the loop is NOT converging.** An owner decision on
+    whether to keep running it is OPEN (## Next).
+  - **The two findings most worth knowing about:** a Plex server that
+    blackholes `/identity` while serving library routes charged a FIVE-SECOND
+    timeout to every click, forever (r16-2, `8d95fd0`) — nine rounds missed it.
+    And the Plex test mock never checked auth, so deleting the scan's token
+    header left every Plex guard green while the real feature 401s (r16-5).
+  - **Guard discipline (the transferable lesson):** THREE guards in this plan
+    were VACUOUS — a setup production cannot reach, an assertion that could not
+    distinguish fix from bug, a case that hid the loss behind a second failure.
+    None failed. None warned. Every one was caught ONLY by injecting the
+    regression and demanding the test go red. Re-prove a guard whenever the
+    behavior around it changes; a fix that teaches the app to CLEAN UP a bad
+    state silently disarms every guard asserting that state's absence after
+    settlement.
+  - **Two process violations, disclosed, not rewritten** (history rewrite needs
+    an owner go): `4cb6b2a` batches three findings; `878c92e` is MIS-DESCRIBED —
+    its message covers only an E2E fix but a `git add -A` swept two production
+    fixes and another E2E case into it. Both recorded in the plan log.
+  - **Verified at `1c2c6b1`+ (as of the r16 fixes):** E2E 16/16 on the Linux VM
+    (28 refresh cases; scanlib against an auth-demanding Plex mock), `cargo test`
+    93, clippy `-D warnings` clean, svelte-check 0/0, npm build. Every fix is
+    guard-proven red→green.
+  - **Version is still 0.1.44 — the feature is UNRELEASED and unbumped.** The
+    plan does not define a bump step, so it was not done unilaterally.
+  - **OWNER PLAYTEST OWED (the plan's Verification section, and it matters more
+    than usual):** the Plex path has no automated coverage of the frontend
+    rebind check (`sameSection`) — the E2E mock is Jellyfin, which never rebinds.
+    A human clicking through a real Plex library refresh is the only check that
+    code gets before release.
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted
