@@ -924,6 +924,14 @@
       const p = await invoke<Pin>("link_begin");
       if (gen !== linkGen) return; // a newer attempt started while we were requesting
       pin = p;
+      // THIS assignment replaces the whole view, so whatever the banner was saying is
+      // now about a screen the user cannot see — and the device-code screen offers
+      // nothing that could clear it (the r14 rule, which the Welcome teardown already
+      // follows). The bump above cannot cover this on its own: during the `link_begin`
+      // await the view is still the old grid, so a delayed publication lands there
+      // legitimately and then RIDES onto the pin screen when this line runs (codex
+      // r21).
+      setError(null);
       // The bump at the top of beginLink() invalidates whatever was in flight
       // THEN — but Settings closes immediately, so the user can start a Refresh
       // while link_begin is still awaiting. THIS is the moment the PIN screen
