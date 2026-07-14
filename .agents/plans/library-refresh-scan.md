@@ -1184,8 +1184,9 @@ case's subject is an action with a settlement step, assert the SETTLED state —
 what the user is finally left looking at — not just the transient it passes
 through.
 
-**r12 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM. 1
-ADMITTED, 1 DECLINED.** Base `63560a6`, head `4f7ac59`.
+**r12 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM, both
+ADMITTED** (r12-1 only after an independent adjudication OVERTURNED my decline —
+see below). Base `63560a6`, head `4f7ac59`.
 
 - **r12-2 (`17d13f0`) — text equality is not evidence of banner ownership.**
   r11-2's retraction was scoped by generation AND by text: it remembered what the
@@ -1202,25 +1203,43 @@ ADMITTED, 1 DECLINED.** Base `63560a6`, head `4f7ac59`.
   one-shots `unauthNextItems` / `unauthNextItemRefresh` (401 is the one failure a
   listing and a scan report with identical text, which is what makes the case
   writable at all).
-- **r12-1 — DECLINED (recorded, not silently dropped).** *Claim:* the
-  disappearance fallback and the content leg's root check identify a section only
-  by its namespaced key, but two Plex servers under one source can issue the same
-  raw section number. If an unidentified server A serves the visible list and an
-  unpinned rediscovery later installs B, both checks pass on B's same-numbered
-  section, so the user browses B's cards under A's stale library identity instead
-  of being reconciled to Home. *Reason for declining:* the drift it describes is
-  only reachable when the machine was NEVER identified — once known, rediscovery
-  is pinned to it and CANNOT install another (`same_machine_candidates`, r4-3), so
-  the old side of any such comparison is always `provenance: None`. The fallback
-  would therefore have to read "provenance was unknown, now it is known" as a
-  disappearance — which also fires on the benign and far more likely case, a
-  transient `/identity` failure that recovers on the SAME server, kicking the user
-  to Home on an ordinary refresh. That is a worse and more frequent defect than
-  the one it fixes, and the ambiguity is irreducible from the frontend: an
-  unidentified server cannot be told apart from a different one. The DANGEROUS
-  half — a scan reaching the wrong server — is already refused (provenance `None`
-  never matches, r11-1). What remains is display-level, and it is the trade r6
-  deliberately made: an unknown machine does not pin rediscovery, precisely so a
-  stale saved address does not leave browsing and scanning dead until the user
-  relinks (see `an_unknown_machine_does_not_pin_rediscovery`). Reopening this
-  would need new evidence that the benign recovery case cannot occur.
+- **r12-1 (`b56dca7`) — a rebound source's keys are not the keys it issued
+  before.** A browse root was identified by its section key alone, but a Plex
+  section key is a server-local number: a source whose `/identity` probe never
+  answered leaves rediscovery unpinned, so a later read failure can REBIND it to
+  another account server — whose list also has a section 2. The disappearance
+  check saw the key still present, kept the user rooted on it, and the grid
+  filled with the NEW server's cards under the OLD library's title. Fixed: the
+  source carries a `binding`, bumped only on an install it cannot prove is the
+  same server (`rebind_voids_keys`), and stamps it on every key it issues; a
+  section is the same library only if key AND binding match (`sameSection`).
+  Provenance cannot decide this — it is `None` exactly when the machine is
+  unknown, which is exactly when a rebind is possible, so a frontend watching it
+  would see `None -> Some(A)` and could not tell a REBOUND source from one whose
+  probe merely RECOVERED on the same server. The backend can: recovery touches
+  only `ensure_ready`, a rebind is an unpinned `rediscover()` that installs.
+  Guards: `an_identity_probe_that_recovers_is_not_a_rebind` (the false positive,
+  red-proven), `sections_are_stamped_with_the_binding_that_issued_them`,
+  `only_an_unprovable_rebind_voids_outstanding_keys`. GUARD GAP: the frontend half
+  (`sameSection`) has no end-to-end guard — the E2E mock is Jellyfin, which never
+  rebinds, and the real rebind path needs plex.tv discovery, which the Rust mock
+  harness cannot reach. Every INPUT to it is guarded; the comparison itself rests
+  on inspection.
+
+  **Process note — I was wrong, and the record should say so.** I first moved to
+  DECLINE r12-1, arguing that the only available fix was a frontend provenance
+  comparison, that it would false-positive on a benign `/identity` recovery, and
+  that the ambiguity was therefore *irreducible*. The owner asked whether that was
+  based on code or assumption. It was assumption, in the load-bearing place. An
+  independent adjudication (grok, read-only, given both the finding and my decline
+  and told to attack the decline) upheld the finding and named the error: I had
+  promoted "the FRONTEND cannot disambiguate" into "NOTHING can" — but the backend
+  distinguishes the two cases by construction, and a correct fix follows directly
+  from that. Claims 1-4 of the decline were sound (and are now load-bearing
+  comments in the fix); claim 5 was motivated reasoning that made stopping feel
+  clean after eleven rounds. **Lesson for this loop: a decline that rests on "no
+  correct fix exists" is a claim about the whole design space, and it must be
+  adjudicated by someone other than its author.** The two earlier declines (r8-4,
+  r10-1) rest on code-verified claims about reachability and consequence, not on
+  design-space impossibility — but they were also self-adjudicated, and are worth
+  re-examining on the same standard if they ever become load-bearing.
