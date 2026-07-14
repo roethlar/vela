@@ -20,6 +20,7 @@ import {
   seedConfig,
   openLibraryGrid,
   goHome,
+  allDelivered,
   holdsFor,
 } from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
@@ -641,13 +642,16 @@ export default {
       `a page failure that renders the same sentence as the edit's must not hand the edit's message to the refresh's retract — got ${JSON.stringify(afterPageFail)}`,
     );
 
-    // ── 12. The recovery repaint belongs to the edit's grid, not to wherever the ──
-    //         user ended up
-    // The catch repainted the CURRENT root before checking whether it was still the
-    // edit's root. So an edit parked in a library, with the user since gone Home, reset
-    // HOME — clearing Home's own still-applicable failure — and only then noticed the
-    // root had moved and bailed. The user loses a diagnostic that was nothing to do with
-    // the edit, on a view they are actually looking at (codex r22).
+    // ── 12. The heal must RETRACT the failure it repairs ──────────────────
+    // This case used to assert the OPPOSITE — that Home's failure survived the heal — and
+    // it was asserting a bug: the heal rebuilds Home successfully, so the previous load's
+    // diagnostic is describing cards that are now on screen. Fresh rails under a stale
+    // "couldn't load" is the r11 lie, and an untagged Home failure has nothing that ever
+    // retracts it, so it was permanent (codex + grok, r24).
+    //
+    // What r22-2 actually protects is a grid the user WALKED TO: the heal never touches a
+    // library (it only drops the hubs), and cases 5/9 prove the edit's failure is not
+    // published there.
     await openLibraryGrid(driver, {
       section: "Big Library",
       cardPrefix: "Movie 000",
@@ -666,8 +670,7 @@ export default {
       "the parked, doomed edit to reach the server",
     );
 
-    // Leave for Home, and give Home a failure of its OWN — nothing to do with the edit,
-    // and not superseded by anything.
+    // Leave for Home, and make Home's own load FAIL, so it has a diagnostic to retract.
     mock.state.failNextLatest = true;
     await goHome(driver);
     await pollUntil(
@@ -675,21 +678,34 @@ export default {
         const b = await banner(driver);
         return b && b.includes("500") ? true : null;
       },
-      "Home's own failure, on the view the user is now looking at",
+      "Home's own failure",
     );
 
-    // The parked edit now fails. It must not touch this view at all.
+    // The parked edit now fails and the backend rolls back. The heal rebuilds Home — and
+    // must take Home's stale diagnostic with it.
+    const latestBefore12 = servedCount("/Items/Latest");
     await pollUntil(
       async () => (servedCount("/PlayedItems/m59") > served12 ? true : null),
       "the parked 401 to be delivered",
     );
+    // Wait for the heal's OWN Home load to land, then HOLD. Polling for the absence of
+    // the 500 would pass on the transient blank while loadHome is still in flight — which
+    // it did: restoring the r23 keepError behaviour left this case green, because the
+    // banner is briefly empty at the reload's entry and the poll returned right there.
+    // The ninth vacuous guard in this plan, and again only the injection found it.
+    await pollUntil(
+      async () => (servedCount("/Items/Latest") > latestBefore12 ? true : null),
+      "the heal's Home load to be delivered",
+    );
     await holdsFor(
       async () => {
         const b = await banner(driver);
-        return b && b.includes("500") ? null : `Home's failure is gone (banner: ${JSON.stringify(b)})`;
+        return b && b.includes("500")
+          ? `Home's stale failure is still up (banner: ${JSON.stringify(b)})`
+          : null;
       },
-      4000,
-      "an edit made in a library the user has left must not reset Home, nor clear the failure Home is reporting",
+      3000,
+      "the heal rebuilt Home, so the failure describing the rails it just replaced must go with it — nothing else ever retracts an untagged Home failure, so leaving it is permanent",
     );
 
     // ── 13. Tearing the search root down takes its failures with it ──
@@ -743,15 +759,19 @@ export default {
     );
 
     // ── 14. Skipping the repaint must not skip the HEAL ──
-    // The backend curates BEFORE the server call: the recents entry is already gone and
-    // the tombstone already written when the request goes out, and it rolls both back if
-    // the request fails. A Home load that runs inside that window captures the transient
-    // state — so if the edit's failure then declines to re-fetch anything (because the
-    // user left the grid it was made in), Continue Watching keeps showing the item as
-    // gone. Falsely, and until a restart (codex r23).
+    // The backend curates BEFORE the server call — the recents entry is gone and the
+    // tombstone written when the request goes out — and rolls both back if it fails. A
+    // Home load INSIDE that window captures the transient state, so an edit failure that
+    // re-fetches nothing (because the user left the grid it was made in) leaves Continue
+    // Watching showing the item as gone. Falsely, and until a restart.
     //
-    // Case 12 proves the destination's BANNER is not clobbered. This proves the content
-    // is still healed — the two pull in opposite directions and both have to hold.
+    // The first version of this case was vacuous BOTH ways (codex + grok, r24): it
+    // snapshotted `servedCount > 0`, which boot had already satisfied, and it never
+    // emptied the hubs — so goHome served Home from cache, the curated window was never
+    // captured, and the ordinary Home load could satisfy the assertion with the heal
+    // deleted. Both halves are forced now: the hubs are dropped so goHome REALLY loads
+    // Home inside the window, and the count is snapshotted only after that load has been
+    // delivered, so nothing but the heal can move it.
     await openLibraryGrid(driver, {
       section: "Big Library",
       cardPrefix: "Movie 000",
@@ -760,6 +780,29 @@ export default {
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "a healthy grid to edit from",
     );
+    // A successful edit empties the hubs (refreshWatchState), so the next goHome must
+    // actually re-load Home rather than serve it from cache.
+    //
+    // Wait for its repaint's RESPONSE, not for a card count: the grid holds 60 cards both
+    // before and after the reload, so counting alone returns on the OLD grid and the next
+    // context-menu click lands on a DOM that is being replaced under it.
+    const servedRepaint = servedCount("/Items");
+    await watchToggle(driver, "Movie 058", "Mark watched");
+    await pollUntil(
+      async () => (servedCount("/Items") > servedRepaint ? true : null),
+      "the successful edit's repaint to be served (the hubs are now empty)",
+    );
+    await pollUntil(
+      async () =>
+        (await cardCount(driver)) === 60 &&
+        (await driver.exec(
+          `return !!document.querySelector('button.poster[aria-label^="Movie 059"]')`,
+        ))
+          ? true
+          : null,
+      "the repainted grid",
+    );
+
     mock.state.unauthNextPlayed = true;
     mock.state.playedDelayMs = 6000;
     const served14 = servedCount("/PlayedItems/m59");
@@ -767,27 +810,24 @@ export default {
     await pollUntil(
       async () =>
         !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
-      "the parked, doomed edit to reach the server",
+      "the parked, doomed edit to reach the server (the backend has now curated)",
     );
+
+    // Home loads INSIDE the curated window — this is the load that captures the lie.
     await goHome(driver);
-    await driver.waitFor(
-      `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
-      "Home",
-    );
-    // Home has loaded (possibly inside the curated window). Count from HERE.
     await pollUntil(
-      async () => (servedCount("/Items/Latest") > 0 ? true : null),
-      "Home's own load",
+      async () => (allDelivered(mock, "/Items/Latest") ? true : null),
+      "Home's own load, inside the curated window, to be delivered",
     );
     const latestBeforeHeal = servedCount("/Items/Latest");
 
     await pollUntil(
       async () => (servedCount("/PlayedItems/m59") > served14 ? true : null),
-      "the parked 401 to be delivered",
+      "the parked 401 to be delivered (the backend now rolls back)",
     );
     await pollUntil(
       async () => (servedCount("/Items/Latest") > latestBeforeHeal ? true : null),
-      "the rolled-back edit must re-fetch the watch state, or Continue Watching keeps showing an item the server still has",
+      "the rolled-back edit must re-fetch the watch state, or Continue Watching keeps showing an item the server still has — and nothing but the heal can issue this request",
     );
 
     assert.equal(
