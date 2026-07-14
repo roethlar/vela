@@ -213,9 +213,14 @@ export default {
     // carry the tag away with it.
     mock.state.unauthNextPlayed = true;
     await watchToggle(driver, "Movie 059", "Mark watched");
+    // Wait for the REPAINT to settle, not just for "a banner". The edit's repaint
+    // clears the banner as it starts and the edit publishes only once it is done
+    // (codex r18) — so a bare non-null poll would return the PREVIOUS banner, and
+    // the capture below would land in the window where it has been cleared.
     await pollUntil(
-      async () => ((await banner(driver)) ? true : null),
-      "the failed edit's banner",
+      async () =>
+        (await cardCount(driver)) === 60 && (await banner(driver)) ? true : null,
+      "the failed edit's banner, once its repaint has settled",
     );
     const beforeSettle = await banner(driver);
 
