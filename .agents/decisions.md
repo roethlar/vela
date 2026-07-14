@@ -666,3 +666,112 @@ Supersedes:
 The `owner`-enum-on-a-shared-part model landed in `da99a46` as the interim fix.
 That model is coherent and stays until this plan lands - it is the thing this
 plan replaces, not a thing to build on.
+
+## 2026-07-14 - Up Next is a consumption queue; playlists are durable objects
+
+Status: APPROVED (owner, 2026-07-14). Implementation plan:
+`.agents/plans/queue-playlists.md`, which owns the full model and the slices.
+
+Decision:
+Vela has two kinds of list, and they are different in kind, not just in name.
+
+UP NEXT is an ephemeral consumption queue behind the queue icon. It persists
+across restarts, but items fall off as they are played and do not repeat unless
+the user added them twice. Clicking the Nth item in the drawer is a SKIP-AHEAD:
+it plays, and the items above it are dropped with it. Up Next only moves
+forward.
+
+NAMED PLAYLISTS are durable, live in a Playlists sidebar entry, and are never
+consumed by being played. Vela's own playlists may mix items from DIFFERENT
+servers in one list - the thing no single server's playlist API can represent,
+and the reason this is a Vela-native feature. The servers' own playlists appear
+alongside them, READ-ONLY. Playing a playlist COPIES its items into Up Next;
+only playing a playlist or an explicit Clear ever wipes Up Next.
+
+THE CONTINUE WATCHING CAROUSEL IS ONE STRIP WITH TWO REGIONS: Up Next at the
+head, Continue Watching (recents union server hubs) behind it. Up Next flows
+into Continue Watching as it drains. A click in the queue region is a
+skip-ahead; a click in the shelf region plays that item and leaves the queue
+intact, because nothing on the shelf was ordered by the user and so nothing
+there can be "passed over". Named playlists never appear in the strip; their
+items do, once played into Up Next.
+
+CONTINUE PLAYING is a three-mode setting consulted only when Up Next drains
+(the queue always wins while it has items): `off` stops; `on` keeps walking
+down the Continue Watching strip; `only-tv` plays the next episode in order,
+rolls into the next season, and stops when the show runs out. Default
+`only-tv`. "Next episode" means strictly the next in order, watched or not, so
+a deliberate rewatch keeps rolling.
+
+PLAYLISTS ARE STORED IN THEIR OWN JSON FILE, not in `config.json` and not in a
+database. The criterion for splitting a store out of `config.json`: the data
+grows without a bound the user controls, AND losing it would be far less bad
+than failing to load the config. Playlists meet both. Recents (capped at 20),
+Continue Watching tombstones (capped at 200) and the per-library sort map meet
+neither, and stay in `config.json`.
+
+Reason:
+The owner's complaint was that the queue does not survive a restart. Tracing it
+found a second, larger defect: the carousel does not reflect the queue AT ALL,
+because `play_by_key` records no recent (`commands.rs:2365` says so), so Vela's
+half of the merge stays empty and only the server's hub half moves. The unified
+strip resolves what looked like an incompatibility between the queue's
+semantics and the server's next-up semantics - they are not competing answers
+to one question, they are two regions of one answer.
+
+The `on` mode must walk the SAME melded list the carousel renders, never a
+fresh server query. A second source of truth for "what plays next" would
+diverge from the first, which is precisely the failure class the per-surface
+status decision (above) was created to kill.
+
+SQLite was considered and rejected: it is a new native dependency touching
+every packaging target, and playlists need none of what a database provides
+(indexed queries, partial reads, concurrent writers, transactions). The one
+store that would have justified it - an unbounded metadata cache - no longer
+exists; it died with the local-source removal (2026-07-08).
+
+Supersedes:
+The cursor-based queue (`AppState.queue_index`) and `play_item`'s
+queue-clearing behavior (`commands.rs:2380`), both of which are harmless only
+because the queue currently dies at exit.
+
+## 2026-07-14 - Video stays external; embedding mpv is a spike, not a plan
+
+Status: APPROVED (owner, 2026-07-14). Reaffirms and hardens the 2026-05-23
+decision "Use external mpv playback for HDR" with the technical findings that
+answer the question directly.
+
+Decision:
+Vela does not embed video in the webview. The question - asked by the owner at
+the start of the project and again on 2026-07-14 - is now ANSWERED rather than
+merely deferred: embedding is not planned, and if it is ever revisited it is a
+SPIKE, not a plan. The first question any such spike must answer is "does HDR
+passthrough survive?", because a No there kills the idea outright.
+
+No feature may be designed as depending on embedded video. In particular, the
+in-app resume prompt ("Continue from <time> / Start from beginning") does NOT
+need it: the prompt fires when the user clicks Play, while the Vela window is
+still frontmost and mpv has not been spawned.
+
+Reason:
+Three routes exist, and each fails on the platform Vela targets first:
+
+- mpv's `--wid` foreign-window embedding is X11/Windows/macOS only. WAYLAND HAS
+  NO PROTOCOL for embedding another process's surface into your window.
+- The "float a borderless mpv window over a div and track its rect" hack needs
+  absolute window positioning, which Wayland deliberately denies clients.
+- Linking libmpv and driving its render API against a GL surface inside Vela's
+  own window DOES work in principle (it is what native GTK players do), but it
+  must be built separately for Linux, macOS (where Apple deprecated OpenGL) and
+  Windows - by a wide margin the largest engineering effort in this repo - and
+  it puts the video behind a toplevel that is not an HDR surface. The likely
+  result is tone-mapping down to SDR, which forfeits the entire reason mpv is
+  external.
+
+That last risk is stated as a RISK, not a certainty: the Wayland limits are
+firm, the HDR ceiling is not fully established. That uncertainty is itself the
+finding - it means embedding cannot be planned, only prototyped.
+
+Supersedes:
+Nothing. Extends the 2026-05-23 external-mpv decision from a preference into a
+researched position, and closes the owner's standing open question.
