@@ -85,14 +85,25 @@
   let offset = $state(0);
   let hasMore = $state(true);
   let error = $state<string | null>(null);
-  // Provenance of the visible banner, when a LISTING load published it: the
-  // generation that failed, plus the exact text it wrote. Only `loadMore`'s
-  // direct publish records it, and the pair is trusted only while `errorGenText`
-  // is still identical to `error` — so any of the ~30 other banner writes (or a
-  // clear) silently invalidates the tag without having to know it exists.
+  // The listing generation whose failure published the visible banner; 0 when
+  // the banner came from anywhere else (a scan, a link, a search, the refresh
+  // action itself) or when there is no banner. A refresh that SUPERSEDES that
+  // load must retract its message (see refreshLibraries settlement).
+  //
+  // Every write to `error` goes through setError so this tag cannot outlive the
+  // message it describes. An earlier version tried to keep the tag honest by
+  // remembering the text and trusting it only while `error` still matched —
+  // which fails the moment two different failures produce the SAME string, and
+  // they do: a 401 on a listing and a 401 on a scan both surface as
+  // `RECONNECT_REQUIRED`, mapped to one constant sentence by friendlyError. The
+  // refresh then retracted a scan failure it never superseded and the user was
+  // left with no status at all (codex r12). ASSIGNING `error` DIRECTLY IS A BUG.
   // Deliberately not `$state`: nothing renders from it.
   let errorGen = 0;
-  let errorGenText: string | null = null;
+  function setError(msg: string | null, gen = 0) {
+    error = msg;
+    errorGen = msg === null ? 0 : gen;
+  }
   let sort = $state("titleSort:asc");
   let searchQuery = $state("");
   let searchTerm = $state(""); // the query backing the current search results view
@@ -140,11 +151,11 @@
   async function installMpv() {
     if (installingMpv) return;
     installingMpv = true;
-    error = null;
+    setError(null);
     try {
       mpvInfo = await invoke<MpvInfo>("install_mpv");
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     } finally {
       installingMpv = false;
     }
@@ -196,7 +207,7 @@
       authenticated = sources.length > 0;
       if (authenticated) await loadEverything();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
 
@@ -265,7 +276,7 @@
     try {
       await invoke("open_url", { url });
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
 
@@ -422,14 +433,14 @@
       const s = await invoke<Section[]>("get_sections", { sourceId: activeSource });
       if (gen === sourceGen) sections = s;
     } catch (e) {
-      if (gen === sourceGen) error = String(e);
+      if (gen === sourceGen) setError(String(e));
     }
   }
 
   async function loadHome(gen: number = homeGen) {
     mode = "home";
     loading = true;
-    error = null;
+    setError(null);
     try {
       const [h, r, t] = await Promise.all([
         invoke<Hub[]>("get_hubs", { sourceId: activeSource }),
@@ -445,7 +456,7 @@
         continueTombstones = t;
       }
     } catch (e) {
-      if (gen === homeGen) error = String(e);
+      if (gen === homeGen) setError(String(e));
     } finally {
       if (gen === homeGen) loading = false;
     }
@@ -457,7 +468,7 @@
     loadGen++; // invalidate any in-flight browse load so it can't append after we leave
     loadingMore = false;
     loading = false; // a stale browse load won't clear this (its gen is stale); do it here
-    error = null; // don't carry a browse/search error banner onto Home
+    setError(null); // don't carry a browse/search error banner onto Home
     searchTerm = "";
     personView = null;
     activeType = null;
@@ -541,7 +552,7 @@
     refreshing = true;
     try {
       // (a) the action owns its status: clear any prior banner immediately.
-      error = null;
+      setError(null);
       // Snapshot what this action reconciles against.
       const epoch = navEpoch;
       refreshEpoch = epoch;
@@ -696,7 +707,7 @@
       // current claimant of its generation.
       if (epoch === navEpoch) {
         const live = legFailures.filter((f) => f.current());
-        if (live.length > 0) error = live.map((f) => f.msg).join("; ");
+        if (live.length > 0) setError(live.map((f) => f.msg).join("; "));
         // Nothing of ours failed — but a load we SUPERSEDED may have published a
         // banner after the click cleared the surface. Its cards are gone,
         // replaced by ours, so its failure no longer describes anything on
@@ -705,17 +716,7 @@
         // (`errorGen > claimedGen`) supersedes US in turn, and its failure is
         // the one the user needs to see. The text check keeps the tag honest:
         // if any other banner replaced this one, it is not ours to touch.
-        else if (
-          claimedGen &&
-          errorGen &&
-          errorGen <= claimedGen &&
-          error !== null &&
-          error === errorGenText
-        ) {
-          error = null;
-          errorGen = 0;
-          errorGenText = null;
-        }
+        else if (claimedGen && errorGen && errorGen <= claimedGen) setError(null);
       }
     } finally {
       refreshing = false;
@@ -755,7 +756,7 @@
     } catch (e) {
       // e.g. invoked from Settings while offline — surface it instead of an
       // unhandled rejection, but only if this attempt is still the current one.
-      if (gen === linkGen) error = String(e);
+      if (gen === linkGen) setError(String(e));
     }
   }
 
@@ -779,7 +780,7 @@
       // Terminal error (expired/rate-limited/server failure) — stop polling and
       // clear the dead code so the UI doesn't keep showing it with no poll loop.
       if (gen === linkGen) {
-        error = String(e);
+        setError(String(e));
         pin = null;
       }
       return;
@@ -846,7 +847,7 @@
     // aggregate AFTER both legs settle, and Svelte's effect flush may land
     // either side of that — clearing here would race the publish away
     // (lrs-1). A user-driven select still clears, as before.
-    if (!keepError) error = null;
+    if (!keepError) setError(null);
     await loadMore(myGen);
     if (myGen === loadGen) loading = false;
   }
@@ -898,12 +899,10 @@
             myGen <= gridActionBaseGen
           )
         ) {
-          error = String(e);
-          // Tag the banner with the load that published it: a refresh that goes
-          // on to SUPERSEDE this load owns its cards, so it must take this
-          // message down with it (see refreshLibraries settlement, codex r11).
-          errorGen = myGen;
-          errorGenText = error;
+          // The ONLY tagged write: a refresh that goes on to SUPERSEDE this
+          // load owns its cards, so it must take this message down with it
+          // (see refreshLibraries settlement, codex r11).
+          setError(String(e), myGen);
         }
         hasMore = false;
       }
@@ -976,7 +975,7 @@
   async function runSearch(query: string = searchQuery, { rerun = false } = {}) {
     const q = query.trim();
     if (q.length < 2) {
-      error = "Search needs at least 2 characters.";
+      setError("Search needs at least 2 characters.");
       if (searchTerm) {
         navEpoch++; // tearing down the search root is navigation (see navEpoch)
         items = [];
@@ -999,13 +998,13 @@
     items = [];
     hasMore = false;
     loading = true;
-    error = null;
+    setError(null);
     try {
       const results = await invoke<Item[]>("search", { query: q, sourceId: activeSource });
       if (myGen !== loadGen) return; // user navigated away while searching
       items = results;
     } catch (e) {
-      if (myGen === loadGen) error = String(e);
+      if (myGen === loadGen) setError(String(e));
     } finally {
       if (myGen === loadGen) loading = false;
     }
@@ -1063,13 +1062,13 @@
     items = [];
     hasMore = false; // one-shot: the backend returns the full merged list
     loading = true;
-    error = null;
+    setError(null);
     try {
       const results = await invoke<Item[]>("get_person_items", { personKey: p.key, kind: p.kind });
       if (myGen !== loadGen) return; // user navigated away while loading
       items = results;
     } catch (e) {
-      if (myGen === loadGen) error = String(e);
+      if (myGen === loadGen) setError(String(e));
     } finally {
       if (myGen === loadGen) loading = false;
     }
@@ -1138,7 +1137,7 @@
       invoke("record_recent", { item }).catch(() => {});
       if (queueOpen) refreshQueue();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
       // A failure may mean mpv went missing — re-check so the install prompt shows.
       invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     }
@@ -1154,7 +1153,7 @@
       }
       await play({ ...item, ratingKey: b.ratingKey, sourceId: b.sourceId });
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
 
@@ -1172,7 +1171,7 @@
       await invoke("queue_play_next", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
   async function addToQueue(item: Item) {
@@ -1181,7 +1180,7 @@
       await invoke("queue_append", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
   async function queueJumpTo(index: number) {
@@ -1189,7 +1188,7 @@
       await invoke("queue_play_at", { index });
       refreshQueue();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
   async function queueRemove(index: number) {
@@ -1197,7 +1196,7 @@
       await invoke("queue_remove", { index });
       refreshQueue();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
   async function queueClearAll() {
@@ -1205,7 +1204,7 @@
       await invoke("queue_clear");
       refreshQueue();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
 
@@ -1262,7 +1261,7 @@
     // The action owns its status (refreshLibraries convention): clear any
     // prior banner/notice immediately, and cancel an armed auto-clear so it
     // can't fire mid-flight against the outcome we're about to publish.
-    error = null;
+    setError(null);
     scanNotice = null;
     scanNoticeOwner = null;
     if (scanNoticeTimer) {
@@ -1290,7 +1289,7 @@
       }, 4000);
     } catch (e) {
       if (scanAttempt !== attempt) return;
-      error = String(e);
+      setError(String(e));
     } finally {
       if (scanGens[s.key] === gen) scanning[s.key] = false;
     }
@@ -1312,7 +1311,7 @@
       // any lingering server hub copy.
       refreshWatchState();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
       // The backend curates BEFORE the server call and rolls back on
       // failure — but an unrelated refresh (e.g. playback-ended) may have
       // rendered the transient curated state meanwhile. Re-fetch so the
@@ -1330,7 +1329,7 @@
       await invoke("remove_from_continue", { ratingKey: item.ratingKey });
       refreshWatchState();
     } catch (e) {
-      error = String(e);
+      setError(String(e));
     }
   }
 

@@ -56,6 +56,11 @@ export function startMockJellyfin({
     failNextLatest: false, // one-shot: 500 the next /Users/{id}/Items/Latest
     delayNextLatestMs: 0, // one-shot delay for the next Latest request
     failNextItems: false, // one-shot: 500 the next listing (a doomed loadMore)
+    // one-shot: 401 the next listing. A 401 is the ONE failure a listing and a
+    // scan report with the SAME text (both surface as RECONNECT_REQUIRED, which
+    // friendlyError maps to one constant sentence) — which is what makes the
+    // banner-ownership case writable (codex r12; refresh case 25).
+    unauthNextItems: false,
     itemsDelayMs: 0, // one-shot delay for the next listing
     // Scan-trigger machinery (library-refresh-scan plan): VirtualFolders is
     // seeded from the served views but kept SEPARATE — a grouped view added
@@ -69,6 +74,9 @@ export function startMockJellyfin({
     })),
     failNextVirtualFolders: false, // one-shot: 403 the next VirtualFolders GET
     failNextItemRefresh: false, // one-shot: 403 the next POST /Items/{id}/Refresh
+    // one-shot: 401 the next scan — the same RECONNECT_REQUIRED a 401 listing
+    // reports (see unauthNextItems).
+    unauthNextItemRefresh: false,
     itemRefreshDelayMs: 0, // one-shot delay for the next POST /Items/{id}/Refresh
     // Mutation helpers that keep `userData` coherent — pushing on the raw
     // array alone would leave toJson reading missing userData and crash the
@@ -266,6 +274,8 @@ export function startMockJellyfin({
       // dies while a refresh is running (codex r3).
       const failItems = state.failNextItems;
       if (failItems) state.failNextItems = false;
+      const unauthItems = state.unauthNextItems;
+      if (unauthItems) state.unauthNextItems = false;
       const itemsDelay = state.itemsDelayMs;
       if (itemsDelay > 0) state.itemsDelayMs = 0;
       // HONOR StartIndex/Limit (library-refresh-scan plan): with an
@@ -277,6 +287,7 @@ export function startMockJellyfin({
         query.Limit !== undefined ? start + Number(query.Limit) : undefined;
       const respondItems = () => {
         if (failItems) return json({ error: "mock listing failure" }, 500);
+        if (unauthItems) return json({ error: "unauthenticated" }, 401);
         return json({ Items: view.movies.slice(start, end).map(toJson) });
       };
       if (itemsDelay > 0) {
@@ -372,10 +383,13 @@ export function startMockJellyfin({
       // case unwritable (lrs-5; same class as the Latest flags, codex r1 f2).
       const fail = state.failNextItemRefresh;
       if (fail) state.failNextItemRefresh = false; // one-shot
+      const unauth = state.unauthNextItemRefresh;
+      if (unauth) state.unauthNextItemRefresh = false; // one-shot
       const delay = state.itemRefreshDelayMs;
       if (delay > 0) state.itemRefreshDelayMs = 0; // one-shot
       const respond = () => {
         if (fail) return json({ error: "mock: admin required" }, 403);
+        if (unauth) return json({ error: "unauthenticated" }, 401);
         // The request (with its full scan query) is already in state.requests;
         // scenarios assert on that log, not on this body.
         res.writeHead(204);

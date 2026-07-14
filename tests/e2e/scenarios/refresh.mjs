@@ -82,6 +82,28 @@ async function clickSide(driver, label) {
   );
   await driver.click(el);
 }
+// Trigger a library scan from the sidebar's right-click menu (scanlib.mjs:33 —
+// WebDriver has no right-click, so dispatch a real `contextmenu` MouseEvent).
+async function scanFromSideMenu(driver, label) {
+  await driver.exec(
+    `const b = [...document.querySelectorAll('button.sideitem')].find((x) => x.textContent.trim() === ${JSON.stringify(label)});
+     if (!b) throw new Error('no sidebar entry ${label}');
+     const r = b.getBoundingClientRect();
+     b.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + 8, clientY: r.y + 8 }));`,
+  );
+  const item = await driver
+    .waitFor(
+      `return !!document.querySelector('.ctxmenu')`,
+      "section context menu open",
+    )
+    .then(() =>
+      driver.find(
+        "xpath",
+        `//div[contains(@class,'ctxmenu')]//button[@role='menuitem' and normalize-space(.)='Scan Library']`,
+      ),
+    );
+  await driver.click(item);
+}
 // Detail OPEN half of openDetailAndPlay (helpers.mjs:92) — without the play.
 async function openDetail(driver, prefix) {
   const card = await driver.find(
@@ -1003,6 +1025,44 @@ export default {
     assert.ok(
       (await posterLabels(driver)).some((l) => l?.startsWith("Alpha One")),
       "...and the grid must be showing the refreshed cards, not an empty view",
+    );
+
+    // ── 25. The refresh may only retract the banner it SUPERSEDED ───────
+    // Case 24's retraction is scoped by generation. The first attempt scoped it
+    // by TEXT as well — remembering what the superseded load wrote and clearing
+    // only while the banner still said exactly that. Two different failures can
+    // say exactly that: a 401 on a listing and a 401 on a scan BOTH surface as
+    // RECONNECT_REQUIRED, which friendlyError renders as one constant sentence.
+    // So a scan failure could wear the superseded load's text, and the refresh
+    // would retract a message it never superseded — the scan failed, and the
+    // user was left with no status at all (codex r12). The tag is now cleared by
+    // every non-listing banner write, and this case is what proves it.
+    await clickSide(driver, "Library A");
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
+      "library A's grid",
+    );
+    mockA.state.viewsDelayMs = 2000; // the action's sections leg stays in flight...
+    await clickRefresh(driver);
+    mockA.state.unauthNextItems = true; // ...the newer load fails 401 (tagged)
+    await watchToggle(driver, "Alpha Three", "Mark unwatched"); // -> resetAndLoad
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the newer load's 401 must surface",
+    );
+    // Now a SCAN fails with the identical text, taking over the banner. The
+    // refresh never superseded it: it is not the refresh's to retract.
+    mockA.state.unauthNextItemRefresh = true;
+    await scanFromSideMenu(driver, "Library A");
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the scan's 401 must surface",
+    );
+    await settle(driver); // the action's leg claims, reloads, and succeeds
+    mockA.state.viewsDelayMs = 0;
+    assert.ok(
+      await banner(driver),
+      "the scan failed and the refresh never superseded it: its banner must survive settlement",
     );
 
     // Session-wide invariant: no listing contract violations anywhere.
