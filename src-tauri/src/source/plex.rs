@@ -43,10 +43,25 @@ impl PlexSource {
     /// A clone of the client with a server already selected, discovering one on
     /// first use. Cloned out so we don't hold the lock across network calls.
     async fn ensure_ready(&self) -> Result<PlexLibrary, String> {
+        Ok(self.ensure_ready_bound().await?.0)
+    }
+
+    /// The client to use AND the binding it is bound under, captured in the SAME
+    /// critical section so the two cannot disagree.
+    ///
+    /// Reading them separately is a race: a caller can be holding a clone of
+    /// server A while another task's failed read rediscovers and installs B,
+    /// bumping the binding — and a binding read after that lands stamps A's keys
+    /// with B's binding. The frontend would then take A's still-correct list for
+    /// B's, evict the live root it is standing on, and offer A's library as
+    /// B-current (codex r13). Every read of `binding` must be under the lib lock,
+    /// paired with the clone it describes.
+    async fn ensure_ready_bound(&self) -> Result<(PlexLibrary, u64), String> {
         {
             let guard = self.lib.lock().await;
             if guard.server_base().is_some() {
                 let lib = guard.clone();
+                let binding = self.binding.load(Ordering::SeqCst); // pairs with THIS clone
                 drop(guard); // never hold the lock across the network call below
                 // A server restored from config carries no machine identifier
                 // (`set_server_manual`), which would leave rediscovery UNPINNED
@@ -59,13 +74,21 @@ impl PlexSource {
                         if rediscovery_pin(guard.server_machine_id()).is_none() {
                             guard.set_machine_identifier(id);
                         }
-                        return Ok(guard.clone());
+                        // Re-read under THIS lock, not the one above: a rebind may
+                        // have landed while we were probing, in which case `guard`
+                        // is the NEW server — and this is its binding. The pair
+                        // still describes one server.
+                        let binding = self.binding.load(Ordering::SeqCst);
+                        return Ok((guard.clone(), binding));
                     }
                 }
-                return Ok(lib);
+                // The probe FAILED: we return the clone we took above, so we must
+                // return the binding we took with it — a rebind that landed while
+                // we probed belongs to a server this clone is not.
+                return Ok((lib, binding));
             }
         }
-        self.rediscover().await
+        self.rediscover_bound().await
     }
 
     /// Run discovery, pick a server, persist it. Recovers from a stale saved
@@ -81,6 +104,14 @@ impl PlexSource {
     /// rediscovery is pinned to its machine; only a source that has never
     /// connected discovers freely.
     async fn rediscover(&self) -> Result<PlexLibrary, String> {
+        Ok(self.rediscover_bound().await?.0)
+    }
+
+    /// As [`Self::rediscover`], returning the installed client together with the
+    /// binding it is bound under — read under the SAME lock that installs it, so
+    /// a caller can never pair this server with another's binding (see
+    /// [`Self::ensure_ready_bound`]).
+    async fn rediscover_bound(&self) -> Result<(PlexLibrary, u64), String> {
         let (lib, pin) = {
             let guard = self.lib.lock().await;
             (guard.clone(), rediscovery_pin(guard.server_machine_id()))
@@ -97,7 +128,7 @@ impl PlexSource {
                     "no reachable direct HTTPS Plex server found; check Plex Remote Access or connect to the server's network. Plex Relay is not used by default for HDR playback.".to_string()
                 }
             })?;
-        let (updated, installed) = {
+        let (updated, installed, binding) = {
             let mut guard = self.lib.lock().await;
             // Don't clobber a server another task installed while we were
             // discovering. Two UNPINNED rediscoveries (first connect) can pick
@@ -117,13 +148,17 @@ impl PlexSource {
                     self.binding.fetch_add(1, Ordering::SeqCst);
                 }
                 guard.set_server(chosen.clone());
-                (guard.clone(), true)
+                // Read under the install's own lock: this is the binding OF the
+                // server we just installed (codex r13).
+                (guard.clone(), true, self.binding.load(Ordering::SeqCst))
             } else {
-                (guard.clone(), false)
+                // Someone else installed while we discovered — take their server
+                // AND their binding, still under the one lock.
+                (guard.clone(), false, self.binding.load(Ordering::SeqCst))
             }
         };
         if !installed {
-            return Ok(updated); // another task got there first — use its server
+            return Ok((updated, binding)); // another task got there first — use its server
         }
         let (host, port, scheme) = (chosen.host.clone(), chosen.port, chosen.scheme.clone());
         if let Err(e) = crate::config::update(move |cfg| {
@@ -138,7 +173,7 @@ impl PlexSource {
                 "plex: failed to persist rediscovered server ({e}); will rediscover next launch"
             );
         }
-        Ok(updated)
+        Ok((updated, binding))
     }
 
     fn to_item(&self, lib: &PlexLibrary, v: PlexVideo) -> ItemDto {
@@ -421,21 +456,20 @@ impl MediaSource for PlexSource {
     }
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
-        let lib = self.ensure_ready().await?;
-        // The binding these keys are issued under, read BEFORE the fetch: the
-        // list about to come back is served by the server bound RIGHT NOW, so a
-        // rebind that happens while it is in flight must not backdate onto it.
-        let mut binding = self.binding.load(Ordering::SeqCst);
+        // The client AND the binding it is bound under, taken together — never
+        // read apart, or a rebind landing between the two would stamp this
+        // server's keys with the next server's binding (codex r13).
+        let (lib, mut binding) = self.ensure_ready_bound().await?;
         // A saved server endpoint can go stale (changed IP / plex.direct host).
         // map_err first so the non-Send error is dropped before the next await.
         let first = lib.get_library_sections().await.map_err(|e| e.to_string());
         let (served_by, sections) = match first {
             Ok(s) => (lib.server_machine_id(), s),
             Err(_) => {
-                let lib = self.rediscover().await?;
-                // That rediscovery may have REBOUND us (a new binding); this
-                // list comes from the new server, so it carries the new one.
-                binding = self.binding.load(Ordering::SeqCst);
+                // That rediscovery may have REBOUND us; this list comes from the
+                // server it installed, so it carries THAT server's binding.
+                let (lib, rebound) = self.rediscover_bound().await?;
+                binding = rebound;
                 let s = lib
                     .get_library_sections()
                     .await
@@ -949,7 +983,9 @@ mod tests {
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
+    use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::{Arc, Mutex};
+    use std::time::Duration;
 
     /// A minimal Plex-shaped HTTP server on 127.0.0.1, enough for `/identity`,
     /// the section list, and a scan. Every request path is recorded on ARRIVAL,
@@ -961,12 +997,21 @@ mod tests {
     /// `identity_failures` 500s that many `/identity` probes before answering —
     /// a server that cannot be identified YET, which is the state every rebind
     /// hazard grows out of.
+    /// Parks a mock handler: it announces the request's ARRIVAL, then waits to be
+    /// released — so a test can make something happen to the source WHILE that
+    /// request is in flight.
+    type Gate = (Sender<()>, Arc<Mutex<Receiver<()>>>);
+
     fn spawn_mock_plex(machine: &str) -> (u16, Arc<Mutex<Vec<String>>>) {
-        spawn_mock_plex_with(machine, 0)
+        spawn_mock_plex_with(machine, 0, None)
     }
     fn spawn_mock_plex_with(
         machine: &str,
         identity_failures: usize,
+        // Gating `/identity` specifically: it is the network call the source makes
+        // AFTER cloning its client, which is where the clone and the binding can
+        // drift apart.
+        identity_gate: Option<Gate>,
     ) -> (u16, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -976,7 +1021,12 @@ mod tests {
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
-                let (machine, hits, left) = (machine.clone(), out.clone(), left.clone());
+                let (machine, hits, left, identity_gate) = (
+                    machine.clone(),
+                    out.clone(),
+                    left.clone(),
+                    identity_gate.clone(),
+                );
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 2048];
                     let n = stream.read(&mut buf).unwrap_or(0);
@@ -987,6 +1037,10 @@ mod tests {
                     let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
                     hits.lock().unwrap().push(path.clone());
                     if path.starts_with("/identity") {
+                        if let Some((arrived, release)) = identity_gate.as_ref() {
+                            let _ = arrived.send(());
+                            let _ = release.lock().unwrap().recv();
+                        }
                         let mut left = left.lock().unwrap();
                         if *left > 0 {
                             *left -= 1;
@@ -1101,7 +1155,7 @@ mod tests {
     /// (codex r12; the false positive that the `binding` split exists to avoid).
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn an_identity_probe_that_recovers_is_not_a_rebind() {
-        let (port, _hits) = spawn_mock_plex_with("machine-A", 1); // first probe 500s
+        let (port, _hits) = spawn_mock_plex_with("machine-A", 1, None); // first probe 500s
 
         let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
         lib.set_server_manual("127.0.0.1".to_string(), port, false, Some("A".to_string()));
@@ -1123,6 +1177,54 @@ mod tests {
         assert_eq!(
             identified[0].key, unidentified[0].key,
             "...so the root the user is standing on is still the same library"
+        );
+    }
+
+    /// A list must carry the binding of the server that SERVED it — never one
+    /// that was installed while it was being fetched.
+    ///
+    /// The source hands out a CLONE of its client and reads the binding
+    /// separately. Between those two reads, another task's failed read can
+    /// rediscover and rebind the source, bumping the binding. Read apart, this
+    /// list — correctly served by the OLD server — gets stamped with the NEW
+    /// server's binding, and the frontend takes the old server's library for the
+    /// new one's: it evicts the live root the user is standing on, and offers the
+    /// old library as if it belonged to the server that replaced it (codex r13).
+    ///
+    /// The `/identity` probe is the window: it is a network call made after the
+    /// clone is taken, and it FAILS here, so the source falls back on that clone.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_list_carries_the_binding_of_the_server_that_served_it() {
+        let (arrived_tx, arrived_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let gate = (arrived_tx, Arc::new(Mutex::new(release_rx)));
+        // The probe parks, then 500s: an unidentifiable server.
+        let (port, _hits) = spawn_mock_plex_with("machine-A", 1, Some(gate));
+
+        let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
+        lib.set_server_manual("127.0.0.1".to_string(), port, false, Some("A".to_string()));
+        let source = Arc::new(PlexSource::new("plex", "Plex", lib));
+
+        let listing = tokio::spawn({
+            let source = source.clone();
+            async move { source.sections().await }
+        });
+
+        // The source is inside the probe, holding a clone of A.
+        arrived_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the identity probe reached the server");
+        // Another task's failed read rediscovers and REBINDS the source. (The real
+        // path needs plex.tv; the bump is what a rebind does — see
+        // `only_an_unprovable_rebind_voids_outstanding_keys`.)
+        source.binding.fetch_add(1, Ordering::SeqCst);
+        release_tx.send(()).unwrap();
+
+        let sections = listing.await.unwrap().expect("A serves its sections");
+        assert_eq!(
+            sections[0].binding, 0,
+            "this list came from the server bound BEFORE the rebind: stamping it with \
+             the new binding makes the frontend mistake A's library for B's"
         );
     }
 
