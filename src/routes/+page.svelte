@@ -243,6 +243,15 @@
     // left on screen to explain it and no way to clear it (codex r14).
     navEpoch++;
     await loadSourceList();
+    // And AGAIN, now that the change has actually landed. The bump above
+    // invalidates whatever was in flight when Settings called us — but Settings
+    // does not await this, so the user can close it and hit Refresh DURING the
+    // await, and that refresh would otherwise own the post-change epoch: it would
+    // go on blocking the empty-Home redirect over a view its own request no longer
+    // describes, stalling navigation until it settled or timed out (codex r15).
+    // Same shape as the link flow's double bump (codex r8): declare the intent
+    // before the await, and the fact after it.
+    navEpoch++;
     if (!sources.some((s) => s.id === activeSource)) activeSource = null;
     authenticated = sources.length > 0;
     if (authenticated) {
