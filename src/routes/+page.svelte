@@ -377,6 +377,11 @@
     // have (codex r15, r16). Abandon it here, once, for both.
     scanAttempt++; // its publication check now fails
     clearScanStatus();
+    // Same for a watch-state edit in flight: its outcome is about an item in a source list
+    // that has just changed, and the last-source branch below leaves nothing it could
+    // sensibly report on (the r14/r15 rule, applied to the edit's line).
+    editAttempt++;
+    editStatus = null;
     if (authenticated) {
       linkGen++; // abandon any in-flight Plex link poll tied to the old pin
       pin = null;
@@ -1573,6 +1578,21 @@
   // codex r14, r15). The view's banner explains the view; a scan explains itself.
   // `failed` picks the surface: an alert that stays, or a neutral notice that
   // auto-clears.
+  // A watch-state edit reports on ITS OWN line, never the view's banner (owner ruling
+  // 2026-07-14, "its own line"; plan .agents/plans/per-surface-status.md). It is an action
+  // the user took, not a fact about the grid — and the two writers sharing one surface is
+  // what produced EIGHT consecutive rounds of the same defect, each fix opening the next
+  // door (library-refresh-scan log, r17-r24). Failure only: a SUCCESS needs no
+  // announcement, because the card's ✓ is the acknowledgement.
+  //
+  // Like the scan's, it publishes regardless of which view is on screen — an action's
+  // outcome is not view-scoped — and stays until the next edit. `editAttempt` is the
+  // publication ownership: a newer edit supersedes an older one's outcome, and the
+  // last-source teardown abandons one in flight so it cannot land on Welcome about a
+  // library that no longer exists (the r14/r15/r16-3 rule).
+  let editStatus = $state<string | null>(null);
+  let editAttempt = 0;
+
   let scanStatus = $state<{ text: string; failed: boolean } | null>(null);
   let scanning = $state<Record<string, boolean>>({}); // menu-entry feedback only
   const scanGens: Record<string, number> = {};
@@ -1633,11 +1653,14 @@
 
   async function setWatched(item: Item, played: boolean) {
     closeMenu();
-    // The root the user made this edit IN — captured BEFORE the server call, because
-    // that call is the longest wait here and they can leave during it. Reading the
-    // signature in the catch instead reads whatever root they landed on, compares it
-    // to itself, and always matches: the edit's failure then lands on a view it says
-    // nothing about, covering that view's own status (codex r20).
+    // This attempt owns the edit line from here on; a newer edit supersedes it.
+    const attempt = ++editAttempt;
+    editStatus = null; // this attempt supersedes whatever the last one said
+    // The root the edit was made IN, captured BEFORE the server call — that call is the
+    // longest wait here and the user can leave during it. It no longer gates the REPORT
+    // (the edit has its own line now, and an action's outcome is not view-scoped); it
+    // gates only whether we re-enter the CURRENT root, because repainting a library the
+    // user merely walked into throws away their scroll and their loaded pages (r22-2).
     const myRoot = rootSig();
     try {
       // Merged cards may front a local file while a server backing owns the
@@ -1653,69 +1676,30 @@
       // any lingering server hub copy.
       refreshWatchState();
     } catch (e) {
-      // The backend curates BEFORE the server call and rolls back on
-      // failure — but an unrelated refresh (e.g. playback-ended) may have
-      // rendered the transient curated state meanwhile. Re-fetch so the
-      // rolled-back truth repaints.
+      // The backend curates BEFORE the server call and rolls back on failure — but an
+      // unrelated refresh (e.g. playback-ended) may have rendered the transient curated
+      // state meanwhile. Re-fetch so the rolled-back truth repaints.
       //
-      // Publish AFTER that, and after it has SETTLED. The re-fetch goes through
-      // `resetAndLoad`, which clears the banner as it starts — reporting first
-      // meant the edit's own repaint wiped the report (a failed mark-watched
-      // flashed an error and swallowed it). And reporting without awaiting it
-      // meant a repaint that ALSO failed would overwrite the edit's message with
-      // its own: the user would learn the reload failed and never learn their edit
-      // had (codex r18). The edit is what they asked for; its failure is the one
-      // they need.
-      // ...but only if the grid this edit was made in is still the one on screen. The
-      // repaint re-enters the CURRENT root, whatever that now is — so if the user left
-      // while the edit was in flight, it would reset a library they merely walked into
-      // and clear that view's own still-applicable diagnostic (codex r22).
-      //
-      // It cannot simply be skipped, though. The backend curates BEFORE the server call:
-      // the recents entry is already gone and the tombstone already written when the
-      // request goes out, and a Home load that ran inside that window captured the
-      // transient state. The rollback restores the server's truth, and without a re-fetch
-      // Continue Watching keeps showing the item as gone — falsely, and until a restart
-      // (codex r23).
-      //
-      // So HEAL: re-fetch the watch state, and do not touch the grid the user walked to.
-      // A library is left alone entirely — dropping the hubs is enough, because goHome()
-      // re-fetches them. Home is rebuilt in place, and rebuilding it RETRACTS the failure
-      // it repairs: a Home load that succeeds must not leave the previous load's
-      // diagnostic sitting under fresh rails (the r11 rule). The `keepError` version of
-      // this did exactly that, permanently — nothing retracts an untagged Home failure
-      // (codex + grok, r24). Every OTHER surface's failure survives, because loadHome now
-      // clears only the view's (see setError).
-      //
-      // Not on Welcome: with the last source gone there is no Home to rebuild, and
-      // loadHome would deterministically fail and paint a dead-source error over a screen
-      // that offers nothing to clear it — the r14 hole (codex r24).
+      // If the user LEFT the grid this edit was made in, do not re-enter their new one:
+      // that resets a library they merely walked into. But do not skip the re-fetch
+      // either — the recents entry was already gone and the tombstone already written
+      // when the request went out, and a Home load inside that window captured the lie.
+      // Rolled back and never re-fetched, Continue Watching keeps showing the item as
+      // gone, falsely, until a restart (r22-2 and r23 pull in opposite directions here;
+      // both hold). Not on Welcome: there is no Home to rebuild and loadHome would paint
+      // a dead-source error over a screen that cannot clear it (r14, r24).
       if (rootSig() !== myRoot) {
         hubs = []; // stale: a later goHome() re-fetches (see refreshWatchState)
         if (authenticated && mode === "home") loadHome(++homeGen);
-        return;
+      } else {
+        await refreshWatchState();
       }
-      await refreshWatchState();
-      // The await is a long window and the user does not wait in it. If they LEFT,
-      // this failure describes a grid that is gone — it does not belong on the screen
-      // they are looking at now (codex + grok, r19).
-      //
-      // Ask the view WHAT IT IS, rather than inferring it from counters. The r19 gate
-      // tried `navEpoch` and `loadGen` together and was wrong in both directions: a
-      // Plex link replaces the whole view with the device-code screen while bumping no
-      // load generation at all, and re-selecting the library you are already in bumps
-      // both counters without going anywhere (codex + grok, r20).
-      if (rootSig() !== myRoot) return;
-      // Still on the root the edit was made in. Someone else's message may be on
-      // screen — our own repaint's, if it failed too and is the only thing explaining
-      // the empty grid it left behind, or the refresh settlement's. Overwriting it
-      // trades one lost failure for the other (the swap r18 made, pointing the other
-      // way). Both are true; add ours to theirs.
-      //
-      // UNTAGGED: no listing generation owns an edit's failure, so no refresh may
-      // retract it. Inheriting the repaint's tag is how a successful refresh came to
-      // erase the very message this catch exists to deliver (codex + grok, r20).
-      addError(String(e));
+      // Report on the edit's OWN line, and report it wherever the user now is: they asked
+      // for this change, it did not happen, and that is true no matter which view they are
+      // looking at. No currency gate, no ownership algebra, no retract — the machinery all
+      // of that needed is exactly what having a second writer on the view's banner cost.
+      // Only a NEWER edit may supersede this one.
+      if (attempt === editAttempt) editStatus = String(e);
     }
   }
 
@@ -1723,11 +1707,14 @@
   // standard re-fetch. No watched-state change.
   async function removeFromContinue(item: Item) {
     closeMenu();
+    const attempt = ++editAttempt;
+    editStatus = null;
     try {
       await invoke("remove_from_continue", { ratingKey: item.ratingKey });
       refreshWatchState();
     } catch (e) {
-      setError(String(e));
+      // A watch-state edit, so the same surface (see editStatus).
+      if (attempt === editAttempt) editStatus = String(e);
     }
   }
 
@@ -1873,6 +1860,14 @@
 
   {#if error}
     <div class="error" role="alert">{friendlyError(error)}</div>
+  {/if}
+
+  {#if editStatus}
+    <!-- The EDIT's own surface, never the view's error banner above (owner ruling
+         2026-07-14). It sits alongside a listing failure rather than fighting it: both
+         are true, and the listing's is the one explaining an empty grid. Stays until the
+         next edit — a failure is not something to tidy away on a timer. -->
+    <div class="scanerror" role="alert">{friendlyError(editStatus)}</div>
   {/if}
 
   {#if scanStatus}

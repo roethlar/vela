@@ -46,6 +46,14 @@ async function banner(driver) {
     `return document.querySelector('div.error')?.textContent ?? null`,
   );
 }
+// The EDIT's own surface (owner ruling 2026-07-14). Renders as div.scanerror, like the
+// scan's — NEVER div.error, which is the view's. A test that reads the wrong one is the
+// whole point of the split.
+async function editLine(driver) {
+  return driver.exec(
+    `return [...document.querySelectorAll('div.scanerror')].map((e) => e.textContent).join(' | ') || null`,
+  );
+}
 async function settle(driver) {
   await driver.waitFor(
     `const b = document.querySelector('button.refreshbtn'); return !!b && !b.disabled`,
@@ -215,297 +223,75 @@ export default {
     );
 
     // ── 2. The refresh may only retract a banner it SUPERSEDED ─────────
-    // `setError` clears the generation tag on every NON-listing write, so a
-    // gen-scoped retraction cannot take down a banner that merely shares its
-    // generation lineage (r12-2). Nothing guarded that any more: case 25 was
-    // written when a scan wrote to the shared banner, and r15 moved scans onto
-    // their own surface, so it went vacuous — revert the funnel and it still
-    // passed (grok r17).
-    //
-    // Both writes must happen DURING the action: the refresh clears the banner at
-    // the click, so nothing published before it can survive to be wrongly
-    // retracted. And the tagged listing failure must leave CARDS on screen, or
-    // there is nothing left to drive a non-listing write with — which rules out a
-    // failed reload (it empties the grid) and leaves a failed PAGE, on a
-    // generation newer than the action's (so it is published, not silenced).
+    // The retract takes parts owned by a LOAD it replaced, and nothing else. An untagged
+    // part — here the search validation message, which no load owns — is not the refresh's
+    // to take back. (Before the surface split this case used a failed EDIT as its untagged
+    // writer; the edit no longer writes to this banner at all, which is the point.)
     mock.state.viewsDelayMs = 6000; // the action stays in flight throughout
     const refresh2 = await driver.find("css selector", "button.refreshbtn");
     await driver.click(refresh2);
 
-    // A successful edit re-enters the root, claiming a generation NEWER than the
-    // action's. Its reload succeeds, so the grid keeps cards.
-    await watchToggle(driver, "Movie 119", "Mark watched");
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "the edit's reload lands (a newer generation now owns the grid)",
+    const box = await driver.find(
+      "css selector",
+      'input[aria-label="Search your libraries"]',
     );
-
-    // Now its NEXT page fails. Newer than the action's generation, so the action
-    // does not silence it: a TAGGED banner, with the cards still there.
-    mock.state.unauthNextItems = true;
-    await scrollGridToEnd(driver);
-    await pollUntil(
-      async () => ((await banner(driver)) ? true : null),
-      "the newer load's 401 must banner (tagged)",
-    );
-
-    // A failing edit now takes the banner over — a NON-listing write, which must
-    // carry the tag away with it.
-    mock.state.unauthNextPlayed = true;
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    // Wait for the REPAINT to settle, not just for "a banner". The edit's repaint
-    // clears the banner as it starts and the edit publishes only once it is done
-    // (codex r18) — so a bare non-null poll would return the PREVIOUS banner, and
-    // the capture below would land in the window where it has been cleared.
-    await pollUntil(
-      async () =>
-        (await cardCount(driver)) === 60 && (await banner(driver)) ? true : null,
-      "the failed edit's banner, once its repaint has settled",
+    await driver.type(box, `M${ENTER}`); // too short: an UNTAGGED banner part
+    await driver.waitFor(
+      `return document.body.innerText.includes('Search needs at least 2 characters.')`,
+      "the untagged validation message",
     );
     const beforeSettle = await banner(driver);
 
-    // The action finally claims the grid and succeeds. It superseded the LISTING —
-    // not the edit. If the tag survived the non-listing write, it retracts by
-    // generation and the user never learns their edit failed.
     await settle(driver);
     mock.state.viewsDelayMs = 0;
     assert.equal(
       await banner(driver),
       beforeSettle,
-      "the refresh superseded the listing, not the edit: a banner it never published and never superseded is not its to retract",
+      "the refresh superseded no load that published this: a part no load owns is not its to retract",
     );
 
-    // ── 3. A failing refresh must not erase the banner that explains the grid ──
-    // Case 2's refresh SUCCEEDS, so settlement publishes nothing and never runs the
-    // preservation branch at all — remove that branch and case 2 stays green
-    // (codex r17). Here the action's own sections leg FAILS, so it has something to
-    // say, and a banner published DURING the run by a load it never superseded must
-    // survive that — it is the one explaining why the grid is empty.
-    mock.state.viewsDelayMs = 6000; // the action is in flight throughout
+    // ── 3. A failing refresh must not erase the banner explaining the grid ──
+    // The action's own sections leg fails, so it has something to say — and it must say it
+    // AFTER what is already there, not over it.
+    await driver.exec(
+      `const i = document.querySelector('input[aria-label="Search your libraries"]');
+       i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    mock.state.viewsDelayMs = 6000;
     const refresh3 = await driver.find("css selector", "button.refreshbtn");
     await driver.click(refresh3);
-    mock.state.failNextViews = true; // ...and its own leg will fail (consumed at respond)
+    mock.state.failNextViews = true; // ...and its own leg will fail
 
-    // The banner published during the run must be UNTAGGED — a failed EDIT, not a
-    // failed listing. A tagged listing banner was already preserved by the narrow
-    // predicate this widening replaced (`errorGen > gridActionBaseGen &&
-    // errorGen === loadGen`), so arming one would leave the widening unguarded:
-    // restore the narrow condition and the case would still pass (grok r18).
-    mock.state.unauthNextPlayed = true;
-    await watchToggle(driver, "Movie 059", "Mark watched"); // the EDIT 401s
-    await pollUntil(
-      async () => ((await banner(driver)) ? true : null),
-      "the failed edit's banner (untagged — nobody's generation owns it)",
+    await driver.type(box, `M${ENTER}`); // an untagged part, published during the run
+    await driver.waitFor(
+      `return document.body.innerText.includes('Search needs at least 2 characters.')`,
+      "the untagged part, published during the action's run",
     );
 
     await settle(driver);
     mock.state.viewsDelayMs = 0;
     const both = await banner(driver);
     assert.ok(
-      both && both.includes("reconnect"),
-      `the failure that explains this empty grid must survive the refresh's own diagnostic — got ${JSON.stringify(both)}`,
+      both && both.includes("Search needs at least 2 characters."),
+      `a part published during the run, by a writer the action never superseded, must survive the action's own diagnostic — got ${JSON.stringify(both)}`,
     );
     assert.ok(
       both.includes("Views"),
       `...and the refresh must still report its own failure alongside it — got ${JSON.stringify(both)}`,
     );
 
-    // ── 4. A failed edit whose own repaint ALSO fails must report BOTH ──
-    // Cases 2 and 3 both let the edit's recovery repaint SUCCEED, so neither one
-    // exercises the ordering at all: delete the `await` in setWatched and both stay
-    // green (codex r19). The repaint CLEARS the banner as it starts and publishes
-    // its OWN failure when it lands, so the edit and its recovery are two writers
-    // racing for one surface — and whoever loses it, the user is missing something
-    // they need: what became of the change they asked for, or why the grid it left
-    // behind is empty. Both are true. Both have to be on screen.
-    //
-    // The two failures must RENDER DIFFERENTLY or no assertion can tell which one
-    // survived — two 401s collapse into the same RECONNECT_REQUIRED sentence (codex
-    // r12), which is how case 27 in refresh.mjs came to guard nothing. So: a 401
-    // edit against a 500 listing.
-    mock.state.unauthNextPlayed = true; // the edit 401s...
-    mock.state.failNextItems = true; // ...and the repaint it kicks off 500s
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(
-      async () =>
-        (await cardCount(driver)) === 0 && (await banner(driver)) ? true : null,
-      "the repaint fails too, leaving an empty grid and a banner",
-    );
-    const bothWriters = await banner(driver);
-    assert.ok(
-      bothWriters.includes("reconnect"),
-      `the edit is what the user ASKED for, and its failure must survive its own recovery — drop the await and the failing repaint publishes last, erasing it — got ${JSON.stringify(bothWriters)}`,
-    );
-    assert.ok(
-      bothWriters.includes("500"),
-      `...and the repaint's failure is the only thing explaining the empty grid it left behind — publish the edit alone and it is erased — got ${JSON.stringify(bothWriters)}`,
-    );
-
-    // ── 5. A failed edit must not paint on a root the user has LEFT ──
-    // The publish waits for the repaint; the user does not. A slow recovery leaves
-    // time to go Home, whose own load clears the surface — and the edit's failure
-    // then lands on a view it says nothing about, covering that view's status
-    // (codex + grok, r19).
-    //
-    // LEAVING is the surface changing AND a new load taking over the content, which
-    // is what goHome does. A modal opening moves `navEpoch` alone and must NOT drop
-    // the message: the grid, and the item the edit was about, are still right there.
-    await openLibraryGrid(driver, {
-      section: "Big Library",
-      cardPrefix: "Movie 000",
-    });
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "a healthy grid to edit from",
-    );
-    mock.state.unauthNextPlayed = true; // the edit 401s...
-    mock.state.itemsDelayMs = 6000; // ...and its recovery repaint parks
-    const served5 = servedCount("/Items");
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(armedShotsBound, "the 401 edit and its parked repaint to both bind");
-    await goHome(driver);
-    await driver.waitFor(
-      `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
-      "Home",
-    );
-    await noEditBannerAfterParked(driver, {
-      endsWith: "/Items",
-      before: served5,
-      what: "the user left the grid this edit was about: its failure describes a view that is gone, and does not belong pasted over the one they are standing on",
-    });
-
-    // ── 6. A successful refresh must not RETRACT a failed edit's message ──
-    // The banner can hold two failures with different OWNERS: a listing failure, owned
-    // by the load that produced it and retractable once a refresh replaces those cards
-    // (codex r11), and an edit's failure, owned by no load and retractable by nobody.
-    // r19 combined them into one string under the LISTING's tag — so the refresh's
-    // retract took the edit's message with it, and a user whose grid was repaired
-    // never learned their change had failed (codex + grok, r20). The same loss r19
-    // fixed, arriving through the retract door instead of the publish door.
-    await openLibraryGrid(driver, {
-      section: "Big Library",
-      cardPrefix: "Movie 000",
-    });
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "a healthy grid to edit from",
-    );
-    // A refresh that will SUCCEED, but slowly: it stays in flight while the edit runs,
-    // then claims the grid and repairs it — which is what arms the retract branch.
-    mock.state.viewsDelayMs = 6000;
-    const refresh4 = await driver.find("css selector", "button.refreshbtn");
-    await driver.click(refresh4);
-
-    // Inside that window: the edit 401s and its recovery repaint 500s. The repaint
-    // claims a generation NEWER than the action's, so it is not silenced — it publishes
-    // a TAGGED listing failure, and the edit adds its untagged one.
-    mock.state.unauthNextPlayed = true;
-    mock.state.failNextItems = true;
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(
-      async () => {
-        const b = await banner(driver);
-        return b && b.includes("500") && b.includes("reconnect") ? true : null;
-      },
-      "both failures on screen before the refresh settles",
-    );
-
-    // The refresh now claims the grid and succeeds. Its cards replace the ones the
-    // failed repaint never loaded, so the LISTING diagnostic is superseded — and the
-    // retract must take that, and only that.
-    await settle(driver);
-    mock.state.viewsDelayMs = 0;
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "the refresh repairs the grid",
-    );
-    const afterRetract = await banner(driver);
-    assert.ok(
-      afterRetract && afterRetract.includes("reconnect"),
-      `a refresh may retract the listing failure it superseded — never the edit failure it did not: the user's change still failed and nothing else will tell them — got ${JSON.stringify(afterRetract)}`,
-    );
-    assert.ok(
-      !afterRetract.includes("500"),
-      `...and the listing diagnostic IS the refresh's to take back: its cards are on screen now — got ${JSON.stringify(afterRetract)}`,
-    );
-
-    // ── 7. A leave that moves NO load generation must still drop the edit ──
-    // `navEpoch` and `loadGen` together are not a proof of root identity, in either
-    // direction (codex + grok, r20). Here is the first direction: tearing down a search
-    // root bumps `navEpoch` and NOTHING else — no load runs — so a gate that demands
-    // both counters move keeps the edit's failure and paints it on the torn-down view.
-    // (The real one that bit us is the Plex link screen, which replaces the whole view
-    // while bumping no load generation; it needs plex.tv, so the search teardown stands
-    // in for it — the same hole, reachable from a mock.)
-    const box = await driver.find(
-      "css selector",
-      'input[aria-label="Search your libraries"]',
-    );
-    await driver.type(box, `Movie 05${ENTER}`);
-    await pollUntil(
-      async () => ((await cardCount(driver)) > 0 ? true : null),
-      "the search root, with results",
-    );
-    mock.state.unauthNextPlayed = true; // the edit 401s...
-    mock.state.itemsDelayMs = 6000; // ...and the search re-run it kicks off parks
-    const served7 = servedCount("/Items");
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(armedShotsBound, "the 401 edit and its parked re-run to both bind");
-    // Tear the search root down: a one-character query. No load; only navEpoch moves.
+    // ── 4. The edit's failure and the view's never touch each other ─────────
+    // THE POINT OF THE SPLIT. Both fail; both are reported; neither erases the other. This
+    // one assertion replaces six cases (the old 5-11), every one of which existed only to
+    // police two writers fighting over a single banner.
     await driver.exec(
       `const i = document.querySelector('input[aria-label="Search your libraries"]');
        i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
     );
-    await driver.type(box, `M${ENTER}`);
-    await driver.waitFor(
-      `return document.body.innerText.includes('Search needs at least 2 characters.')`,
-      "the search root torn down",
-    );
-    await noEditBannerAfterParked(driver, {
-      endsWith: "/Items",
-      before: served7,
-      what: "the search root the edit was made in is gone — its failure does not belong on what replaced it, and no load generation moved to say so",
-    });
-
-    // ── 8. Re-entering the SAME root must not drop the edit ──
-    // The other direction. Re-selecting the library you are already in bumps BOTH
-    // counters and goes nowhere: the grid, and the item, are exactly where they were.
-    // A gate that reads "both moved" as "the user left" silently swallows the failure
-    // (codex r20) — the same silent loss r18 and r19 were both spent fixing.
-    await openLibraryGrid(driver, {
-      section: "Big Library",
-      cardPrefix: "Movie 000",
-    });
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "back on the library grid",
-    );
-    mock.state.unauthNextPlayed = true; // the edit 401s...
-    mock.state.itemsDelayMs = 6000; // ...and its recovery repaint parks
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(armedShotsBound, "the 401 edit and its parked repaint to both bind");
-    // Re-select the library we are ALREADY in: navEpoch++ and a fresh resetAndLoad
-    // (loadGen++), same root.
-    await openLibraryGrid(driver, {
-      section: "Big Library",
-      cardPrefix: "Movie 000",
-    });
-    // A POSITIVE assertion can simply wait for the thing it wants, so poll rather than
-    // sleep: a late publish should not read as a failure.
-    await pollUntil(
-      async () => {
-        const b = await banner(driver);
-        return b && b.includes("reconnect") ? true : null;
-      },
-      "the user never left — they re-entered the library they were standing in, and their edit still failed, so it must be reported",
-    );
-
-    // ── 9. The root is the one the edit was MADE in, not the one it lands in ──
-    // The edit's own server call is the LONGEST wait in setWatched, and the user can
-    // leave during it. Reading the root in the catch — after the call has already
-    // failed — reads whatever root they walked to, compares it against itself, and
-    // always matches: the failure then lands on a view it says nothing about, covering
-    // that view's status (codex r20). The signature has to be taken BEFORE the call.
     await openLibraryGrid(driver, {
       section: "Big Library",
       cardPrefix: "Movie 000",
@@ -515,84 +301,34 @@ export default {
       "a healthy grid to edit from",
     );
     mock.state.unauthNextPlayed = true; // the edit 401s...
-    mock.state.playedDelayMs = 6000; // ...but not for six seconds
-    const served9 = servedCount("/PlayedItems/m59");
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(
-      async () =>
-        !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
-      "the parked, doomed edit to reach the server",
-    );
-    // Leave while it is still in flight — the failure has not happened yet.
-    await goHome(driver);
-    await driver.waitFor(
-      `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
-      "Home",
-    );
-    await noEditBannerAfterParked(driver, {
-      endsWith: "/PlayedItems/m59",
-      before: served9,
-      what: "the edit was made in a library the user has since left: its failure belongs to that grid, not to the Home they are standing on",
-    });
-
-    // ── 10. Two failures, ONE sentence — the survivor must be the weaker claim ──
-    // A 401 on a listing and a 401 on an edit both collapse into the same constant
-    // RECONNECT_REQUIRED sentence. Deduplicating the banner on TEXT alone silently
-    // decides ownership: the tagged listing part is already there, the edit's untagged
-    // part is dropped as a duplicate, and the refresh then retracts the only line left —
-    // the grid is repaired and nothing says the edit failed (codex r21).
-    //
-    // Case 6 cannot see this: it deliberately uses a 500 against a 401 so its assertions
-    // can tell the two apart. The identical-text case is the one that breaks.
-    await openLibraryGrid(driver, {
-      section: "Big Library",
-      cardPrefix: "Movie 000",
-    });
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "a healthy grid to edit from",
-    );
-    mock.state.viewsDelayMs = 6000; // a refresh that will SUCCEED, slowly
-    const refresh5 = await driver.find("css selector", "button.refreshbtn");
-    await driver.click(refresh5);
-
-    mock.state.unauthNextPlayed = true; // the edit 401s...
-    mock.state.unauthNextItems = true; // ...and its repaint 401s with the SAME sentence
+    mock.state.failNextItems = true; // ...and its recovery repaint 500s
     await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(
       async () => {
+        const e = await editLine(driver);
         const b = await banner(driver);
-        return b && b.includes("reconnect") ? true : null;
+        return e && b ? true : null;
       },
-      "the one sentence both failures produce",
+      "both failures, each on its own surface",
     );
-
-    await settle(driver);
-    mock.state.viewsDelayMs = 0;
-    await pollUntil(
-      async () => ((await cardCount(driver)) === 60 ? true : null),
-      "the refresh repairs the grid",
-    );
-    const survivor = await banner(driver);
     assert.ok(
-      survivor && survivor.includes("reconnect"),
-      `the refresh repaired the grid, which retires the LISTING's reason for this sentence — but the edit's reason still holds, and dropping the line leaves the user with no sign their change failed — got ${JSON.stringify(survivor)}`,
+      (await editLine(driver)).includes("reconnect"),
+      "the edit the user ASKED for failed: that is reported on the edit's line",
+    );
+    assert.ok(
+      (await banner(driver)).includes("500"),
+      "...and the repaint's failure, which is the only thing explaining the empty grid it left behind, is reported on the VIEW's",
+    );
+    assert.ok(
+      !(await banner(driver)).includes("reconnect"),
+      "the edit's failure must not appear on the view's banner at all — that shared surface is what eight review rounds of defects came from",
     );
 
-    // ── 11. A page failure must not take the edit's message with it ──
-    // The ownership algebra lived in addError, but setError REPLACED the whole list —
-    // and every listing writer uses setError. So an ordinary page failure wiped the
-    // edit's untagged part, or (when both render the same 401 sentence) re-tagged it as
-    // listing-owned; the refresh's retract then took it. The r21 silent loss, reverse
-    // ordering, through the setError door (codex + grok, r22).
-    //
-    // Case 10 cannot see it: there the edit publishes LAST, so addError runs last and the
-    // algebra saves it. Here the listing failure comes second.
-    //
-    // Everything must happen INSIDE an in-flight refresh. The refresh CLICK clears the
-    // surface, so an edit published before it is gone whatever the ownership rules say —
-    // a first draft of this case "went red" for exactly that reason and would have
-    // guarded nothing.
+    // ── 5. An action's outcome is reported wherever the user is ─────────────
+    // The old cases 5/7/9 asserted the OPPOSITE — that a failed edit must be SUPPRESSED if
+    // the user navigated away — because on the shared banner it would have covered the new
+    // view's own status. On its own line it covers nothing, and suppressing it was only
+    // ever a way to lose a failure the user needed. The scan already behaves this way.
     await openLibraryGrid(driver, {
       section: "Big Library",
       cardPrefix: "Movie 000",
@@ -601,57 +337,59 @@ export default {
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "a healthy grid to edit from",
     );
-    mock.state.viewsDelayMs = 6000; // a refresh that will SUCCEED, slowly
-    const refresh6 = await driver.find("css selector", "button.refreshbtn");
-    await driver.click(refresh6);
-
-    // The edit fails; its recovery repaint SUCCEEDS and claims a generation NEWER than
-    // the action's. One untagged part on screen, over a healthy grid.
     mock.state.unauthNextPlayed = true;
+    mock.state.playedDelayMs = 6000; // the edit is still in flight when the user leaves
+    const served5 = servedCount("/PlayedItems/m59");
     await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(
-      async () => {
-        const b = await banner(driver);
-        return b && b.includes("reconnect") && (await cardCount(driver)) === 60
-          ? true
-          : null;
-      },
-      "the edit's failure, over a healthy repainted grid",
+      async () =>
+        !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
+      "the parked, doomed edit to reach the server",
     );
-
-    // Now an ordinary page failure — the SAME 401 sentence, published by a LISTING.
-    // Newer than the action's generation, so it is published rather than silenced.
-    mock.state.unauthNextItems = true;
-    await scrollGridToEnd(driver);
+    await goHome(driver);
     await pollUntil(
-      async () => (mock.state.unauthNextItems === false ? true : null),
-      "the doomed page request to reach the server",
+      async () => (servedCount("/PlayedItems/m59") > served5 ? true : null),
+      "the parked 401 to be delivered",
+    );
+    await pollUntil(
+      async () => {
+        const e = await editLine(driver);
+        return e && e.includes("reconnect") ? true : null;
+      },
+      "the user asked for this change and it did not happen — they are told so, wherever they now are",
     );
 
-    // The refresh claims the grid and succeeds. It may retract the PAGE's diagnostic —
-    // those cards are back — but the edit's failure was never its to take.
-    await settle(driver);
-    mock.state.viewsDelayMs = 0;
+    // ── 6. A newer edit supersedes an older one's outcome ───────────────────
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
     await pollUntil(
       async () => ((await cardCount(driver)) === 60 ? true : null),
-      "the refresh repairs the grid",
+      "the grid",
     );
-    const afterPageFail = await banner(driver);
-    assert.ok(
-      afterPageFail && afterPageFail.includes("reconnect"),
-      `a page failure that renders the same sentence as the edit's must not hand the edit's message to the refresh's retract — got ${JSON.stringify(afterPageFail)}`,
+    await watchToggle(driver, "Movie 058", "Mark watched"); // succeeds
+    await pollUntil(
+      async () => ((await editLine(driver)) === null ? true : null),
+      "a new edit clears the previous one's failure — a stale outcome is not an outcome",
     );
 
-    // ── 12. The heal must RETRACT the failure it repairs ──────────────────
-    // This case used to assert the OPPOSITE — that Home's failure survived the heal — and
-    // it was asserting a bug: the heal rebuilds Home successfully, so the previous load's
-    // diagnostic is describing cards that are now on screen. Fresh rails under a stale
-    // "couldn't load" is the r11 lie, and an untagged Home failure has nothing that ever
-    // retracts it, so it was permanent (codex + grok, r24).
+    // ── (no case 7) ────────────────────────────────────────────────────────
+    // Losing the LAST source must abandon an edit in flight — its outcome is about an item
+    // in a library that no longer exists, and Welcome offers nothing that could clear it
+    // (the r14 rule, which cost three separate defects). `onSourcesChanged` bumps
+    // `editAttempt` and clears the line for exactly this.
     //
-    // What r22-2 actually protects is a grid the user WALKED TO: the heal never touches a
-    // library (it only drops the hubs), and cases 5/9 prove the edit's failure is not
-    // published there.
+    // NOT GUARDED HERE: this scenario cannot remove a source (that is Settings UI, and
+    // pagefail seeds a single mock). A first draft of this case called a `__vela_removeSource`
+    // hook that does not exist — a test that asserted nothing while looking like a guard.
+    // Deleted rather than shipped. Recorded as an open gap in the plan.
+
+    // ── 8. The heal must RETRACT the failure it repairs ─────────────────────
+    // (was case 12) The heal rebuilds Home successfully, so the previous load's diagnostic
+    // describes rails that are now on screen. Fresh rails under a stale "couldn't load" is
+    // the r11 lie, and an untagged Home failure has nothing that ever retracts it — so
+    // leaving it is permanent.
     await openLibraryGrid(driver, {
       section: "Big Library",
       cardPrefix: "Movie 000",
@@ -660,18 +398,16 @@ export default {
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "a healthy grid to edit from",
     );
-    mock.state.unauthNextPlayed = true; // the edit will 401...
-    mock.state.playedDelayMs = 6000; // ...but not for six seconds
-    const served12 = servedCount("/PlayedItems/m59");
+    mock.state.unauthNextPlayed = true;
+    mock.state.playedDelayMs = 6000;
+    const served8 = servedCount("/PlayedItems/m59");
     await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(
       async () =>
         !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
       "the parked, doomed edit to reach the server",
     );
-
-    // Leave for Home, and make Home's own load FAIL, so it has a diagnostic to retract.
-    mock.state.failNextLatest = true;
+    mock.state.failNextLatest = true; // Home's OWN load will fail
     await goHome(driver);
     await pollUntil(
       async () => {
@@ -680,23 +416,17 @@ export default {
       },
       "Home's own failure",
     );
-
-    // The parked edit now fails and the backend rolls back. The heal rebuilds Home — and
-    // must take Home's stale diagnostic with it.
-    const latestBefore12 = servedCount("/Items/Latest");
+    const latestBefore8 = servedCount("/Items/Latest");
     await pollUntil(
-      async () => (servedCount("/PlayedItems/m59") > served12 ? true : null),
+      async () => (servedCount("/PlayedItems/m59") > served8 ? true : null),
       "the parked 401 to be delivered",
     );
-    // Wait for the heal's OWN Home load to land, then HOLD. Polling for the absence of
-    // the 500 would pass on the transient blank while loadHome is still in flight — which
-    // it did: restoring the r23 keepError behaviour left this case green, because the
-    // banner is briefly empty at the reload's entry and the poll returned right there.
-    // The ninth vacuous guard in this plan, and again only the injection found it.
     await pollUntil(
-      async () => (servedCount("/Items/Latest") > latestBefore12 ? true : null),
+      async () => (servedCount("/Items/Latest") > latestBefore8 ? true : null),
       "the heal's Home load to be delivered",
     );
+    // HOLD it: polling for the absence would pass on the transient blank while the heal's
+    // reload is still in flight — which is exactly how this case was vacuous once.
     await holdsFor(
       async () => {
         const b = await banner(driver);
@@ -705,73 +435,13 @@ export default {
           : null;
       },
       3000,
-      "the heal rebuilt Home, so the failure describing the rails it just replaced must go with it — nothing else ever retracts an untagged Home failure, so leaving it is permanent",
+      "the heal rebuilt Home, so the failure describing the rails it just replaced must go with it — nothing else ever retracts an untagged Home failure",
     );
 
-    // ── 13. Tearing the search root down takes its failures with it ──
-    // `gen: 0` says no LOAD owns a part — NOT that the part belongs to the view on
-    // screen. setError keeps every untagged part, so a failed edit made in search results
-    // survived the teardown of the very root it was made in and sat over the replacement
-    // view until the next navigation (codex r23).
-    //
-    // Case 7 cannot see this: there the edit publishes AFTER the teardown and is dropped
-    // by rootSig. Here it publishes BEFORE, legitimately, and must be cleared away WITH
-    // the root it describes.
-    const box2 = await driver.find(
-      "css selector",
-      'input[aria-label="Search your libraries"]',
-    );
-    // Case 7 left its one-character query in the box; typing appends, so clear it first
-    // or the query becomes "MMovie 05" and matches nothing.
-    await driver.exec(
-      `const i = document.querySelector('input[aria-label="Search your libraries"]');
-       i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
-    );
-    await driver.type(box2, `Movie 05${ENTER}`);
-    await pollUntil(
-      async () => ((await cardCount(driver)) > 0 ? true : null),
-      "the search root, with results",
-    );
-    mock.state.unauthNextPlayed = true; // the edit 401s; its re-run repaint SUCCEEDS
-    await watchToggle(driver, "Movie 059", "Mark watched");
-    await pollUntil(
-      async () => {
-        const b = await banner(driver);
-        return b && b.includes("reconnect") ? true : null;
-      },
-      "the edit's failure, published on the search root it was made in",
-    );
-
-    // Now tear that root down.
-    await driver.exec(
-      `const i = document.querySelector('input[aria-label="Search your libraries"]');
-       i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
-    );
-    await driver.type(box2, `M${ENTER}`);
-    await driver.waitFor(
-      `return document.body.innerText.includes('Search needs at least 2 characters.')`,
-      "the search root torn down",
-    );
-    const afterTorn = await banner(driver);
-    assert.ok(
-      afterTorn && !afterTorn.includes("reconnect"),
-      `the search root this edit was made in is gone — its failure does not belong over whatever replaced it — got ${JSON.stringify(afterTorn)}`,
-    );
-
-    // ── 14. Skipping the repaint must not skip the HEAL ──
-    // The backend curates BEFORE the server call — the recents entry is gone and the
-    // tombstone written when the request goes out — and rolls both back if it fails. A
+    // ── 9. Skipping the repaint must not skip the HEAL ──────────────────────
+    // (was case 14) The backend curates BEFORE the server call and rolls back on failure. A
     // Home load INSIDE that window captures the transient state, so an edit failure that
-    // re-fetches nothing (because the user left the grid it was made in) leaves Continue
-    // Watching showing the item as gone. Falsely, and until a restart.
-    //
-    // The first version of this case was vacuous BOTH ways (codex + grok, r24): it
-    // snapshotted `servedCount > 0`, which boot had already satisfied, and it never
-    // emptied the hubs — so goHome served Home from cache, the curated window was never
-    // captured, and the ordinary Home load could satisfy the assertion with the heal
-    // deleted. Both halves are forced now: the hubs are dropped so goHome REALLY loads
-    // Home inside the window, and the count is snapshotted only after that load has been
-    // delivered, so nothing but the heal can move it.
+    // re-fetches nothing leaves Continue Watching showing an item the server still has.
     await openLibraryGrid(driver, {
       section: "Big Library",
       cardPrefix: "Movie 000",
@@ -780,21 +450,17 @@ export default {
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "a healthy grid to edit from",
     );
-    // A successful edit empties the hubs (refreshWatchState), so the next goHome must
-    // actually re-load Home rather than serve it from cache.
-    //
-    // Wait for its repaint's RESPONSE, not for a card count: the grid holds 60 cards both
-    // before and after the reload, so counting alone returns on the OLD grid and the next
-    // context-menu click lands on a DOM that is being replaced under it.
+    // A successful edit empties the hubs, so the next goHome REALLY loads Home rather than
+    // serving it from cache — without this the curated window is never captured and the
+    // case guards nothing.
     const servedRepaint = servedCount("/Items");
-    await watchToggle(driver, "Movie 058", "Mark watched");
+    await watchToggle(driver, "Movie 057", "Mark watched"); // 058 is already watched (case 6)
     await pollUntil(
       async () => (servedCount("/Items") > servedRepaint ? true : null),
       "the successful edit's repaint to be served (the hubs are now empty)",
     );
     await pollUntil(
       async () =>
-        (await cardCount(driver)) === 60 &&
         (await driver.exec(
           `return !!document.querySelector('button.poster[aria-label^="Movie 059"]')`,
         ))
@@ -805,28 +471,25 @@ export default {
 
     mock.state.unauthNextPlayed = true;
     mock.state.playedDelayMs = 6000;
-    const served14 = servedCount("/PlayedItems/m59");
+    const served9 = servedCount("/PlayedItems/m59");
     await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(
       async () =>
         !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
       "the parked, doomed edit to reach the server (the backend has now curated)",
     );
-
-    // Home loads INSIDE the curated window — this is the load that captures the lie.
     await goHome(driver);
     await pollUntil(
       async () => (allDelivered(mock, "/Items/Latest") ? true : null),
       "Home's own load, inside the curated window, to be delivered",
     );
-    const latestBeforeHeal = servedCount("/Items/Latest");
-
+    const latestBefore9 = servedCount("/Items/Latest");
     await pollUntil(
-      async () => (servedCount("/PlayedItems/m59") > served14 ? true : null),
+      async () => (servedCount("/PlayedItems/m59") > served9 ? true : null),
       "the parked 401 to be delivered (the backend now rolls back)",
     );
     await pollUntil(
-      async () => (servedCount("/Items/Latest") > latestBeforeHeal ? true : null),
+      async () => (servedCount("/Items/Latest") > latestBefore9 ? true : null),
       "the rolled-back edit must re-fetch the watch state, or Continue Watching keeps showing an item the server still has — and nothing but the heal can issue this request",
     );
 

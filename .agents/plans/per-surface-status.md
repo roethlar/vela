@@ -71,11 +71,18 @@ The highest-value slice: this writer caused most of the loop's defects.
   NOT in `div.error`.
 - `onSourcesChanged` bumps `editAttempt` and clears the status — an edit in flight when a
   source is removed must not publish over an unrelated source (the r16-3 rule, applied).
-- **DELETE, once nothing else needs them:** `rootSig()` and its call sites in `setWatched`.
-  The whole root-identity gate exists ONLY because the edit's failure had to fight the
-  view's banner for one surface. An action's status line does not care which view is on
-  screen — that is the point of the decision. Do not port the gate; deleting it IS the fix.
-  (`rootSig` is also used by nothing else — verify with a grep before removing.)
+- **`rootSig` gates TWO things. Exactly one of them dies.** (Corrected against the code
+  before implementing — the first draft of this plan claimed the whole gate could go, and
+  it cannot.)
+  - **The PUBLISH gate goes** (`if (rootSig() !== myRoot) return;` before reporting). An
+    action's outcome does not care which view is on screen — the scan already publishes
+    regardless. This is the gate that caused the defects, and deleting it IS the fix.
+  - **The REPAINT gate stays** (`if (rootSig() !== myRoot) { heal; return; }`). It decides
+    whether to re-enter the CURRENT root, and if the user walked to another library, a
+    repaint resets their grid to page one and throws away their scroll. That harm is real
+    (r22-2) and independent of where the failure is reported.
+  - The win is not that the gate disappears; it is that its **blast radius collapses**. Get
+    it wrong now and the cost is an unnecessary reload, not a silently lost failure.
 - **KEEP the heal.** The backend curates recents/tombstones BEFORE the server call and
   rolls back on failure (`src-tauri/src/commands.rs` `set_watched`), so a Home load inside
   that window captures a transient lie. The catch must still re-fetch the watch state
