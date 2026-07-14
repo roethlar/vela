@@ -44,10 +44,22 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     found independently by BOTH reviewers, and both were in the PREVIOUS round's fixes.
     Nine fix commits, `d7cb3ef`..`74fc3ad`, each with a red-proven guard where the
     harness can reach it. Detail in the plan's `## Code review log`.
-  - **IN FLIGHT: review round r23**, dispatched to BOTH reviewers over
-    `a29a0f7..74fc3ad`, results not yet read. Prompts + outputs in the session
-    scratchpad; if lost, re-dispatch (the incantations are in ## Next). r23 targets
-    the r22 fixes — which is where the last SIX rounds each found their worst bug.
+  - **r23 LANDED (2026-07-14).** codex 4 MEDIUM + 1 LOW, grok 3 MEDIUM + 1 LOW — and all
+    three top findings were in ONE commit: the `linking` flag invented two commits
+    earlier, which shipped three defects of its own (it dropped an edit made on a grid the
+    user never left; it stuck true forever after any source change abandoned a link; it
+    could not retract a banner already on screen). Replaced by a SCOPE on each banner part
+    (`0a79013`) — which is what the model needed from the start. Also `78f7ba0` (skipping
+    the repaint was skipping a needed heal — Continue Watching kept showing a rolled-back
+    item as gone) and `f61bc71` (the delivery witness overstated what it saw).
+  - **First reviewer-vs-reviewer disagreement of the loop (r23):** grok blessed the r22-2
+    early return, codex found it skipped a heal. Both positions were satisfiable at once,
+    so it was FIXED, not escalated. Escalate to the owner only when they genuinely cannot
+    both hold.
+  - **IN FLIGHT: review round r24**, dispatched to BOTH reviewers over
+    `74fc3ad..f61bc71`, results not yet read. Prompts + outputs in the session
+    scratchpad; if lost, re-dispatch (the incantations are in ## Next). r24 targets
+    the r23 fixes — which is where the last SEVEN rounds each found their worst bug.
   - **REVIEW PROTOCOL (owner, 2026-07-14) — now standing:** TWO independent
     reviewers (`codex` and `grok`) on the same pinned diff, neither seeing the
     other's findings; the author writes the fixes and runs every guard, red-proof
@@ -56,7 +68,7 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     self-adjudication was tested twice and failed twice (r12-1, r8-4, both
     overturned). Reviewer-vs-reviewer disagreement goes to the owner.
   - **Why it is still running (r17-r22 evidence):** in this subsystem the author's
-    FIXES carry defects at the same rate as the original code. SIX rounds running, the
+    FIXES carry defects at the same rate as the original code. SEVEN rounds running, the
     newest fix has carried a defect of the same CLASS it was fixing, through another
     door — and the class never changes: **a failure the user needs is silently lost.**
     It has now been reached through the publish door, the ordering door, the retract
@@ -183,8 +195,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **NEXT ACTION (library-refresh-scan): read r23's two verdicts** (codex JSON + grok
-  JSON, both over `a29a0f7..74fc3ad`), merge and dedupe the findings, then fix each in
+- **NEXT ACTION (library-refresh-scan): read r24's two verdicts** (codex JSON + grok
+  JSON, both over `74fc3ad..f61bc71`), merge and dedupe the findings, then fix each in
   ONE commit with a red-proven guard. Decline nothing without sending it to the OTHER
   reviewer — the author does not adjudicate his own declines (see ## Now). If a round
   comes back clean from BOTH, the loop can close; nothing else is outstanding on this
