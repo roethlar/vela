@@ -88,13 +88,28 @@ export default {
       "the first full page of 60",
     );
 
-    // Page 2 is in flight and doomed, and the refresh will silence it.
-    mock.state.itemsDelayMs = 700; // still loading when we click Refresh...
-    mock.state.failNextItems = true; // ...and it dies
-    mock.state.viewsDelayMs = 2500; // the action's sections leg lands much later
-    await scrollGridToEnd(driver);
+    // Refresh FIRST, and make its sections leg slow: for the whole of that window
+    // the action is live and owns the banner, so any listing failure is SILENCED.
+    // (Order matters. If the detail opened first, the epoch would already have
+    // moved and the failure would take the ordinary publish path — a different,
+    // already-correct case.)
+    mock.state.viewsDelayMs = 2500;
     const refresh = await driver.find("css selector", "button.refreshbtn");
     await driver.click(refresh);
+
+    // Now page 2 is requested, and dies — silently, because the action expects to
+    // replace it.
+    mock.state.failNextItems = true;
+    await scrollGridToEnd(driver);
+    await pollUntil(
+      async () => (mock.state.failNextItems === false ? true : null),
+      "the doomed page-2 request must actually reach the server",
+    );
+    assert.equal(
+      await banner(driver),
+      null,
+      "precondition: the action silenced it — nothing on screen says the page failed",
+    );
 
     // The user opens a detail while the action is still waiting on sections. That
     // is navigation: the content leg will never claim the grid, and settlement
@@ -109,7 +124,6 @@ export default {
       "detail surface open",
     );
     await settle(driver);
-    mock.state.itemsDelayMs = 0;
     mock.state.viewsDelayMs = 0;
 
     // Back to the library. Nothing replaced page 2 and nothing reported it — so
