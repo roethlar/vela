@@ -145,6 +145,24 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     `4cb6b2a` batches three findings; `878c92e` is MIS-DESCRIBED — a `git add -A`
     swept two production fixes and an E2E case into a commit whose message covers
     only a test fix. Root cause both times: `git add -A` instead of naming paths.
+- **LIVE E2E (`npm run e2e:live`) — landed 2026-07-14, owner-approved.** Drives the app
+  against the owner's REAL Plex and REAL Jellyfin from the Linux VM. Opt-in; NEVER part of
+  the gating suite (non-hermetic). Venue, access grants and restore-on-exit rules:
+  `.agents/machines.md`.
+  - **Why:** the owner's manual playtests found FOUR defects in two sessions that 18 mock
+    scenarios and 24 rounds of two-reviewer review all missed. Real servers say things
+    mocks do not.
+  - **What it closed:** the Plex scan path had NEVER been exercised — the mock is Jellyfin
+    (GUID ids, never rebinds), so a real Plex section key (a server-LOCAL number) had never
+    appeared in a test. `live-plex` now browses real libraries and scans one, red-proven.
+  - **STILL OPEN, and unclosable here:** a Plex REBIND needs a SECOND Plex server, which
+    does not exist. `sameSection` and the section-binding comparison remain inspection-only.
+- **CI NOTE (2026-07-14):** the `audit` job is `continue-on-error: true`, so a failing
+  `cargo audit` goes GREEN. It had been swallowing two RUSTSEC DoS advisories in
+  `quick-xml` — the crate that parses every Plex response off the network — until someone
+  read the run instead of trusting its colour (fixed, `5cb467f`). **A green CI here does
+  not mean the audit passed.** Whether that job should block is an owner decision, not a
+  drive-by change.
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted
