@@ -626,3 +626,37 @@ Supersedes:
 The implicit prior semantic (mark-watched dropped recents only,
 mark-unwatched deliberately left the entry; commands.rs set_watched
 comment before 02504be).
+
+## 2026-07-14 - Failures report on the surface that owns them, not on one shared banner
+
+Status: APPROVED (owner, 2026-07-14). Implementation plan:
+`.agents/plans/per-surface-status.md`.
+
+Decision:
+Every failure is reported on the surface it belongs to, and is cleared by
+that surface. The top error banner keeps only VIEW-scoped failures (the
+listing, the refresh, the search). The play queue, the mpv setup bar and the
+open detail page each report their own. This extends the r15 ruling that gave
+the library scan its own status line, to every writer that shares the banner.
+
+Reason:
+The shared banner is written by surfaces with four different lifetimes, and
+the code had no way to say which failure belonged to which. Every clear was
+therefore either too wide (silently erasing a failure the user still needed)
+or too narrow (stranding a diagnostic over a view that no longer exists). The
+library-refresh-scan code-review loop found EIGHT consecutive rounds of this,
+each one a new door into the same silent loss, several opened by the fix for
+the previous one: r18 (publish), r19 (ordering), r20 (retract), r21 (dedup),
+r22 (setError), r23 (a `linking` flag), r24 (setError(null) again). Patching
+the shared banner has a demonstrated defect rate of one new door per round,
+and three of the four surfaces cannot be guarded by the E2E harness at all.
+
+Evidence:
+`.agents/plans/library-refresh-scan.md` `## Code review log`, rounds r17-r24
+(two independent reviewers per round; they converged on the same top finding,
+without seeing each other, in six straight rounds).
+
+Supersedes:
+The `owner`-enum-on-a-shared-part model landed in `da99a46` as the interim fix.
+That model is coherent and stays until this plan lands - it is the thing this
+plan replaces, not a thing to build on.
