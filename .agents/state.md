@@ -8,8 +8,9 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 - **LIBRARY-REFRESH-SCAN: COMPLETE — owner playtest VERIFIED on REAL PLEX
   2026-07-14 (0.1.45).** Refresh button + per-library server scan trigger. Plan:
-  `.agents/plans/library-refresh-scan.md`. CI green at `64547a8`; E2E 17/17 on the
-  VM; `cargo test` 94; clippy `-D warnings`, svelte-check, npm build all clean.
+  `.agents/plans/library-refresh-scan.md`. As of `22dad8b`: E2E 17/17 on the VM;
+  `cargo test` 95; clippy `-D warnings`, svelte-check, npm build all clean. (CI runs on
+  the `github` remote only, and local main is ahead of it — the owner pushes.)
   - **Owner playtest (all six green, real Plex):** refresh while in a library;
     library RENAMED then refresh (sidebar + breadcrumb both update); library
     DELETED while standing in it then refresh (reconciled to Home); right-click →
@@ -20,10 +21,18 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     every finding, every fix commit, the declines (r10-1 UPHELD; r8-4 and r12-1
     OVERTURNED on independent adjudication), the guard gaps, and the process
     disclosures. Do not reconstruct any of it from chat.
-  - **IN FLIGHT: review round r19**, dispatched to BOTH reviewers over
-    `63560a6..64547a8`, results not yet read. Prompts + outputs in the session
-    scratchpad; re-dispatch from the r18 prompt if lost (the plan's log has the
-    incantation). r19 targets the r18 fixes.
+  - **r19 LANDED (2026-07-14).** codex 1 HIGH + 3 MEDIUM, grok 1 MEDIUM — and BOTH
+    reviewers, independently, found the same defect in the r18 `setWatched` fix. Every
+    r19 finding was in code written during r17/r18; nothing in the original slices was
+    faulted. Fixes: `563b2fb` (HIGH — an identity probe's answer was written onto the
+    server that REPLACED the one it described, pinning rediscovery to a lie: the third
+    distinct route to the wrong-server scan in this plan, and the second one opened by
+    a fix for the previous one) and `91045cb` (a failed edit stomped the banner
+    explaining its own empty grid, and could paint itself on a root the user had left).
+  - **IN FLIGHT: review round r20**, dispatched to BOTH reviewers over
+    `64547a8..91045cb`, results not yet read. Prompts + outputs in the session
+    scratchpad; if lost, re-dispatch (the incantations are in ## Next). r20 targets
+    the r19 fixes — which is where the last three rounds each found their worst bug.
   - **REVIEW PROTOCOL (owner, 2026-07-14) — now standing:** TWO independent
     reviewers (`codex` and `grok`) on the same pinned diff, neither seeing the
     other's findings; the author writes the fixes and runs every guard, red-proof
@@ -31,17 +40,19 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     the reviewer that did not raise it. That rule exists because author
     self-adjudication was tested twice and failed twice (r12-1, r8-4, both
     overturned). Reviewer-vs-reviewer disagreement goes to the owner.
-  - **Why it is still running (r17-r18 evidence):** in this subsystem the author's
-    FIXES carry defects at the same rate as the original code. r18's HIGH — BOTH
-    reviewers found it independently — was that an r17 fix had REINTRODUCED the
-    wrong-server scan the subsystem exists to forbid; and the r17 storm fix had
-    traded a storm for the same silent truncation it was fixing. A single reviewer
-    would have shipped both.
-  - **Guard discipline (the transferable lesson):** SIX guards in this plan were
+  - **Why it is still running (r17-r19 evidence):** in this subsystem the author's
+    FIXES carry defects at the same rate as the original code. Three rounds running,
+    the newest fix has carried a defect of the same CLASS it was fixing, through
+    another door: r18's HIGH was an r17 fix reintroducing the wrong-server scan; r19's
+    HIGH was an r18 fix doing it again by another route; and r19's MEDIUM was the r18
+    banner fix, which stopped the repaint erasing the edit and left the edit erasing
+    the repaint. A single reviewer — or the author alone — ships all of them.
+  - **Guard discipline (the transferable lesson):** SEVEN guards in this plan were
     VACUOUS — three disarmed by the author's own later fixes, two written vacuous
-    while actively trying not to, one racing a fix just made. **None ever failed or
-    warned. Every one was caught only by injecting the regression and demanding the
-    test go red.** Re-prove a guard whenever behavior around it changes.
+    while actively trying not to, one racing a fix just made, one (r19-3) that let the
+    behavior it guarded be deleted outright. **None ever failed or warned. Every one
+    was caught only by injecting the regression and demanding the test go red.**
+    Re-prove a guard whenever behavior around it changes.
   - **OPEN, recorded, not fixed:** r13-2 (reads carry no binding — owner-DEFERRED to
     a follow-up plan, do not re-raise in review); the tall-viewport request storm is
     untestable at the harness viewport; no guard on scan invalidation when a source
@@ -142,20 +153,24 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **NEXT ACTION (library-refresh-scan): read r19's two verdicts** (codex JSON +
-  grok JSON, both over `63560a6..64547a8`), merge and dedupe the findings, then fix
-  each in ONE commit with a red-proven guard. Decline nothing without sending it to
-  the OTHER reviewer — the author does not adjudicate his own declines (see ## Now).
-  If a round comes back clean from BOTH, the loop can close; nothing else is
-  outstanding on this feature except the recorded gaps.
+- **NEXT ACTION (library-refresh-scan): read r20's two verdicts** (codex JSON + grok
+  JSON, both over `64547a8..91045cb`), merge and dedupe the findings, then fix each in
+  ONE commit with a red-proven guard. Decline nothing without sending it to the OTHER
+  reviewer — the author does not adjudicate his own declines (see ## Now). If a round
+  comes back clean from BOTH, the loop can close; nothing else is outstanding on this
+  feature except the recorded gaps.
   - Reviewer incantations: `codex exec --sandbox read-only -o <out.json> "$(cat
     <prompt>)" < /dev/null` (stdin MUST be closed or it hangs; it has hung once) and
     `grok --sandbox read-only -p "$(cat <prompt>)"`. E2E is Linux-only: see
     `.agents/machines.md` for the VM (login-shell cargo).
-- **RED-PROOF EVERY GUARD, ALWAYS.** Six vacuous guards in this plan; not one was
+  - E2E without pushing: the push policy is ASK, and that includes the `vm` remote.
+    Sync the changed files with `scp` into `~/dev/vela` and verify by checksum before
+    running — no `git push`, no `git checkout -- .` on the VM's tree.
+- **RED-PROOF EVERY GUARD, ALWAYS.** Seven vacuous guards in this plan; not one was
   caught by review, CI or a green run. Land the fix, THEN inject the regression, THEN
-  demand the test fail for the RIGHT reason. Restore from a committed state, never a
-  stale file backup (that silently reverted work once).
+  demand the test fail for the RIGHT reason — and prove EACH behavior the fix claims
+  separately (r19's frontend fix claimed three, and needed three injections). Restore
+  from a committed state, never a stale file backup (that silently reverted work once).
 - No pending playtest ask from the 2026-07-09/10 work — both fixes
   (context-menu Play, hero episode Info) are owner-verified on 0.1.40/41.
 - **machine-local (mac host `/Users/michael/Dev/vela`):** the owner's Linux
@@ -247,8 +262,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   decisions resolved, parked at queue bottom)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner
   playtest)
-- `.agents/plans/library-refresh-scan.md` (IMPLEMENTED — both slices landed;
-  code-review loop r1-r9 recorded in its `## Code review log`; r10 open)
+- `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; two-reviewer
+  code-review loop r1-r19 recorded in its `## Code review log`; r20 in flight)
 - `.agents/review/index.md` (durable review trails)
 - `docs/history/state-archive.md` (rotated state entries)
 - `README.md`, `ISSUES.md` (swept by DLS slice 3, 2026-07-09)
