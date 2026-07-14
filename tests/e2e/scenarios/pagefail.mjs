@@ -224,6 +224,43 @@ export default {
       "the refresh superseded the listing, not the edit: a banner it never published and never superseded is not its to retract",
     );
 
+    // ── 3. A failing refresh must not erase the banner that explains the grid ──
+    // Case 2's refresh SUCCEEDS, so settlement publishes nothing and never runs the
+    // preservation branch at all — remove it and case 2 stays green (codex r17).
+    // Here the action's own sections leg FAILS, so it has something to say; a
+    // banner published during the run (by a load it never superseded) must survive
+    // that, because it is the one explaining the empty grid.
+    mock.state.viewsDelayMs = 6000;
+    const refresh3 = await driver.find("css selector", "button.refreshbtn");
+    await driver.click(refresh3);
+    mock.state.failNextViews = true; // the action's OWN leg will fail
+
+    // A newer generation takes the grid and its next page dies: a tagged banner
+    // the action did not silence and will not supersede.
+    await watchToggle(driver, "Movie 059", "Mark unwatched"); // case 2 left it watched
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "the edit's reload lands",
+    );
+    mock.state.unauthNextItems = true;
+    await scrollGridToEnd(driver);
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the newer load's 401 must banner",
+    );
+
+    await settle(driver);
+    mock.state.viewsDelayMs = 0;
+    const both = await banner(driver);
+    assert.ok(
+      both && both.includes("reconnect"),
+      `the listing failure that explains this empty grid must survive the refresh's own diagnostic — got ${JSON.stringify(both)}`,
+    );
+    assert.ok(
+      both.includes("500") || both.includes("Views"),
+      "...and the refresh must still report its own failure alongside it",
+    );
+
     assert.equal(
       mock.state.contractViolations.length,
       0,

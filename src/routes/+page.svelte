@@ -788,10 +788,16 @@
           // the retract branch already knows not to touch a newer banner, and the
           // publish branch must know it too (grok r17). Keep it, say our piece
           // after it, and leave the tag with the load that still owns the grid.
-          const newerOwnsIt =
-            error !== null && errorGen > gridActionBaseGen && errorGen === loadGen;
-          if (newerOwnsIt) setError(`${error}; ${msgs.join("; ")}`, errorGen);
-          else setError(msgs.join("; "));
+          // The click cleared the banner, so ANY banner here was published during
+          // our run, by someone else: a newer listing load, a failed search, a
+          // failed edit. None of them are ours to erase — and the one that owns the
+          // grid is usually the only thing explaining why it is empty. Say our piece
+          // after theirs, and leave the tag where it was (untagged writes carry 0,
+          // which is exactly right — see setError, codex r17).
+          const theirs = error;
+          const dedup = [...new Set(msgs)]; // a retried offset can hold the same failure twice
+          if (theirs !== null) setError(`${theirs}; ${dedup.join("; ")}`, errorGen);
+          else setError(dedup.join("; "));
         }
         // Nothing of ours failed — but a load we SUPERSEDED may have published a
         // banner after the click cleared the surface. Its cards are gone,
@@ -941,6 +947,7 @@
   // and append it. Drives infinite scroll. Discards results if navigation moved on.
   async function loadMore(myGen: number = loadGen, onError: ((msg: string) => void) | null = null) {
     if (loadingMore || !hasMore || myGen !== loadGen) return;
+    let failed = false;
     const here = crumbs[crumbs.length - 1];
     if (!here || (!here.ratingKey && !active && !activeType)) return;
     loadingMore = true;
@@ -966,6 +973,7 @@
       offset += page.length;
       hasMore = page.length >= PAGE;
     } catch (e) {
+      failed = true;
       if (myGen === loadGen) {
         // The refresh action aggregates its legs' failures action-locally
         // (library-refresh-scan plan); navigation loads keep the direct publish.
@@ -1020,8 +1028,20 @@
     // loading: on tall / hi-dpi (4K) displays a single page can fit without a
     // scrollbar, so onScroll would never fire and we'd be stuck with more to load.
     // Bounded — each pass advances offset and clears hasMore on a short page.
+    //
+    // NOT after a failure. A failed page advances neither, and a SILENCED one no
+    // longer clears `hasMore` either (r8-4), so on a viewport tall enough to fit
+    // the cards this would re-request the same failing offset as fast as the
+    // server can refuse it, for as long as the refresh runs — a request storm,
+    // one held failure pushed per pass (codex r17).
     await tick();
-    if (myGen === loadGen && hasMore && gridEl && gridEl.scrollHeight <= gridEl.clientHeight) {
+    if (
+      !failed &&
+      myGen === loadGen &&
+      hasMore &&
+      gridEl &&
+      gridEl.scrollHeight <= gridEl.clientHeight
+    ) {
       await loadMore(myGen, onError);
     }
   }
