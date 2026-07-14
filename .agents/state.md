@@ -207,16 +207,25 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **NEXT ACTION: implement `.agents/plans/per-surface-status.md`, slice 1.** The owner was
-  asked and ANSWERED (2026-07-14): "own surfaces" for the queue / mpv bar / detail page, and
-  "its own line" for a failed watch-state edit. Decision recorded in `.agents/decisions.md`;
-  plan APPROVED. Slice 1 (the edit's own line) is the highest value — it is the writer that
-  caused most of the loop's defects, and it DELETES the root-identity gate (`rootSig`) built
-  only to stop that writer fighting the view's banner.
+- **PER-SURFACE-STATUS: SLICE 1 LANDED (`fee7f0e`).** A failed watch-state edit now reports
+  on its own line, never the view's banner (owner ruling 2026-07-14, "its own line"). Plan
+  `.agents/plans/per-surface-status.md`; decision `.agents/decisions.md`. e2e 17/17,
+  red-proven three ways. **Six pagefail cases COLLAPSED** — they existed only to police two
+  writers sharing one banner, and three of them asserted that a failed edit must be
+  SUPPRESSED when the user navigated away, which was only ever a way to lose a failure they
+  needed.
+  - **NEXT ACTION: slice 2** (the queue drawer reports its own), then 3 (mpv bar), 4 (detail
+    page), 5 (collapse the banner model back to a single writer class). The plan carries the
+    detail, the precedent to copy (the scan's status, r15), and which slices the harness
+    CANNOT guard — the queue, mpv and detail surfaces cannot be made to fail here, so they
+    are inspection + owner playtest, and the plan says so rather than implying coverage.
   - Do NOT open r25 against the shared banner. The interim owner-enum model (`da99a46`) is
     what this plan REPLACES, not a base to build on.
-  - The library-refresh-scan review loop is CLOSED at r24. Its log stays as the evidence
-    for this plan.
+  - The library-refresh-scan review loop is CLOSED at r24. Its log stays as the evidence for
+    this plan.
+  - **Owner playtest ask, once the slices land:** fail a mark-watched (kill the server
+    mid-edit) and confirm the message appears on its own line and does not disturb the
+    grid's own banner.
   - Reviewer incantations: `codex exec --sandbox read-only -o <out.json> "$(cat
     <prompt>)" < /dev/null` (stdin MUST be closed or it hangs; it has hung once) and
     `grok --sandbox read-only -p "$(cat <prompt>)"`. **grok has twice returned only its
