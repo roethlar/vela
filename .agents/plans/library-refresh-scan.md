@@ -1396,3 +1396,56 @@ were vacuous for three different reasons — a setup production cannot reach (r1
 an assertion that could not distinguish the fix from the bug (r14-1's), and a
 scenario that hid the loss behind a second failure (r14-2's). None of them failed.
 Nothing warned. Re-prove guards when the behavior around them moves.
+
+**r16 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 3 MEDIUM + 5 LOW, all
+ADMITTED.** Base `63560a6`, head `40bb4f2`. Four of the eight were VACUOUS GUARDS.
+
+- **r16-2 (`8d95fd0`) — a server that never identifies itself taxed every click.**
+  The `/identity` probe (r7-1) was retried on EVERY `ensure_ready` while the machine
+  stayed unknown — and `ensure_ready` is the front door for every read: browse,
+  search, detail, playback, watch-state. A server that blackholes `/identity` while
+  serving library routes fine (a reverse proxy, a firewall rule) therefore charged
+  the probe's FIVE-SECOND timeout to every single action, indefinitely, with
+  concurrent callers storming the endpoint. The app would have felt like it hung on
+  every click. **Nine rounds of review did not find this**; it took asking the
+  reviewer to look for stalls. Fixed: reads probe at most ONCE per source (the flag
+  also collapses a concurrent storm); the SECTIONS path still retries while unknown,
+  because it issues the keys a scan acts on and a transient failure must be able to
+  recover — the user's Refresh is that retry, which is what the refusal message
+  already tells them to do. Guard: `a_read_probes_identity_at_most_once`.
+- **r16-5 (`36b2e95`) — the Plex mock never checked auth.** It parsed the path and
+  ignored everything else, so deleting `X-Plex-Token` from `request_library_scan`
+  left every Plex guard green — while a real server answers 401 and Scan Library is
+  simply unusable. An authenticated action could regress to broken with the whole
+  suite passing. The mock now demands the token on every route but `/identity` (the
+  one Plex serves unauthenticated), as the Jellyfin mock already did. Red-proven.
+- **r16-1 (`5f8e9a2`) — a load the action silenced but never replaced.** The action
+  silences a listing in flight because it means to REPLACE that grid; if its sections
+  leg then fails, its content leg returns before claiming the grid, so nothing
+  replaced anything — and the load it silenced is the reason the grid is empty. The
+  user got only the sections diagnostic over an empty library with pagination dead.
+  Fixed: a silenced failure is HELD, and settlement publishes it if the action never
+  claimed the grid. Guard: refresh case 27.
+- **r16-3, r16-4 (in `878c92e` — see the disclosure below).** A scan in flight when a
+  source is removed could publish over an unrelated source (the authenticated branch
+  invalidated neither `scanAttempt` nor the status); both branches now abandon it.
+  And a library renamed server-side kept its old title in the grid's breadcrumb,
+  because `active` and the crumb were still the objects from the PREVIOUS list; the
+  surviving root is now re-bound to its refreshed section. Guard: refresh case 28.
+
+**Case 27 was itself VACUOUS on the first attempt, written minutes after recording
+the rule about vacuous guards.** Both the silenced listing and the sections leg fail
+with a 500, so asserting "the banner mentions 500" was satisfied by the sections
+failure alone: the case passed with the fix reverted. It now asserts on what only the
+listing's failure can say (the URL of the library it was paging). **Red-proving is the
+only thing that has ever caught a vacuous guard in this plan — three of them now, and
+not one was caught by review, by CI, or by a green run.**
+
+**PROCESS DISCLOSURE — `878c92e` is mis-described.** Its message covers only case
+27's assertion fix, but a `git add -A` swept in three more changes: the r16-3 scan
+teardown fix, the r16-4 crumb re-bind, and E2E case 28 (both production fixes, in
+`src/routes/+page.svelte`). This is the SECOND one-item-per-commit violation in this
+plan (the first was `4cb6b2a`), and worse than the first because the message hides
+what the commit contains. Not rewritten — history rewrite needs the owner's explicit
+go (AGENTS.md, Git Safety). Recorded here so the log is not the only account of what
+those commits hold. Root cause both times: `git add -A` instead of naming the paths.
