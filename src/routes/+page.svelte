@@ -114,9 +114,6 @@
   // surfaces have completely different lifetimes:
   //
   //   view    the grid / rails / search results. Dies with the view.
-  //   queue   the play queue. Its drawer and chip outlive every view, and render above
-  //           the device-code screen too. Cleared by the next queue action, or by
-  //           closing the drawer.
   //   mpv     the mpv setup bar. Global, and blocks playback until resolved.
   //   detail  the open detail surface. Survives a search teardown underneath it.
   //
@@ -135,7 +132,7 @@
   // false when a link FAILED and silently dropped an edit made on a grid the user never
   // left; it stuck true whenever a source change abandoned a link; and it could only
   // reject FUTURE publishes, never retract one already on screen (codex + grok, r23).
-  type ErrorOwner = "view" | "queue" | "mpv" | "detail";
+  type ErrorOwner = "view" | "mpv" | "detail";
   let errorParts = $state<{ msg: string; gen: number; owner: ErrorOwner }[]>([]);
   const error = $derived(
     errorParts.length === 0 ? null : errorParts.map((p) => p.msg).join("; "),
@@ -1422,7 +1419,10 @@
     queueOpen = !queueOpen;
     // Closing the drawer dismisses what it was reporting — otherwise a queue failure has
     // nothing that can ever clear it, and sits over every view forever (codex r24).
-    if (!queueOpen) clearOwned("queue");
+    if (!queueOpen) {
+      queueAttempt++; // abandon an action still in flight: its surface is gone
+      queueStatus = null;
+    }
     if (queueOpen) {
       refreshQueue();
       // While the drawer is visible, poll lightly so auto-advances (which run
@@ -1475,64 +1475,59 @@
 
   async function playNext(item: Item) {
     closeMenu();
-    clearOwned("queue"); // this attempt supersedes whatever the last one said
+    const attempt = ++queueAttempt;
+    queueStatus = null; // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_play_next", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives every view (it renders above the link screen too), so
-      // its failure is not the view's to take away — and no view's clear may take it
-      // (codex r22/r23/r24).
-      addError(String(e), 0, "queue");
+      // On the QUEUE's own surface, never the view's banner (slice 2).
+      if (attempt === queueAttempt) queueStatus = String(e);
     }
   }
   async function addToQueue(item: Item) {
     closeMenu();
-    clearOwned("queue"); // this attempt supersedes whatever the last one said
+    const attempt = ++queueAttempt;
+    queueStatus = null; // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_append", { item: queueItemFromItem(item) });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives every view (it renders above the link screen too), so
-      // its failure is not the view's to take away — and no view's clear may take it
-      // (codex r22/r23/r24).
-      addError(String(e), 0, "queue");
+      // On the QUEUE's own surface, never the view's banner (slice 2).
+      if (attempt === queueAttempt) queueStatus = String(e);
     }
   }
   async function queueJumpTo(index: number) {
-    clearOwned("queue"); // this attempt supersedes whatever the last one said
+    const attempt = ++queueAttempt;
+    queueStatus = null; // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_play_at", { index });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives every view (it renders above the link screen too), so
-      // its failure is not the view's to take away — and no view's clear may take it
-      // (codex r22/r23/r24).
-      addError(String(e), 0, "queue");
+      // On the QUEUE's own surface, never the view's banner (slice 2).
+      if (attempt === queueAttempt) queueStatus = String(e);
     }
   }
   async function queueRemove(index: number) {
-    clearOwned("queue"); // this attempt supersedes whatever the last one said
+    const attempt = ++queueAttempt;
+    queueStatus = null; // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_remove", { index });
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives every view (it renders above the link screen too), so
-      // its failure is not the view's to take away — and no view's clear may take it
-      // (codex r22/r23/r24).
-      addError(String(e), 0, "queue");
+      // On the QUEUE's own surface, never the view's banner (slice 2).
+      if (attempt === queueAttempt) queueStatus = String(e);
     }
   }
   async function queueClearAll() {
-    clearOwned("queue"); // this attempt supersedes whatever the last one said
+    const attempt = ++queueAttempt;
+    queueStatus = null; // this attempt supersedes whatever the last one said
     try {
       await invoke("queue_clear");
       refreshQueue();
     } catch (e) {
-      // The queue drawer outlives every view (it renders above the link screen too), so
-      // its failure is not the view's to take away — and no view's clear may take it
-      // (codex r22/r23/r24).
-      addError(String(e), 0, "queue");
+      // On the QUEUE's own surface, never the view's banner (slice 2).
+      if (attempt === queueAttempt) queueStatus = String(e);
     }
   }
 
@@ -1592,6 +1587,17 @@
   // library that no longer exists (the r14/r15/r16-3 rule).
   let editStatus = $state<string | null>(null);
   let editAttempt = 0;
+
+  // The queue's own status (per-surface-status slice 2). Its drawer and chip outlive every
+  // view — they render above the device-code screen too — so a queue failure is not the
+  // view's to erase, and the view's clears are not its to obey. That mismatch was the
+  // seventh door into the same silent loss: `setError(null)`, which every load start calls,
+  // wiped a queue failure on the next navigation while the drawer was still open and the
+  // failure still true (codex + grok, r24).
+  //
+  // Cleared by the next queue action, or by closing the drawer — the user has seen it.
+  let queueStatus = $state<string | null>(null);
+  let queueAttempt = 0;
 
   let scanStatus = $state<{ text: string; failed: boolean } | null>(null);
   let scanning = $state<Record<string, boolean>>({}); // menu-entry feedback only
@@ -1847,8 +1853,9 @@
       class="queuechip"
       class:has-items={queue.items.length > 0}
       class:active={queueOpen}
-      title="Play queue"
-      aria-label="Play queue ({queue.items.length} item{queue.items.length === 1 ? '' : 's'})"
+      class:failed={queueStatus !== null}
+      title={queueStatus ? friendlyError(queueStatus) : "Play queue"}
+      aria-label="Play queue ({queue.items.length} item{queue.items.length === 1 ? '' : 's'}){queueStatus ? ' — last action failed' : ''}"
       onclick={toggleQueue}
     >
       <Icon name="queue" size={17} />{#if queue.items.length > 0}<span class="qcount">{queue.items.length}</span>{/if}
@@ -2367,6 +2374,11 @@
         <button class="drawerclose" aria-label="Close queue" onclick={toggleQueue}><Icon name="close" size={16} /></button>
       </div>
     </header>
+    {#if queueStatus}
+      <!-- The QUEUE's own surface (per-surface-status slice 2), never the view's error
+           banner. It sits with the thing it is about. -->
+      <div class="drawererror" role="alert">{friendlyError(queueStatus)}</div>
+    {/if}
     {#if queue.items.length === 0}
       <div class="drawerempty">Nothing queued. Right-click an item to add it here.</div>
     {:else}
@@ -3073,6 +3085,25 @@
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
     animation: vela-slide-down 0.2s var(--ease);
+  }
+
+  /* The QUEUE's own failure, inside its drawer — never .error, which is the VIEW's.
+     A `div.error` selector must never accidentally match it (the same rule the scan's
+     .scanerror follows). */
+  .drawererror {
+    margin: 0 14px 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--errfg, #ffb4a9);
+    background: var(--errbg, rgba(255, 80, 60, 0.12));
+    border: 1px solid var(--errborder, rgba(255, 80, 60, 0.28));
+  }
+  /* ...and a mark on the chip, so a failure stays discoverable with the drawer shut. */
+  .queuechip.failed {
+    color: var(--errfg, #ffb4a9);
+    box-shadow: inset 0 0 0 1px var(--errborder, rgba(255, 80, 60, 0.45));
   }
 
   /* Neutral transient status (scan started) — same slot as .error, calmer. */
