@@ -271,10 +271,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
      DIFFERENT poster: the first failure is REPLACED, not stacked. Then switch library: the
      EDIT line FOLLOWS them, the grid's banner does not. (The old build silently swallowed
      the edit failure on navigation — that is the change they will notice.)
-  2. THE QUEUE. Click the queue chip -> drawer -> click the queued item. Expect the failure
-     INSIDE the drawer, not on the main banner. Close the drawer -> it goes with it. Reopen,
-     click again, and CLOSE THE DRAWER WHILE IT IS STILL TRYING -> the chip takes a red mark.
-     Navigate away -> the chip mark SURVIVES.
+  2. ~~THE QUEUE.~~ **SKIP — MOOT as of 2026-07-14.** The queue is being DELETED
+     (`.agents/plans/playlists.md` S1; decision 2026-07-14), and per-surface-status slice 2
+     goes with it. Do not ask the owner to test a surface that is being removed. The SETUP
+     step above no longer needs the "Add to queue" action either.
   3. THE DETAIL PAGE. Left-click a poster -> Play. Expect the failure ON the detail page, not
      on the grid underneath. Back -> it goes with the page.
 
@@ -284,6 +284,21 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
   WRONG LOOKS LIKE: anything landing on the MAIN banner that belongs to another surface; two
   messages where one erases the other; a raw `http://…` on screen; or a blank library.
+
+- **AWAITING OWNER GO: `.agents/plans/playlists.md` (drafted 2026-07-14, no code written).**
+  Five slices. **S2 (every play records a recent) is independent of playlists and can land
+  first** — it is the defect that makes the Continue Watching carousel reflect nothing played
+  through the dispatcher, and it is worth landing on its own even if the rest waits. S1
+  (delete the queue) is the next-largest and is pure removal. Do not start any of it without
+  the owner's explicit go.
+
+- **DRIFT FOUND 2026-07-14, NOT FIXED (docs only; `drift` owns these):**
+  - `ISSUES.md` still lists "Bound and decouple metadata cache writes" as an open P1, but
+    **the metadata cache no longer exists** — `metadata_cache.json` and the listing cache
+    died with the local-source removal (2026-07-08). `grep -rn "metadata_cache"
+    src-tauri/src/` returns nothing; `config.json` is the only persistent file.
+  - `src-tauri/src/source/mod.rs:63` has a comment referencing a "listing-cache" that no
+    longer exists.
 
 - **RELEASE (owner asked 2026-07-14): a second Plex server is NOT needed.** The dangerous
   half of the rebind path IS guarded — `src-tauri/src/source/plex.rs` spins up TWO mock Plex
