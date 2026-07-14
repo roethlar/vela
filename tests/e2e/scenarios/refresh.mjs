@@ -1108,14 +1108,21 @@ export default {
     // erases and replaces nothing, which is exactly when the loss shows: an empty
     // grid, its explanation gone, under a cheerful "Scan started" (codex r15).
     // A scan reloads no content, so it may never take down the view's banner.
+    // Both halves must be the SAME source: the failing listing and the scan are
+    // armed on mock A, so they have to be driven through mock A's library.
+    await goHome(driver);
+    await pollUntil(
+      async () => ((await onHome(driver)) ? true : null),
+      "Home, so the click below is a fresh listing",
+    );
     mockA.state.unauthNextItems = true;
-    await clickSide(driver, "Library B"); // its listing 401s -> the view banners
+    await clickSide(driver, "Library A"); // its listing 401s -> the view banners
     await pollUntil(
       async () => ((await banner(driver)) ? true : null),
       "the failing listing must banner",
     );
     const explanation = await banner(driver);
-    await scanFromSideMenu(driver, "Library B"); // and this one SUCCEEDS
+    await scanFromSideMenu(driver, "Library A"); // and this scan SUCCEEDS
     await pollUntil(
       async () => ((await notice(driver)) ? true : null),
       "the scan must acknowledge",
