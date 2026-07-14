@@ -1568,3 +1568,24 @@ banner persists; this one's did not), `friendlyError` eating the rest of the ban
 of my own (case 2's first two attempts). **A test that cannot be satisfied by
 hand-waving forces the code to prove what it claims, and in this plan that has
 consistently outperformed reading it.**
+
+## Owner playtest — VERIFIED (2026-07-14, 0.1.45, real Plex)
+
+All six checks green on the owner's real Plex server:
+
+1. Refresh while standing in a library — grid reloads, sidebar updates, no spurious
+   bounce to Home, no false error banner.
+2. Library RENAMED server-side, then Refresh — sidebar AND the grid's breadcrumb both
+   show the new name (the r16-4 re-bind, previously mock-only).
+3. Library DELETED server-side while standing in it, then Refresh — reconciled to Home
+   (the disappearance fallback, on the real Plex path for the first time).
+4. Right-click → Scan Library — Plex actually starts scanning; notice shown, no error.
+   **The entire Plex scan path had never touched a real server before this.**
+5. General use (browse / search / detail / play) — no ~5s stalls, confirming the r16-2
+   `/identity` probe fix on a real server.
+6. Footer reports 0.1.45.
+
+This closes the plan's Verification requirement. What it does NOT and CANNOT cover:
+`sameSection` (the frontend half of the rebind protection) — triggering it needs a Plex
+server to change identity mid-session, which cannot be staged. It stays guarded only by
+inspection and by the backend invariants feeding it. Recorded, not hidden.
