@@ -82,12 +82,17 @@ const servedCount = (endsWith) =>
   mock.state.served.filter((s) => s.path.endsWith(endsWith)).length;
 // An ABSENCE assertion ("the edit's failure must NOT be published here") passes just as
 // well by asking too early as by being right. A fixed sleep measured from the PARK is
-// not a witness: it says when the request arrived, never when the client was handed the
-// answer and ran the code under test (codex + grok, r21).
+// not a witness: it says when the request ARRIVED, never when the answer went out (codex
+// + grok, r21).
 //
-// So: wait for the parked response to actually be SERVED — the catch resumes on it, and
-// deciding whether to publish is the very next thing it does — and then hold the window
-// OPEN, failing the moment a banner appears rather than sampling once at the end.
+// So: wait for the parked response to actually be SENT, then hold the window OPEN and
+// fail the moment a banner appears, rather than sampling once at the end.
+//
+// Be precise about what this proves. `served` is a SERVER-dispatch witness — it cannot
+// see the client parse the body, resume the catch, and render (codex r23). Nothing in
+// the mock can. The hold is what covers that gap: it keeps asking for five seconds after
+// dispatch, so a publish that is going to happen has to beat a window it has no reason
+// to, rather than merely beating a single sample.
 async function noEditBannerAfterParked(driver, { endsWith, before, what }) {
   await pollUntil(
     async () => (servedCount(endsWith) > before ? true : null),

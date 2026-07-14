@@ -189,9 +189,14 @@ export function startMockJellyfin({
       // — a wait measured from the request's ARRIVAL proves nothing about when the
       // parked answer was delivered, so the assertion can simply run too early and pass
       // (codex + grok, r21).
-      state.served.push({ method: req.method, path, status });
+      //
+      // Recorded AFTER the write, so it cannot claim delivery for a response still
+      // sitting in this handler (codex r23). It is still a SERVER-dispatch witness, not
+      // proof the client processed it — the scenarios pair it with a held window for
+      // that, and say so.
       res.writeHead(status, { "Content-Type": "application/json" });
       res.end(JSON.stringify(body));
+      state.served.push({ method: req.method, path, status });
     };
     const unauthorized = (p) => {
       state.contractViolations.push({ path: p, query: { auth: "missing" } });
@@ -445,9 +450,10 @@ export function startMockJellyfin({
         // scenarios assert on that log, not on this body. But the RESPONSE still has to
         // be recorded, or `state.served` has a hole exactly where a scenario parks a
         // scan — this is the one success path that does not go through json().
-        state.served.push({ method: req.method, path, status: 204 });
         res.writeHead(204);
-        return res.end();
+        res.end();
+        state.served.push({ method: req.method, path, status: 204 });
+        return;
       };
       if (delay > 0) {
         setTimeout(respond, delay);
