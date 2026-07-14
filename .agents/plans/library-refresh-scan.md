@@ -1226,6 +1226,9 @@ see below). Base `63560a6`, head `4f7ac59`.
   harness cannot reach. Every INPUT to it is guarded; the comparison itself rests
   on inspection.
 
+  **r13-1 later found a defect IN this fix** — the binding was read apart from the
+  client it describes. See r13.
+
   **Process note — I was wrong, and the record should say so.** I first moved to
   DECLINE r12-1, arguing that the only available fix was a frontend provenance
   comparison, that it would false-positive on a benign `/identity` recovery, and
@@ -1243,3 +1246,39 @@ see below). Base `63560a6`, head `4f7ac59`.
   r10-1) rest on code-verified claims about reachability and consequence, not on
   design-space impossibility — but they were also self-adjudicated, and are worth
   re-examining on the same standard if they ever become load-bearing.
+
+**r13 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM. 1 ADMITTED
+and fixed, 1 OPEN as a follow-up (out of this plan's scope — owner decision).**
+Base `63560a6`, head `8d4e5d7`.
+
+- **r13-1 (`381955a`) — the binding was read apart from the client it
+  describes.** `sections()` took a CLONE of the client from `ensure_ready`, then
+  loaded the binding. Between the two, another task's failed read can rediscover
+  and rebind the source, bumping it — so a list correctly served by the OLD
+  server was stamped with the NEW server's binding, and the frontend took the old
+  server's library for the new one's: it evicts the live root the user is standing
+  on and offers that library as if it belonged to the server that replaced it.
+  Exactly what the binding exists to prevent, reintroduced by how it was read.
+  Fixed: the client and its binding are captured in ONE critical section
+  (`ensure_ready_bound` / `rediscover_bound`), including across the `/identity`
+  probe. Guard: `a_list_carries_the_binding_of_the_server_that_served_it` (parks
+  the probe, rebinds mid-flight; red-proven).
+
+- **r13-2 — OPEN, deferred to a follow-up plan. NOT a decline.** *Claim:* the
+  binding is only checked when a new sections list arrives. Reads do not carry it:
+  `get_items` / `get_children` / pagination / reselect send a bare section or
+  rating key, which the source routes to whatever server it is bound to NOW. So
+  between refreshes, a rebound source serves the NEW server's items under the OLD
+  library's title, and the user can browse, play and curate them.
+  *Assessment (code-checked, not assumed):* REAL, and NOT introduced by this work —
+  `items()` has taken only a section key since before this plan (`git show
+  63560a6:src-tauri/src/source/plex.rs`), so a rebind has always made stale keys
+  address the new server. This plan NARROWED the hazard (r12-1 reconciles the root
+  to Home on the next refresh) and did not widen it. Closing it completely means
+  the binding must travel with EVERY key the source issues — `ItemDto` too, plus
+  the read commands and the frontend paths that hold them — or a rebind must emit
+  a signal that resets the view wholesale. Either is a design change beyond this
+  plan's approved scope, which is why it is recorded here rather than fixed here.
+  *Reachability:* a Plex server restored from config whose `/identity` never
+  answers, on a multi-server account, where a read failure rediscovers onto a
+  different server. Scans are already refused throughout (r11-1).
