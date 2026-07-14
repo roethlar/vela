@@ -473,6 +473,33 @@
   // gate exists to prevent (codex r5).
   let navEpoch = $state(0);
 
+  // WHICH ROOT the view is standing on — not which surface is layered over it, and not
+  // how many loads have run. `navEpoch` and `loadGen` are both proxies for this, and
+  // neither is a proof: a detail opening bumps `navEpoch` while leaving the grid (and
+  // the item) exactly where they were; a Plex link REPLACES the view with the
+  // device-code screen while bumping no load generation at all; re-selecting the
+  // library you are already in bumps BOTH while going nowhere. A delayed outcome that
+  // needs to know "is the user still looking at the thing I am about to talk about?"
+  // must ask the view what it is (codex + grok, r20).
+  //
+  // Cheap enough to call twice per delayed publication, and it fails CLOSED: a new
+  // root-defining field that nobody adds here can only make two roots look alike, so
+  // keep it in step with what `resetAndLoad` actually reloads.
+  function rootSig(): string {
+    return JSON.stringify([
+      authenticated,
+      pin !== null, // the device-code screen replaces the view entirely
+      mode,
+      activeSource,
+      active?.key ?? null,
+      activeType,
+      searchTerm,
+      personView?.key ?? null,
+      crumbs.length,
+      crumbs.at(-1)?.ratingKey ?? null,
+    ]);
+  }
+
   async function loadEverything() {
     loadGen++; // a full home reload supersedes any in-flight browse/search load
     // Clear the previous source's content immediately so stale rails/tabs can't
@@ -1493,12 +1520,8 @@
       // its own: the user would learn the reload failed and never learn their edit
       // had (codex r18). The edit is what they asked for; its failure is the one
       // they need.
-      const reload = refreshWatchState();
-      // Whichever leg it took, it bumped `loadGen` synchronously on the way out
-      // (resetAndLoad / loadHome / runSearch / runPersonView all do).
-      const myGen = loadGen;
-      const myEpoch = navEpoch;
-      await reload;
+      const myRoot = rootSig();
+      await refreshWatchState();
       // The await is a long window and the user does not wait in it. If they LEFT,
       // this failure describes a grid that is gone — it does not belong on the screen
       // they are looking at now (codex + grok, r19).
@@ -1508,7 +1531,7 @@
       // Plex link replaces the whole view with the device-code screen while bumping no
       // load generation at all, and re-selecting the library you are already in bumps
       // both counters without going anywhere (codex + grok, r20).
-      if (myEpoch !== navEpoch && myGen !== loadGen) return;
+      if (rootSig() !== myRoot) return;
       // Still on the root the edit was made in. Someone else's message may be on
       // screen — our own repaint's, if it failed too and is the only thing explaining
       // the empty grid it left behind, or the refresh settlement's. Overwriting it

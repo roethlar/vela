@@ -68,6 +68,15 @@ async function watchToggle(driver, prefix, label) {
     );
   await driver.click(item);
 }
+const ENTER = ""; // WebDriver Enter (search.mjs uses the literal char)
+// Both of the edit's one-shots bind at request ARRIVAL. A case that navigates before
+// they are consumed guards nothing: the edit would not have failed, or its recovery
+// repaint would not have parked, and the race never runs (codex r20). Every timed wait
+// below is measured from HERE — the parked response is 6s after the request arrives,
+// not 6s after the click.
+async function armedShotsBound() {
+  return !mock.state.unauthNextPlayed && mock.state.itemsDelayMs === 0 ? true : null;
+}
 // The grid loads the next page when scrolled near its end (onScroll -> loadMore).
 async function scrollGridToEnd(driver) {
   // The grid is only in the DOM once it has cards — a reload in flight replaces it
@@ -322,6 +331,7 @@ export default {
     mock.state.unauthNextPlayed = true; // the edit 401s...
     mock.state.itemsDelayMs = 6000; // ...and its recovery repaint parks
     await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(armedShotsBound, "the 401 edit and its parked repaint to both bind");
     await goHome(driver);
     await driver.waitFor(
       `return [...document.querySelectorAll('button.sideitem.active')].some((b) => b.textContent.trim() === 'Home')`,
@@ -390,6 +400,74 @@ export default {
     assert.ok(
       !afterRetract.includes("500"),
       `...and the listing diagnostic IS the refresh's to take back: its cards are on screen now — got ${JSON.stringify(afterRetract)}`,
+    );
+
+    // ── 7. A leave that moves NO load generation must still drop the edit ──
+    // `navEpoch` and `loadGen` together are not a proof of root identity, in either
+    // direction (codex + grok, r20). Here is the first direction: tearing down a search
+    // root bumps `navEpoch` and NOTHING else — no load runs — so a gate that demands
+    // both counters move keeps the edit's failure and paints it on the torn-down view.
+    // (The real one that bit us is the Plex link screen, which replaces the whole view
+    // while bumping no load generation; it needs plex.tv, so the search teardown stands
+    // in for it — the same hole, reachable from a mock.)
+    const box = await driver.find(
+      "css selector",
+      'input[aria-label="Search your libraries"]',
+    );
+    await driver.type(box, `Movie 05${ENTER}`);
+    await pollUntil(
+      async () => ((await cardCount(driver)) > 0 ? true : null),
+      "the search root, with results",
+    );
+    mock.state.unauthNextPlayed = true; // the edit 401s...
+    mock.state.itemsDelayMs = 6000; // ...and the search re-run it kicks off parks
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(armedShotsBound, "the 401 edit and its parked re-run to both bind");
+    // Tear the search root down: a one-character query. No load; only navEpoch moves.
+    await driver.exec(
+      `const i = document.querySelector('input[aria-label="Search your libraries"]');
+       i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
+    );
+    await driver.type(box, `M${ENTER}`);
+    await driver.waitFor(
+      `return document.body.innerText.includes('Search needs at least 2 characters.')`,
+      "the search root torn down",
+    );
+    await new Promise((r) => setTimeout(r, 8000)); // past the parked re-run
+    const afterTeardown = await banner(driver);
+    assert.ok(
+      afterTeardown && !afterTeardown.includes("reconnect"),
+      `the search root the edit was made in is gone — its failure does not belong on what replaced it, and no load generation moved to say so — got ${JSON.stringify(afterTeardown)}`,
+    );
+
+    // ── 8. Re-entering the SAME root must not drop the edit ──
+    // The other direction. Re-selecting the library you are already in bumps BOTH
+    // counters and goes nowhere: the grid, and the item, are exactly where they were.
+    // A gate that reads "both moved" as "the user left" silently swallows the failure
+    // (codex r20) — the same silent loss r18 and r19 were both spent fixing.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "back on the library grid",
+    );
+    mock.state.unauthNextPlayed = true; // the edit 401s...
+    mock.state.itemsDelayMs = 6000; // ...and its recovery repaint parks
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(armedShotsBound, "the 401 edit and its parked repaint to both bind");
+    // Re-select the library we are ALREADY in: navEpoch++ and a fresh resetAndLoad
+    // (loadGen++), same root.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await new Promise((r) => setTimeout(r, 8000)); // past the parked repaint
+    const afterReselect = await banner(driver);
+    assert.ok(
+      afterReselect && afterReselect.includes("reconnect"),
+      `the user never left — they re-entered the library they were standing in, and their edit still failed — got ${JSON.stringify(afterReselect)}`,
     );
 
     assert.equal(

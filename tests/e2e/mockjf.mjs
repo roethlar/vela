@@ -255,16 +255,37 @@ export function startMockJellyfin({
           state.contractViolations.push({ path, query });
           return json({ error: "query contract violation" }, 400);
         }
+        // A search re-run is a LISTING for one-shot purposes. `refreshWatchState()`
+        // re-enters a search root through `runSearch(rerun)`, so an edit made in
+        // search results recovers through HERE — and until this branch honoured the
+        // one-shots, that recovery could not be parked or failed, which left the whole
+        // search root untestable for delayed-publication races (r20, pagefail case 7).
+        // Bound at ARRIVAL, exactly like the listing branch below.
+        const failSearch = state.failNextItems;
+        if (failSearch) state.failNextItems = false;
+        const unauthSearch = state.unauthNextItems;
+        if (unauthSearch) state.unauthNextItems = false;
+        const searchDelay = state.itemsDelayMs;
+        if (searchDelay > 0) state.itemsDelayMs = 0;
         const term = query.searchTerm.toLowerCase();
-        return json({
-          Items: allMovies()
-            .filter(
-              (m) =>
-                query.IncludeItemTypes.includes(typeOfItem(m.id)) &&
-                m.name.toLowerCase().includes(term),
-            )
-            .map(toJson),
-        });
+        const respondSearch = () => {
+          if (failSearch) return json({ error: "mock search failure" }, 500);
+          if (unauthSearch) return json({ error: "unauthenticated" }, 401);
+          return json({
+            Items: allMovies()
+              .filter(
+                (m) =>
+                  query.IncludeItemTypes.includes(typeOfItem(m.id)) &&
+                  m.name.toLowerCase().includes(term),
+              )
+              .map(toJson),
+          });
+        };
+        if (searchDelay > 0) {
+          setTimeout(respondSearch, searchDelay);
+          return;
+        }
+        return respondSearch();
       }
       // Fail closed on the client's listing query contract (eh-12): a real
       // Jellyfin would return the wrong contents (or error) for a bad
