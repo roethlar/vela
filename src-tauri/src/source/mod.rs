@@ -42,6 +42,21 @@ pub struct SectionDto {
     /// need provenance must fail closed.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub provenance: Option<String>,
+    /// WHICH BINDING of the source issued this key. Two sections are the same
+    /// library only if their key AND their binding match: a source that rebinds
+    /// to a server it cannot prove is the same one (Plex rediscovery on a server
+    /// whose identity was never established) reissues the SAME section numbers
+    /// for DIFFERENT libraries, so a matching key alone proves nothing and the
+    /// caller must treat its old root as gone (codex r12).
+    ///
+    /// This cannot be folded into `provenance`, which is `None` exactly when the
+    /// machine is unknown — exactly when a rebind is possible. A caller watching
+    /// provenance would see `None -> Some(A)` and be unable to tell a source that
+    /// REBOUND from one whose identity probe merely recovered on the same server.
+    ///
+    /// Sources that cannot rebind (Jellyfin/Emby: one fixed address for life)
+    /// always issue `0`.
+    pub binding: u64,
 }
 
 /// A playable/browsable item (movie, show, season, episode), source-tagged.

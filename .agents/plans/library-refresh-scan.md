@@ -1183,3 +1183,44 @@ watching before the action settles will sit and watch the bug happen. When a
 case's subject is an action with a settlement step, assert the SETTLED state —
 what the user is finally left looking at — not just the transient it passes
 through.
+
+**r12 — 2026-07-13 — codex-cli 0.144.1, verdict `reopened`, 2 MEDIUM. 1
+ADMITTED, 1 DECLINED.** Base `63560a6`, head `4f7ac59`.
+
+- **r12-2 (`17d13f0`) — text equality is not evidence of banner ownership.**
+  r11-2's retraction was scoped by generation AND by text: it remembered what the
+  superseded load wrote and cleared only while the banner still said exactly
+  that. Two different failures can say exactly that — a 401 on a LISTING and a
+  401 on a SCAN both surface as `RECONNECT_REQUIRED`, which `friendlyError`
+  renders as one constant sentence. So a scan failure could wear the superseded
+  load's text and be retracted by a refresh that never superseded it: the scan
+  failed and the user was left with no status at all. Fixed: every write to
+  `error` goes through `setError()`, which clears the tag unless the write IS the
+  tagged listing publish. The tag can no longer outlive the message it describes,
+  and no future banner write has to know the tag exists to stay correct —
+  ASSIGNING `error` DIRECTLY IS NOW A BUG. Guard: refresh case 25, plus mock
+  one-shots `unauthNextItems` / `unauthNextItemRefresh` (401 is the one failure a
+  listing and a scan report with identical text, which is what makes the case
+  writable at all).
+- **r12-1 — DECLINED (recorded, not silently dropped).** *Claim:* the
+  disappearance fallback and the content leg's root check identify a section only
+  by its namespaced key, but two Plex servers under one source can issue the same
+  raw section number. If an unidentified server A serves the visible list and an
+  unpinned rediscovery later installs B, both checks pass on B's same-numbered
+  section, so the user browses B's cards under A's stale library identity instead
+  of being reconciled to Home. *Reason for declining:* the drift it describes is
+  only reachable when the machine was NEVER identified — once known, rediscovery
+  is pinned to it and CANNOT install another (`same_machine_candidates`, r4-3), so
+  the old side of any such comparison is always `provenance: None`. The fallback
+  would therefore have to read "provenance was unknown, now it is known" as a
+  disappearance — which also fires on the benign and far more likely case, a
+  transient `/identity` failure that recovers on the SAME server, kicking the user
+  to Home on an ordinary refresh. That is a worse and more frequent defect than
+  the one it fixes, and the ambiguity is irreducible from the frontend: an
+  unidentified server cannot be told apart from a different one. The DANGEROUS
+  half — a scan reaching the wrong server — is already refused (provenance `None`
+  never matches, r11-1). What remains is display-level, and it is the trade r6
+  deliberately made: an unknown machine does not pin rediscovery, precisely so a
+  stale saved address does not leave browsing and scanning dead until the user
+  relinks (see `an_unknown_machine_does_not_pin_rediscovery`). Reopening this
+  would need new evidence that the benign recovery case cannot occur.

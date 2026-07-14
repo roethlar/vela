@@ -3,6 +3,7 @@
 //! previously lived in the command handlers.
 
 use async_trait::async_trait;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
@@ -16,6 +17,17 @@ pub struct PlexSource {
     id: String,
     name: String,
     lib: AsyncMutex<PlexLibrary>,
+    /// Which BINDING of this source issued the keys it hands out — bumped when
+    /// the source rebinds to a server it cannot prove is the same one
+    /// ([`rebind_voids_keys`]). Section keys are server-local numbers, so every
+    /// key issued under an earlier binding may now name a different library.
+    ///
+    /// Provenance ([`SectionDto::provenance`]) cannot carry this: it is `None`
+    /// exactly when the machine is unknown, which is exactly when a rebind is
+    /// possible — so a caller comparing provenance would see `None -> Some(A)`
+    /// and could not tell a source that REBOUND to another server from one whose
+    /// `/identity` probe merely recovered on the SAME server (codex r12).
+    binding: AtomicU64,
 }
 
 impl PlexSource {
@@ -24,6 +36,7 @@ impl PlexSource {
             id: id.into(),
             name: name.into(),
             lib: AsyncMutex::new(lib),
+            binding: AtomicU64::new(0),
         }
     }
 
@@ -92,6 +105,17 @@ impl PlexSource {
             // otherwise overwrite the winner, and ids already handed to the
             // frontend would silently refer to the wrong server (codex r6).
             if should_install(pin.is_some(), guard.server_machine_id().as_deref()) {
+                // Void the keys already in the frontend's hands if this install
+                // REBINDS the source to a server we cannot prove is the one that
+                // issued them. Pinned: provably the same machine, keys stand.
+                // Unpinned with no server yet (first connect): nothing was ever
+                // issued. Unpinned OVER an existing server (a restored endpoint
+                // whose /identity never answered): the new server may be another
+                // account server whose section 2 is a different library — every
+                // outstanding key is now a guess (codex r12).
+                if rebind_voids_keys(pin.is_some(), guard.server_base().is_some()) {
+                    self.binding.fetch_add(1, Ordering::SeqCst);
+                }
                 guard.set_server(chosen.clone());
                 (guard.clone(), true)
             } else {
@@ -398,6 +422,10 @@ impl MediaSource for PlexSource {
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
         let lib = self.ensure_ready().await?;
+        // The binding these keys are issued under, read BEFORE the fetch: the
+        // list about to come back is served by the server bound RIGHT NOW, so a
+        // rebind that happens while it is in flight must not backdate onto it.
+        let mut binding = self.binding.load(Ordering::SeqCst);
         // A saved server endpoint can go stale (changed IP / plex.direct host).
         // map_err first so the non-Send error is dropped before the next await.
         let first = lib.get_library_sections().await.map_err(|e| e.to_string());
@@ -405,6 +433,9 @@ impl MediaSource for PlexSource {
             Ok(s) => (lib.server_machine_id(), s),
             Err(_) => {
                 let lib = self.rediscover().await?;
+                // That rediscovery may have REBOUND us (a new binding); this
+                // list comes from the new server, so it carries the new one.
+                binding = self.binding.load(Ordering::SeqCst);
                 let s = lib
                     .get_library_sections()
                     .await
@@ -437,6 +468,7 @@ impl MediaSource for PlexSource {
                 source_name: self.name.clone(),
                 sort: None, // stamped from config by get_sections
                 provenance: provenance.clone(),
+                binding,
             })
             .collect())
     }
@@ -868,6 +900,22 @@ fn should_install(pinned: bool, installed_now: Option<&str>) -> bool {
     pinned || installed_now.is_none_or(|m| m.is_empty())
 }
 
+/// Does this install VOID the keys already issued to the frontend?
+///
+/// Only when the source rebinds to a server it cannot prove is the one that
+/// issued them: unpinned (the machine was never identified, so discovery was
+/// free to pick any account server) AND a server was already installed (so keys
+/// are outstanding). A PINNED install is provably the same machine — the
+/// stale-address recovery — and keeps its keys. A first connect has issued
+/// none. The one case that survives is an unpinned rediscovery that happens to
+/// re-find the SAME unidentified server at a new address: its keys are still
+/// good, but nothing here can prove that, so they are voided anyway and the user
+/// is re-rooted to Home. That is the price of an unidentifiable server, and it is
+/// the safe direction (codex r12).
+fn rebind_voids_keys(pinned: bool, had_server: bool) -> bool {
+    !pinned && had_server
+}
+
 /// May a scan fire? The section key came from `served_by`; the request would go
 /// to `current`. Both must be KNOWN and IDENTICAL — an unidentified server, or a
 /// source that drifted to another machine since the section list was fetched,
@@ -909,15 +957,26 @@ mod tests {
     /// is the request the wrong server never receives, which a return value alone
     /// cannot prove. Both mock servers serve a section "2": that collision is the
     /// whole hazard, since a Plex section key is only a number.
+    ///
+    /// `identity_failures` 500s that many `/identity` probes before answering —
+    /// a server that cannot be identified YET, which is the state every rebind
+    /// hazard grows out of.
     fn spawn_mock_plex(machine: &str) -> (u16, Arc<Mutex<Vec<String>>>) {
+        spawn_mock_plex_with(machine, 0)
+    }
+    fn spawn_mock_plex_with(
+        machine: &str,
+        identity_failures: usize,
+    ) -> (u16, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let left = Arc::new(Mutex::new(identity_failures));
         let (machine, out) = (machine.to_string(), hits.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
-                let (machine, hits) = (machine.clone(), out.clone());
+                let (machine, hits, left) = (machine.clone(), out.clone(), left.clone());
                 std::thread::spawn(move || {
                     let mut buf = [0u8; 2048];
                     let n = stream.read(&mut buf).unwrap_or(0);
@@ -927,6 +986,17 @@ mod tests {
                     let req = String::from_utf8_lossy(&buf[..n]);
                     let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
                     hits.lock().unwrap().push(path.clone());
+                    if path.starts_with("/identity") {
+                        let mut left = left.lock().unwrap();
+                        if *left > 0 {
+                            *left -= 1;
+                            drop(left);
+                            let _ = stream.write_all(
+                                b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                            );
+                            return;
+                        }
+                    }
                     let body = if path.starts_with("/identity") {
                         format!(r#"<MediaContainer machineIdentifier="{machine}" />"#)
                     } else if path.starts_with("/library/sections/") {
@@ -1017,6 +1087,79 @@ mod tests {
             seen.iter().any(|p| p == "/library/sections/2/refresh"),
             "B never received the scan it should have: {seen:?}"
         );
+    }
+
+    /// The benign case that a naive fix would break. A restored server carries no
+    /// machine id, so `/identity` is probed on every call until it answers. A
+    /// probe that fails and LATER SUCCEEDS on the SAME server is not a rebind:
+    /// nothing moved, and the keys already on screen are still that server's.
+    ///
+    /// This is why the frontend cannot key its "is my library still here?" check
+    /// on provenance. It would see `None -> Some(machine-A)` here — identical to
+    /// what it sees when the source rebinds to ANOTHER server — and would kick
+    /// the user to Home on an ordinary refresh of a server that never changed
+    /// (codex r12; the false positive that the `binding` split exists to avoid).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_identity_probe_that_recovers_is_not_a_rebind() {
+        let (port, _hits) = spawn_mock_plex_with("machine-A", 1); // first probe 500s
+
+        let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
+        lib.set_server_manual("127.0.0.1".to_string(), port, false, Some("A".to_string()));
+        let source = PlexSource::new("plex", "Plex", lib);
+
+        // The probe fails: the server serves its list, but cannot be named — so
+        // the keys are unprovable (and unscannable, r8-1).
+        let unidentified = source.sections().await.expect("A serves its sections");
+        assert_eq!(unidentified[0].provenance, None);
+        assert_eq!(unidentified[0].binding, 0);
+
+        // The probe recovers. Same server, same library, same keys.
+        let identified = source.sections().await.expect("A serves its sections");
+        assert_eq!(identified[0].provenance.as_deref(), Some("machine-A"));
+        assert_eq!(
+            identified[0].binding, 0,
+            "identity finally answering is not a rebind: the keys did not change hands"
+        );
+        assert_eq!(
+            identified[0].key, unidentified[0].key,
+            "...so the root the user is standing on is still the same library"
+        );
+    }
+
+    /// The keys a source hands out are stamped with the binding in force when it
+    /// served them, so a caller holding an older list can be told its root is
+    /// gone.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn sections_are_stamped_with_the_binding_that_issued_them() {
+        let (port, _hits) = spawn_mock_plex("machine-A");
+        let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
+        lib.set_server_manual("127.0.0.1".to_string(), port, false, Some("A".to_string()));
+        let source = PlexSource::new("plex", "Plex", lib);
+
+        assert_eq!(source.sections().await.unwrap()[0].binding, 0);
+        // A rebind (rediscover installing a server it cannot prove is the same
+        // one) bumps this; the real path needs plex.tv discovery, so drive the
+        // decision directly — `rebind_voids_keys` below owns whether it happens.
+        source.binding.fetch_add(1, Ordering::SeqCst);
+        let after = source.sections().await.unwrap();
+        assert_eq!(
+            after[0].binding, 1,
+            "keys issued after a rebind must not be mistakable for the ones before it"
+        );
+    }
+
+    #[test]
+    fn only_an_unprovable_rebind_voids_outstanding_keys() {
+        // Pinned: discovery was filtered to our own machine, so whatever it
+        // installed IS us at a new address. The keys stand (this is the stale-
+        // address recovery r6 kept working).
+        assert!(!rebind_voids_keys(true, true));
+        // Unpinned over an existing server: the machine was never identified, so
+        // discovery was free to pick any server on the account. Every key we
+        // already handed out may now name a different library.
+        assert!(rebind_voids_keys(false, true));
+        // First connect: nothing has been issued to void.
+        assert!(!rebind_voids_keys(false, false));
     }
 
     fn server_with_id(machine: &str, host: &str) -> PlexServer {

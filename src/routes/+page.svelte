@@ -42,6 +42,9 @@
     sourceName?: string;
     sort?: string;
     provenance?: string;
+    // Which binding of the source issued this key (see sameSection). Sources
+    // that cannot rebind always send 0.
+    binding?: number;
   };
   // `Item` (the listing-card DTO mirror) lives in $lib/types, shared with the
   // detail components.
@@ -523,10 +526,22 @@
   // when (and only when) it is a bare section grid, the one root the
   // disappearance fallback may reconcile. Home/search/person/drill roots
   // never qualify.
-  function currentSectionRootKey(): string | null {
+  function currentSectionRoot(): Section | null {
     if (mode === "home" || personView || searchTerm || !active) return null;
     const here = crumbs[crumbs.length - 1];
-    return here?.ratingKey ? null : active.key;
+    return here?.ratingKey ? null : active;
+  }
+
+  // Two sections are the SAME LIBRARY only if their key AND their binding match.
+  // A Plex source that rebinds to a server it cannot prove is the one that issued
+  // its keys (rediscovery on a server whose identity was never established)
+  // reissues the same section NUMBERS for different libraries — so "the key is
+  // still in the list" proves nothing, and the root the user is standing on may
+  // now be a stranger's library under the old one's title (codex r12). Sources
+  // that cannot rebind always issue binding 0, so this is exactly the old
+  // key check for them.
+  function sameSection(a: Section, b: Section): boolean {
+    return a.key === b.key && (a.binding ?? 0) === (b.binding ?? 0);
   }
 
   // Forced-Home reconciliation for a browse root whose library disappeared
@@ -557,7 +572,9 @@
       const epoch = navEpoch;
       refreshEpoch = epoch;
       const kind = visibleRootKind();
-      const rootKey = kind === "section-grid" ? active!.key : null;
+      // The root section ITSELF, not its key: identity is key + binding
+      // (see sameSection).
+      const rootSection = kind === "section-grid" ? active! : null;
       // The fallback needs a COMPLETE sections response: a single-source
       // fetch either errors or returns that source's complete list. A merged
       // aggregate is partial by design (failing sources are skipped), so
@@ -599,8 +616,8 @@
           // detail) on a key missing from a complete refreshed list →
           // reconcile to Home; navigated elsewhere meanwhile → untouched.
           if (singleSource) {
-            const rootNow = currentSectionRootKey();
-            if (rootNow !== null && !s.some((sec) => sec.key === rootNow)) {
+            const rootNow = currentSectionRoot();
+            if (rootNow !== null && !s.some((sec) => sameSection(sec, rootNow))) {
               forceHomeForRemovedRoot();
             }
           }
@@ -673,7 +690,10 @@
             const list = await sectionsLeg;
             if (list === null) return; // sections failed or superseded
             if (epoch !== navEpoch) return; // navigation wins
-            if (kind === "section-grid" && !list.some((sec) => sec.key === rootKey)) {
+            if (
+              kind === "section-grid" &&
+              !list.some((sec) => sameSection(sec, rootSection!))
+            ) {
               return; // root gone: the disappearance fallback owns this outcome
             }
             myGen = claimedGen = ++loadGen; // NOW we own the grid: discard any older load

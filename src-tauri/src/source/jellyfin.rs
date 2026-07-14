@@ -936,6 +936,7 @@ impl MediaSource for JellyfinSource {
                     // Not needed here (see `scan_library`): one fixed server,
                     // and library ids are server-issued GUIDs.
                     provenance: None,
+                    binding: 0, // this source cannot rebind: one address for life
                 })
             })
             .collect())
