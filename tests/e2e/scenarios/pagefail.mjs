@@ -24,7 +24,10 @@ import { startMockJellyfin } from "../mockjf.mjs";
 
 let mock;
 
-const MOVIES = Array.from({ length: 65 }, (_, i) => ({
+// 130, not 65: page 2 must come back FULL (60) so the library still has a page 3
+// for case 2 to fail. With 65, page 2 returns 5, `hasMore` goes false, and a scroll
+// can no longer ask for anything.
+const MOVIES = Array.from({ length: 130 }, (_, i) => ({
   id: `m${i}`,
   name: `Movie ${String(i).padStart(3, "0")}`,
   year: 2000 + (i % 20),
