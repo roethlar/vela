@@ -972,6 +972,39 @@ export default {
       "the refresh's sections failure must still surface: re-running the same root is not navigation",
     );
 
+    // ── 24. A superseded load's banner must not outlive the refresh ─────
+    // Case 22's interleaving, one step further on. The newer load fails and
+    // (rightly) banners. The action's leg then lands, claims a HIGHER
+    // generation, replaces the cards and succeeds — so nothing of the action's
+    // own failed, settlement published nothing, and the message the superseded
+    // load left behind was never taken down: fresh cards under a stale
+    // "couldn't load" banner (codex r11). Case 22 only ever looks at the
+    // intermediate state, so it cannot see this.
+    await clickSide(driver, "Library A");
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
+      "library A's grid",
+    );
+    mockA.state.viewsDelayMs = 2000; // the action's sections leg stays in flight...
+    await clickRefresh(driver);
+    mockA.state.failNextItems = true; // ...and the NEWER load will fail
+    // Case 23 marked Alpha Three unwatched again, so "Mark watched" is back.
+    await watchToggle(driver, "Alpha Three", "Mark watched"); // -> resetAndLoad
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the newer load's failure must surface while the refresh is still in flight",
+    );
+    await settle(driver); // the action's leg claims, reloads, and succeeds
+    mockA.state.viewsDelayMs = 0;
+    assert.ok(
+      !(await banner(driver)),
+      "the refresh replaced that load's cards with its own: the stale failure banner must be gone",
+    );
+    assert.ok(
+      (await posterLabels(driver)).some((l) => l?.startsWith("Alpha One")),
+      "...and the grid must be showing the refreshed cards, not an empty view",
+    );
+
     // Session-wide invariant: no listing contract violations anywhere.
     assert.equal(
       mockA.state.contractViolations.length,

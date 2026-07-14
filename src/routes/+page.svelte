@@ -85,6 +85,14 @@
   let offset = $state(0);
   let hasMore = $state(true);
   let error = $state<string | null>(null);
+  // Provenance of the visible banner, when a LISTING load published it: the
+  // generation that failed, plus the exact text it wrote. Only `loadMore`'s
+  // direct publish records it, and the pair is trusted only while `errorGenText`
+  // is still identical to `error` — so any of the ~30 other banner writes (or a
+  // clear) silently invalidates the tag without having to know it exists.
+  // Deliberately not `$state`: nothing renders from it.
+  let errorGen = 0;
+  let errorGenText: string | null = null;
   let sort = $state("titleSort:asc");
   let searchQuery = $state("");
   let searchTerm = $state(""); // the query backing the current search results view
@@ -596,6 +604,10 @@
 
       // Content leg — exactly one, chosen by the snapshot's visible root.
       let contentLeg: Promise<void> = Promise.resolve();
+      // The listing generation the content leg claims, if it gets that far. Every
+      // load at or below it is one this action SUPERSEDED, so a failure banner
+      // one of them left behind is ours to retract at settlement.
+      let claimedGen = 0;
       if (kind === "home") {
         // Claim a Home generation like every Home load: an unclaimed leg
         // would let an older in-flight Home load overwrite the refreshed
@@ -653,7 +665,7 @@
             if (kind === "section-grid" && !list.some((sec) => sec.key === rootKey)) {
               return; // root gone: the disappearance fallback owns this outcome
             }
-            myGen = ++loadGen; // NOW we own the grid: discard any older load
+            myGen = claimedGen = ++loadGen; // NOW we own the grid: discard any older load
             loadingMore = false;
             offset = 0;
             hasMore = true;
@@ -685,6 +697,25 @@
       if (epoch === navEpoch) {
         const live = legFailures.filter((f) => f.current());
         if (live.length > 0) error = live.map((f) => f.msg).join("; ");
+        // Nothing of ours failed — but a load we SUPERSEDED may have published a
+        // banner after the click cleared the surface. Its cards are gone,
+        // replaced by ours, so its failure no longer describes anything on
+        // screen: fresh cards under a stale "couldn't load" message (codex r11).
+        // Retract it, and ONLY it — a load NEWER than the one we claimed
+        // (`errorGen > claimedGen`) supersedes US in turn, and its failure is
+        // the one the user needs to see. The text check keeps the tag honest:
+        // if any other banner replaced this one, it is not ours to touch.
+        else if (
+          claimedGen &&
+          errorGen &&
+          errorGen <= claimedGen &&
+          error !== null &&
+          error === errorGenText
+        ) {
+          error = null;
+          errorGen = 0;
+          errorGenText = null;
+        }
       }
     } finally {
       refreshing = false;
@@ -866,8 +897,14 @@
             refreshEpoch === navEpoch &&
             myGen <= gridActionBaseGen
           )
-        )
+        ) {
           error = String(e);
+          // Tag the banner with the load that published it: a refresh that goes
+          // on to SUPERSEDE this load owns its cards, so it must take this
+          // message down with it (see refreshLibraries settlement, codex r11).
+          errorGen = myGen;
+          errorGenText = error;
+        }
         hasMore = false;
       }
     } finally {
