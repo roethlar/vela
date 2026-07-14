@@ -1750,3 +1750,101 @@ finding was that my fix had reopened its own bug. The author is not a reliable r
 the author, and a self-audit is not a check: r20-2 is a defect I looked straight at, in a
 message that said I had traced every writer, and waved through on an assumption I could
 have tested in one grep.
+
+**r21 — 2026-07-14 — two reviewers on the r20 fixes. codex: 5 MEDIUM + 3 LOW. grok: 1
+HIGH + 3 MEDIUM + 1 LOW.** Base `64547a8`, head `91045cb`... reviewed at `39ead92`. Both
+reviewers, independently, found the SAME top two defects — and both were in the r20 fixes.
+
+- **r21-1 (`db2e959`) — the r20 multi-part banner reopened r20's OWN retract loss, through
+  its DEDUP door** (both reviewers; grok rated it HIGH). `addError` deduplicated on the
+  message TEXT and kept whichever owner arrived first. A 401 on a listing and a 401 on an
+  edit collapse into the identical constant RECONNECT_REQUIRED sentence — the codebase has
+  known this since r12 — so: the repaint's TAGGED part lands, the edit's UNTAGGED part is
+  dropped as a duplicate, and the next successful refresh retracts the only line left. Grid
+  repaired, banner empty, and nothing anywhere says the edit failed. Fixed: the WEAKER claim
+  wins — if either reason is owned by no load, no refresh may take the line back, because
+  repairing the grid does not make the edit's failure untrue. Guard: pagefail case 10.
+  **Case 6 could never have caught it: it deliberately pits a 500 against a 401 so its
+  assertions can tell them apart, and the identical-text case is exactly the one that breaks.
+  Choosing legible test messages HID the bug.**
+- **r21-2 (`d7cb3ef`) — the root was snapshotted after the edit had already failed** (both
+  reviewers; I had also found it myself, re-reading codex's r20 comments, and had fixed it
+  before r21 came back — an independent confirmation of a triage error rather than a new
+  find). I had merged two distinct codex r20 findings into one and only fixed the other.
+  The edit's own server call is the longest wait in `setWatched`; reading the root in the
+  catch reads whatever root the user walked to, compares it against itself, and always
+  matches. Guard: pagefail case 9 (with a new arrival-bound `playedDelayMs` in the mock —
+  until then a scenario could park the edit's RECOVERY but never the edit itself).
+- **r21-3 (`d25cdfe`) — `refreshWatchState` could navigate, and the root test could not tell
+  that from a user navigating** (codex). Its search re-run was ungated, so from a level
+  drilled BELOW a search it replaced the multi-crumb trail with the one-crumb search root:
+  the user was yanked out of the show they were standing in merely for marking an episode
+  watched, and `setWatched` saw its own repaint move the root and silently dropped the
+  failure it was about to report. The person path had been gated to `crumbs.length === 1`
+  since plan-review r2; the search path never was. NOT GUARDED — the mock resolves ParentId
+  only against VIEWS, so no scenario can drill.
+- **r21-4 (`8ddbece`) — `rootSig` compared section KEYS while `sameSection` compares key AND
+  binding** (codex). A section key is a server-LOCAL number; an unprovable rebind can put
+  B's colliding "2" under a parked recovery, and the two roots then compare equal. NOT
+  GUARDED (the mock is Jellyfin: GUID ids, never rebinds — the same recorded gap that leaves
+  `sameSection` itself unguarded).
+- **r21-5 (`0ef6de4`, superseded by `74fc3ad`) — the device-code screen inherited a banner
+  about a view it had replaced** (codex).
+- **r21-6 (`a29a0f7`) — the guards were on stopwatches** (both reviewers). The r20 absence
+  assertions slept a fixed 8s measured from the PARK — the moment a request ARRIVED — and
+  then sampled once. Arrival is not delivery, and "no banner yet" is indistinguishable from
+  "no banner ever" if you ask too early: on a slow box, cases 5 and 7 could pass a BROKEN
+  currency gate. The mock now records every response as it goes OUT (`state.served`), so a
+  scenario waits for the parked answer to actually be delivered and then HOLDS the assertion
+  open, failing the moment the thing it forbids appears. Applied to refresh.mjs cases 13/14/19
+  and scanlib's stale phases too (`9b39695`).
+
+**Building that witness found a hole in the witness.** The scan's 204 is the one success
+path that does not go through the mock's `json()`, so it was never recorded as served — and
+the first delivery-witness sat waiting forever for a response that had already gone out.
+**A witness with a blind spot is worse than a stopwatch, because it looks rigorous.**
+
+**And the first red proof of the r20-2 fix was itself unfaithful.** The injected regression
+read the load generation BEFORE the repaint kicked off, where r19 read it AFTER — so the
+conjunction came out true, gated correctly by accident, and the injection proved nothing. A
+regression you inject wrong is a guard you did not test.
+
+**r22 — 2026-07-14 — two reviewers on the r21 fixes. codex: 3 MEDIUM. grok: 1 MEDIUM.**
+Base `39ead92`, head `a29a0f7`. Both reviewers converged, independently, on the same defect
+for the fourth round running.
+
+- **r22-1 (`8c79e16`) — the ownership algebra lived in `addError`; every listing writer
+  publishes through `setError`, which REPLACED the whole list** (both reviewers). A failed
+  edit whose recovery succeeds leaves one untagged part; an ordinary page failure then wipes
+  it — or, when both render the same 401 sentence, silently RE-TAGS the edit's message as
+  listing-owned — and the next successful refresh retracts it. **The fifth door into the same
+  silent loss, and the second one opened by the fix for the previous one.** Fixed: `setError`
+  clears only what a load owns and routes through `addError`. Two writers of one surface,
+  each with its own rule, WAS the defect. Guard: pagefail case 11.
+- **r22-2 (`3d06d5c`) — the recovery repaint ran on whatever root the user had walked to**
+  (codex). The catch repainted the CURRENT root before checking whether it was still the
+  edit's root, so an edit parked in a library, with the user since gone Home, RESET Home and
+  cleared Home's own still-applicable failure. r20 moved the snapshot early enough to
+  suppress the publish; the repaint was still running unconditionally, one line above the
+  check. Guard: pagefail case 12.
+- **r22-3 (`74fc3ad`) — my r21-5 fix over-reached.** Clearing the whole banner when the PIN
+  lands erases failures that are not about the replaced view: the queue drawer renders OVER
+  the link screen, so a queue action's failure is still visible, still true, and never
+  superseded. Replaced with a `linking` flag declared at the START of the flow (in rootSig),
+  which drops the delayed publish instead of cleaning up after it. NOT GUARDED (link_begin
+  needs plex.tv).
+
+**Case 11's first draft was junk and nearly shipped.** It ran the edit and the page failure
+BEFORE the refresh — where the refresh CLICK clears the surface — so the banner was empty
+either way and the case "went red" for a reason with nothing to do with the bug. It only
+became a guard once the whole race ran INSIDE an in-flight refresh, with the retract as the
+mechanism under test. **The red proof is not a formality: it is the only thing that told me
+the test was worthless.**
+
+**What r21 and r22 establish.** SIX consecutive rounds (r17-r22) in which the author's
+newest fix carried a defect of the SAME CLASS it was fixing, through another door. The
+class never changes: **a failure the user needs is silently lost.** It has now been reached
+through the publish door, the ordering door, the retract door, the dedup door and the
+setError door — each opened by the fix for the last. The two reviewers have converged,
+independently, on the same top finding in FOUR straight rounds (r19, r20, r21, r22). No
+single reviewer — and certainly not the author — would have caught this sequence.
