@@ -109,95 +109,68 @@
   // as `RECONNECT_REQUIRED`, which friendlyError maps to one constant sentence. The
   // refresh then retracted a scan failure it never superseded and the user was left
   // with no status at all (codex r12).
-  // Each part names the SURFACE that owns it. A failure is cleared by the surface it
-  // belongs to and by nothing else — because the banner is shared by writers whose
-  // surfaces have completely different lifetimes:
+  // The view's banner. ONE writer class now: the listing, the refresh, the search — the
+  // things that describe THIS view and die with it. Every other writer reports on its own
+  // surface (the scan's, the edit's, the queue's, the mpv bar's, the detail's), which is
+  // what `.agents/plans/per-surface-status.md` was for.
   //
-  //   view    the grid / rails / search results. Dies with the view.
-  //   detail  the open detail surface. Survives a search teardown underneath it.
+  // That is why there is no `owner` field here any more, no per-surface clear, and no
+  // scope. All of that existed to referee writers with different lifetimes fighting over
+  // one surface, and it never worked: eight consecutive review rounds, each fix opening
+  // the next door, every one of them the same defect — a failure the user needed,
+  // silently lost (library-refresh-scan log, r17-r24). The referee is gone because the
+  // fight is gone.
   //
-  // A boolean (`app`) could not express this, and each surface it lumped together lost
-  // its diagnostic to some other surface's clear: `setError(null)` — which every load
-  // start calls — wiped the queue's failure on any navigation, the search teardown
-  // deleted a Play failure while its detail was still open, and an mpv setup failure
-  // vanished under a one-character search while the mpv bar stayed mounted (codex +
-  // grok, r24).
+  // What REMAINS is view-vs-view, and it is load-scoped, not surface-scoped:
   //
-  // Without that distinction there was no honest answer to "the view was replaced —
-  // what goes?": clearing everything erased a queue failure that was still on screen and
-  // still true, and clearing nothing left a library's diagnostic stranded on the link
-  // screen with no way to dismiss it (the r14 hole). Trying to paper over it with a
-  // `linking` process flag in rootSig produced three defects of its own — it flipped
-  // false when a link FAILED and silently dropped an edit made on a grid the user never
-  // left; it stuck true whenever a source change abandoned a link; and it could only
-  // reject FUTURE publishes, never retract one already on screen (codex + grok, r23).
-  type ErrorOwner = "view" | "detail";
-  let errorParts = $state<{ msg: string; gen: number; owner: ErrorOwner }[]>([]);
+  //   `gen`             the load generation that published this part (0 = no load owns it:
+  //                     a search's validation message, the refresh's own sections leg).
+  //   `retractThrough`  a refresh that REPLACED a load's cards retracts that load's
+  //                     diagnostic and nothing else — fresh cards under a stale
+  //                     "couldn't load" is a lie (codex r11), but a part no load owns was
+  //                     never the refresh's to take back (codex + grok, r20).
+  //   the weaker-claim  two listing failures can render the SAME sentence (a 401 on a
+  //   merge in addError listing and a 401 on a page both collapse to one constant
+  //                     RECONNECT_REQUIRED line — codex r12), so deduplicating on text
+  //                     must not silently decide which load owns what is left (codex r21).
+  //
+  // Those are real rules about one surface with one kind of writer, and they stay.
+  let errorParts = $state<{ msg: string; gen: number }[]>([]);
   const error = $derived(
     errorParts.length === 0 ? null : errorParts.map((p) => p.msg).join("; "),
   );
   function setError(msg: string | null, gen = 0) {
-    // null is the CLEAR — but only of the VIEW. Every load start calls this, and a load
-    // starting fresh says nothing about the queue drawer, the mpv bar, or an open detail;
-    // wiping their failures here is how the scope introduced in r23 was defeated on the
-    // very next navigation (codex + grok, r24).
     if (msg === null) {
-      clearOwned("view");
+      errorParts = [];
       return;
     }
-    // Publishing a failure supersedes the LISTING diagnostics it replaces — a newer
-    // load's failure describes the same grid the older one did — but it must never
-    // erase a part that no load owns. An edit's failure is not a listing's to take
-    // back, and this writer used to replace the whole list: an ordinary page failure
-    // wiped the edit's message, or (when the two rendered the same 401 sentence) re-
-    // tagged it as listing-owned, and the next successful refresh retracted it. The
-    // r21 loss again, reverse ordering, through the setError door (codex + grok, r22).
-    //
-    // Routing through addError is what keeps the ownership algebra in ONE place: two
-    // writers of the same surface, two rules, was the whole defect.
+    // A newer load's failure supersedes the diagnostics of the loads it replaced, and
+    // leaves alone the parts no load owns.
     errorParts = errorParts.filter((p) => p.gen === 0);
     addError(msg, gen);
   }
-  // A surface is gone, or is starting over: everything it was saying goes with it, and
-  // nothing else is touched.
-  function clearOwned(owner: ErrorOwner) {
-    errorParts = errorParts.filter((p) => p.owner !== owner);
-  }
-  // The view has been REPLACED (the device-code screen, a torn-down search root) while
-  // the banner itself stays on screen.
+  // The view has been REPLACED (the device-code screen, a torn-down search root) rather
+  // than reloaded: everything it was saying goes with it.
   function clearViewErrors() {
-    clearOwned("view");
+    errorParts = [];
   }
-  // Say something without ERASING what is already there: the two writers are reporting
-  // different failures and the user needs both. Identical text is not repeated — a
-  // retried offset can fail the same way twice, and a superseded banner could
-  // otherwise appear twice in one message (codex r18, LOW).
-  function addError(msg: string, gen = 0, owner: ErrorOwner = "view") {
+  // Say something without ERASING what is already there — the two failures are both true.
+  // Identical text is not repeated: a retried offset can fail the same way twice.
+  function addError(msg: string, gen = 0) {
     const at = errorParts.findIndex((p) => p.msg === msg);
     if (at === -1) {
-      errorParts = [...errorParts, { msg, gen, owner }];
+      errorParts = [...errorParts, { msg, gen }];
       return;
     }
-    // The same sentence, now true for a SECOND reason. Two unrelated failures really do
-    // render identically here — a 401 on a listing and a 401 on an edit both collapse
-    // into the one constant RECONNECT_REQUIRED sentence — so deduplicating on the text
-    // alone silently decides who owns what is left on screen. Deduplicating and keeping
-    // the FIRST owner is how the edit's failure went back to being retractable: the
-    // listing part was already there, the edit's untagged part was dropped as a
-    // duplicate, and the refresh then retracted the only line left (codex r21).
-    //
-    // The WEAKER claim wins. If either reason is owned by no load, no refresh may take
-    // the line back — repairing the grid does not make the edit's failure untrue. If
-    // both are listing failures, it survives until the LATER one is superseded too.
-    // The same sentence from a DIFFERENT surface keeps the one already there: two
-    // surfaces reporting the identical text is not a reason to make one of them
-    // unclearable by the other. Only the load-ownership weakens.
+    // The same sentence, now true for a second load as well. The WEAKER claim wins: if
+    // either reason is owned by no load, no refresh may take the line back; if both are
+    // listing failures, it survives until the LATER one is superseded too. Keeping the
+    // FIRST owner instead is how a failure became retractable by a refresh that had
+    // superseded nothing (codex r21).
     const held = errorParts[at].gen;
     const weaker = held === 0 || gen === 0 ? 0 : Math.max(held, gen);
     if (weaker !== held)
-      errorParts = errorParts.map((p, i) =>
-        i === at ? { ...p, msg, gen: weaker } : p,
-      );
+      errorParts = errorParts.map((p, i) => (i === at ? { msg, gen: weaker } : p));
   }
   // Retract every part owned by a load through `claimedGen` — and nothing else. An
   // untagged part is not the refresh's to take back, and a NEWER load's failure
