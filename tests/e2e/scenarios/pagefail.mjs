@@ -237,7 +237,8 @@ export default {
 
     // A newer generation takes the grid and its next page dies: a tagged banner
     // the action did not silence and will not supersede.
-    await watchToggle(driver, "Movie 059", "Mark unwatched"); // case 2 left it watched
+    // Case 2's edit on this card FAILED (401), so it is still unwatched.
+    await watchToggle(driver, "Movie 059", "Mark watched");
     await pollUntil(
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "the edit's reload lands",
