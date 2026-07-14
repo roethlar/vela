@@ -276,7 +276,17 @@ impl PlexSource {
         // cannot name the server — a restored endpoint whose /identity probe
         // failed — every key it serves is unprovable and unscannable, by
         // design (codex r8).
-        let provenance = rediscovery_pin(served_by);
+        let provenance = match rediscovery_pin(served_by) {
+            Some(machine) => Some(machine),
+            // Our own clone could not name the server — but a CONCURRENT caller's
+            // probe may have identified it since, and the binding check above
+            // proves we are still bound to that same server. Its id therefore
+            // describes the very list we just fetched. Without this, two parallel
+            // loads on a restored server could leave the winner's keys unprovable
+            // and Scan Library refusing every library until the next refresh
+            // (codex r17).
+            None => rediscovery_pin(self.lib.lock().await.server_machine_id()),
+        };
         Ok(Some(
             sections
                 .into_iter()
@@ -1372,6 +1382,53 @@ mod tests {
         assert_eq!(
             after[0].binding, 1,
             "keys issued after a rebind must not be mistakable for the ones before it"
+        );
+    }
+
+    /// A list served by a server another caller has just IDENTIFIED is provable.
+    ///
+    /// Two loads can run on a restored, unidentified server at once. One holds a
+    /// clone that cannot name it; the other's probe succeeds and writes the id into
+    /// shared state. If the first stamps its list from its own stale clone, every
+    /// key on it is `provenance: None` — and Scan Library refuses the whole library
+    /// list until something triggers another refresh. The binding check proves we
+    /// are still bound to the same server, so the id that arrived while we were
+    /// fetching describes the very list we fetched (codex r17).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_list_is_provable_once_anyone_has_identified_the_server() {
+        let (arrived_tx, arrived_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let gate = (arrived_tx, Arc::new(Mutex::new(release_rx)));
+        // The probe parks, then fails: THIS caller will never learn who it is.
+        let (port, _hits) = spawn_mock_plex_with("machine-A", 1, Some(gate));
+
+        let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
+        lib.set_server_manual("127.0.0.1".to_string(), port, false, Some("A".to_string()));
+        let source = Arc::new(PlexSource::new("plex", "Plex", lib));
+
+        let listing = tokio::spawn({
+            let source = source.clone();
+            async move { source.sections().await }
+        });
+        arrived_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the probe reached the server");
+
+        // A concurrent caller identifies the server while this one is parked.
+        source
+            .lib
+            .lock()
+            .await
+            .set_machine_identifier("machine-A".to_string());
+        release_tx.send(()).unwrap();
+
+        let sections = listing.await.unwrap().expect("the list still lands");
+        assert_eq!(
+            sections[0].provenance.as_deref(),
+            Some("machine-A"),
+            "someone identified this server while we were fetching from it — the keys \
+             it served are provable, and refusing to scan them until another refresh \
+             is a refusal we cannot justify"
         );
     }
 
