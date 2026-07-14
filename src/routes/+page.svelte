@@ -103,20 +103,9 @@
   // left with no status at all (codex r12). ASSIGNING `error` DIRECTLY IS A BUG.
   // Deliberately not `$state`: nothing renders from it.
   let errorGen = 0;
-  // WHO published the visible banner. Not everyone may take it down: a refresh
-  // reloads the cards its banner is about and so may retract it, but a scan
-  // reloads nothing and must leave a listing's failure standing (codex r14).
-  // Set in the same place as `errorGen`, so it cannot drift out of step with the
-  // message it describes.
-  let errorOwner: "listing" | "scan" | "other" = "other";
-  function setError(
-    msg: string | null,
-    gen = 0,
-    owner: "listing" | "scan" | "other" = "other",
-  ) {
+  function setError(msg: string | null, gen = 0) {
     error = msg;
     errorGen = msg === null ? 0 : gen;
-    errorOwner = msg === null ? "other" : owner;
   }
   let sort = $state("titleSort:asc");
   let searchQuery = $state("");
@@ -280,6 +269,11 @@
       // The view this banner described no longer exists, and the Welcome screen
       // offers nothing that could clear it (codex r14).
       setError(null);
+      // A scan still in flight would land its outcome here — an error about a
+      // library that is gone, or a "Scan started" for a server the user just
+      // removed, on the Welcome screen, with nothing to clear it (codex r15).
+      scanAttempt++; // its publication check now fails
+      clearScanStatus();
     }
   }
 
@@ -938,7 +932,7 @@
           // The ONLY tagged write: a refresh that goes on to SUPERSEDE this
           // load owns its cards, so it must take this message down with it
           // (see refreshLibraries settlement, codex r11).
-          setError(String(e), myGen, "listing");
+          setError(String(e), myGen);
         }
         hasMore = false;
       }
@@ -1279,37 +1273,44 @@
   // a timer armed by an earlier success must never wipe a newer attempt's
   // published notice. Per-key gens survive only for the `scanning` flag, so a
   // superseded attempt still re-enables its own menu entry.
-  let scanNotice = $state<string | null>(null);
+  // A scan's status lives on its OWN surface — never on the view's error banner.
+  // Sharing one slot cost three separate defects (a scan erasing a listing's
+  // failure; a scan's failure destroying that diagnostic permanently; a scan
+  // completing after its source was removed and republishing over Welcome —
+  // codex r14, r15). The view's banner explains the view; a scan explains itself.
+  // `failed` picks the surface: an alert that stays, or a neutral notice that
+  // auto-clears.
+  let scanStatus = $state<{ text: string; failed: boolean } | null>(null);
   let scanning = $state<Record<string, boolean>>({}); // menu-entry feedback only
   const scanGens: Record<string, number> = {};
   let scanAttempt = 0; // global publication ownership
-  let scanNoticeOwner: number | null = null; // owning attempt of the visible notice
-  let scanNoticeTimer: ReturnType<typeof setTimeout> | null = null;
+  let scanStatusOwner: number | null = null; // owning attempt of the visible status
+  let scanStatusTimer: ReturnType<typeof setTimeout> | null = null;
   onDestroy(() => {
-    if (scanNoticeTimer) clearTimeout(scanNoticeTimer);
+    if (scanStatusTimer) clearTimeout(scanStatusTimer);
   });
+
+  // Drop any scan status and stop an in-flight scan from publishing one. Used by
+  // the next scan, and by the last-source teardown — where a scan still in flight
+  // would otherwise land its outcome on the Welcome screen, about a library that
+  // no longer exists (codex r15).
+  function clearScanStatus() {
+    scanStatus = null;
+    scanStatusOwner = null;
+    if (scanStatusTimer) {
+      clearTimeout(scanStatusTimer);
+      scanStatusTimer = null;
+    }
+  }
 
   async function scanSection(s: Section) {
     closeSectionMenu();
     const gen = (scanGens[s.key] = (scanGens[s.key] ?? 0) + 1);
     const attempt = ++scanAttempt;
     scanning[s.key] = true;
-    // The action owns ITS OWN status, and only that: clear a previous SCAN's
-    // banner and notice, and cancel an armed auto-clear so it can't fire
-    // mid-flight against the outcome we're about to publish.
-    //
-    // It must NOT clear a listing failure. Refresh may (it reloads the very
-    // cards the banner is about), but a scan reloads nothing: the banner
-    // EXPLAINS the empty grid the user is looking at, and wiping it leaves them
-    // with an empty view and a cheerful "Scan started" that accounts for none of
-    // it (codex r14).
-    if (errorOwner === "scan") setError(null);
-    scanNotice = null;
-    scanNoticeOwner = null;
-    if (scanNoticeTimer) {
-      clearTimeout(scanNoticeTimer);
-      scanNoticeTimer = null;
-    }
+    // The action owns its own status and NOTHING else — the view's banner is not
+    // a scan's to touch.
+    clearScanStatus();
     try {
       // Hand back the provenance issued WITH this key: `s` is the section object
       // from the list this menu was opened on, which may no longer be the list
@@ -1319,19 +1320,19 @@
       // No auto-refresh afterward: the scan runs asynchronously server-side
       // and completion is unknowable without polling (non-goal). The slice-1
       // refresh button is the companion action once the scan has landed.
-      scanNotice = `Scan started — ${s.title}`;
-      scanNoticeOwner = attempt;
-      scanNoticeTimer = setTimeout(() => {
+      scanStatus = { text: `Scan started — ${s.title}`, failed: false };
+      scanStatusOwner = attempt;
+      scanStatusTimer = setTimeout(() => {
         // Only the owning attempt may clear — a timer armed by an earlier
-        // success must not wipe a newer attempt's notice.
-        if (scanNoticeOwner === attempt) {
-          scanNotice = null;
-          scanNoticeOwner = null;
-        }
+        // success must not wipe a newer attempt's status.
+        if (scanStatusOwner === attempt) clearScanStatus();
       }, 4000);
     } catch (e) {
       if (scanAttempt !== attempt) return;
-      setError(String(e), 0, "scan"); // ours to clear on the next scan
+      // Stays until the next scan: unlike the acknowledgement, a failure is not
+      // something to tidy away on a timer.
+      scanStatus = { text: String(e), failed: true };
+      scanStatusOwner = attempt;
     } finally {
       if (scanGens[s.key] === gen) scanning[s.key] = false;
     }
@@ -1498,10 +1499,18 @@
     <div class="error" role="alert">{friendlyError(error)}</div>
   {/if}
 
-  {#if scanNotice}
-    <!-- Transient scan acknowledgement (slice 2) — neutral, auto-clears;
-         scan COMPLETION is unknowable without polling (non-goal). -->
-    <div class="notice" role="status">{scanNotice}</div>
+  {#if scanStatus}
+    <!-- The scan's OWN surface, never the view's error banner above (codex r15).
+         Success is a transient acknowledgement — neutral, auto-clears; scan
+         COMPLETION is unknowable without polling (non-goal). Failure is an alert
+         that stays until the next scan, and it sits ALONGSIDE any listing failure
+         rather than replacing it: both are true, and the listing's is the one that
+         explains the empty grid. -->
+    {#if scanStatus.failed}
+      <div class="scanerror" role="alert">{friendlyError(scanStatus.text)}</div>
+    {:else}
+      <div class="notice" role="status">{scanStatus.text}</div>
+    {/if}
   {/if}
 
   {#if showSettings}
@@ -2682,7 +2691,12 @@
   .center {
     margin: auto;
   }
-  .error {
+  /* The VIEW's failure. `.scanerror` is a SCAN's, styled the same but a separate
+     element: the two can be on screen together, and neither may clear the other
+     (codex r15). Distinct class names keep that separation legible to tests too —
+     a `div.error` selector must never accidentally match a scan's status. */
+  .error,
+  .scanerror {
     background: var(--danger-bg);
     color: var(--danger-text);
     padding: 0.6rem 1rem;

@@ -59,6 +59,17 @@ async function banner(driver) {
     `return document.querySelector('div.error')?.textContent ?? null`,
   );
 }
+// A scan's status has its own surfaces, never the view's banner (codex r15).
+async function scanBanner(driver) {
+  return driver.exec(
+    `return document.querySelector('div.scanerror')?.textContent ?? null`,
+  );
+}
+async function notice(driver) {
+  return driver.exec(
+    `return document.querySelector('div.notice')?.textContent ?? null`,
+  );
+}
 async function sidebarNames(driver) {
   return driver.exec(
     `return [...document.querySelectorAll('button.sideitem')].map((b) => b.textContent.trim())`,
@@ -1073,19 +1084,46 @@ export default {
       async () => ((await banner(driver)) ? true : null),
       "the newer load's 401 must surface",
     );
-    // Now a SCAN fails with the identical text, taking over the banner. The
-    // refresh never superseded it: it is not the refresh's to retract.
+    // Now a SCAN fails with the identical text. It lives on the scan's OWN
+    // surface (codex r15), so the refresh cannot retract it even by accident —
+    // and this case proves the separation holds under the exact text collision
+    // that defeated the old text-scoped tag.
     mockA.state.unauthNextItemRefresh = true;
     await scanFromSideMenu(driver, "Library A");
     await pollUntil(
-      async () => ((await banner(driver)) ? true : null),
-      "the scan's 401 must surface",
+      async () => ((await scanBanner(driver)) ? true : null),
+      "the scan's 401 must surface on the scan's own surface",
     );
     await settle(driver); // the action's leg claims, reloads, and succeeds
     mockA.state.viewsDelayMs = 0;
     assert.ok(
+      await scanBanner(driver),
+      "the scan failed and the refresh never superseded it: its status must survive settlement",
+    );
+
+    // ── 26. A SUCCESSFUL scan must not erase the view's failure ─────────
+    // The only case pairing a listing banner with a scan forced the scan to FAIL,
+    // so restoring the scan's old unconditional clear still passed — its own
+    // failure simply replaced the banner it had just erased. A scan that SUCCEEDS
+    // erases and replaces nothing, which is exactly when the loss shows: an empty
+    // grid, its explanation gone, under a cheerful "Scan started" (codex r15).
+    // A scan reloads no content, so it may never take down the view's banner.
+    mockA.state.unauthNextItems = true;
+    await clickSide(driver, "Library B"); // its listing 401s -> the view banners
+    await pollUntil(
+      async () => ((await banner(driver)) ? true : null),
+      "the failing listing must banner",
+    );
+    const explanation = await banner(driver);
+    await scanFromSideMenu(driver, "Library B"); // and this one SUCCEEDS
+    await pollUntil(
+      async () => ((await notice(driver)) ? true : null),
+      "the scan must acknowledge",
+    );
+    assert.equal(
       await banner(driver),
-      "the scan failed and the refresh never superseded it: its banner must survive settlement",
+      explanation,
+      "the scan reloaded nothing: the banner explaining this empty grid must still be there",
     );
 
     // Session-wide invariant: no listing contract violations anywhere.

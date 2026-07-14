@@ -22,7 +22,15 @@ async function notice(driver) {
     `return document.querySelector('div.notice')?.textContent ?? null`,
   );
 }
+// A SCAN's failure has its own surface (`div.scanerror`), separate from the
+// view's error banner (`div.error`) — a scan may not touch the view's, and the
+// two can be on screen at once (codex r15). Assert on the right one.
 async function banner(driver) {
+  return driver.exec(
+    `return document.querySelector('div.scanerror')?.textContent ?? null`,
+  );
+}
+async function viewBanner(driver) {
   return driver.exec(
     `return document.querySelector('div.error')?.textContent ?? null`,
   );
@@ -109,6 +117,11 @@ export default {
       "scan notice for Library One",
     );
     assert.equal(await banner(driver), null, "happy path must not banner");
+    assert.equal(
+      await viewBanner(driver),
+      null,
+      "and must not disturb the view's own banner",
+    );
     const posts1 = refreshPosts("lib1");
     assert.equal(posts1.length, 1, "exactly one refresh POST for lib1");
     // Assert what Vela SENDS, param for param. Checking only Recursive and
