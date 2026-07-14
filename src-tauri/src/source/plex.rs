@@ -1090,7 +1090,14 @@ mod tests {
                         // a scan: /library/sections/{key}/refresh
                         r#"<MediaContainer size="0" />"#.to_string()
                     } else if path.starts_with("/library/sections") {
-                        r#"<MediaContainer size="1"><Directory key="2" type="movie" title="Movies" /></MediaContainer>"#.to_string()
+                        // Same KEY on both servers — that collision is the whole
+                        // hazard — but a DIFFERENT library behind it, so a test can
+                        // tell which server actually answered. Identical bodies let
+                        // a retry that merely restamped the old server's list pass
+                        // (codex r15).
+                        format!(
+                            r#"<MediaContainer size="1"><Directory key="2" type="movie" title="{machine} Films" /></MediaContainer>"#
+                        )
                     } else {
                         r#"<MediaContainer size="0" />"#.to_string()
                     };
@@ -1227,7 +1234,7 @@ mod tests {
         let (release_tx, release_rx) = channel();
         let gate = (arrived_tx, Arc::new(Mutex::new(release_rx)));
         let (port_a, _hits_a) = spawn_mock_plex_with("machine-A", 1, Some(gate));
-        let (port_b, _hits_b) = spawn_mock_plex("machine-B");
+        let (port_b, hits_b) = spawn_mock_plex("machine-B");
 
         let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
         lib.set_server_manual("127.0.0.1".to_string(), port_a, false, Some("A".to_string()));
@@ -1253,12 +1260,23 @@ mod tests {
         release_tx.send(()).unwrap();
 
         let sections = listing.await.unwrap().expect("the source serves SOME list");
+        // The TITLE is the proof: provenance and binding alone could be restamped
+        // onto A's completed list by a broken retry, and both mocks answer the same
+        // KEY. Only B's actual library body can come from B (codex r15).
         assert_eq!(
-            sections[0].provenance.as_deref(),
-            Some("machine-B"),
+            sections[0].title, "machine-B Films",
             "the sidebar must show the libraries of the server this source is bound to NOW — \
              serving A's list here leaves the user browsing B's films under A's library name"
         );
+        assert!(
+            hits_b
+                .lock()
+                .unwrap()
+                .iter()
+                .any(|p| p.starts_with("/library/sections") && !p.contains("refresh")),
+            "B must actually have been ASKED for its libraries, not merely credited with A's"
+        );
+        assert_eq!(sections[0].provenance.as_deref(), Some("machine-B"));
         assert_eq!(sections[0].binding, 1);
     }
 
