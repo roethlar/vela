@@ -157,12 +157,14 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     appeared in a test. `live-plex` now browses real libraries and scans one, red-proven.
   - **STILL OPEN, and unclosable here:** a Plex REBIND needs a SECOND Plex server, which
     does not exist. `sameSection` and the section-binding comparison remain inspection-only.
-- **CI NOTE (2026-07-14):** the `audit` job is `continue-on-error: true`, so a failing
-  `cargo audit` goes GREEN. It had been swallowing two RUSTSEC DoS advisories in
-  `quick-xml` — the crate that parses every Plex response off the network — until someone
-  read the run instead of trusting its colour (fixed, `5cb467f`). **A green CI here does
-  not mean the audit passed.** Whether that job should block is an owner decision, not a
-  drive-by change.
+- **CI: a known vulnerability FAILS the build** (owner ruling 2026-07-14, "known
+  vulnerabilities should fail so we can keep current"). The `audit` job used to be
+  `continue-on-error: true` and had been swallowing two RUSTSEC DoS advisories in
+  `quick-xml` — the crate that parses every Plex response off the network — into green runs
+  (fixed `5cb467f`, gate flipped `2ba5f95`). Advisories with no upstream fix get an explicit
+  `--ignore RUSTSEC-XXXX-NNNN` with a reason, never a blanket re-disable. The ~18 remaining
+  entries are WARNINGS (unmaintained GTK 0.18 crates via Tauri 2, one unsoundness note);
+  `cargo audit` does not fail on those.
 - **PRODUCT DIRECTION (2026-07-08, owner): Vela is a multi-server client.**
   Local/SMB/SSH sources are REMOVED (decision `.agents/decisions.md`
   2026-07-08; plan `.agents/plans/drop-local-sources.md`, plan-review accepted
