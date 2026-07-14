@@ -1443,8 +1443,10 @@
       if (queueOpen) refreshQueue();
     } catch (e) {
       // A Play started from an open detail is reported ON that detail, which survives a
-      // search teardown underneath it — so the view's clear is not its owner (codex r24).
-      addError(String(e), 0, detailView ? "detail" : "view");
+      // search teardown underneath it — so the view's clear is not its owner (slice 4).
+      // From the grid, the view IS the surface, and its banner is right.
+      if (detailView) detailStatus = String(e);
+      else setError(String(e));
       // A failure may mean mpv went missing — re-check so the install prompt shows.
       invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     }
@@ -1605,6 +1607,14 @@
   // (codex r24).
   let mpvStatus = $state<string | null>(null);
 
+  // The open detail page's own status (per-surface-status slice 4). It layers OVER the
+  // grid and survives things that replace what is underneath it — a search teardown, for
+  // one — so a Play failure raised on it is not the view's to delete. It was: tearing down
+  // a search root deleted the reason playback had failed while the detail, and the Play
+  // button it was about, stayed on screen (codex r24). Cleared when the detail closes or
+  // is replaced.
+  let detailStatus = $state<string | null>(null);
+
   let scanStatus = $state<{ text: string; failed: boolean } | null>(null);
   let scanning = $state<Record<string, boolean>>({}); // menu-entry feedback only
   const scanGens: Record<string, number> = {};
@@ -1742,7 +1752,7 @@
   function closeDetail() {
     navEpoch++; // closing the detail surface is navigation (see navEpoch)
     detailView = null;
-    clearOwned("detail"); // its surface is gone; so is what it was saying
+    detailStatus = null; // its surface is gone; so is what it was saying
     // The grid comes back. If it still has pages but cannot SCROLL — a tall or
     // hi-dpi viewport where the cards already fit — then nothing will ever ask for
     // them: `onScroll` cannot fire on a grid that does not scroll, and the
@@ -1804,7 +1814,7 @@
   // drill, so no entry is offered for them.
   function openInfo(item: Item) {
     navEpoch++; // opening the detail surface is navigation (see navEpoch)
-    clearOwned("detail"); // a new detail supersedes what the last one was saying
+    detailStatus = null; // a new detail supersedes what the last one was saying
     closeMenu();
     if (item.mediaType === "season") {
       detailView = { kind: "season", seasonKey: detailKeyOf(item), seed: item };
@@ -2208,6 +2218,10 @@
         <span class="crumb current">{detailCrumbTitle(detailView)}</span>
       {/if}
     </div>
+    {#if detailStatus}
+      <!-- The DETAIL's own surface (slice 4), never the view's error banner underneath. -->
+      <div class="detailerror" role="alert">{friendlyError(detailStatus)}</div>
+    {/if}
     {#if detailView.kind === "item"}
       {#key detailView.item.ratingKey}
         <ItemDetail
@@ -2230,6 +2244,7 @@
           onShow={(key, title) => open({ ratingKey: key, title, mediaType: "show" })}
           onSeason={(key, seed, sel) => {
             navEpoch++; // swapping the open detail surface is navigation
+            detailStatus = null; // ...and it replaces the surface, so its status goes too
             detailView = { kind: "season", seasonKey: key, seed, initialSelKey: sel };
           }}
           onPerson={(key, kind, name) => runPersonView({ key, kind, name })}
@@ -3095,6 +3110,18 @@
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
     animation: vela-slide-down 0.2s var(--ease);
+  }
+
+  /* The DETAIL page's own failure — never .error, which is the VIEW's. */
+  .detailerror {
+    margin: 0 18px 10px;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 13px;
+    line-height: 1.45;
+    color: var(--errfg, #ffb4a9);
+    background: var(--errbg, rgba(255, 80, 60, 0.12));
+    border: 1px solid var(--errborder, rgba(255, 80, 60, 0.28));
   }
 
   /* The mpv BAR's own failure — never .error, which is the VIEW's. */
