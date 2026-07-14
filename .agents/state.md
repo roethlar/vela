@@ -62,15 +62,12 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     SEVENTH door into the same silent loss, opened by the fix for the sixth. Banner parts
     now name the SURFACE that owns them (`da99a46`), and the heal retracts what it repairs
     and stays off Welcome (in `da99a46`; guards `49a2141`).
-  - **DECISION FOR THE OWNER — the loop should stop on this axis.** The findings have
-    migrated OUT of library-refresh-scan. They are now about a pre-existing design
-    weakness: **one shared error banner carrying failures from four surfaces with four
-    different lifetimes** (view, queue drawer, mpv bar, open detail). Every round patches
-    one door and the next finds another (`linking` r23, `app: boolean` r24, now a four-way
-    owner enum). **The durable fix is per-surface status — exactly what r15 already did for
-    scans — and that is a PRODUCT change, not a review fix.** Three of the four surfaces
-    have no automated guard and cannot get one in this harness. Do not open r25 on this
-    axis without an owner decision.
+  - **THE LOOP IS CLOSED AT r24, and its conclusion is now an approved plan.** The findings
+    had migrated out of this feature into a pre-existing design weakness: one shared error
+    banner carrying failures from four surfaces with four different lifetimes. The owner was
+    asked and chose the durable fix: **per-surface status**
+    (`.agents/plans/per-surface-status.md`, decision 2026-07-14). The r17-r24 log is the
+    evidence for it — read it before touching the banner again.
   - **A THIRD process violation, disclosed, NOT rewritten:** `da99a46` is MIS-DESCRIBED —
     its message covers only the banner-owner model, but it also carries two production
     fixes to the heal. Root cause, for the third time: staging a whole path instead of the
@@ -210,13 +207,16 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **NEXT ACTION (library-refresh-scan): ASK THE OWNER, do not open r25.** r24 landed and
-  the loop has earned a conclusion: the remaining findings are not defects of this feature
-  but of a pre-existing design — one error banner shared by four surfaces with four
-  lifetimes. Put the decision to the owner in plain words: keep patching the shared banner
-  (each round has found another door), or give the queue / mpv / detail their own status
-  surfaces as r15 did for scans (a product change, and the durable fix). Only resume the
-  review loop on this axis with their answer.
+- **NEXT ACTION: implement `.agents/plans/per-surface-status.md`, slice 1.** The owner was
+  asked and ANSWERED (2026-07-14): "own surfaces" for the queue / mpv bar / detail page, and
+  "its own line" for a failed watch-state edit. Decision recorded in `.agents/decisions.md`;
+  plan APPROVED. Slice 1 (the edit's own line) is the highest value — it is the writer that
+  caused most of the loop's defects, and it DELETES the root-identity gate (`rootSig`) built
+  only to stop that writer fighting the view's banner.
+  - Do NOT open r25 against the shared banner. The interim owner-enum model (`da99a46`) is
+    what this plan REPLACES, not a base to build on.
+  - The library-refresh-scan review loop is CLOSED at r24. Its log stays as the evidence
+    for this plan.
   - Reviewer incantations: `codex exec --sandbox read-only -o <out.json> "$(cat
     <prompt>)" < /dev/null` (stdin MUST be closed or it hangs; it has hung once) and
     `grok --sandbox read-only -p "$(cat <prompt>)"`. **grok has twice returned only its
