@@ -1848,3 +1848,47 @@ through the publish door, the ordering door, the retract door, the dedup door an
 setError door — each opened by the fix for the last. The two reviewers have converged,
 independently, on the same top finding in FOUR straight rounds (r19, r20, r21, r22). No
 single reviewer — and certainly not the author — would have caught this sequence.
+
+**r23 — 2026-07-14 — two reviewers on the r22 fixes. codex: 4 MEDIUM + 1 LOW. grok: 3
+MEDIUM + 1 LOW.** Base `a29a0f7`, head `74fc3ad`. Both reviewers converged, independently,
+on the SAME target for the fifth round running — and this time all three of their top
+findings were in ONE commit: `74fc3ad`, the `linking` flag invented two commits earlier.
+
+- **r23-1 (`0a79013`) — `linking` was process state pretending to be view identity, and it
+  failed three ways** (both reviewers). It flipped false when a link FAILED, so an edit
+  made on a grid the user never left was silently dropped — **the sixth door into the same
+  loss.** It stuck true forever whenever `onSourcesChanged` abandoned an in-flight link
+  (nothing else clears it), after which "declare the intent at the start" was a no-op. And
+  it could only reject FUTURE publishes, never retract one already on screen, so a banner
+  painted before the link still rode onto the device-code screen.
+
+  The real question was never "is a link in progress". It is **which parts belong to the
+  view that was just replaced** — and the parts could not answer, because `gen: 0` says no
+  LOAD owns a part, not that it belongs here. Same blind spot stranded a failed edit over a
+  torn-down search root (codex). Fixed: parts carry a SCOPE. View-scoped parts die with the
+  view; `app` parts — today only the queue drawer's, which renders above the link screen,
+  stays usable there, and whose failure is still true — do not. `linking` deleted. Guard:
+  pagefail case 13 (the PIN half stays unguarded: `link_begin` needs plex.tv).
+- **r23-2 (`78f7ba0`) — the first REVIEWER-VS-REVIEWER disagreement of the loop.** grok
+  blessed the r22-2 early return; codex found that it skips a needed HEAL. codex is right,
+  and both positions are satisfiable, so this was a fix and not an adjudication. The
+  backend curates BEFORE the server call — the recents entry is gone and the tombstone
+  written when the request goes out — and rolls both back on failure. A Home load inside
+  that window captures the transient state; skipping the repaint meant nothing ever
+  re-fetched, so Continue Watching kept showing the item as gone, falsely, until a restart.
+  But repainting the destination is what r22-2 was fixing. Fixed: heal QUIETLY — re-fetch
+  the watch state without clearing the banner or resetting the grid the user walked to.
+  Guards pull in opposite directions and both must hold: case 12 (the destination's banner
+  survives) and case 14 (the watch state is still re-fetched).
+- **r23-3 (`f61bc71`) — the delivery witness overstated itself** (codex, LOW).
+  `state.served` was pushed BEFORE the write, and the helper's comment called it proof the
+  client had processed the response. It never was. Recorded after the write; the comment
+  now says it is a SERVER-dispatch witness and that the held window is what covers the
+  client gap. **A witness that overstates itself is the same trap as a guard that cannot
+  fail: it reads as rigour and isn't.**
+
+**What r23 adds to the pattern.** SEVEN consecutive rounds. The `linking` flag is the
+clearest specimen yet: invented to fix a review finding, it shipped three new defects — one
+of them the same silent loss it was standing next to — and every one was caught by the
+reviewers, none by the author. Its replacement (a scope on the part) is what the model
+needed from the start, and only became obvious after three rounds of being wrong about it.
