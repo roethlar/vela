@@ -190,7 +190,9 @@ export default {
     // A watch-state edit now fails with the same 401 — a NON-listing writer taking
     // over the banner. It must clear the listing's tag with it.
     mock.state.unauthNextPlayed = true;
-    await watchToggle(driver, "Movie 000", "Mark watched");
+    // A card that is actually ON SCREEN: the grid is scrolled to its end, so the
+    // first card's context menu would open above the viewport and be unclickable.
+    await watchToggle(driver, "Movie 119", "Mark watched");
     await pollUntil(
       async () => ((await banner(driver)) ? true : null),
       "the watch-state 401 must banner",
