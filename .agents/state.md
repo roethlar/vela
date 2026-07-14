@@ -254,25 +254,46 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **PER-SURFACE-STATUS: SLICE 1 LANDED (`fee7f0e`).** A failed watch-state edit now reports
-  on its own line, never the view's banner (owner ruling 2026-07-14, "its own line"). Plan
-  `.agents/plans/per-surface-status.md`; decision `.agents/decisions.md`. e2e 17/17,
-  red-proven three ways. **Six pagefail cases COLLAPSED** — they existed only to police two
-  writers sharing one banner, and three of them asserted that a failed edit must be
-  SUPPRESSED when the user navigated away, which was only ever a way to lose a failure they
-  needed.
-  - **NEXT ACTION: slice 2** (the queue drawer reports its own), then 3 (mpv bar), 4 (detail
-    page), 5 (collapse the banner model back to a single writer class). The plan carries the
-    detail, the precedent to copy (the scan's status, r15), and which slices the harness
-    CANNOT guard — the queue, mpv and detail surfaces cannot be made to fail here, so they
-    are inspection + owner playtest, and the plan says so rather than implying coverage.
-  - Do NOT open r25 against the shared banner. The interim owner-enum model (`da99a46`) is
-    what this plan REPLACES, not a base to build on.
-  - The library-refresh-scan review loop is CLOSED at r24. Its log stays as the evidence for
-    this plan.
-  - **Owner playtest ask, once the slices land:** fail a mark-watched (kill the server
-    mid-edit) and confirm the message appears on its own line and does not disturb the
-    grid's own banner.
+- **OWNER PLAYTEST OF 0.1.48 — THE ONE THING OUTSTANDING. Remind the owner of these steps
+  (they asked, 2026-07-14).** Per-surface-status is COMPLETE (all five slices) and every
+  automated check is green; what is left is the judgement automation cannot make. The owner
+  has NOT seen the mpv bar and does not need to — it only renders when mpv is MISSING, which
+  would mean renaming their binary. SKIP IT. Three tests, one sitting:
+
+  SETUP: open a Plex library so the grid is full; right-click a poster -> "Add to queue"
+  (BEFORE stopping the server); then stop Plex. Do not Refresh — the grid stays loaded from
+  memory, which is the point.
+
+  1. THE EDIT'S OWN LINE (the one that matters — it is the visible behaviour change).
+     Right-click a poster -> Mark watched. Expect: a line NAMING it ("Couldn't mark “…”
+     watched — the server could not be reached"), a SEPARATE line for the grid's own
+     failure, the LIBRARY STILL THERE (posters on screen), and NO url anywhere. Then mark a
+     DIFFERENT poster: the first failure is REPLACED, not stacked. Then switch library: the
+     EDIT line FOLLOWS them, the grid's banner does not. (The old build silently swallowed
+     the edit failure on navigation — that is the change they will notice.)
+  2. THE QUEUE. Click the queue chip -> drawer -> click the queued item. Expect the failure
+     INSIDE the drawer, not on the main banner. Close the drawer -> it goes with it. Reopen,
+     click again, and CLOSE THE DRAWER WHILE IT IS STILL TRYING -> the chip takes a red mark.
+     Navigate away -> the chip mark SURVIVES.
+  3. THE DETAIL PAGE. Left-click a poster -> Play. Expect the failure ON the detail page, not
+     on the grid underneath. Back -> it goes with the page.
+
+  THEN restart Plex and Refresh: the library reloads and the grid's banner clears, but the
+  EDIT line STAYS (a refresh repairs the VIEW; it does not un-fail the user's edit). A
+  successful mark-watched clears it.
+
+  WRONG LOOKS LIKE: anything landing on the MAIN banner that belongs to another surface; two
+  messages where one erases the other; a raw `http://…` on screen; or a blank library.
+
+- **RELEASE (owner asked 2026-07-14): a second Plex server is NOT needed.** The dangerous
+  half of the rebind path IS guarded — `src-tauri/src/source/plex.rs` spins up TWO mock Plex
+  servers (machine-A / machine-B), both serving a section "2" with DIFFERENT libraries behind
+  it, and drives the real rebind scenarios. What has no end-to-end guard is the FRONTEND
+  `sameSection` comparison, because the E2E mock is Jellyfin. **A rebind cannot happen at all
+  on a single-server account** (it needs 2+ Plex servers on one account AND the saved one
+  becoming unidentifiable), so it is inert for this owner. Ship without it and keep it
+  recorded. Closing it would need a TLS-capable mock Plex in the harness (the app only
+  restores an `https` Plex server, so it needs a trusted cert) or a second real instance.
   - Reviewer incantations: `codex exec --sandbox read-only -o <out.json> "$(cat
     <prompt>)" < /dev/null` (stdin MUST be closed or it hangs; it has hung once) and
     `grok --sandbox read-only -p "$(cat <prompt>)"`. **grok has twice returned only its
