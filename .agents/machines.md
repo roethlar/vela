@@ -4,6 +4,47 @@ Machine-specific facts (host layout, tool paths, local versions). Portable
 truth belongs in `.agents/state.md` / `.agents/repo-guidance.md`; this file is
 the only place allowed to know about a particular box.
 
+## macOS dev host (`/Users/michael/Dev/vela`)
+
+Relocated out of `.agents/state.md` 2026-07-14 (drift pass) — state.md stays
+portable and may at most point here.
+
+- The owner's Linux VM at `michael@192.168.64.5` is the standing E2E venue
+  (Ubuntu 25.10 aarch64, 12 CPU; fully provisioned 2026-07-09: rustup,
+  tauri-driver, Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64
+  WebKitWebDriver, debug binary built). See the Linux VM section below.
+- The mac clone has a `vm` remote. **The push policy is ASK, and that includes
+  `vm`** (`.agents/push-policy.md`). To run E2E without pushing, `scp` the
+  changed files into `~/dev/vela` and verify by checksum before running — no
+  `git push`, no `git checkout -- .` on the VM's tree (that has silently
+  reverted work).
+- Reviewer CLIs: `codex exec --sandbox read-only -o <out.json> "$(cat
+  <prompt>)" < /dev/null` — **stdin MUST be closed or it hangs** (it has hung
+  once) — and `grok --sandbox read-only -p "$(cat <prompt>)"`. **grok has twice
+  returned only its preamble with no JSON verdict; that is a FAILED run, not a
+  clean pass. Re-dispatch it, and never read silence as agreement.**
+
+## Windows dev host (`F:\dev\vela`)
+
+Relocated out of `.agents/state.md` 2026-07-14 (drift pass). Recorded
+2026-07-09; **not re-verified since — treat as possibly stale.**
+
+- The `ptk` MCP server (warm PowerShell runspace, `ptk_invoke`) is the DIRECT
+  shell for agent harnesses on this host. Probe it before assuming there is no
+  shell or delegating shell work to subagents (2026-07-09 lesson: an entire
+  session ran shell through subagent indirection with ptk available the whole
+  time).
+- cargo/rustc need valid stdin: `cmd /c "cargo ... < nul"` (rustup shim quirk).
+- codex lives at `%APPDATA%\npm\codex.cmd`; headless via
+  `codex exec --json --sandbox read-only` with the prompt on stdin.
+- Unix-cfg-gated cargo tests are excluded here — **Linux CI is authoritative;
+  do not record the local test count, it rots.**
+- clippy baseline = 4 pre-existing cfg-dead mpv-installer warnings
+  (post-removal; was 13).
+- The E2E harness does NOT run here (needs Linux WebKitWebDriver).
+- Checkout is `autocrlf=true`: empty-diff "modified" files are line-ending
+  noise.
+
 ## Linux VM (E2E host)
 
 Recorded 2026-07-13.

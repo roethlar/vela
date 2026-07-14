@@ -4,6 +4,162 @@ Entries rotated verbatim out of `.agents/state.md` `## Now` when they stopped
 being live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-07-14 (drift pass — five completed tracks, v0.1.48)
+
+Context for readers: five tracks in `## Now` were COMPLETE and owner-verified,
+and were carrying a great deal of detail that no live decision depends on
+anymore. They rotate here verbatim.
+
+TWO things were CARVED OUT of the library-refresh-scan block below before it was
+rotated, because they are standing rules and would have died with it:
+
+- The **review protocol** (two independent reviewers; an author never
+  adjudicates their own decline) is now `.agents/decisions.md`, 2026-07-14.
+- The **guard-discipline practices** (red-proof every guard; prove each claimed
+  behavior separately; the newest fix is the most dangerous code; a self-audit is
+  not a check; read the failure path before calling something unguardable) are now
+  `.agents/repo-guidance.md`, "Guard discipline".
+
+Read those two first. The block below is the evidence they rest on, not the rule.
+
+---
+
+- **LIBRARY-REFRESH-SCAN: COMPLETE — owner playtest VERIFIED on REAL PLEX
+  2026-07-14 (0.1.45).** Refresh button + per-library server scan trigger. Plan:
+  `.agents/plans/library-refresh-scan.md`. As of `22dad8b`: E2E 17/17 on the VM;
+  `cargo test` 95; clippy `-D warnings`, svelte-check, npm build all clean.
+  - **Owner playtest (all six green, real Plex):** refresh while in a library;
+    library RENAMED then refresh (sidebar + breadcrumb both update); library
+    DELETED while standing in it then refresh (reconciled to Home); right-click →
+    Scan Library (Plex really scans — **the Plex scan path had never touched a real
+    server before this**); general use with no ~5s stalls (confirms the r16-2
+    `/identity` fix); footer 0.1.45. Detail in the plan's `## Owner playtest`.
+  - **Where the trail lives:** the plan's `## Code review log` — every round, every
+    finding, every fix commit, the declines (r10-1 UPHELD; r8-4 and r12-1 OVERTURNED on
+    independent adjudication), the guard gaps, and the process disclosures. Do not
+    reconstruct any of it from chat.
+  - **r19 LANDED (2026-07-14).** codex 1 HIGH + 3 MEDIUM, grok 1 MEDIUM — and BOTH
+    reviewers, independently, found the same defect in the r18 `setWatched` fix. Every
+    r19 finding was in code written during r17/r18; nothing in the original slices was
+    faulted. Fixes: `563b2fb` (HIGH — an identity probe's answer was written onto the
+    server that REPLACED the one it described, pinning rediscovery to a lie: the third
+    distinct route to the wrong-server scan in this plan, and the second one opened by
+    a fix for the previous one) and `91045cb` (a failed edit stomped the banner
+    explaining its own empty grid, and could paint itself on a root the user had left).
+  - **r20 LANDED (2026-07-14).** codex 3 MEDIUM + 1 LOW, grok 2 MEDIUM — converging
+    independently, for the third round running, on the same defects. Both were in the
+    r19 fixes, and the first was **r19's own bug returning through a door r19 opened**:
+    the combined banner inherited the listing's generation tag, so the refresh's
+    RETRACT erased the user's failed edit (`64972ac` — the banner is now a list of
+    OWNED parts, and a retract takes only what it superseded). The second: the r19
+    currency gate was wrong in BOTH directions — the Plex link screen replaces the whole
+    view while bumping no load generation, and re-entering the library you are standing
+    in bumps both counters while going nowhere (`39ead92` — `rootSig()` asks the view
+    what root it is on, instead of inferring it from counters).
+  - **r21 + r22 LANDED (2026-07-14).** r21: codex 5 MEDIUM + 3 LOW, grok 1 HIGH + 3
+    MEDIUM + 1 LOW. r22: codex 3 MEDIUM, grok 1 MEDIUM. Both rounds' top finding was
+    found independently by BOTH reviewers, and both were in the PREVIOUS round's fixes.
+    Nine fix commits, `d7cb3ef`..`74fc3ad`, each with a red-proven guard where the
+    harness can reach it. Detail in the plan's `## Code review log`.
+  - **r23 LANDED (2026-07-14).** codex 4 MEDIUM + 1 LOW, grok 3 MEDIUM + 1 LOW — and all
+    three top findings were in ONE commit: the `linking` flag invented two commits
+    earlier, which shipped three defects of its own (it dropped an edit made on a grid the
+    user never left; it stuck true forever after any source change abandoned a link; it
+    could not retract a banner already on screen). Replaced by a SCOPE on each banner part
+    (`0a79013`) — which is what the model needed from the start. Also `78f7ba0` (skipping
+    the repaint was skipping a needed heal — Continue Watching kept showing a rolled-back
+    item as gone) and `f61bc71` (the delivery witness overstated what it saw).
+  - **First reviewer-vs-reviewer disagreement of the loop (r23):** grok blessed the r22-2
+    early return, codex found it skipped a heal. Both positions were satisfiable at once,
+    so it was FIXED, not escalated. Escalate to the owner only when they genuinely cannot
+    both hold.
+  - **r24 LANDED (2026-07-14).** codex 6 MEDIUM, grok 3 MEDIUM. Every finding was in an
+    r23 fix or an r23 guard. The r23 scope was defeated on the very next navigation
+    (`setError(null)` — which every load start calls — still wiped app-scoped parts): the
+    SEVENTH door into the same silent loss, opened by the fix for the sixth. Banner parts
+    now name the SURFACE that owns them (`da99a46`), and the heal retracts what it repairs
+    and stays off Welcome (in `da99a46`; guards `49a2141`).
+  - **THE LOOP IS CLOSED AT r24, and its conclusion is now an approved plan.** The findings
+    had migrated out of this feature into a pre-existing design weakness: one shared error
+    banner carrying failures from four surfaces with four different lifetimes. The owner was
+    asked and chose the durable fix: **per-surface status**
+    (`.agents/plans/per-surface-status.md`, decision 2026-07-14). The r17-r24 log is the
+    evidence for it — read it before touching the banner again.
+  - **A THIRD process violation, disclosed, NOT rewritten:** `da99a46` is MIS-DESCRIBED —
+    its message covers only the banner-owner model, but it also carries two production
+    fixes to the heal. Root cause, for the third time: staging a whole path instead of the
+    hunks just written.
+  - **Why it ran so long (r17-r22 evidence):** in this subsystem the author's
+    FIXES carry defects at the same rate as the original code. EIGHT rounds running, the
+    newest fix has carried a defect of the same CLASS it was fixing, through another
+    door — and the class never changes: **a failure the user needs is silently lost.**
+    It has now been reached through the publish door, the ordering door, the retract
+    door, the dedup door and the setError door, each opened by the fix for the last
+    (plus, twice, a wrong-server scan reintroduced by the fix for the previous
+    wrong-server scan). The two reviewers have converged, independently, on the same top
+    finding in FOUR straight rounds. A single reviewer — or the author alone — ships
+    every one of them.
+  - **OPEN, recorded, not fixed:** r13-2 (reads carry no binding — owner-DEFERRED to a
+    follow-up plan, do not re-raise in review); the tall-viewport request storm is
+    untestable at the harness viewport; no guard on scan invalidation when a source is
+    removed (r16-3).
+  - **FIXES THE HARNESS CANNOT GUARD** (fixed, verified only by inspection — say so
+    rather than implying coverage): `sameSection` and `rootSig`'s section BINDING (the
+    E2E mock is Jellyfin — GUID ids, never rebinds); the drilled-below-a-search repaint
+    gate (the mock resolves ParentId only against VIEWS, so no scenario can drill); and
+    everything on the Plex link/pin screen (`link_begin` needs plex.tv). Each is a
+    standing hole a future regression could walk through unseen.
+  - **Two process violations, disclosed, NOT rewritten** (rewrite needs owner go):
+    `4cb6b2a` batches three findings; `878c92e` is MIS-DESCRIBED — a `git add -A`
+    swept two production fixes and an E2E case into a commit whose message covers
+    only a test fix. Root cause both times: `git add -A` instead of naming paths.
+- **DLS (drop-local-sources): slice 1 LANDED + owner-playtested 2026-07-08**
+  (0.1.33, `6855df5`; loop `dls-s1` clean r1; full detail rotated to
+  `docs/history/state-archive.md`). **Slice 3 (docs sweep) LANDED
+  2026-07-09, loop `dls-s3` accepted at r5** (`861442f` + four fix commits
+  through `ec6a4b9`; trail in `.agents/review/index.md`) — README/ISSUES/
+  repo-guidance de-localed, obsolete plans bannered, decision statuses
+  closed/amended, config round-trip guard extended to legacy SMB
+  credentials (guard-proven); repo-map refresh moot (file retired
+  2026-07-08). **Slice 2 (E2E re-home) LANDED 2026-07-09, loop `dls-s2`
+  accepted clean r1** (`80dd8e6` app fix + `b223951` suite + `b41703a`
+  bump 0.1.40): all scenarios mock-served and nav-flip-aware, suite 10/10
+  on the owner's Linux VM. The re-home banked a real regression fix —
+  **context-menu Play threw since the nav flip** (Svelte 5 `{@const}` read
+  after `closeMenu()`; fixed `80dd8e6`, guard = queue/curation scenarios
+  red→green). **THE DLS PLAN IS COMPLETE.** Owner spot-check ask for the
+  next build: right-click → Play on a library card now works (0.1.40).
+- **ITEM-DETAIL TRACK: COMPLETE and owner-verified through 0.1.41
+  (2026-07-10)** — nav flip (`74ff385`), episode navigation polish
+  (`f1e36d3`+`cc9f060`), detail crumb trail (`496218e`), context-menu Play
+  un-broken (`80dd8e6`, owner-verified 2026-07-09), hero episode Info →
+  season page (`d7b938f`+`18c5bcd`, loop `idv-s6` accepted r2;
+  owner-verified 2026-07-10 "info goes to series view"). Loops
+  idv-s3/s4/s5/s6 in `.agents/review/index.md`; older history rotated to
+  the archive and `.agents/plans/item-detail-view.md`. No open defect;
+  further Plex polish only on the next owner report. JF/Emby `item_detail`
+  stays deferred on an explicit owner go. No automated frontend guard for
+  these flows (no JS runner; the mock E2E servers carry no episodes) —
+  owner playtests are the behavioral check.
+- **PERSON BROWSE (clickable actor/director/writer → filtered grid):
+  COMPLETE — owner playtest VERIFIED 2026-07-09 ("works well") on 0.1.39.**
+  Plan `.agents/plans/person-browse.md`; slice 1 backend `35fcc67` (loop
+  `pb-s1` clean r1), slice 2 frontend `b290b31` (loop `pb-s2` clean r1),
+  bumps `62fd927`/`8204a77`. No open defect; JF/Emby person browse stays
+  deferred on an explicit owner go (same bar as JF/Emby `item_detail`).
+- **CW WATCH-STATE: COMPLETE — owner playtest VERIFIED 2026-07-10
+  ("carousel fix verified") on 0.1.42** (fix `02504be`; plan
+  `.agents/plans/continue-watching-watch-state.md`, retained as design
+  record). Mark watched/unwatched are one-op curations (recents drop +
+  identity tombstone, curate-first with rollback; edits serialized;
+  every play path clears tombstones); "Remove from Continue Watching"
+  stays the keep-progress dismiss. Decision in `.agents/decisions.md`
+  (2026-07-10). Resolved BOTH the 2026-07-10 masking defect and the
+  2026-07-08 two-op curation annoyance. Guard: `watchcurate` E2E,
+  red→green proven on the VM; full suite 11/11; local CI set green.
+  Codex plan-review loop closed at r6 — the one CONTESTED r6 finding
+  still awaits owner adjudication (item in ## Next).
+
 ## Rotated 2026-07-09 (item-detail complete + person browse code-complete, v0.1.39)
 
 Context for readers: the item-detail track (nav flip + episode navigation +
