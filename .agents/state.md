@@ -17,10 +17,10 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     Scan Library (Plex really scans — **the Plex scan path had never touched a real
     server before this**); general use with no ~5s stalls (confirms the r16-2
     `/identity` fix); footer 0.1.45. Detail in the plan's `## Owner playtest`.
-  - **Where the trail lives:** the plan's `## Code review log` — every round r1-r19,
-    every finding, every fix commit, the declines (r10-1 UPHELD; r8-4 and r12-1
-    OVERTURNED on independent adjudication), the guard gaps, and the process
-    disclosures. Do not reconstruct any of it from chat.
+  - **Where the trail lives:** the plan's `## Code review log` — every round, every
+    finding, every fix commit, the declines (r10-1 UPHELD; r8-4 and r12-1 OVERTURNED on
+    independent adjudication), the guard gaps, and the process disclosures. Do not
+    reconstruct any of it from chat.
   - **r19 LANDED (2026-07-14).** codex 1 HIGH + 3 MEDIUM, grok 1 MEDIUM — and BOTH
     reviewers, independently, found the same defect in the r18 `setWatched` fix. Every
     r19 finding was in code written during r17/r18; nothing in the original slices was
@@ -80,13 +80,16 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     **Not one ever failed or warned. Every one was caught only by injecting the
     regression and demanding the test go red.** Re-prove a guard whenever behavior
     around it changes, and prove each behavior a fix claims SEPARATELY.
-  - **OPEN, recorded, not fixed:** r13-2 (reads carry no binding — owner-DEFERRED to
-    a follow-up plan, do not re-raise in review); the tall-viewport request storm is
-    untestable at the harness viewport; no guard on scan invalidation when a source
-    is removed (r16-3); a doubled RECONNECT_REQUIRED in a combined banner (bounded).
-    **`sameSection` (the frontend half of the Plex rebind protection) has NO
-    automated guard and cannot get one** — the E2E mock is Jellyfin, which never
-    rebinds. Inspection + the owner playtest are its only checks.
+  - **OPEN, recorded, not fixed:** r13-2 (reads carry no binding — owner-DEFERRED to a
+    follow-up plan, do not re-raise in review); the tall-viewport request storm is
+    untestable at the harness viewport; no guard on scan invalidation when a source is
+    removed (r16-3).
+  - **FIXES THE HARNESS CANNOT GUARD** (fixed, verified only by inspection — say so
+    rather than implying coverage): `sameSection` and `rootSig`'s section BINDING (the
+    E2E mock is Jellyfin — GUID ids, never rebinds); the drilled-below-a-search repaint
+    gate (the mock resolves ParentId only against VIEWS, so no scenario can drill); and
+    everything on the Plex link/pin screen (`link_begin` needs plex.tv). Each is a
+    standing hole a future regression could walk through unseen.
   - **Two process violations, disclosed, NOT rewritten** (rewrite needs owner go):
     `4cb6b2a` batches three findings; `878c92e` is MIS-DESCRIBED — a `git add -A`
     swept two production fixes and an E2E case into a commit whose message covers
