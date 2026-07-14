@@ -114,15 +114,31 @@ impl PlexSource {
                 if may_probe {
                     if let Ok(id) = lib.fetch_machine_identifier().await {
                         let mut guard = self.lib.lock().await;
-                        if rediscovery_pin(guard.server_machine_id()).is_none() {
+                        // Read the binding under THIS lock — the same critical
+                        // section as the id below, so the pair describes one server
+                        // (r18). A rebind may have landed while we were probing, in
+                        // which case `guard` is the NEW server.
+                        let current = self.binding.load(Ordering::SeqCst);
+                        // This id names the server we CLONED, and nothing else. If a
+                        // rebind replaced it while we probed, and the install carried
+                        // no machineIdentifier of its own (discovery yields such
+                        // servers — the reachability probe accepts them), the new
+                        // server is UNNAMED, the `is_none()` test below passes, and
+                        // the old server's name lands on it.
+                        //
+                        // A source that believes it is A while talking to B is worse
+                        // than one that admits it cannot say. The lie PINS rediscovery
+                        // to A — and a pinned install is the one case that does NOT
+                        // void outstanding keys (`rebind_voids_keys`). So B's section
+                        // "2", provable and unvoided, is handed to the real A: the
+                        // wrong-server scan, reached through the machinery built to
+                        // forbid it (codex r19). The binding is the proof of sameness,
+                        // and this was the one writer that never asked for it.
+                        if current == binding && rediscovery_pin(guard.server_machine_id()).is_none()
+                        {
                             guard.set_machine_identifier(id);
                         }
-                        // Re-read under THIS lock, not the one above: a rebind may
-                        // have landed while we were probing, in which case `guard`
-                        // is the NEW server — and this is its binding. The pair
-                        // still describes one server.
-                        let binding = self.binding.load(Ordering::SeqCst);
-                        return Ok((guard.clone(), binding));
+                        return Ok((guard.clone(), current));
                     }
                 }
                 // No probe, or it FAILED: we return the clone we took above, so we
@@ -1375,6 +1391,83 @@ mod tests {
         );
         assert_eq!(sections[0].provenance.as_deref(), Some("machine-B"));
         assert_eq!(sections[0].binding, 1);
+    }
+
+    /// An identity probe answers for the server it was SENT to. If a rebind lands
+    /// while it is in flight, that answer must be thrown away — never written onto
+    /// the server that replaced it.
+    ///
+    /// The replacement here carries no machine identifier, which is a server
+    /// discovery really produces (the reachability probe accepts an empty id
+    /// outright). So the new server is unnamed, the "do we already know who we
+    /// are?" test passes, and A's name is stamped onto B.
+    ///
+    /// That misnaming is worse than the ignorance it replaces. It PINS rediscovery
+    /// to A — and a pinned install is the one case that does NOT void outstanding
+    /// keys — so B's section "2" is later handed to the real A as a provable,
+    /// unvoided key: the wrong-server scan, arrived at through the machinery built
+    /// to forbid it (codex r19).
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn an_identity_answer_is_never_written_onto_the_server_that_replaced_it() {
+        let (arrived_tx, arrived_rx) = channel();
+        let (release_tx, release_rx) = channel();
+        let gate = (arrived_tx, Arc::new(Mutex::new(release_rx)));
+        // The probe SUCCEEDS this time — that is the hazard. A failed probe writes
+        // nothing, so the only way to stamp the wrong server is to answer correctly
+        // about the right one, too late.
+        let (port_a, _hits_a) = spawn_mock_plex_with("machine-A", 0, Some(gate));
+        let (port_b, _hits_b) = spawn_mock_plex("machine-B");
+
+        let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
+        lib.set_server_manual("127.0.0.1".to_string(), port_a, false, Some("A".to_string()));
+        let source = Arc::new(PlexSource::new("plex", "Plex", lib));
+
+        let listing = tokio::spawn({
+            let source = source.clone();
+            async move { source.sections().await }
+        });
+        arrived_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the identity probe reached A");
+
+        // While A's probe is parked, an unpinned rediscovery installs B — and the
+        // discovery record for B carried NO machineIdentifier, so this source can no
+        // longer name the server it is bound to. Going through the real install is
+        // the point: it is what bumps the binding, and the binding is the proof the
+        // probe's answer no longer applies.
+        {
+            let mut unnamed_b = mock_server("machine-B", port_b);
+            unnamed_b.machine_identifier = String::new();
+            let mut guard = source.lib.lock().await;
+            let (_, installed, binding) = source.install_under_lock(&mut guard, false, unnamed_b);
+            assert!(installed);
+            assert_eq!(binding, 1, "an unpinned install over a live server voids its keys");
+        }
+        release_tx.send(()).unwrap();
+
+        let sections = listing.await.unwrap().expect("the source serves SOME list");
+
+        // The source is bound to B and cannot name it. That is the honest state, and
+        // it is a SAFE one: unnameable means unscannable, and the user's next refresh
+        // probes B and recovers. Answering "machine-A" here would be the unsafe one.
+        assert_eq!(
+            rediscovery_pin(source.lib.lock().await.server_machine_id()),
+            None,
+            "A's probe answered about A — writing it here names B after the server it replaced, \
+             and pins rediscovery to a machine this source is not talking to"
+        );
+        // The corruption is visible on the key itself: B's library, stamped with A's
+        // name. A scan of it compares A against A, passes, and is free to travel to
+        // the real A the moment rediscovery follows the pin.
+        assert_eq!(
+            sections[0].title, "machine-B Films",
+            "the list must come from the server we are bound to NOW"
+        );
+        assert_eq!(
+            sections[0].provenance, None,
+            "a key from a server we cannot name is unprovable — stamping B's key with A's name is \
+             exactly the wrong-server scan this subsystem exists to forbid"
+        );
     }
 
     /// The keys a source hands out are stamped with the binding in force when it
