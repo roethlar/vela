@@ -957,7 +957,10 @@
       if (myGen === loadGen) {
         // The refresh action aggregates its legs' failures action-locally
         // (library-refresh-scan plan); navigation loads keep the direct publish.
-        if (onError) onError(String(e));
+        if (onError) {
+          onError(String(e));
+          hasMore = false; // the action's own leg: it reports this itself
+        }
         // A grid-root refresh owns the banner while it runs: this load's own
         // failure must not land over the result the action is loading (r3-2),
         // and the action publishes its own legs' failures itself. It owns it for
@@ -978,13 +981,23 @@
           // failure; settlement publishes it if the action never took the grid
           // (codex r16).
           suppressedFailures.push({ msg: String(e), gen: myGen });
+          // And do NOT declare the library finished. We silenced this failure on
+          // the promise of replacing it — but if the user opens a detail while we
+          // wait on sections, the epoch moves, the content leg never claims, and
+          // settlement drops the held failure as belonging to a view the user has
+          // left. They press Back to a library that is truncated, cannot
+          // paginate, and says nothing about why. Killing `hasMore` here is what
+          // makes that silence permanent; leaving it lets a scroll retry the page
+          // we never actually replaced (r8-4, declined once, OVERTURNED on
+          // independent re-adjudication). If the action does claim the grid it
+          // resets `hasMore` itself, so this costs the happy path nothing.
         } else {
           // The ONLY tagged write: a refresh that goes on to SUPERSEDE this
           // load owns its cards, so it must take this message down with it
           // (see refreshLibraries settlement, codex r11).
           setError(String(e), myGen);
+          hasMore = false;
         }
-        hasMore = false;
       }
     } finally {
       // Only release the in-flight guard for the current generation; a stale load
