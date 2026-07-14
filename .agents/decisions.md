@@ -639,6 +639,12 @@ listing, the refresh, the search). The play queue, the mpv setup bar and the
 open detail page each report their own. This extends the r15 ruling that gave
 the library scan its own status line, to every writer that shares the banner.
 
+A failed WATCH-STATE EDIT (mark watched / unwatched / remove from Continue
+Watching) also gets its own action line, in the owner's words "its own line" -
+it is an action the user took, not a fact about the grid. That writer caused
+most of the loop's defects, and its own line is what removes the machinery
+(the root-identity gate) built to keep it from fighting the view's banner.
+
 Reason:
 The shared banner is written by surfaces with four different lifetimes, and
 the code had no way to say which failure belonged to which. Every clear was
