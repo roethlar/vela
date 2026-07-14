@@ -263,9 +263,25 @@ impl PlexSource {
                 (lib.server_machine_id(), s)
             }
         };
-        // Did we get rebound while that was in flight? Then this list is a report
-        // about a server we are not talking to any more.
-        if self.binding.load(Ordering::SeqCst) != binding {
+        // Take the source's CURRENT machine and CURRENT binding in ONE critical
+        // section, so they describe the same instant. The binding is only ever
+        // bumped under this lock (`install_under_lock`), so nothing can rebind us
+        // between these two reads.
+        //
+        // Reading them apart is how a fix for one race becomes another: the check
+        // "am I still bound to the server that served this?" proves nothing about a
+        // machine id fetched AFTER it. A rebind landing in that gap would stamp
+        // THIS server's keys with the NEXT server's id — and a scan would then
+        // compare B against B, pass, and rescan B's same-numbered library. The
+        // wrong-server scan this whole subsystem exists to forbid, reintroduced by
+        // its own guard (grok r18).
+        let (current_machine, current_binding) = {
+            let guard = self.lib.lock().await;
+            (guard.server_machine_id(), self.binding.load(Ordering::SeqCst))
+        };
+        // Rebound while the list was in flight? Then it is a report about a server
+        // we are not talking to any more — and `current_machine` is not its name.
+        if current_binding != binding {
             return Ok(None);
         }
         // Stamp each key with the machine that ACTUALLY SERVED it (the
@@ -276,17 +292,15 @@ impl PlexSource {
         // cannot name the server — a restored endpoint whose /identity probe
         // failed — every key it serves is unprovable and unscannable, by
         // design (codex r8).
-        let provenance = match rediscovery_pin(served_by) {
-            Some(machine) => Some(machine),
+        let provenance = rediscovery_pin(served_by).or_else(|| {
             // Our own clone could not name the server — but a CONCURRENT caller's
-            // probe may have identified it since, and the binding check above
-            // proves we are still bound to that same server. Its id therefore
-            // describes the very list we just fetched. Without this, two parallel
-            // loads on a restored server could leave the winner's keys unprovable
-            // and Scan Library refusing every library until the next refresh
-            // (codex r17).
-            None => rediscovery_pin(self.lib.lock().await.server_machine_id()),
-        };
+            // probe may have identified it, and the binding equality above (read
+            // WITH this id, under one lock) proves it is the same server that
+            // served us. Without this, two parallel loads on a restored server
+            // leave the winner's keys unprovable and Scan Library refusing every
+            // library until the next refresh (codex r17).
+            rediscovery_pin(current_machine)
+        });
         Ok(Some(
             sections
                 .into_iter()
