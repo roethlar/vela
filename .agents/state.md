@@ -29,10 +29,20 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     distinct route to the wrong-server scan in this plan, and the second one opened by
     a fix for the previous one) and `91045cb` (a failed edit stomped the banner
     explaining its own empty grid, and could paint itself on a root the user had left).
-  - **IN FLIGHT: review round r20**, dispatched to BOTH reviewers over
-    `64547a8..91045cb`, results not yet read. Prompts + outputs in the session
-    scratchpad; if lost, re-dispatch (the incantations are in ## Next). r20 targets
-    the r19 fixes — which is where the last three rounds each found their worst bug.
+  - **r20 LANDED (2026-07-14).** codex 3 MEDIUM + 1 LOW, grok 2 MEDIUM — converging
+    independently, for the third round running, on the same defects. Both were in the
+    r19 fixes, and the first was **r19's own bug returning through a door r19 opened**:
+    the combined banner inherited the listing's generation tag, so the refresh's
+    RETRACT erased the user's failed edit (`64972ac` — the banner is now a list of
+    OWNED parts, and a retract takes only what it superseded). The second: the r19
+    currency gate was wrong in BOTH directions — the Plex link screen replaces the whole
+    view while bumping no load generation, and re-entering the library you are standing
+    in bumps both counters while going nowhere (`39ead92` — `rootSig()` asks the view
+    what root it is on, instead of inferring it from counters).
+  - **IN FLIGHT: review round r21**, dispatched to BOTH reviewers over
+    `91045cb..39ead92`, results not yet read. Prompts + outputs in the session
+    scratchpad; if lost, re-dispatch (the incantations are in ## Next). r21 targets
+    the r20 fixes — which is where the last FOUR rounds each found their worst bug.
   - **REVIEW PROTOCOL (owner, 2026-07-14) — now standing:** TWO independent
     reviewers (`codex` and `grok`) on the same pinned diff, neither seeing the
     other's findings; the author writes the fixes and runs every guard, red-proof
@@ -40,13 +50,20 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
     the reviewer that did not raise it. That rule exists because author
     self-adjudication was tested twice and failed twice (r12-1, r8-4, both
     overturned). Reviewer-vs-reviewer disagreement goes to the owner.
-  - **Why it is still running (r17-r19 evidence):** in this subsystem the author's
-    FIXES carry defects at the same rate as the original code. Three rounds running,
-    the newest fix has carried a defect of the same CLASS it was fixing, through
-    another door: r18's HIGH was an r17 fix reintroducing the wrong-server scan; r19's
-    HIGH was an r18 fix doing it again by another route; and r19's MEDIUM was the r18
-    banner fix, which stopped the repaint erasing the edit and left the edit erasing
-    the repaint. A single reviewer — or the author alone — ships all of them.
+  - **Why it is still running (r17-r20 evidence):** in this subsystem the author's
+    FIXES carry defects at the same rate as the original code. FOUR rounds running, the
+    newest fix has carried a defect of the same CLASS it was fixing, through another
+    door: r18's HIGH was an r17 fix reintroducing the wrong-server scan; r19's HIGH was
+    an r18 fix doing it again by another route; r19's MEDIUM was the r18 banner fix,
+    which stopped the repaint erasing the edit and left the edit erasing the repaint;
+    and r20's was the r19 banner fix reopening THAT loss through the retract door. A
+    single reviewer — or the author alone — ships every one of them.
+  - **A SELF-AUDIT IS NOT A CHECK.** r20-2 is a defect the author looked straight at
+    during his own r19 audit, in a message claiming every writer had been traced, and
+    waved through on an assumption (that the Plex link screen was a modal over the grid;
+    it REPLACES the view) that one grep would have falsified. That is the third
+    unverified author assumption a reviewer has overturned (r12-1, r8-4, r20-2). When
+    the author's reasoning says "this one is fine", that is the moment to go and look.
   - **Guard discipline (the transferable lesson):** SEVEN guards in this plan were
     VACUOUS — three disarmed by the author's own later fixes, two written vacuous
     while actively trying not to, one racing a fix just made, one (r19-3) that let the
@@ -153,8 +170,8 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
 
 ## Next
 
-- **NEXT ACTION (library-refresh-scan): read r20's two verdicts** (codex JSON + grok
-  JSON, both over `64547a8..91045cb`), merge and dedupe the findings, then fix each in
+- **NEXT ACTION (library-refresh-scan): read r21's two verdicts** (codex JSON + grok
+  JSON, both over `91045cb..39ead92`), merge and dedupe the findings, then fix each in
   ONE commit with a red-proven guard. Decline nothing without sending it to the OTHER
   reviewer — the author does not adjudicate his own declines (see ## Now). If a round
   comes back clean from BOTH, the loop can close; nothing else is outstanding on this
@@ -166,7 +183,7 @@ superseded entries rotate verbatim to `docs/history/state-archive.md`.
   - E2E without pushing: the push policy is ASK, and that includes the `vm` remote.
     Sync the changed files with `scp` into `~/dev/vela` and verify by checksum before
     running — no `git push`, no `git checkout -- .` on the VM's tree.
-- **RED-PROOF EVERY GUARD, ALWAYS.** Seven vacuous guards in this plan; not one was
+- **RED-PROOF EVERY GUARD, ALWAYS.** Eight vacuous guards in this plan; not one was
   caught by review, CI or a green run. Land the fix, THEN inject the regression, THEN
   demand the test fail for the RIGHT reason — and prove EACH behavior the fix claims
   separately (r19's frontend fix claimed three, and needed three injections). Restore
