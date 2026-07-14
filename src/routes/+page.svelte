@@ -290,11 +290,17 @@
     }
   }
 
-  // Make the backend's reconnect signal human-readable.
+  // Make the backend's reconnect signal human-readable. SUBSTITUTE it — do not
+  // replace the whole message with it. The banner can now carry more than one
+  // failure (settlement appends its own to whatever a load already published), and
+  // swapping the entire string for this sentence threw the other failures away:
+  // the user was told to reconnect and never told what else had gone wrong
+  // (codex r17, found via the guard for the settlement publish).
   function friendlyError(e: string): string {
-    return e.includes("RECONNECT_REQUIRED")
-      ? "A server needs reconnecting — open Settings (⚙) and reconnect it."
-      : e;
+    return e.replaceAll(
+      "RECONNECT_REQUIRED",
+      "A server needs reconnecting — open Settings (⚙) and reconnect it.",
+    );
   }
 
   // Open a URL in the system browser via the backend (webview would navigate away).
