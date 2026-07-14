@@ -1128,6 +1128,20 @@ mod tests {
                     let req = String::from_utf8_lossy(&buf[..n]);
                     let path = req.split_whitespace().nth(1).unwrap_or("/").to_string();
                     hits.lock().unwrap().push(path.clone());
+                    // DEMAND the token, as a real server does. The mock used to
+                    // parse the path and nothing else, so deleting the
+                    // `X-Plex-Token` header left every Plex guard green while a
+                    // real server answered 401 and Scan Library became unusable
+                    // (codex r16). `/identity` is the one route Plex serves
+                    // unauthenticated.
+                    if !path.starts_with("/identity")
+                        && !req.to_ascii_lowercase().contains("x-plex-token:")
+                    {
+                        let _ = stream.write_all(
+                            b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                        );
+                        return;
+                    }
                     if path.starts_with("/identity") {
                         if let Some((arrived, release)) = identity_gate.as_ref() {
                             let _ = arrived.send(());
