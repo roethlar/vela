@@ -79,6 +79,30 @@ export async function openLibraryGrid(driver, { section = 'Mock Library', cardPr
   );
 }
 
+// Every request matching `endsWith` has had its response SENT — nothing armed is still
+// parked in the mock. Waiting for a request to ARRIVE proves only that the client asked;
+// it says nothing about when the client was handed the answer and ran the code under
+// test. An assertion that something bad did NOT happen passes just as well by asking too
+// early, so it needs this (codex + grok, r21).
+export const allDelivered = (mock, endsWith) => {
+  const asked = mock.state.requests.filter((r) => r.path.endsWith(endsWith)).length;
+  const answered = mock.state.served.filter((s) => s.path.endsWith(endsWith)).length;
+  return asked > 0 && answered >= asked;
+};
+
+// Hold a condition open for a window, failing the MOMENT it breaks — rather than
+// sleeping and sampling once at the end, which cannot tell "it never happened" from
+// "it has not happened yet".
+export async function holdsFor(check, ms, what) {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const broke = await check();
+    if (broke) throw new Error(`${what} — broke during the hold: ${broke}`);
+    if (Date.now() >= deadline) return;
+    await new Promise((r) => setTimeout(r, 200));
+  }
+}
+
 export async function goHome(driver) {
   const home = await driver.find(
     'xpath',

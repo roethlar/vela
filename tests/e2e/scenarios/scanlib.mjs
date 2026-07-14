@@ -7,7 +7,13 @@
 //
 // RED without slice 2: no "Scan Library" menu entry, no request.
 import assert from "node:assert/strict";
-import { pollUntil, mockSource, seedConfig } from "../helpers.mjs";
+import {
+  pollUntil,
+  mockSource,
+  seedConfig,
+  allDelivered,
+  holdsFor,
+} from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
 
 let mock;
@@ -247,7 +253,14 @@ export default {
       "fast lib2 notice while lib1 is in flight",
     );
     const lib1Landed = refreshPosts("lib1").length;
-    await sleep(DELAY + 300); // let lib1's parked 204 land
+    // Wait for the parked 204 to be DELIVERED, not for a stopwatch to expire: the
+    // request count records ARRIVAL, so a sleep sized from the delay can assert while
+    // the stale result is still pending and pass a missing scan-attempt gate (codex
+    // r21).
+    await pollUntil(
+      async () => (allDelivered(mock, "/Refresh") ? true : null),
+      "lib1's parked 204 to be delivered",
+    );
     assert.equal(
       refreshPosts("lib1").length,
       lib1Landed,
@@ -334,10 +347,15 @@ export default {
       async () => (await notice(driver)) === "Scan started — Library Two",
       "lib2's success notice while lib1's failure is still parked",
     );
-    await sleep(DELAY + 500); // lib1's 403 lands late
-    assert.equal(
-      await banner(driver),
-      null,
+    await pollUntil(
+      async () => (allDelivered(mock, "/Refresh") ? true : null),
+      "lib1's parked 403 to be delivered",
+    );
+    // ...and HOLD it: a banner that appears a tick after a single sample is a banner
+    // this case was written to catch.
+    await holdsFor(
+      async () => await banner(driver),
+      1500,
       "a superseded scan's FAILURE must not banner over a newer success",
     );
     assert.equal(

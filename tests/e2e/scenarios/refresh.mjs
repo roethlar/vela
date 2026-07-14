@@ -15,6 +15,8 @@ import {
   seedConfig,
   openLibraryGrid,
   goHome,
+  allDelivered,
+  holdsFor,
 } from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
 
@@ -581,9 +583,16 @@ export default {
       async () => (latestRequests() > latestBeforeFallback ? true : null),
       "the fallback's Home re-fetch arrived (the redirect's gate can now open)",
     );
-    await new Promise((r) => setTimeout(r, 600)); // let it apply: loading clears, the effect re-runs
-    assert.ok(
-      await detailOpen(driver),
+    // Arrival is not delivery, and one sample after a sleep cannot tell "the redirect
+    // never fired" from "it has not fired yet" (codex r21). Wait for every parked Home
+    // response to actually be SENT, then hold the assertion open.
+    await pollUntil(
+      async () => (allDelivered(mockA, "/Items/Latest") ? true : null),
+      "every Home re-fetch response delivered (the redirect's gate can now open)",
+    );
+    await holdsFor(
+      async () => ((await detailOpen(driver)) ? null : "the detail was closed"),
+      2000,
       "the redirect must be DEFERRED while the detail is open",
     );
     await pressBack(driver);
@@ -626,12 +635,16 @@ export default {
       `return !!document.querySelector('button.poster[aria-label^="Alpha"]')`,
       "the refresh's Home leg lands: rails present",
     );
-    // The armed stale load fails AFTER the refresh settles — give it time to
-    // land, then assert it published nothing.
-    await new Promise((r) => setTimeout(r, DELAY + 600));
-    assert.equal(
-      await banner(driver),
-      null,
+    // The armed stale load fails AFTER the refresh settles. Wait for its response to be
+    // DELIVERED (a sleep sized from the delay only guesses), then hold the assertion
+    // open — a banner that appears a tick after a single sample would be missed.
+    await pollUntil(
+      async () => (allDelivered(mockA, "/Items/Latest") ? true : null),
+      "the superseded load's late failure to be delivered",
+    );
+    await holdsFor(
+      async () => await banner(driver),
+      2000,
       "the superseded load's late failure publishes NO banner",
     );
     assert.ok(
@@ -689,10 +702,13 @@ export default {
     );
     await markWatchedFromHome(driver, "Alpha One"); // newer successful Home load
     await settle(driver);
-    await new Promise((r) => setTimeout(r, DELAY + 600)); // the refresh's failure lands late
-    assert.equal(
-      await banner(driver),
-      null,
+    await pollUntil(
+      async () => (allDelivered(mockA, "/Items/Latest") ? true : null),
+      "the refresh leg's late failure to be delivered",
+    );
+    await holdsFor(
+      async () => await banner(driver),
+      2000,
       "a refresh leg superseded by a newer same-root Home load must publish NO failure",
     );
     assert.ok(
@@ -898,7 +914,13 @@ export default {
       `return document.querySelectorAll('button.poster').length === 60`,
       "the action's reloaded first page is on screen",
     );
-    await new Promise((r) => setTimeout(r, 2600)); // the parked page lands here
+    // The parked page lands when the mock actually answers it, not when a stopwatch says
+    // so (codex r21).
+    await pollUntil(
+      async () => (allDelivered(mockA, "/Items") ? true : null),
+      "the parked page's response to be delivered",
+    );
+    await new Promise((r) => setTimeout(r, 400)); // a tick for a wrong append to render
     const after = await posterLabels(driver);
     assert.equal(
       after.length,

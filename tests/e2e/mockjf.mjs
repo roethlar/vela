@@ -442,7 +442,10 @@ export function startMockJellyfin({
         if (fail) return json({ error: "mock: admin required" }, 403);
         if (unauth) return json({ error: "unauthenticated" }, 401);
         // The request (with its full scan query) is already in state.requests;
-        // scenarios assert on that log, not on this body.
+        // scenarios assert on that log, not on this body. But the RESPONSE still has to
+        // be recorded, or `state.served` has a hole exactly where a scenario parks a
+        // scan — this is the one success path that does not go through json().
+        state.served.push({ method: req.method, path, status: 204 });
         res.writeHead(204);
         return res.end();
       };
