@@ -780,7 +780,19 @@
           ? []
           : suppressedFailures.filter((f) => f.gen === loadGen);
         const msgs = [...live.map((f) => f.msg), ...abandoned.map((f) => f.msg)];
-        if (msgs.length > 0) setError(msgs.join("; "));
+        if (msgs.length > 0) {
+          // A load NEWER than this action's (it supersedes us — see the retract
+          // branch below) may already have banner'd, and if it still owns the
+          // grid its failure is the reason the grid is empty. Publishing over it
+          // would erase the true cause and leave only our sections diagnostic —
+          // the retract branch already knows not to touch a newer banner, and the
+          // publish branch must know it too (grok r17). Keep it, say our piece
+          // after it, and leave the tag with the load that still owns the grid.
+          const newerOwnsIt =
+            error !== null && errorGen > gridActionBaseGen && errorGen === loadGen;
+          if (newerOwnsIt) setError(`${error}; ${msgs.join("; ")}`, errorGen);
+          else setError(msgs.join("; "));
+        }
         // Nothing of ours failed — but a load we SUPERSEDED may have published a
         // banner after the click cleared the surface. Its cards are gone,
         // replaced by ours, so its failure no longer describes anything on

@@ -74,11 +74,10 @@ export default {
 
   async run({ driver }) {
     // Page 1: the app asks for 60 and gets 60, so it knows there is more.
-    const side = await driver.find(
-      "xpath",
-      `//button[contains(@class,'sideitem') and normalize-space(.)='Big Library']`,
-    );
-    await driver.click(side);
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
     await pollUntil(
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "the first full page of 60",
