@@ -55,7 +55,17 @@ jobs:
   audit:
     name: cargo audit
     runs-on: ubuntu-latest
-    continue-on-error: true # advisory only; don't block on transient advisories
+    # A known vulnerability FAILS the build (owner, 2026-07-14: "known vulnerabilities
+    # should fail so we can keep current").
+    #
+    # This job used to be `continue-on-error: true`, which meant CI went GREEN while
+    # reporting them — and it did, for two RUSTSEC DoS advisories in `quick-xml`, the crate
+    # that parses every Plex response Vela receives off the network. Nobody looks at a job
+    # that cannot fail.
+    #
+    # If an advisory lands with NO fix available upstream, do not re-disable this job. Add
+    # an explicit `--ignore RUSTSEC-XXXX-NNNN` below with a comment saying why and when to
+    # revisit: a visible exception in the diff, not a silent blanket.
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
