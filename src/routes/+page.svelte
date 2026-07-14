@@ -103,9 +103,20 @@
   // left with no status at all (codex r12). ASSIGNING `error` DIRECTLY IS A BUG.
   // Deliberately not `$state`: nothing renders from it.
   let errorGen = 0;
-  function setError(msg: string | null, gen = 0) {
+  // WHO published the visible banner. Not everyone may take it down: a refresh
+  // reloads the cards its banner is about and so may retract it, but a scan
+  // reloads nothing and must leave a listing's failure standing (codex r14).
+  // Set in the same place as `errorGen`, so it cannot drift out of step with the
+  // message it describes.
+  let errorOwner: "listing" | "scan" | "other" = "other";
+  function setError(
+    msg: string | null,
+    gen = 0,
+    owner: "listing" | "scan" | "other" = "other",
+  ) {
     error = msg;
     errorGen = msg === null ? 0 : gen;
+    errorOwner = msg === null ? "other" : owner;
   }
   let sort = $state("titleSort:asc");
   let searchQuery = $state("");
@@ -234,18 +245,20 @@
 
   // Re-sync after sources are added/removed in Settings.
   async function onSourcesChanged() {
+    // The source list is changing under the view: that IS navigation (a refresh
+    // still in flight must stop owning the epoch — codex r6), and it has to be
+    // declared BEFORE the first await, not after. A refresh can settle DURING
+    // that await and publish against an epoch that still matches; if the last
+    // source was just removed, the teardown below then leaves that banner
+    // standing over the Welcome screen — a dead server's failure, with nothing
+    // left on screen to explain it and no way to clear it (codex r14).
+    navEpoch++;
     await loadSourceList();
     if (!sources.some((s) => s.id === activeSource)) activeSource = null;
     authenticated = sources.length > 0;
     if (authenticated) {
       linkGen++; // abandon any in-flight Plex link poll tied to the old pin
       pin = null;
-      // loadEverything() resets the view underneath the user — that IS
-      // navigation. Without the bump, a refresh still in flight keeps owning
-      // the epoch, so its gate would go on blocking the empty-Home redirect
-      // (and swallowing errors) over a view it no longer has anything to do
-      // with (codex r6).
-      navEpoch++;
       await loadEverything();
     } else {
       // Last source removed — clear stale content and show the neutral empty state.
@@ -264,6 +277,9 @@
       detailView = null;
       mode = "home";
       loading = false;
+      // The view this banner described no longer exists, and the Welcome screen
+      // offers nothing that could clear it (codex r14).
+      setError(null);
     }
   }
 
@@ -922,7 +938,7 @@
           // The ONLY tagged write: a refresh that goes on to SUPERSEDE this
           // load owns its cards, so it must take this message down with it
           // (see refreshLibraries settlement, codex r11).
-          setError(String(e), myGen);
+          setError(String(e), myGen, "listing");
         }
         hasMore = false;
       }
@@ -1278,10 +1294,16 @@
     const gen = (scanGens[s.key] = (scanGens[s.key] ?? 0) + 1);
     const attempt = ++scanAttempt;
     scanning[s.key] = true;
-    // The action owns its status (refreshLibraries convention): clear any
-    // prior banner/notice immediately, and cancel an armed auto-clear so it
-    // can't fire mid-flight against the outcome we're about to publish.
-    setError(null);
+    // The action owns ITS OWN status, and only that: clear a previous SCAN's
+    // banner and notice, and cancel an armed auto-clear so it can't fire
+    // mid-flight against the outcome we're about to publish.
+    //
+    // It must NOT clear a listing failure. Refresh may (it reloads the very
+    // cards the banner is about), but a scan reloads nothing: the banner
+    // EXPLAINS the empty grid the user is looking at, and wiping it leaves them
+    // with an empty view and a cheerful "Scan started" that accounts for none of
+    // it (codex r14).
+    if (errorOwner === "scan") setError(null);
     scanNotice = null;
     scanNoticeOwner = null;
     if (scanNoticeTimer) {
@@ -1309,7 +1331,7 @@
       }, 4000);
     } catch (e) {
       if (scanAttempt !== attempt) return;
-      setError(String(e));
+      setError(String(e), 0, "scan"); // ours to clear on the next scan
     } finally {
       if (scanGens[s.key] === gen) scanning[s.key] = false;
     }

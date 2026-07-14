@@ -49,6 +49,11 @@ async function settle(driver) {
     "refresh to settle",
   );
 }
+async function stillRefreshing(driver) {
+  return driver.exec(
+    `const b = document.querySelector('button.refreshbtn'); return !!b && b.disabled`,
+  );
+}
 async function banner(driver) {
   return driver.exec(
     `return document.querySelector('div.error')?.textContent ?? null`,
@@ -743,8 +748,26 @@ export default {
     mockA.state.viewsDelayMs = 1400; // sections lands well AFTER that failure
     await clickSide(driver, "Library A"); // starts the doomed listing
     await clickRefresh(driver); // must claim loadGen HERE, not later
-    await settle(driver);
+    // Watch the WHOLE in-flight window, not just the end of it. The doomed
+    // listing dies ~600ms in and the action settles ~1400ms in, and a banner the
+    // user sees for that 800ms is a banner the user saw — even though the
+    // action's own retraction (codex r11/r12) would tidy it away before
+    // settlement. Asserting only the settled state made this guard VACUOUS:
+    // delete the suppression and it still passed, while the false failure sat
+    // over the grid the whole time (codex r14).
+    while (await stillRefreshing(driver)) {
+      assert.equal(
+        await banner(driver),
+        null,
+        "the superseded failing listing must not banner AT ALL — not even briefly, while the action it was superseded by is still running",
+      );
+    }
     mockA.state.viewsDelayMs = 0;
+    assert.equal(
+      mockA.state.failNextItems,
+      false,
+      "the doomed listing must actually have been served its failure — otherwise the window above proved nothing",
+    );
     await driver.waitFor(
       `return !!document.querySelector('button.poster[aria-label^="Alpha One"]')`,
       "the refresh's own listing lands",
