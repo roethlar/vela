@@ -1520,3 +1520,51 @@ grok's r17 findings:
   this — the GUARD did**, by requiring a non-listing writer whose banner persists and
   exposing that this one's did not. A test you cannot fake makes you check what the
   code actually does.
+
+**r17 — codex (the second reviewer's independent pass): 3 MEDIUM + 6 LOW.** Reviewed
+`53973d1`, so three of its findings were already fixed from grok's pass — including
+an INDEPENDENT confirmation of the mark-watched swallow, which grok's guard had
+already exposed. The rest:
+
+- **`55450d4` — my own r8-4 fix opened a request storm.** Leaving `hasMore` true on
+  a silenced page failure is right, but the grid's auto-fill tail ("keep loading
+  until the grid scrolls") then re-requested the SAME failing offset as fast as the
+  server could refuse it — on any viewport tall enough to fit the cards, for as long
+  as the refresh ran, pushing a held failure per pass. Its comment claimed it was
+  bounded "because each pass advances offset and clears `hasMore`"; a FAILED page
+  does neither. It no longer retries after a failure.
+- **`55450d4` — settlement preserved only a TAGGED banner.** The click clears the
+  surface, so ANY banner at settlement was published during the run by someone else
+  (a failed search, a failed edit, a newer load) and none of them are ours to erase.
+  Settlement now appends to whatever is there, whatever it is.
+- **`6591b73` — a concurrent probe left a list unprovable.** Two loads on a restored,
+  unidentified server: one's probe succeeds and writes the id to shared state, the
+  other stamps its list from its own stale clone — so every key came back
+  `provenance: None` and Scan Library refused the WHOLE library list until another
+  refresh. The binding check already proves we are still bound to the same server, so
+  an id that arrives mid-fetch describes the list we fetched. Guard:
+  `a_list_is_provable_once_anyone_has_identified_the_server`, red-proven.
+- **`a8830f2` — a held failure outlived its own page.** Once a generation loads
+  successfully, a failure held for it describes nothing; settlement would publish a
+  diagnostic for cards that are on screen.
+- **`bf3e3fa` — a reconnect notice swallowed the rest of the banner.**
+  `friendlyError` replaced the ENTIRE message when it saw RECONNECT_REQUIRED —
+  harmless when a banner carried one failure, wrong now that settlement appends: a
+  combined banner collapsed to "reconnect" and the user was never told what else had
+  failed. Substitute the token, keep the rest.
+
+Guard gaps codex named, now closed: `pagefail` case 3 (the settlement PUBLISH branch
+— case 2's refresh succeeds, so it never ran the branch at all and the whole
+preservation block could have been deleted with the suite green; red-proven).
+STILL OPEN: no guard on the scan invalidation when a source is removed while a scan
+is in flight (r16-3) — recorded, not fixed.
+
+**What r17 actually demonstrated.** Both reviewers found defects in fixes made during
+r17 itself: the request storm was created by the fix for the truncation grok had
+overturned an hour earlier. And FOUR bugs were found not by either reviewer but by
+BUILDING THE GUARDS — the mark-watched swallow (the guard needed a writer whose
+banner persists; this one's did not), `friendlyError` eating the rest of the banner
+(the guard demanded both failures be visible; they were not), and two vacuous guards
+of my own (case 2's first two attempts). **A test that cannot be satisfied by
+hand-waving forces the code to prove what it claims, and in this plan that has
+consistently outperformed reading it.**
