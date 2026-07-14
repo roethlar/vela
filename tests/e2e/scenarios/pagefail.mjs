@@ -72,7 +72,7 @@ export default {
     await mock?.close();
   },
 
-  async run(driver) {
+  async run({ driver }) {
     // Page 1: the app asks for 60 and gets 60, so it knows there is more.
     const side = await driver.find(
       "xpath",
