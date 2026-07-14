@@ -114,7 +114,23 @@
     errorParts.length === 0 ? null : errorParts.map((p) => p.msg).join("; "),
   );
   function setError(msg: string | null, gen = 0) {
-    errorParts = msg === null ? [] : [{ msg, gen }];
+    // null is the CLEAR: a fresh load, or a navigation, starts the surface empty.
+    if (msg === null) {
+      errorParts = [];
+      return;
+    }
+    // Publishing a failure supersedes the LISTING diagnostics it replaces — a newer
+    // load's failure describes the same grid the older one did — but it must never
+    // erase a part that no load owns. An edit's failure is not a listing's to take
+    // back, and this writer used to replace the whole list: an ordinary page failure
+    // wiped the edit's message, or (when the two rendered the same 401 sentence) re-
+    // tagged it as listing-owned, and the next successful refresh retracted it. The
+    // r21 loss again, reverse ordering, through the setError door (codex + grok, r22).
+    //
+    // Routing through addError is what keeps the ownership algebra in ONE place: two
+    // writers of the same surface, two rules, was the whole defect.
+    errorParts = errorParts.filter((p) => p.gen === 0);
+    addError(msg, gen);
   }
   // Say something without ERASING what is already there: the two writers are reporting
   // different failures and the user needs both. Identical text is not repeated — a

@@ -572,6 +572,69 @@ export default {
       `the refresh repaired the grid, which retires the LISTING's reason for this sentence — but the edit's reason still holds, and dropping the line leaves the user with no sign their change failed — got ${JSON.stringify(survivor)}`,
     );
 
+    // ── 11. A page failure must not take the edit's message with it ──
+    // The ownership algebra lived in addError, but setError REPLACED the whole list —
+    // and every listing writer uses setError. So an ordinary page failure wiped the
+    // edit's untagged part, or (when both render the same 401 sentence) re-tagged it as
+    // listing-owned; the refresh's retract then took it. The r21 silent loss, reverse
+    // ordering, through the setError door (codex + grok, r22).
+    //
+    // Case 10 cannot see it: there the edit publishes LAST, so addError runs last and the
+    // algebra saves it. Here the listing failure comes second.
+    //
+    // Everything must happen INSIDE an in-flight refresh. The refresh CLICK clears the
+    // surface, so an edit published before it is gone whatever the ownership rules say —
+    // a first draft of this case "went red" for exactly that reason and would have
+    // guarded nothing.
+    await openLibraryGrid(driver, {
+      section: "Big Library",
+      cardPrefix: "Movie 000",
+    });
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "a healthy grid to edit from",
+    );
+    mock.state.viewsDelayMs = 6000; // a refresh that will SUCCEED, slowly
+    const refresh6 = await driver.find("css selector", "button.refreshbtn");
+    await driver.click(refresh6);
+
+    // The edit fails; its recovery repaint SUCCEEDS and claims a generation NEWER than
+    // the action's. One untagged part on screen, over a healthy grid.
+    mock.state.unauthNextPlayed = true;
+    await watchToggle(driver, "Movie 059", "Mark watched");
+    await pollUntil(
+      async () => {
+        const b = await banner(driver);
+        return b && b.includes("reconnect") && (await cardCount(driver)) === 60
+          ? true
+          : null;
+      },
+      "the edit's failure, over a healthy repainted grid",
+    );
+
+    // Now an ordinary page failure — the SAME 401 sentence, published by a LISTING.
+    // Newer than the action's generation, so it is published rather than silenced.
+    mock.state.unauthNextItems = true;
+    await scrollGridToEnd(driver);
+    await pollUntil(
+      async () => (mock.state.unauthNextItems === false ? true : null),
+      "the doomed page request to reach the server",
+    );
+
+    // The refresh claims the grid and succeeds. It may retract the PAGE's diagnostic —
+    // those cards are back — but the edit's failure was never its to take.
+    await settle(driver);
+    mock.state.viewsDelayMs = 0;
+    await pollUntil(
+      async () => ((await cardCount(driver)) === 60 ? true : null),
+      "the refresh repairs the grid",
+    );
+    const afterPageFail = await banner(driver);
+    assert.ok(
+      afterPageFail && afterPageFail.includes("reconnect"),
+      `a page failure that renders the same sentence as the edit's must not hand the edit's message to the refresh's retract — got ${JSON.stringify(afterPageFail)}`,
+    );
+
     assert.equal(
       mock.state.contractViolations.length,
       0,
