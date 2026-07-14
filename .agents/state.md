@@ -5,19 +5,24 @@
   (`fee7f0e`), the queue (`67358fd`), the mpv bar (`0f41c7b`) and the detail page
   (`40dfc40`) each report their own. Slice 5 (`282702b`) then DELETED the whole refereeing
   apparatus — the `owner` field, `ErrorOwner`, `clearOwned`, per-surface clearing, the scope
-  merge — net -67 lines. e2e 17/17, cargo test 95, clippy/svelte-check/build clean.
+  merge — net -67 lines. e2e 18/18, cargo test 95, clippy/svelte-check/build clean.
   - **What it bought:** the defect class that ran for EIGHT review rounds (r17-r24, each fix
     opening the next door, always the same loss — a failure the user needed, silently gone)
     is structurally gone, because the fight over one surface is gone. Slice 1 alone
     collapsed SIX e2e cases, three of which had asserted that a failed edit must be
     SUPPRESSED when the user navigated away — never right, just the price of sharing.
-  - **OWNER PLAYTEST ASK (0.1.46) — the ONLY real check on slices 2, 3 and 4**, which the
-    harness cannot guard (it cannot fail a queue action, an mpv install or a Play; evidence
-    in the plan's outcome table): (1) kill the server mid-edit, mark watched — the failure
-    lands on its own line, follows you when you navigate, and a second edit replaces it;
-    (2) a failed queue action reports inside the drawer and marks the chip when it is shut;
-    (3) a failed mpv install reports on the mpv bar and a search no longer wipes it;
-    (4) a failed Play from an open detail reports on the detail.
+  - **GUARDED after all: slices 2 and 4** (`surfaces` scenario, `537ba70`, red-proven four
+    ways). I had recorded them as unguardable and that was WRONG, twice, both times because
+    I reasoned about the code instead of reading it — the mock CAN fail a Play, because
+    `play_by_key` resolves the stream before it spawns mpv. **Before recording anything as
+    unguardable, go and read the failure path.** Building the guard then found a real bug in
+    slice 2 (closing the drawer abandoned an in-flight action, dropping a failure the user
+    needed and making the chip's mark dead code).
+  - **OWNER PLAYTEST ASK (0.1.46).** Slice 3 (the mpv bar) is the only one automation cannot
+    reach — `install_mpv` cannot be made to fail. The rest is confirmation: (1) kill the
+    server mid-edit, mark watched — the failure lands on its own line, follows you when you
+    navigate, and a second edit replaces it; (2) a failed mpv install reports on the mpv bar
+    and a search no longer wipes it.
   - The library-refresh-scan review loop is CLOSED at r24; its log is the evidence for this
     plan. Do not reopen it against the shared banner.
 # Agent State

@@ -184,11 +184,26 @@ of sharing a surface with the view's banner.
 
 | slice | guard |
 | --- | --- |
-| 1 — the edit's own line | GUARDED. pagefail cases 4/5/6 + the heal's 8/9. Red-proven three ways. |
-| 2 — the queue | NOT GUARDED. `queue_remove`/`queue_play_at` can fail (`commands.rs:2454, 2474`) but not deterministically through the UI — the drawer only ever renders indices that exist. `queue_append`/`queue_clear` cannot fail at all. |
-| 3 — the mpv bar | NOT GUARDED. The harness either has mpv or it does not. |
-| 4 — the detail | NOT GUARDED. `play_item` resolves at mpv spawn, so a bad stream still succeeds where this catch would fire. |
-| 5 — the collapse | Covered by the 17 existing scenarios (no behaviour change intended). |
+| 1 — the edit's own line | GUARDED. `pagefail` cases 4/5/6 + the heal's 8/9. Red-proven three ways. |
+| 2 — the queue | GUARDED. `surfaces` cases 2/3/4/5. Red-proven. |
+| 3 — the mpv bar | NOT GUARDED. The harness either has mpv or it does not, and `install_mpv` cannot be made to fail. Inspection + owner playtest. |
+| 4 — the detail | GUARDED. `surfaces` case 1. Red-proven. |
+| 5 — the collapse | Covered by the existing scenarios (no behaviour change intended). |
+
+**I first recorded slices 2 and 4 as UNGUARDABLE, and that was wrong — twice over, both
+times because I reasoned about the code instead of reading it.** (1) "the harness cannot
+fail a Play": it can — `play_by_key` RESOLVES THE STREAM before it spawns mpv
+(`commands.rs:2247`), and the mock owns that endpoint. (2) "so seed a bogus `mpv_path`":
+that does nothing — `resolve_mpv` VALIDATES the configured path and silently falls back to
+mpv on `PATH` (`playback.rs:207`). The first draft of the scenario did exactly that and
+timed out waiting for a failure that was never coming. The door is `failPlaybackInfo` on
+the mock. **Before recording anything as unguardable, go and read the failure path.**
+
+Building that guard then found a real bug in slice 2: `toggleQueue` abandoned an in-flight
+queue action when the drawer closed, so a play the user asked for could fail and tell them
+nothing — and it made the chip's failure mark DEAD CODE, since that is the only state the
+mark exists for. Fixed in `537ba70`. **The guard found the defect the review of the same
+code did not.**
 
 Also unguarded, recorded in place in pagefail: `onSourcesChanged` abandoning an edit in
 flight (this scenario cannot remove a source). A first draft of that case called a hook that
