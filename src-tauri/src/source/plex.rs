@@ -176,6 +176,68 @@ impl PlexSource {
         Ok((updated, binding))
     }
 
+    /// One attempt at [`MediaSource::sections`]. `Ok(None)` means the source
+    /// REBOUND while the list was in flight, so what came back describes a server
+    /// this source no longer is — the caller must ask again, not serve it.
+    async fn sections_once(&self) -> Result<Option<Vec<SectionDto>>, String> {
+        // The client AND the binding it is bound under, taken together — never
+        // read apart, or a rebind landing between the two would stamp this
+        // server's keys with the next server's binding (codex r13).
+        let (lib, mut binding) = self.ensure_ready_bound().await?;
+        // A saved server endpoint can go stale (changed IP / plex.direct host).
+        // map_err first so the non-Send error is dropped before the next await.
+        let first = lib.get_library_sections().await.map_err(|e| e.to_string());
+        let (served_by, sections) = match first {
+            Ok(s) => (lib.server_machine_id(), s),
+            Err(_) => {
+                // That rediscovery may have REBOUND us; this list comes from the
+                // server it installed, so it carries THAT server's binding.
+                let (lib, rebound) = self.rediscover_bound().await?;
+                binding = rebound;
+                let s = lib
+                    .get_library_sections()
+                    .await
+                    .map_err(|e| e.to_string())?;
+                // The RETRY's server served these keys — not the one we started
+                // against. Recording the pre-request machine here would refuse a
+                // legitimate scan of the list actually on screen.
+                (lib.server_machine_id(), s)
+            }
+        };
+        // Did we get rebound while that was in flight? Then this list is a report
+        // about a server we are not talking to any more.
+        if self.binding.load(Ordering::SeqCst) != binding {
+            return Ok(None);
+        }
+        // Stamp each key with the machine that ACTUALLY SERVED it (the
+        // rediscovered one, on the retry path above). These numbers are
+        // server-local, so the key alone is not enough to act on later: it
+        // travels with its origin, and a scan of a key this source can no
+        // longer vouch for fails closed (see `SectionDto::provenance`). When we
+        // cannot name the server — a restored endpoint whose /identity probe
+        // failed — every key it serves is unprovable and unscannable, by
+        // design (codex r8).
+        let provenance = rediscovery_pin(served_by);
+        Ok(Some(
+            sections
+                .into_iter()
+                // Only video libraries — skip music/photo sections so non-playable
+                // items never reach the nav or get routed into mpv.
+                .filter(|s| s.section_type == "movie" || s.section_type == "show")
+                .map(|s| SectionDto {
+                    key: namespace_key(&self.id, &s.key),
+                    title: s.title,
+                    section_type: s.section_type,
+                    source_id: self.id.clone(),
+                    source_name: self.name.clone(),
+                    sort: None, // stamped from config by get_sections
+                    provenance: provenance.clone(),
+                    binding,
+                })
+                .collect(),
+        ))
+    }
+
     fn to_item(&self, lib: &PlexLibrary, v: PlexVideo) -> ItemDto {
         ItemDto {
             // Request a grid-sized thumbnail, not the full-resolution poster.
@@ -456,55 +518,26 @@ impl MediaSource for PlexSource {
     }
 
     async fn sections(&self) -> Result<Vec<SectionDto>, String> {
-        // The client AND the binding it is bound under, taken together — never
-        // read apart, or a rebind landing between the two would stamp this
-        // server's keys with the next server's binding (codex r13).
-        let (lib, mut binding) = self.ensure_ready_bound().await?;
-        // A saved server endpoint can go stale (changed IP / plex.direct host).
-        // map_err first so the non-Send error is dropped before the next await.
-        let first = lib.get_library_sections().await.map_err(|e| e.to_string());
-        let (served_by, sections) = match first {
-            Ok(s) => (lib.server_machine_id(), s),
-            Err(_) => {
-                // That rediscovery may have REBOUND us; this list comes from the
-                // server it installed, so it carries THAT server's binding.
-                let (lib, rebound) = self.rediscover_bound().await?;
-                binding = rebound;
-                let s = lib
-                    .get_library_sections()
-                    .await
-                    .map_err(|e| e.to_string())?;
-                // The RETRY's server served these keys — not the one we started
-                // against. Recording the pre-request machine here would refuse a
-                // legitimate scan of the list actually on screen.
-                (lib.server_machine_id(), s)
+        // Bounded, because a list from a server we are NO LONGER BOUND TO is
+        // already wrong when it arrives. Our own fetch can be perfectly correct
+        // and perfectly stale: another task's failed read can rediscover and
+        // install a different account server while we are still talking to the
+        // old one (our `/identity` probe failing is the widest window). Serving
+        // that list anyway puts the OLD server's libraries in the sidebar while
+        // every read behind them — items, pagination, playback — goes to the NEW
+        // one: the user browses B's films under A's library name, and nothing
+        // reconciles it, because the list is internally consistent (codex r14).
+        // So a rebind that lands while we fetch invalidates what we fetched.
+        for _ in 0..2 {
+            match self.sections_once().await? {
+                Some(sections) => return Ok(sections),
+                None => continue, // rebound under us — ask whoever we are bound to now
             }
-        };
-        // Stamp each key with the machine that ACTUALLY SERVED it (the
-        // rediscovered one, on the retry path above). These numbers are
-        // server-local, so the key alone is not enough to act on later: it
-        // travels with its origin, and a scan of a key this source can no
-        // longer vouch for fails closed (see `SectionDto::provenance`). When we
-        // cannot name the server — a restored endpoint whose /identity probe
-        // failed — every key it serves is unprovable and unscannable, by
-        // design (codex r8).
-        let provenance = rediscovery_pin(served_by);
-        Ok(sections
-            .into_iter()
-            // Only video libraries — skip music/photo sections so non-playable
-            // items never reach the nav or get routed into mpv.
-            .filter(|s| s.section_type == "movie" || s.section_type == "show")
-            .map(|s| SectionDto {
-                key: namespace_key(&self.id, &s.key),
-                title: s.title,
-                section_type: s.section_type,
-                source_id: self.id.clone(),
-                source_name: self.name.clone(),
-                sort: None, // stamped from config by get_sections
-                provenance: provenance.clone(),
-                binding,
-            })
-            .collect())
+        }
+        Err(
+            "the Plex server changed while its libraries were loading — refresh libraries again"
+                .to_string(),
+        )
     }
 
     async fn hubs(&self) -> Result<Vec<HubDto>, String> {
@@ -1180,52 +1213,53 @@ mod tests {
         );
     }
 
-    /// A list must carry the binding of the server that SERVED it — never one
-    /// that was installed while it was being fetched.
+    /// A list from a server we are NO LONGER BOUND TO must not be served at all.
     ///
-    /// The source hands out a CLONE of its client and reads the binding
-    /// separately. Between those two reads, another task's failed read can
-    /// rediscover and rebind the source, bumping the binding. Read apart, this
-    /// list — correctly served by the OLD server — gets stamped with the NEW
-    /// server's binding, and the frontend takes the old server's library for the
-    /// new one's: it evicts the live root the user is standing on, and offers the
-    /// old library as if it belonged to the server that replaced it (codex r13).
-    ///
-    /// The `/identity` probe is the window: it is a network call made after the
-    /// clone is taken, and it FAILS here, so the source falls back on that clone.
+    /// The previous guard bumped the binding but never actually installed another
+    /// server, so it could not reach this state (codex r14). Here B really is
+    /// installed while A's probe is parked: A's fetch then succeeds and is
+    /// perfectly self-consistent — A's keys, A's binding — and is still a report
+    /// about a server this source has stopped being. Serving it puts A's
+    /// libraries in the sidebar while every read behind them goes to B.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    async fn a_list_carries_the_binding_of_the_server_that_served_it() {
+    async fn a_list_from_a_server_we_no_longer_are_is_not_served() {
         let (arrived_tx, arrived_rx) = channel();
         let (release_tx, release_rx) = channel();
         let gate = (arrived_tx, Arc::new(Mutex::new(release_rx)));
-        // The probe parks, then 500s: an unidentifiable server.
-        let (port, _hits) = spawn_mock_plex_with("machine-A", 1, Some(gate));
+        let (port_a, _hits_a) = spawn_mock_plex_with("machine-A", 1, Some(gate));
+        let (port_b, _hits_b) = spawn_mock_plex("machine-B");
 
         let mut lib = PlexLibrary::new("token".to_string(), "client".to_string());
-        lib.set_server_manual("127.0.0.1".to_string(), port, false, Some("A".to_string()));
+        lib.set_server_manual("127.0.0.1".to_string(), port_a, false, Some("A".to_string()));
         let source = Arc::new(PlexSource::new("plex", "Plex", lib));
 
         let listing = tokio::spawn({
             let source = source.clone();
             async move { source.sections().await }
         });
-
-        // The source is inside the probe, holding a clone of A.
         arrived_rx
             .recv_timeout(Duration::from_secs(10))
-            .expect("the identity probe reached the server");
-        // Another task's failed read rediscovers and REBINDS the source. (The real
-        // path needs plex.tv; the bump is what a rebind does — see
-        // `only_an_unprovable_rebind_voids_outstanding_keys`.)
-        source.binding.fetch_add(1, Ordering::SeqCst);
+            .expect("the identity probe reached A");
+
+        // While A's probe is parked, another task's failed read rediscovers and
+        // REBINDS this source to B — exactly what `rediscover_bound` does on an
+        // unpinned install (the real path needs plex.tv, so drive the two effects
+        // it has: the new server, and the binding that voids A's keys).
+        {
+            let mut guard = source.lib.lock().await;
+            source.binding.fetch_add(1, Ordering::SeqCst);
+            guard.set_server(mock_server("machine-B", port_b));
+        }
         release_tx.send(()).unwrap();
 
-        let sections = listing.await.unwrap().expect("A serves its sections");
+        let sections = listing.await.unwrap().expect("the source serves SOME list");
         assert_eq!(
-            sections[0].binding, 0,
-            "this list came from the server bound BEFORE the rebind: stamping it with \
-             the new binding makes the frontend mistake A's library for B's"
+            sections[0].provenance.as_deref(),
+            Some("machine-B"),
+            "the sidebar must show the libraries of the server this source is bound to NOW — \
+             serving A's list here leaves the user browsing B's films under A's library name"
         );
+        assert_eq!(sections[0].binding, 1);
     }
 
     /// The keys a source hands out are stamped with the binding in force when it
