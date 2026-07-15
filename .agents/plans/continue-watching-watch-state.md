@@ -2,9 +2,10 @@
 
 ## Status
 **COMPLETE — owner playtest VERIFIED 2026-07-10 ("installed and tested.
-carousel fix verified.") on 0.1.42** (fix `02504be`). Open remainder: the
-contested r6 finding awaits owner adjudication (see Review log / Accepted
-edges; also queued in `.agents/state.md ## Next`). Plan retained as the
+carousel fix verified.") on 0.1.42** (fix `02504be`). The owner adjudicated
+the contested r6 finding on 2026-07-15: accept it for v1.0 as a documented
+known potential issue because closing it requires persisted per-entry epochs
+and compare-and-swap curation rather than a quick fix. Plan retained as the
 design record.
 
 Original status: IMPLEMENTED 2026-07-10 — owner go given 2026-07-10
@@ -162,7 +163,7 @@ Accepted edges (called out, not blocking):
   be lost (`finish` no-ops once the entry was dropped). Double-rare
   (failing server + racing play on one item), self-heals on the next
   play.
-- **Residual interleaving class (r6, CONTESTED — owner to adjudicate):**
+- **Residual interleaving class (r6, ACCEPTED FOR v1.0 — release-note issue):**
   an edit QUEUED behind a slow edit on the serialization lock has a
   pre-curation wait window; a play of the queued edit's item inside that
   window is curated away when the edit finally runs (same damage class
@@ -174,9 +175,9 @@ Accepted edges (called out, not blocking):
   over async server edits — each guard so far has produced its own new
   interleaving (r2→r6) — and the next narrowing (persisted per-entry
   timestamps + compare-and-swap curation) exceeds the cost-benefit line
-  for a local media client. Routed to the owner with the review trail;
-  ordering the CAS hardening as a follow-up plan reverses this
-  disposition.
+  for a local media client. The owner accepted this disposition on 2026-07-15
+  and required it to appear in the v1.0 release notes as a known potential
+  issue. A future owner report may justify a CAS-hardening follow-up plan.
 - Rollback micro-losses on a FAILED server edit: tombstone keys the FIFO
   cap (200) evicted during the hide are not resurrected; and an explicit
   "Remove from Continue Watching" issued on the same item DURING the
@@ -417,3 +418,10 @@ adjudication. Loop tally: r1 3 findings (all fixed), r2 2 (fixed), r3 3
 (fixed by design change), r5 3 (two fixed, one dispositioned), r6 1
 (contested). Core defect guard: E2E red→green proven on the target
 platform; full suite 11/11.
+
+**Owner adjudication — 2026-07-15 — ACCEPTED FOR v1.0.** The owner chose the
+documented known-issue disposition unless the fix was quick. Inspection of the
+reviewed design confirmed it is not: the next narrowing requires persisted
+per-entry epochs, compare-and-swap curation semantics, migration/serialization
+work, and interleaving guards. Record the bounded race in the v1.0 release
+notes; do not expand the playlist implementation to include it.

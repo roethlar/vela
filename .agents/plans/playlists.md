@@ -1,8 +1,9 @@
 # Plan: Playlists and Continue Playing
 
-Status: **DRAFTED 2026-07-14 — awaiting owner go before any code.** Scope
-approved by the owner 2026-07-14. Product decisions that outlive this plan are
-in `.agents/decisions.md` (2026-07-14).
+Status: **APPROVED 2026-07-15 — implementation authorized by the owner.** Scope
+was approved by the owner 2026-07-14; the owner gave the implementation go on
+2026-07-15. Product decisions that outlive this plan are in
+`.agents/decisions.md` (2026-07-14).
 
 Origin: the in-app play queue does not survive an app restart (owner,
 2026-07-14). The design discussion that followed concluded that **the queue

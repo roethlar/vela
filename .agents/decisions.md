@@ -900,3 +900,41 @@ The Node 20 selections in CI/release and the accidental `@types/node` 25
 baseline. Extends the 2026-07-14 known-vulnerabilities-fail decision from Cargo
 to npm; it does not weaken Cargo audit or authorize raising the Linux release
 glibc floor.
+
+## 2026-07-15 - The residual queued watch-edit race is a documented v1.0 edge
+
+Status: APPROVED (owner, 2026-07-15).
+
+Decision:
+Vela 1.0 may ship with the residual queued watch-edit interleaving recorded in
+`.agents/plans/continue-watching-watch-state.md` review round r6. Reaching it
+requires one slow or failing edit, a second queued edit on another item, and a
+play of that second item before its edit acquires the serialization lock. The
+bounded consequence is temporary Continue Watching absence and possible loss
+of a sub-threshold local resume stamp; another play repairs it. The v1.0
+release notes must disclose it as a known potential issue.
+
+Reason:
+The owner accepted the edge unless its fix was quick. It is not: the reviewed
+next narrowing requires persisted per-entry epochs, compare-and-swap curation
+semantics, serialization/migration work, and dedicated interleaving guards.
+That cost is disproportionate to the rare self-healing v1.0 failure. Revisit
+only on an owner report or an explicit follow-up plan.
+
+## 2026-07-15 - v1.0 ships unsigned binaries and requires an Arch artifact
+
+Status: APPROVED (owner, 2026-07-15).
+
+Decision:
+The v1.0 GitHub release ships unsigned native binaries because the owner has no
+Apple or Windows developer credentials. The release matrix must include an
+Arch package suitable for AUR publication in addition to the existing macOS,
+Windows, AppImage, Debian, and RPM outputs. Emby support is labeled
+experimental until it has been exercised against a real Emby server.
+
+Reason:
+GitHub Actions can build and attach the platform artifacts, but signing and
+notarization require developer identities the project does not have. Arch is a
+real release target because the project will publish through AUR. Jellyfin and
+Emby share MediaBrowser ancestry, but that is evidence for an experimental
+compatibility posture, not a substitute for a live Emby integration test.

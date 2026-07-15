@@ -210,7 +210,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   only restores an `https` Plex server, so it needs a trusted cert) or a second
   real instance.
 
-- **AUTOCROP-RESUME: IMPLEMENTED 2026-07-10, awaiting owner playtest** (fix
+- **AUTOCROP-RESUME: OWNER-CONFIRMED 2026-07-15** (fix
   `c2962a8` on 0.1.43; plan `.agents/plans/autocrop-resume.md`, loop closed
   accepted r3). Root cause probe-CONFIRMED: the stock script's positional
   auto_delay makes resumed plays detect immediately at file-loaded, before hwdec
@@ -219,12 +219,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   fork ruling: stock `autocrop.lua` stays byte-identical upstream; a new
   Vela-owned `vela-autocrop.lua` shim owns the auto trigger. Guards: mac probe
   red→green recorded in the plan; the `autocrop` E2E (sed-red proven).
-  **Owner playtest ask:** resume a mid-progress letterboxed/HDR title → bars crop
-  automatically within ~5s without Shift+C; fresh play still crops; Shift+C still
-  toggles; and a manual Shift+C crop+undo right after resume stays undone.
+  The owner playtested the shipped behavior and confirmed autocrop on 2026-07-15.
 
-- **SHOW-SORT + PER-LIBRARY PERSISTENCE: LANDED 2026-07-10 (`9cd3323` on 0.1.44),
-  awaiting owner playtest** (plan `.agents/plans/show-last-episode-sort.md`). Show
+- **SHOW-SORT + PER-LIBRARY PERSISTENCE: OWNER-CONFIRMED 2026-07-15**
+  (`9cd3323` on 0.1.44; plan `.agents/plans/show-last-episode-sort.md`). Show
   libraries get "Last episode added" (Plex `episode.addedAt` LIVE-VERIFIED against
   the owner's server; JF/Emby `DateLastContentAdded`; show-only, excluded from the
   merged view), and every library's sort now persists across restarts
@@ -232,12 +230,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   restart E2E, all proven red→green. **Owner playtest ask (real Plex):** show
   library → "Last episode added" → a show with a fresh episode tops the list; movie
   libraries don't offer that option; set different sorts on two libraries, restart
-  → each reopens on its own sort.
+  → each reopens on its own sort. The owner confirmed the playtest on 2026-07-15.
 
-- **OPEN ADJUDICATION (owner, from the cw-watch-state plan-review r6):** the
-  contested residual queued-edit race class — accept the recorded disposition
-  (documented accepted edge) or order the compare-and-swap hardening as a follow-up
-  plan. Detail: that plan's Review log r6 + Accepted edges.
+- **QUEUED WATCH-EDIT RACE ACCEPTED FOR v1.0 (owner, 2026-07-15):** the
+  contested r6 residual race is rare, bounded and self-healing; closing it is not
+  a quick fix because it needs persisted per-entry epochs and compare-and-swap
+  curation. Ship it as a known potential issue in the v1.0 release notes. Detail:
+  `.agents/plans/continue-watching-watch-state.md` Review log r6 + Accepted edges.
 
 - **DRIFT FOUND 2026-07-14, NOT FIXED — needs an owner go (it is a code file):**
   `src-tauri/src/source/mod.rs:63` has a comment referencing a "listing-cache"
@@ -246,13 +245,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   making a lone code commit. (`ISSUES.md`'s companion drift — an open P1 for a
   metadata cache that no longer exists — was fixed in the same pass.)
 
-- **v1.0.0 RELEASE TRACK (owner, 2026-07-10 — ordered LAST, behind the functional
+- **v1.0.0 RELEASE TRACK (owner, 2026-07-10, refined 2026-07-15 — ordered LAST,
+  behind the functional
   work above; "queue first, v1 polish goes to the bottom", where "queue" means the
   work queue, not the play queue):** (1) UI embellishments — plan QUEUED with
   decisions resolved (`.agents/plans/ui-embellishments.md`: 3 slices; vibrancy CUT
   — Linux/Wayland first; motion SUBTLE, binding); (2) docs polish — a README that
   entices users to try it; (3) graphics + screenshots for socials. 2 and 3 are
-  gated on 1 and on the functional work emptying.
+  gated on 1 and on the functional work emptying; (4) harden the GitHub release
+  build so missing platform artifacts fail closed, add the required Arch package
+  for AUR publication, and ship unsigned binaries because the owner has no Apple
+  or Windows developer credentials; (5) run the deferred final Plex/error smoke
+  before publishing. Emby ships explicitly experimental until a real-server
+  integration test exists.
 
 - Migration-time (not now): plan the one-shot Plex→JF/Emby watch-state copy
   (provider-id matching; both APIs already integrated).
@@ -282,17 +287,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner confirmed 0.1.50)
 - `.agents/plans/dependency-lts-refresh.md` (COMPLETE — final canonical,
   native-package, live-server, and external integration review green)
-- `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
+- `.agents/plans/playlists.md` (APPROVED — implementation active; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
-- `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)
-- `.agents/plans/show-last-episode-sort.md` (LANDED — awaiting owner playtest)
+- `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
+- `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
 - `.agents/plans/ui-embellishments.md` (QUEUED — v1.0.0 item 1, parked at the
   bottom)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)
-- `.agents/plans/continue-watching-watch-state.md` (COMPLETE — r6 adjudication
-  open)
+- `.agents/plans/continue-watching-watch-state.md` (COMPLETE — owner accepted
+  the r6 residual race for v1.0 release-note disclosure)
 - `.agents/plans/drop-local-sources.md`, `.agents/plans/item-detail-view.md`,
   `.agents/plans/person-browse.md` (all COMPLETE — design records)
 - `.agents/review/index.md` (durable review trails)
