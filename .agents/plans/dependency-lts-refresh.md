@@ -1,7 +1,7 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — Slice 1 landed at `7fef89a`; review fix `adc0104`;
-Codex and Grok accepted corrected r2. Slice 2 is next.** The owner approved the
+Status: **IMPLEMENTING — Slices 1–2 landed and were accepted by Codex and
+Grok; Slice 3 is next.** The owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
@@ -15,6 +15,12 @@ Implementation log:
   the Windows release leg. `adc0104` uses the platform shell for the static npm
   query; both reviewers accepted the full corrected slice at r2. Durable
   finding: `.agents/review/findings/dlr-s1-1.md`.
+- Slice 2 (`986fa2e`) replaces only the obsolete Ubuntu appindicator
+  prerequisite spelling with Tauri's current Ayatana GTK3 development package.
+  Canonical's jammy/noble indexes and Tauri's prerequisite guide confirm it;
+  YAML plus the full local command set passed. Codex CLI 0.144.4 and Grok
+  0.2.101 independently accepted exact base `3e7fd4c` and head `986fa2e` with
+  no comments.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel

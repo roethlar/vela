@@ -120,9 +120,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the existing Linux E2E VM. Slice 1 landed at `7fef89a`; its Windows assertion
   review fix landed at `adc0104`, and Codex plus Grok accepted the corrected
   full slice at r2. Node 26.5/npm 12.0.1 now drive the repo and E2E VM; the VM's
-  Ubuntu packages remain untouched. Slice 2 (current Linux appindicator build
-  prerequisite name) is next. Eight independently committed/reviewed slices
-  and the exact verification rails live in
+  Ubuntu packages remain untouched. Slice 2 then landed at `986fa2e`, changing
+  only the Ubuntu appindicator prerequisite to the current Ayatana package;
+  Codex plus Grok accepted it with no comments. Slice 3 (frontend compatibility
+  set and fail-closed npm security gate) is next. Eight independently committed/
+  reviewed slices and the exact verification rails live in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
@@ -240,8 +242,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner playtest confirmed)
 - `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
   owner confirmed 0.1.50)
-- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slice 1 accepted;
-  Slice 2 next)
+- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–2
+  accepted; Slice 3 next)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)
