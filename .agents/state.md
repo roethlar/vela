@@ -14,8 +14,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 - **PER-SURFACE-STATUS: IMPLEMENTATION COMPLETE — owner playtest FAILED
   2026-07-14 on 0.1.48.** Follow-up plan
-  `.agents/plans/failed-watch-edit-recovery.md` is DRAFTED and awaits owner
-  approval before code. The status separation itself passed: the stopped-Plex
+  `.agents/plans/failed-watch-edit-recovery.md` is APPROVED and implementation
+  is active. The status separation itself passed: the stopped-Plex
   test showed a view failure and a named edit failure on separate lines, with no
   raw URL. Recovery failed: the whole loaded Movies grid disappeared, and
   **12 Years a Slave** remained absent after Plex returned even though Plex Web
@@ -90,13 +90,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **PLAN REVIEW STOPPED — NO CONSENSUS: failed watch-state recovery
-  follow-up.** Plan `.agents/plans/failed-watch-edit-recovery.md`, one slice;
-  its `## Plan review log` is the canonical record. R1's two findings were
-  fixed. At the final allowed r2, Claude accepted and Grok reopened one
-  same-cardinality red-proof recipe because its mock-only substitution cannot
-  reach the fixed path's in-memory grid. The conditional approval did not fire;
-  the plan is not approved and no code starts without new owner direction.
+- **IMPLEMENTING: failed watch-state recovery follow-up.** Approved plan
+  `.agents/plans/failed-watch-edit-recovery.md`, one slice. The owner ordered
+  the final r2 red-proof recipe corrected, authorized coding, and requires Grok
+  `reviewloop` on every code/fix slice with no round cap. The plan's `## Plan
+  review log` is the canonical trail.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
@@ -209,8 +207,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md` (host-specific facts; the E2E venue)
 - `.agents/push-policy.md` (always ask — including the `vm` remote)
-- `.agents/plans/failed-watch-edit-recovery.md` (DRAFTED — r2 ended without
-  reviewer consensus; not approved)
+- `.agents/plans/failed-watch-edit-recovery.md` (APPROVED — implementation
+  active; Grok code review required per slice)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)

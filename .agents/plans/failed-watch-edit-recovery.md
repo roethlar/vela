@@ -1,11 +1,11 @@
 # Plan: a failed watch-state edit never reloads or loses the browse grid
 
-Status: **DRAFTED — NOT APPROVED.** The two-round Grok + Claude plan review
-ended without consensus on 2026-07-15; see `## Plan review log`. No code starts
-without new owner direction. The owner playtest of 0.1.48 failed on the real
-Plex path. This follow-up is one code slice. The per-surface-status
-implementation remains complete; this plan fixes the recovery work that runs
-underneath its correctly separated status lines.
+Status: **APPROVED (owner, 2026-07-14) — implementation authorized.** The owner
+admitted and ordered correction of the remaining r2 red-proof defect, then
+explicitly said to start coding. See `## Plan review log`. The owner playtest of
+0.1.48 failed on the real Plex path. This follow-up is one code slice. The
+per-surface-status implementation remains complete; this plan fixes the
+recovery work that runs underneath its correctly separated status lines.
 
 ## Owner-visible defect
 
@@ -64,7 +64,7 @@ same-cardinality substitution passes. The live recovery assertion requires
 only that some cards return and targets the first card in the first available
 library, not the reported Movies item.
 
-## Binding behavior (pending owner approval)
+## Binding behavior (approved)
 
 A failed watch-state edit does not reload a browse, search, person, drill, or
 detail listing. The loaded items, pagination, and scroll remain exactly as the
@@ -150,9 +150,13 @@ the committed tree after each:
 3. Publish a synthetic view failure from the failed-edit catch without making
    a listing request. The no-view-banner assertion must fail independently of
    the request and identity guards.
-4. Remove the attempted mock item while backfilling a different item with a
-   distinct `aria-label`. The old count check must remain green and the
-   exact-identity assertion must fail for the substitution.
+4. Temporarily inject a same-length UI-writing regression in `setWatched`'s
+   failed-edit catch: replace the attempted entry in `items` with a copied item
+   whose title/key produce a distinct poster `aria-label`, without clearing or
+   changing the array length. The exact-identity assertion must fail while
+   `cardCount === 60` remains green. Mutating only the mock catalog is invalid
+   here because the fixed path makes no Items request and would never publish
+   that mutation into the rendered grid.
 
 ### Real Plex guard
 
@@ -273,3 +277,10 @@ did not fire. The plan remains unapproved at the requested two-round cap. The
 r2 finding is evidence-backed and admitted, but correcting it would produce a
 new unreviewed head; no third round or implementation starts without new owner
 direction.
+
+**Owner disposition — 2026-07-14.** The owner ordered the r2 finding corrected
+as above and explicitly authorized implementation, with Grok `reviewloop` on
+each code slice and no round limit. This supersedes the stopped status in the
+preceding outcome paragraph: the corrected plan is APPROVED. Code-review
+acceptance still requires Grok to independently confirm the implemented guard
+proof with `guard_confirmed: true`.
