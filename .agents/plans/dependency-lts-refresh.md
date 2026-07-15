@@ -1,8 +1,8 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **DRAFT — owner approved Node 26, the npm security posture, and the
-Linux E2E VM Node/npm alignment on 2026-07-15; implementation awaits approval
-of this complete plan.**
+Status: **APPROVED for implementation by the owner on 2026-07-15; no code
+slice landed yet.** The owner separately approved Node 26, the npm security
+posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel

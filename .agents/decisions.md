@@ -854,7 +854,7 @@ decision, recovery behavior, and every other surface lifetime remain unchanged.
 
 ## 2026-07-15 - Dependency baseline is Node 26 plus current mutually compatible stable releases
 
-Status: APPROVED (owner, 2026-07-15). Draft implementation plan:
+Status: APPROVED (owner, 2026-07-15). Approved implementation plan:
 `.agents/plans/dependency-lts-refresh.md`.
 
 Decision:
