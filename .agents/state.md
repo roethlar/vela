@@ -156,6 +156,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   external review of the integration/version range are the only remaining
   dependency-plan gates. Exact evidence lives in
   `.agents/plans/dependency-lts-refresh.md`.
+  Active review loop: see `.agents/review/index.md` (`dlr-s8-4`).
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
