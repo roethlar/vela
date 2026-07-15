@@ -127,7 +127,7 @@ export default {
   async run({ driver }) {
     // ── 1. A real server, a real library ───────────────────────────────────
     await driver.waitFor(
-      `return document.readyState === 'complete' && document.querySelectorAll('button.sideitem').length > 0`,
+      `return document.readyState === 'complete' && [...document.querySelectorAll('button.sideitem')].some((item) => item.textContent.trim() !== 'Home')`,
       "the real server's libraries in the sidebar",
     );
     const section = await driver.exec(
