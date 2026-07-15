@@ -247,9 +247,9 @@
   // `playback-ended` after its final server check-in, so the re-fetch below is
   // guaranteed to see the updated progress/played state (the hubs fetch itself
   // is live and uncached).
-  // Shared by the playback-ended event and watched-state edits: anything
-  // that changes watch state re-fetches hubs + recents so the hero flow and
-  // progress bars reflect it without a restart.
+  // Shared by the playback-ended event and successful watched-state edits:
+  // anything that changes server truth re-fetches hubs + recents so the hero
+  // flow and progress bars reflect it without a restart.
   // Returns the reload it kicked off, so a caller that must publish AFTER the
   // repaint can actually wait for it (an un-awaited `await` on a void function is
   // a no-op that looks correct — see setWatched, codex r18).
@@ -268,9 +268,8 @@
       // refreshes through resetAndLoad, whose crumb carries a ratingKey (plan-review r2
       // established this for the person root; the search root never got it). Ungated,
       // the search re-run REPLACES a multi-crumb drill trail with the one-crumb search
-      // root — so changing watch state on a drilled item yanked the user back out to the
-      // search results, and `setWatched` then saw its own repaint move the root and
-      // silently dropped the very failure it was about to report (codex r21).
+      // root — so changing watch state on a drilled item would yank the user back out to
+      // the search results instead of repainting the drilled level (codex r21).
       if (searchTerm && crumbs.length === 1)
         return runSearch(searchTerm, { rerun: true });
       if (personView && crumbs.length === 1)
@@ -279,6 +278,18 @@
       // resetAndLoad).
       return resetAndLoad({ preserve: true });
     }
+  }
+
+  // A failed edit creates no new browse truth: the backend rolls its temporary
+  // curation back and the frontend has not mutated the clicked card. Re-entering
+  // a browse/search/person/drill root here only blanks loaded cards, loses pages
+  // and scroll, and manufactures a view failure while the server is unavailable.
+  // Home is the exception because a load racing the curate-first backend call may
+  // have rendered transient recents/tombstones. Invalidate hidden Home state, and
+  // rebuild it immediately only when Home is the active underlying root.
+  async function repairFailedWatchEdit(): Promise<void> {
+    hubs = [];
+    if (authenticated && mode === "home") await loadHome(++homeGen);
   }
 
   onMount(() => {
@@ -560,41 +571,6 @@
   // asleep until the refresh settled, which is the very stranding the scoped
   // gate exists to prevent (codex r5).
   let navEpoch = $state(0);
-
-  // WHICH ROOT the view is standing on — not which surface is layered over it, and not
-  // how many loads have run. `navEpoch` and `loadGen` are both proxies for this, and
-  // neither is a proof: a detail opening bumps `navEpoch` while leaving the grid (and
-  // the item) exactly where they were; a Plex link REPLACES the view with the
-  // device-code screen while bumping no load generation at all; re-selecting the
-  // library you are already in bumps BOTH while going nowhere. A delayed outcome that
-  // needs to know "is the user still looking at the thing I am about to talk about?"
-  // must ask the view what it is (codex + grok, r20).
-  //
-  // Cheap enough to call twice per delayed publication, and it fails CLOSED: a new
-  // root-defining field that nobody adds here can only make two roots look alike, so
-  // keep it in step with what `resetAndLoad` actually reloads.
-  function rootSig(): string {
-    return JSON.stringify([
-      authenticated,
-      pin !== null, // the device-code screen replaces the view entirely
-      mode,
-      activeSource,
-      // A Plex section key is a server-LOCAL number, so the key alone does not name a
-      // library: `sameSection` defines one by key AND binding, and this must agree with
-      // it. An unprovable rebind can put server B under us while a recovery is parked;
-      // B's section "2" is a different library with the same number, and comparing keys
-      // alone would call the two roots identical and publish A's edit failure over B's
-      // library (codex r21 — the same server-local-key hazard as r10/r12, reaching the
-      // frontend's own root test).
-      active?.key ?? null,
-      active?.binding ?? 0,
-      activeType,
-      searchTerm,
-      personView?.key ?? null,
-      crumbs.length,
-      crumbs.at(-1)?.ratingKey ?? null,
-    ]);
-  }
 
   async function loadEverything() {
     loadGen++; // a full home reload supersedes any in-flight browse/search load
@@ -990,7 +966,7 @@
       pin = p;
       // The device-code screen has REPLACED the view, so everything the old view was
       // saying goes with it — including a failure published during this very await,
-      // while the grid was still up and rootSig still described it (codex r21). What
+      // while the grid was still up (codex r21). What
       // does NOT go is the queue's: its drawer renders above this screen, still usable,
       // and its failure is still true and never superseded (codex r22).
       clearViewErrors();
@@ -1726,12 +1702,6 @@
     // This attempt owns the edit line from here on; a newer edit supersedes it.
     const attempt = ++editAttempt;
     editStatus = null; // this attempt supersedes whatever the last one said
-    // The root the edit was made IN, captured BEFORE the server call — that call is the
-    // longest wait here and the user can leave during it. It no longer gates the REPORT
-    // (the edit has its own line now, and an action's outcome is not view-scoped); it
-    // gates only whether we re-enter the CURRENT root, because repainting a library the
-    // user merely walked into throws away their scroll and their loaded pages (r22-2).
-    const myRoot = rootSig();
     try {
       // Merged cards may front a local file while a server backing owns the
       // watch state — route the action where it can actually be recorded.
@@ -1746,24 +1716,10 @@
       // any lingering server hub copy.
       refreshWatchState();
     } catch (e) {
-      // The backend curates BEFORE the server call and rolls back on failure — but an
-      // unrelated refresh (e.g. playback-ended) may have rendered the transient curated
-      // state meanwhile. Re-fetch so the rolled-back truth repaints.
-      //
-      // If the user LEFT the grid this edit was made in, do not re-enter their new one:
-      // that resets a library they merely walked into. But do not skip the re-fetch
-      // either — the recents entry was already gone and the tombstone already written
-      // when the request went out, and a Home load inside that window captured the lie.
-      // Rolled back and never re-fetched, Continue Watching keeps showing the item as
-      // gone, falsely, until a restart (r22-2 and r23 pull in opposite directions here;
-      // both hold). Not on Welcome: there is no Home to rebuild and loadHome would paint
-      // a dead-source error over a screen that cannot clear it (r14, r24).
-      if (rootSig() !== myRoot) {
-        hubs = []; // stale: a later goHome() re-fetches (see refreshWatchState)
-        if (authenticated && mode === "home") loadHome(++homeGen);
-      } else {
-        await refreshWatchState();
-      }
+      // The backend curates BEFORE the server call and rolls back on failure. A Home
+      // load inside that window may have rendered the transient state, so heal Home;
+      // never reload a listing that the failed edit did not change.
+      await repairFailedWatchEdit();
       // Report on the edit's OWN line, and report it wherever the user now is: they asked
       // for this change, it did not happen, and that is true no matter which view they are
       // looking at. No currency gate, no ownership algebra, no retract — the machinery all
@@ -1937,9 +1893,10 @@
 
   {#if editStatus}
     <!-- The EDIT's own surface, never the view's error banner above (owner ruling
-         2026-07-14). It sits alongside a listing failure rather than fighting it: both
-         are true, and the listing's is the one explaining an empty grid. Stays until the
-         next edit — a failure is not something to tidy away on a timer. -->
+         2026-07-14). It can sit alongside an independently existing view failure rather
+         than fighting it; a failed edit does not manufacture a listing request or view
+         failure of its own. Stays until the next edit — a failure is not something to
+         tidy away on a timer. -->
     <div class="scanerror" role="alert">{friendlyError(editStatus)}</div>
   {/if}
 

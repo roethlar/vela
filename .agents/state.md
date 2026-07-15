@@ -94,7 +94,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/failed-watch-edit-recovery.md`, one slice. The owner ordered
   the final r2 red-proof recipe corrected, authorized coding, and requires Grok
   `reviewloop` on every code/fix slice with no round cap. The plan's `## Plan
-  review log` is the canonical trail.
+  review log` is the design trail. Active code review: `fwer-1`; see
+  `.agents/review/index.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`

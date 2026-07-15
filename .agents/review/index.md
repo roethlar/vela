@@ -9,6 +9,12 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `fwer-1` OPEN (failed-watch-edit recovery implementation). Base
+`012a031`; branch `fix/fwer-1-failed-watch-edit-recovery`; head pending the
+implementation commit. Grok reviews the pinned code slice after the coder's
+four red proofs and full green verification. Detail:
+`.agents/review/findings/fwer-1.md`.
+
 Loop `lrs-code` OPEN (library-refresh-scan IMPLEMENTATION review; batch
 adaptation, no per-finding branches). Base `63560a6` (plan APPROVED), head
 `ca84f5b`. **r1 reopened 4, all fixed (`e9edac8`); r2 (codex-cli 0.144.1,
@@ -530,6 +536,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
+| fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
 | lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[x]` | see log |
 | lrs-2 | MEDIUM | Refresh case 5 passes with the content-leg navEpoch gate removed (loadMore reads live state) | `[x]` | see log |
 | lrs-3 | MEDIUM | Refresh case 14 omits the plan's reverse-ordering phase: leg-failure generation ownership unguarded | `[x]` | see log |
