@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import Icon from "$lib/Icon.svelte";
-  import { detailKeyOf, type Detail, type Item, type PersonRef } from "$lib/types";
+  import { detailKeyOf, type Detail, type Item, type PersonRef, type PlayIntent } from "$lib/types";
 
   // Full-screen info page for a single item (movie / video). Renders the
   // listing data immediately and enriches in place when `get_item_detail`
@@ -17,7 +17,7 @@
   }: {
     item: Item;
     posterSrc: (p: string) => string;
-    onPlay: (item: Item) => void;
+    onPlay: (item: Item, intent?: PlayIntent) => void;
     onMenu: (e: MouseEvent, item: Item) => void;
     // Person browse: cast cards and director/writer names are clickable when
     // the backend identified the person; absent keys render plain text.
@@ -47,6 +47,7 @@
   let backdrop = $derived(detail?.backdrop ?? item.backdrop);
   let durationMs = $derived(detail?.durationMs ?? item.durationMs);
   let viewOffsetMs = $derived(detail?.viewOffsetMs ?? item.viewOffsetMs);
+  let inProgress = $derived((viewOffsetMs ?? 0) > 0);
   let played = $derived(detail?.played ?? item.played);
   let playable = $derived(item.mediaType !== "show" && item.mediaType !== "season");
   let posterFailed = $state(false);
@@ -123,9 +124,9 @@
         <button
           class="posterframe"
           class:noplay={!playable}
-          onclick={() => playable && onPlay(item)}
+          onclick={() => playable && onPlay(item, "resume")}
           oncontextmenu={(e) => onMenu(e, item)}
-          aria-label={playable ? `Play ${title}` : title}
+          aria-label={playable ? `${inProgress ? "Resume" : "Play"} ${title}` : title}
         >
           {#if poster && !posterFailed}
             <img src={posterSrc(poster)} alt={title} onerror={() => (posterFailed = true)} />
@@ -142,10 +143,17 @@
           {/if}
         </button>
         {#if playable}
-          <button class="primary playwide" onclick={() => onPlay(item)}>
-            <Icon name="play" size={16} />
-            {pct !== null ? "Resume" : "Play"}
-          </button>
+          <div class="playactions">
+            <button class="primary playwide" onclick={() => onPlay(item, "resume")}>
+              <Icon name="play" size={16} />
+              {inProgress ? "Resume" : "Play"}
+            </button>
+            {#if inProgress}
+              <button class="playwide" onclick={() => onPlay(item, "beginning")}>
+                Play from Beginning
+              </button>
+            {/if}
+          </div>
         {/if}
       </div>
       <div class="info">
@@ -342,6 +350,22 @@
     padding: 0.55rem 0.9rem;
     border-radius: 0.5rem;
     font-weight: 600;
+  }
+  .playactions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
+  }
+  .playactions .playwide {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .playactions .primary {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--on-accent);
   }
   .info {
     flex: 1;

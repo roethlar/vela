@@ -6,7 +6,7 @@
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
-  import { detailKeyOf, type Detail, type Item } from "$lib/types";
+  import { detailKeyOf, type Detail, type Item, type PlayIntent } from "$lib/types";
 
   // Poster URLs that 404'd; fall back to the title placeholder for these.
   let failedPosters = $state(new Set<string>());
@@ -17,7 +17,6 @@
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
-    if (queueTimer) clearInterval(queueTimer);
     unlistenPlaybackEnded?.();
     linkGen++; // invalidate any in-flight link_poll so it won't reschedule after unmount
   });
@@ -111,7 +110,7 @@
   // with no status at all (codex r12).
   // The view's banner. ONE writer class now: the listing, the refresh, the search — the
   // things that describe THIS view and die with it. Every other writer reports on its own
-  // surface (the scan's, the edit's, the queue's, the mpv bar's, the detail's), which is
+  // surface (the scan's, the edit's, the mpv bar's, the detail's), which is
   // what `.agents/plans/per-surface-status.md` was for.
   //
   // That is why there is no `owner` field here any more, no per-surface clear, and no
@@ -300,8 +299,6 @@
     // Check mpv up front so we can prompt to install before the user hits play.
     invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     invoke<AppInfo>("get_app_info").then((a) => (appInfo = a)).catch(() => {});
-    refreshQueue(); // so the header chip shows the count from launch
-
     try {
       await loadSourceList();
       authenticated = sources.length > 0;
@@ -596,8 +593,8 @@
   async function loadHome(gen: number = homeGen) {
     mode = "home";
     loading = true;
-    // Clears the VIEW's parts only — the queue drawer, the mpv bar and an open detail are
-    // not this load's to silence (see setError).
+    // Clears the VIEW's parts only — the mpv bar and an open detail are not
+    // this load's to silence (see setError).
     setError(null);
     try {
       const [h, r, t] = await Promise.all([
@@ -966,9 +963,7 @@
       pin = p;
       // The device-code screen has REPLACED the view, so everything the old view was
       // saying goes with it — including a failure published during this very await,
-      // while the grid was still up (codex r21). What
-      // does NOT go is the queue's: its drawer renders above this screen, still usable,
-      // and its failure is still true and never superseded (codex r22).
+      // while the grid was still up (codex r21).
       clearViewErrors();
       // The bump at the top of beginLink() invalidates whatever was in flight
       // THEN — but Settings closes immediately, so the user can start a Refresh
@@ -1273,8 +1268,7 @@
         // This tears the search root DOWN and replaces it. Anything the old root was
         // saying — a failed edit made in those results, its own listing diagnostic —
         // describes a view that is gone, and `setError` alone would keep every untagged
-        // part (gen 0 says no LOAD owns it, not that it belongs here). Only the queue's
-        // survives (codex r23).
+        // part (gen 0 says no LOAD owns it, not that it belongs here).
         clearViewErrors();
         navEpoch++; // tearing down the search root is navigation (see navEpoch)
         items = [];
@@ -1387,78 +1381,24 @@
     }
   }
 
-  // Play queue (Phase B). The backend owns the queue; we just send actions and
-  // pull a snapshot for the drawer. queueItemFromItem captures the display
-  // fields the drawer needs (title/poster/subtitle), so right-clicking an item
-  // in any view enqueues the same poster we'd show in the grid.
-  type QueueItem = {
-    ratingKey: string;
-    title: string;
-    durationMs: number | null;
-    poster: string | null;
-    subtitle: string | null;
-  };
-  type QueueSnapshot = { items: QueueItem[]; currentIndex: number | null };
-
-  function queueItemFromItem(item: Item): QueueItem {
-    const subtitle = item.grandparentTitle
-      ? item.parentIndex != null && item.index != null
-        ? `S${item.parentIndex} · E${item.index}`
-        : item.title
-      : item.year != null
-        ? `${item.year}`
-        : null;
-    return {
-      ratingKey: item.ratingKey,
-      title: item.grandparentTitle ?? item.title,
-      durationMs: item.durationMs ?? null,
-      poster: item.poster ?? null,
-      subtitle,
-    };
+  function hasResume(item: Pick<Item, "viewOffsetMs">): boolean {
+    return (item.viewOffsetMs ?? 0) > 0;
   }
 
-  let queue = $state<QueueSnapshot>({ items: [], currentIndex: null });
-  let queueOpen = $state(false);
-  let queueTimer: ReturnType<typeof setInterval> | undefined;
-
-  async function refreshQueue() {
+  async function play(item: Item, intent: PlayIntent = "resume") {
+    // A beginning request starts a new local Continue Watching snapshot too;
+    // retaining the old offset would make the hero advertise stale progress
+    // until the first tracker update lands.
+    const playedItem = intent === "beginning" ? { ...item, viewOffsetMs: 0 } : item;
     try {
-      queue = await invoke<QueueSnapshot>("queue_list");
-    } catch {
-      // Backend unreachable mid-startup is fine to ignore here.
-    }
-  }
-  function toggleQueue() {
-    queueOpen = !queueOpen;
-    // Closing the drawer dismisses what it is REPORTING — the user has seen it, and
-    // otherwise a queue failure has nothing that can ever clear it (codex r24).
-    //
-    // It must NOT abandon an action still IN FLIGHT. That failure has not happened yet, and
-    // when it does it is just as real as if the drawer were open — the user asked for a
-    // play and did not get one. Bumping the attempt here dropped it silently, and made the
-    // chip's failure mark dead code: with the drawer shut there was no other way to reach
-    // it, and with it open you cannot navigate (the backdrop swallows the sidebar). The
-    // outcome lands; the CHIP is where it shows.
-    if (!queueOpen) queueStatus = null;
-    if (queueOpen) {
-      refreshQueue();
-      // While the drawer is visible, poll lightly so auto-advances (which run
-      // entirely in the backend on mpv EOF) show up without a user action.
-      queueTimer = setInterval(refreshQueue, 3000);
-    } else if (queueTimer) {
-      clearInterval(queueTimer);
-      queueTimer = undefined;
-    }
-  }
-
-  async function play(item: Item) {
-    try {
-      await invoke("play_item", { item: queueItemFromItem(item) });
+      await invoke("play_item", {
+        item: playedItem,
+        startFromBeginning: intent === "beginning",
+      });
       // Snapshot into Vela's recents only after the session actually
       // launched (play_item resolves at mpv spawn): a FAILED play must not
       // create a recents entry or clear a remove-from-continue tombstone.
-      invoke("record_recent", { item }).catch(() => {});
-      if (queueOpen) refreshQueue();
+      invoke("record_recent", { item: playedItem }).catch(() => {});
     } catch (e) {
       // A Play started from an open detail is reported ON that detail, which survives a
       // search teardown underneath it — so the view's clear is not its owner (slice 4).
@@ -1473,13 +1413,17 @@
 
   // Play a merged title from a specific backing source and remember the
   // choice for this title (it wins over the default ranking from now on).
-  async function playFrom(item: Item, b: { sourceId: string; ratingKey: string }) {
+  async function playFrom(
+    item: Item,
+    b: { sourceId: string; ratingKey: string },
+    intent: PlayIntent = "resume",
+  ) {
     closeMenu();
     try {
       if (item.canonicalId) {
         await invoke("set_merged_override", { canonicalId: item.canonicalId, sourceId: b.sourceId });
       }
-      await play({ ...item, ratingKey: b.ratingKey, sourceId: b.sourceId });
+      await play({ ...item, ratingKey: b.ratingKey, sourceId: b.sourceId }, intent);
     } catch (e) {
       // Only the source-preference write can land here — `play` reports its own failure
       // and does not rethrow. Same rule either way: report on the surface the user is
@@ -1493,67 +1437,9 @@
   // The menu's Play entry must take `mi` as an argument BEFORE closing the
   // menu: `mi` is a template {@const} over `menu.item`, so an inline
   // `closeMenu(); play(mi)` nulls `menu` first and the `mi` read throws.
-  function playFromCtx(item: Item) {
+  function playFromCtx(item: Item, intent: PlayIntent) {
     closeMenu();
-    play(item);
-  }
-
-  async function playNext(item: Item) {
-    closeMenu();
-    const attempt = ++queueAttempt;
-    queueStatus = null; // this attempt supersedes whatever the last one said
-    try {
-      await invoke("queue_play_next", { item: queueItemFromItem(item) });
-      refreshQueue();
-    } catch (e) {
-      // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = `Couldn't queue “${item.title}” to play next — ${String(e)}`;
-    }
-  }
-  async function addToQueue(item: Item) {
-    closeMenu();
-    const attempt = ++queueAttempt;
-    queueStatus = null; // this attempt supersedes whatever the last one said
-    try {
-      await invoke("queue_append", { item: queueItemFromItem(item) });
-      refreshQueue();
-    } catch (e) {
-      // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = `Couldn't add “${item.title}” to the queue — ${String(e)}`;
-    }
-  }
-  async function queueJumpTo(index: number) {
-    const attempt = ++queueAttempt;
-    queueStatus = null; // this attempt supersedes whatever the last one said
-    try {
-      await invoke("queue_play_at", { index });
-      refreshQueue();
-    } catch (e) {
-      // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = `Couldn't play “${queue.items[index]?.title ?? "that item"}” — ${String(e)}`;
-    }
-  }
-  async function queueRemove(index: number) {
-    const attempt = ++queueAttempt;
-    queueStatus = null; // this attempt supersedes whatever the last one said
-    try {
-      await invoke("queue_remove", { index });
-      refreshQueue();
-    } catch (e) {
-      // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = `Couldn't remove “${queue.items[index]?.title ?? "that item"}” from the queue — ${String(e)}`;
-    }
-  }
-  async function queueClearAll() {
-    const attempt = ++queueAttempt;
-    queueStatus = null; // this attempt supersedes whatever the last one said
-    try {
-      await invoke("queue_clear");
-      refreshQueue();
-    } catch (e) {
-      // On the QUEUE's own surface, never the view's banner (slice 2).
-      if (attempt === queueAttempt) queueStatus = `Couldn't clear the queue — ${String(e)}`;
-    }
+    play(item, intent);
   }
 
   // Right-click context menu for per-item actions.
@@ -1642,17 +1528,6 @@
     editAttempt++;
     clearEditStatus();
   });
-
-  // The queue's own status (per-surface-status slice 2). Its drawer and chip outlive every
-  // view — they render above the device-code screen too — so a queue failure is not the
-  // view's to erase, and the view's clears are not its to obey. That mismatch was the
-  // seventh door into the same silent loss: `setError(null)`, which every load start calls,
-  // wiped a queue failure on the next navigation while the drawer was still open and the
-  // failure still true (codex + grok, r24).
-  //
-  // Cleared by the next queue action, or by closing the drawer — the user has seen it.
-  let queueStatus = $state<string | null>(null);
-  let queueAttempt = 0;
 
   // The mpv setup bar's own status (per-surface-status slice 3). The bar is global and
   // stays mounted until mpv is resolved — it does not belong to any view — so a view's
@@ -1906,17 +1781,6 @@
         onkeydown={(e) => e.key === "Enter" && runSearch()}
       />
     {/if}
-    <button
-      class="queuechip"
-      class:has-items={queue.items.length > 0}
-      class:active={queueOpen}
-      class:failed={queueStatus !== null}
-      title={queueStatus ? friendlyError(queueStatus) : "Play queue"}
-      aria-label="Play queue ({queue.items.length} item{queue.items.length === 1 ? '' : 's'}){queueStatus ? ' — last action failed' : ''}"
-      onclick={toggleQueue}
-    >
-      <Icon name="queue" size={17} />{#if queue.items.length > 0}<span class="qcount">{queue.items.length}</span>{/if}
-    </button>
     <button class="gear" title="Settings" aria-label="Settings" onclick={() => (showSettings = true)}>
       <Icon name="settings" />
     </button>
@@ -2063,6 +1927,7 @@
   {#snippet heroFlow()}
     {@const idx = heroClamp(heroPos)}
     {@const center = heroItems[idx]}
+    {@const centerInProgress = hasResume(center)}
     {@const centerEp =
       center.parentIndex != null && center.index != null
         ? `S${center.parentIndex} · E${center.index} – ${center.title}`
@@ -2086,7 +1951,7 @@
               onclick={() => (d === 0 ? play(it) : (heroPos = i))}
               oncontextmenu={(e) => openMenu(e, it, true)}
               title={it.grandparentTitle ?? it.title}
-              aria-label={d === 0 ? `Play ${it.grandparentTitle ?? it.title}` : `Show ${it.grandparentTitle ?? it.title}`}
+              aria-label={d === 0 ? `${hasResume(it) ? "Resume" : "Play"} ${it.grandparentTitle ?? it.title}` : `Show ${it.grandparentTitle ?? it.title}`}
             >
               <div class="art">
                 {#if art && !failedPosters.has(art)}
@@ -2132,6 +1997,14 @@
         {/if}
         {#if activeSource === null && sources.length > 1 && center.sourceId}
           <span class="y srctag">· {sourceNameOf(center.sourceId)}</span>
+        {/if}
+      </div>
+      <div class="flowactions" aria-label="Playback choices for {center.grandparentTitle ?? center.title}">
+        <button class="primary" onclick={() => play(center, "resume")}>
+          <Icon name="play" size={15} /> {centerInProgress ? "Resume" : "Play"}
+        </button>
+        {#if centerInProgress}
+          <button onclick={() => play(center, "beginning")}>Play from Beginning</button>
         {/if}
       </div>
     </section>
@@ -2370,12 +2243,11 @@
 <svelte:window
   onkeydown={(e) => {
     if (e.key === "Escape") {
-      // Menus first (topmost surfaces), then the drawer, then the detail —
+      // Menus first (topmost surfaces), then the detail —
       // Escape with the scan menu open must not close a detail underneath it
       // (codex code review r1, finding 4).
       if (menu) closeMenu();
       else if (sectionMenu) closeSectionMenu();
-      else if (queueOpen) toggleQueue();
       else if (detailView) closeDetail();
     }
   }}
@@ -2388,14 +2260,17 @@
   {@const inProgress = (mi.viewOffsetMs ?? 0) > 0}
   {@const fullyWatched = mi.played === true && !inProgress}
   <div class="ctxmenu" style="left:{menu.x}px; top:{menu.y}px;" role="menu">
-    <button role="menuitem" onclick={() => playFromCtx(mi)}>Play</button>
+    {#if inProgress}
+      <button role="menuitem" onclick={() => playFromCtx(mi, "resume")}>Resume</button>
+      <button role="menuitem" onclick={() => playFromCtx(mi, "beginning")}>Play from Beginning</button>
+    {:else}
+      <button role="menuitem" onclick={() => playFromCtx(mi, "resume")}>Play</button>
+    {/if}
     {#if mi.mediaType !== "show"}
       <!-- The info path for the Continue Watching flow, where click plays;
            shows get no entry — their info surface is the seasons drill. -->
       <button role="menuitem" onclick={() => openInfo(mi)}>Info</button>
     {/if}
-    <button role="menuitem" onclick={() => playNext(mi)}>Play next</button>
-    <button role="menuitem" onclick={() => addToQueue(mi)}>Add to queue</button>
     {#if mi.played != null && !fullyWatched}
       <button role="menuitem" onclick={() => setWatched(mi, true)}>Mark watched</button>
     {/if}
@@ -2409,9 +2284,18 @@
       <!-- Merged title: pick which source plays it (persists for this title).
            Keyed by the full backing identity — sourceId alone can collide. -->
       {#each mi.backing! as b (b.sourceId + ":" + b.ratingKey)}
-        <button role="menuitem" onclick={() => playFrom(mi, b)}>
-          Play from {sourceNameOf(b.sourceId)}
-        </button>
+        {#if inProgress}
+          <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
+            Resume from {sourceNameOf(b.sourceId)}
+          </button>
+          <button role="menuitem" onclick={() => playFrom(mi, b, "beginning")}>
+            Play from Beginning on {sourceNameOf(b.sourceId)}
+          </button>
+        {:else}
+          <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
+            Play from {sourceNameOf(b.sourceId)}
+          </button>
+        {/if}
       {/each}
     {/if}
   </div>
@@ -2426,49 +2310,6 @@
          the per-section generation in scanSection. -->
     <button role="menuitem" disabled={scanning[sm.key]} onclick={() => scanSection(sm)}>Scan Library</button>
   </div>
-{/if}
-
-{#if queueOpen}
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="drawerbackdrop" role="presentation" onclick={toggleQueue}></div>
-  <aside class="drawer" aria-label="Play queue">
-    <header class="drawerhead">
-      <div class="drawertitle">Up Next{#if queue.items.length > 0}<span class="qcount inline">{queue.items.length}</span>{/if}</div>
-      <div class="drawerhead-actions">
-        {#if queue.items.length > 0}
-          <button class="drawerlink" onclick={queueClearAll}>Clear</button>
-        {/if}
-        <button class="drawerclose" aria-label="Close queue" onclick={toggleQueue}><Icon name="close" size={16} /></button>
-      </div>
-    </header>
-    {#if queueStatus}
-      <!-- The QUEUE's own surface (per-surface-status slice 2), never the view's error
-           banner. It sits with the thing it is about. -->
-      <div class="drawererror" role="alert">{friendlyError(queueStatus)}</div>
-    {/if}
-    {#if queue.items.length === 0}
-      <div class="drawerempty">Nothing queued. Right-click an item to add it here.</div>
-    {:else}
-      <ol class="drawerlist">
-        {#each queue.items as qi, i (qi.ratingKey + ":" + i)}
-          <li class="drawerrow" class:current={i === queue.currentIndex}>
-            <button class="drawerplay" title="Play this item" onclick={() => queueJumpTo(i)}>
-              {#if qi.poster}
-                <img class="drawerthumb" src={posterSrc(qi.poster)} alt="" loading="lazy" onerror={(e) => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
-              {:else}
-                <div class="drawerthumb noart small">{qi.title}</div>
-              {/if}
-              <div class="drawerinfo">
-                <div class="drawerinfotitle">{qi.title}</div>
-                {#if qi.subtitle}<div class="drawerinfosub">{qi.subtitle}</div>{/if}
-              </div>
-            </button>
-            <button class="drawerremove" title="Remove from queue" aria-label="Remove from queue" onclick={() => queueRemove(i)}><Icon name="close" size={15} /></button>
-          </li>
-        {/each}
-      </ol>
-    {/if}
-  </aside>
 {/if}
 
 <style>
@@ -2921,6 +2762,30 @@
     text-align: center;
     margin-top: 0.5rem;
   }
+  .flowactions {
+    display: flex;
+    justify-content: center;
+    gap: 0.5rem;
+    margin-top: 0.65rem;
+  }
+  .flowactions button {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    border: 1px solid var(--border);
+    border-radius: 0.45rem;
+    padding: 0.45rem 0.75rem;
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.84rem;
+  }
+  .flowactions button.primary {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--on-accent);
+  }
   /* Home rails */
   .home {
     flex: 1;
@@ -3174,25 +3039,6 @@
     color: var(--errfg, #ffb4a9);
   }
 
-  /* The QUEUE's own failure, inside its drawer — never .error, which is the VIEW's.
-     A `div.error` selector must never accidentally match it (the same rule the scan's
-     .scanerror follows). */
-  .drawererror {
-    margin: 0 14px 10px;
-    padding: 8px 10px;
-    border-radius: 8px;
-    font-size: 12px;
-    line-height: 1.4;
-    color: var(--errfg, #ffb4a9);
-    background: var(--errbg, rgba(255, 80, 60, 0.12));
-    border: 1px solid var(--errborder, rgba(255, 80, 60, 0.28));
-  }
-  /* ...and a mark on the chip, so a failure stays discoverable with the drawer shut. */
-  .queuechip.failed {
-    color: var(--errfg, #ffb4a9);
-    box-shadow: inset 0 0 0 1px var(--errborder, rgba(255, 80, 60, 0.45));
-  }
-
   /* Neutral transient status (scan started) — same slot as .error, calmer. */
   .notice {
     background: rgba(255, 255, 255, 0.06);
@@ -3254,203 +3100,4 @@
     background: var(--surface-2);
   }
 
-  /* Header queue chip */
-  .queuechip {
-    background: transparent;
-    border: 1px solid transparent;
-    color: var(--text-2);
-    font: inherit;
-    font-size: 0.9rem;
-    padding: 0.3rem 0.55rem;
-    border-radius: 0.45rem;
-    cursor: pointer;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-  }
-  .queuechip:hover {
-    background: var(--border-subtle);
-  }
-  .queuechip.has-items {
-    color: var(--text-bright);
-  }
-  .queuechip.active {
-    background: var(--border-subtle);
-    border-color: var(--border);
-  }
-  .qcount {
-    background: var(--accent);
-    color: var(--on-accent);
-    font-size: 0.7rem;
-    font-weight: 700;
-    border-radius: 0.7rem;
-    padding: 0.05rem 0.4rem;
-    line-height: 1.1;
-  }
-  .qcount.inline {
-    margin-left: 0.5rem;
-  }
-
-  /* Queue drawer */
-  .drawerbackdrop {
-    position: fixed;
-    inset: 0;
-    z-index: 30;
-    background: rgba(0, 0, 0, 0.25);
-    animation: vela-fade 0.16s var(--ease);
-  }
-  .drawer {
-    position: fixed;
-    top: 0;
-    right: 0;
-    bottom: 0;
-    width: 360px;
-    max-width: 92vw;
-    z-index: 31;
-    background: var(--surface-sunken);
-    border-left: 1px solid var(--border);
-    box-shadow: -10px 0 30px rgba(0, 0, 0, 0.45);
-    display: flex;
-    flex-direction: column;
-    animation: vela-slide-right 0.22s var(--ease);
-  }
-  .drawerhead {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 0.85rem 1rem;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .drawertitle {
-    font-weight: 700;
-    color: var(--text);
-    display: inline-flex;
-    align-items: center;
-  }
-  .drawerhead-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-  }
-  .drawerlink {
-    background: none;
-    border: none;
-    color: var(--accent);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.85rem;
-    padding: 0.2rem 0.4rem;
-    border-radius: 0.35rem;
-  }
-  .drawerlink:hover {
-    background: var(--border-subtle);
-  }
-  .drawerclose {
-    background: none;
-    border: none;
-    color: var(--text-muted);
-    cursor: pointer;
-    padding: 0.35rem;
-    border-radius: 0.35rem;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-  .drawerclose:hover {
-    color: var(--text-bright);
-    background: var(--border-subtle);
-  }
-  .drawerempty {
-    padding: 1.25rem 1rem;
-    color: var(--text-muted);
-    font-size: 0.85rem;
-  }
-  .drawerlist {
-    list-style: none;
-    margin: 0;
-    padding: 0.5rem;
-    overflow-y: auto;
-    flex: 1;
-  }
-  .drawerrow {
-    display: flex;
-    align-items: stretch;
-    gap: 0.4rem;
-    margin: 0;
-    padding: 0;
-  }
-  .drawerrow + .drawerrow {
-    margin-top: 0.25rem;
-  }
-  .drawerplay {
-    flex: 1;
-    display: flex;
-    align-items: center;
-    gap: 0.6rem;
-    background: none;
-    border: 1px solid transparent;
-    border-radius: 0.5rem;
-    padding: 0.4rem 0.5rem;
-    color: var(--text);
-    text-align: left;
-    cursor: pointer;
-    min-width: 0;
-  }
-  .drawerplay:hover {
-    background: var(--border-subtle);
-  }
-  .drawerrow.current .drawerplay {
-    border-color: var(--accent);
-    background: rgba(229, 160, 13, 0.08);
-  }
-  .drawerthumb {
-    width: 64px;
-    height: 36px;
-    object-fit: cover;
-    border-radius: 0.3rem;
-    background: var(--surface);
-    flex-shrink: 0;
-  }
-  .drawerthumb.noart.small {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
-    font-size: 0.65rem;
-    padding: 0.2rem;
-    text-align: center;
-    overflow: hidden;
-  }
-  .drawerinfo {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 0.15rem;
-  }
-  .drawerinfotitle {
-    font-size: 0.88rem;
-    font-weight: 600;
-    color: var(--text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .drawerinfosub {
-    font-size: 0.75rem;
-    color: var(--text-muted);
-  }
-  .drawerremove {
-    background: none;
-    border: none;
-    color: var(--text-dim);
-    cursor: pointer;
-    padding: 0 0.45rem;
-    border-radius: 0.35rem;
-    display: inline-flex;
-    align-items: center;
-  }
-  .drawerremove:hover {
-    color: var(--danger-text);
-    background: var(--border-subtle);
-  }
 </style>

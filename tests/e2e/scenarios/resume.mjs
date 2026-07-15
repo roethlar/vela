@@ -12,7 +12,7 @@ import {
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
-const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Play Mock Movie"]`;
+const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Resume Mock Movie"]`;
 
 let mock;
 

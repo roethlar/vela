@@ -146,7 +146,7 @@ export default {
     // …and the hero cover-flow shows it as Continue Watching.
     await driver.find('xpath', `//button[contains(@class,'sideitem') and normalize-space(.)='Home']`).then((el) => driver.click(el));
     await driver.waitFor(
-      `return !!document.querySelector('[aria-label="Continue watching"] [aria-label^="Play Mock Movie"]')`,
+      `return !!document.querySelector('[aria-label="Continue watching"] [aria-label^="Resume Mock Movie"]')`,
       'movie in the Continue Watching hero',
     ).catch(async (err) => {
       const state = await driver.exec(

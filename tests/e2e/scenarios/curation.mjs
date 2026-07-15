@@ -11,7 +11,7 @@ import path from 'node:path';
 import { pollUntil, openLibraryGrid, goHome, playAndQuit, makeClips, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
-const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Play Mock Movie"]`;
+const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Resume Mock Movie"]`;
 const EMPTY_HOME = 'Nothing on your home screen yet';
 
 let mock;
@@ -27,7 +27,7 @@ async function playClipAndQuit(driver) {
     );
     const play = await driver
       .waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu (play)')
-      .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='Play']`));
+      .then(() => driver.find('xpath', `(//button[@role='menuitem' and (normalize-space(.)='Resume' or normalize-space(.)='Play')])[1]`));
     await driver.click(play);
   });
 }

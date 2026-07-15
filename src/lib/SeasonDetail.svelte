@@ -1,7 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import Icon from "$lib/Icon.svelte";
-  import { detailKeyOf, type Detail, type Item, type PersonRef } from "$lib/types";
+  import { detailKeyOf, type Detail, type Item, type PersonRef, type PlayIntent } from "$lib/types";
 
   // The shared episode info page (binding UX ruling): ONE page per season —
   // an episode list plus a detail panel bound to the selection; selecting an
@@ -30,7 +30,7 @@
     seed: Item;
     initialSelKey?: string;
     posterSrc: (p: string) => string;
-    onPlay: (item: Item) => void;
+    onPlay: (item: Item, intent?: PlayIntent) => void;
     onMenu: (e: MouseEvent, item: Item) => void;
     // Heading navigation (owner playtest 2026-07-08): the show title links to
     // the show's seasons drill; the season title links to the full season
@@ -129,6 +129,13 @@
   let panelSummary = $derived(detail?.summary ?? selected?.summary);
   let panelStill = $derived(detail?.poster ?? selected?.poster);
   let panelDuration = $derived(detail?.durationMs ?? selected?.durationMs);
+  let panelViewOffset = $derived(detail?.viewOffsetMs ?? selected?.viewOffsetMs);
+  let panelInProgress = $derived((panelViewOffset ?? 0) > 0);
+  let panelPct = $derived(
+    panelViewOffset && panelDuration
+      ? Math.round(Math.min(100, (100 * panelViewOffset) / panelDuration))
+      : null
+  );
   let stillFailed = $state(false);
   $effect(() => {
     void selKey;
@@ -254,7 +261,6 @@
     </div>
     <div class="panel">
       {#if selected}
-        {@const pct = pctOf(selected)}
         <div class="stillwrap">
           {#if panelStill && !stillFailed}
             <img class="still" src={posterSrc(panelStill)} alt="" onerror={() => (stillFailed = true)} />
@@ -272,12 +278,19 @@
           {#if detail?.originallyAvailableAt}<span>{detail.originallyAvailableAt}</span>{/if}
           {#if panelDuration}<span>{runtimeLabel(panelDuration)}</span>{/if}
           {#if detail?.rating != null}<span title="Rating">★ {detail.rating.toFixed(1)}</span>{/if}
-          {#if selected.played === true && pct === null}<span class="chip watched"><Icon name="check" size={12} stroke={2.5} /> Watched</span>{/if}
+          {#if selected.played === true && panelPct === null}<span class="chip watched"><Icon name="check" size={12} stroke={2.5} /> Watched</span>{/if}
         </div>
-        <button class="primary playwide" onclick={() => onPlay(selected!)}>
-          <Icon name="play" size={16} />
-          {pct !== null ? "Resume" : "Play"}
-        </button>
+        <div class="playactions">
+          <button class="primary playwide" onclick={() => onPlay(selected!, "resume")}>
+            <Icon name="play" size={16} />
+            {panelInProgress ? "Resume" : "Play"}
+          </button>
+          {#if panelInProgress}
+            <button class="playwide" onclick={() => onPlay(selected!, "beginning")}>
+              Play from Beginning
+            </button>
+          {/if}
+        </div>
         {#if panelSummary}
           <p class="summary">{panelSummary}</p>
         {/if}
@@ -550,7 +563,23 @@
     padding: 0.5rem 0.9rem;
     border-radius: 0.5rem;
     font-weight: 600;
+  }
+  .playactions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.45rem;
     margin-bottom: 0.9rem;
+  }
+  .playactions .playwide {
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .playactions .primary {
+    border-color: transparent;
+    background: var(--accent);
+    color: var(--on-accent);
   }
   .summary {
     margin: 0 0 0.9rem;

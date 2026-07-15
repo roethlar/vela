@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -2141,21 +2141,6 @@ pub async fn set_watched(
 
 // ---- playback ------------------------------------------------------------
 
-/// Display-friendly snapshot of a queued item — what the drawer renders and what
-/// the dispatcher needs to drive the next play.
-#[derive(Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QueueItem {
-    pub rating_key: String,
-    pub title: String,
-    pub duration_ms: Option<u64>,
-    /// http(s) URL or asset path; the drawer uses convertFileSrc for non-http.
-    pub poster: Option<String>,
-    /// e.g. "S5 · E8" for episodes, "2026" for movies — what the frontend would
-    /// otherwise compute itself.
-    pub subtitle: Option<String>,
-}
-
 /// Snapshot an item into Vela's recents as playback starts (frontend passes
 /// the full card it played, artwork included). The end notifier stamps the
 /// final position and drops finished entries.
@@ -2222,29 +2207,18 @@ pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
     Ok(cfg.hidden_from_continue.clone())
 }
 
-/// Result of `queue_list` — the queue snapshot plus the cursor, so the drawer
-/// can highlight whichever item is currently playing.
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct QueueSnapshot {
-    pub items: Vec<QueueItem>,
-    pub current_index: Option<usize>,
-}
-
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
-/// Used by `play_item` (top-level play) AND by `queue_play_at` and the auto-
-/// advance dispatcher — same lock discipline regardless of trigger.
+/// All play contexts use the same lock discipline regardless of trigger.
 pub(crate) async fn play_by_key(
     state: &AppState,
-    rating_key: &str,
-    title: &str,
-    duration_ms: Option<u64>,
+    item: &ItemDto,
+    start_from_beginning: bool,
 ) -> Result<(), String> {
     // Serialize the whole resolve+stop-old+spawn sequence so overlapping triggers
     // can't both spawn an mpv and lose one of the child handles.
     let _play = state.play_lock.lock().await;
-    let (src, raw) = state.registry.lock().await.route(rating_key)?;
-    let resolved = src.resolve_stream(&raw, duration_ms).await?;
+    let (src, raw) = state.registry.lock().await.route(&item.rating_key)?;
+    let resolved = src.resolve_stream(&raw, item.duration_ms).await?;
 
     // Cancel the prior tracker and terminate the prior mpv so we never run two
     // players. The kill is a non-blocking syscall; the reap is handed to the
@@ -2275,13 +2249,14 @@ pub(crate) async fn play_by_key(
     // resume_ms 0 — fall back to Vela's own stamped position so a Continue
     // Watching click actually continues (2026-07-04 hero decision). A server
     // that supplies a position still wins: it is the watch-state authority.
-    let resume_ms = if resolved.resume_ms > 0 {
-        resolved.resume_ms
-    } else {
+    let local_resume_ms = if !start_from_beginning && resolved.resume_ms == 0 {
         config::load_config()
-            .map(|cfg| crate::recents::resume_stamp_ms(&cfg, rating_key))
+            .map(|cfg| crate::recents::resume_stamp_ms(&cfg, &item.rating_key))
             .unwrap_or(0)
+    } else {
+        0
     };
+    let resume_ms = playback_start_ms(start_from_beginning, resolved.resume_ms, local_resume_ms);
     // Resolve the bundled mpv autocrop script here (the command layer holds the
     // AppHandle; `playback::play` does not). Whether it's injected depends on the
     // `mpv_autocrop` config mode, decided in `play`. `resolve` only computes the
@@ -2305,7 +2280,7 @@ pub(crate) async fn play_by_key(
     let autocrop_shim = resolve_resource("vela-autocrop.lua");
     let spec = playback::PlaySpec {
         url: resolved.url,
-        title: title.to_string(),
+        title: item.title.clone(),
         http_headers: resolved.http_headers,
         start_seconds: resume_ms as f64 / 1000.0,
         autocrop_script,
@@ -2318,7 +2293,7 @@ pub(crate) async fn play_by_key(
         use tauri::Emitter;
         let app = app.clone();
         let source_id = src.id().to_string();
-        let item_key = rating_key.to_string();
+        let item_key = item.rating_key.clone();
         std::sync::Arc::new(move |position_ms: u64| {
             // Stamp Vela's recents BEFORE emitting, so the refresh the event
             // triggers reads the updated list. Runs on the tracker thread —
@@ -2341,7 +2316,7 @@ pub(crate) async fn play_by_key(
     let progress = resolved.progress;
     let child_slot = state.current_child.clone();
     let shutting_down = state.shutting_down.clone();
-    let advance = state.queue_advance.clone();
+    let advance = state.playback_advance.clone();
     let played = tauri::async_runtime::spawn_blocking(move || {
         playback::play(
             &spec,
@@ -2361,12 +2336,13 @@ pub(crate) async fn play_by_key(
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(stop);
     // A play is the explicit opposite of "stop suggesting it": clear this
-    // key's Continue Watching tombstone. Direct plays already do this via
-    // record_recent (frontend); this covers queue plays and auto-advance,
-    // which record no snapshot. Deliberately post-spawn — a FAILED play must
-    // not clear a tombstone (the record_recent rule) — and best-effort: a
-    // config hiccup must not fail a playback that already started.
-    let key = rating_key.to_string();
+    // key's Continue Watching tombstone. Direct plays also do this via
+    // record_recent (frontend); the dispatcher needs the explicit clearing
+    // here until S2 moves recent recording into this path. Deliberately
+    // post-spawn — a FAILED play must not clear a tombstone (the record_recent
+    // rule) — and best-effort: a config hiccup must not fail a playback that
+    // already started.
+    let key = item.rating_key.clone();
     let _ = config::update(move |cfg| {
         crate::recents::untombstone(cfg, &key);
         Ok(())
@@ -2374,110 +2350,35 @@ pub(crate) async fn play_by_key(
     Ok(())
 }
 
-/// Top-level Play: replace the queue with just this item and play it. The user
-/// asked to start over from here, so the existing queue (if any) is cleared.
+/// Play one item, either resuming its resolved position or explicitly starting
+/// from the beginning. A single item has no persistent sequence context.
 #[tauri::command]
-pub async fn play_item(item: QueueItem, state: State<'_, AppState>) -> Result<(), String> {
-    let rating_key = item.rating_key.clone();
-    let title = item.title.clone();
-    let duration_ms = item.duration_ms;
-    {
-        let mut q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
-        *q = vec![item];
-    }
-    *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(0);
-    play_by_key(&state, &rating_key, &title, duration_ms).await
-}
-
-/// Insert an item right after the currently-playing one ("Play Next"). If the
-/// queue is empty / nothing is playing, it goes to position 0 — i.e. the very
-/// next thing the dispatcher will play.
-#[tauri::command]
-pub async fn queue_play_next(item: QueueItem, state: State<'_, AppState>) -> Result<(), String> {
-    let mut q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
-    let cursor = *state.queue_index.lock().unwrap_or_else(|e| e.into_inner());
-    let pos = match cursor {
-        Some(i) => (i + 1).min(q.len()),
-        None => 0,
-    };
-    q.insert(pos, item);
-    Ok(())
-}
-
-/// Append an item to the end of the queue ("Add to Queue").
-#[tauri::command]
-pub async fn queue_append(item: QueueItem, state: State<'_, AppState>) -> Result<(), String> {
-    state
-        .queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .push(item);
-    Ok(())
-}
-
-/// Snapshot of the queue + cursor for the drawer.
-#[tauri::command]
-pub async fn queue_list(state: State<'_, AppState>) -> Result<QueueSnapshot, String> {
-    let items = state
-        .queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone();
-    let current_index = *state.queue_index.lock().unwrap_or_else(|e| e.into_inner());
-    Ok(QueueSnapshot {
-        items,
-        current_index,
-    })
-}
-
-/// Clear the queue. Does NOT stop the currently-playing item — closing the mpv
-/// window does that; "Clear" is for tidying what's queued up next.
-#[tauri::command]
-pub async fn queue_clear(state: State<'_, AppState>) -> Result<(), String> {
-    state
-        .queue
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clear();
-    *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = None;
-    Ok(())
-}
-
-/// Remove the item at `index`. Adjusts the cursor: items before it shift the
-/// cursor back; removing the currently-playing one detaches the cursor (it keeps
-/// playing in mpv, but isn't tracked in the queue any more — next auto-advance
-/// will start from queue[0]).
-#[tauri::command]
-pub async fn queue_remove(index: usize, state: State<'_, AppState>) -> Result<(), String> {
-    let mut q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
-    if index >= q.len() {
-        return Err("queue index out of range".into());
-    }
-    q.remove(index);
-    let mut idx = state.queue_index.lock().unwrap_or_else(|e| e.into_inner());
-    *idx = match *idx {
-        Some(c) if c == index => None,
-        Some(c) if c > index => Some(c - 1),
-        other => other,
-    };
-    Ok(())
-}
-
-/// Jump to and play the item at `index`. Sets the cursor so subsequent advances
-/// continue from there.
-#[tauri::command]
-pub async fn queue_play_at(index: usize, state: State<'_, AppState>) -> Result<(), String> {
-    let item = {
-        let q = state.queue.lock().unwrap_or_else(|e| e.into_inner());
-        q.get(index)
-            .cloned()
-            .ok_or_else(|| "queue index out of range".to_string())?
-    };
-    *state.queue_index.lock().unwrap_or_else(|e| e.into_inner()) = Some(index);
-    play_by_key(&state, &item.rating_key, &item.title, item.duration_ms).await
+pub async fn play_item(
+    item: ItemDto,
+    start_from_beginning: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    play_by_key(&state, &item, start_from_beginning).await
 }
 
 // ---- helpers -------------------------------------------------------------
+
+/// Choose the mpv start position. An explicit beginning request overrides
+/// both server progress and Vela's local fallback; otherwise the server is the
+/// watch-state authority and the local stamp fills only a zero server offset.
+fn playback_start_ms(
+    start_from_beginning: bool,
+    server_resume_ms: u64,
+    local_resume_ms: u64,
+) -> u64 {
+    if start_from_beginning {
+        0
+    } else if server_resume_ms > 0 {
+        server_resume_ms
+    } else {
+        local_resume_ms
+    }
+}
 
 /// Run `f` over each source, concatenating results. A failing source is always
 /// tolerated when some source returns content. When the combined result is
@@ -2581,6 +2482,14 @@ fn attr(xml: &str, name: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playback_start_mode_honors_resume_authority_and_forced_beginning() {
+        assert_eq!(playback_start_ms(false, 7_000, 3_000), 7_000);
+        assert_eq!(playback_start_ms(false, 0, 3_000), 3_000);
+        assert_eq!(playback_start_ms(true, 7_000, 3_000), 0);
+        assert_eq!(playback_start_ms(true, 0, 3_000), 0);
+    }
 
     #[test]
     fn normalize_autocrop_clamps_to_known_states() {

@@ -34,6 +34,10 @@ export type Item = {
   detailKey?: string;
 };
 
+// Explicit playback choice for an item that has progress. "resume" follows
+// the server/local authority chain; "beginning" overrides both and starts at 0.
+export type PlayIntent = "resume" | "beginning";
+
 export type CastMember = { name: string; role?: string; thumb?: string; personKey?: string };
 
 // A person credit (director/writer); `personKey` (namespaced, when the

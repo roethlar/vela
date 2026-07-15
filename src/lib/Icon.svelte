@@ -31,7 +31,7 @@
     <line x1="14" x2="14" y1="2" y2="6" />
     <line x1="8" x2="8" y1="10" y2="14" />
     <line x1="16" x2="16" y1="18" y2="22" />
-  {:else if name === "queue"}
+  {:else if name === "playlist"}
     <line x1="8" x2="21" y1="6" y2="6" />
     <line x1="8" x2="21" y1="12" y2="12" />
     <line x1="8" x2="21" y1="18" y2="18" />

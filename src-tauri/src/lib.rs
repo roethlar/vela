@@ -56,17 +56,10 @@ pub struct AppState {
     /// Serializes source mutations (add/remove) so they apply in order
     /// without holding the registry lock across config file I/O.
     pub source_lock: AsyncMutex<()>,
-    /// In-memory play queue. Cleared+repopulated by a top-level "Play"; mutated by
-    /// "Play Next" / "Add to Queue". Not persisted across restarts.
-    pub queue: Arc<Mutex<Vec<commands::QueueItem>>>,
-    /// Index of the currently-playing item in `queue`, or `None` if nothing is
-    /// playing. The auto-advance task moves this forward on natural mpv EOF.
-    pub queue_index: Arc<Mutex<Option<usize>>>,
     /// Signaled by the mpv EOF watcher when a file ends naturally (not when the
-    /// user closed the window). An async dispatcher in `run()` awaits this and
-    /// plays the next queued item, so closing mpv stops playback while watching
-    /// to the end continues to the next.
-    pub queue_advance: Arc<tokio::sync::Notify>,
+    /// user closed the window). The async dispatcher in `run()` awaits this;
+    /// playlist and Continue Playing contexts are attached in later plan slices.
+    pub playback_advance: Arc<tokio::sync::Notify>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
@@ -117,9 +110,7 @@ pub fn run() {
         play_lock: AsyncMutex::new(()),
         watch_edit_lock: AsyncMutex::new(()),
         source_lock: AsyncMutex::new(()),
-        queue: Arc::new(Mutex::new(Vec::new())),
-        queue_index: Arc::new(Mutex::new(None)),
-        queue_advance: Arc::new(tokio::sync::Notify::new()),
+        playback_advance: Arc::new(tokio::sync::Notify::new()),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
     };
@@ -166,49 +157,13 @@ pub fn run() {
                 .app_handle
                 .set(app.handle().clone());
 
-            // Auto-advance dispatcher: when the mpv EOF watcher notifies a clean
-            // file end, walk the queue cursor forward and play the next item.
-            // Lives until the process exits.
-            let handle_for_advance = app.handle().clone();
-            let (advance_notify, queue_arc, queue_idx_arc) = {
-                let s = handle_for_advance.state::<AppState>();
-                (
-                    s.queue_advance.clone(),
-                    s.queue.clone(),
-                    s.queue_index.clone(),
-                )
-            };
+            // Playback sequence dispatcher: a single item has nothing to do at
+            // clean EOF. Keep the notification loop alive so Slice 3 can attach
+            // the playlist cursor without rebuilding the mpv watcher plumbing.
+            let advance_notify = app.handle().state::<AppState>().playback_advance.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
                     advance_notify.notified().await;
-                    // Pick the next item under the locks, then drop them before
-                    // calling play_by_key (which takes its own locks via state).
-                    let next = {
-                        let q = queue_arc.lock().unwrap_or_else(|e| e.into_inner());
-                        let mut idx = queue_idx_arc.lock().unwrap_or_else(|e| e.into_inner());
-                        let candidate = match *idx {
-                            Some(i) => i + 1,
-                            None => 0,
-                        };
-                        if candidate < q.len() {
-                            *idx = Some(candidate);
-                            Some(q[candidate].clone())
-                        } else {
-                            None
-                        }
-                    };
-                    let Some(item) = next else { continue };
-                    let state = handle_for_advance.state::<AppState>();
-                    if let Err(e) = commands::play_by_key(
-                        &state,
-                        &item.rating_key,
-                        &item.title,
-                        item.duration_ms,
-                    )
-                    .await
-                    {
-                        eprintln!("vela: auto-advance to {:?} failed: {e}", item.title);
-                    }
                 }
             });
 
@@ -247,12 +202,6 @@ pub fn run() {
             commands::get_person_items,
             commands::set_watched,
             commands::play_item,
-            commands::queue_list,
-            commands::queue_clear,
-            commands::queue_remove,
-            commands::queue_play_at,
-            commands::queue_play_next,
-            commands::queue_append,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the tauri application")

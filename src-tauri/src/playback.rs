@@ -656,12 +656,11 @@ pub fn play(
     let start_ms = (spec.start_seconds.max(0.0) * 1000.0) as u64;
     let stop_flag = Arc::new(AtomicBool::new(false));
 
-    // Watch mpv's IPC for a clean EOF — that's the signal to auto-advance the
-    // queue. We do NOT advance on user-close (mpv reports reason=quit/stop),
-    // only on reason=eof, so closing the window stops playback while letting a
-    // file play to the end roll into the next item. Always-on regardless of
-    // progress target (works for local playback too). Failure to spawn the
-    // watcher is non-fatal — playback still works, just no auto-advance.
+    // Watch mpv's IPC for a clean EOF — that's the signal for whichever
+    // playback context owns the sequence. We do NOT advance on user-close (mpv
+    // reports reason=quit/stop), only on reason=eof. Always-on regardless of
+    // progress target. Failure to spawn the watcher is non-fatal — playback
+    // still works, just without sequence advancement.
     if let Err(e) = spawn_eof_watcher(ipc_path.clone(), stop_flag.clone(), advance.clone()) {
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
@@ -702,14 +701,11 @@ pub fn play(
     Ok(stop_flag)
 }
 
-/// Spawn the IPC reader thread. It connects to mpv's JSON IPC socket, observes
-/// `time-pos`, and continuously drains the socket (so mpv never blocks on a full
-/// Tiny IPC listener that signals the queue dispatcher when mpv finishes a file
-/// CLEANLY (mpv emits `event=end-file, reason=eof`). User-closed (`quit`),
+/// Tiny IPC listener that signals the playback dispatcher when mpv finishes a
+/// file CLEANLY (mpv emits `event=end-file, reason=eof`). User-closed (`quit`),
 /// errored (`error`), or otherwise-stopped exits never fire the notifier — so
-/// closing the player stops playback, while watching to the end auto-advances.
-/// Separate from the progress reader so it runs for every backend, including
-/// local files where no progress tracker is active.
+/// closing the player stops playback. Separate from the progress reader so it
+/// runs for every source even when no progress tracker is active.
 fn spawn_eof_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,

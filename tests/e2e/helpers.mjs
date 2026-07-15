@@ -1,7 +1,7 @@
 // Shared scenario plumbing for the mock-server scenarios. The playback
 // scenario keeps its own detailed inline flow — it IS the mpv-IPC probe
 // test; these leaner helpers serve scenarios that use playback as a means
-// (curation, resume, queue, search).
+// (curation, resume, explicit play verbs, search).
 import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';

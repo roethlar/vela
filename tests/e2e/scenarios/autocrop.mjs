@@ -38,7 +38,7 @@ function makePaddedClip(configRoot) {
   return clip;
 }
 
-async function gridCtxPlay(driver) {
+async function gridCtxPlay(driver, verb) {
   await driver.exec(
     `const el = document.querySelector('button.poster[aria-label^="Letterbox Movie"]');
      const r = el.getBoundingClientRect();
@@ -46,7 +46,7 @@ async function gridCtxPlay(driver) {
   );
   const play = await driver
     .waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu (play)')
-    .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='Play']`));
+    .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='${verb}']`));
   await driver.click(play);
 }
 
@@ -54,7 +54,7 @@ async function gridCtxPlay(driver) {
 // optionally park the head at ~6s for the next leg, then quit.
 async function playAndAssertCrop(driver, label, { minStart, maxStart, park }) {
   const before = mpvSocketSnapshot();
-  await gridCtxPlay(driver);
+  await gridCtxPlay(driver, label === 'resume' ? 'Resume' : 'Play');
   const socketPath = await waitForNewMpvSocket(before);
   const mpv = await MpvIpc.connect(socketPath);
   try {
