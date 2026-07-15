@@ -363,7 +363,7 @@
     // that has just changed, and the last-source branch below leaves nothing it could
     // sensibly report on (the r14/r15 rule, applied to the edit's line).
     editAttempt++;
-    editStatus = null;
+    clearEditStatus();
     if (authenticated) {
       linkGen++; // abandon any in-flight Plex link poll tied to the old pin
       pin = null;
@@ -1606,12 +1606,42 @@
   // announcement, because the card's ✓ is the acknowledgement.
   //
   // Like the scan's, it publishes regardless of which view is on screen — an action's
-  // outcome is not view-scoped — and stays until the next edit. `editAttempt` is the
-  // publication ownership: a newer edit supersedes an older one's outcome, and the
-  // last-source teardown abandons one in flight so it cannot land on Welcome about a
-  // library that no longer exists (the r14/r15/r16-3 rule).
+  // outcome is not view-scoped. It clears after eight seconds or immediately when the
+  // next edit starts. `editAttempt` owns both publication and expiry: a newer edit
+  // supersedes an older one's outcome, and the last-source teardown abandons one in
+  // flight so it cannot land on Welcome about a library that no longer exists (the
+  // r14/r15/r16-3 rule).
+  const EDIT_STATUS_TTL_MS = 8000;
   let editStatus = $state<string | null>(null);
   let editAttempt = 0;
+  let editStatusTimer: ReturnType<typeof setTimeout> | null = null;
+
+  function clearEditStatus() {
+    editStatus = null;
+    if (editStatusTimer !== null) {
+      clearTimeout(editStatusTimer);
+      editStatusTimer = null;
+    }
+  }
+
+  function publishEditFailure(attempt: number, text: string) {
+    if (attempt !== editAttempt) return;
+    clearEditStatus();
+    editStatus = text;
+    editStatusTimer = setTimeout(() => {
+      // Cancellation cannot retract a callback that is already queued. The
+      // captured attempt is the final authority: an older expiry may never
+      // clear a newer edit's failure.
+      if (attempt === editAttempt) clearEditStatus();
+    }, EDIT_STATUS_TTL_MS);
+  }
+
+  onDestroy(() => {
+    // Prevent an edit still awaiting the backend from publishing and arming a
+    // fresh timer after the component has already torn down.
+    editAttempt++;
+    clearEditStatus();
+  });
 
   // The queue's own status (per-surface-status slice 2). Its drawer and chip outlive every
   // view — they render above the device-code screen too — so a queue failure is not the
@@ -1701,7 +1731,7 @@
     closeMenu();
     // This attempt owns the edit line from here on; a newer edit supersedes it.
     const attempt = ++editAttempt;
-    editStatus = null; // this attempt supersedes whatever the last one said
+    clearEditStatus(); // this attempt supersedes whatever the last one said
     try {
       // Merged cards may front a local file while a server backing owns the
       // watch state — route the action where it can actually be recorded.
@@ -1722,11 +1752,14 @@
       await repairFailedWatchEdit();
       // Report on the edit's OWN line, and report it wherever the user now is: they asked
       // for this change, it did not happen, and that is true no matter which view they are
-      // looking at. No currency gate, no ownership algebra, no retract — the machinery all
-      // of that needed is exactly what having a second writer on the view's banner cost.
-      // Only a NEWER edit may supersede this one.
-      if (attempt === editAttempt)
-        editStatus = `Couldn't mark “${item.title}” ${played ? "watched" : "unwatched"} — ${String(e)}`;
+      // looking at. No view-currency gate, banner ownership algebra, or retract — the
+      // machinery all of that needed is exactly what having a second writer on the view's
+      // banner cost.
+      // A newer edit may supersede this one; otherwise its own expiry owns the clear.
+      publishEditFailure(
+        attempt,
+        `Couldn't mark “${item.title}” ${played ? "watched" : "unwatched"} — ${String(e)}`,
+      );
     }
   }
 
@@ -1735,14 +1768,16 @@
   async function removeFromContinue(item: Item) {
     closeMenu();
     const attempt = ++editAttempt;
-    editStatus = null;
+    clearEditStatus();
     try {
       await invoke("remove_from_continue", { ratingKey: item.ratingKey });
       refreshWatchState();
     } catch (e) {
       // A watch-state edit, so the same surface (see editStatus).
-      if (attempt === editAttempt)
-        editStatus = `Couldn't remove “${item.title}” from Continue Watching — ${String(e)}`;
+      publishEditFailure(
+        attempt,
+        `Couldn't remove “${item.title}” from Continue Watching — ${String(e)}`,
+      );
     }
   }
 
@@ -1895,8 +1930,8 @@
     <!-- The EDIT's own surface, never the view's error banner above (owner ruling
          2026-07-14). It can sit alongside an independently existing view failure rather
          than fighting it; a failed edit does not manufacture a listing request or view
-         failure of its own. Stays until the next edit — a failure is not something to
-         tidy away on a timer. -->
+         failure of its own. It stays readable for eight seconds, unless the next edit
+         supersedes it first. -->
     <div class="scanerror" role="alert">{friendlyError(editStatus)}</div>
   {/if}
 

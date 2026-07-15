@@ -207,12 +207,12 @@ export default {
       async () => ((await cardCount(driver)) > 0 ? true : null),
       "and the library reloads from the real server",
     );
-    // The EDIT's line is NOT the refresh's to clear — it is an action's outcome, and the
-    // action still failed. Only a newer edit supersedes it. (Scan Library has behaved this
-    // way since r15; this is the same rule.)
-    assert.ok(
-      await editLine(driver),
-      "a refresh repairs the VIEW; it does not un-fail the user's edit",
+    // Refresh does not own the edit line; its independent 8s presentation timer does.
+    // The proxy can recover before that deadline, so wait only for the remainder.
+    await pollUntil(
+      async () => ((await editLine(driver)) === null ? true : null),
+      "the named edit failure to auto-dismiss independently of server recovery and Refresh",
+      { timeoutMs: 10000, intervalMs: 200 },
     );
   },
 };

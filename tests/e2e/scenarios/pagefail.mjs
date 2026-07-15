@@ -54,6 +54,77 @@ async function editLine(driver) {
     `return [...document.querySelectorAll('div.scanerror')].map((e) => e.textContent).join(' | ') || null`,
   );
 }
+// The production promise is exactly 8s, but making this scenario spend 16 real seconds
+// would turn ownership into a slow timing test. Intercept only the next two exact 8s
+// requests, accelerate them to separate deadlines, and refuse the first cancellation so
+// its callback really runs stale. Everything else continues to use the native clock.
+async function installEditTimerProbe(driver) {
+  await driver.exec(`
+    (() => {
+      if (window.__velaEditTimerProbe) throw new Error('edit timer probe already installed');
+      const nativeSetTimeout = window.setTimeout;
+      const nativeClearTimeout = window.clearTimeout;
+      const probe = {
+        nativeSetTimeout,
+        nativeClearTimeout,
+        acceleratedMs: [3000, 5000],
+        requestedMs: [],
+        fired: [],
+        handles: [],
+        firstCancellationIgnored: false,
+      };
+      window.__velaEditTimerProbe = probe;
+      window.setTimeout = function (callback, delay, ...args) {
+        if (delay !== 8000 || probe.requestedMs.length >= 2) {
+          return nativeSetTimeout.call(window, callback, delay, ...args);
+        }
+        const timer = probe.requestedMs.length + 1;
+        probe.requestedMs.push(delay);
+        const handle = nativeSetTimeout.call(window, () => {
+          probe.fired.push(timer);
+          callback(...args);
+        }, probe.acceleratedMs[timer - 1]);
+        probe.handles.push(handle);
+        return handle;
+      };
+      window.clearTimeout = function (handle) {
+        if (
+          !probe.firstCancellationIgnored &&
+          probe.handles.length > 0 &&
+          handle === probe.handles[0]
+        ) {
+          probe.firstCancellationIgnored = true;
+          return;
+        }
+        return nativeClearTimeout.call(window, handle);
+      };
+    })();
+  `);
+}
+async function editTimerProbeState(driver) {
+  return driver.exec(`
+    const probe = window.__velaEditTimerProbe;
+    return probe ? {
+      requestedMs: [...probe.requestedMs],
+      fired: [...probe.fired],
+      firstCancellationIgnored: probe.firstCancellationIgnored,
+    } : null;
+  `);
+}
+async function restoreEditTimerProbe(driver) {
+  await driver.exec(`
+    (() => {
+      const probe = window.__velaEditTimerProbe;
+      if (!probe) return;
+      window.setTimeout = probe.nativeSetTimeout;
+      window.clearTimeout = probe.nativeClearTimeout;
+      for (const handle of probe.handles) {
+        probe.nativeClearTimeout.call(window, handle);
+      }
+      delete window.__velaEditTimerProbe;
+    })();
+  `);
+}
 async function settle(driver) {
   await driver.waitFor(
     `const b = document.querySelector('button.refreshbtn'); return !!b && !b.disabled`,
@@ -448,6 +519,123 @@ export default {
     const menuBackdrop = await driver.find("css selector", ".menubackdrop");
     await driver.click(menuBackdrop);
 
+    // ── 4b. Failed edits auto-dismiss, and only their own timer may do it ────
+    // Timer A is deliberately allowed to fire even after edit B cancels it. B must clear A
+    // synchronously at its click, publish its own delayed failure, survive A's stale
+    // callback, and disappear only when B's callback runs. The probe also makes 8000 itself
+    // observable: a changed duration is not accelerated and fails before a long wait can
+    // accidentally accept it.
+    try {
+      await installEditTimerProbe(driver);
+
+      mock.state.unauthNextPlayed = true;
+      await watchToggle(driver, "Movie 056", "Mark watched");
+      const failedA = await pollUntil(
+        async () => {
+          const current = await gridState(driver);
+          assertExactLabels(current.labels, expectedLabels, "while timer failure A publishes");
+          return current.edit?.includes("Couldn't mark “Movie 056” watched")
+            ? current.edit
+            : null;
+        },
+        "timer failure A",
+      );
+      assert.equal(await banner(driver), null, "timer failure A does not become a view failure");
+      let probe = await editTimerProbeState(driver);
+      assert.deepEqual(probe?.requestedMs, [8000], "failure A requests the exact 8s promise");
+      assert.deepEqual(probe?.fired, [], "failure A's accelerated deadline has not passed yet");
+
+      mock.state.unauthNextPlayed = true;
+      mock.state.playedDelayMs = 500; // keep B in flight while its click synchronously clears A
+      const servedB = servedCount("/PlayedItems/m55");
+      await watchToggle(driver, "Movie 055", "Mark watched");
+      assert.equal(
+        await editLine(driver),
+        null,
+        "starting edit B clears failure A immediately, before B has an outcome",
+      );
+      assert.equal(
+        servedCount("/PlayedItems/m55"),
+        servedB,
+        "the delayed edit B response is still pending at the immediate-clear assertion",
+      );
+      probe = await editTimerProbeState(driver);
+      assert.equal(
+        probe?.firstCancellationIgnored,
+        true,
+        "the probe keeps A's cancelled callback queued so stale ownership is exercised",
+      );
+      await pollUntil(
+        async () =>
+          !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
+        "the delayed timer failure B to reach the server",
+      );
+      await pollUntil(
+        async () => (servedCount("/PlayedItems/m55") > servedB ? true : null),
+        "timer failure B's delayed 401",
+      );
+      const failedB = await pollUntil(
+        async () => {
+          const current = await gridState(driver);
+          assertExactLabels(current.labels, expectedLabels, "while timer failure B publishes");
+          return current.edit?.includes("Couldn't mark “Movie 055” watched")
+            ? current.edit
+            : null;
+        },
+        "timer failure B",
+      );
+      assert.notEqual(failedB, failedA, "failure B replaces failure A with its own exact outcome");
+      assert.equal(await banner(driver), null, "timer failure B does not become a view failure");
+      probe = await editTimerProbeState(driver);
+      assert.deepEqual(
+        probe?.requestedMs,
+        [8000, 8000],
+        "both published failures request the exact 8s promise",
+      );
+      assert.deepEqual(
+        probe?.fired,
+        [],
+        "failure B publishes before the forced stale callback's deadline",
+      );
+
+      await pollUntil(
+        async () => ((await editTimerProbeState(driver))?.fired.includes(1) ? true : null),
+        "failure A's deliberately uncancelled stale callback",
+        { timeoutMs: 4000, intervalMs: 50 },
+      );
+      assert.equal(
+        await editLine(driver),
+        failedB,
+        "failure A's stale callback may not erase the newer failure B",
+      );
+      let timerGrid = await gridState(driver);
+      assertExactLabels(timerGrid.labels, expectedLabels, "after failure A's stale callback");
+      assert.equal(await banner(driver), null, "a stale edit timer does not touch the view banner");
+      probe = await editTimerProbeState(driver);
+      assert.deepEqual(probe?.fired, [1], "only failure A's callback has fired so far");
+
+      await pollUntil(
+        async () => {
+          const currentProbe = await editTimerProbeState(driver);
+          return currentProbe?.fired.length === 2 && (await editLine(driver)) === null
+            ? true
+            : null;
+        },
+        "failure B to auto-dismiss on its own accelerated 8s callback",
+        { timeoutMs: 6500, intervalMs: 50 },
+      );
+      probe = await editTimerProbeState(driver);
+      assert.deepEqual(probe?.fired, [1, 2], "each exact 8s timer callback ran once, in order");
+      timerGrid = await gridState(driver);
+      assertExactLabels(timerGrid.labels, expectedLabels, "after failure B auto-dismisses");
+      assert.equal(timerGrid.edit, null, "failure B's own timer clears only the edit line");
+      assert.equal(await banner(driver), null, "auto-dismissal does not touch the view banner");
+    } finally {
+      mock.state.unauthNextPlayed = false;
+      mock.state.playedDelayMs = 0;
+      await restoreEditTimerProbe(driver);
+    }
+
     // ── 5. An action's outcome is reported wherever the user is ─────────────
     // The old cases 5/7/9 asserted the OPPOSITE — that a failed edit must be SUPPRESSED if
     // the user navigated away — because on the shared banner it would have covered the new
@@ -492,10 +680,21 @@ export default {
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "the grid",
     );
+    const priorFailure6 = await editLine(driver);
+    assert.ok(
+      priorFailure6?.includes("Couldn't mark “Movie 059” watched"),
+      "case 6 starts with the exact prior failure still visible",
+    );
+    const served6 = servedCount("/PlayedItems/m58");
     await watchToggle(driver, "Movie 058", "Mark watched"); // succeeds
+    assert.equal(
+      await editLine(driver),
+      null,
+      "a new edit clears the previous failure immediately, before its 8s timer can satisfy a poll",
+    );
     await pollUntil(
-      async () => ((await editLine(driver)) === null ? true : null),
-      "a new edit clears the previous one's failure — a stale outcome is not an outcome",
+      async () => (servedCount("/PlayedItems/m58") > served6 ? true : null),
+      "the successful newer edit to be delivered",
     );
 
     // ── (no case 7) ────────────────────────────────────────────────────────

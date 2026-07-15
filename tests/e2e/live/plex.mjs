@@ -226,10 +226,13 @@ export default {
       `${TARGET} remains unwatched after Plex returns and Refresh succeeds`,
       { timeoutMs: 90000 }, // Plex takes a while to start serving after systemd says active
     );
-    // The EDIT's line is not the refresh's to clear: the action still failed.
-    assert.ok(
-      await editLine(driver),
-      "a refresh repairs the VIEW; it does not un-fail the user's edit",
+    // Refresh does not own the edit line; its independent 8s presentation timer does.
+    // Plex startup can outlast that timer, so accept either an already-dismissed line or
+    // the remaining portion of its promised lifetime.
+    await pollUntil(
+      async () => ((await editLine(driver)) === null ? true : null),
+      "the named edit failure to auto-dismiss independently of server recovery and Refresh",
+      { timeoutMs: 10000, intervalMs: 200 },
     );
     await targetMenuItem(driver, "Mark watched");
     await closeContextMenu(driver);
