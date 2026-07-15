@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — the Windows release matrix exits before dependency
 installation, so Vela cannot produce or validate Windows bundles.
-**Status**: Verified — Codex and Grok accepted r2
+**Status**: Verified — external reviewer Grok accepted r2
 **Branch**: `main` (approved dependency-refresh Slice 1)
 **Commit**: `adc0104`
 
@@ -57,9 +57,11 @@ No local Windows execution venue is available in this session.
 
 ## Reviewer comments
 
-**r1 — 2026-07-15T15:32:40Z — reopened.** Codex CLI 0.144.4 reviewed exact
-base `c02767e` and head `7fef89a` read-only. It reported the direct `npm.cmd`
-launch failure at `.github/workflows/release.yml:65`.
+**r1 author self-review — 2026-07-15T15:32:40Z — reopened.** Codex CLI 0.144.4
+reviewed exact base `c02767e` and head `7fef89a` read-only. It reported the
+direct `npm.cmd` launch failure at `.github/workflows/release.yml:65`. Per the
+owner's 2026-07-15 correction, this is author evidence and does not count as
+independent review.
 
 **r1 independent — 2026-07-15T15:32:40Z — accepted.** Grok 0.2.101 reviewed
 the same exact base/head read-only and returned no comments without seeing the
@@ -67,10 +69,10 @@ Codex result. The author admitted the concrete Codex finding; both reviewer
 positions can be satisfied by the narrow fix, so no owner adjudication is
 needed under the standing review decision.
 
-**r2 — 2026-07-15T15:41:55Z — accepted by both reviewers.** Codex CLI 0.144.4
-and Grok 0.2.101 independently reviewed exact base `c02767e` and corrected head
-`adc0104`, neither seeing the other's result. Both returned `verdict: accepted`,
-the exact SHAs, and `comments: []`. Codex explicitly rechecked Node's Windows
-shell contract; Grok explicitly read this finding and the full corrected slice.
-The exact assertion runs locally under both Bash and PowerShell syntax; the
-GitHub-hosted Windows release leg remains the final platform execution proof.
+**r2 — 2026-07-15T15:41:55Z — accepted by external reviewer Grok.** Grok
+0.2.101 reviewed exact base `c02767e` and corrected head `adc0104`, returned
+`verdict: accepted`, the exact SHAs, and `comments: []`, and explicitly read
+this finding and the full corrected slice. Codex CLI also returned clean, but
+that author-model self-review does not count. The exact assertion runs locally
+under both Bash and PowerShell syntax; the GitHub-hosted Windows release leg
+remains the final platform execution proof.

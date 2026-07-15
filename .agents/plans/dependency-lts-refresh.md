@@ -1,7 +1,7 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — Slices 1–2 landed and were accepted by Codex and
-Grok; Slice 3 is next.** The owner approved the
+Status: **IMPLEMENTING — Slices 1–3 landed and were accepted by external
+reviewer Grok; Slice 4 is next.** The owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
@@ -13,14 +13,26 @@ Implementation log:
   locked Rust suite passed; the VM clean install and real-app smoke passed.
   Review r1 admitted `dlr-s1-1`: direct `execFileSync('npm.cmd')` would block
   the Windows release leg. `adc0104` uses the platform shell for the static npm
-  query; both reviewers accepted the full corrected slice at r2. Durable
+  query; Grok accepted the full corrected slice at r2. The Codex self-review
+  that found the defect is author evidence, not independent review. Durable
   finding: `.agents/review/findings/dlr-s1-1.md`.
 - Slice 2 (`986fa2e`) replaces only the obsolete Ubuntu appindicator
   prerequisite spelling with Tauri's current Ayatana GTK3 development package.
   Canonical's jammy/noble indexes and Tauri's prerequisite guide confirm it;
-  YAML plus the full local command set passed. Codex CLI 0.144.4 and Grok
-  0.2.101 independently accepted exact base `3e7fd4c` and head `986fa2e` with
-  no comments.
+  YAML plus the full local command set passed. Grok 0.2.101 accepted exact base
+  `3e7fd4c` and head `986fa2e` with no comments.
+- Slice 3 (`28159ea`) moves the compatible frontend graph to Kit 2.69.3,
+  plugin-svelte 7.2.0, Svelte 5.56.5, svelte-check 4.7.2, TypeScript 6.0.3,
+  Vite 8.1.4, Tauri JS API 2.11.1, and CLI 2.11.4. It scopes `cookie` 0.7.2
+  to Kit, explicitly denies the optional `fsevents` native hook, adds
+  fail-closed npm audit gates, and moves the CSS-only Geist import out of
+  TypeScript. Removing only the cookie override makes npm audit fail on
+  GHSA-pxg6-pf52-xh8x; the landed graph audits clean. Local canonical checks,
+  the Vite HMR protocol proof, Tauri build, and Linux real-app E2E 18/18 passed;
+  Cargo manifests stayed byte-identical. Grok 0.2.101 accepted exact base
+  `e26add4` and head `28159ea` with no comments. A concurrent Codex CLI run was
+  stopped and discarded after the owner clarified that author-model
+  self-review does not count.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel
@@ -53,8 +65,8 @@ The work is complete only when:
 - npm and Cargo vulnerability audits exit zero;
 - the frontend static SPA, Rust backend, Plex XML, direct HTTPS server paths,
   packaging inputs, and Linux real-app suite retain behavior;
-- each code slice is committed, independently reviewed by Codex and Grok on a
-  pinned diff, and any admitted review fix is its own commit;
+- each code slice is committed, externally reviewed by Grok on a pinned diff,
+  and any admitted review fix is its own commit;
 - Vela is versioned once, at the end, as 0.1.51.
 
 ## Audited targets
@@ -389,14 +401,15 @@ outward-facing action and needs explicit approval.
 
 ## Review protocol
 
-Every code slice and every review-fix slice gets two independent reviewers,
-Codex and Grok, on the same pinned base/head diff, neither seeing the other's
-findings. No round cap. The author runs the guards and red proofs; reviewers do
-not mutate the main worktree. Apply the standing 2026-07-14 decision for
-admission, declined-finding adjudication, and owner escalation. A round with no
-material finding is a valid acceptance; a round that produces no verifiable
-delta after a reopen is a stall. Stop and surface after three consecutive
-stalled cycles.
+Every code slice and every review-fix slice goes through Grok reviewloop on the
+same pinned base/head diff, with no round cap. The Codex author never counts a
+Codex CLI run as review; Claude is the eligible external fallback or
+adjudicator. The author runs the guards and red proofs; reviewers do not mutate
+the main worktree. Apply the standing 2026-07-14 decision, as amended
+2026-07-15, for admission, declined-finding adjudication, and owner escalation.
+A round with no material finding is a valid acceptance; a round that produces
+no verifiable delta after a reopen is a stall. Stop and surface after three
+consecutive stalled cycles.
 
 ## Final verification matrix
 

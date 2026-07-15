@@ -795,16 +795,22 @@ Supersedes:
 Nothing. Extends the 2026-05-23 external-mpv decision from a preference into a
 researched position, and closes the owner's standing open question.
 
-## 2026-07-14 - Code review runs TWO independent reviewers; an author never adjudicates their own decline
+## 2026-07-14 - Code review uses external reviewers; an author never adjudicates their own decline
 
-Status: APPROVED (owner, 2026-07-14). STANDING - applies to every review loop,
-not just the one that produced it. Carved out of `.agents/state.md` on
-2026-07-14 so it survives that entry's rotation to the archive.
+Status: APPROVED (owner, 2026-07-14), AMENDED by the owner 2026-07-15.
+STANDING - applies to every review loop, not just the one that produced it.
+Carved out of `.agents/state.md` on 2026-07-14 so it survives that entry's
+rotation to the archive.
 
 Decision:
-TWO independent reviewers (`codex` and `grok`) review the same pinned diff,
-neither seeing the other's findings. The author writes the fixes and runs every
-guard, red-proof and E2E run.
+Reviewers must be independent of the author harness/model. A Codex author may
+not count a Codex CLI run as code review; that is self-review. Use Claude or
+Grok for Codex-authored code. The default remains two external reviewers on the
+same pinned diff, neither seeing the other's findings, unless the owner gives a
+more specific review instruction for a task. For the dependency-LTS refresh,
+the owner's specific instruction is Grok reviewloop for each code slice, with
+no round cap; Claude is an eligible external fallback or adjudicator. The
+author writes the fixes and runs every guard, red-proof and E2E run.
 
 AN AUTHOR MAY NEVER ADJUDICATE THEIR OWN DECLINE. A declined finding goes to the
 reviewer that did NOT raise it. Reviewer-vs-reviewer disagreement goes to the
@@ -814,6 +820,9 @@ satisfiable at once, fix both rather than escalating (r23 precedent).
 Reason:
 Author self-adjudication was tested twice and failed twice: r8-4 and r12-1 were
 both declined by the author and both OVERTURNED on independent adjudication.
+On 2026-07-15 the owner identified that a Codex author dispatching Codex CLI
+was still reviewing its own work; those runs no longer count as independent
+review.
 
 The two-reviewer requirement is not belt-and-braces. Across the r17-r24 loop the
 two reviewers converged, independently, on the same top finding in FOUR straight
@@ -826,7 +835,9 @@ guard-discipline practices carved into `.agents/repo-guidance.md` at the same
 time.
 
 Supersedes:
-Nothing. Formalizes the protocol that the library-refresh-scan loop arrived at.
+The 2026-07-15 amendment replaces the original named `codex` + `grok`
+reviewer pair with author-external reviewer selection. It preserves the guard,
+decline-adjudication, disagreement, and pinned-diff rules.
 
 ## 2026-07-15 - Failed watch-state edit errors auto-dismiss after eight seconds
 
