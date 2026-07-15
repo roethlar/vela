@@ -2,9 +2,9 @@
 
 **Severity**: HIGH — one failed card edit can blank or permanently truncate the
 entire loaded library while leaving the item unchanged on the server.
-**Status**: In progress
+**Status**: Awaiting Grok review
 **Branch**: `fix/fwer-1-failed-watch-edit-recovery`
-**Commit**: pending (filled after the implementation commit)
+**Commit**: `b5c170a`
 
 ## Evidence
 
@@ -48,13 +48,29 @@ checks the same identity and unwatched action through the real outage/restart.
 
 ## Guard proof
 
-- `tests/e2e/scenarios/pagefail.mjs`, case 4 — passing on the Linux real-app
-  runner; four separate injected regressions still must be proven red against
-  the committed implementation, then the committed tree re-proven green.
+- `tests/e2e/scenarios/pagefail.mjs`, case 4 — four separate temporary
+  regressions were proven red on the Linux real-app runner, restoring the
+  committed tree after each:
+  1. the old delayed `refreshWatchState()` catch emptied the grid: `poster
+     cardinality changed`, `0 !== 60`;
+  2. the old undelayed catch made an unnecessary listing request: `a failed
+     edit has no new browse truth and must not request the listing`, `7 !== 6`;
+  3. a synthetic failed-edit view error violated the independent surface guard:
+     `the failed edit must not manufacture a view failure`;
+  4. a same-length in-memory substitution kept 60 cards but failed exact
+     identity: poster 59 changed from `Movie 059 — 2019` to `Movie 059
+     replacement — 2019`.
+- The restored committed tree then passed `pagefail` on the Linux real-app
+  runner. The full hermetic Linux suite passed 18/18 at `b5c170a` before the
+  temporary proof mutations.
 - `tests/e2e/live/plex.mjs` — passed against the exact owner report: the target
   stayed present continuously, no view failure appeared, and Mark watched
   remained offered after Plex restart plus Refresh.
-- Full Linux hermetic suite: 18/18 passed before commit.
+- Local verification at `b5c170a`: both changed `.mjs` files pass
+  `node --check`; `npm run check` reports 0 errors and 0 warnings; `npm run
+  build`, `cargo check --locked`, and clippy with `-D warnings` pass; `cargo
+  test --locked` passes all 95 tests; `git diff --check` passes. The Plex
+  service and watchdog timer were both confirmed active after the live run.
 
 ## Coder dispute (if any)
 
@@ -67,5 +83,6 @@ review loop closes. The live test is opt-in and non-gating by design.
 
 ## Reviewer comments
 
-Pending Grok headless review after the implementation commit and coder guard
-proofs.
+Pending Grok headless review of exact base `012a031` and code head `b5c170a`.
+Acceptance requires Grok's independent guard proof and
+`guard_confirmed: true`.

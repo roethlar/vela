@@ -2,8 +2,9 @@
 
 Status: **APPROVED (owner, 2026-07-14) — implementation authorized.** The owner
 admitted and ordered correction of the remaining r2 red-proof defect, then
-explicitly said to start coding. See `## Plan review log`. The owner playtest of
-0.1.48 failed on the real Plex path. This follow-up is one code slice. The
+explicitly said to start coding. Implementation commit: `b5c170a`; Grok code
+review is active. See `## Plan review log`. The owner playtest of 0.1.48 failed
+on the real Plex path. This follow-up is one code slice. The
 per-surface-status implementation remains complete; this plan fixes the
 recovery work that runs underneath its correctly separated status lines.
 
@@ -188,8 +189,8 @@ scenario remains opt-in/non-hermetic evidence, never part of the gating suite.
 - Full Linux `npm run e2e`
 - Opt-in `npm run e2e:live -- live-plex` with the existing service-restoration
   rails.
-- Two independent code reviewers (`codex` and `grok`) on the same pinned diff;
-  apply the standing adjudication and guard-discipline rules.
+- Grok `reviewloop` on the pinned code slice and every review-fix slice, with no
+  round cap; apply the standing adjudication and guard-discipline rules.
 - Owner playtest: repeat the exact report. The grid and **12 Years a Slave**
   never disappear; only the named edit line appears while Plex is down; after
   Plex starts and Refresh runs, the item remains unwatched and actionable.

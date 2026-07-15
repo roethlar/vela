@@ -10,9 +10,9 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (smb-1..smb-6).
 
 Loop `fwer-1` OPEN (failed-watch-edit recovery implementation). Base
-`012a031`; branch `fix/fwer-1-failed-watch-edit-recovery`; head pending the
-implementation commit. Grok reviews the pinned code slice after the coder's
-four red proofs and full green verification. Detail:
+`012a031`; branch `fix/fwer-1-failed-watch-edit-recovery`; code head `b5c170a`.
+The coder's four independent red proofs and full green verification are
+complete. Grok reviews that exact pinned code slice next. Detail:
 `.agents/review/findings/fwer-1.md`.
 
 Loop `lrs-code` OPEN (library-refresh-scan IMPLEMENTATION review; batch
