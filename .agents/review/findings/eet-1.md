@@ -2,7 +2,7 @@
 
 **Severity**: LOW — a handled edit failure leaves a permanent red status until
 another edit, making resolved attention state look continuously active.
-**Status**: In progress — coder verification complete; awaiting Grok r1
+**Status**: Verified — Grok accepted r1
 **Branch**: `fix/eet-1-edit-error-auto-dismiss`
 **Commit**: `01e30cf`
 
@@ -84,4 +84,18 @@ inspection-covered.
 
 ## Reviewer comments
 
-Pending Grok headless review of exact base `26a48ca` and code head `01e30cf`.
+**r1 — 2026-07-15T04:59:23Z — accepted.** Grok 0.2.101
+(`5bc4b5dfadcf`, model `grok-4.5`) reviewed exact base `26a48ca` and full code
+head `01e30cf800db5d8497211daafccf0a7746d2b130` in a detached disposable
+worktree. Structured result: `verdict: accepted`, `guard_confirmed: true`,
+exact SHAs, `comments: []` (session
+`019f6420-dfd2-7a52-9c15-37b0baf56a52`).
+
+The reviewer independently removed the edit-expiry callback's attempt check
+and ran the Linux real-app `pagefail` scenario. Failure A's deliberately queued
+stale callback erased failure B, producing the intended exact ownership red.
+It restored the reviewed production blob, reran `pagefail` green, and verified
+the disposable and VM implementation blobs matched the reviewed head with no
+E2E process left. The coder independently repeated the post-review audit: both
+worktrees clean, all ten implementation blobs exact on the review tree and VM,
+and no persistent index lock or E2E process.

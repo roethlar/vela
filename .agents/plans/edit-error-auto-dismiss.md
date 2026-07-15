@@ -1,11 +1,11 @@
 # Plan: failed edit errors auto-dismiss after eight seconds
 
-Status: **IMPLEMENTED at `01e30cf`; coder verification complete; Grok review
-pending.** The owner confirmed the 0.1.49 failed-watch recovery on the exact
-stopped-Plex path, then approved this follow-up behavior: a failed edit error
-stays readable for about eight seconds and still clears immediately when the
-next edit starts. The specific owner instruction for this flow requires Grok
-`reviewloop` on the code slice, with no round cap.
+Status: **IMPLEMENTED at `01e30cf`; Grok accepted r1; awaiting owner playtest
+and owner-gated landing.** The owner confirmed the 0.1.49 failed-watch recovery
+on the exact stopped-Plex path, then approved this follow-up behavior: a failed
+edit error stays readable for about eight seconds and still clears immediately
+when the next edit starts. The required Grok `reviewloop` accepted the code
+slice with an independent guard proof and no findings.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. This plan supersedes only
 the watch-state edit lifetime detail in the completed per-surface-status and

@@ -12,14 +12,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **Version 0.1.50** (`package.json`, `src-tauri/tauri.conf.json`,
   `src-tauri/Cargo.toml` all agree, as of `01e30cf`).
 
-- **FAILED EDIT-ERROR AUTO-DISMISS: CODE COMPLETE; GROK REVIEW PENDING.**
+- **FAILED EDIT-ERROR AUTO-DISMISS: IMPLEMENTED; GROK ACCEPTED R1.**
   Implemented at `01e30cf` from approved plan
   `.agents/plans/edit-error-auto-dismiss.md`. Failed watch-state edit errors
   retain their own line, follow navigation, clear after eight seconds, and
   still clear immediately for a newer edit/source change; captured attempts
   prevent a queued old timer from erasing a newer failure. Four distinct
   regressions were proven red, the restored Linux suite is green, and both live
-  server paths passed. Active review loop: `.agents/review/index.md` (`eet-1`).
+  server paths passed. Grok independently proved the stale-timer ownership
+  guard, restored the head green, and accepted with no findings. Closed review
+  record: `.agents/review/findings/eet-1.md`. Awaiting the owner's stopped-Plex
+  timing playtest and owner-gated landing; no push or merge is authorized.
 
 - **FAILED-WATCH-EDIT RECOVERY: OWNER-CONFIRMED ON 0.1.49.** Implemented at
   `b5c170a`; Grok accepted r1.
@@ -40,9 +43,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   identity guard, restored the head green, and accepted with no findings.
   The owner repeated the exact stopped-Plex path on installed 0.1.49 and
   confirmed the grid/title remain present and the item remains unwatched. The
-  follow-up for the indefinite red edit line is implemented at `01e30cf` and
-  awaiting Grok review under `.agents/plans/edit-error-auto-dismiss.md`. Closed
-  recovery review record:
+  follow-up for the indefinite red edit line is implemented and Grok-accepted
+  at `01e30cf` under `.agents/plans/edit-error-auto-dismiss.md`. Closed recovery
+  review record:
   `.agents/review/findings/fwer-1.md`. Original plan
   `.agents/plans/per-surface-status.md`; decision `.agents/decisions.md`
   (2026-07-14). Every failure now reports on the surface it belongs to: the
@@ -109,11 +112,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **REVIEWING: failed edit-error auto-dismiss.** Code is committed at
-  `01e30cf`; coder guards and full verification are complete. Run Grok
-  `reviewloop` on exact base `26a48ca` and code head `01e30cf`, then hand 0.1.50
-  to the owner for the stopped-Plex timing playtest. Active loop: `eet-1`; see
-  `.agents/review/index.md`.
+- **OWNER PLAYTEST: failed edit-error auto-dismiss.** Build/install 0.1.50 and
+  repeat the stopped-Plex Mark watched path: the exact grid/title stays, the
+  named red edit line is readable and disappears after about eight seconds,
+  and the item remains unwatched/actionable after Plex restart plus Refresh.
+  Code/review record: `.agents/review/findings/eet-1.md`. Landing remains
+  owner-gated; no push or merge is authorized.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
