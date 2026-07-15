@@ -10,10 +10,11 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (smb-1..smb-6).
 
 Loop `eet-1` OPEN (failed edit-error auto-dismiss). Base `26a48ca`; branch
-`fix/eet-1-edit-error-auto-dismiss`; code head pending. One owner-approved
+`fix/eet-1-edit-error-auto-dismiss`; code head `01e30cf`. One owner-approved
 slice adds attempt-owned eight-second expiry and deterministic exact-timer /
-stale-callback guards. Grok reviews the pinned slice after coder red proofs and
-full green verification. Detail: `.agents/review/findings/eet-1.md`.
+stale-callback guards. All four coder regressions were proven red; targeted,
+full Linux, and both live-server paths are green. Grok r1 reviews the pinned
+slice next. Detail: `.agents/review/findings/eet-1.md`.
 
 Loop `fwer-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
 `guard_confirmed:true`; base `012a031`, code head `b5c170a`). Scope was the
