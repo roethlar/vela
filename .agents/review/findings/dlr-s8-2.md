@@ -2,9 +2,9 @@
 
 **Severity**: MEDIUM — the harness deliberately runs a mismatched browser
 driver even though the validation OS now publishes an exact compatible match.
-**Status**: In progress
+**Status**: In progress — guard-proven, external review pending
 **Branch**: `main` (approved dependency-refresh Slice 8)
-**Commit**: pending
+**Commit**: `ec7c43e`
 
 ## Evidence
 
@@ -45,10 +45,18 @@ the obsolete ICU72 library injection is removed.
 
 ## Guard proof
 
-Pending: prove an existing unstamped Debian cache is replaced by the expected
-Ubuntu driver, verify the downloaded package/driver identity and system linkage,
-then run the full Linux E2E suite. Separately inject a wrong SHA in a disposable
-copy and require the checksum gate to fail before extraction.
+- Before the first new-script run, the VM cache had no package stamp and its
+  driver SHA256 was `e682e150…`. Running the committed fetch script without
+  `--force` replaced it with driver SHA256 `7f0bc618…`, wrote the exact ARM64
+  package name to `.package`, removed the old `lib/` shim directory, and left
+  no unresolved `ldd` dependency.
+- Official ARM64 and AMD64 package downloads independently matched the two new
+  manifest SHA256 values. Changing only the ARM64 expected SHA in a disposable
+  committed worktree made `sha256sum` exit 1 with `FAILED`; no driver payload
+  was installed. Restoring the SHA left that worktree byte-clean before removal.
+- The full Linux real-app suite passed 18/18 with the new cached driver. The
+  earlier isolated ARM64 probe also proved session creation, Tauri IPC/JS,
+  element find/click, and screenshot behavior against WebKitGTK 2.52.3.
 
 ## Coder dispute (if any)
 
