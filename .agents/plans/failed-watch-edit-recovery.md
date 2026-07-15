@@ -1,10 +1,11 @@
 # Plan: a failed watch-state edit never reloads or loses the browse grid
 
-Status: **DRAFTED 2026-07-14 — awaiting owner approval before code.** The
-owner playtest of 0.1.48 failed on the real Plex path. This follow-up is one
-code slice. The per-surface-status implementation remains complete; this plan
-fixes the recovery work that runs underneath its correctly separated status
-lines.
+Status: **DRAFTED — NOT APPROVED.** The two-round Grok + Claude plan review
+ended without consensus on 2026-07-15; see `## Plan review log`. No code starts
+without new owner direction. The owner playtest of 0.1.48 failed on the real
+Plex path. This follow-up is one code slice. The per-surface-status
+implementation remains complete; this plan fixes the recovery work that runs
+underneath its correctly separated status lines.
 
 ## Owner-visible defect
 
@@ -247,3 +248,28 @@ Finding 2 disposition: ADDRESSED — the committed green case never waits for a
 recovery listing; separate temporary regressions prove card continuity,
 no-request/non-consumption, view-banner absence, and exact identity red for
 their intended reasons.
+
+**r2 — 2026-07-15T02:24:57Z — base `310c2ca`, head `ad401ed`; round verdict
+`reopened`, two-round cap exhausted.**
+
+- Grok 0.2.101 (`5bc4b5dfadcf`) returned `reopened`,
+  `guard_confirmed: false`, with one ADMITTED finding:
+  1. HIGH — substitution red proof 4 mutates only the mock catalog, but the
+     fixed failed-edit path intentionally makes no Items request. The rendered
+     in-memory poster buttons therefore never receive the replacement, so the
+     exact-identity assertion stays green and the purported same-cardinality
+     red proof is vacuous. A valid proof must temporarily write the substituted
+     same-length array into the UI, either by restoring a successful recovery
+     listing for that proof or by assigning the array in the catch, then require
+     exact identity to fail while `cardCount === 60` remains green.
+- Claude Code 2.1.209 returned `accepted`, `guard_confirmed: false`, with no
+  findings. Claude judged the four temporary regressions independently
+  executable using the existing mock mutation and request/served controls; that
+  conclusion conflicts with Grok's evidence that an unrequested mock mutation
+  cannot change the already-rendered grid.
+
+Outcome: there is no reviewer consensus, so the owner's conditional approval
+did not fire. The plan remains unapproved at the requested two-round cap. The
+r2 finding is evidence-backed and admitted, but correcting it would produce a
+new unreviewed head; no third round or implementation starts without new owner
+direction.

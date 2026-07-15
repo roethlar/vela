@@ -90,13 +90,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **PLAN REVIEW ACTIVE: failed watch-state recovery follow-up.** Plan
-  `.agents/plans/failed-watch-edit-recovery.md`, one slice; its `## Plan review
-  log` is the canonical loop record. R1 was reopened for test-sequencing fixes.
-  The owner pre-approved the plan conditional on Grok + Claude consensus within
-  two rounds; implementation still requires an explicit go after that gate
-  closes. After landing, repeat the exact stopped-Plex test and the
-  still-outstanding detail-page test.
+- **PLAN REVIEW STOPPED — NO CONSENSUS: failed watch-state recovery
+  follow-up.** Plan `.agents/plans/failed-watch-edit-recovery.md`, one slice;
+  its `## Plan review log` is the canonical record. R1's two findings were
+  fixed. At the final allowed r2, Claude accepted and Grok reopened one
+  same-cardinality red-proof recipe because its mock-only substitution cannot
+  reach the fixed path's in-memory grid. The conditional approval did not fire;
+  the plan is not approved and no code starts without new owner direction.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
@@ -209,8 +209,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md` (host-specific facts; the E2E venue)
 - `.agents/push-policy.md` (always ask — including the `vm` remote)
-- `.agents/plans/failed-watch-edit-recovery.md` (DRAFTED — owner approval
-  pending; the 0.1.48 real-Plex playtest failed)
+- `.agents/plans/failed-watch-edit-recovery.md` (DRAFTED — r2 ended without
+  reviewer consensus; not approved)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)
