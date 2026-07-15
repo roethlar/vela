@@ -110,32 +110,48 @@ or offset-zero refresh semantics.
 
 ### Hermetic E2E guard
 
-Strengthen `tests/e2e/scenarios/pagefail.mjs` case 4:
+Strengthen `tests/e2e/scenarios/pagefail.mjs` case 4 with a committed green path
+that never waits for a recovery listing:
 
-1. Snapshot the exact visible card-label/key set, including the card used for
-   Mark watched.
-2. Park the edit's failed recovery window with mock response controls and hold
-   the exact card set visible throughout. The current implementation must go
-   red while it publishes `items = []`.
-3. Assert the failed edit makes no listing request. A failed backend edit has no
-   new browse truth to fetch; an armed next-listing failure must remain
-   unconsumed and no view banner should appear.
-4. After the edit settles, assert the exact set and attempted card remain, not
-   merely the same count.
-5. After proving the listing one-shot was not consumed, explicitly return
-   `failNextItems`, `unauthNextItems`, and `itemsDelayMs` to their neutral
-   values before pressing Refresh. Put the same reset in case cleanup so an
-   assertion failure cannot poison a later case. Assert the controls are
-   neutral, then run a healthy explicit Refresh and require its listing to be
-   served successfully; it must not be the request that consumes the guard.
-   Assert the attempted card remains unwatched and actionable.
+1. Snapshot the exact ordered visible poster `aria-label` values, which are
+   unique in this fixture, including the card used for Mark watched; establish
+   that the view banner is clear.
+2. Record both Items-request arrival and served-response counts. Arm the doomed
+   edit with `unauthNextPlayed`, plus `failNextItems` and a 6000 ms
+   `itemsDelayMs`. Do **not** wait for the listing controls to bind: on the fixed
+   path they must remain armed because no recovery Items request exists.
+3. From the Mark watched click until the named edit failure appears, sample the
+   exact identity continuously. A missing, substituted, or empty set is an
+   immediate assertion failure, not a polling condition to wait through.
+4. After the edit settles, require the exact identity and attempted card to
+   remain, both Items counters to be unchanged, both listing controls still to
+   be armed, and the view banner still to be absent. The failed edit line must
+   be the only new failure surface.
+5. In `finally`, and before pressing Refresh on the passing path, explicitly
+   return `unauthNextPlayed`, `failNextItems`, `unauthNextItems`, and
+   `itemsDelayMs` to their neutral values. Assert the controls are neutral, then
+   run a healthy explicit Refresh and require its listing to be served
+   successfully; it must not be the request that consumes the guard. Assert
+   the attempted card remains unwatched and actionable.
 6. Keep the existing Home transient-state cases green; they prove the narrow
    repair still heals recents/tombstones when Home could have observed them.
 
-Red-proof the identity assertion separately by temporarily removing the
-attempted key while backfilling a different uniquely keyed card. The old count
-check must remain green and the exact-identity check must fail for the intended
-reason.
+Prove the committed guard red with separate temporary regressions, restoring
+the committed tree after each:
+
+1. Reinsert the old catch-to-`refreshWatchState()` call with the delayed Items
+   response armed. The continuous identity guard must fail while that call
+   publishes `items = []`; do not turn the green case into a wait for the
+   recovery request.
+2. Reinsert the old call with no response delay. The card set may restore too
+   quickly to witness the blank, but the Items-arrival/non-consumption assertion
+   must fail for the unnecessary request.
+3. Publish a synthetic view failure from the failed-edit catch without making
+   a listing request. The no-view-banner assertion must fail independently of
+   the request and identity guards.
+4. Remove the attempted mock item while backfilling a different item with a
+   distinct `aria-label`. The old count check must remain green and the
+   exact-identity assertion must fail for the substitution.
 
 ### Real Plex guard
 
@@ -226,3 +242,8 @@ they are admitted for plan revision before r2.
 Finding 1 disposition: ADDRESSED — the hermetic case now disarms every related
 listing one-shot before healthy Refresh and in case cleanup, and requires the
 Refresh itself to be served successfully.
+
+Finding 2 disposition: ADDRESSED — the committed green case never waits for a
+recovery listing; separate temporary regressions prove card continuity,
+no-request/non-consumption, view-banner absence, and exact identity red for
+their intended reasons.
