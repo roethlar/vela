@@ -8,18 +8,23 @@ use url::Url;
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct PlexServer {
+    #[serde(rename = "@name")]
     pub name: String,
+    #[serde(rename = "@host")]
     pub host: String,
+    #[serde(rename = "@port")]
     pub port: u16,
+    #[serde(rename = "@scheme")]
     pub scheme: String,
-    #[serde(default)]
+    #[serde(rename = "@uri", default)]
     pub uri: String,
-    #[serde(default)]
+    #[serde(rename = "@local", default)]
     pub local: bool,
-    #[serde(default)]
+    #[serde(rename = "@relay", default)]
     pub relay: bool,
-    #[serde(rename = "machineIdentifier")]
+    #[serde(rename = "@machineIdentifier")]
     pub machine_identifier: String,
+    #[serde(rename = "@version")]
     pub version: String,
 }
 
@@ -41,25 +46,29 @@ pub struct ItemsContainer {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PlexDir {
+    #[serde(rename = "@key")]
     pub key: String,
-    #[serde(rename = "ratingKey")]
+    #[serde(rename = "@ratingKey")]
     pub rating_key: Option<String>,
+    #[serde(rename = "@title")]
     pub title: String,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "@type", default)]
     pub media_type: Option<String>,
-    #[serde(rename = "thumb")]
+    #[serde(rename = "@thumb")]
     pub thumb: Option<String>,
+    #[serde(rename = "@year")]
     pub year: Option<u32>,
+    #[serde(rename = "@summary")]
     pub summary: Option<String>,
     // Shows arrive as Directory rows; without these the "date added" / "last
     // played" sorts rank all Plex shows as missing-timestamp (sorting review r2).
-    #[serde(rename = "addedAt")]
+    #[serde(rename = "@addedAt")]
     pub added_at: Option<u64>,
-    #[serde(rename = "lastViewedAt")]
+    #[serde(rename = "@lastViewedAt")]
     pub last_viewed_at: Option<u64>,
     /// A season Directory row's parent (its show) — the info surface's
     /// show-navigation target.
-    #[serde(rename = "parentRatingKey")]
+    #[serde(rename = "@parentRatingKey")]
     pub parent_rating_key: Option<String>,
 }
 
@@ -105,58 +114,67 @@ pub struct PlexHub {
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct LibrarySection {
+    #[serde(rename = "@key")]
     pub key: String,
+    #[serde(rename = "@title")]
     pub title: String,
-    #[serde(rename = "type")]
+    #[serde(rename = "@type")]
     pub section_type: String,
+    #[serde(rename = "@agent")]
     pub agent: Option<String>,
+    #[serde(rename = "@scanner")]
     pub scanner: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Default)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct PlexVideo {
+    #[serde(rename = "@key")]
     pub key: String,
-    #[serde(rename = "ratingKey")]
+    #[serde(rename = "@ratingKey")]
     pub rating_key: String,
+    #[serde(rename = "@title")]
     pub title: String,
-    #[serde(rename = "titleSort")]
+    #[serde(rename = "@titleSort")]
     pub title_sort: Option<String>,
+    #[serde(rename = "@summary")]
     pub summary: Option<String>,
+    #[serde(rename = "@duration")]
     pub duration: Option<u64>,
-    #[serde(rename = "viewOffset")]
+    #[serde(rename = "@viewOffset")]
     pub view_offset: Option<u64>,
-    #[serde(rename = "viewCount", default)]
+    #[serde(rename = "@viewCount", default)]
     pub view_count: Option<u64>,
-    #[serde(rename = "thumb")]
+    #[serde(rename = "@thumb")]
     pub thumb: Option<String>,
-    #[serde(rename = "grandparentThumb")]
+    #[serde(rename = "@grandparentThumb")]
     pub grandparent_thumb: Option<String>,
-    #[serde(rename = "art")]
+    #[serde(rename = "@art")]
     pub art: Option<String>,
-    #[serde(rename = "addedAt")]
+    #[serde(rename = "@addedAt")]
     pub added_at: Option<u64>,
     /// Unix seconds of the user's last watch activity on this item.
-    #[serde(rename = "lastViewedAt")]
+    #[serde(rename = "@lastViewedAt")]
     pub last_viewed_at: Option<u64>,
-    #[serde(rename = "updatedAt")]
+    #[serde(rename = "@updatedAt")]
     pub updated_at: Option<u64>,
     #[serde(rename = "Media", default)]
     pub media: Vec<PlexMedia>,
+    #[serde(rename = "@year")]
     pub year: Option<u32>,
-    #[serde(rename = "type", default)]
+    #[serde(rename = "@type", default)]
     pub media_type: Option<String>,
-    #[serde(rename = "index")]
+    #[serde(rename = "@index")]
     pub index: Option<u32>,
-    #[serde(rename = "parentIndex")]
+    #[serde(rename = "@parentIndex")]
     pub parent_index: Option<u32>,
-    #[serde(rename = "grandparentTitle")]
+    #[serde(rename = "@grandparentTitle")]
     pub grandparent_title: Option<String>,
-    #[serde(rename = "parentTitle")]
+    #[serde(rename = "@parentTitle")]
     pub parent_title: Option<String>,
-    #[serde(rename = "parentRatingKey")]
+    #[serde(rename = "@parentRatingKey")]
     pub parent_rating_key: Option<String>,
-    #[serde(rename = "grandparentRatingKey")]
+    #[serde(rename = "@grandparentRatingKey")]
     pub grandparent_rating_key: Option<String>,
     /// `<Guid id="imdb://tt…"/>` children (present in section listings when
     /// requested with `includeGuids=1`); the cross-source dedup identity.
@@ -166,25 +184,30 @@ pub struct PlexVideo {
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PlexGuid {
+    #[serde(rename = "@id")]
     pub id: String,
 }
 
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct PlexMedia {
+    #[serde(rename = "@id")]
     pub id: String,
+    #[serde(rename = "@duration")]
     pub duration: Option<u64>,
-    #[serde(rename = "bitrate")]
+    #[serde(rename = "@bitrate")]
     pub bitrate: Option<u32>,
+    #[serde(rename = "@width")]
     pub width: Option<u32>,
+    #[serde(rename = "@height")]
     pub height: Option<u32>,
-    #[serde(rename = "aspectRatio")]
+    #[serde(rename = "@aspectRatio")]
     pub aspect_ratio: Option<f32>,
-    #[serde(rename = "videoCodec")]
+    #[serde(rename = "@videoCodec")]
     pub video_codec: Option<String>,
-    #[serde(rename = "audioCodec")]
+    #[serde(rename = "@audioCodec")]
     pub audio_codec: Option<String>,
-    #[serde(rename = "container")]
+    #[serde(rename = "@container")]
     pub container: Option<String>,
     #[serde(rename = "Part", default)]
     pub parts: Vec<PlexPart>,
@@ -193,19 +216,25 @@ pub struct PlexMedia {
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct PlexPart {
+    #[serde(rename = "@id")]
     pub id: String,
+    #[serde(rename = "@key")]
     pub key: String,
+    #[serde(rename = "@duration")]
     pub duration: Option<u64>,
+    #[serde(rename = "@file")]
     pub file: String,
+    #[serde(rename = "@size")]
     pub size: Option<u64>,
+    #[serde(rename = "@container")]
     pub container: Option<String>,
 }
 
 // --- Item detail (the "more info" surface) -------------------------------------
 // A dedicated serde hierarchy for the per-item `/library/metadata/{rk}` response.
 // Kept separate from the listing structs above so the hot listing/playback parse
-// isn't widened; serde_xml_rs maps both attributes and repeated child elements to
-// fields (the same mechanism `PlexVideo.media`/`.guids` already rely on).
+// isn't widened; serde_xml_rs maps explicitly named attributes and repeated child
+// elements to fields (the same mechanism `PlexVideo.media`/`.guids` already use).
 
 /// Root wrapper: the metadata endpoint returns the item as a `Video` (movie/
 /// episode) or a `Directory` (show/season) under `MediaContainer`.
@@ -224,42 +253,53 @@ pub struct DetailContainer {
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
 pub struct PlexDetail {
+    #[serde(rename = "@key")]
     pub key: String,
-    #[serde(rename = "ratingKey")]
+    #[serde(rename = "@ratingKey")]
     pub rating_key: String,
+    #[serde(rename = "@title")]
     pub title: String,
+    #[serde(rename = "@summary")]
     pub summary: Option<String>,
+    #[serde(rename = "@tagline")]
     pub tagline: Option<String>,
+    #[serde(rename = "@year")]
     pub year: Option<u32>,
+    #[serde(rename = "@duration")]
     pub duration: Option<u64>,
-    #[serde(rename = "viewOffset")]
+    #[serde(rename = "@viewOffset")]
     pub view_offset: Option<u64>,
-    #[serde(rename = "viewCount")]
+    #[serde(rename = "@viewCount")]
     pub view_count: Option<u64>,
-    #[serde(rename = "type")]
+    #[serde(rename = "@type")]
     pub media_type: Option<String>,
+    #[serde(rename = "@thumb")]
     pub thumb: Option<String>,
-    #[serde(rename = "grandparentThumb")]
+    #[serde(rename = "@grandparentThumb")]
     pub grandparent_thumb: Option<String>,
+    #[serde(rename = "@art")]
     pub art: Option<String>,
-    #[serde(rename = "contentRating")]
+    #[serde(rename = "@contentRating")]
     pub content_rating: Option<String>,
+    #[serde(rename = "@rating")]
     pub rating: Option<f32>,
-    #[serde(rename = "audienceRating")]
+    #[serde(rename = "@audienceRating")]
     pub audience_rating: Option<f32>,
+    #[serde(rename = "@studio")]
     pub studio: Option<String>,
-    #[serde(rename = "originallyAvailableAt")]
+    #[serde(rename = "@originallyAvailableAt")]
     pub originally_available_at: Option<String>,
+    #[serde(rename = "@index")]
     pub index: Option<u32>,
-    #[serde(rename = "parentIndex")]
+    #[serde(rename = "@parentIndex")]
     pub parent_index: Option<u32>,
-    #[serde(rename = "grandparentTitle")]
+    #[serde(rename = "@grandparentTitle")]
     pub grandparent_title: Option<String>,
-    #[serde(rename = "parentTitle")]
+    #[serde(rename = "@parentTitle")]
     pub parent_title: Option<String>,
-    #[serde(rename = "parentRatingKey")]
+    #[serde(rename = "@parentRatingKey")]
     pub parent_rating_key: Option<String>,
-    #[serde(rename = "grandparentRatingKey")]
+    #[serde(rename = "@grandparentRatingKey")]
     pub grandparent_rating_key: Option<String>,
     #[serde(rename = "Genre", default)]
     pub genres: Vec<PlexTag>,
@@ -279,10 +319,12 @@ pub struct PlexDetail {
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct PlexTag {
+    #[serde(rename = "@tag")]
     pub tag: String,
     /// Server-local numeric tag id (captured as a string; digits-validated at
     /// mapping time). On Director/Writer it keys the person-filtered listing
     /// (`?director=<id>`); Genre/Country simply ignore it.
+    #[serde(rename = "@id")]
     pub id: Option<String>,
 }
 
@@ -290,26 +332,33 @@ pub struct PlexTag {
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct PlexRole {
+    #[serde(rename = "@tag")]
     pub tag: String,
     /// Server-local numeric tag id — keys the `?actor=<id>` filtered listing.
+    #[serde(rename = "@id")]
     pub id: Option<String>,
+    #[serde(rename = "@role")]
     pub role: Option<String>,
+    #[serde(rename = "@thumb")]
     pub thumb: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct PlexDetailMedia {
-    #[serde(rename = "videoResolution")]
+    #[serde(rename = "@videoResolution")]
     pub video_resolution: Option<String>,
+    #[serde(rename = "@width")]
     pub width: Option<u32>,
+    #[serde(rename = "@height")]
     pub height: Option<u32>,
-    #[serde(rename = "videoCodec")]
+    #[serde(rename = "@videoCodec")]
     pub video_codec: Option<String>,
-    #[serde(rename = "audioCodec")]
+    #[serde(rename = "@audioCodec")]
     pub audio_codec: Option<String>,
+    #[serde(rename = "@container")]
     pub container: Option<String>,
-    #[serde(rename = "videoDynamicRange")]
+    #[serde(rename = "@videoDynamicRange")]
     pub video_dynamic_range: Option<String>,
     #[serde(rename = "Part", default)]
     pub parts: Vec<PlexDetailPart>,
@@ -325,12 +374,15 @@ pub struct PlexDetailPart {
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct PlexStream {
-    #[serde(rename = "streamType")]
+    #[serde(rename = "@streamType")]
     pub stream_type: Option<u8>,
+    #[serde(rename = "@codec")]
     pub codec: Option<String>,
+    #[serde(rename = "@language")]
     pub language: Option<String>,
+    #[serde(rename = "@channels")]
     pub channels: Option<u32>,
-    #[serde(rename = "displayTitle")]
+    #[serde(rename = "@displayTitle")]
     pub display_title: Option<String>,
 }
 
@@ -634,8 +686,8 @@ impl PlexLibrary {
             .await?
             .error_for_status()?;
         let body = resp.text().await?;
-        // Stream-parse: serde_xml_rs 0.6 errors ("duplicate field 'Video'") on the
-        // nested <Hub><Video/>…</Hub> shape, so walk it manually and preserve order.
+        // Stream-parse the nested <Hub><Video/>…</Hub> shape so repeated mixed
+        // item elements retain their server order.
         let mut reader = quick_xml::Reader::from_str(&body);
         let mut buf = Vec::new();
         let mut out: Vec<PlexHub> = Vec::new();
@@ -1572,6 +1624,32 @@ mod tests {
     use super::*;
 
     #[test]
+    fn library_sections_parse_scalar_attributes() {
+        let xml = r#"<MediaContainer size="2">
+  <Directory key="1" title="Movies" type="movie"
+             agent="tv.plex.agents.movie" scanner="Plex Movie"/>
+  <Directory key="2" title="Shows" type="show"/>
+</MediaContainer>"#;
+
+        let container: MediaContainer = serde_xml_rs::from_str(xml).expect("section parse");
+        assert_eq!(container.directories.len(), 2);
+
+        let movies = &container.directories[0];
+        assert_eq!(movies.key, "1");
+        assert_eq!(movies.title, "Movies");
+        assert_eq!(movies.section_type, "movie");
+        assert_eq!(movies.agent.as_deref(), Some("tv.plex.agents.movie"));
+        assert_eq!(movies.scanner.as_deref(), Some("Plex Movie"));
+
+        let shows = &container.directories[1];
+        assert_eq!(shows.key, "2");
+        assert_eq!(shows.title, "Shows");
+        assert_eq!(shows.section_type, "show");
+        assert_eq!(shows.agent, None);
+        assert_eq!(shows.scanner, None);
+    }
+
+    #[test]
     fn detail_parse_captures_full_metadata() {
         // A representative `/library/metadata/{rk}` movie response. The parse must
         // capture the scalar attrs AND every child collection (genre/director/
@@ -1607,8 +1685,14 @@ mod tests {
         let d = container.videos.into_iter().next().expect("one Video");
 
         // Scalar attributes.
+        assert_eq!(d.key, "/library/metadata/12345");
         assert_eq!(d.rating_key, "12345");
         assert_eq!(d.title, "Blade Runner 2049");
+        assert_eq!(d.media_type.as_deref(), Some("movie"));
+        assert_eq!(
+            d.summary.as_deref(),
+            Some("A young blade runner uncovers a secret.")
+        );
         assert_eq!(d.content_rating.as_deref(), Some("R"));
         assert_eq!(d.rating, Some(8.0));
         assert_eq!(d.audience_rating, Some(8.8));
@@ -1619,6 +1703,8 @@ mod tests {
         assert_eq!(d.duration, Some(9_754_000));
         assert_eq!(d.view_count, Some(1));
         assert_eq!(d.view_offset, Some(120_000));
+        assert_eq!(d.thumb.as_deref(), Some("/library/metadata/12345/thumb/1"));
+        assert_eq!(d.art.as_deref(), Some("/library/metadata/12345/art/1"));
 
         // Child collections.
         let genres: Vec<_> = d.genres.iter().map(|t| t.tag.as_str()).collect();
@@ -1661,15 +1747,19 @@ mod tests {
         assert_eq!(m.height, Some(2160));
         assert_eq!(m.video_codec.as_deref(), Some("hevc"));
         assert_eq!(m.audio_codec.as_deref(), Some("truehd"));
+        assert_eq!(m.container.as_deref(), Some("mkv"));
         assert_eq!(m.video_dynamic_range.as_deref(), Some("Dolby Vision"));
         assert_eq!(m.parts.len(), 1);
         let streams = &m.parts[0].streams;
         assert_eq!(streams.len(), 2);
         assert_eq!(streams[0].stream_type, Some(2));
         assert_eq!(streams[0].codec.as_deref(), Some("truehd"));
+        assert_eq!(streams[0].language.as_deref(), Some("English"));
         assert_eq!(streams[0].channels, Some(8));
+        assert_eq!(streams[0].display_title.as_deref(), Some("TrueHD 7.1"));
         assert_eq!(streams[1].stream_type, Some(3));
         assert_eq!(streams[1].language.as_deref(), Some("English"));
+        assert_eq!(streams[1].display_title.as_deref(), Some("English (SRT)"));
     }
 
     #[test]
@@ -1808,26 +1898,164 @@ mod tests {
     }
 
     #[test]
-    fn episode_and_season_rows_carry_parent_keys() {
+    fn detail_container_parses_metadata_and_directory_parent_attributes() {
         let xml = r#"
             <MediaContainer size="2">
+              <Metadata ratingKey="202" key="/library/metadata/202" title="Next Up"
+                        type="episode" grandparentThumb="/library/metadata/100/thumb/1"
+                        index="2" parentIndex="1" grandparentTitle="The Show"
+                        parentTitle="Season 1" parentRatingKey="150"
+                        grandparentRatingKey="100" />
+              <Directory ratingKey="100" key="/library/metadata/100"
+                         title="The Show" type="show" />
+            </MediaContainer>
+        "#;
+
+        let container: DetailContainer = serde_xml_rs::from_str(xml).expect("detail parse");
+        assert_eq!(container.metadata.len(), 1);
+        assert_eq!(container.directories.len(), 1);
+
+        let episode = &container.metadata[0];
+        assert_eq!(episode.rating_key, "202");
+        assert_eq!(episode.key, "/library/metadata/202");
+        assert_eq!(episode.title, "Next Up");
+        assert_eq!(episode.media_type.as_deref(), Some("episode"));
+        assert_eq!(
+            episode.grandparent_thumb.as_deref(),
+            Some("/library/metadata/100/thumb/1")
+        );
+        assert_eq!(episode.index, Some(2));
+        assert_eq!(episode.parent_index, Some(1));
+        assert_eq!(episode.grandparent_title.as_deref(), Some("The Show"));
+        assert_eq!(episode.parent_title.as_deref(), Some("Season 1"));
+        assert_eq!(episode.parent_rating_key.as_deref(), Some("150"));
+        assert_eq!(episode.grandparent_rating_key.as_deref(), Some("100"));
+
+        let show = &container.directories[0];
+        assert_eq!(show.rating_key, "100");
+        assert_eq!(show.key, "/library/metadata/100");
+        assert_eq!(show.title, "The Show");
+        assert_eq!(show.media_type.as_deref(), Some("show"));
+    }
+
+    #[test]
+    fn episode_and_season_rows_carry_parent_keys() {
+        let xml = r#"
+            <MediaContainer size="3">
               <Video ratingKey="202" key="/library/metadata/202" title="Next Up"
-                     type="episode" parentRatingKey="150" grandparentRatingKey="100" />
+                     titleSort="Next Up, The" summary="An episode summary"
+                     duration="2700000" viewOffset="1200000" viewCount="1"
+                     thumb="/library/metadata/202/thumb/1"
+                     grandparentThumb="/library/metadata/100/thumb/1"
+                     art="/library/metadata/100/art/1" addedAt="1751000000"
+                     lastViewedAt="1751500000" updatedAt="1751600000" year="2025"
+                     type="episode" index="2" parentIndex="1"
+                     grandparentTitle="The Show" parentTitle="Season 1"
+                     parentRatingKey="150" grandparentRatingKey="100">
+                <Guid id="imdb://tt1234567" />
+                <Guid id="tmdb://7654321" />
+                <Media id="301" duration="2700000" bitrate="12000" width="3840"
+                       height="2160" aspectRatio="1.78" videoCodec="hevc"
+                       audioCodec="eac3" container="mkv">
+                  <Part id="401" key="/library/parts/401/file.mkv" duration="2700000"
+                        file="/data/episode.mkv" size="987654321" container="mkv" />
+                </Media>
+              </Video>
+              <Metadata ratingKey="303" key="/library/metadata/303"
+                        title="Metadata Row" type="movie" />
               <Directory ratingKey="150" key="/library/metadata/150/children"
-                     title="Season 1" type="season" parentRatingKey="100" />
+                     title="Season 1" type="season" thumb="/library/metadata/150/thumb/1"
+                     year="2025" summary="The first season" addedAt="1750000000"
+                     lastViewedAt="1751400000" parentRatingKey="100" />
             </MediaContainer>
         "#;
         // Attribute path (hubs / on-deck / streamed listings).
         let items = videos_from_xml(xml);
         assert_eq!(items[0].parent_rating_key.as_deref(), Some("150"));
         assert_eq!(items[0].grandparent_rating_key.as_deref(), Some("100"));
-        assert_eq!(items[1].parent_rating_key.as_deref(), Some("100"));
+        assert_eq!(items[2].parent_rating_key.as_deref(), Some("100"));
 
         // Serde path (the get_items listing parse) + the Directory→Video map.
         let c: ItemsContainer = serde_xml_rs::from_str(xml).expect("parse");
-        assert_eq!(c.videos[0].parent_rating_key.as_deref(), Some("150"));
-        assert_eq!(c.videos[0].grandparent_rating_key.as_deref(), Some("100"));
+        assert_eq!(c.videos.len(), 1);
+        assert_eq!(c.metadata.len(), 1);
+        assert_eq!(c.directories.len(), 1);
+
+        let episode = &c.videos[0];
+        assert_eq!(episode.key, "/library/metadata/202");
+        assert_eq!(episode.rating_key, "202");
+        assert_eq!(episode.title, "Next Up");
+        assert_eq!(episode.title_sort.as_deref(), Some("Next Up, The"));
+        assert_eq!(episode.summary.as_deref(), Some("An episode summary"));
+        assert_eq!(episode.duration, Some(2_700_000));
+        assert_eq!(episode.view_offset, Some(1_200_000));
+        assert_eq!(episode.view_count, Some(1));
+        assert_eq!(
+            episode.thumb.as_deref(),
+            Some("/library/metadata/202/thumb/1")
+        );
+        assert_eq!(
+            episode.grandparent_thumb.as_deref(),
+            Some("/library/metadata/100/thumb/1")
+        );
+        assert_eq!(episode.art.as_deref(), Some("/library/metadata/100/art/1"));
+        assert_eq!(episode.added_at, Some(1_751_000_000));
+        assert_eq!(episode.last_viewed_at, Some(1_751_500_000));
+        assert_eq!(episode.updated_at, Some(1_751_600_000));
+        assert_eq!(episode.year, Some(2025));
+        assert_eq!(episode.media_type.as_deref(), Some("episode"));
+        assert_eq!(episode.index, Some(2));
+        assert_eq!(episode.parent_index, Some(1));
+        assert_eq!(episode.grandparent_title.as_deref(), Some("The Show"));
+        assert_eq!(episode.parent_title.as_deref(), Some("Season 1"));
+        assert_eq!(episode.parent_rating_key.as_deref(), Some("150"));
+        assert_eq!(episode.grandparent_rating_key.as_deref(), Some("100"));
+        assert_eq!(
+            episode
+                .guids
+                .iter()
+                .map(|g| g.id.as_str())
+                .collect::<Vec<_>>(),
+            ["imdb://tt1234567", "tmdb://7654321"]
+        );
+
+        assert_eq!(episode.media.len(), 1);
+        let media = &episode.media[0];
+        assert_eq!(media.id, "301");
+        assert_eq!(media.duration, Some(2_700_000));
+        assert_eq!(media.bitrate, Some(12_000));
+        assert_eq!(media.width, Some(3840));
+        assert_eq!(media.height, Some(2160));
+        assert_eq!(media.aspect_ratio, Some(1.78));
+        assert_eq!(media.video_codec.as_deref(), Some("hevc"));
+        assert_eq!(media.audio_codec.as_deref(), Some("eac3"));
+        assert_eq!(media.container.as_deref(), Some("mkv"));
+        assert_eq!(media.parts.len(), 1);
+        let part = &media.parts[0];
+        assert_eq!(part.id, "401");
+        assert_eq!(part.key, "/library/parts/401/file.mkv");
+        assert_eq!(part.duration, Some(2_700_000));
+        assert_eq!(part.file, "/data/episode.mkv");
+        assert_eq!(part.size, Some(987_654_321));
+        assert_eq!(part.container.as_deref(), Some("mkv"));
+
+        assert_eq!(c.metadata[0].rating_key, "303");
+        assert_eq!(c.metadata[0].title, "Metadata Row");
+        assert_eq!(c.metadata[0].media_type.as_deref(), Some("movie"));
+
         let season: PlexVideo = c.directories[0].clone().into();
+        assert_eq!(season.key, "/library/metadata/150/children");
+        assert_eq!(season.rating_key, "150");
+        assert_eq!(season.title, "Season 1");
+        assert_eq!(season.media_type.as_deref(), Some("season"));
+        assert_eq!(
+            season.thumb.as_deref(),
+            Some("/library/metadata/150/thumb/1")
+        );
+        assert_eq!(season.year, Some(2025));
+        assert_eq!(season.summary.as_deref(), Some("The first season"));
+        assert_eq!(season.added_at, Some(1_750_000_000));
+        assert_eq!(season.last_viewed_at, Some(1_751_400_000));
         assert_eq!(season.parent_rating_key.as_deref(), Some("100"));
         assert_eq!(season.grandparent_rating_key, None);
     }
