@@ -277,6 +277,10 @@ switch ($os) {
   }
 }
 
+# A mismatched local toolchain can rewrite the lockfile or produce a bundle
+# different from CI. The pins live in .node-version and packageManager.
+Invoke-Checked -FilePath 'node' -ArgumentList @('scripts/check-js-toolchain.mjs')
+
 $nodeModulesMarker = Join-Path 'node_modules' '.package-lock.json'
 $depsMissing = -not (Test-Path -LiteralPath 'node_modules' -PathType Container)
 $depsStale = $false

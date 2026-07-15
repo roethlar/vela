@@ -105,6 +105,10 @@ case "$os" in
     ;;
 esac
 
+# A mismatched local toolchain can rewrite the lockfile or produce a bundle
+# different from CI. The pins live in .node-version and packageManager.
+node scripts/check-js-toolchain.mjs
+
 # --- Ensure JS deps exist and are current (tauri CLI lives in node_modules) ---
 # npm writes node_modules/.package-lock.json on every install, so it's a faithful
 # marker of what's actually installed. Reinstall when node_modules is absent OR

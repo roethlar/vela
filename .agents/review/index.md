@@ -568,6 +568,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
+| dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[~]` | pending |
 | fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
 | dlr-s1-1 | MEDIUM | Windows release cannot run the direct npm.cmd version assertion | `[x]` | `adc0104` |
 | lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[x]` | see log |

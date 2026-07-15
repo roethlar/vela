@@ -26,7 +26,7 @@ jobs:
       - name: Activate pinned npm
         run: |
           npm install --global npm@12.0.1
-          node --input-type=module -e "import { execSync } from 'node:child_process'; const npm = execSync('npm --version', { encoding: 'utf8' }).trim(); if (process.version !== 'v26.5.0' || npm !== '12.0.1') { throw new Error('expected Node v26.5.0/npm 12.0.1; got ' + process.version + '/npm ' + npm); }"
+          node scripts/check-js-toolchain.mjs
       - run: npm ci
       - run: npm audit
 
@@ -79,7 +79,7 @@ jobs:
       - name: Activate pinned npm
         run: |
           npm install --global npm@12.0.1
-          node --input-type=module -e "import { execSync } from 'node:child_process'; const npm = execSync('npm --version', { encoding: 'utf8' }).trim(); if (process.version !== 'v26.5.0' || npm !== '12.0.1') { throw new Error('expected Node v26.5.0/npm 12.0.1; got ' + process.version + '/npm ' + npm); }"
+          node scripts/check-js-toolchain.mjs
       - run: npm ci
 
       # Builds the frontend (beforeBuildCommand) + the Rust release binary and

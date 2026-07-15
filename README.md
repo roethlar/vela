@@ -60,8 +60,12 @@ call.
 
 ## Run (development)
 
+Activate the Node version pinned by `.node-version` and the npm version pinned
+by `package.json`'s `packageManager`, then verify them before installing:
+
 ```bash
-npm install
+node scripts/check-js-toolchain.mjs
+npm ci
 npm run tauri dev
 ```
 
