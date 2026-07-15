@@ -93,6 +93,15 @@ A single `npm run e2e` orchestrates: build debug app → start tauri-driver
 
 ## Deviation 2026-07-05: driver sourcing and protocol client (owner-approved)
 
+> **Amended 2026-07-15 by the approved dependency-refresh audit.** Ubuntu
+> 26.04 now ships `webkitgtk-webdriver` 2.52.3, exactly matching the E2E VM's
+> WebKitGTK 2.52.3. The SHA-pinned Ubuntu ARM64 package passed session creation,
+> Tauri IPC/JavaScript, element find/click, and screenshot checks without an
+> install; the AMD64 package URL, checksum, and payload were inspected but no
+> AMD64 runtime venue was available. `fetch-driver.sh` now fetches those
+> official packages and no longer carries Debian's ICU 72 shim. The historical
+> 2026-07-05 evidence and choice below explain the superseded fixture.
+
 The original plan assumed WebKitWebDriver "ships with webkit2gtk on Arch".
 Verified false: Arch/CachyOS, Fedora, and openSUSE all build webkit2gtk
 without the driver binary, and Debian tops out at 2.50.6 — no distro ships
