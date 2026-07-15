@@ -27,9 +27,17 @@ const nameFilter = argv.filter((a) => !a.startsWith('--'));
 // and the detached driver group never sees the terminal's SIGINT — so an
 // interrupted run must reap the group itself (eh-1).
 const activeKills = new Set();
+const activeCleanups = new Set();
+let handlingSignal = false;
 for (const [sig, code] of Object.entries({ SIGHUP: 129, SIGINT: 130, SIGTERM: 143 })) {
-  process.on(sig, () => {
+  process.on(sig, async () => {
+    // A second signal is the operator's force-exit escape hatch. The first one
+    // reaps the app, then gives externally-mutating live scenarios a chance to
+    // restore state before Node exits (ordinary mocks clean up here too).
+    if (handlingSignal) process.exit(code);
+    handlingSignal = true;
     for (const kill of activeKills) kill();
+    await Promise.allSettled([...activeCleanups].map((cleanup) => cleanup()));
     process.exit(code);
   });
 }
@@ -73,6 +81,23 @@ async function runScenario(scenario, tauriDriverBin) {
   // The app reads XDG_CONFIG_HOME=<configRoot>/config, so a seeded config
   // file belongs at <configRoot>/config/vela/config.json.
   if (scenario.seed) await scenario.seed({ configRoot, repoRoot });
+  let cleanupPromise = null;
+  const runCleanup = scenario.cleanup
+    ? () => {
+        if (!cleanupPromise) {
+          // Start from an already-resolved promise so a synchronous cleanup
+          // throw becomes a rejection too; both ordinary teardown and the
+          // signal handler can then wait without skipping the remaining rails.
+          cleanupPromise = Promise.resolve()
+            .then(() => scenario.cleanup())
+            .finally(() => {
+              cleanupPromise = null;
+            });
+        }
+        return cleanupPromise;
+      }
+    : null;
+  if (runCleanup) activeCleanups.add(runCleanup);
   const logFd = fs.openSync(path.join(artifactsDir, `${scenario.name}-driver.log`), 'w');
   // detached ⇒ own process group, so killing -pid also takes down the
   // WebKitWebDriver child tauri-driver spawns.
@@ -122,7 +147,8 @@ async function runScenario(scenario, tauriDriverBin) {
   } catch (err) {
     return err;
   } finally {
-    if (scenario.cleanup) await Promise.resolve(scenario.cleanup()).catch(() => {});
+    if (runCleanup) await runCleanup().catch(() => {});
+    if (runCleanup) activeCleanups.delete(runCleanup);
     await driver.deleteSession().catch(() => {});
     killTree();
     activeKills.delete(killTree);
