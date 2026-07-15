@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — local release scripts can install dependencies and
 produce bundles with a Node/npm pair different from CI and the committed lock.
-**Status**: In progress — guard-proven, external review pending
+**Status**: Verified — external reviewer Grok accepted r1
 **Branch**: `main` (approved dependency-refresh Slice 8)
 **Commit**: `4cba5db`
 
@@ -73,4 +73,8 @@ folded into it.
 
 ## Reviewer comments
 
-Pending external Grok review.
+**r1 — 2026-07-15T18:13:15Z — accepted.** Grok 0.2.101 independently
+reviewed exact base `33163c5` and head `0934628`, injected fake npm 11 across
+the checker and both available packaging entry points, injected a wrong Node
+pin, observed the exact failures, restored its disposable worktree green, and
+returned `guard_confirmed: true` with no comments.

@@ -9,6 +9,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `dlr-s8-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
+`guard_confirmed:true`; base `33163c5`, reviewed head `0934628`). The Slice 8
+integration audit found that local Bash and PowerShell package scripts could
+install/build without the pinned Node/npm pair. `4cba5db` adds one assertion
+derived from `.node-version` plus `packageManager` and reuses it in local,
+CI, and release paths. The author and Grok independently proved both npm and
+Node mismatch legs red, restored green, and Grok returned no comments. Detail:
+`.agents/review/findings/dlr-s8-1.md`.
+
 Loop `dlr-s7` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
 `guard_confirmed:true`; base `8a563c9`, code head `1d619fd`). Scope was
 dependency-refresh Slice 7: reqwest 0.13.4 with explicit query support and
@@ -568,7 +577,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[~]` | `4cba5db` |
+| dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[x]` | `4cba5db` |
 | fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
 | dlr-s1-1 | MEDIUM | Windows release cannot run the direct npm.cmd version assertion | `[x]` | `adc0104` |
 | lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[x]` | see log |
