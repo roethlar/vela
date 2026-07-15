@@ -280,13 +280,27 @@ async function exerciseEpisodeUi(driver, fixtures) {
   await clickPoster(driver, fixtures.season.title);
   await driver.waitFor(
     `return [...document.querySelectorAll('.season .eplist button.eprow')]
-       .some((row) => row.querySelector('.eptitle')?.textContent.trim() === ${JSON.stringify(fixtures.episode.title)})`,
+       .some((row) => {
+         const title = row.querySelector('.eptitle');
+         const itemTitle = [...(title?.childNodes ?? [])]
+           .filter((node) => node.nodeType === Node.TEXT_NODE)
+           .map((node) => node.textContent)
+           .join('').trim();
+         return itemTitle === ${JSON.stringify(fixtures.episode.title)};
+       })`,
     `the real episode ${fixtures.episode.title}`,
     { timeoutMs: 60000 },
   );
   const matches = await driver.exec(
     `const matches = [...document.querySelectorAll('.season .eplist button.eprow')]
-       .filter((row) => row.querySelector('.eptitle')?.textContent.trim() === ${JSON.stringify(fixtures.episode.title)});
+       .filter((row) => {
+         const title = row.querySelector('.eptitle');
+         const itemTitle = [...(title?.childNodes ?? [])]
+           .filter((node) => node.nodeType === Node.TEXT_NODE)
+           .map((node) => node.textContent)
+           .join('').trim();
+         return itemTitle === ${JSON.stringify(fixtures.episode.title)};
+       });
      if (matches.length === 1) matches[0].click();
      return matches.length;`,
   );
