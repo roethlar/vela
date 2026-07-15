@@ -1,8 +1,20 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **APPROVED for implementation by the owner on 2026-07-15; no code
-slice landed yet.** The owner separately approved Node 26, the npm security
+Status: **IMPLEMENTING — Slice 1 landed at `7fef89a`; review fix `adc0104`;
+Codex and Grok accepted corrected r2. Slice 2 is next.** The owner approved the
+complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
+
+Implementation log:
+
+- Slice 1 pins Node 26.5.0/npm 12.0.1, aligns `@types/node`, moves the
+  JavaScript actions to current majors, and aligns the E2E VM through a
+  reversible user-local install. Local clean install/check/build and the full
+  locked Rust suite passed; the VM clean install and real-app smoke passed.
+  Review r1 admitted `dlr-s1-1`: direct `execFileSync('npm.cmd')` would block
+  the Windows release leg. `adc0104` uses the platform shell for the static npm
+  query; both reviewers accepted the full corrected slice at r2. Durable
+  finding: `.agents/review/findings/dlr-s1-1.md`.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel
