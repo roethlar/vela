@@ -167,7 +167,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **PLAYLIST IMPLEMENTATION ACTIVE: `.agents/plans/playlists.md`** (approved and
-  authorized 2026-07-15; S1 landed and was externally accepted, S2 is next).
+  authorized 2026-07-15; S1 and S2 landed and were externally accepted, S3 is
+  next).
   Product model and the two durable
   rulings: `.agents/decisions.md`
   (2026-07-14 — no play queue; video stays external). Five slices.
@@ -182,12 +183,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     review trail: `.agents/review/findings/pl-s1.md`. **This is why the queue step
     of the playtest above is gone: never ask the owner to test a surface that is
     being removed.**
-  - **S2 (every play records a recent) is independent of playlists and can land
-    first.** It is the real defect: the Continue Watching carousel reflects nothing
-    played through the dispatcher, because `play_by_key` records no recent
-    (`commands.rs:2365` says so outright), so Vela's half of the hero merge stays
-    empty and only the server's hub half moves. This absorbs the 2026-07-10 QUEUED
-    defect, which is no longer tracked separately.
+  - **S2 (every successful play records a recent) is complete** (`c6bc5c1`, two
+    independent Grok acceptances at r1). The shared backend path is now the sole
+    play-start writer; failed launches create no recent and preserve tombstones,
+    and the matching end callback cannot overtake its start record. Exact guard
+    and review trail: `.agents/review/findings/pl-s2.md`. S3 must add per-play
+    session identity before enabling auto-advance so a replaced tracker's stale
+    finish cannot mutate the newer playback session.
   - **Already true, and it is what makes this cheap:** item keys are namespaced
     `<source_id>:<raw>` and `Registry::route` (`source/mod.rs:414`) dispatches per
     item, so a list mixing Plex and Jellyfin items already plays today.

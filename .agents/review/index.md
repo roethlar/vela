@@ -9,6 +9,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `pl-s2` CLOSED 2026-07-15: **accepted clean by two independent external
+reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each
+`guard_confirmed:true`; base `4e4eec0`, reviewed head `c6bc5c1`). Slice 2 makes
+the shared backend path the sole successful-play recent writer, preserves
+failed-launch curation, and orders start recording before the matching end
+stamp. The coder separately red-proved every claimed behavior; the reviewers
+independently proved the failed-launch side-effect and start/end-boundary
+guards and returned no comments. Detail: `.agents/review/findings/pl-s2.md`.
+
 Loop `pl-s1` CLOSED 2026-07-15: **accepted clean by two independent external
 reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each
 `guard_confirmed:true`; base `7f8a2c2`, reviewed head `ec5d613`). Slice 1

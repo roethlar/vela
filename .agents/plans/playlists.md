@@ -358,8 +358,33 @@ base `7f8a2c2` and head `ec5d613`, independently produced the forced-beginning
 red and restored green, and accepted with no comments. The fail-closed harness
 trail and exact evidence are in `.agents/review/findings/pl-s1.md`.
 
-Next implementation slice: S2, every successful play records its recent from
-the backend while failed plays record nothing and preserve tombstones.
+### S2 — complete and externally accepted 2026-07-15
+
+Commit `c6bc5c1` makes the shared backend `play_by_key` path the sole owner of
+play-start recording. It records the complete item only after mpv and tracker
+setup succeed, leaves failed launches and tombstones untouched, shapes an
+explicit beginning to zero, and gates the matching end callback until the
+start-record attempt completes. The frontend `record_recent` writer and Tauri
+command are deleted.
+
+The coder separately red-proved beginning shaping, success-only side effects,
+start/end ordering, backend ownership, failed-launch no-write behavior, and
+both successful/failed tombstone legs. Restored Rust tests pass 101/101 and the
+focused Linux real-app `playback surfaces` run passes 2/2; the full local gates
+and Linux E2E 18/18 had already passed on the committed slice. Two independent
+Grok 0.2.101 / `grok-4.5` sessions reviewed exact base `4e4eec0` and head
+`c6bc5c1`, independently red/green-proved different backend guards, and
+accepted with no comments. Exact evidence:
+`.agents/review/findings/pl-s2.md`.
+
+The plan's literal dispatcher-driven recent E2E moves to S3 because S1 left
+only a notification drain, not a sequence caller; S2 proves the same shared
+path without resurrecting queue or test-only dispatch state. Before S3 enables
+auto-advance, add a per-play session identity so a replaced tracker's delayed
+finish cannot re-front an old item or stamp a newer same-key session.
+
+Next implementation slice: S3, Vela-native playlist persistence, editing,
+mixed-source playback, and cursor-driven auto-advance.
 
 ## Verification
 
