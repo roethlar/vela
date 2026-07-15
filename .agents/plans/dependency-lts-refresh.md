@@ -1,7 +1,7 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — Slices 1–5 landed and were accepted by external
-reviewer Grok; Slice 6 is next.** The owner approved the
+Status: **IMPLEMENTING — Slices 1–6 landed and met their required external
+review; Slice 7 is next.** The owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
@@ -51,6 +51,23 @@ Implementation log:
   audit, frontend checks, and Linux real-app E2E 18/18 passed; `sortpersist`
   proved exact-file write and restart readback. Grok 0.2.101 accepted exact
   base `fb16141` and head `8559c59` with no comments.
+- Slice 6 migrates Plex XML to `serde-xml-rs` 0.8.2 (`fa3d04f`) and adds the
+  required real-server browse/detail/episode/play/watch coverage plus
+  signal-safe cleanup (`69a8f83`, selector correction `3a002fa`). The
+  dependency-only worktree produced the expected three targeted failures;
+  six independent mapping regressions then failed their exact assertions after
+  the fix. Rust 1.89/stable checks, clippy, all 97 tests, Cargo audit, frontend
+  check/build, Linux real-app E2E 18/18, and live Plex 1/1 passed. The first
+  live attempt correctly failed on a harness selector that compared an episode
+  title together with its rendered index tag; `3a002fa` isolates the title text
+  node, and the rerun passed. Post-run proof found credentials removed, Plex
+  plus its watchdog active, and the watch fixture unwatched at zero progress.
+  Grok 0.2.101 independently red-proved an XML attribute guard and accepted
+  exact base `c8b9159` and head `3a002fa` with `guard_confirmed: true` and no
+  comments at 2026-07-15T17:23:11Z. At the owner's request, Claude Code
+  2.1.210 using `claude-fable-5` then independently ran its own red/restore/
+  green guard and accepted the same exact base/head with
+  `guard_confirmed: true` and no comments at 2026-07-15T17:34:39Z.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel

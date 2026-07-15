@@ -1,13 +1,23 @@
 # Review status
 
-Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harness: `codex`
-(codex-cli 0.143.0, re-verified headless 2026-07-08 on the Windows host;
-0.144.0 re-verified 2026-07-09 on the mac host — both via
-`codex exec --json --sandbox read-only`, prompt on stdin).
+Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harnesses are
+loop-specific. Under the standing 2026-07-15 owner amendment, Codex-authored
+changes require Grok or Claude; the historical Codex loops below remain
+evidence but are not precedent for self-review.
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
+
+Loop `dlr-s6` CLOSED 2026-07-15: **accepted clean by both external reviewers
+at r1** (Grok 0.2.101 and Claude Code 2.1.210 / `claude-fable-5`, each
+`guard_confirmed:true`; base `c8b9159`, code head `3a002fa`). Scope was
+dependency-refresh Slice 6: serde XML 0.8 Plex mappings, strengthened fixtures,
+live Plex browse/detail/episode/play/watch/scan coverage, and handled signal
+cleanup. Each reviewer independently injected an optional attribute regression,
+observed the exact targeted failure, restored its disposable worktree green,
+and returned no comments. Full verification and the harness-only first-live-run
+correction are recorded in `.agents/plans/dependency-lts-refresh.md`.
 
 Loop `eet-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
 `guard_confirmed:true`; base `26a48ca`, code head `01e30cf`). The

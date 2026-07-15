@@ -108,8 +108,11 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
     ephemeral port, per-run secret in the path, two argument-less verbs.
 - **STILL NOT COVERED, anywhere:** a Plex REBIND. It needs a SECOND Plex server, which
   does not exist here — so `sameSection` and the section-binding comparison remain
-  inspection-only. Everything else on the Plex path (real section keys, provenance, a
-  real scan, the offline path) is now exercised by `live-plex`.
+  inspection-only. `live-plex` now exercises real XML browse/movie detail/show-season-
+  episode detail, direct HTTPS paused playback, successful watched/unwatched readback,
+  real section keys/provenance/scan, and the stopped-server edit/restart path. Its one
+  clean watch fixture is restored directly on normal failure and handled signals; the
+  Mac control process independently restores the Plex service and watchdog.
 - **Credentials:** extracted from `~/Library/Application Support/com.vela.vela/config.json`
   at run time by `scripts/e2e-live.sh`, written 0600 to the VM's `/tmp`, and deleted on
   exit. Gitignored. Never printed, never logged, never committed.

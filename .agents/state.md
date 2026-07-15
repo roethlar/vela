@@ -134,10 +134,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   plus Linux real-app verification passed. Grok accepted the pinned diff with
   no comments. Slice 5 landed at `8559c59`: `directories` 6 preserves the exact
   macOS/Linux/XDG config paths, audit and all compiler gates pass, Linux E2E is
-  18/18, and Grok accepted the pinned diff with no comments. Slice 6
-  (`serde-xml-rs` 0.8 Plex XML migration) is next. Eight independently
-  committed/reviewed slices and the exact verification rails live in
-  `.agents/plans/dependency-lts-refresh.md`.
+  18/18, and Grok accepted the pinned diff with no comments. Slice 6 landed at
+  `fa3d04f` plus live-coverage commits `69a8f83`/`3a002fa`: every Plex scalar
+  mapping now uses serde XML 0.8 attribute syntax while repeated child elements
+  remain children. Six mapping regressions were proven red; Rust, audit,
+  frontend, Linux E2E 18/18, signal cleanup, and live Plex
+  browse/detail/episode/play/watch/scan/offline/restart all passed. Independent
+  post-run checks found the watch fixture clean, credentials removed, and both
+  Plex services active. Grok and Claude Fable 5 each independently red-proved
+  a guard and accepted the exact Slice 6 diff with no comments. Slice 7
+  (`reqwest` 0.13 with preserved native TLS) is next. The eight-slice sequence
+  and exact verification rails live in `.agents/plans/dependency-lts-refresh.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
@@ -254,8 +261,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner playtest confirmed)
 - `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
   owner confirmed 0.1.50)
-- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–5
-  Grok-accepted; Slice 6 next)
+- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–6
+  Grok-accepted; Slice 7 next)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)
