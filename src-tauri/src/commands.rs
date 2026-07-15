@@ -2141,17 +2141,6 @@ pub async fn set_watched(
 
 // ---- playback ------------------------------------------------------------
 
-/// Snapshot an item into Vela's recents as playback starts (frontend passes
-/// the full card it played, artwork included). The end notifier stamps the
-/// final position and drops finished entries.
-#[tauri::command]
-pub async fn record_recent(item: ItemDto) -> Result<(), String> {
-    config::update(move |cfg| {
-        crate::recents::record(cfg, item);
-        Ok(())
-    })
-}
-
 /// Keep only recents whose source still exists. An entry from a removed
 /// source (e.g. the local/SMB/SSH family removed 2026-07-08) would render a
 /// hero card whose Play can only error — the dead-end the UX rulings forbid.
@@ -2286,6 +2275,12 @@ pub(crate) async fn play_by_key(
         autocrop_script,
         autocrop_shim,
     };
+    // The tracker can observe a very fast mpv exit before this async command
+    // resumes from spawn_blocking. Hold its final recents stamp until the
+    // post-launch record attempt has completed, or finish() could run first
+    // and leave a permanently unstamped open entry behind.
+    let recents_ready = std::sync::Arc::new(PlayStartGate::default());
+    let _release_recents_on_return = OpenPlayStartGateOnDrop(recents_ready.clone());
     // End-of-session notifier → the `playback-ended` UI event, emitted after
     // the final server check-in so a re-fetch it triggers sees the new watch
     // state. Payload carries ids only — never URLs or tokens.
@@ -2294,7 +2289,9 @@ pub(crate) async fn play_by_key(
         let app = app.clone();
         let source_id = src.id().to_string();
         let item_key = item.rating_key.clone();
+        let recents_ready = recents_ready.clone();
         std::sync::Arc::new(move |position_ms: u64| {
+            recents_ready.wait();
             // Stamp Vela's recents BEFORE emitting, so the refresh the event
             // triggers reads the updated list. Runs on the tracker thread —
             // synchronous config I/O is fine there.
@@ -2330,23 +2327,21 @@ pub(crate) async fn play_by_key(
     .await
     .map_err(|e| format!("playback task failed: {e}"))
     .and_then(|r| r);
+    let recent = item.clone();
+    let played = after_successful_play(played, || {
+        if let Err(e) = config::update(move |cfg| {
+            crate::recents::record_play_start(cfg, recent, start_from_beginning);
+            Ok(())
+        }) {
+            eprintln!("vela: couldn't record started playback: {e}");
+        }
+    });
     let stop = played?;
     *state
         .tracking_stop
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(stop);
-    // A play is the explicit opposite of "stop suggesting it": clear this
-    // key's Continue Watching tombstone. Direct plays also do this via
-    // record_recent (frontend); the dispatcher needs the explicit clearing
-    // here until S2 moves recent recording into this path. Deliberately
-    // post-spawn — a FAILED play must not clear a tombstone (the record_recent
-    // rule) — and best-effort: a config hiccup must not fail a playback that
-    // already started.
-    let key = item.rating_key.clone();
-    let _ = config::update(move |cfg| {
-        crate::recents::untombstone(cfg, &key);
-        Ok(())
-    });
+    recents_ready.open();
     Ok(())
 }
 
@@ -2377,6 +2372,49 @@ fn playback_start_ms(
         server_resume_ms
     } else {
         local_resume_ms
+    }
+}
+
+/// Run a side effect only when playback fully launched. Keeping this boundary
+/// explicit prevents a resolve, spawn, or tracker-setup error from mutating
+/// recents or Continue Watching tombstones.
+fn after_successful_play<T>(
+    result: Result<T, String>,
+    on_success: impl FnOnce(),
+) -> Result<T, String> {
+    if result.is_ok() {
+        on_success();
+    }
+    result
+}
+
+#[derive(Default)]
+struct PlayStartGate {
+    ready: std::sync::Mutex<bool>,
+    changed: std::sync::Condvar,
+}
+
+impl PlayStartGate {
+    fn wait(&self) {
+        let mut ready = self.ready.lock().unwrap_or_else(|e| e.into_inner());
+        while !*ready {
+            ready = self.changed.wait(ready).unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    fn open(&self) {
+        *self.ready.lock().unwrap_or_else(|e| e.into_inner()) = true;
+        self.changed.notify_all();
+    }
+}
+
+/// Cancellation and every early error must release a tracker that is waiting
+/// to finish its session, even though no start record will be written.
+struct OpenPlayStartGateOnDrop(std::sync::Arc<PlayStartGate>);
+
+impl Drop for OpenPlayStartGateOnDrop {
+    fn drop(&mut self) {
+        self.0.open();
     }
 }
 
@@ -2489,6 +2527,45 @@ mod tests {
         assert_eq!(playback_start_ms(false, 0, 3_000), 3_000);
         assert_eq!(playback_start_ms(true, 7_000, 3_000), 0);
         assert_eq!(playback_start_ms(true, 0, 3_000), 0);
+    }
+
+    #[test]
+    fn successful_play_side_effect_runs_only_for_a_completed_launch() {
+        let mut calls = 0;
+        assert_eq!(after_successful_play(Ok(7_u8), || calls += 1), Ok(7));
+        assert_eq!(calls, 1);
+
+        assert_eq!(
+            after_successful_play(Err::<u8, _>("spawn failed".into()), || calls += 1),
+            Err("spawn failed".into())
+        );
+        assert_eq!(calls, 1, "a failed launch must not run the side effect");
+    }
+
+    #[test]
+    fn playback_end_waits_until_the_start_record_boundary_opens() {
+        let gate = std::sync::Arc::new(PlayStartGate::default());
+        let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+        let (passed_tx, passed_rx) = std::sync::mpsc::channel();
+        let waiter_gate = gate.clone();
+        let waiter = std::thread::spawn(move || {
+            entered_tx.send(()).unwrap();
+            waiter_gate.wait();
+            passed_tx.send(()).unwrap();
+        });
+
+        entered_rx.recv().unwrap();
+        assert!(
+            passed_rx
+                .recv_timeout(std::time::Duration::from_millis(50))
+                .is_err(),
+            "the end callback crossed the closed start-record boundary"
+        );
+        gate.open();
+        passed_rx
+            .recv_timeout(std::time::Duration::from_secs(1))
+            .expect("the open boundary releases the end callback");
+        waiter.join().unwrap();
     }
 
     #[test]

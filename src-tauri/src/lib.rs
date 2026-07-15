@@ -192,7 +192,6 @@ pub fn run() {
             commands::get_items,
             commands::get_type_listing,
             commands::set_merged_override,
-            commands::record_recent,
             commands::get_recents,
             commands::remove_from_continue,
             commands::get_continue_tombstones,

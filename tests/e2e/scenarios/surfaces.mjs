@@ -5,13 +5,14 @@
 // guarded here. The claim was false because I reasoned about the code instead
 // of reading it:
 //
-// "The harness cannot fail a Play" was wrong. `play_by_key` resolves the stream
-// before it spawns mpv, and the mock owns that endpoint. A bogus `mpv_path`
-// does nothing because `resolve_mpv` validates it and falls back to PATH.
-//
-// `failPlaybackInfo` makes the stream resolve fail before mpv spawns. The edit
+// "The harness cannot fail a Play" was wrong. A NUL in mpv's configured extra
+// args passes stream resolution but makes Command::spawn fail deterministically,
+// which exercises the exact post-resolve / pre-success boundary. A merely bogus
+// `mpv_path` would not: resolve_mpv validates it and falls back to PATH. The edit
 // leg separately proves a watch-state failure stays on the edit's own line.
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
 import { pollUntil, mockSource, seedConfig, openLibraryGrid } from "../helpers.mjs";
 import { startMockJellyfin } from "../mockjf.mjs";
 
@@ -53,21 +54,25 @@ export default {
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin({ movies: MOVIES });
-    seedConfig(configRoot, [mockSource(mock, { id: "jf", name: "Mock JF" })]);
+    seedConfig(configRoot, [mockSource(mock, { id: "jf", name: "Mock JF" })], {
+      recents: [],
+      hidden_from_continue: ["jf:m1", "sentinel"],
+      mpv_extra_args: "\0",
+    });
   },
 
   async cleanup() {
     await mock?.close();
   },
 
-  async run({ driver }) {
+  async run({ driver, configRoot }) {
+    const configFile = path.join(configRoot, "config", "vela", "config.json");
     await openLibraryGrid(driver, {
       section: "Mock Library",
       cardPrefix: "Alpha One",
     });
-    // Every playback attempt from here on fails at the stream resolve — deterministically,
-    // and before mpv is ever spawned.
-    mock.state.failPlaybackInfo = true;
+    // Every playback attempt from here on resolves successfully, then fails
+    // before mpv can spawn because argv contains the configured NUL.
 
     // ── 1. A Play failure from an OPEN DETAIL reports on the detail ─────────
     // Not on the view's banner underneath it. The detail layers OVER the grid and outlives
@@ -97,6 +102,23 @@ export default {
       null,
       "...and the view's banner must not have been touched: a Play failure is not a fact about the grid",
     );
+    assert.ok(
+      mock.state.served.some(
+        (r) => r.path === "/Items/m1/PlaybackInfo" && r.status === 200,
+      ),
+      "stream resolution succeeded before the deterministic mpv spawn failure",
+    );
+    const failedPlayConfig = JSON.parse(fs.readFileSync(configFile, "utf8"));
+    assert.deepEqual(
+      failedPlayConfig.recents ?? [],
+      [],
+      "a failed launch must not create a recent",
+    );
+    assert.deepEqual(
+      failedPlayConfig.hidden_from_continue ?? [],
+      ["jf:m1", "sentinel"],
+      "a failed play must not clear either its tombstone or unrelated state",
+    );
 
     // Closing the detail dismisses what it was saying — its surface is gone.
     const back = await driver.find(
@@ -110,7 +132,6 @@ export default {
     );
 
     // ── 2. A failed watch-state edit reports on the edit line ──────────────
-    mock.state.failPlaybackInfo = false;
     mock.state.unauthNextPlayed = true;
     await ctxMenu(driver, "Beta Two", "Mark watched");
     await pollUntil(

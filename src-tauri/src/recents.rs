@@ -2,8 +2,9 @@
 //! Owner semantic (decision 2026-07-04): recently played and not finished =
 //! Continue Watching — regardless of source (local/SMB plays count) and of
 //! server-side resume thresholds (Plex ignores plays under ~a minute). The
-//! frontend snapshots the item when playback starts; the playback end
-//! notifier stamps the final mpv position and drops finished entries.
+//! the shared backend play path snapshots the item after mpv starts; the
+//! playback end notifier stamps the final mpv position and drops finished
+//! entries.
 
 use serde::{Deserialize, Serialize};
 
@@ -52,6 +53,17 @@ pub fn record(cfg: &mut AppConfig, item: ItemDto) {
         },
     );
     cfg.recents.truncate(MAX_RECENTS);
+}
+
+/// Record the snapshot for a successfully-started playback session. Starting
+/// from the beginning is a new zero-offset session even when the card carried
+/// an older resume point; resume playback retains that point until the tracker
+/// reports a newer one.
+pub fn record_play_start(cfg: &mut AppConfig, mut item: ItemDto, start_from_beginning: bool) {
+    if start_from_beginning {
+        item.view_offset_ms = Some(0);
+    }
+    record(cfg, item);
 }
 
 /// Stamp a session's final position onto its entry (and re-front it: it is
@@ -261,6 +273,28 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn record_play_start_resets_only_for_an_explicit_beginning() {
+        let mut cfg = AppConfig::default();
+        let mut progressed = item("movie", Some(100_000));
+        progressed.view_offset_ms = Some(30_000);
+
+        record_play_start(&mut cfg, progressed.clone(), false);
+        assert_eq!(
+            cfg.recents[0].item.view_offset_ms,
+            Some(30_000),
+            "Resume keeps the known position until playback reports a newer one"
+        );
+
+        record_play_start(&mut cfg, progressed, true);
+        assert_eq!(
+            cfg.recents[0].item.view_offset_ms,
+            Some(0),
+            "Play from Beginning must not advertise stale progress"
+        );
+        assert_eq!(cfg.recents[0].ended_at_ms, 0, "the session is still open");
     }
 
     #[test]

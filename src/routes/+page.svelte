@@ -1386,19 +1386,11 @@
   }
 
   async function play(item: Item, intent: PlayIntent = "resume") {
-    // A beginning request starts a new local Continue Watching snapshot too;
-    // retaining the old offset would make the hero advertise stale progress
-    // until the first tracker update lands.
-    const playedItem = intent === "beginning" ? { ...item, viewOffsetMs: 0 } : item;
     try {
       await invoke("play_item", {
-        item: playedItem,
+        item,
         startFromBeginning: intent === "beginning",
       });
-      // Snapshot into Vela's recents only after the session actually
-      // launched (play_item resolves at mpv spawn): a FAILED play must not
-      // create a recents entry or clear a remove-from-continue tombstone.
-      invoke("record_recent", { item: playedItem }).catch(() => {});
     } catch (e) {
       // A Play started from an open detail is reported ON that detail, which survives a
       // search teardown underneath it — so the view's clear is not its owner (slice 4).

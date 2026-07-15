@@ -26,7 +26,9 @@ export default {
         mediaFile: path.join(mediaDir, 'stream.mp4'),
       }],
     });
-    seedConfig(configRoot, [mockSource(mock)]);
+    seedConfig(configRoot, [mockSource(mock)], {
+      hidden_from_continue: ['jf-mock:m1'],
+    });
   },
 
   async cleanup() {
@@ -34,6 +36,7 @@ export default {
   },
 
   async run({ driver, screenshot, configRoot }) {
+    const configFile = path.join(configRoot, 'config', 'vela', 'config.json');
     // Seeded config ⇒ authenticated view with the mock library as a sidebar
     // section. Wait for that specific button: boot loads sections async,
     // and the pre-boot Welcome screen would satisfy any generic render wait.
@@ -92,6 +95,26 @@ export default {
         loaded.startsWith(`http://127.0.0.1:${mock.port}/Videos/m1/stream`),
         `mpv must play the mock stream URL, got ${loaded}`,
       );
+      // Backend ownership (playlists S2): the shared play_by_key path records
+      // an OPEN recent immediately after a successful launch, before the end
+      // notifier has any position to stamp. The frontend has no record_recent
+      // IPC fallback, and this mock serves no Resume hub that could mask it.
+      const openRecent = await pollUntil(() => {
+        try {
+          const cfg = JSON.parse(fs.readFileSync(configFile, 'utf8'));
+          const r = cfg.recents?.[0];
+          return r?.item?.ratingKey === 'jf-mock:m1' ? { recent: r, cfg } : null;
+        } catch {
+          return null;
+        }
+      }, 'the backend-owned open recent after mpv launch', { timeoutMs: 3000 });
+      assert.equal(openRecent.recent.item.title, 'Mock Movie');
+      assert.equal(openRecent.recent.ended_at_ms, 0, 'the session is still open');
+      assert.deepEqual(
+        openRecent.cfg.hidden_from_continue ?? [],
+        [],
+        'a successful replay clears its Continue Watching tombstone',
+      );
       await pollUntil(
         () => mpv.getProp('time-pos').then((t) => t > 0.5).catch(() => false),
         'playback to progress past 0.5s',
@@ -122,8 +145,7 @@ export default {
     );
 
     // Vela side: mpv exit stamps the final position into recents…
-    const configFile = path.join(configRoot, 'config', 'vela', 'config.json');
-    // record_recent creates the entry at play START (offset null); finish()
+    // play_by_key creates the entry at play START (offset null); finish()
     // stamps the position at mpv exit — wait for the stamp, not the entry.
     const recent = await pollUntil(() => {
       try {
