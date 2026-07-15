@@ -9,6 +9,16 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `dlr-s8-4` CLOSED 2026-07-15: **accepted clean at r1** (Claude Code
+2.1.210, `claude-fable-5`, `guard_confirmed:true`; base `58279a0`, reviewed
+head `f7bc344`). The final 0.1.51 Linux package run exposed stale 0.1.39 and
+0.1.50 artifacts being recopied into `dist/`. `bff2905` validates exact Linux
+bundle selections, clears only selected generated targets, and adds a
+canonical hermetic regression. Author and reviewer independently reproduced
+the five-file red result and restored the two-file green result; the real
+0.1.51 deb/rpm build also passed. Claude returned no comments. Detail:
+`.agents/review/findings/dlr-s8-4.md`.
+
 Loop `dlr-s8-3` CLOSED 2026-07-15: **accepted clean at r1** (Claude Code
 2.1.210, `claude-fable-5`, `guard_confirmed:true`; base `39b233a`, reviewed
 head `32b8e83`). The matching WebKit driver exposed a live Jellyfin harness
@@ -596,7 +606,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| dlr-s8-4 | MEDIUM | Package collection can republish stale installers | `[~]` | `bff2905` |
+| dlr-s8-4 | MEDIUM | Package collection can republish stale installers | `[x]` | `bff2905` |
 | dlr-s8-3 | MEDIUM | Live Jellyfin can fail on Home before a real library renders | `[x]` | `5532e93`, guard `8366b4f` |
 | dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[x]` | `ec7c43e` |
 | dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[x]` | `4cba5db` |

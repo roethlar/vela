@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — a successful release build leaves older installers in
 `dist/`, so an operator can distribute the wrong Vela version.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `main` (approved dependency-refresh Slice 8)
 **Commit**: `bff2905`
 
@@ -75,4 +75,12 @@ Windows packaging remains GitHub-hosted and owner-gated.
 
 ## Reviewer comments
 
-Pending external Claude Fable 5 review.
+Claude Code 2.1.210 (`claude-fable-5`) reviewed head
+`f7bc3446d44994dfadd11ccf71aedb226f5dcaf8` against base
+`58279a05328564a6064f7b3747f56ae446fe2017` at
+2026-07-15T19:12:17Z. Verdict: **accepted**;
+`guard_confirmed:true`; comments: none. In its detached disposable worktree,
+Claude independently restored both old collection behaviors, observed the
+exact five-file stale-artifact failure, restored the reviewed head, observed
+the guard pass, confirmed canonical activation and cleanup safety, and left
+the tree clean.
