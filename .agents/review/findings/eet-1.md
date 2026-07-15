@@ -2,7 +2,7 @@
 
 **Severity**: LOW — a handled edit failure leaves a permanent red status until
 another edit, making resolved attention state look continuously active.
-**Status**: Verified — Grok accepted r1
+**Status**: Verified — Grok accepted r1; owner confirmed 0.1.50
 **Branch**: `fix/eet-1-edit-error-auto-dismiss`
 **Commit**: `01e30cf`
 
@@ -71,6 +71,10 @@ the current timer's dismissal without a production test hook.
   test --locked` passes all 95 tests. The coder tree remained clean, all ten
   implementation blobs matched the Linux VM after verification, temporary live
   credentials and E2E processes were absent, and both real servers were healthy.
+- Owner playtest on installed 0.1.50 — confirmed the exact stopped-Plex path:
+  the grid/title stayed present, the named red edit line disappeared after about
+  eight seconds, and the item remained unwatched/actionable after Plex restart
+  plus Refresh.
 
 ## Coder dispute (if any)
 

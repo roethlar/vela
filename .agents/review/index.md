@@ -14,7 +14,8 @@ Loop `eet-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
 owner-approved slice adds attempt-owned eight-second edit-error expiry and
 deterministic exact-timer / stale-callback guards. Four coder regressions and
 Grok's independent ownership regression were proven red; targeted, full Linux,
-and both live-server paths are green. Detail:
+and both live-server paths are green. The owner subsequently confirmed the
+exact stopped-Plex timing path on installed 0.1.50. Detail:
 `.agents/review/findings/eet-1.md`.
 
 Loop `fwer-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,

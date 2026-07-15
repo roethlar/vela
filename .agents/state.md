@@ -12,7 +12,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **Version 0.1.50** (`package.json`, `src-tauri/tauri.conf.json`,
   `src-tauri/Cargo.toml` all agree, as of `01e30cf`).
 
-- **FAILED EDIT-ERROR AUTO-DISMISS: IMPLEMENTED; GROK ACCEPTED R1.**
+- **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
   `.agents/plans/edit-error-auto-dismiss.md`. Failed watch-state edit errors
   retain their own line, follow navigation, clear after eight seconds, and
@@ -21,8 +21,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   regressions were proven red, the restored Linux suite is green, and both live
   server paths passed. Grok independently proved the stale-timer ownership
   guard, restored the head green, and accepted with no findings. Closed review
-  record: `.agents/review/findings/eet-1.md`. Awaiting the owner's stopped-Plex
-  timing playtest and owner-gated landing; no push or merge is authorized.
+  record: `.agents/review/findings/eet-1.md`. The owner built 0.1.50 and
+  confirmed the exact stopped-Plex timing path: the grid/title stayed present,
+  the named red edit line disappeared after about eight seconds, and the item
+  remained unwatched/actionable after Plex restart plus Refresh. Awaiting only
+  owner-gated landing; no push or merge is authorized.
 
 - **FAILED-WATCH-EDIT RECOVERY: OWNER-CONFIRMED ON 0.1.49.** Implemented at
   `b5c170a`; Grok accepted r1.
@@ -112,12 +115,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **OWNER PLAYTEST: failed edit-error auto-dismiss.** Build/install 0.1.50 and
-  repeat the stopped-Plex Mark watched path: the exact grid/title stays, the
-  named red edit line is readable and disappears after about eight seconds,
-  and the item remains unwatched/actionable after Plex restart plus Refresh.
-  Code/review record: `.agents/review/findings/eet-1.md`. Landing remains
-  owner-gated; no push or merge is authorized.
+- **AWAITING OWNER-GATED LANDING: failed edit-error auto-dismiss.** The owner
+  confirmed the stopped-Plex timing playtest on 0.1.50. Code/review record:
+  `.agents/review/findings/eet-1.md`. No push or merge is authorized.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`

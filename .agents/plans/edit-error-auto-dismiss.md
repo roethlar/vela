@@ -1,11 +1,12 @@
 # Plan: failed edit errors auto-dismiss after eight seconds
 
-Status: **IMPLEMENTED at `01e30cf`; Grok accepted r1; awaiting owner playtest
-and owner-gated landing.** The owner confirmed the 0.1.49 failed-watch recovery
-on the exact stopped-Plex path, then approved this follow-up behavior: a failed
-edit error stays readable for about eight seconds and still clears immediately
-when the next edit starts. The required Grok `reviewloop` accepted the code
-slice with an independent guard proof and no findings.
+Status: **IMPLEMENTED at `01e30cf`; Grok accepted r1; owner confirmed 0.1.50;
+awaiting owner-gated landing.** The owner confirmed the 0.1.49 failed-watch
+recovery on the exact stopped-Plex path, then approved this follow-up behavior:
+a failed edit error stays readable for about eight seconds and still clears
+immediately when the next edit starts. The required Grok `reviewloop` accepted
+the code slice with an independent guard proof and no findings. The owner then
+built 0.1.50 and confirmed the exact stopped-Plex timing playtest.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. This plan supersedes only
 the watch-state edit lifetime detail in the completed per-surface-status and
@@ -130,10 +131,10 @@ Prove the changed guards red separately, restoring committed source after each:
 - Grok `reviewloop` on the pinned code slice and every review-fix slice, with no
   round cap. Acceptance requires the reviewer's independent guard proof and
   `guard_confirmed: true`.
-- Owner playtest on 0.1.50: repeat the stopped-Plex Mark watched failure. The
-  grid/title stay exact, the named edit line is readable and disappears after
-  about eight seconds, and the item remains unwatched/actionable after restart
-  plus Refresh.
+- Owner playtest on 0.1.50 — **CONFIRMED 2026-07-15** on the stopped-Plex Mark
+  watched failure: the grid/title stayed exact, the named edit line was readable
+  and disappeared after about eight seconds, and the item remained
+  unwatched/actionable after restart plus Refresh.
 
 ## Non-goals and known gaps
 
