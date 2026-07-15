@@ -165,8 +165,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Exact evidence lives in
   `.agents/plans/dependency-lts-refresh.md`.
 
-- **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
-  written). Product model and the two durable rulings: `.agents/decisions.md`
+- **PLAYLIST IMPLEMENTATION ACTIVE: `.agents/plans/playlists.md`** (approved and
+  authorized 2026-07-15; no code landed yet). Product model and the two durable
+  rulings: `.agents/decisions.md`
   (2026-07-14 — no play queue; video stays external). Five slices.
   - **THE PLAY QUEUE IS BEING DELETED** (owner ruling). Ephemeral queues are a
     music idiom; the only preset video sequence worth having is a show binge, and
