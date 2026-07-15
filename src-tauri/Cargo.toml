@@ -26,7 +26,7 @@ quick-xml = { version = "0.41", features = ["serialize"] }
 serde-xml-rs = "0.6.0"
 url = "2.5"
 uuid = { version = "1", features = ["v4"] }
-directories = "5.0"
+directories = "6.0"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 async-trait = "0.1"
 tauri-plugin-dialog = "2"
