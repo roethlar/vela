@@ -9,6 +9,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `dlr-s7` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
+`guard_confirmed:true`; base `8a563c9`, code head `1d619fd`). Scope was
+dependency-refresh Slice 7: reqwest 0.13.4 with explicit query support and
+native TLS without ALPN, plus the duplicate-family lock consolidation. Grok
+independently removed only `query`, observed compiler failures at Vela's real
+query call sites, restored the disposable worktree to a clean locked build,
+and returned no comments. Full local, Linux E2E/live-server, and native package
+verification is recorded in `.agents/plans/dependency-lts-refresh.md`.
+
 Loop `dlr-s6` CLOSED 2026-07-15: **accepted clean by both external reviewers
 at r1** (Grok 0.2.101 and Claude Code 2.1.210 / `claude-fable-5`, each
 `guard_confirmed:true`; base `c8b9159`, code head `3a002fa`). Scope was

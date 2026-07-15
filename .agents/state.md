@@ -142,9 +142,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   browse/detail/episode/play/watch/scan/offline/restart all passed. Independent
   post-run checks found the watch fixture clean, credentials removed, and both
   Plex services active. Grok and Claude Fable 5 each independently red-proved
-  a guard and accepted the exact Slice 6 diff with no comments. Slice 7
-  (`reqwest` 0.13 with preserved native TLS) is next. The eight-slice sequence
-  and exact verification rails live in `.agents/plans/dependency-lts-refresh.md`.
+  a guard and accepted the exact Slice 6 diff with no comments. Slice 7 landed
+  at `1d619fd`: reqwest 0.13.4 retains native TLS without ALPN, the direct 0.12
+  duplicate is gone, and the required local, Linux E2E/live-server, Linux
+  package, and macOS universal package checks passed. Grok independently
+  red-proved the explicit `query` feature and accepted the pinned diff with no
+  comments. Slice 8 integration/version/durable-state work is next. The
+  eight-slice sequence and exact verification rails live in
+  `.agents/plans/dependency-lts-refresh.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
@@ -261,8 +266,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner playtest confirmed)
 - `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
   owner confirmed 0.1.50)
-- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–6
-  Grok-accepted; Slice 7 next)
+- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–7
+  Grok-accepted; Slice 8 integration next)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)

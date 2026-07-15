@@ -1,7 +1,7 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — Slices 1–6 landed and met their required external
-review; Slice 7 is next.** The owner approved the
+Status: **IMPLEMENTING — Slices 1–7 landed and met their required external
+review; Slice 8 integration is next.** The owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
@@ -68,6 +68,22 @@ Implementation log:
   2.1.210 using `claude-fable-5` then independently ran its own red/restore/
   green guard and accepted the same exact base/head with
   `guard_confirmed: true` and no comments at 2026-07-15T17:34:39Z.
+- Slice 7 (`1d619fd`) raises the direct reqwest dependency to 0.13.4 with
+  defaults disabled and explicit `json`, `query`, `charset`, `http2`,
+  `system-proxy`, and `native-tls-no-alpn`. The resolved graph has one reqwest
+  0.13.4, shared with Tauri, and no reqwest 0.12 or enabled reqwest
+  `default-tls`, rustls, or ALPN-bearing `native-tls` feature. Removing only
+  `query` failed compilation at Vela's real Plex, Jellyfin, and release query
+  call sites; restoring it returned the locked build green. Rust 1.89/stable
+  checks, clippy, all 97 tests, Cargo audit (zero vulnerabilities; 17 visible
+  upstream warnings), frontend check/build, Linux real-app E2E 18/18, live
+  direct-HTTPS Plex, live Jellyfin, Linux ARM64 deb/rpm packaging, and the
+  macOS x86_64+arm64 universal app/DMG build passed. The configured live
+  sources contain no Emby server, so live Emby remains an explicit coverage
+  gap. Grok 0.2.101 independently red-proved the `query` guard, restored its
+  disposable worktree green, and accepted exact base `8a563c9` and head
+  `1d619fd` with `guard_confirmed: true` and no comments at
+  2026-07-15T17:54:14Z.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel
