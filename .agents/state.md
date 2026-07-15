@@ -24,8 +24,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   record: `.agents/review/findings/eet-1.md`. The owner built 0.1.50 and
   confirmed the exact stopped-Plex timing path: the grid/title stayed present,
   the named red edit line disappeared after about eight seconds, and the item
-  remained unwatched/actionable after Plex restart plus Refresh. Awaiting only
-  owner-gated landing; no push or merge is authorized.
+  remained unwatched/actionable after Plex restart plus Refresh.
 
 - **FAILED-WATCH-EDIT RECOVERY: OWNER-CONFIRMED ON 0.1.49.** Implemented at
   `b5c170a`; Grok accepted r1.
@@ -114,10 +113,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   plans remain in `.agents/plans/` as design records.
 
 ## Next
-
-- **AWAITING OWNER-GATED LANDING: failed edit-error auto-dismiss.** The owner
-  confirmed the stopped-Plex timing playtest on 0.1.50. Code/review record:
-  `.agents/review/findings/eet-1.md`. No push or merge is authorized.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
@@ -231,9 +226,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/machines.md` (host-specific facts; the E2E venue)
 - `.agents/push-policy.md` (always ask — including the `vm` remote)
 - `.agents/plans/failed-watch-edit-recovery.md` (IMPLEMENTED — Grok accepted r1;
-  owner playtest confirmed; landing waits on the timeout polish)
-- `.agents/plans/edit-error-auto-dismiss.md` (APPROVED — implementation active;
-  Grok code review required)
+  owner playtest confirmed)
+- `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
+  owner confirmed 0.1.50)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)
