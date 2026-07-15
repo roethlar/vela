@@ -28,6 +28,8 @@ jobs:
             libayatana-appindicator3-dev \
             patchelf
 
+      - uses: dtolnay/rust-toolchain@1.89.0
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
@@ -36,9 +38,11 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - run: cargo check --locked
-      - run: cargo clippy --all-targets --locked -- -D warnings
-      - run: cargo test --locked
+      - name: Check declared Rust 1.89 MSRV
+        run: cargo +1.89.0 check --locked
+      - run: cargo +stable check --locked
+      - run: cargo +stable clippy --all-targets --locked -- -D warnings
+      - run: cargo +stable test --locked
 
   frontend:
     name: Frontend
