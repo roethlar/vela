@@ -1,11 +1,10 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — all eight slices and final canonical/package
-verification are green; external review of the pinned Slice 8
-integration/version range is the only remaining gate.** The
-owner approved the
-complete plan on 2026-07-15 and separately approved Node 26, the npm security
-posture, and the Linux E2E VM Node/npm alignment during plan drafting.
+Status: **COMPLETE — all eight slices, final canonical/package verification,
+and the pinned Slice 8 integration/version review are green.** The owner
+approved the complete plan on 2026-07-15 and separately approved Node 26, the
+npm security posture, and the Linux E2E VM Node/npm alignment during plan
+drafting.
 
 Implementation log:
 
@@ -119,7 +118,13 @@ Implementation log:
   macOS DMG reports 0.1.51 with an x86_64+arm64 executable. GitHub workflow
   YAML and PowerShell parsing passed; `actionlint` is not installed. Windows
   packaging remains the owner-gated GitHub-hosted proof, and no configured
-  Emby venue exists. Only the pinned final integration-range review remains.
+  Emby venue exists.
+- Claude Code 2.1.210 using `claude-fable-5` independently reviewed the entire
+  Slice 8 range from base `33163c5` through head `ebcd81a` at
+  2026-07-15T19:49:50Z. It verified all 0.1.51 surfaces, injected an exact
+  Node-version mismatch and observed the toolchain guard fail, restored green,
+  ran the fresh-artifact guard, left its disposable tree clean, and returned
+  `accepted` with `guard_confirmed:true` and no comments.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel

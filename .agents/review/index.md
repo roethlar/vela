@@ -9,6 +9,16 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `dlr-s8-final` CLOSED 2026-07-15: **accepted clean at r1** (Claude Code
+2.1.210, `claude-fable-5`, `guard_confirmed:true`; base `33163c5`, reviewed
+head `ebcd81a`). Scope was the complete Slice 8 integration/version range:
+exact Node/npm enforcement, matching WebKit driver fixture, 0.1.51 surfaces,
+live Jellyfin readiness, fresh package collection, and durable verification
+evidence. Claude independently red-proved the Node pin, restored it green,
+ran the artifact guard, verified every version surface, left a clean worktree,
+and returned no comments. The dependency-refresh plan is complete. Detail:
+`.agents/plans/dependency-lts-refresh.md`.
+
 Loop `dlr-s8-4` CLOSED 2026-07-15: **accepted clean at r1** (Claude Code
 2.1.210, `claude-fable-5`, `guard_confirmed:true`; base `58279a0`, reviewed
 head `f7bc344`). The final 0.1.51 Linux package run exposed stale 0.1.39 and

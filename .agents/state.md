@@ -115,13 +115,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **IMPLEMENTATION APPROVED: current dependencies + Node 26.** The owner
-  selected Node 26 over current Node 24 LTS, approved a scoped patched-cookie
-  override plus fail-closed npm audit, and authorized aligning only Node/npm on
-  the existing Linux E2E VM. Slice 1 landed at `7fef89a`; its Windows assertion
-  review fix landed at `adc0104`, and Grok accepted the corrected full slice at
-  r2. Node 26.5/npm 12.0.1 now drive the repo and E2E VM; the VM's
-  Ubuntu packages remain untouched. Slice 2 then landed at `986fa2e`, changing
+- **OWNER-GATED FOLLOW-UP: publish dependency refresh 0.1.51.** Implementation
+  is COMPLETE; no push, CI dispatch, or release workflow was triggered. The
+  owner selected Node 26 over current Node 24 LTS, approved a scoped
+  patched-cookie override plus fail-closed npm audit, and authorized aligning
+  only Node/npm on the existing Linux E2E VM. Slice 1 landed at `7fef89a`; its
+  Windows assertion review fix landed at `adc0104`, and Grok accepted the
+  corrected full slice at r2. Node 26.5/npm 12.0.1 now drive the repo and E2E
+  VM; the VM's Ubuntu packages remain untouched. Slice 2 then landed at
+  `986fa2e`, changing
   only the Ubuntu appindicator prerequisite to the current Ayatana package;
   Grok accepted it with no comments. Slice 3 landed at `28159ea`: the compatible
   Vite 8 / Svelte / TypeScript 6 / Tauri JS graph, scoped patched-cookie
@@ -156,9 +158,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Their guards, real integrations, and external Grok/Claude reviews passed.
   `dc73627` bumps Vela once to 0.1.51. The final local canonical suite, Linux
   E2E 18/18, live server checks, current-only Linux deb/rpm packages, and
-  checksum-valid macOS universal DMG are green. External review of the pinned
-  Slice 8 integration/version range is the only remaining dependency-plan
-  gate. Exact evidence lives in
+  checksum-valid macOS universal DMG are green. Claude Fable 5 independently
+  accepted the complete pinned Slice 8 integration/version range with its
+  guard confirmed and no comments. No implementation gate remains; publishing
+  or triggering GitHub-hosted Windows/CI proof requires a separate owner go.
+  Exact evidence lives in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
@@ -276,8 +280,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner playtest confirmed)
 - `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
   owner confirmed 0.1.50)
-- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — all slices landed;
-  final canonical verification/integration review pending)
+- `.agents/plans/dependency-lts-refresh.md` (COMPLETE — final canonical,
+  native-package, live-server, and external integration review green)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)
