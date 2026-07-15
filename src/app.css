@@ -1,3 +1,5 @@
+@import "@fontsource-variable/geist";
+
 /* ===== Theme catalog =====
    Each theme maps a well-known open-source palette onto Vela's semantic tokens.
    Components reference var(--*) only, so adding a theme is just another block.

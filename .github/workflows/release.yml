@@ -14,7 +14,24 @@ on:
     tags: ['v*']
 
 jobs:
+  npm-audit:
+    name: npm audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Activate pinned npm
+        run: |
+          npm install --global npm@12.0.1
+          node --input-type=module -e "import { execSync } from 'node:child_process'; const npm = execSync('npm --version', { encoding: 'utf8' }).trim(); if (process.version !== 'v26.5.0' || npm !== '12.0.1') { throw new Error('expected Node v26.5.0/npm 12.0.1; got ' + process.version + '/npm ' + npm); }"
+      - run: npm ci
+      - run: npm audit
+
   bundle:
+    needs: npm-audit
     strategy:
       fail-fast: false
       matrix:
