@@ -1,7 +1,7 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — Slices 1–4 landed and were accepted by external
-reviewer Grok; Slice 5 is next.** The owner approved the
+Status: **IMPLEMENTING — Slices 1–5 landed and were accepted by external
+reviewer Grok; Slice 6 is next.** The owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
@@ -43,6 +43,14 @@ Implementation log:
   and Tauri builds, and Linux real-app E2E 18/18 passed. `Cargo.toml` stayed
   byte-identical. Grok 0.2.101 accepted exact base `20fc059` and head `770bfba`
   with no comments.
+- Slice 5 (`8559c59`) raises only `directories` to 6.0.0 and consolidates
+  `dirs-sys` on 0.5.0. Executable before/after probes preserved the exact
+  macOS, default Linux, and XDG-overridden Linux config directories; upstream
+  v5/v6 platform source is byte-identical, and the Windows binding-only null
+  handle change preserves current-user semantics. Rust 1.89 and stable gates,
+  audit, frontend checks, and Linux real-app E2E 18/18 passed; `sortpersist`
+  proved exact-file write and restart readback. Grok 0.2.101 accepted exact
+  base `fb16141` and head `8559c59` with no comments.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel
