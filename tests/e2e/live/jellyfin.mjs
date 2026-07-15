@@ -22,6 +22,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import net from "node:net";
+import vm from "node:vm";
 import { pollUntil, seedConfig } from "../helpers.mjs";
 
 const CREDS = "/tmp/vela-live-creds.json";
@@ -30,6 +31,34 @@ let proxy;
 let sockets = new Set();
 let creds;
 let proxyPort;
+
+const LIBRARY_READY =
+  `return document.readyState === 'complete' && [...document.querySelectorAll('button.sideitem')].some((item) => item.textContent.trim() !== 'Home')`;
+
+function libraryReadyFor(labels, readyState = "complete") {
+  return vm.runInNewContext(`(() => { ${LIBRARY_READY} })()`, {
+    document: {
+      readyState,
+      querySelectorAll: () => labels.map((textContent) => ({ textContent })),
+    },
+  });
+}
+
+assert.equal(
+  libraryReadyFor(["Home"]),
+  false,
+  "Home alone is not a server library",
+);
+assert.equal(
+  libraryReadyFor(["Home", "Movies"]),
+  true,
+  "a real library is ready",
+);
+assert.equal(
+  libraryReadyFor(["Home", "Movies"], "loading"),
+  false,
+  "a library is not ready before the document",
+);
 
 // Forward 127.0.0.1:proxyPort -> the real Jellyfin. `stop()` makes the server vanish.
 function startProxy(target, port = 0) {
@@ -127,7 +156,7 @@ export default {
   async run({ driver }) {
     // ── 1. A real server, a real library ───────────────────────────────────
     await driver.waitFor(
-      `return document.readyState === 'complete' && [...document.querySelectorAll('button.sideitem')].some((item) => item.textContent.trim() !== 'Home')`,
+      LIBRARY_READY,
       "the real server's libraries in the sidebar",
     );
     const section = await driver.exec(
