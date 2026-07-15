@@ -9,6 +9,25 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `eet-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
+`guard_confirmed:true`; base `26a48ca`, code head `01e30cf`). The
+owner-approved slice adds attempt-owned eight-second edit-error expiry and
+deterministic exact-timer / stale-callback guards. Four coder regressions and
+Grok's independent ownership regression were proven red; targeted, full Linux,
+and both live-server paths are green. The owner subsequently confirmed the
+exact stopped-Plex timing path on installed 0.1.50. Detail:
+`.agents/review/findings/eet-1.md`.
+
+Loop `fwer-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
+`guard_confirmed:true`; base `012a031`, code head `b5c170a`). Scope was the
+failed-watch-edit recovery follow-up: failed browse/search/person/drill/detail
+edits keep exact loaded identity and make no listing request; Home alone heals
+its transient curation after backend rollback. Grok independently proved the
+old broad recovery and a same-cardinality substitution red, then restored the
+head and passed `pagefail`. Coder verification: four distinct red proofs,
+local checks/build/Rust gates clean, Linux E2E 18/18, and the exact opt-in live
+Plex outage/restart path passed. Detail: `.agents/review/findings/fwer-1.md`.
+
 Loop `lrs-code` OPEN (library-refresh-scan IMPLEMENTATION review; batch
 adaptation, no per-finding branches). Base `63560a6` (plan APPROVED), head
 `ca84f5b`. **r1 reopened 4, all fixed (`e9edac8`); r2 (codex-cli 0.144.1,
@@ -530,6 +549,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
+| fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
 | lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[x]` | see log |
 | lrs-2 | MEDIUM | Refresh case 5 passes with the content-leg navEpoch gate removed (loadMore reads live state) | `[x]` | see log |
 | lrs-3 | MEDIUM | Refresh case 14 omits the plan's reverse-ordering phase: leg-failure generation ownership unguarded | `[x]` | see log |

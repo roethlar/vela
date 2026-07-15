@@ -9,11 +9,46 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Version 0.1.48** (`package.json`, `src-tauri/tauri.conf.json`,
-  `src-tauri/Cargo.toml` all agree, as of `98f9e9e`).
+- **Version 0.1.50** (`package.json`, `src-tauri/tauri.conf.json`,
+  `src-tauri/Cargo.toml` all agree, as of `01e30cf`).
 
-- **PER-SURFACE-STATUS: COMPLETE — all five slices landed 2026-07-14 (0.1.46),
-  owner playtest still outstanding** (the ask is in `## Next`). Plan
+- **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
+  Implemented at `01e30cf` from approved plan
+  `.agents/plans/edit-error-auto-dismiss.md`. Failed watch-state edit errors
+  retain their own line, follow navigation, clear after eight seconds, and
+  still clear immediately for a newer edit/source change; captured attempts
+  prevent a queued old timer from erasing a newer failure. Four distinct
+  regressions were proven red, the restored Linux suite is green, and both live
+  server paths passed. Grok independently proved the stale-timer ownership
+  guard, restored the head green, and accepted with no findings. Closed review
+  record: `.agents/review/findings/eet-1.md`. The owner built 0.1.50 and
+  confirmed the exact stopped-Plex timing path: the grid/title stayed present,
+  the named red edit line disappeared after about eight seconds, and the item
+  remained unwatched/actionable after Plex restart plus Refresh.
+
+- **FAILED-WATCH-EDIT RECOVERY: OWNER-CONFIRMED ON 0.1.49.** Implemented at
+  `b5c170a`; Grok accepted r1.
+  The owner playtest failed 2026-07-14 on 0.1.48; follow-up plan
+  `.agents/plans/failed-watch-edit-recovery.md` is IMPLEMENTED. The stopped-Plex
+  test showed a view failure and a named edit failure on separate lines, with no
+  raw URL. Recovery failed: the whole loaded Movies grid disappeared, and
+  **12 Years a Slave** remained absent after Plex returned even though Plex Web
+  showed it present and unwatched. Read-only diagnosis at `310c2ca` confirmed
+  Plex returns that exact item at index 5 of Vela's first-page query and Vela
+  has no tombstone for it. The frontend's failed-edit catch unnecessarily
+  re-enters the browse listing; backend rollback affects only Home
+  recents/tombstones. `b5c170a` replaces that browse reload with a Home-only
+  repair and strengthens the count-only guards to exact identity. The four
+  planned hermetic regressions were each proven red, the restored scenario is
+  green, the full Linux suite is 18/18, and the exact live Plex path passed.
+  Grok independently red-proved both the old broad recovery and the exact-
+  identity guard, restored the head green, and accepted with no findings.
+  The owner repeated the exact stopped-Plex path on installed 0.1.49 and
+  confirmed the grid/title remain present and the item remains unwatched. The
+  follow-up for the indefinite red edit line is implemented and Grok-accepted
+  at `01e30cf` under `.agents/plans/edit-error-auto-dismiss.md`. Closed recovery
+  review record:
+  `.agents/review/findings/fwer-1.md`. Original plan
   `.agents/plans/per-surface-status.md`; decision `.agents/decisions.md`
   (2026-07-14). Every failure now reports on the surface it belongs to: the
   view's banner keeps listing/refresh/search failures, and the watch-state edit
@@ -78,34 +113,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   plans remain in `.agents/plans/` as design records.
 
 ## Next
-
-- **OWNER PLAYTEST OF 0.1.48 — the judgement automation cannot make.**
-  Per-surface-status is COMPLETE and every automated check is green. The owner has
-  NOT seen the mpv bar and does not need to — it only renders when mpv is MISSING,
-  which would mean renaming their binary. SKIP IT. **Two tests, one sitting** (the
-  queue test that used to be here is MOOT — see the next item):
-
-  SETUP: open a Plex library so the grid is full, then stop Plex. Do not Refresh —
-  the grid stays loaded from memory, which is the point.
-
-  1. THE EDIT'S OWN LINE (the one that matters — it is the visible behaviour
-     change). Right-click a poster -> Mark watched. Expect: a line NAMING it
-     ("Couldn't mark “…” watched — the server could not be reached"), a SEPARATE
-     line for the grid's own failure, the LIBRARY STILL THERE (posters on screen),
-     and NO url anywhere. Then mark a DIFFERENT poster: the first failure is
-     REPLACED, not stacked. Then switch library: the EDIT line FOLLOWS them, the
-     grid's banner does not. (The old build silently swallowed the edit failure on
-     navigation — that is the change they will notice.)
-  2. THE DETAIL PAGE. Left-click a poster -> Play. Expect the failure ON the
-     detail page, not on the grid underneath. Back -> it goes with the page.
-
-  THEN restart Plex and Refresh: the library reloads and the grid's banner clears,
-  but the EDIT line STAYS (a refresh repairs the VIEW; it does not un-fail the
-  user's edit). A successful mark-watched clears it.
-
-  WRONG LOOKS LIKE: anything landing on the MAIN banner that belongs to another
-  surface; two messages where one erases the other; a raw `http://…` on screen; or
-  a blank library.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
@@ -218,6 +225,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md` (host-specific facts; the E2E venue)
 - `.agents/push-policy.md` (always ask — including the `vm` remote)
+- `.agents/plans/failed-watch-edit-recovery.md` (IMPLEMENTED — Grok accepted r1;
+  owner playtest confirmed)
+- `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
+  owner confirmed 0.1.50)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)

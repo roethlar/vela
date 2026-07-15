@@ -20,6 +20,8 @@ import fs from "node:fs";
 import { pollUntil, seedConfig } from "../helpers.mjs";
 
 const CREDS = "/tmp/vela-live-creds.json";
+const SECTION = "Movies";
+const TARGET = "12 Years a Slave";
 let creds;
 
 const control = async (path) => {
@@ -36,12 +38,23 @@ const editLine = (driver) =>
   );
 const notice = (driver) =>
   driver.exec(`return document.querySelector('div.notice')?.textContent ?? null`);
-const cardCount = (driver) =>
-  driver.exec(`return document.querySelectorAll('main.grid button.poster').length`);
+const targetState = (driver) =>
+  driver.exec(
+    `const cards = [...document.querySelectorAll('main.grid button.poster')];
+     const matches = cards.filter((card) => card.title === ${JSON.stringify(TARGET)});
+     return {
+       gridCount: cards.length,
+       matches: matches.length,
+       label: matches[0]?.getAttribute('aria-label') ?? null,
+     }`,
+  );
 
-async function ctxMenuOnCard(driver, index, label) {
+async function targetMenuItem(driver, label) {
   await driver.exec(
-    `const el = document.querySelectorAll('main.grid button.poster')[${index}];
+    `const matches = [...document.querySelectorAll('main.grid button.poster')]
+       .filter((card) => card.title === ${JSON.stringify(TARGET)});
+     if (matches.length !== 1) throw new Error('expected one exact target card');
+     const el = matches[0];
      const r = el.getBoundingClientRect();
      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
   );
@@ -50,7 +63,12 @@ async function ctxMenuOnCard(driver, index, label) {
     .then(() =>
       driver.find("xpath", `//button[@role='menuitem' and normalize-space(.)='${label}']`),
     );
-  await driver.click(item);
+  return item;
+}
+
+async function closeContextMenu(driver) {
+  const backdrop = await driver.find("css selector", ".menubackdrop");
+  await driver.click(backdrop);
 }
 
 export default {
@@ -81,17 +99,26 @@ export default {
       "the real Plex libraries in the sidebar",
     );
     const section = await driver.exec(
-      `const b = [...document.querySelectorAll('button.sideitem')].find((x) => x.textContent.trim() !== 'Home');
+      `const b = [...document.querySelectorAll('button.sideitem')]
+         .find((x) => x.textContent.trim() === ${JSON.stringify(SECTION)});
        if (b) b.click();
        return b ? b.textContent.trim() : null`,
     );
-    assert.ok(section, "the real Plex server must offer at least one library");
+    assert.equal(section, SECTION, `the real Plex server must offer the ${SECTION} library`);
     await pollUntil(
-      async () => ((await cardCount(driver)) > 0 ? true : null),
-      `real items from the real Plex server (${section})`,
+      async () => {
+        const target = await targetState(driver);
+        return target.matches === 1 ? target : null;
+      },
+      `${TARGET} from the real Plex ${SECTION} library`,
     );
-    const before = await cardCount(driver);
+    const initialTarget = await targetState(driver);
+    assert.equal(initialTarget.matches, 1, `exactly one ${TARGET} card is visible`);
+    assert.ok(initialTarget.label, `${TARGET} has a stable accessible identity`);
+    const before = initialTarget.gridCount;
     assert.equal(await banner(driver), null, "a healthy Plex server produces no banner");
+    await targetMenuItem(driver, "Mark watched");
+    await closeContextMenu(driver);
 
     // ── 2. Scan Library reaches the REAL server ─────────────────────────────
     // The whole provenance/binding apparatus exists to make sure a scan reaches the server
@@ -126,13 +153,22 @@ export default {
     // ── 3. Plex goes away, and a watch-state edit fails ─────────────────────
     // The owner's playtest, against the server it actually happened on.
     await control("/plex/stop");
-    await ctxMenuOnCard(driver, 0, "Mark watched");
-    await pollUntil(
-      async () => ((await editLine(driver)) ? true : null),
+    const markWatched = await targetMenuItem(driver, "Mark watched");
+    await driver.click(markWatched);
+    const said = await pollUntil(
+      async () => {
+        const target = await targetState(driver);
+        assert.equal(target.matches, 1, `${TARGET} must never disappear while the edit fails`);
+        assert.equal(
+          target.label,
+          initialTarget.label,
+          `${TARGET}'s identity must remain unchanged while the edit fails`,
+        );
+        return (await editLine(driver)) || null;
+      },
       "the edit's failure, on the edit's own line",
-      { timeoutMs: 40000 }, // a dead Plex is a CONNECT timeout, not an instant refusal
+      { timeoutMs: 40000, intervalMs: 200 }, // dead Plex is a CONNECT timeout
     );
-    const said = await editLine(driver);
 
     assert.ok(
       said.includes("Couldn't mark"),
@@ -142,30 +178,63 @@ export default {
       !/https?:\/\//.test(said) && !/token/i.test(said),
       `no url and nothing token-shaped may reach the screen — a Plex url carries ?X-Plex-Token= — got ${JSON.stringify(said)}`,
     );
+    assert.equal(
+      await banner(driver),
+      null,
+      "the failed edit makes no listing request and therefore no view failure",
+    );
 
     // ── 4. ...and the library is STILL THERE ───────────────────────────────
+    const afterFailure = await targetState(driver);
+    assert.equal(afterFailure.matches, 1, `${TARGET} remains after the named failure`);
+    assert.equal(afterFailure.label, initialTarget.label, `${TARGET}'s identity remains exact`);
     assert.equal(
-      await cardCount(driver),
+      afterFailure.gridCount,
       before,
-      "a failed watch-state repaint must not empty the library — the owner lost every library to this, and with the server down had nothing left to retry with",
+      "the failed edit must not change the loaded grid's cardinality",
     );
 
     // ── 5. Plex comes back, and Refresh recovers ───────────────────────────
     await control("/plex/start");
+    const beforeRefresh = await targetState(driver);
+    assert.equal(beforeRefresh.matches, 1, `${TARGET} remains cached while Plex restarts`);
+    assert.equal(beforeRefresh.label, initialTarget.label, `${TARGET} remains exact before Refresh`);
+    let refreshAttempts = 0;
     await pollUntil(
       async () => {
-        const refresh = await driver.find("css selector", "button.refreshbtn");
-        await driver.click(refresh);
-        await new Promise((r) => setTimeout(r, 2000));
-        return (await cardCount(driver)) > 0 && (await banner(driver)) === null ? true : null;
+        const refreshReady = await driver.exec(
+          `const b = document.querySelector('button.refreshbtn'); return !!b && !b.disabled`,
+        );
+        if (refreshReady) {
+          const refresh = await driver.find("css selector", "button.refreshbtn");
+          await driver.click(refresh);
+          refreshAttempts++;
+          await new Promise((r) => setTimeout(r, 2000));
+        }
+        const target = await targetState(driver);
+        const settled = await driver.exec(
+          `const b = document.querySelector('button.refreshbtn'); return !!b && !b.disabled`,
+        );
+        return refreshAttempts > 0 &&
+          settled &&
+          target.matches === 1 &&
+          target.label === initialTarget.label &&
+          (await banner(driver)) === null
+          ? true
+          : null;
       },
-      "the library recovers once the real server is back",
+      `${TARGET} remains unwatched after Plex returns and Refresh succeeds`,
       { timeoutMs: 90000 }, // Plex takes a while to start serving after systemd says active
     );
-    // The EDIT's line is not the refresh's to clear: the action still failed.
-    assert.ok(
-      await editLine(driver),
-      "a refresh repairs the VIEW; it does not un-fail the user's edit",
+    // Refresh does not own the edit line; its independent 8s presentation timer does.
+    // Plex startup can outlast that timer, so accept either an already-dismissed line or
+    // the remaining portion of its promised lifetime.
+    await pollUntil(
+      async () => ((await editLine(driver)) === null ? true : null),
+      "the named edit failure to auto-dismiss independently of server recovery and Refresh",
+      { timeoutMs: 10000, intervalMs: 200 },
     );
+    await targetMenuItem(driver, "Mark watched");
+    await closeContextMenu(driver);
   },
 };

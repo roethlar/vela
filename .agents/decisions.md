@@ -827,3 +827,27 @@ time.
 
 Supersedes:
 Nothing. Formalizes the protocol that the library-refresh-scan loop arrived at.
+
+## 2026-07-15 - Failed watch-state edit errors auto-dismiss after eight seconds
+
+Status: APPROVED (owner, 2026-07-15). Implementation plan:
+`.agents/plans/edit-error-auto-dismiss.md`.
+
+Decision:
+A failed watch-state edit appears on the edit's own line, follows navigation,
+and auto-dismisses eight seconds after publication. A newer edit or source-list
+change clears it immediately. Expiry is attempt-owned so an older timer cannot
+clear a newer failure. Scan failures retain their next-scan lifetime; there is
+no manual dismiss control.
+
+Reason:
+The owner confirmed the destructive stopped-Plex path was fixed in 0.1.49, but
+the correctly separated red action line then remained indefinitely and looked
+permanently active after it had been read. Eight seconds preserves a visible,
+accessible failure without requiring another edit merely to clear presentation.
+
+Supersedes:
+Only the watch-state edit lifetime detail in
+`.agents/plans/per-surface-status.md` and
+`.agents/plans/failed-watch-edit-recovery.md`. The 2026-07-14 own-surface
+decision, recovery behavior, and every other surface lifetime remain unchanged.

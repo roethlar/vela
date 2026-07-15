@@ -54,15 +54,84 @@ async function editLine(driver) {
     `return [...document.querySelectorAll('div.scanerror')].map((e) => e.textContent).join(' | ') || null`,
   );
 }
+// The production promise is exactly 8s, but making this scenario spend 16 real seconds
+// would turn ownership into a slow timing test. Intercept only the next two exact 8s
+// requests, accelerate them to separate deadlines, and refuse the first cancellation so
+// its callback really runs stale. Everything else continues to use the native clock.
+async function installEditTimerProbe(driver) {
+  await driver.exec(`
+    (() => {
+      if (window.__velaEditTimerProbe) throw new Error('edit timer probe already installed');
+      const nativeSetTimeout = window.setTimeout;
+      const nativeClearTimeout = window.clearTimeout;
+      const probe = {
+        nativeSetTimeout,
+        nativeClearTimeout,
+        acceleratedMs: [3000, 5000],
+        requestedMs: [],
+        fired: [],
+        handles: [],
+        firstCancellationIgnored: false,
+      };
+      window.__velaEditTimerProbe = probe;
+      window.setTimeout = function (callback, delay, ...args) {
+        if (delay !== 8000 || probe.requestedMs.length >= 2) {
+          return nativeSetTimeout.call(window, callback, delay, ...args);
+        }
+        const timer = probe.requestedMs.length + 1;
+        probe.requestedMs.push(delay);
+        const handle = nativeSetTimeout.call(window, () => {
+          probe.fired.push(timer);
+          callback(...args);
+        }, probe.acceleratedMs[timer - 1]);
+        probe.handles.push(handle);
+        return handle;
+      };
+      window.clearTimeout = function (handle) {
+        if (
+          !probe.firstCancellationIgnored &&
+          probe.handles.length > 0 &&
+          handle === probe.handles[0]
+        ) {
+          probe.firstCancellationIgnored = true;
+          return;
+        }
+        return nativeClearTimeout.call(window, handle);
+      };
+    })();
+  `);
+}
+async function editTimerProbeState(driver) {
+  return driver.exec(`
+    const probe = window.__velaEditTimerProbe;
+    return probe ? {
+      requestedMs: [...probe.requestedMs],
+      fired: [...probe.fired],
+      firstCancellationIgnored: probe.firstCancellationIgnored,
+    } : null;
+  `);
+}
+async function restoreEditTimerProbe(driver) {
+  await driver.exec(`
+    (() => {
+      const probe = window.__velaEditTimerProbe;
+      if (!probe) return;
+      window.setTimeout = probe.nativeSetTimeout;
+      window.clearTimeout = probe.nativeClearTimeout;
+      for (const handle of probe.handles) {
+        probe.nativeClearTimeout.call(window, handle);
+      }
+      delete window.__velaEditTimerProbe;
+    })();
+  `);
+}
 async function settle(driver) {
   await driver.waitFor(
     `const b = document.querySelector('button.refreshbtn'); return !!b && !b.disabled`,
     "refresh to settle",
   );
 }
-// Toggle a card's watch state from its context menu (refresh.mjs:162). Used here
-// as a NON-listing writer to the shared error banner.
-async function watchToggle(driver, prefix, label) {
+async function contextMenuItem(driver, prefix, label) {
   await driver.exec(
     `const el = document.querySelector('button.poster[aria-label^="${prefix}"]');
      const r = el.getBoundingClientRect();
@@ -76,7 +145,31 @@ async function watchToggle(driver, prefix, label) {
         `//button[@role='menuitem' and normalize-space(.)='${label}']`,
       ),
     );
+  return item;
+}
+// Toggle a card's watch state from its context menu (refresh.mjs:162).
+async function watchToggle(driver, prefix, label) {
+  const item = await contextMenuItem(driver, prefix, label);
   await driver.click(item);
+}
+async function gridState(driver) {
+  return driver.exec(
+    `return {
+       labels: [...document.querySelectorAll('main.grid button.poster')]
+         .map((b) => b.getAttribute('aria-label')),
+       edit: [...document.querySelectorAll('div.scanerror')]
+         .map((e) => e.textContent).join(' | ') || null,
+     }`,
+  );
+}
+function assertExactLabels(actual, expected, where) {
+  assert.equal(actual.length, expected.length, `${where}: poster cardinality changed`);
+  const mismatch = actual.findIndex((label, i) => label !== expected[i]);
+  assert.equal(
+    mismatch,
+    -1,
+    `${where}: poster ${mismatch} changed from ${JSON.stringify(expected[mismatch])} to ${JSON.stringify(actual[mismatch])}`,
+  );
 }
 const ENTER = ""; // WebDriver Enter (search.mjs uses the literal char)
 // Both of the edit's one-shots bind at request ARRIVAL. A case that navigates before
@@ -89,6 +182,22 @@ async function armedShotsBound() {
 }
 const servedCount = (endsWith) =>
   mock.state.served.filter((s) => s.path.endsWith(endsWith)).length;
+const itemsPath = () => `/Users/${mock.userId}/Items`;
+const listingArrivals = () =>
+  mock.state.requests.filter(
+    (r) =>
+      r.method === "GET" &&
+      r.path === itemsPath() &&
+      r.query.ParentId === "libBig" &&
+      r.query.searchTerm === undefined,
+  ).length;
+const itemsServed = (status = null) =>
+  mock.state.served.filter(
+    (s) =>
+      s.method === "GET" &&
+      s.path === itemsPath() &&
+      (status === null || s.status === status),
+  ).length;
 // An ABSENCE assertion ("the edit's failure must NOT be published here") passes just as
 // well by asking too early as by being right. A fixed sleep measured from the PARK is
 // not a witness: it says when the request ARRIVED, never when the answer went out (codex
@@ -284,10 +393,12 @@ export default {
       `...and the refresh must still report its own failure alongside it — got ${JSON.stringify(both)}`,
     );
 
-    // ── 4. The edit's failure and the view's never touch each other ─────────
-    // THE POINT OF THE SPLIT. Both fail; both are reported; neither erases the other. This
-    // one assertion replaces six cases (the old 5-11), every one of which existed only to
-    // police two writers fighting over a single banner.
+    // ── 4. A failed edit never reloads or loses the browse grid ─────────────
+    // The backend rolled its temporary curation back and the frontend never changed the
+    // card, so there is no new browse truth to fetch. A recovery listing here is itself
+    // the defect: it blanks every loaded card while a dead server times out, can lose the
+    // held pages to a newer generation, and manufactures a view failure unrelated to the
+    // edit. Guard exact identity continuously — count alone accepts a substituted card.
     await driver.exec(
       `const i = document.querySelector('input[aria-label="Search your libraries"]');
        i.value = ''; i.dispatchEvent(new Event('input', { bubbles: true }));`,
@@ -300,39 +411,230 @@ export default {
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "a healthy grid to edit from",
     );
-    mock.state.unauthNextPlayed = true; // the edit 401s...
-    mock.state.failNextItems = true; // ...and its recovery repaint 500s
-    await watchToggle(driver, "Movie 059", "Mark watched");
+    const expectedLabels = (await gridState(driver)).labels;
+    assert.equal(expectedLabels.length, 60, "case 4 starts with one exact full page");
+    assert.ok(
+      expectedLabels.some((label) => label?.startsWith("Movie 059")),
+      "the attempted card is part of the exact identity snapshot",
+    );
+    assert.equal(await banner(driver), null, "case 4 starts without a view failure");
+    assert.equal(await editLine(driver), null, "case 4 starts without an edit failure");
+    assert.equal(mock.state.unauthNextPlayed, false, "edit one-shot starts neutral");
+    assert.equal(mock.state.failNextItems, false, "listing failure starts neutral");
+    assert.equal(mock.state.unauthNextItems, false, "listing auth starts neutral");
+    assert.equal(mock.state.itemsDelayMs, 0, "listing delay starts neutral");
+
+    const arrivalsBefore4 = listingArrivals();
+    const servedBefore4 = itemsServed();
+    let failedLine;
+    try {
+      mock.state.unauthNextPlayed = true; // the edit 401s...
+      mock.state.failNextItems = true; // ...but no recovery listing may consume this
+      mock.state.itemsDelayMs = 6000; // or this: old code stays visibly blank while parked
+      await watchToggle(driver, "Movie 059", "Mark watched");
+      failedLine = await pollUntil(
+        async () => {
+          const current = await gridState(driver);
+          assertExactLabels(current.labels, expectedLabels, "while the edit fails");
+          return current.edit?.includes("Couldn't mark “Movie 059” watched")
+            ? current.edit
+            : null;
+        },
+        "the named failed-edit line while the exact grid remains",
+      );
+
+      const settled = await gridState(driver);
+      assertExactLabels(settled.labels, expectedLabels, "after the edit fails");
+      assert.equal(
+        listingArrivals(),
+        arrivalsBefore4,
+        "a failed edit has no new browse truth and must not request the listing",
+      );
+      assert.equal(
+        itemsServed(),
+        servedBefore4,
+        "no recovery listing response may be served when no request exists",
+      );
+      assert.equal(mock.state.unauthNextPlayed, false, "the doomed edit reached the server");
+      assert.equal(
+        mock.state.failNextItems,
+        true,
+        "the next-listing failure remains armed because recovery made no listing request",
+      );
+      assert.equal(mock.state.unauthNextItems, false, "no unrelated listing auth flag changed");
+      assert.equal(
+        mock.state.itemsDelayMs,
+        6000,
+        "the next-listing delay remains armed because recovery made no listing request",
+      );
+      assert.equal(
+        await banner(driver),
+        null,
+        "the failed edit must not manufacture a view failure",
+      );
+      assert.ok(
+        failedLine.includes("reconnect"),
+        "the edit the user asked for failed, so its own line says how to recover",
+      );
+    } finally {
+      // A passing no-request guard deliberately leaves these armed. Disarm before the
+      // healthy Refresh and on every assertion path so this case cannot poison later ones.
+      mock.state.unauthNextPlayed = false;
+      mock.state.failNextItems = false;
+      mock.state.unauthNextItems = false;
+      mock.state.itemsDelayMs = 0;
+      assert.equal(mock.state.unauthNextPlayed, false);
+      assert.equal(mock.state.failNextItems, false);
+      assert.equal(mock.state.unauthNextItems, false);
+      assert.equal(mock.state.itemsDelayMs, 0);
+    }
+
+    const refreshArrivals4 = listingArrivals();
+    const refreshServed4 = itemsServed(200);
+    const healthyRefresh = await driver.find("css selector", "button.refreshbtn");
+    await driver.click(healthyRefresh);
     await pollUntil(
-      async () => {
-        const e = await editLine(driver);
-        const b = await banner(driver);
-        return e && b ? true : null;
-      },
-      "both failures, each on its own surface",
+      async () => (listingArrivals() > refreshArrivals4 ? true : null),
+      "the explicit healthy Refresh listing request",
     );
-    // ...AND THE LIBRARY IS STILL THERE. The repaint is a RE-ENTRY of the root the user is
-    // already standing on, not a navigation away from it: blanking the grid before the
-    // fetch means a failed re-fetch leaves them with nothing. They asked to mark ONE item
-    // watched, and it cost them the whole view — with the server down they could not even
-    // retry, because there was nothing left to right-click (owner playtest, 0.1.47).
+    await pollUntil(
+      async () => (itemsServed(200) > refreshServed4 ? true : null),
+      "the explicit healthy Refresh listing response",
+    );
+    await settle(driver);
+    const afterRefresh4 = await gridState(driver);
+    assertExactLabels(afterRefresh4.labels, expectedLabels, "after explicit healthy Refresh");
+    assert.equal(await banner(driver), null, "healthy Refresh leaves the view healthy");
     assert.equal(
-      await cardCount(driver),
-      60,
-      "a failed watch-state repaint must not empty the library: the user asked to change one item, not to lose the view",
+      afterRefresh4.edit,
+      failedLine,
+      "Refresh repairs the view; it does not erase the edit that failed",
     );
-    assert.ok(
-      (await editLine(driver)).includes("reconnect"),
-      "the edit the user ASKED for failed: that is reported on the edit's line",
+    assert.equal(
+      mock.state.userData.m59.played,
+      false,
+      "the failed operation and healthy Refresh leave the target unwatched",
     );
-    assert.ok(
-      (await banner(driver)).includes("500"),
-      "...and the repaint's failure, which is the only thing explaining the empty grid it left behind, is reported on the VIEW's",
-    );
-    assert.ok(
-      !(await banner(driver)).includes("reconnect"),
-      "the edit's failure must not appear on the view's banner at all — that shared surface is what eight review rounds of defects came from",
-    );
+    await contextMenuItem(driver, "Movie 059", "Mark watched");
+    const menuBackdrop = await driver.find("css selector", ".menubackdrop");
+    await driver.click(menuBackdrop);
+
+    // ── 4b. Failed edits auto-dismiss, and only their own timer may do it ────
+    // Timer A is deliberately allowed to fire even after edit B cancels it. B must clear A
+    // synchronously at its click, publish its own delayed failure, survive A's stale
+    // callback, and disappear only when B's callback runs. The probe also makes 8000 itself
+    // observable: a changed duration is not accelerated and fails before a long wait can
+    // accidentally accept it.
+    try {
+      await installEditTimerProbe(driver);
+
+      mock.state.unauthNextPlayed = true;
+      await watchToggle(driver, "Movie 056", "Mark watched");
+      const failedA = await pollUntil(
+        async () => {
+          const current = await gridState(driver);
+          assertExactLabels(current.labels, expectedLabels, "while timer failure A publishes");
+          return current.edit?.includes("Couldn't mark “Movie 056” watched")
+            ? current.edit
+            : null;
+        },
+        "timer failure A",
+      );
+      assert.equal(await banner(driver), null, "timer failure A does not become a view failure");
+      let probe = await editTimerProbeState(driver);
+      assert.deepEqual(probe?.requestedMs, [8000], "failure A requests the exact 8s promise");
+      assert.deepEqual(probe?.fired, [], "failure A's accelerated deadline has not passed yet");
+
+      mock.state.unauthNextPlayed = true;
+      mock.state.playedDelayMs = 500; // keep B in flight while its click synchronously clears A
+      const servedB = servedCount("/PlayedItems/m55");
+      await watchToggle(driver, "Movie 055", "Mark watched");
+      assert.equal(
+        await editLine(driver),
+        null,
+        "starting edit B clears failure A immediately, before B has an outcome",
+      );
+      assert.equal(
+        servedCount("/PlayedItems/m55"),
+        servedB,
+        "the delayed edit B response is still pending at the immediate-clear assertion",
+      );
+      probe = await editTimerProbeState(driver);
+      assert.equal(
+        probe?.firstCancellationIgnored,
+        true,
+        "the probe keeps A's cancelled callback queued so stale ownership is exercised",
+      );
+      await pollUntil(
+        async () =>
+          !mock.state.unauthNextPlayed && mock.state.playedDelayMs === 0 ? true : null,
+        "the delayed timer failure B to reach the server",
+      );
+      await pollUntil(
+        async () => (servedCount("/PlayedItems/m55") > servedB ? true : null),
+        "timer failure B's delayed 401",
+      );
+      const failedB = await pollUntil(
+        async () => {
+          const current = await gridState(driver);
+          assertExactLabels(current.labels, expectedLabels, "while timer failure B publishes");
+          return current.edit?.includes("Couldn't mark “Movie 055” watched")
+            ? current.edit
+            : null;
+        },
+        "timer failure B",
+      );
+      assert.notEqual(failedB, failedA, "failure B replaces failure A with its own exact outcome");
+      assert.equal(await banner(driver), null, "timer failure B does not become a view failure");
+      probe = await editTimerProbeState(driver);
+      assert.deepEqual(
+        probe?.requestedMs,
+        [8000, 8000],
+        "both published failures request the exact 8s promise",
+      );
+      assert.deepEqual(
+        probe?.fired,
+        [],
+        "failure B publishes before the forced stale callback's deadline",
+      );
+
+      await pollUntil(
+        async () => ((await editTimerProbeState(driver))?.fired.includes(1) ? true : null),
+        "failure A's deliberately uncancelled stale callback",
+        { timeoutMs: 4000, intervalMs: 50 },
+      );
+      assert.equal(
+        await editLine(driver),
+        failedB,
+        "failure A's stale callback may not erase the newer failure B",
+      );
+      let timerGrid = await gridState(driver);
+      assertExactLabels(timerGrid.labels, expectedLabels, "after failure A's stale callback");
+      assert.equal(await banner(driver), null, "a stale edit timer does not touch the view banner");
+      probe = await editTimerProbeState(driver);
+      assert.deepEqual(probe?.fired, [1], "only failure A's callback has fired so far");
+
+      await pollUntil(
+        async () => {
+          const currentProbe = await editTimerProbeState(driver);
+          return currentProbe?.fired.length === 2 && (await editLine(driver)) === null
+            ? true
+            : null;
+        },
+        "failure B to auto-dismiss on its own accelerated 8s callback",
+        { timeoutMs: 6500, intervalMs: 50 },
+      );
+      probe = await editTimerProbeState(driver);
+      assert.deepEqual(probe?.fired, [1, 2], "each exact 8s timer callback ran once, in order");
+      timerGrid = await gridState(driver);
+      assertExactLabels(timerGrid.labels, expectedLabels, "after failure B auto-dismisses");
+      assert.equal(timerGrid.edit, null, "failure B's own timer clears only the edit line");
+      assert.equal(await banner(driver), null, "auto-dismissal does not touch the view banner");
+    } finally {
+      mock.state.unauthNextPlayed = false;
+      mock.state.playedDelayMs = 0;
+      await restoreEditTimerProbe(driver);
+    }
 
     // ── 5. An action's outcome is reported wherever the user is ─────────────
     // The old cases 5/7/9 asserted the OPPOSITE — that a failed edit must be SUPPRESSED if
@@ -378,10 +680,21 @@ export default {
       async () => ((await cardCount(driver)) === 60 ? true : null),
       "the grid",
     );
+    const priorFailure6 = await editLine(driver);
+    assert.ok(
+      priorFailure6?.includes("Couldn't mark “Movie 059” watched"),
+      "case 6 starts with the exact prior failure still visible",
+    );
+    const served6 = servedCount("/PlayedItems/m58");
     await watchToggle(driver, "Movie 058", "Mark watched"); // succeeds
+    assert.equal(
+      await editLine(driver),
+      null,
+      "a new edit clears the previous failure immediately, before its 8s timer can satisfy a poll",
+    );
     await pollUntil(
-      async () => ((await editLine(driver)) === null ? true : null),
-      "a new edit clears the previous one's failure — a stale outcome is not an outcome",
+      async () => (servedCount("/PlayedItems/m58") > served6 ? true : null),
+      "the successful newer edit to be delivered",
     );
 
     // ── (no case 7) ────────────────────────────────────────────────────────
