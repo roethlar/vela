@@ -1,7 +1,9 @@
 # Plan: failures report on the surface that owns them
 
 Status: **COMPLETE** — all five slices landed 2026-07-14 (`fee7f0e`, `67358fd`,
-`0f41c7b`, `40dfc40`, `282702b`; version 0.1.46). Awaiting owner playtest.
+`0f41c7b`, `40dfc40`, `282702b`; version 0.1.46). The watch-state edit
+lifetime was amended by the owner on 2026-07-15; see
+`.agents/plans/edit-error-auto-dismiss.md`.
 Originally APPROVED (owner, 2026-07-14). Two decisions taken in the owner's words:
 
 1. *"Own surfaces"* — the play queue, the mpv setup bar and the open detail page each
@@ -20,7 +22,7 @@ string → `div.error`) written by surfaces with four different lifetimes:
 | writer | surface | lives until |
 | --- | --- | --- |
 | listing / refresh / search / sections | the view | the next load of that view |
-| watch-state edit (`setWatched`, `removeFromContinue`) | an action | the next edit |
+| watch-state edit (`setWatched`, `removeFromContinue`) | an action | eight seconds, or the next edit/source change |
 | queue mutations (`playNext`, `addToQueue`, `queueJumpTo`, `queueRemove`, `queueClearAll`) | the queue drawer + chip | the next queue action, or the drawer closing |
 | `installMpv` | the mpv setup bar | the next install attempt |
 | `play` from an open detail | the detail page | the detail closing |
@@ -54,8 +56,9 @@ The library scan already works this way, from r15 of the same loop. Read it firs
 - An attempt counter (`scanAttempt`) invalidates in-flight outcomes when the source list
   changes (`onSourcesChanged` bumps it), so a scan cannot publish over an unrelated source.
 
-Every surface below follows that shape: `{ text, failed } | null` + an attempt counter +
-success-auto-clears / failure-persists.
+The scan follows that full shape. The edit surface is failure-only (`string | null`):
+the card checkmark acknowledges success, while a failed edit auto-dismisses after eight
+seconds under the 2026-07-15 amendment. Other surfaces keep the lifetimes named below.
 
 ## Slices
 
@@ -66,8 +69,8 @@ lands. Run the full check set (`.agents/repo-guidance.md` Verification) per slic
 
 The highest-value slice: this writer caused most of the loop's defects.
 
-- Add `editStatus = $state<{ text: string; failed: boolean } | null>` and `editAttempt`,
-  mirroring `scanStatus`/`scanAttempt`.
+- Add failure-only `editStatus = $state<string | null>` and `editAttempt`, using the
+  scan's separate-surface and attempt-ownership pattern without a success notice.
 - `setWatched` and `removeFromContinue` publish there, never through `setError`/`addError`.
 - Render it next to the scan's status (same slot family, `div.scanerror` / `div.notice`),
   NOT in `div.error`.
@@ -133,8 +136,9 @@ Once slices 1-4 have landed, the banner has exactly ONE writer class: the view.
 
 ## Non-goals
 
-- Do not add a dismiss (×) control to any status line. The scan's precedent is
-  success-auto-clears / failure-persists-until-the-next-action, and it has held.
+- Do not add a dismiss (×) control to any status line. Scan failures still persist until
+  the next scan. Failed watch-state edits follow the separate 2026-07-15 eight-second
+  amendment; other lifetimes above are unchanged.
 - Do not touch the Rust backend. The curate-before-call + rollback behaviour is correct and
   owner-verified (`.agents/decisions.md` 2026-07-10); this plan is presentation only.
 - Do not change WHEN a failure occurs, only where it is reported. No new retries.

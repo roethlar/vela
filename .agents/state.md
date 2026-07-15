@@ -12,7 +12,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **Version 0.1.49** (`package.json`, `src-tauri/tauri.conf.json`,
   `src-tauri/Cargo.toml` all agree, as of `b5c170a`).
 
-- **FAILED-WATCH-EDIT RECOVERY: IMPLEMENTED AT `b5c170a`, GROK ACCEPTED R1.**
+- **FAILED-WATCH-EDIT RECOVERY: OWNER-CONFIRMED ON 0.1.49.** Implemented at
+  `b5c170a`; Grok accepted r1.
   The owner playtest failed 2026-07-14 on 0.1.48; follow-up plan
   `.agents/plans/failed-watch-edit-recovery.md` is IMPLEMENTED. The stopped-Plex
   test showed a view failure and a named edit failure on separate lines, with no
@@ -28,7 +29,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   green, the full Linux suite is 18/18, and the exact live Plex path passed.
   Grok independently red-proved both the old broad recovery and the exact-
   identity guard, restored the head green, and accepted with no findings.
-  Closed review record: `.agents/review/findings/fwer-1.md`. Original plan
+  The owner repeated the exact stopped-Plex path on installed 0.1.49 and
+  confirmed the grid/title remain present and the item remains unwatched. The
+  remaining polish is the indefinite red edit line: the owner approved an
+  attempt-owned eight-second auto-dismiss in
+  `.agents/plans/edit-error-auto-dismiss.md`. Closed recovery review record:
+  `.agents/review/findings/fwer-1.md`. Original plan
   `.agents/plans/per-surface-status.md`; decision `.agents/decisions.md`
   (2026-07-14). Every failure now reports on the surface it belongs to: the
   view's banner keeps listing/refresh/search failures, and the watch-state edit
@@ -94,12 +100,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **AWAITING OWNER PLAYTEST / LANDING: failed watch-state recovery follow-up.**
-  Code slice `b5c170a`, coder verification, and Grok r1 acceptance are complete.
-  Repeat the exact stopped-Plex report on 0.1.49: the Movies grid and **12 Years
-  a Slave** never disappear; only the named edit line appears; after Plex starts
-  and Refresh runs, the item remains unwatched and actionable. Review loop
-  `fwer-1` is closed; see `.agents/review/index.md`.
+- **IMPLEMENTING: failed edit-error auto-dismiss.** Approved plan
+  `.agents/plans/edit-error-auto-dismiss.md`, one code slice. Failed watch-state
+  edit errors remain on their own line, follow navigation, then auto-dismiss
+  eight seconds after publication; the next edit/source change still clears
+  immediately and stale timers cannot erase newer failures. Active review loop:
+  `eet-1`; see `.agents/review/index.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
@@ -213,7 +219,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/machines.md` (host-specific facts; the E2E venue)
 - `.agents/push-policy.md` (always ask — including the `vm` remote)
 - `.agents/plans/failed-watch-edit-recovery.md` (IMPLEMENTED — Grok accepted r1;
-  owner playtest / landing outstanding)
+  owner playtest confirmed; landing waits on the timeout polish)
+- `.agents/plans/edit-error-auto-dismiss.md` (APPROVED — implementation active;
+  Grok code review required)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)

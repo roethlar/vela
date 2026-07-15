@@ -78,8 +78,10 @@ None.
 
 ## Known gaps
 
-The owner must repeat the stopped-Plex playtest in the installed app after the
-review loop closes. The live test is opt-in and non-gating by design.
+The owner repeated the exact stopped-Plex playtest on installed 0.1.49 and
+confirmed the grid/title remain present and the item remains unwatched. The
+separate edit-line lifetime polish is tracked by `eet-1`. The live test remains
+opt-in and non-gating by design.
 
 ## Reviewer comments
 

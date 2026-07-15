@@ -1,13 +1,13 @@
 # Plan: a failed watch-state edit never reloads or loses the browse grid
 
-Status: **IMPLEMENTED (`b5c170a`) — Grok accepted r1; owner playtest / landing
-outstanding.** The owner admitted and ordered correction of the remaining r2
-red-proof defect, then explicitly said to start coding. See `## Plan review
-log`; the completed code review is `.agents/review/findings/fwer-1.md`. The
-owner playtest of 0.1.48 failed on the real Plex path. This follow-up is one
-code slice. The per-surface-status implementation remains complete; this plan
-fixes the recovery work that runs underneath its correctly separated status
-lines.
+Status: **IMPLEMENTED (`b5c170a`) — Grok accepted r1; owner playtest CONFIRMED
+on 0.1.49; landing outstanding.** The owner admitted and ordered correction of
+the remaining r2 red-proof defect, then explicitly said to start coding. See
+`## Plan review log`; the completed code review is
+`.agents/review/findings/fwer-1.md`. The owner playtest of 0.1.48 failed on the
+real Plex path. This follow-up is one code slice. The per-surface-status
+implementation remains complete; this plan fixes the recovery work that runs
+underneath its correctly separated status lines.
 
 ## Owner-visible defect
 
@@ -78,8 +78,9 @@ Home still heals after the backend rolls back its temporary curation:
 - if Home is visible when the edit fails, reload Home's hubs, recents, and
   tombstones;
 - otherwise invalidate the hidden Home data so the next visit reloads it;
-- the failed edit line continues to follow the user until the next edit, as
-  settled by the per-surface-status decision.
+- the failed edit line follows navigation and, under the owner-approved
+  2026-07-15 amendment, auto-dismisses eight seconds after publication; a newer
+  edit or source-list change clears it immediately.
 
 Successful edits and `playback-ended` keep their current visible-state refresh.
 Those paths have new server truth to display; the failed path does not.
