@@ -1,7 +1,8 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — all eight slices landed; final canonical verification
-and external review of the Slice 8 integration/version range are pending.** The
+Status: **IMPLEMENTING — all eight slices and final canonical/package
+verification are green; external review of the pinned Slice 8
+integration/version range is the only remaining gate.** The
 owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
@@ -98,9 +99,27 @@ Implementation log:
   SHA-pinned ARM64/AMD64 packages and cache identity. The ARM64 session/IPC/UI
   probe and full E2E 18/18 passed; Grok independently proved the package/cache/
   checksum guard and accepted exact base `76c844c` and head `f3e5601` with no
-  comments. `dc73627` applies the plan's one final version bump to 0.1.51. The
-  post-version canonical suite and pinned integration-range review remain the
-  closing gates.
+  comments. The matching driver exposed a live Jellyfin readiness race;
+  `5532e93`/`8366b4f` wait for and deterministically guard an actual server
+  library, the complete live scenario passed, and Claude Fable 5 accepted
+  `dlr-s8-3` with no comments. `dc73627` applies the plan's one final version
+  bump to 0.1.51. The final Linux package run then exposed stale installers in
+  `dist/`; `bff2905` limits collection to fresh requested targets, its hermetic
+  regression and real deb/rpm build passed, and Claude Fable 5 accepted
+  `dlr-s8-4` with no comments.
+- Post-version verification at final code head `f4cfe8d` passed the exact
+  Node 26.5.0/npm 12.0.1 assertion, clean install/tree, zero-vulnerability npm
+  audit, the build-script regression, Svelte check, production build, Rust
+  1.89 and stable locked checks, clippy with warnings denied, all 97 Rust tests,
+  and Cargo audit with zero vulnerabilities plus 17 visible upstream warnings.
+  `npm outdated` reports only TypeScript 7.0.2 outside the selected compatible
+  TypeScript 6 line. The final Linux real-app suite passed 18/18; live Plex and
+  live Jellyfin passed at 0.1.51; temporary credentials were absent afterward.
+  Linux produced exactly the current arm64 deb/rpm, and the checksum-valid
+  macOS DMG reports 0.1.51 with an x86_64+arm64 executable. GitHub workflow
+  YAML and PowerShell parsing passed; `actionlint` is not installed. Windows
+  packaging remains the owner-gated GitHub-hosted proof, and no configured
+  Emby venue exists. Only the pinned final integration-range review remains.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel

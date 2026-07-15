@@ -148,13 +148,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   duplicate is gone, and the required local, Linux E2E/live-server, Linux
   package, and macOS universal package checks passed. Grok independently
   red-proved the explicit `query` feature and accepted the pinned diff with no
-  comments. Slice 8 then closed two audit findings: `4cba5db` enforces the
-  pinned Node/npm pair in local, CI, and release install paths; `ec7c43e`
-  replaces the old WebKit driver/ICU fixture with Ubuntu's exact 2.52.3 match.
-  Both guards, the matching-driver E2E 18/18 run, and external Grok reviews
-  passed. `dc73627` bumps Vela once to 0.1.51. Final canonical verification and
-  external review of the integration/version range are the only remaining
-  dependency-plan gates. Exact evidence lives in
+  comments. Slice 8 then closed four integration findings: `4cba5db` enforces
+  the pinned Node/npm pair in local, CI, and release install paths; `ec7c43e`
+  replaces the old WebKit driver/ICU fixture with Ubuntu's exact 2.52.3 match;
+  `5532e93`/`8366b4f` make the live Jellyfin library wait deterministic; and
+  `bff2905` prevents stale installers from being recopied into `dist/`.
+  Their guards, real integrations, and external Grok/Claude reviews passed.
+  `dc73627` bumps Vela once to 0.1.51. The final local canonical suite, Linux
+  E2E 18/18, live server checks, current-only Linux deb/rpm packages, and
+  checksum-valid macOS universal DMG are green. External review of the pinned
+  Slice 8 integration/version range is the only remaining dependency-plan
+  gate. Exact evidence lives in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
