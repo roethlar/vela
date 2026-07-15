@@ -122,8 +122,13 @@ Strengthen `tests/e2e/scenarios/pagefail.mjs` case 4:
    unconsumed and no view banner should appear.
 4. After the edit settles, assert the exact set and attempted card remain, not
    merely the same count.
-5. Run a healthy explicit Refresh and assert the attempted card remains
-   unwatched and actionable.
+5. After proving the listing one-shot was not consumed, explicitly return
+   `failNextItems`, `unauthNextItems`, and `itemsDelayMs` to their neutral
+   values before pressing Refresh. Put the same reset in case cleanup so an
+   assertion failure cannot poison a later case. Assert the controls are
+   neutral, then run a healthy explicit Refresh and require its listing to be
+   served successfully; it must not be the request that consumes the guard.
+   Assert the attempted card remains unwatched and actionable.
 6. Keep the existing Home transient-state cases green; they prove the narrow
    repair still heals recents/tombstones when Home could have observed them.
 
@@ -217,3 +222,7 @@ same pinned plan.
 
 Round outcome: both Grok findings are evidence-backed and jointly satisfiable;
 they are admitted for plan revision before r2.
+
+Finding 1 disposition: ADDRESSED — the hermetic case now disarms every related
+listing one-shot before healthy Refresh and in case cleanup, and requires the
+Refresh itself to be served successfully.
