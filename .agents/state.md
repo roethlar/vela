@@ -64,9 +64,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     one surface is gone. Slice 1 alone collapsed SIX e2e cases, three of which
     had asserted that a failed edit must be SUPPRESSED when the user navigated
     away — never right, just the price of sharing.
-  - **The queue's slice (`67358fd`) is about to be deleted** along with the
-    queue itself (`.agents/plans/playlists.md` S1). The `surfaces` E2E scenario
-    must keep red-proving the surfaces that REMAIN.
+  - **The queue and its status slice (`67358fd`) were deleted in playlist S1**
+    (`ec5d613`). The rewritten `surfaces` scenario still red-proves the detail
+    and edit lines that remain; exact proof and external review:
+    `.agents/review/findings/pl-s1.md`.
   - The library-refresh-scan review loop is CLOSED at r24. Its evidence rotated
     to `docs/history/state-archive.md` (2026-07-14); its two standing rules were
     carved out first — the **review protocol** to `.agents/decisions.md` and
@@ -166,15 +167,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **PLAYLIST IMPLEMENTATION ACTIVE: `.agents/plans/playlists.md`** (approved and
-  authorized 2026-07-15; no code landed yet). Product model and the two durable
+  authorized 2026-07-15; S1 landed and was externally accepted, S2 is next).
+  Product model and the two durable
   rulings: `.agents/decisions.md`
   (2026-07-14 — no play queue; video stays external). Five slices.
-  - **THE PLAY QUEUE IS BEING DELETED** (owner ruling). Ephemeral queues are a
+  - **THE PLAY QUEUE IS DELETED** (owner ruling; `ec5d613`, two independent
+    Grok acceptances at r1). Ephemeral queues are a
     music idiom; the only preset video sequence worth having is a show binge, and
     there the sequence IS the show's episode order — which Continue Playing walks.
     Anything larger is a named playlist. Infuse's model, and the owner's. S1
-    deletes the chip, the drawer, the six `queue_*` commands, and
-    per-surface-status slice 2 (`67358fd`) with them. **This is why the queue step
+    deleted the chip, the drawer, the six `queue_*` commands, and
+    per-surface-status slice 2 (`67358fd`) with them; it also added explicit
+    Resume / Play from Beginning behavior. Exact verification and fail-closed
+    review trail: `.agents/review/findings/pl-s1.md`. **This is why the queue step
     of the playtest above is gone: never ask the owner to test a surface that is
     being removed.**
   - **S2 (every play records a recent) is independent of playlists and can land

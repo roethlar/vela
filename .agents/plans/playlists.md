@@ -340,6 +340,27 @@ The largest slice; the editor is most of it.
   the playlist from that item. Accepted edge, not a defect. Revisit only on an
   owner report.
 
+## Implementation log
+
+### S1 — complete and externally accepted 2026-07-15
+
+Commit `ec5d613` deletes the queue model, six commands, queue UI/status/polling,
+and queue E2E scenario; turns `play_item` into full-`ItemDto` single-item
+playback with an explicit beginning flag; and exposes Play or Resume + Play from
+Beginning on the context menu, item/season detail, and Continue Watching. The
+mpv EOF notify remains as neutral plumbing for S3.
+
+The coder separately red-proved the backend start-mode selector, queue absence,
+each visible playback surface, the frontend intent-to-IPC mapping, and retained
+detail/edit error ownership. Restored local gates passed and Linux real-app E2E
+passed 18/18. Two independent Grok 0.2.101 / `grok-4.5` sessions reviewed exact
+base `7f8a2c2` and head `ec5d613`, independently produced the forced-beginning
+red and restored green, and accepted with no comments. The fail-closed harness
+trail and exact evidence are in `.agents/review/findings/pl-s1.md`.
+
+Next implementation slice: S2, every successful play records its recent from
+the backend while failed plays record nothing and preserve tombstones.
+
 ## Verification
 
 The repo's standard set (`.agents/repo-guidance.md`): `npm run check`,

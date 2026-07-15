@@ -9,6 +9,17 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `pl-s1` CLOSED 2026-07-15: **accepted clean by two independent external
+reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each
+`guard_confirmed:true`; base `7f8a2c2`, reviewed head `ec5d613`). Slice 1
+deletes the ephemeral queue and adds explicit Play / Resume / Play from
+Beginning behavior across playback surfaces while retaining neutral EOF
+plumbing for durable playlists. The coder red-proved seven distinct production
+regressions and restored Linux E2E 18/18; both reviewers independently
+red/green-proved the forced-beginning backend guard and returned no comments.
+One Claude Fable 5 attempt plus its allowed retry failed closed and do not count.
+Detail: `.agents/review/findings/pl-s1.md`.
+
 Loop `dlr-s8-final` CLOSED 2026-07-15: **accepted clean at r1** (Claude Code
 2.1.210, `claude-fable-5`, `guard_confirmed:true`; base `33163c5`, reviewed
 head `ebcd81a`). Scope was the complete Slice 8 integration/version range:
