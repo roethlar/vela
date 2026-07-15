@@ -488,7 +488,8 @@ pub fn play(
     progress: ProgressTarget,
     child_slot: &Arc<Mutex<Option<std::process::Child>>>,
     shutting_down: &Arc<AtomicBool>,
-    advance: &Arc<tokio::sync::Notify>,
+    advance: &Arc<crate::commands::PlaybackAdvance>,
+    session_id: String,
     on_end: Option<EndNotify>,
 ) -> Result<Arc<AtomicBool>, String> {
     // mpv emulates the IPC socket with a named pipe under \\.\pipe\ on Windows.
@@ -661,7 +662,12 @@ pub fn play(
     // reports reason=quit/stop), only on reason=eof. Always-on regardless of
     // progress target. Failure to spawn the watcher is non-fatal — playback
     // still works, just without sequence advancement.
-    if let Err(e) = spawn_eof_watcher(ipc_path.clone(), stop_flag.clone(), advance.clone()) {
+    if let Err(e) = spawn_eof_watcher(
+        ipc_path.clone(),
+        stop_flag.clone(),
+        advance.clone(),
+        session_id,
+    ) {
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
 
@@ -709,7 +715,8 @@ pub fn play(
 fn spawn_eof_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
-    advance: Arc<tokio::sync::Notify>,
+    advance: Arc<crate::commands::PlaybackAdvance>,
+    session_id: String,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("mpv-eof-watcher".into())
@@ -738,7 +745,8 @@ fn spawn_eof_watcher(
                 // mpv emits one JSON event per line. Substring match is fine here
                 // (the event/reason keys are fixed, no escaping concerns).
                 if line.contains("\"event\":\"end-file\"") && line.contains("\"reason\":\"eof\"") {
-                    advance.notify_one();
+                    advance.mark_eof(session_id);
+                    return;
                 }
             }
         })?;

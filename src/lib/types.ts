@@ -38,6 +38,29 @@ export type Item = {
 // the server/local authority chain; "beginning" overrides both and starts at 0.
 export type PlayIntent = "resume" | "beginning";
 
+export type PlaylistSummary = {
+  id: string;
+  name: string;
+  itemCount: number;
+  createdMs: number;
+  updatedMs: number;
+};
+
+export type PlaylistEntry = {
+  id: string;
+  item: Item;
+  sourceName?: string;
+  available: boolean;
+};
+
+export type Playlist = {
+  id: string;
+  name: string;
+  items: PlaylistEntry[];
+  createdMs: number;
+  updatedMs: number;
+};
+
 export type CastMember = { name: string; role?: string; thumb?: string; personKey?: string };
 
 // A person credit (director/writer); `personKey` (namespaced, when the

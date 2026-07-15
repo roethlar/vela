@@ -93,6 +93,11 @@ export function startMockJellyfin({
     // and silently falls back to mpv on PATH (playback.rs:207).
     failPlaybackInfo: false,
     playbackInfoDelayMs: 0, // one-shot: park the next PlaybackInfo (bound at arrival)
+    // One-shot delay for the next authoritative Stopped response. The body is
+    // captured immediately, but neither server progress nor the HTTP response
+    // lands until the delay expires; playlist tests use it to replace a
+    // same-key session before the old tracker callback completes.
+    delayNextStoppedMs: 0,
     // Mutation helpers that keep `userData` coherent — pushing on the raw
     // array alone would leave toJson reading missing userData and crash the
     // next listing that includes the new movie.
@@ -416,18 +421,24 @@ export function startMockJellyfin({
           body = JSON.parse(raw);
         } catch {}
         state.checkins.push({ endpoint, body });
-        // A real server records the reported position; Stopped is the
-        // authoritative final one that a refetch must reflect — unless it
-        // falls under the server's resume minimum (see minResumeTicks).
-        if (
-          endpoint === "/Stopped" &&
-          typeof body.PositionTicks === "number" &&
-          state.userData[body.ItemId] &&
-          body.PositionTicks >= minResumeTicks
-        ) {
-          state.userData[body.ItemId].positionTicks = body.PositionTicks;
-        }
-        json({});
+        const delay = endpoint === "/Stopped" ? state.delayNextStoppedMs : 0;
+        if (delay > 0) state.delayNextStoppedMs = 0;
+        const respond = () => {
+          // A real server records the reported position; Stopped is the
+          // authoritative final one that a refetch must reflect — unless it
+          // falls under the server's resume minimum (see minResumeTicks).
+          if (
+            endpoint === "/Stopped" &&
+            typeof body.PositionTicks === "number" &&
+            state.userData[body.ItemId] &&
+            body.PositionTicks >= minResumeTicks
+          ) {
+            state.userData[body.ItemId].positionTicks = body.PositionTicks;
+          }
+          json({});
+        };
+        if (delay > 0) setTimeout(respond, delay);
+        else respond();
       });
       return;
     }

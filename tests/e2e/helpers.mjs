@@ -52,6 +52,20 @@ export function seedConfig(configRoot, sources, extra = {}) {
   );
 }
 
+// Seed Vela's independent versioned playlist store. The helper returns the
+// file path so scenarios can assert byte-for-byte read-only playback.
+export function seedPlaylists(configRoot, playlists) {
+  const configDir = path.join(configRoot, 'config', 'vela');
+  fs.mkdirSync(configDir, { recursive: true });
+  const file = path.join(configDir, 'playlists.json');
+  fs.writeFileSync(
+    file,
+    JSON.stringify({ schemaVersion: 1, playlists }, null, 2),
+    { mode: 0o600 },
+  );
+  return file;
+}
+
 export async function pollUntil(fn, what, { timeoutMs = 15000, intervalMs = 250 } = {}) {
   const deadline = Date.now() + timeoutMs;
   for (;;) {

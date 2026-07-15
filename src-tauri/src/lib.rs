@@ -1,10 +1,12 @@
 mod commands;
 mod config;
 mod playback;
+mod playlists;
 mod plex_api;
 mod plex_library;
 mod recents;
 mod source;
+mod storage;
 
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
@@ -56,10 +58,12 @@ pub struct AppState {
     /// Serializes source mutations (add/remove) so they apply in order
     /// without holding the registry lock across config file I/O.
     pub source_lock: AsyncMutex<()>,
-    /// Signaled by the mpv EOF watcher when a file ends naturally (not when the
-    /// user closed the window). The async dispatcher in `run()` awaits this;
-    /// playlist and Continue Playing contexts are attached in later plan slices.
-    pub playback_advance: Arc<tokio::sync::Notify>,
+    /// Joins mpv's clean-EOF signal to the matching completed tracker write.
+    /// The async dispatcher in `run()` advances only that exact session.
+    pub(crate) playback_advance: Arc<commands::PlaybackAdvance>,
+    /// Active Vela-playlist location. The cursor is in-memory by design; the
+    /// durable playlist never changes merely because it is played.
+    pub(crate) playlist_cursor: AsyncMutex<Option<commands::PlaylistCursor>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
@@ -110,7 +114,8 @@ pub fn run() {
         play_lock: AsyncMutex::new(()),
         watch_edit_lock: AsyncMutex::new(()),
         source_lock: AsyncMutex::new(()),
-        playback_advance: Arc::new(tokio::sync::Notify::new()),
+        playback_advance: Arc::new(commands::PlaybackAdvance::default()),
+        playlist_cursor: AsyncMutex::new(None),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
     };
@@ -160,10 +165,13 @@ pub fn run() {
             // Playback sequence dispatcher: a single item has nothing to do at
             // clean EOF. Keep the notification loop alive so Slice 3 can attach
             // the playlist cursor without rebuilding the mpv watcher plumbing.
+            let app_handle = app.handle().clone();
             let advance_notify = app.handle().state::<AppState>().playback_advance.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
-                    advance_notify.notified().await;
+                    let session_id = advance_notify.next().await;
+                    let state = app_handle.state::<AppState>();
+                    commands::advance_playlist(&state, session_id).await;
                 }
             });
 
@@ -201,6 +209,15 @@ pub fn run() {
             commands::get_person_items,
             commands::set_watched,
             commands::play_item,
+            commands::playlist_list,
+            commands::playlist_get,
+            commands::playlist_create,
+            commands::playlist_rename,
+            commands::playlist_delete,
+            commands::playlist_add_items,
+            commands::playlist_remove_item,
+            commands::playlist_reorder,
+            commands::playlist_play,
         ])
         .build(tauri::generate_context!())
         .expect("error while building the tauri application")

@@ -5,8 +5,10 @@
   import Settings from "$lib/Settings.svelte";
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
+  import PlaylistsView from "$lib/PlaylistsView.svelte";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
-  import { detailKeyOf, type Detail, type Item, type PlayIntent } from "$lib/types";
+  import { friendlyError } from "$lib/errors";
+  import { detailKeyOf, type Detail, type Item, type PlaylistSummary, type PlayIntent } from "$lib/types";
 
   // Poster URLs that 404'd; fall back to the title placeholder for these.
   let failedPosters = $state(new Set<string>());
@@ -56,7 +58,10 @@
   let showSettings = $state(false);
 
   let authenticated = $state(false);
-  let mode = $state<"home" | "browse">("home");
+  let mode = $state<"home" | "browse" | "playlists">("home");
+  // Invalidates the playlist view after source availability or an external
+  // Add-to-Playlist mutation changes what it should render.
+  let playlistVersion = $state(0);
   let sections = $state<Section[]>([]);
   let hubs = $state<Hub[]>([]);
   let active = $state<Section | null>(null);
@@ -256,6 +261,11 @@
     heroPos = 0; // the most recent change should be front and center
     if (mode === "home") {
       return loadHome(++homeGen);
+    } else if (mode === "playlists") {
+      // Playlist snapshots are durable curation, not live watch-state mirrors.
+      // Keep this root intact while ensuring Home re-fetches when revisited.
+      hubs = [];
+      return Promise.resolve();
     } else {
       // The hidden Home hubs are stale now; empty them so goHome() re-fetches.
       hubs = [];
@@ -361,6 +371,23 @@
     // sensibly report on (the r14/r15 rule, applied to the edit's line).
     editAttempt++;
     clearEditStatus();
+    playlistVersion++;
+    if (mode === "playlists") {
+      // Saved playlists remain available when the last source is removed;
+      // the view reload marks those retained entries unavailable in place.
+      sourceGen++;
+      homeGen++;
+      loadGen++;
+      linkGen++;
+      pin = null;
+      hubs = [];
+      items = [];
+      loading = false;
+      setError(null);
+      if (authenticated) await loadSections(++sourceGen);
+      else sections = [];
+      return;
+    }
     if (authenticated) {
       linkGen++; // abandon any in-flight Plex link poll tied to the old pin
       pin = null;
@@ -387,41 +414,6 @@
       // already abandoned above, for both branches.
       setError(null);
     }
-  }
-
-  // Make the backend's reconnect signal human-readable. SUBSTITUTE it — do not
-  // replace the whole message with it. The banner can now carry more than one
-  // failure (settlement appends its own to whatever a load already published), and
-  // swapping the entire string for this sentence threw the other failures away:
-  // the user was told to reconnect and never told what else had gone wrong
-  // (codex r17, found via the guard for the settlement publish).
-  function friendlyError(e: string): string {
-    return (
-      e
-        .replaceAll(
-          "RECONNECT_REQUIRED",
-          "A server needs reconnecting — open Settings (⚙) and reconnect it.",
-        )
-        // A transport failure carries the ENTIRE request URL into its message, and that
-        // URL has no business on screen. It tells the user nothing they can act on, and it
-        // carries things that must never be displayed: a Jellyfin user GUID and item key,
-        // and — the reason this is a rule and not a preference — Plex builds URLs with
-        // `?X-Plex-Token=…` in the query (plex_library.rs:878, playback.rs:599). Repo
-        // guidance forbids putting a token-bearing URL in an error or any UI text, and the
-        // only way to keep that promise is to never let a raw URL through the funnel.
-        //
-        // (Owner playtest, 0.1.46: a stopped Jellyfin produced
-        //  "error sending request for url (http://localhost:8096/Users/817e…/PlayedItems/…)".)
-        .replace(
-          /error sending request for url \([^)]*\)/gi,
-          "the server could not be reached",
-        )
-        // An HTTP-status failure carries the url too, and THAT is where the token lives:
-        // Plex puts `?X-Plex-Token=…` in the query. Redact every query string rather than
-        // try to enumerate the parameter names a secret might hide behind. The path stays —
-        // it is genuinely diagnostic ("…/Views", "…/PlaybackInfo") and carries no secret.
-        .replace(/(https?:\/\/[^\s)?]+)\?[^\s)]*/gi, "$1")
-    );
   }
 
   // Open a URL in the system browser via the backend (webview would navigate away).
@@ -586,7 +578,7 @@
       const s = await invoke<Section[]>("get_sections", { sourceId: activeSource });
       if (gen === sourceGen) sections = s;
     } catch (e) {
-      if (gen === sourceGen) setError(String(e));
+      if (gen === sourceGen && mode !== "playlists") setError(String(e));
     }
   }
 
@@ -633,6 +625,26 @@
     if (hubs.length === 0) loadHome(++homeGen);
   }
 
+  function openPlaylists() {
+    navEpoch++;
+    detailView = null;
+    detailStatus = null;
+    homeGen++;
+    loadGen++;
+    loadingMore = false;
+    loading = false;
+    searchTerm = "";
+    personView = null;
+    active = null;
+    activeType = null;
+    crumbs = [];
+    items = [];
+    setError(null);
+    closeMenu();
+    closeSectionMenu();
+    mode = "playlists";
+  }
+
   // ---- Library refresh (library-refresh-scan plan, slice 1) ----------------
   // One user action that refreshes the section list AND the content the user
   // is looking at. Legs are ACTION-LOCAL: no leg writes or clears the shared
@@ -658,7 +670,7 @@
   // the load that failed is the reason the grid is empty (codex r16).
   let suppressedFailures: { msg: string; gen: number }[] = [];
 
-  type RootKind = "home" | "section-grid" | "type-grid" | "search" | "person" | "drill" | "detail";
+  type RootKind = "home" | "playlists" | "section-grid" | "type-grid" | "search" | "person" | "drill" | "detail";
 
   // What the user is actually looking at — derived from visible state, never
   // residual state: goHome() leaves `active` set, and a search retains
@@ -667,6 +679,7 @@
   function visibleRootKind(): RootKind {
     if (detailView) return "detail";
     if (mode === "home") return "home";
+    if (mode === "playlists") return "playlists";
     if (personView) return "person";
     if (searchTerm) return "search";
     const here = crumbs[crumbs.length - 1];
@@ -683,7 +696,7 @@
   // disappearance fallback may reconcile. Home/search/person/drill roots
   // never qualify.
   function currentSectionRoot(): Section | null {
-    if (mode === "home" || personView || searchTerm || !active) return null;
+    if (mode !== "browse" || personView || searchTerm || !active) return null;
     const here = crumbs[crumbs.length - 1];
     return here?.ratingKey ? null : active;
   }
@@ -1436,14 +1449,87 @@
 
   // Right-click context menu for per-item actions.
   let menu = $state<{ x: number; y: number; item: Item; hero: boolean } | null>(null);
+  let addMenuOpen = $state(false);
+  let addMenuLoading = $state(false);
+  let addMenuPlaylists = $state<PlaylistSummary[]>([]);
+  let addMenuStatus = $state<{ text: string; failed: boolean } | null>(null);
+  let addMenuAttempt = 0;
+
   function openMenu(e: MouseEvent, item: Item, hero = false) {
     e.preventDefault();
     sectionMenu = null; // only one context menu at a time (codex code review r1, finding 4)
-    // Clamp so the menu stays on screen near the right/bottom edges.
-    menu = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 160), item, hero };
+    addMenuAttempt++;
+    addMenuOpen = false;
+    addMenuLoading = false;
+    addMenuPlaylists = [];
+    addMenuStatus = null;
+    // The playlist submenu can be much taller than the old fixed action list.
+    menu = {
+      x: Math.max(8, Math.min(e.clientX, window.innerWidth - 290)),
+      y: Math.max(8, Math.min(e.clientY, window.innerHeight - 420)),
+      item,
+      hero,
+    };
   }
+
   function closeMenu() {
+    addMenuAttempt++;
+    addMenuOpen = false;
+    addMenuLoading = false;
+    addMenuStatus = null;
     menu = null;
+  }
+
+  function closeAddMenu() {
+    addMenuAttempt++;
+    addMenuOpen = false;
+    addMenuLoading = false;
+    addMenuStatus = null;
+  }
+
+  async function toggleAddMenu() {
+    if (addMenuOpen) {
+      closeAddMenu();
+      return;
+    }
+    addMenuOpen = true;
+    addMenuLoading = true;
+    addMenuStatus = null;
+    const attempt = ++addMenuAttempt;
+    try {
+      const loaded = await invoke<PlaylistSummary[]>("playlist_list");
+      if (attempt === addMenuAttempt && menu) addMenuPlaylists = loaded;
+    } catch (error) {
+      if (attempt === addMenuAttempt && menu) {
+        addMenuStatus = { text: String(error), failed: true };
+      }
+    } finally {
+      if (attempt === addMenuAttempt) addMenuLoading = false;
+    }
+  }
+
+  async function addToPlaylist(saved: PlaylistSummary) {
+    const item = menu?.item;
+    if (!item || addMenuLoading) return;
+    const attempt = ++addMenuAttempt;
+    addMenuLoading = true;
+    addMenuStatus = null;
+    try {
+      await invoke("playlist_add_items", { id: saved.id, items: [item] });
+      if (attempt === addMenuAttempt && menu) {
+        addMenuStatus = { text: `Added to “${saved.name}”.`, failed: false };
+        playlistVersion++;
+      }
+    } catch (error) {
+      if (attempt === addMenuAttempt && menu) {
+        addMenuStatus = {
+          text: `Couldn't add “${item.title}” — ${String(error)}`,
+          failed: true,
+        };
+      }
+    } finally {
+      if (attempt === addMenuAttempt) addMenuLoading = false;
+    }
   }
 
   // Right-click menu on a sidebar library entry (slice 2 of the
@@ -2029,53 +2115,56 @@
   {/snippet}
 
   <div class="shell">
-    {#if authenticated && !pin}
+    {#if !pin}
       <!-- Library navigation lives in a left sidebar (Infuse reference):
            Home, the Library entries for the current scope, and the source
            scopes — freeing the vertical space the top nav used to take. -->
       <aside class="sidebar">
         <nav class="sidenav" aria-label="Library">
           <button class="sideitem" class:active={mode === "home"} onclick={goHome}>Home</button>
-          <div class="sidegroup sidegroup-row">
-            <span>Library</span>
-            <!-- Slice 1 (library-refresh-scan plan): one action refreshes the
-                 section list and the content the user is looking at. Disabled
-                 while in flight; re-enable is the settled signal for E2E. -->
-            <button
-              class="refreshbtn"
-              class:spinning={refreshing}
-              aria-label="Refresh libraries"
-              title="Refresh libraries"
-              disabled={refreshing}
-              onclick={refreshLibraries}
-            >
-              <Icon name="refresh" size={12} />
-            </button>
-          </div>
-          {#if activeSource === null && sources.length > 1}
-            {#each typeTabs as t (t)}
-              <button class="sideitem" class:active={mode === "browse" && activeType === t} onclick={() => selectType(t)}>
-                {TYPE_LABELS[t] ?? t}
-              </button>
-            {/each}
-          {:else}
-            {#each sections as s (s.key)}
+          <button class="sideitem" class:active={mode === "playlists"} onclick={openPlaylists}>Playlists</button>
+          {#if authenticated}
+            <div class="sidegroup sidegroup-row">
+              <span>Library</span>
+              <!-- Slice 1 (library-refresh-scan plan): one action refreshes the
+                   section list and the content the user is looking at. Disabled
+                   while in flight; re-enable is the settled signal for E2E. -->
               <button
-                class="sideitem"
-                class:active={mode === "browse" && active?.key === s.key}
-                onclick={() => select(s)}
-                oncontextmenu={(e) => openSectionMenu(e, s)}
+                class="refreshbtn"
+                class:spinning={refreshing}
+                aria-label="Refresh libraries"
+                title="Refresh libraries"
+                disabled={refreshing || mode === "playlists"}
+                onclick={refreshLibraries}
               >
-                {s.title}
+                <Icon name="refresh" size={12} />
               </button>
-            {/each}
-          {/if}
-          {#if sources.length > 1}
-            <div class="sidegroup">Sources</div>
-            <button class="sideitem" class:active={activeSource === null} onclick={() => selectSource(null)}>All</button>
-            {#each sources as src (src.id)}
-              <button class="sideitem" class:active={activeSource === src.id} onclick={() => selectSource(src.id)}>{src.name}</button>
-            {/each}
+            </div>
+            {#if activeSource === null && sources.length > 1}
+              {#each typeTabs as t (t)}
+                <button class="sideitem" class:active={mode === "browse" && activeType === t} onclick={() => selectType(t)}>
+                  {TYPE_LABELS[t] ?? t}
+                </button>
+              {/each}
+            {:else}
+              {#each sections as s (s.key)}
+                <button
+                  class="sideitem"
+                  class:active={mode === "browse" && active?.key === s.key}
+                  onclick={() => select(s)}
+                  oncontextmenu={(e) => openSectionMenu(e, s)}
+                >
+                  {s.title}
+                </button>
+              {/each}
+            {/if}
+            {#if sources.length > 1}
+              <div class="sidegroup">Sources</div>
+              <button class="sideitem" class:active={mode !== "playlists" && activeSource === null} onclick={() => selectSource(null)}>All</button>
+              {#each sources as src (src.id)}
+                <button class="sideitem" class:active={mode !== "playlists" && activeSource === src.id} onclick={() => selectSource(src.id)}>{src.name}</button>
+              {/each}
+            {/if}
           {/if}
         </nav>
       </aside>
@@ -2099,6 +2188,8 @@
       <div class="code">{pin.code}</div>
       <p class="muted">Waiting for you to authorize…</p>
     </div>
+  {:else if mode === "playlists"}
+    <PlaylistsView sourceVersion={playlistVersion} {posterSrc} />
   {:else if !authenticated}
     <div class="empty">
       <div class="empty-icon" aria-hidden="true"><Icon name="film" size={46} stroke={1.5} /></div>
@@ -2238,7 +2329,8 @@
       // Menus first (topmost surfaces), then the detail —
       // Escape with the scan menu open must not close a detail underneath it
       // (codex code review r1, finding 4).
-      if (menu) closeMenu();
+      if (menu && addMenuOpen) closeAddMenu();
+      else if (menu) closeMenu();
       else if (sectionMenu) closeSectionMenu();
       else if (detailView) closeDetail();
     }
@@ -2271,6 +2363,29 @@
     {/if}
     {#if menu.hero}
       <button role="menuitem" onclick={() => removeFromContinue(mi)}>Remove from Continue Watching</button>
+    {/if}
+    {#if mi.mediaType !== "show" && mi.mediaType !== "season"}
+      <button role="menuitem" aria-expanded={addMenuOpen} onclick={toggleAddMenu}>Add to Playlist →</button>
+      {#if addMenuOpen}
+        <div class="addsubmenu" role="group" aria-label="Choose a playlist">
+          {#if addMenuStatus}
+            <div class:addfailure={addMenuStatus.failed} class="addstatus" role={addMenuStatus.failed ? "alert" : "status"}>
+              {addMenuStatus.failed ? friendlyError(addMenuStatus.text) : addMenuStatus.text}
+            </div>
+          {/if}
+          {#if addMenuLoading && addMenuPlaylists.length === 0}
+            <div class="addempty" role="status">Loading playlists…</div>
+          {:else if addMenuPlaylists.length === 0}
+            <div class="addempty">No playlists yet.</div>
+          {:else}
+            {#each addMenuPlaylists as saved (saved.id)}
+              <button role="menuitem" disabled={addMenuLoading} onclick={() => addToPlaylist(saved)}>
+                {saved.name} <span>{saved.itemCount}</span>
+              </button>
+            {/each}
+          {/if}
+        </div>
+      {/if}
     {/if}
     {#if (mi.backing?.length ?? 0) > 1 && mi.canonicalId}
       <!-- Merged title: pick which source plays it (persists for this title).
@@ -3075,6 +3190,8 @@
     box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
     display: flex;
     flex-direction: column;
+    max-height: calc(100vh - 16px);
+    overflow-y: auto;
     transform-origin: top left;
     animation: vela-pop 0.13s var(--ease);
   }
@@ -3090,6 +3207,38 @@
   }
   .ctxmenu button:hover {
     background: var(--surface-2);
+  }
+  .ctxmenu button:disabled {
+    opacity: 0.5;
+    cursor: default;
+  }
+  .addsubmenu {
+    display: flex;
+    flex-direction: column;
+    margin: 0.15rem 0.2rem 0.3rem;
+    padding: 0.25rem;
+    max-height: 12rem;
+    overflow-y: auto;
+    border: 1px solid var(--border-subtle);
+    border-radius: 0.4rem;
+    background: var(--bg);
+  }
+  .addsubmenu button {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+  }
+  .addsubmenu button span {
+    color: var(--text-dim);
+  }
+  .addstatus,
+  .addempty {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+    padding: 0.45rem 0.6rem;
+  }
+  .addstatus.addfailure {
+    color: #ffb4ad;
   }
 
 </style>

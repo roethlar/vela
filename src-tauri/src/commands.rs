@@ -1,4 +1,5 @@
 use serde::Serialize;
+use std::collections::VecDeque;
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
@@ -2141,6 +2142,136 @@ pub async fn set_watched(
 
 // ---- playback ------------------------------------------------------------
 
+const MAX_PLAYBACK_SIGNALS: usize = 64;
+
+#[derive(Default)]
+struct PlaybackSignals {
+    eof: VecDeque<String>,
+    ended: VecDeque<String>,
+}
+
+/// Joins mpv's clean-EOF observation with the matching tracker's completed
+/// final write. The dispatcher receives a UUID only after both happened, so
+/// auto-advance cannot overtake recents/server progress and a stale EOF cannot
+/// advance a newer playlist cursor.
+#[derive(Default)]
+pub(crate) struct PlaybackAdvance {
+    signals: std::sync::Mutex<PlaybackSignals>,
+    changed: tokio::sync::Notify,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlaylistCursor {
+    playlist_id: String,
+    entry_id: String,
+    index: usize,
+    session_id: String,
+}
+
+#[derive(Debug, Clone)]
+struct PlaylistLocation {
+    playlist_id: String,
+    entry_id: String,
+    index: usize,
+}
+
+#[derive(Debug)]
+struct PlayFailure {
+    message: String,
+    kind: PlayFailureKind,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlayFailureKind {
+    Unavailable,
+    Superseded,
+    Fatal,
+}
+
+impl PlayFailure {
+    fn unavailable(message: String) -> Self {
+        Self {
+            message,
+            kind: PlayFailureKind::Unavailable,
+        }
+    }
+
+    fn superseded() -> Self {
+        Self {
+            message: "playback request was superseded".to_string(),
+            kind: PlayFailureKind::Superseded,
+        }
+    }
+
+    fn fatal(message: String) -> Self {
+        Self {
+            message,
+            kind: PlayFailureKind::Fatal,
+        }
+    }
+}
+
+impl PlaybackAdvance {
+    fn push_bounded(queue: &mut VecDeque<String>, session_id: String) {
+        if !queue.iter().any(|held| held == &session_id) {
+            queue.push_back(session_id);
+            while queue.len() > MAX_PLAYBACK_SIGNALS {
+                queue.pop_front();
+            }
+        }
+    }
+
+    pub(crate) fn mark_eof(&self, session_id: String) {
+        let mut signals = self
+            .signals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        Self::push_bounded(&mut signals.eof, session_id);
+        drop(signals);
+        self.changed.notify_one();
+    }
+
+    fn mark_ended(&self, session_id: String) {
+        let mut signals = self
+            .signals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        Self::push_bounded(&mut signals.ended, session_id);
+        drop(signals);
+        self.changed.notify_one();
+    }
+
+    fn take_ready(&self) -> Option<String> {
+        let mut signals = self
+            .signals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let eof_index = signals
+            .eof
+            .iter()
+            .position(|session| signals.ended.iter().any(|ended| ended == session))?;
+        let session = signals.eof.remove(eof_index)?;
+        if let Some(ended_index) = signals.ended.iter().position(|ended| ended == &session) {
+            signals.ended.remove(ended_index);
+        }
+        Some(session)
+    }
+
+    pub(crate) async fn next(&self) -> String {
+        loop {
+            let changed = self.changed.notified();
+            if let Some(session) = self.take_ready() {
+                return session;
+            }
+            changed.await;
+        }
+    }
+}
+
+fn cursor_matches_session(cursor: Option<&PlaylistCursor>, session_id: &str) -> bool {
+    cursor.is_some_and(|current| current.session_id == session_id)
+}
+
 /// Keep only recents whose source still exists. An entry from a removed
 /// source (e.g. the local/SMB/SSH family removed 2026-07-08) would render a
 /// hero card whose Play can only error — the dead-end the UX rulings forbid.
@@ -2198,16 +2329,47 @@ pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
 
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
 /// All play contexts use the same lock discipline regardless of trigger.
-pub(crate) async fn play_by_key(
+async fn play_by_key(
     state: &AppState,
     item: &ItemDto,
     start_from_beginning: bool,
-) -> Result<(), String> {
+    session_id: &str,
+    playlist: Option<PlaylistLocation>,
+    replace_session: Option<&str>,
+) -> Result<(), PlayFailure> {
     // Serialize the whole resolve+stop-old+spawn sequence so overlapping triggers
     // can't both spawn an mpv and lose one of the child handles.
     let _play = state.play_lock.lock().await;
-    let (src, raw) = state.registry.lock().await.route(&item.rating_key)?;
-    let resolved = src.resolve_stream(&raw, item.duration_ms).await?;
+    if let Some(expected) = replace_session {
+        let cursor = state.playlist_cursor.lock().await;
+        if !cursor_matches_session(cursor.as_ref(), expected) {
+            return Err(PlayFailure::superseded());
+        }
+    }
+    let (src, raw) = state
+        .registry
+        .lock()
+        .await
+        .route(&item.rating_key)
+        .map_err(PlayFailure::unavailable)?;
+    let resolved = src
+        .resolve_stream(&raw, item.duration_ms)
+        .await
+        .map_err(PlayFailure::unavailable)?;
+
+    // A failed resolve leaves the currently-playing context intact. Only once
+    // the replacement has a real stream do we provisionally install its
+    // context; a later launch/tracker failure compare-restores the old one.
+    let new_cursor = playlist.map(|location| PlaylistCursor {
+        playlist_id: location.playlist_id,
+        entry_id: location.entry_id,
+        index: location.index,
+        session_id: session_id.to_string(),
+    });
+    let previous_cursor = {
+        let mut cursor = state.playlist_cursor.lock().await;
+        std::mem::replace(&mut *cursor, new_cursor)
+    };
 
     // Cancel the prior tracker and terminate the prior mpv so we never run two
     // players. The kill is a non-blocking syscall; the reap is handed to the
@@ -2284,14 +2446,18 @@ pub(crate) async fn play_by_key(
     // End-of-session notifier → the `playback-ended` UI event, emitted after
     // the final server check-in so a re-fetch it triggers sees the new watch
     // state. Payload carries ids only — never URLs or tokens.
-    let on_end: Option<playback::EndNotify> = state.app_handle.get().map(|app| {
+    let on_end: Option<playback::EndNotify> = {
         use tauri::Emitter;
-        let app = app.clone();
+        let app = state.app_handle.get().cloned();
         let source_id = src.id().to_string();
         let item_key = item.rating_key.clone();
+        let session_id = session_id.to_string();
         let recents_ready = recents_ready.clone();
-        std::sync::Arc::new(move |position_ms: u64| {
-            recents_ready.wait();
+        let advance = state.playback_advance.clone();
+        Some(std::sync::Arc::new(move |position_ms: u64| {
+            if !recents_ready.wait_succeeded() {
+                return;
+            }
             // Stamp Vela's recents BEFORE emitting, so the refresh the event
             // triggers reads the updated list. Runs on the tracker thread —
             // synchronous config I/O is fine there.
@@ -2300,20 +2466,25 @@ pub(crate) async fn play_by_key(
                 .map(|d| d.as_millis() as u64)
                 .unwrap_or(0);
             let key = item_key.clone();
+            let finishing_session = session_id.clone();
             let _ = config::update(move |cfg| {
-                crate::recents::finish(cfg, &key, position_ms, now_ms);
+                crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
                 Ok(())
             });
-            let _ = app.emit(
-                "playback-ended",
-                serde_json::json!({ "sourceId": source_id, "itemKey": item_key }),
-            );
-        }) as playback::EndNotify
-    });
+            if let Some(app) = &app {
+                let _ = app.emit(
+                    "playback-ended",
+                    serde_json::json!({ "sourceId": source_id, "itemKey": item_key }),
+                );
+            }
+            advance.mark_ended(session_id.clone());
+        }) as playback::EndNotify)
+    };
     let progress = resolved.progress;
     let child_slot = state.current_child.clone();
     let shutting_down = state.shutting_down.clone();
     let advance = state.playback_advance.clone();
+    let playback_session = session_id.to_string();
     let played = tauri::async_runtime::spawn_blocking(move || {
         playback::play(
             &spec,
@@ -2321,6 +2492,7 @@ pub(crate) async fn play_by_key(
             &child_slot,
             &shutting_down,
             &advance,
+            playback_session,
             on_end,
         )
     })
@@ -2328,20 +2500,43 @@ pub(crate) async fn play_by_key(
     .map_err(|e| format!("playback task failed: {e}"))
     .and_then(|r| r);
     let recent = item.clone();
+    let recent_session = session_id.to_string();
     let played = after_successful_play(played, || {
+        let started_at_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|duration| duration.as_millis() as u64)
+            .unwrap_or(0);
         if let Err(e) = config::update(move |cfg| {
-            crate::recents::record_play_start(cfg, recent, start_from_beginning);
+            crate::recents::record_play_start(
+                cfg,
+                recent,
+                start_from_beginning,
+                recent_session,
+                started_at_ms,
+            );
             Ok(())
         }) {
             eprintln!("vela: couldn't record started playback: {e}");
         }
     });
-    let stop = played?;
+    let stop = match played {
+        Ok(stop) => stop,
+        Err(message) => {
+            let mut cursor = state.playlist_cursor.lock().await;
+            if cursor
+                .as_ref()
+                .is_none_or(|current| current.session_id == session_id)
+            {
+                *cursor = previous_cursor;
+            }
+            return Err(PlayFailure::fatal(message));
+        }
+    };
     *state
         .tracking_stop
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(stop);
-    recents_ready.open();
+    recents_ready.succeed();
     Ok(())
 }
 
@@ -2353,7 +2548,240 @@ pub async fn play_item(
     start_from_beginning: bool,
     state: State<'_, AppState>,
 ) -> Result<(), String> {
-    play_by_key(&state, &item, start_from_beginning).await
+    let session_id = uuid::Uuid::new_v4().to_string();
+    play_by_key(&state, &item, start_from_beginning, &session_id, None, None)
+        .await
+        .map_err(|failure| failure.message)
+}
+
+// ---- Vela playlists ------------------------------------------------------
+
+fn unix_now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|duration| duration.as_millis() as u64)
+        .unwrap_or(0)
+}
+
+async fn playlist_store<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("playlist task failed: {error}"))?
+}
+
+#[tauri::command]
+pub async fn playlist_list() -> Result<Vec<crate::playlists::PlaylistSummary>, String> {
+    playlist_store(crate::playlists::list).await
+}
+
+#[tauri::command]
+pub async fn playlist_get(
+    id: String,
+    state: State<'_, AppState>,
+) -> Result<crate::playlists::PlaylistView, String> {
+    let lookup = id.clone();
+    let playlist = playlist_store(move || crate::playlists::get(&lookup)).await?;
+    let live_sources = state.registry.lock().await.ids().into_iter().collect();
+    Ok(crate::playlists::view(playlist, &live_sources))
+}
+
+#[tauri::command]
+pub async fn playlist_create(name: String) -> Result<crate::playlists::Playlist, String> {
+    let now_ms = unix_now_ms();
+    playlist_store(move || crate::playlists::create(name, now_ms)).await
+}
+
+#[tauri::command]
+pub async fn playlist_rename(
+    id: String,
+    name: String,
+) -> Result<crate::playlists::Playlist, String> {
+    let now_ms = unix_now_ms();
+    playlist_store(move || crate::playlists::rename(id, name, now_ms)).await
+}
+
+#[tauri::command]
+pub async fn playlist_delete(id: String) -> Result<(), String> {
+    playlist_store(move || crate::playlists::delete(id)).await
+}
+
+#[tauri::command]
+pub async fn playlist_add_items(
+    id: String,
+    items: Vec<ItemDto>,
+    state: State<'_, AppState>,
+) -> Result<crate::playlists::Playlist, String> {
+    let stored_items = {
+        let registry = state.registry.lock().await;
+        items
+            .into_iter()
+            .map(|item| {
+                let source_name = registry.get(&item.source_id).map(|source| source.name());
+                (item, source_name)
+            })
+            .collect()
+    };
+    let now_ms = unix_now_ms();
+    playlist_store(move || crate::playlists::add_items(id, stored_items, now_ms)).await
+}
+
+#[tauri::command]
+pub async fn playlist_remove_item(
+    id: String,
+    entry_id: String,
+) -> Result<crate::playlists::Playlist, String> {
+    let now_ms = unix_now_ms();
+    playlist_store(move || crate::playlists::remove_item(id, entry_id, now_ms)).await
+}
+
+#[tauri::command]
+pub async fn playlist_reorder(
+    id: String,
+    entry_id: String,
+    to_index: usize,
+) -> Result<crate::playlists::Playlist, String> {
+    let now_ms = unix_now_ms();
+    playlist_store(move || crate::playlists::reorder(id, entry_id, to_index, now_ms)).await
+}
+
+async fn clear_playlist_cursor_if(state: &AppState, expected_session: &str) {
+    let mut cursor = state.playlist_cursor.lock().await;
+    if cursor_matches_session(cursor.as_ref(), expected_session) {
+        *cursor = None;
+    }
+}
+
+fn next_playlist_index<'a>(
+    mut entry_ids: impl Iterator<Item = &'a str>,
+    item_count: usize,
+    cursor: &PlaylistCursor,
+) -> usize {
+    entry_ids
+        .position(|entry_id| entry_id == cursor.entry_id)
+        .map_or(cursor.index.min(item_count), |index| index + 1)
+}
+
+async fn play_playlist_entries(
+    state: &AppState,
+    playlist_id: String,
+    items: Vec<crate::playlists::PlaylistEntry>,
+    start_index: usize,
+    start_from_beginning: bool,
+    replace_session: Option<&str>,
+) -> Result<bool, String> {
+    if start_index >= items.len() {
+        return Err("playlist position is out of range".to_string());
+    }
+
+    let mut last_unavailable = None;
+    for (index, entry) in items.into_iter().enumerate().skip(start_index) {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let location = PlaylistLocation {
+            playlist_id: playlist_id.clone(),
+            entry_id: entry.id,
+            index,
+        };
+        let beginning = start_from_beginning && index == start_index;
+        match play_by_key(
+            state,
+            &entry.item,
+            beginning,
+            &session_id,
+            Some(location),
+            replace_session,
+        )
+        .await
+        {
+            Ok(()) => return Ok(true),
+            Err(failure) if failure.kind == PlayFailureKind::Unavailable => {
+                last_unavailable = Some(failure.message);
+            }
+            Err(failure) if failure.kind == PlayFailureKind::Superseded => return Ok(false),
+            Err(failure) => return Err(failure.message),
+        }
+    }
+    Err(last_unavailable.unwrap_or_else(|| "playlist has no playable items".to_string()))
+}
+
+async fn play_playlist_from(
+    state: &AppState,
+    playlist_id: String,
+    start_index: usize,
+    start_from_beginning: bool,
+    replace_session: Option<&str>,
+) -> Result<bool, String> {
+    let lookup = playlist_id.clone();
+    let playlist = playlist_store(move || crate::playlists::get(&lookup)).await?;
+    play_playlist_entries(
+        state,
+        playlist_id,
+        playlist.items,
+        start_index,
+        start_from_beginning,
+        replace_session,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn playlist_play(
+    id: String,
+    start_index: usize,
+    start_from_beginning: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    play_playlist_from(&state, id, start_index, start_from_beginning, None)
+        .await
+        .map(|_| ())
+}
+
+/// Handle one fully-finished clean EOF. The UUID payload prevents a queued
+/// older EOF from advancing or clearing a playlist the user started later.
+pub(crate) async fn advance_playlist(state: &AppState, ended_session: String) {
+    let cursor = state.playlist_cursor.lock().await.clone();
+    let Some(cursor) = cursor.filter(|cursor| cursor.session_id == ended_session) else {
+        return;
+    };
+    let lookup = cursor.playlist_id.clone();
+    let playlist = match playlist_store(move || crate::playlists::get(&lookup)).await {
+        Ok(playlist) => playlist,
+        Err(_) => {
+            clear_playlist_cursor_if(state, &ended_session).await;
+            return;
+        }
+    };
+    let next_index = next_playlist_index(
+        playlist.items.iter().map(|entry| entry.id.as_str()),
+        playlist.items.len(),
+        &cursor,
+    );
+    if next_index >= playlist.items.len() {
+        clear_playlist_cursor_if(state, &ended_session).await;
+        return;
+    }
+    // Use the same freshly-read snapshot that produced `next_index`. A second
+    // read here would let an edit between the reads invalidate the stable-entry
+    // anchor and turn the derived numeric index into a different item.
+    match play_playlist_entries(
+        state,
+        cursor.playlist_id,
+        playlist.items,
+        next_index,
+        false,
+        Some(&ended_session),
+    )
+    .await
+    {
+        Ok(true) | Ok(false) => {}
+        Err(error) => {
+            eprintln!("vela: playlist auto-advance stopped: {error}");
+            clear_playlist_cursor_if(state, &ended_session).await;
+        }
+    }
 }
 
 // ---- helpers -------------------------------------------------------------
@@ -2388,23 +2816,45 @@ fn after_successful_play<T>(
     result
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum PlayStartState {
+    #[default]
+    Pending,
+    Succeeded,
+    Failed,
+}
+
 #[derive(Default)]
 struct PlayStartGate {
-    ready: std::sync::Mutex<bool>,
+    state: std::sync::Mutex<PlayStartState>,
     changed: std::sync::Condvar,
 }
 
 impl PlayStartGate {
-    fn wait(&self) {
-        let mut ready = self.ready.lock().unwrap_or_else(|e| e.into_inner());
-        while !*ready {
-            ready = self.changed.wait(ready).unwrap_or_else(|e| e.into_inner());
+    fn wait_succeeded(&self) -> bool {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        while *state == PlayStartState::Pending {
+            state = self.changed.wait(state).unwrap_or_else(|e| e.into_inner());
         }
+        *state == PlayStartState::Succeeded
     }
 
-    fn open(&self) {
-        *self.ready.lock().unwrap_or_else(|e| e.into_inner()) = true;
+    fn finish(&self, next: PlayStartState) {
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        if *state != PlayStartState::Pending {
+            return;
+        }
+        *state = next;
+        drop(state);
         self.changed.notify_all();
+    }
+
+    fn succeed(&self) {
+        self.finish(PlayStartState::Succeeded);
+    }
+
+    fn fail(&self) {
+        self.finish(PlayStartState::Failed);
     }
 }
 
@@ -2414,7 +2864,7 @@ struct OpenPlayStartGateOnDrop(std::sync::Arc<PlayStartGate>);
 
 impl Drop for OpenPlayStartGateOnDrop {
     fn drop(&mut self) {
-        self.0.open();
+        self.0.fail();
     }
 }
 
@@ -2550,8 +3000,7 @@ mod tests {
         let waiter_gate = gate.clone();
         let waiter = std::thread::spawn(move || {
             entered_tx.send(()).unwrap();
-            waiter_gate.wait();
-            passed_tx.send(()).unwrap();
+            passed_tx.send(waiter_gate.wait_succeeded()).unwrap();
         });
 
         entered_rx.recv().unwrap();
@@ -2561,11 +3010,72 @@ mod tests {
                 .is_err(),
             "the end callback crossed the closed start-record boundary"
         );
-        gate.open();
-        passed_rx
+        gate.succeed();
+        assert!(passed_rx
             .recv_timeout(std::time::Duration::from_secs(1))
-            .expect("the open boundary releases the end callback");
+            .expect("the successful boundary releases the end callback"));
         waiter.join().unwrap();
+    }
+
+    #[test]
+    fn failed_playback_releases_the_start_gate_without_authorizing_end_work() {
+        let gate = PlayStartGate::default();
+        gate.fail();
+        assert!(!gate.wait_succeeded());
+        gate.succeed();
+        assert!(
+            !gate.wait_succeeded(),
+            "a late success cannot revive a failed launch"
+        );
+    }
+
+    #[test]
+    fn playback_advance_joins_only_matching_eof_and_tracker_sessions() {
+        let advance = PlaybackAdvance::default();
+        advance.mark_eof("old".to_string());
+        advance.mark_ended("new".to_string());
+        assert_eq!(advance.take_ready(), None);
+
+        advance.mark_ended("old".to_string());
+        assert_eq!(advance.take_ready().as_deref(), Some("old"));
+        assert_eq!(advance.take_ready(), None);
+    }
+
+    #[test]
+    fn session_comparison_rejects_a_stale_dispatcher() {
+        let cursor = PlaylistCursor {
+            playlist_id: "p".to_string(),
+            entry_id: "entry".to_string(),
+            index: 1,
+            session_id: "new".to_string(),
+        };
+        assert!(cursor_matches_session(Some(&cursor), "new"));
+        assert!(!cursor_matches_session(Some(&cursor), "old"));
+        assert!(!cursor_matches_session(None, "new"));
+    }
+
+    #[test]
+    fn next_playlist_position_tracks_the_stable_entry_across_edits() {
+        let cursor = PlaylistCursor {
+            playlist_id: "p".to_string(),
+            entry_id: "current".to_string(),
+            index: 1,
+            session_id: "s".to_string(),
+        };
+        assert_eq!(
+            next_playlist_index(["before", "current", "next"].into_iter(), 3, &cursor),
+            2
+        );
+        assert_eq!(
+            next_playlist_index(["current", "inserted", "next"].into_iter(), 3, &cursor),
+            1,
+            "a fresh store read keeps the stable current entry as its anchor"
+        );
+        assert_eq!(
+            next_playlist_index(["before", "next"].into_iter(), 2, &cursor),
+            1,
+            "if the current entry was removed, its former index is the fallback"
+        );
     }
 
     #[test]

@@ -21,8 +21,20 @@ const DEFAULT_WATCHED_THRESHOLD: u8 = 95;
 pub struct RecentEntry {
     /// Snapshot of the item as played (artwork, titles, duration).
     pub item: ItemDto,
+    /// Unique playback incarnation. Missing on pre-S3 config entries.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+    /// Unix ms when this playback successfully started. Open sessions use it
+    /// as their recency stamp so a newly-started item stays ahead of an older
+    /// tracker that is still winding down.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub started_at_ms: u64,
     /// Unix ms when the play session ended; 0 while it is still playing.
     pub ended_at_ms: u64,
+}
+
+fn is_zero(value: &u64) -> bool {
+    *value == 0
 }
 
 /// Bound on the Continue Watching tombstone list. Feeds aren't available
@@ -39,7 +51,12 @@ fn entry_matches(entry: &RecentEntry, key: &str) -> bool {
 }
 
 /// Record a play starting: newest first, one entry per item, capped.
+#[cfg(test)]
 pub fn record(cfg: &mut AppConfig, item: ItemDto) {
+    record_at(cfg, item, None, 0);
+}
+
+fn record_at(cfg: &mut AppConfig, item: ItemDto, session_id: Option<String>, started_at_ms: u64) {
     // Playing something again is the explicit opposite of "stop suggesting
     // it": clear the Continue Watching tombstones of BOTH its identities.
     cfg.hidden_from_continue
@@ -49,6 +66,8 @@ pub fn record(cfg: &mut AppConfig, item: ItemDto) {
         0,
         RecentEntry {
             item,
+            session_id,
+            started_at_ms,
             ended_at_ms: 0,
         },
     );
@@ -59,17 +78,59 @@ pub fn record(cfg: &mut AppConfig, item: ItemDto) {
 /// from the beginning is a new zero-offset session even when the card carried
 /// an older resume point; resume playback retains that point until the tracker
 /// reports a newer one.
-pub fn record_play_start(cfg: &mut AppConfig, mut item: ItemDto, start_from_beginning: bool) {
+pub fn record_play_start(
+    cfg: &mut AppConfig,
+    mut item: ItemDto,
+    start_from_beginning: bool,
+    session_id: String,
+    started_at_ms: u64,
+) {
     if start_from_beginning {
         item.view_offset_ms = Some(0);
     }
-    record(cfg, item);
+    record_at(cfg, item, Some(session_id), started_at_ms);
+}
+
+/// Stamp only the exact playback incarnation that started this entry. A
+/// replaced same-key tracker finds a different UUID and becomes a no-op. An
+/// older different-key tracker may update its position in place, but never its
+/// recency stamp once a newer play sits in front of it.
+pub fn finish_session(
+    cfg: &mut AppConfig,
+    rating_key: &str,
+    session_id: &str,
+    position_ms: u64,
+    now_ms: u64,
+) {
+    let Some(pos) = cfg.recents.iter().position(|entry| {
+        entry.item.rating_key == rating_key && entry.session_id.as_deref() == Some(session_id)
+    }) else {
+        return;
+    };
+    let threshold = cfg
+        .watched_threshold_percent
+        .unwrap_or(DEFAULT_WATCHED_THRESHOLD) as u64;
+    let finished = cfg.recents[pos].item.duration_ms.is_some_and(|duration| {
+        duration > 0 && position_ms.saturating_mul(100) >= duration.saturating_mul(threshold)
+    });
+    if finished {
+        cfg.recents.remove(pos);
+        return;
+    }
+    let entry = &mut cfg.recents[pos];
+    if position_ms > 0 {
+        entry.item.view_offset_ms = Some(position_ms);
+    }
+    if pos == 0 {
+        entry.ended_at_ms = now_ms;
+    }
 }
 
 /// Stamp a session's final position onto its entry (and re-front it: it is
 /// now the most recent thing that happened). An entry past the watched
 /// threshold is finished and leaves the list — the hero shows only
 /// "recently played and NOT finished".
+#[cfg(test)]
 pub fn finish(cfg: &mut AppConfig, rating_key: &str, position_ms: u64, now_ms: u64) {
     let Some(pos) = cfg
         .recents
@@ -208,15 +269,19 @@ pub fn untombstone(cfg: &mut AppConfig, key: &str) {
 }
 
 /// The hero feed: item snapshots, newest first. Each snapshot carries its
-/// session-end stamp so the frontend can interleave recents with server
-/// hub items by recency. A still-open session (`ended_at_ms == 0`) has no
-/// stamp yet; the stamp lands at mpv exit.
+/// session stamp so the frontend can interleave recents with server hub items
+/// by recency. A still-open session uses its successful start time; its final
+/// tracker write replaces that with the end time.
 pub fn list(cfg: &AppConfig) -> Vec<ItemDto> {
     cfg.recents
         .iter()
         .map(|r| {
             let mut item = r.item.clone();
-            item.last_watched_at_ms = (r.ended_at_ms > 0).then_some(r.ended_at_ms);
+            item.last_watched_at_ms = if r.ended_at_ms > 0 {
+                Some(r.ended_at_ms)
+            } else {
+                (r.started_at_ms > 0).then_some(r.started_at_ms)
+            };
             item
         })
         .collect()
@@ -281,20 +346,79 @@ mod tests {
         let mut progressed = item("movie", Some(100_000));
         progressed.view_offset_ms = Some(30_000);
 
-        record_play_start(&mut cfg, progressed.clone(), false);
+        record_play_start(&mut cfg, progressed.clone(), false, "resume".into(), 10);
         assert_eq!(
             cfg.recents[0].item.view_offset_ms,
             Some(30_000),
             "Resume keeps the known position until playback reports a newer one"
         );
 
-        record_play_start(&mut cfg, progressed, true);
+        record_play_start(&mut cfg, progressed, true, "beginning".into(), 20);
         assert_eq!(
             cfg.recents[0].item.view_offset_ms,
             Some(0),
             "Play from Beginning must not advertise stale progress"
         );
         assert_eq!(cfg.recents[0].ended_at_ms, 0, "the session is still open");
+    }
+
+    #[test]
+    fn exact_session_finish_updates_the_current_play() {
+        let mut cfg = AppConfig::default();
+        record_play_start(
+            &mut cfg,
+            item("movie", Some(100_000)),
+            false,
+            "session".into(),
+            10,
+        );
+        finish_session(&mut cfg, "movie", "session", 30_000, 20);
+        assert_eq!(cfg.recents[0].item.view_offset_ms, Some(30_000));
+        assert_eq!(cfg.recents[0].ended_at_ms, 20);
+    }
+
+    #[test]
+    fn older_different_key_finish_stays_behind_the_newer_play() {
+        let mut cfg = AppConfig::default();
+        record_play_start(
+            &mut cfg,
+            item("older", Some(100_000)),
+            false,
+            "older-session".into(),
+            10,
+        );
+        record_play_start(
+            &mut cfg,
+            item("newer", Some(100_000)),
+            false,
+            "newer-session".into(),
+            20,
+        );
+        finish_session(&mut cfg, "older", "older-session", 30_000, 30);
+
+        assert_eq!(cfg.recents[0].item.rating_key, "newer");
+        assert_eq!(cfg.recents[1].item.rating_key, "older");
+        assert_eq!(cfg.recents[1].item.view_offset_ms, Some(30_000));
+        assert_eq!(
+            list(&cfg)[1].last_watched_at_ms,
+            Some(10),
+            "the delayed finish must not acquire newer recency"
+        );
+    }
+
+    #[test]
+    fn stale_same_key_finish_cannot_stamp_the_replacement_session() {
+        let mut cfg = AppConfig::default();
+        let mut replay = item("movie", Some(100_000));
+        replay.view_offset_ms = Some(40_000);
+        record_play_start(&mut cfg, replay.clone(), false, "old".into(), 10);
+        record_play_start(&mut cfg, replay, true, "new".into(), 20);
+
+        finish_session(&mut cfg, "movie", "old", 75_000, 30);
+        assert_eq!(cfg.recents.len(), 1);
+        assert_eq!(cfg.recents[0].session_id.as_deref(), Some("new"));
+        assert_eq!(cfg.recents[0].item.view_offset_ms, Some(0));
+        assert_eq!(cfg.recents[0].ended_at_ms, 0);
     }
 
     #[test]

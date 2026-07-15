@@ -1,7 +1,5 @@
-use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::io::{self, Read, Write};
+use std::io;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -188,11 +186,7 @@ impl AppConfig {
 /// A file inside the app's config dir, creating the dir if needed. Surfaces a
 /// real IO error rather than collapsing it into "no path".
 pub fn config_dir_file(name: &str) -> io::Result<PathBuf> {
-    let proj = ProjectDirs::from("com", "vela", "vela")
-        .ok_or_else(|| io::Error::other("could not determine a config directory"))?;
-    let dir = proj.config_dir();
-    fs::create_dir_all(dir)?;
-    Ok(dir.join(name))
+    crate::storage::config_dir_file(name)
 }
 
 fn config_path() -> io::Result<PathBuf> {
@@ -207,96 +201,14 @@ pub fn update<T, F>(f: F) -> Result<T, String>
 where
     F: FnOnce(&mut AppConfig) -> Result<T, String>,
 {
-    let _guard = CONFIG_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-    // Mandatory cross-process advisory lock so a second Vela instance can't
-    // interleave its own load-modify-save and clobber ours (the in-process lock
-    // above only serializes this process). We fail rather than proceed unlocked.
-    // Held (and released) when `lock_file` drops at the end of update().
-    let lock_path =
-        config_dir_file("config.lock").map_err(|e| format!("config lock unavailable: {e}"))?;
-    let lock_file = fs::OpenOptions::new()
-        .create(true)
-        .write(true)
-        .truncate(false) // lock-only sentinel; never written/truncated
-        .open(&lock_path)
-        .map_err(|e| format!("could not open config lock: {e}"))?;
-    lock_file
-        .lock()
-        .map_err(|e| format!("could not acquire config lock: {e}"))?;
-    // Propagate a read/parse error rather than defaulting — otherwise we could
-    // save an empty config over a good-but-unparseable file and wipe everything.
-    let mut cfg = load_config().map_err(|e| format!("could not read config: {e}"))?;
-    let out = f(&mut cfg)?;
-    save_config(&cfg).map_err(|e| e.to_string())?;
-    Ok(out)
+    let path = config_path().map_err(|error| format!("config unavailable: {error}"))?;
+    let lock_path = config_dir_file("config.lock")
+        .map_err(|error| format!("config lock unavailable: {error}"))?;
+    crate::storage::update_json("config", &CONFIG_LOCK, &path, &lock_path, f)
 }
 
 pub fn load_config() -> io::Result<AppConfig> {
-    let path = config_path()?;
-    // Open directly: only a genuine "not found" is treated as absent (→ default).
-    // A metadata error / broken symlink / permission issue surfaces as an error
-    // (Path::exists() would hide those as "absent", risking an overwrite); a
-    // parse failure surfaces too, so a later save can't overwrite a good file.
-    let mut s = String::new();
-    match fs::File::open(&path) {
-        Ok(mut f) => f.read_to_string(&mut s)?,
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            // open() also reports NotFound for a *dangling symlink* (its target is
-            // gone). Use symlink_metadata (lstat, doesn't follow) to tell that
-            // apart from a genuinely missing file: only the latter is "absent".
-            match fs::symlink_metadata(&path) {
-                Err(me) if me.kind() == io::ErrorKind::NotFound => return Ok(AppConfig::default()),
-                _ => return Err(e), // path exists (e.g. broken symlink) but can't be read
-            }
-        }
-        Err(e) => return Err(e),
-    };
-    let cfg: AppConfig =
-        serde_json::from_str(&s).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-    Ok(cfg)
-}
-
-pub fn save_config(cfg: &AppConfig) -> io::Result<()> {
-    // A failure to resolve/create the config dir is a real error, not a
-    // successful no-op (callers must not report success while nothing persists).
-    let path = config_path()?;
-    let s = serde_json::to_string_pretty(cfg).unwrap_or_else(|_| "{}".into());
-
-    // Write to a temp file then atomically rename over the target, so a reader
-    // never sees a half-written config. The config holds auth tokens and SMB
-    // passwords, so on Unix the temp file is created owner-only (0600) from the
-    // start — never briefly group/world-readable — and a chmod failure is fatal.
-    // The temp name is process-unique so separate processes can't clobber it.
-    let tmp = path.with_extension(format!("json.tmp.{}", std::process::id()));
-    // Remove any stale temp from a prior run. A failure other than "not found"
-    // means we can't guarantee a clean file, so abort rather than risk writing
-    // secrets into an existing one with looser permissions.
-    match fs::remove_file(&tmp) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {}
-        Err(e) => return Err(e),
-    }
-    {
-        // create_new (O_CREAT|O_EXCL) requires a brand-new file, so on Unix it
-        // gets 0600 from creation — never a write-before-chmod window.
-        #[cfg(unix)]
-        let mut f = {
-            use std::os::unix::fs::OpenOptionsExt;
-            fs::OpenOptions::new()
-                .write(true)
-                .create_new(true)
-                .mode(0o600)
-                .open(&tmp)?
-        };
-        #[cfg(not(unix))]
-        let mut f = fs::OpenOptions::new()
-            .write(true)
-            .create_new(true)
-            .open(&tmp)?;
-        f.write_all(s.as_bytes())?;
-        f.sync_all()?;
-    }
-    fs::rename(&tmp, &path)
+    crate::storage::load_json(&config_path()?)
 }
 
 #[cfg(test)]
