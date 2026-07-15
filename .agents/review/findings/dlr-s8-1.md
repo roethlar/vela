@@ -2,9 +2,9 @@
 
 **Severity**: MEDIUM — local release scripts can install dependencies and
 produce bundles with a Node/npm pair different from CI and the committed lock.
-**Status**: In progress
+**Status**: In progress — guard-proven, external review pending
 **Branch**: `main` (approved dependency-refresh Slice 8)
-**Commit**: pending
+**Commit**: `4cba5db`
 
 ## Evidence
 
@@ -47,11 +47,15 @@ activating npm 12, removing three hand-copied version comparisons.
 
 ## Guard proof
 
-Pending: inject a fake npm 11 executable and prove the checker plus both local
-packaging entry points fail before building; separately change only
-`.node-version` in a disposable worktree and prove the Node mismatch fails.
-Restore the committed state and require the checker and normal build gates to
-pass.
+- A PATH-prepended fake npm reporting 11.17.0 made the checker,
+  `scripts/build.sh --native`, and `pwsh scripts/build.ps1 --native` each exit
+  1 with the exact expected-12/got-11 mismatch before any build command ran.
+- In a disposable worktree at `4cba5db`, changing only `.node-version` from
+  26.5.0 to 26.5.1 made the checker exit 1 with the exact expected-26.5.1/
+  got-26.5.0 mismatch. Restoring the committed pin returned it green and left
+  the worktree byte-clean before removal.
+- At the restored head, the checker, Bash syntax, PowerShell parser, frontend
+  check/build, and the default macOS universal packaging script passed.
 
 ## Coder dispute (if any)
 
@@ -61,6 +65,11 @@ None. The audit finding is admitted under the approved dependency plan.
 
 The PowerShell path can be executed on macOS, but a GitHub-hosted Windows bundle
 remains the final Windows runtime proof after a separately approved push/run.
+The documented Bash-only `scripts/build.sh --native` path passes the new
+toolchain check and then hits a pre-existing macOS Bash 3 empty-array failure at
+the later Tauri invocation. The required default universal path is green; the
+unrelated native-path defect is outside this finding and must not be silently
+folded into it.
 
 ## Reviewer comments
 
