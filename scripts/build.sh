@@ -79,7 +79,14 @@ subdirs=()
 case "$os" in
   linux)
     if [ -n "$bundles" ]; then         # explicit override wins
-      subdirs=(appimage deb rpm)
+      requested=()
+      IFS=',' read -r -a requested <<< "$bundles"
+      for bundle in "${requested[@]}"; do
+        case "$bundle" in
+          appimage|deb|rpm) subdirs+=("$bundle") ;;
+          *) echo "Unsupported Linux bundle: $bundle (use appimage, deb, or rpm)" >&2; exit 2 ;;
+        esac
+      done
       appimage_workarounds
     elif is_arch; then                 # native AppImage can't be built here
       mode=arch
@@ -118,6 +125,16 @@ node scripts/check-js-toolchain.mjs
 if [ ! -d node_modules ] || [ package-lock.json -nt node_modules/.package-lock.json ]; then
   echo "==> JS deps missing or stale; running npm install"
   npm install
+fi
+
+# Tauri keeps older versioned installers in its generated bundle directories.
+# Clear only the selected, known generated targets so dist/ cannot republish a
+# stale artifact after an otherwise successful build. The Arch output directory
+# also contains package sources, so its `.` entry is deliberately never removed.
+if [ "$mode" = tauri ]; then
+  for d in "${subdirs[@]}"; do
+    [ "$d" = "." ] || rm -rf "$bundle_dir/$d"
+  done
 fi
 
 # --- Build -------------------------------------------------------------------
