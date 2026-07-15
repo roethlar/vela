@@ -2,9 +2,9 @@
 
 **Severity**: MEDIUM — a successful release build leaves older installers in
 `dist/`, so an operator can distribute the wrong Vela version.
-**Status**: Open
+**Status**: In progress
 **Branch**: `main` (approved dependency-refresh Slice 8)
-**Commit**: pending
+**Commit**: `bff2905`
 
 ## Evidence
 
@@ -31,24 +31,35 @@ see artifacts produced by the current invocation.
 
 ## Approach
 
-Pending implementation. Add a hermetic Node test that runs the real Bash
-script with fake `node`, `npm`, and `uname` commands, seeds stale AppImage,
-deb, and rpm outputs, and requires a deb/rpm build to collect only the new
-requested packages. Wire that guard into the existing frontend check gate.
+The explicit Linux override now derives its artifact directories from the
+validated requested bundle list. Before invoking Tauri, the script removes
+only those known generated directories; it deliberately never removes the
+Arch package directory, which also contains source files. A hermetic Node test
+runs the real Bash script with fake `node`, `npm`, and `uname` commands, seeds
+stale AppImage, deb, and rpm outputs, and requires a deb/rpm build to collect
+only the new requested packages. The existing frontend check gate runs it.
 
 ## Files changed
 
-- `scripts/build.sh` — pending exact bundle-directory selection and pre-build
-  generated-output cleanup.
-- `tests/build-script.test.mjs` — pending hermetic stale-artifact regression.
-- `package.json` — pending guard activation in the canonical check.
+- `scripts/build.sh` — select exact Linux bundle directories and clear only
+  those generated targets before building.
+- `tests/build-script.test.mjs` — hermetic stale-artifact regression.
+- `package.json` — activate the guard in the canonical check.
 
 ## Guard proof
 
-Pending: after the fix lands, restore the old all-Linux-subdirectories and
-no-cleanup behavior in a detached disposable worktree, require the hermetic
-test to fail on stale files, restore the commit, and require the test plus
-canonical check to pass.
+- In a detached `bff2905` worktree, restoring the old
+  `subdirs=(appimage deb rpm)` selection and deleting the pre-build cleanup
+  made `node --test tests/build-script.test.mjs` fail on the exact five-file
+  stale result: 0.1.39 AppImage, 0.1.50 deb/rpm, and 0.1.51 deb/rpm. Restoring
+  the committed script made the test pass with a clean worktree.
+- `npm run check` passes the new guard plus Svelte diagnostics, and
+  `npm run build` passes.
+- The fixed script and guard were checksum-verified on the Linux VM. The real
+  `scripts/build.sh --bundles deb,rpm` build produced 0.1.51 packages and
+  `dist/` contained exactly `Vela_0.1.51_arm64.deb` and
+  `Vela-0.1.51-1.aarch64.rpm`; the deb metadata reports version 0.1.51/arm64
+  and `file` recognizes both package formats.
 
 ## Coder dispute (if any)
 

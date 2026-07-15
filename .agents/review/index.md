@@ -596,7 +596,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| dlr-s8-4 | MEDIUM | Package collection can republish stale installers | `[ ]` | pending |
+| dlr-s8-4 | MEDIUM | Package collection can republish stale installers | `[~]` | `bff2905` |
 | dlr-s8-3 | MEDIUM | Live Jellyfin can fail on Home before a real library renders | `[x]` | `5532e93`, guard `8366b4f` |
 | dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[x]` | `ec7c43e` |
 | dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[x]` | `4cba5db` |
