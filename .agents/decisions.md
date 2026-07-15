@@ -851,3 +851,41 @@ Only the watch-state edit lifetime detail in
 `.agents/plans/per-surface-status.md` and
 `.agents/plans/failed-watch-edit-recovery.md`. The 2026-07-14 own-surface
 decision, recovery behavior, and every other surface lifetime remain unchanged.
+
+## 2026-07-15 - Dependency baseline is Node 26 plus current mutually compatible stable releases
+
+Status: APPROVED (owner, 2026-07-15). Draft implementation plan:
+`.agents/plans/dependency-lts-refresh.md`.
+
+Decision:
+Vela adopts Node 26, the immediate next LTS line, before its October 2026 LTS
+promotion. The repo, CI, release workflow, Node type declarations, npm version,
+and Linux E2E venue move together to one pinned Node 26/npm 12 baseline. The
+owner explicitly chose 26 over the recommended current Node 24 LTS and
+authorized changing Node/npm on the E2E VM; that grant does not extend to any
+other VM or media-server software.
+
+For ecosystems with no LTS concept, dependency refreshes use the newest stable
+mutually compatible set: no prereleases, forced peer graphs, or independently
+latest version outside a direct package's declared compatibility range. Thus
+TypeScript remains on current compatible 6 while SvelteKit excludes 7; Rust
+stays rolling stable while Vela preserves and tests its declared 1.89 MSRV.
+
+Known npm vulnerabilities fail CI under the existing fail-closed security
+rule. Current SvelteKit still requests vulnerable `cookie ^0.6.0`; because Vela
+is a static SPA with no server-cookie use, the owner approved a narrow, tested
+override to the closest patched 0.7 line plus a failing npm-audit gate. There is
+no blanket suppression and no `npm audit fix --force` downgrade.
+
+Reason:
+CI and release still use EOL Node 20 and JavaScript actions whose internal
+runtime is Node 20. The direct npm graph spans incompatible toolchain
+generations, Rust has three unadopted current majors, and the npm lock contains
+a high Vite advisory plus the SvelteKit cookie advisory. One explicit baseline
+and fail-closed audits make "current" reproducible rather than host-dependent.
+
+Supersedes:
+The Node 20 selections in CI/release and the accidental `@types/node` 25
+baseline. Extends the 2026-07-14 known-vulnerabilities-fail decision from Cargo
+to npm; it does not weaken Cargo audit or authorize raising the Linux release
+glibc floor.

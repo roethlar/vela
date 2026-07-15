@@ -114,6 +114,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
+- **AWAITING OWNER PLAN APPROVAL: current dependencies + Node 26.** The owner
+  selected Node 26 over current Node 24 LTS, approved a scoped patched-cookie
+  override plus fail-closed npm audit, and authorized aligning only Node/npm on
+  the existing Linux E2E VM. No dependency code has changed. Eight independently
+  committed/reviewed slices and the exact verification rails live in
+  `.agents/plans/dependency-lts-refresh.md`.
+
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
   (2026-07-14 — no play queue; video stays external). Five slices.
@@ -229,6 +236,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner playtest confirmed)
 - `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
   owner confirmed 0.1.50)
+- `.agents/plans/dependency-lts-refresh.md` (DRAFT — owner decisions recorded;
+  complete plan awaiting approval)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)

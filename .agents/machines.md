@@ -10,8 +10,8 @@ Relocated out of `.agents/state.md` 2026-07-14 (drift pass) — state.md stays
 portable and may at most point here.
 
 - The owner's Linux VM at `michael@192.168.64.5` is the standing E2E venue
-  (Ubuntu 25.10 aarch64, 12 CPU; fully provisioned 2026-07-09: rustup,
-  tauri-driver, Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64
+  (Ubuntu 26.04 LTS aarch64, 12 CPU; OS re-verified 2026-07-15; provisioned
+  with rustup, tauri-driver, Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64
   WebKitWebDriver, debug binary built). See the Linux VM section below.
 - The mac clone has a `vm` remote. **The push policy is ASK, and that includes
   `vm`** (`.agents/push-policy.md`). To run E2E without pushing, `scp` the
@@ -47,7 +47,14 @@ Relocated out of `.agents/state.md` 2026-07-14 (drift pass). Recorded
 
 ## Linux VM (E2E host)
 
-Recorded 2026-07-13.
+Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
+
+- Current observed baseline before the approved dependency refresh: Ubuntu
+  26.04 LTS, Node 22.22.1, npm 9.2.0, Rust 1.97.0 stable, WebKitGTK 2.52.3,
+  mpv 0.41.0, FFmpeg 8.0.1, and tauri-driver 2.0.6. The owner authorized
+  aligning only Node/npm to the repo's Node 26/npm 12 baseline as part of
+  `.agents/plans/dependency-lts-refresh.md`; record the actual result after it
+  happens.
 
 - The E2E suite (`npm run e2e`) is Linux-only and runs here, not on the macOS
   dev box: `michael@192.168.64.5`, clone at `~/dev/vela`, reachable from the
