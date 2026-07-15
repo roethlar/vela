@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — the required live integration gate fails before testing
 Jellyfin even though the authenticated server has libraries and is healthy.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `main` (approved dependency-refresh Slice 8)
 **Commit**: `5532e93` (fix), `8366b4f` (deterministic guard)
 
@@ -61,4 +61,12 @@ not promoted into the normal gating suite.
 
 ## Reviewer comments
 
-Pending external Claude Fable 5 review.
+Claude Code 2.1.210 (`claude-fable-5`) reviewed head
+`32b8e8393acf28247f115f31ae6bd8db129417e3` against base
+`39b233aca5e2141274f49107660960282e11c149` at
+2026-07-15T18:56:28Z. Verdict: **accepted**;
+`guard_confirmed:true`; comments: none. In its detached disposable worktree,
+Claude independently restored the old any-sidebar-item predicate, observed
+the exact Home-only assertion fail, restored the reviewed head, observed the
+guard pass, confirmed the live wait uses `LIBRARY_READY`, and left the tree
+clean.

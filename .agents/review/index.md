@@ -9,6 +9,16 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `dlr-s8-3` CLOSED 2026-07-15: **accepted clean at r1** (Claude Code
+2.1.210, `claude-fable-5`, `guard_confirmed:true`; base `39b233a`, reviewed
+head `32b8e83`). The matching WebKit driver exposed a live Jellyfin harness
+race where static Home satisfied the library-ready wait before an actual
+server library rendered. The fix and deterministic guard landed at `5532e93`
+and `8366b4f`; author and reviewer independently proved the old predicate red,
+the restored guard green, and the complete live Jellyfin scenario passed at
+0.1.51. Claude returned no comments. Detail:
+`.agents/review/findings/dlr-s8-3.md`.
+
 Loop `dlr-s8-2` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
 `guard_confirmed:true`; base `76c844c`, reviewed head `f3e5601`). The Slice 8
 audit found an official Ubuntu WebKitWebDriver 2.52.3 package exactly matching
@@ -586,7 +596,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| dlr-s8-3 | MEDIUM | Live Jellyfin can fail on Home before a real library renders | `[~]` | `5532e93`, guard `8366b4f` |
+| dlr-s8-3 | MEDIUM | Live Jellyfin can fail on Home before a real library renders | `[x]` | `5532e93`, guard `8366b4f` |
 | dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[x]` | `ec7c43e` |
 | dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[x]` | `4cba5db` |
 | fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
