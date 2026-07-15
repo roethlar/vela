@@ -129,7 +129,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   build, and Linux real-app E2E 18/18 passed; Grok accepted the pinned diff with
   no comments. Per the owner's 2026-07-15 correction, Codex-authored code is
   reviewed externally by Grok or Claude; Codex CLI self-review does not count.
-  Slice 4 (compatible Cargo lock refresh plus MSRV enforcement) is next. Eight
+  Slice 4 landed at `770bfba`: the compatible Cargo graph is current, the Rust
+  1.89 floor is now checked in CI, audit is at zero vulnerabilities, and local
+  plus Linux real-app verification passed. Grok accepted the pinned diff with
+  no comments. Slice 5 (`directories` 6 path preservation) is next. Eight
   independently committed/reviewed slices and the exact verification rails
   live in `.agents/plans/dependency-lts-refresh.md`.
 
@@ -248,8 +251,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner playtest confirmed)
 - `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
   owner confirmed 0.1.50)
-- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–3
-  Grok-accepted; Slice 4 next)
+- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–4
+  Grok-accepted; Slice 5 next)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)

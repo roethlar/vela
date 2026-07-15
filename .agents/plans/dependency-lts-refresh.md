@@ -1,7 +1,7 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — Slices 1–3 landed and were accepted by external
-reviewer Grok; Slice 4 is next.** The owner approved the
+Status: **IMPLEMENTING — Slices 1–4 landed and were accepted by external
+reviewer Grok; Slice 5 is next.** The owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
@@ -33,6 +33,16 @@ Implementation log:
   `e26add4` and head `28159ea` with no comments. A concurrent Codex CLI run was
   stopped and discarded after the owner clarified that author-model
   self-review does not count.
+- Slice 4 (`770bfba`) refreshes the compatible Cargo lock and adds an explicit
+  Rust 1.89 CI check while retaining rolling stable for check, clippy, and
+  tests. The graph moves from 504 to 487 packages and 41 to 39 duplicate-name
+  families with no new duplicate family; `getrandom`'s removed WASI Preview 3
+  branch explains the large WIT/Wasm deletion. Cargo audit remains at zero
+  vulnerabilities and drops the fixed `anyhow` warning, leaving 17 visible
+  upstream warnings. Rust 1.89 check, stable check/clippy/95 tests, frontend
+  and Tauri builds, and Linux real-app E2E 18/18 passed. `Cargo.toml` stayed
+  byte-identical. Grok 0.2.101 accepted exact base `20fc059` and head `770bfba`
+  with no comments.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel
