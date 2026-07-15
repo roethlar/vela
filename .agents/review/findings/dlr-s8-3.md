@@ -4,7 +4,7 @@
 Jellyfin even though the authenticated server has libraries and is healthy.
 **Status**: In progress
 **Branch**: `main` (approved dependency-refresh Slice 8)
-**Commit**: pending
+**Commit**: `5532e93` (fix), `8366b4f` (deterministic guard)
 
 ## Evidence
 
@@ -41,9 +41,14 @@ the proof that the real server supplies a library.
 
 ## Guard proof
 
-Pending: land the corrected predicate, restore the old any-item predicate in a
-disposable committed worktree and require the exact null-library failure, then
-restore the fix and require the complete live Jellyfin scenario to pass.
+- At `8366b4f`, a detached disposable worktree replaced `LIBRARY_READY` with
+  the old any-item predicate. `node tests/e2e/live/jellyfin.mjs` failed on the
+  exact assertion `Home alone is not a server library` because the old
+  predicate returned `true` for Home alone. Restoring the committed predicate
+  made the same command pass with no diff.
+- The corrected file was checksum-verified on the Linux E2E VM, then
+  `npm run e2e:live -- live-jellyfin` passed the complete real-server scenario
+  at Vela 0.1.51. The launcher's cleanup removed the temporary credential file.
 
 ## Coder dispute (if any)
 
@@ -56,4 +61,4 @@ not promoted into the normal gating suite.
 
 ## Reviewer comments
 
-Pending external Grok review.
+Pending external Claude Fable 5 review.
