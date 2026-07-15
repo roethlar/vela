@@ -9,6 +9,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `dlr-s8-2` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
+`guard_confirmed:true`; base `76c844c`, reviewed head `f3e5601`). The Slice 8
+audit found an official Ubuntu WebKitWebDriver 2.52.3 package exactly matching
+the VM's WebKitGTK, superseding the skewed Debian 2.50.6/ICU72 fixture.
+`ec7c43e` pins both architecture packages, stamps cache identity, and removes
+the old ICU shim. Author and reviewer checksum/cache guards passed, the ARM64
+session/IPC/UI probe and full E2E 18/18 passed, and Grok returned no comments.
+Detail: `.agents/review/findings/dlr-s8-2.md`.
+
 Loop `dlr-s8-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
 `guard_confirmed:true`; base `33163c5`, reviewed head `0934628`). The Slice 8
 integration audit found that local Bash and PowerShell package scripts could
@@ -577,7 +586,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[~]` | `ec7c43e` |
+| dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[x]` | `ec7c43e` |
 | dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[x]` | `4cba5db` |
 | fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
 | dlr-s1-1 | MEDIUM | Windows release cannot run the direct npm.cmd version assertion | `[x]` | `adc0104` |

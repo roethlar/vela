@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — the harness deliberately runs a mismatched browser
 driver even though the validation OS now publishes an exact compatible match.
-**Status**: In progress — guard-proven, external review pending
+**Status**: Verified — external reviewer Grok accepted r1
 **Branch**: `main` (approved dependency-refresh Slice 8)
 **Commit**: `ec7c43e`
 
@@ -72,4 +72,9 @@ approved Ubuntu 26.04 venue, while other Linux distributions remain best-effort.
 
 ## Reviewer comments
 
-Pending external Grok review.
+**r1 — 2026-07-15T18:24:31Z — accepted.** Grok 0.2.101 independently
+reviewed exact base `76c844c` and head `f3e5601`, verified both official
+package URLs/SHA256 values and payloads, proved an unstamped cache refresh,
+injected a wrong ARM64 checksum and observed fail-closed behavior, restored
+its disposable worktree clean, and returned `guard_confirmed: true` with no
+comments.
