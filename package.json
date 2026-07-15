@@ -3,6 +3,10 @@
   "version": "0.1.50",
   "description": "mpv-backed HDR media client (Plex, Jellyfin, Emby, local)",
   "type": "module",
+  "engines": {
+    "node": ">=26.5.0 <27"
+  },
+  "packageManager": "npm@12.0.1",
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
@@ -25,7 +29,7 @@
     "@sveltejs/kit": "^2.9.0",
     "@sveltejs/vite-plugin-svelte": "^5.0.0",
     "@tauri-apps/cli": "^2",
-    "@types/node": "^25.9.1",
+    "@types/node": "^26.1.1",
     "svelte": "^5.0.0",
     "svelte-check": "^4.0.0",
     "typescript": "~5.6.2",

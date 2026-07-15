@@ -32,7 +32,7 @@ jobs:
             bundle_dir: src-tauri/target/release/bundle
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Tauri system dependencies (Linux)
         if: matrix.os == 'ubuntu-22.04'
@@ -55,14 +55,19 @@ jobs:
         with:
           workspaces: src-tauri
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Activate pinned npm
+        run: |
+          npm install --global npm@12.0.1
+          node --input-type=module -e "import { execFileSync } from 'node:child_process'; const npm = execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--version'], { encoding: 'utf8' }).trim(); if (process.version !== 'v26.5.0' || npm !== '12.0.1') { throw new Error('expected Node v26.5.0/npm 12.0.1; got ' + process.version + '/npm ' + npm); }"
       - run: npm ci
 
       # Builds the frontend (beforeBuildCommand) + the Rust release binary and
       # produces the native installers. Unsigned — fine for testing; see notes.
-      - uses: tauri-apps/tauri-action@v0
+      - uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
@@ -73,7 +78,7 @@ jobs:
           releaseDraft: true
 
       - name: Upload bundles as workflow artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: vela-${{ matrix.os }}
           if-no-files-found: ignore

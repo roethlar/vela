@@ -13,7 +13,7 @@ jobs:
       run:
         working-directory: src-tauri
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Tauri's Linux build needs the WebKitGTK / soup / gtk dev libraries even
       # for `cargo check`/`clippy` (tauri-build + the webview crates link them).
@@ -44,10 +44,15 @@ jobs:
     name: Frontend
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
-          node-version: 20
+          node-version-file: .node-version
+          package-manager-cache: false
+      - name: Activate pinned npm
+        run: |
+          npm install --global npm@12.0.1
+          node --input-type=module -e "import { execFileSync } from 'node:child_process'; const npm = execFileSync(process.platform === 'win32' ? 'npm.cmd' : 'npm', ['--version'], { encoding: 'utf8' }).trim(); if (process.version !== 'v26.5.0' || npm !== '12.0.1') { throw new Error('expected Node v26.5.0/npm 12.0.1; got ' + process.version + '/npm ' + npm); }"
       - run: npm ci
       - run: npm run check
       - run: npm run build
@@ -67,7 +72,7 @@ jobs:
     # an explicit `--ignore RUSTSEC-XXXX-NNNN` below with a comment saying why and when to
     # revisit: a visible exception in the diff, not a silent blanket.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - run: cargo install cargo-audit --locked
       - run: cargo audit --file src-tauri/Cargo.lock

@@ -49,12 +49,16 @@ Relocated out of `.agents/state.md` 2026-07-14 (drift pass). Recorded
 
 Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
 
-- Current observed baseline before the approved dependency refresh: Ubuntu
-  26.04 LTS, Node 22.22.1, npm 9.2.0, Rust 1.97.0 stable, WebKitGTK 2.52.3,
-  mpv 0.41.0, FFmpeg 8.0.1, and tauri-driver 2.0.6. The owner authorized
-  aligning only Node/npm to the repo's Node 26/npm 12 baseline as part of
-  `.agents/plans/dependency-lts-refresh.md`; record the actual result after it
-  happens.
+- Current observed baseline after the owner-approved Slice 1 alignment
+  (2026-07-15): Ubuntu 26.04 LTS; user-local Node 26.5.0/npm 12.0.1 at
+  `~/.local/bin`; Rust 1.97.0 stable; WebKitGTK 2.52.3; mpv 0.41.0; FFmpeg
+  8.0.1; tauri-driver 2.0.6. Node came from the checksum-verified official
+  arm64 archive under `~/.local/opt/node-v26.5.0`; npm's registry integrity was
+  pinned and verified. Ubuntu's `/usr/bin/node` 22.22.1 and `/usr/bin/npm`
+  9.2.0 packages remain installed and unchanged. Removing only the three
+  user-local `node`/`npm`/`npx` symlinks and that versioned directory rolls the
+  alignment back. `bash -lc` resolves the user-local pair, matching the E2E
+  launcher; a clean install and the real-app `smoke` scenario passed.
 
 - The E2E suite (`npm run e2e`) is Linux-only and runs here, not on the macOS
   dev box: `michael@192.168.64.5`, clone at `~/dev/vela`, reachable from the
