@@ -186,3 +186,34 @@ scenario remains opt-in/non-hermetic evidence, never part of the gating suite.
   intentional: there is no browse request and therefore no browse failure.
 - Hard-coding a live title is owner-environment-specific. It belongs only in
   the opt-in live-Plex scenario; the hermetic guard remains generic.
+
+## Plan review log
+
+Plan-review loop (playbook `reviewloop`, adapted to design review; Grok and
+Claude, headless one-shot, read-only tools). A design review cannot execute an
+unimplemented guard, so `guard_confirmed` is recorded as `false`; convergence
+requires both reviewers to return `accepted` with no material findings on the
+same pinned plan.
+
+**r1 — 2026-07-15T02:13:48Z — base `310c2ca`, head `a481f5d`; round verdict
+`reopened`.**
+
+- Grok 0.2.101 (`5bc4b5dfadcf`) returned `reopened`,
+  `guard_confirmed: false`, with two ADMITTED findings:
+  1. HIGH — case 4 leaves `failNextItems` armed and then requires a healthy
+     Refresh. The Refresh would consume the one-shot and fail even after a
+     correct production change; a surviving flag could also poison later
+     cases. The plan must explicitly disarm listing failure/delay controls
+     after proving non-consumption and before Refresh or case exit.
+  2. MEDIUM — the hermetic steps conflate the old-path red proof, which must
+     park a recovery Items request to observe the blank, with the fixed-path
+     green proof, which must prove that request never exists. The plan must
+     specify separate red and green phases.
+- Claude Code 2.1.209 returned `accepted`, `guard_confirmed: false`, with no
+  findings after checking the plan against the referenced frontend, backend,
+  mock, and E2E paths. Its first process result was rejected fail-closed because
+  denied read-only tool calls yielded placeholder fields; the recorded verdict
+  is the substantive retry using only `Read`, `Glob`, and `Grep`.
+
+Round outcome: both Grok findings are evidence-backed and jointly satisfiable;
+they are admitted for plan revision before r2.

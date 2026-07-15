@@ -90,12 +90,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **AWAITING OWNER APPROVAL: failed watch-state recovery follow-up.** Plan
-  `.agents/plans/failed-watch-edit-recovery.md`, one slice. Pending behavior
-  decision: a failed edit no longer reloads the browse grid, so the exact loaded
-  cards/pages/scroll stay untouched and only the edit's own line appears. Home
-  still reloads when needed to heal rolled-back recents/tombstones. After landing,
-  repeat the exact stopped-Plex test and the still-outstanding detail-page test.
+- **PLAN REVIEW ACTIVE: failed watch-state recovery follow-up.** Plan
+  `.agents/plans/failed-watch-edit-recovery.md`, one slice; its `## Plan review
+  log` is the canonical loop record. R1 was reopened for test-sequencing fixes.
+  The owner pre-approved the plan conditional on Grok + Claude consensus within
+  two rounds; implementation still requires an explicit go after that gate
+  closes. After landing, repeat the exact stopped-Plex test and the
+  still-outstanding detail-page test.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
   written). Product model and the two durable rulings: `.agents/decisions.md`
