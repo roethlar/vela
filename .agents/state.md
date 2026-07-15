@@ -9,8 +9,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Version 0.1.50** (`package.json`, `src-tauri/tauri.conf.json`,
-  `src-tauri/Cargo.toml` all agree, as of `01e30cf`).
+- **Version 0.1.51** (`package.json`, both lockfiles,
+  `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
+  agree, as of `dc73627`).
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
@@ -147,8 +148,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   duplicate is gone, and the required local, Linux E2E/live-server, Linux
   package, and macOS universal package checks passed. Grok independently
   red-proved the explicit `query` feature and accepted the pinned diff with no
-  comments. Slice 8 integration/version/durable-state work is next. The
-  eight-slice sequence and exact verification rails live in
+  comments. Slice 8 then closed two audit findings: `4cba5db` enforces the
+  pinned Node/npm pair in local, CI, and release install paths; `ec7c43e`
+  replaces the old WebKit driver/ICU fixture with Ubuntu's exact 2.52.3 match.
+  Both guards, the matching-driver E2E 18/18 run, and external Grok reviews
+  passed. `dc73627` bumps Vela once to 0.1.51. Final canonical verification and
+  external review of the integration/version range are the only remaining
+  dependency-plan gates. Exact evidence lives in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **AWAITING OWNER GO: `.agents/plans/playlists.md`** (drafted 2026-07-14, no code
@@ -266,8 +272,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner playtest confirmed)
 - `.agents/plans/edit-error-auto-dismiss.md` (IMPLEMENTED — Grok accepted r1;
   owner confirmed 0.1.50)
-- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — Slices 1–7
-  Grok-accepted; Slice 8 integration next)
+- `.agents/plans/dependency-lts-refresh.md` (IMPLEMENTING — all slices landed;
+  final canonical verification/integration review pending)
 - `.agents/plans/playlists.md` (DRAFTED — awaiting owner go; five slices)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — awaiting owner playtest)

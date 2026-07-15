@@ -52,13 +52,22 @@ Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
 - Current observed baseline after the owner-approved Slice 1 alignment
   (2026-07-15): Ubuntu 26.04 LTS; user-local Node 26.5.0/npm 12.0.1 at
   `~/.local/bin`; Rust 1.97.0 stable; WebKitGTK 2.52.3; mpv 0.41.0; FFmpeg
-  8.0.1; tauri-driver 2.0.6. Node came from the checksum-verified official
+  8.0.1; tauri-driver 2.0.6. The crates.io registry and upstream release log
+  still identified tauri-driver 2.0.6 (published 2026-05-06) as current on
+  2026-07-15. Node came from the checksum-verified official
   arm64 archive under `~/.local/opt/node-v26.5.0`; npm's registry integrity was
   pinned and verified. Ubuntu's `/usr/bin/node` 22.22.1 and `/usr/bin/npm`
   9.2.0 packages remain installed and unchanged. Removing only the three
   user-local `node`/`npm`/`npx` symlinks and that versioned directory rolls the
   alignment back. `bash -lc` resolves the user-local pair, matching the E2E
   launcher; a clean install and the real-app `smoke` scenario passed.
+
+- The fetched E2E driver now uses Ubuntu's SHA-pinned
+  `webkitgtk-webdriver` 2.52.3 package, exactly matching this VM's WebKitGTK;
+  the previous Debian 2.50.6/ICU72 cache is invalidated by package identity.
+  The ARM64 package passed an isolated Vela session/IPC/UI/screenshot probe and
+  the full suite. The AMD64 package URL, checksum, and payload were inspected,
+  but no current AMD64 runtime venue was available.
 
 - The E2E suite (`npm run e2e`) is Linux-only and runs here, not on the macOS
   dev box: `michael@192.168.64.5`, clone at `~/dev/vela`, reachable from the

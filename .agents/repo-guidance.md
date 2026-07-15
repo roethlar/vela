@@ -33,14 +33,24 @@
 
 This section is the canonical home for the verification commands (carved in
 from the retired `.agents/repo-map.json`, 2026-07-08; verified against
-`package.json` scripts and `.github/workflows/ci.yml` as of that carve):
+`package.json` scripts and `.github/workflows/ci.yml` on 2026-07-15):
 
+- `node scripts/check-js-toolchain.mjs` (repo root) — require the exact Node
+  and npm executables pinned by `.node-version` and `packageManager`.
+- `npm ci` (repo root) — clean, lockfile-exact JavaScript install.
+- `npm audit` (repo root) — fail closed on known npm vulnerabilities.
 - `npm run check` (repo root) — frontend type and Svelte validation.
 - `npm run build` (repo root) — production frontend build, or any change
   that can affect the Tauri frontend bundle.
-- `cargo check --locked` (from `src-tauri/`) — Rust compile validation.
-- `cargo clippy --all-targets --locked -- -D warnings` (from `src-tauri/`).
-- `cargo test --locked` (from `src-tauri/`) — Rust unit tests.
+- `cargo +1.89.0 check --locked` (from `src-tauri/`) — declared MSRV compile
+  floor.
+- `cargo +stable check --locked` (from `src-tauri/`) — rolling-stable compile
+  validation.
+- `cargo +stable clippy --all-targets --locked -- -D warnings` (from
+  `src-tauri/`).
+- `cargo +stable test --locked` (from `src-tauri/`) — Rust unit tests.
+- `cargo audit --file Cargo.lock` (from `src-tauri/`) — fail closed on known
+  Rust vulnerabilities; unsoundness/unmaintained notices remain visible.
 - `npm run e2e` (repo root) — end-to-end UI/playback validation on Linux
   (drives the real debug app; needs tauri-driver, Xvfb, ffmpeg, mpv, bsdtar,
   curl — see `tests/e2e/README.md`). `-- --skip-build` reuses the existing
@@ -54,12 +64,10 @@ CI only covers pushes that reach the github remote.
 
 Rules the command list doesn't carry on its own:
 
-- Run Rust commands (`cargo check`, `cargo clippy`, `cargo test`) from
-  `src-tauri/`, not the repo root.
+- Run every Cargo command above from `src-tauri/`, not the repo root.
 - For changes that can affect both sides of the Tauri app, run the full CI
-  command set: `npm run check`, `npm run build`, `cargo check --locked`,
-  `cargo clippy --all-targets --locked -- -D warnings`, and
-  `cargo test --locked`.
+  command set: toolchain assertion, `npm ci`, npm audit/check/build, Rust 1.89
+  check, stable check/clippy/test, and Cargo audit.
 - Packaging changes should also run the affected packaging command when
   practical: `npm run build:linux` for Tauri Linux bundles or
   `npm run build:arch` for the Arch package.

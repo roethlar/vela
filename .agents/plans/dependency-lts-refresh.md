@@ -1,7 +1,8 @@
 # Plan: current dependencies and Node 26 immediate-next-LTS baseline
 
-Status: **IMPLEMENTING — Slices 1–7 landed and met their required external
-review; Slice 8 integration is next.** The owner approved the
+Status: **IMPLEMENTING — all eight slices landed; final canonical verification
+and external review of the Slice 8 integration/version range are pending.** The
+owner approved the
 complete plan on 2026-07-15 and separately approved Node 26, the npm security
 posture, and the Linux E2E VM Node/npm alignment during plan drafting.
 
@@ -84,6 +85,22 @@ Implementation log:
   disposable worktree green, and accepted exact base `8a563c9` and head
   `1d619fd` with `guard_confirmed: true` and no comments at
   2026-07-15T17:54:14Z.
+- Slice 8 re-verified the VM's user-local Node 26.5.0/npm 12.0.1 paths, full
+  Linux E2E 18/18, live Plex, and live Jellyfin; no configured Emby venue
+  exists. The registry still reports installed `tauri-driver` 2.0.6 as the
+  newest stable release. Integration audit finding `dlr-s8-1` found the local
+  package scripts bypassed the pinned JavaScript executables; `4cba5db` adds a
+  canonical assertion reused by local/CI/release paths, and Grok 0.2.101
+  independently red-proved both version legs and accepted exact base `33163c5`
+  and head `0934628` with no comments. Audit finding `dlr-s8-2` found Ubuntu
+  26.04 now supplies WebKitWebDriver 2.52.3 matching the VM's WebKitGTK, so
+  `ec7c43e` replaces the skewed Debian 2.50.6/ICU72 fixture with official
+  SHA-pinned ARM64/AMD64 packages and cache identity. The ARM64 session/IPC/UI
+  probe and full E2E 18/18 passed; Grok independently proved the package/cache/
+  checksum guard and accepted exact base `76c844c` and head `f3e5601` with no
+  comments. `dc73627` applies the plan's one final version bump to 0.1.51. The
+  post-version canonical suite and pinned integration-range review remain the
+  closing gates.
 
 Decision record: `.agents/decisions.md`, 2026-07-15. Audited against clean
 `main` at `a0e936b` on 2026-07-15. Re-query every registry and release channel

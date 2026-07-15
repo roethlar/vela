@@ -1,5 +1,14 @@
 # Issue Queue
 
+## Open - Agent-Found (2026-07-15)
+
+- `scripts/build.sh --native` fails on macOS's Bash 3 after the toolchain check
+  with `extra_args[@]: unbound variable`: `--native` leaves the array empty and
+  the later Tauri invocation expands it under `set -u`. The default universal
+  macOS path remains green. This pre-dates and is separate from the dependency
+  refresh's Node/npm enforcement, so it was recorded rather than silently
+  folded into that reviewed fix.
+
 ## Resolved - Owner-Reported (2026-07-04, Continue Watching curation)
 
 Reported on Linux against a live Plex server; code-traced same day.
