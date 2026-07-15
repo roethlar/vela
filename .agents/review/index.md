@@ -9,11 +9,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Loop `fwer-1` OPEN (failed-watch-edit recovery implementation). Base
-`012a031`; branch `fix/fwer-1-failed-watch-edit-recovery`; code head `b5c170a`.
-The coder's four independent red proofs and full green verification are
-complete. Grok reviews that exact pinned code slice next. Detail:
-`.agents/review/findings/fwer-1.md`.
+Loop `fwer-1` CLOSED 2026-07-15: **accepted clean at r1** (Grok 0.2.101,
+`guard_confirmed:true`; base `012a031`, code head `b5c170a`). Scope was the
+failed-watch-edit recovery follow-up: failed browse/search/person/drill/detail
+edits keep exact loaded identity and make no listing request; Home alone heals
+its transient curation after backend rollback. Grok independently proved the
+old broad recovery and a same-cardinality substitution red, then restored the
+head and passed `pagefail`. Coder verification: four distinct red proofs,
+local checks/build/Rust gates clean, Linux E2E 18/18, and the exact opt-in live
+Plex outage/restart path passed. Detail: `.agents/review/findings/fwer-1.md`.
 
 Loop `lrs-code` OPEN (library-refresh-scan IMPLEMENTATION review; batch
 adaptation, no per-finding branches). Base `63560a6` (plan APPROVED), head

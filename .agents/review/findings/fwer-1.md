@@ -2,7 +2,7 @@
 
 **Severity**: HIGH — one failed card edit can blank or permanently truncate the
 entire loaded library while leaving the item unchanged on the server.
-**Status**: Awaiting Grok review
+**Status**: Verified — Grok accepted r1
 **Branch**: `fix/fwer-1-failed-watch-edit-recovery`
 **Commit**: `b5c170a`
 
@@ -83,6 +83,21 @@ review loop closes. The live test is opt-in and non-gating by design.
 
 ## Reviewer comments
 
-Pending Grok headless review of exact base `012a031` and code head `b5c170a`.
-Acceptance requires Grok's independent guard proof and
-`guard_confirmed: true`.
+**r1 — 2026-07-15T03:14:43Z — accepted.** Grok 0.2.101
+(`5bc4b5dfadcf`, model `grok-4.5`) reviewed exact base `012a031` and code head
+`b5c170a` in a detached disposable worktree. Structured result:
+`verdict: accepted`, `guard_confirmed: true`, exact SHAs, `comments: []`
+(session `019f63c0-6954-7a71-8826-655887c121eb`).
+
+The reviewer independently injected and ran both load-bearing regressions on
+the Linux real-app runner: the old broad failed-edit recovery failed the grid
+continuity guard, and a same-cardinality in-memory substitution failed exact
+poster identity. It restored exact `b5c170a`, passed `pagefail`, and verified
+the disposable worktree and VM copies of `+page.svelte` and `pagefail.mjs`
+matched the reviewed blobs. The coder repeated those cleanup hash checks after
+the reviewer exited; both worktrees were clean and no E2E process remained.
+
+An earlier CLI launch rejected the unavailable `workspace-write` sandbox
+profile before the reviewer process started. It produced no model verdict and
+is a capability probe, not a review round. The substantive one-shot used the
+installed `workspace` profile against only the disposable worktree.

@@ -1,12 +1,13 @@
 # Plan: a failed watch-state edit never reloads or loses the browse grid
 
-Status: **APPROVED (owner, 2026-07-14) — implementation authorized.** The owner
-admitted and ordered correction of the remaining r2 red-proof defect, then
-explicitly said to start coding. Implementation commit: `b5c170a`; Grok code
-review is active. See `## Plan review log`. The owner playtest of 0.1.48 failed
-on the real Plex path. This follow-up is one code slice. The
-per-surface-status implementation remains complete; this plan fixes the
-recovery work that runs underneath its correctly separated status lines.
+Status: **IMPLEMENTED (`b5c170a`) — Grok accepted r1; owner playtest / landing
+outstanding.** The owner admitted and ordered correction of the remaining r2
+red-proof defect, then explicitly said to start coding. See `## Plan review
+log`; the completed code review is `.agents/review/findings/fwer-1.md`. The
+owner playtest of 0.1.48 failed on the real Plex path. This follow-up is one
+code slice. The per-surface-status implementation remains complete; this plan
+fixes the recovery work that runs underneath its correctly separated status
+lines.
 
 ## Owner-visible defect
 
