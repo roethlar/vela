@@ -1,8 +1,8 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **DRAFT — Claude goal-only r5 accepted the prior head; r6 reviews the
-clarified head before surfacing; not owner-approved.** The owner reported the
-regression on a locally built 0.1.51 universal macOS DMG:
+Status: **DRAFT — Claude goal-only r6 accepted the prior head; r7 reviews one
+key-routing clarification before surfacing; not owner-approved.** The owner
+reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
 appears.
@@ -113,9 +113,11 @@ In the joined clean-EOF dispatcher:
    already-rendered list; the following refresh then guarantees post-curation
    repaint for `off` and every terminal mode instead of relying on the earlier
    tracker event to lose a race with curation.
-5. For an admitted completion, route the namespaced key and call the source's
-   existing `mark_played(raw, true)` while retaining watch-edit serialization.
-   Log failure without rolling back local completion or sequence state.
+5. For an admitted completion, route its namespaced watch key when present,
+   falling back to the play key only when there is no distinct watch identity,
+   and call that owning source's existing `mark_played(raw, true)` while
+   retaining watch-edit serialization. Log failure without rolling back local
+   completion or sequence state.
 6. Release the watch-edit lock. Do not call the public `set_watched` command:
    its user-edit undo/publication behavior is wrong for an already-proven clean
    EOF.
@@ -391,3 +393,22 @@ goal-only rule landed in `.agents/playbooks/reviewloop.md` and
 Round outcome: the reviewed head is accepted. Both comments are concrete,
 compatible hardening, so they are incorporated before owner surfacing. That
 creates a new plan head; r6 asks the same unframed goal question against it.
+
+**r6 — 2026-07-16T06:51:32Z — base `b42b3a7`, head `f57d6a4`; verdict
+`accepted`.**
+
+- Claude Code 2.1.211 (`claude-fable-5`) received the same neutral goal
+  question plus pinned/read-only/schema mechanics. It returned the exact SHAs,
+  `guard_confirmed: false`, and no material finding.
+- Claude verified the root-cause shape, lock order, mock controls, revised
+  generation proof, and both r5 hardenings. It judged the redundant terminal
+  refresh intentional and the Resume-hub seed assumption self-correcting under
+  the required red proof.
+- One non-material wording comment is incorporated: the automatic played write
+  explicitly routes the watch key when present, rather than leaving a cold
+  implementer to infer that a merged item's playback key may name a different
+  server.
+
+Round outcome: the reviewed head is accepted. The key-routing clarification
+creates a new plan head; r7 asks the identical unframed goal question before
+owner surfacing.
