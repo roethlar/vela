@@ -10,6 +10,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `ui-s1` ACTIVE 2026-07-16: theme-correct visual-language foundation is
+implemented through `c1c4db4`; primary Claude code review and independent Grok
+second review are pending. Detail: `.agents/review/findings/ui-s1.md`.
+
 Finding `ceof-2` OPEN 2026-07-16: Claude Fable 5 plan `openreview` found that
 clean-EOF dispatch holds the app-wide watch-edit lock across potentially long
 offline playlist advancement. The finding is ADMITTED at LOW severity; no code

@@ -29,7 +29,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   tinted Settings actions); the plan now defines danger foreground, tinted
   secondary danger, and solid primary danger separately. Primary Claude plan
   `openreview` r4 accepted exact head `a5e818c` with no findings; Slice 1 code is
-  authorized and active.
+  authorized and implemented through `c1c4db4`. Canonical frontend checks,
+  separately red-proven source guards, normal and reduced-motion focused Linux
+  runs, final Linux E2E 25/25, and dark/light screenshot inspection are green.
+  The active external code-review status is owned by
+  `.agents/review/findings/ui-s1.md` and `.agents/review/index.md`.
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
