@@ -211,6 +211,26 @@ test("app.css exclusively owns the six shared visual primitives", () => {
   }
 });
 
+test("Continue Watching has no duplicate playback action row", () => {
+  const page = sources.get("src/routes/+page.svelte");
+  assert.ok(page, "the application page must exist");
+  assert.doesNotMatch(
+    page,
+    /\bflowactions\b|Playback choices for/,
+    "the centered carousel card already owns Play/Resume; do not add another action row",
+  );
+  assert.match(
+    page,
+    /onclick=\{\(\) => \(d === 0 \? play\(it\) : \(heroPos = i\)\)\}/,
+    "the centered carousel card must remain the playback control",
+  );
+  assert.match(
+    page,
+    /aria-label=\{d === 0 \? `\$\{hasResume\(it\) \? "Resume" : "Play"\}/,
+    "the centered carousel card must expose its dynamic Play/Resume action",
+  );
+});
+
 test("Icon names are typed, defined, used, and free of migrated raw UI glyphs", () => {
   const iconFile = "src/lib/Icon.svelte";
   const iconSource = sources.get(iconFile);
