@@ -9,14 +9,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Version 0.1.54** (`package.json`, both lockfiles,
+- **Version 0.1.55** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `c8aa15e`).
-
-- **UI IMAGE-LOADING POLISH SLICE 2 REVIEW VERIFIED:** primary Claude and the
-  owner-authorized Agy/Gemini substitute independently accepted the exact
-  implementation range with guard proofs. Version finalization remains; exact
-  evidence lives in `.agents/review/findings/ui-s2.md`.
+  agree, as of `49c0dc9`).
 
 - **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
   theme-correct foundation in `.agents/plans/ui-embellishments.md` now owns
@@ -27,19 +22,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   screenshot inspection are green. Primary Claude Fable 5 and independent Grok
   4.5 each accepted the exact code range with separate red/green guard proofs
   and no material findings. The owner is unavailable to playtest this track;
-  no playtest is required or pending. Slice 2's later activation is tracked
-  below; Slice 3 (subtle motion/empty-state pass) retains its owner go gate.
+  no playtest is required or pending. Slice 2 is complete below; Slice 3
+  (subtle motion/empty-state pass) retains its owner go gate.
   Exact review evidence: `.agents/review/findings/ui-s1.md`.
 
-- **UI EMBELLISHMENTS SLICE 2 AUTHORIZED 2026-07-16; IMPLEMENTATION ACTIVE.** The
-  owner's "continue" activates image-loading polish only. The refreshed
-  implementation contract in `.agents/plans/ui-embellishments.md` inventories
-  all runtime images, defines one cache/source-safe reveal action and fixed-frame
-  failure underlays, and specifies held-response Linux, reduced-motion, theme,
-  and source-contract evidence. Primary Claude Fable 5 returned a clean,
-  exact-SHA `openreview` on the refreshed contract; the code gate is open.
-  Slice 3 remains separately owner-gated; no owner playtest is required for
-  this UI track.
+- **UI EMBELLISHMENTS SLICE 2 COMPLETE at 0.1.55 (owner go 2026-07-16).** One
+  cache/source-safe reveal action now owns nine media-art surfaces over fixed
+  failure underlays; all ten runtime images decode asynchronously and the Plex
+  QR remains the sole no-fade exception. Implementation `830cabd`, real-app
+  selector repair `c22a07e`, version `49c0dc9`. Focused guards were separately
+  proven red, canonical frontend plus complete Rust verification passed, normal
+  and reduced-motion Linux runs passed, the full real-app suite passed 26/26,
+  and six dark/light screenshots were inspected. Primary Claude Fable 5 and the
+  owner-authorized independent Agy/Gemini substitute accepted the exact range
+  with separate guard proofs and no findings. No owner playtest is required or
+  pending. Slice 3 remains separately owner-gated. Exact evidence:
+  `.agents/review/findings/ui-s2.md`.
 
 - **CAROUSEL DUPLICATE PLAY ACTION CORRECTION COMPLETE at 0.1.54 (owner go
   2026-07-16).** Playlist S1 added a primary Play/Resume row beneath the
@@ -341,8 +339,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   behind the functional
   work above; "queue first, v1 polish goes to the bottom", where "queue" means the
   work queue, not the play queue):** (1) UI embellishments — Slice 1 is complete
-  at 0.1.53; Slice 2 is owner-authorized, plan-reviewed, and active; Slice 3
-  remains separately owner-gated
+  at 0.1.53 and Slice 2 at 0.1.55; Slice 3 remains separately owner-gated
   (`.agents/plans/ui-embellishments.md`; vibrancy CUT — Linux/Wayland first;
   motion SUBTLE, binding); (2) docs polish — a README that
   entices users to try it; (3) graphics + screenshots for socials. 2 and 3 are
@@ -387,7 +384,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
-- `.agents/plans/ui-embellishments.md` (SLICE 2 IMPLEMENTATION ACTIVE — v1.0.0 item 1)
+- `.agents/plans/ui-embellishments.md` (SLICES 1–2 COMPLETE; SLICE 3 OWNER-GATED — v1.0.0 item 1)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

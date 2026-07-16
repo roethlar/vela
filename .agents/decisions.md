@@ -1000,6 +1000,28 @@ earlier 2026-07-16 Claude-prompt decision. It preserves that decision's neutral
 plan-review rule and every independent-review, pinned-SHA, fail-closed, guard,
 and owner-action boundary.
 
+## 2026-07-16 - Agy with Gemini 3.1 Pro replaces Grok as the secondary reviewer
+
+Status: APPROVED (owner, 2026-07-16). STANDING.
+
+Decision:
+Claude remains the primary external reviewer for Codex-authored plans and
+code. Where an independent second reviewer is required, use Agy with the
+Gemini 3.1 Pro model in lieu of Grok. The current Agy catalog exposes that
+model as `Gemini 3.1 Pro (High)`. Historical Grok reviews remain valid evidence,
+but Grok is no longer the reviewer selected for new work.
+
+Reason:
+The owner explicitly replaced the secondary reviewer selection. The first
+Agy/Gemini run completed the same pinned UI embellishments Slice 2 review with
+independently verified red and restored-green proof.
+
+Supersedes:
+Only the named secondary-reviewer selection in the preceding 2026-07-16
+Claude-primary decision. Claude's primary role and all distinct-playbook,
+independence, pinned-SHA, fail-closed, guard-proof, and owner-action boundaries
+remain unchanged.
+
 ## 2026-07-16 - Natural episode completion owns watched state and successor repaint
 
 Status: APPROVED (owner, 2026-07-16). Implementation plan:

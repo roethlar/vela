@@ -1,11 +1,11 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**SLICE 2 AUTHORIZED 2026-07-16; REFRESHED PLAN REVIEW CLEAN; IMPLEMENTATION
-ACTIVE.** The owner's "continue" activates image-loading polish only. Slice 1 is
-complete at Vela 0.1.53: the theme-correct visual-language foundation is
-implemented, guard-proven, visually inspected, and accepted by primary Claude
-plus independent Grok. Slice 3 retains its separate go gate. The plan was queued
+**SLICE 2 COMPLETE AT VELA 0.1.55; SLICE 3 OWNER-GATED.** Slice 1 is complete
+at Vela 0.1.53 and Slice 2 image-loading polish is implemented, guard-proven,
+visually inspected, canonically verified, and accepted by primary Claude plus
+the owner-authorized independent Agy/Gemini substitute. Slice 3 retains its
+separate go gate. The plan was queued
 2026-07-10 at the bottom of the functional work; that preceding work is now
 clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
 slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
@@ -408,6 +408,34 @@ proof, and no material comments. The fail-closed record is
 `.agents/review/findings/ui-s1.md`. At Slice 1 close, Slices 2–3 were still
 unauthorized; Slice 2 was activated separately on 2026-07-16 as recorded in the
 current status, while Slice 3 remains gated.
+
+## Slice 2 implementation record
+
+Implementation landed at `830cabd`; the first real-app run exposed and fixed a
+nested season-card selector assumption at `c22a07e`; `49c0dc9` versioned the
+independently shippable slice as 0.1.55. One source-aware Svelte action now
+owns successful, failed, cached, changed-source, stale-work, and cleanup
+behavior. Nine media-art images reveal over fixed title/icon/surface underlays;
+the Plex QR remains the sole no-fade exception while all ten runtime images use
+asynchronous decoding.
+
+The ordinary-load, changed-source/cache, image inventory, failure-underlay,
+opacity/duration, and reduced-motion guard families were independently proven
+red for the intended reasons and restored green. Canonical frontend checks and
+the complete MSRV/stable/clippy/test/audit Rust set passed at 0.1.55 with zero
+known vulnerabilities. Fresh-build focused normal and reduced-motion Linux
+runs passed; the reduced-motion assertion was proven non-vacuous with an
+injected 180ms exception; the final real-app suite passed 26/26. Six exact-head
+dark/light held, loaded, and failed-state screenshots were inspected without an
+owner playtest.
+
+Primary Claude Code 2.1.211 (`claude-fable-5`) and the owner-authorized
+independent Agy 1.1.3 (`Gemini 3.1 Pro (High)`) both accepted exact reviewed
+head `0ccb269` against base `e98220e` with `guard_confirmed:true`, independent
+red/restored-green proof, and no material comments. Grok's failed attempts were
+discarded fail-closed and remain in the record rather than counting as review.
+Exact evidence: `.agents/review/findings/ui-s2.md`. Slice 3 remains
+unauthorized.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling

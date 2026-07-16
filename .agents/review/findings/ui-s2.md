@@ -3,10 +3,11 @@
 **Severity**: MEDIUM — media art could pop into place, disappear into a blank
 frame on failure, or retain stale loaded state when an image URL changed.
 **Status**: Verified — primary Claude and owner-authorized independent Agy
-accepted with `guard_confirmed:true`; version bump pending
+accepted with `guard_confirmed:true`; complete at Vela 0.1.55
 **Branch**: `main` (approved Slice 2 implementation)
 **Commit**: `830cabda963bb96ffa1eb525c5cc08a80f246def` plus focused E2E selector fix
 `c22a07edc075576804cec3e7d1ca9f493eb436ef`
+**Version**: 0.1.55 at `49c0dc9`
 
 ## Evidence
 
