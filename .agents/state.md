@@ -167,8 +167,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **PLAYLIST IMPLEMENTATION ACTIVE: `.agents/plans/playlists.md`** (approved and
-  authorized 2026-07-15; S1 and S2 landed and were externally accepted, S3 is
-  next).
+  authorized 2026-07-15; S1 through S3 landed and were externally accepted, S4
+  is next).
   Product model and the two durable
   rulings: `.agents/decisions.md`
   (2026-07-14 — no play queue; video stays external). Five slices.
@@ -187,9 +187,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     independent Grok acceptances at r1). The shared backend path is now the sole
     play-start writer; failed launches create no recent and preserve tombstones,
     and the matching end callback cannot overtake its start record. Exact guard
-    and review trail: `.agents/review/findings/pl-s2.md`. S3 must add per-play
-    session identity before enabling auto-advance so a replaced tracker's stale
-    finish cannot mutate the newer playback session.
+    and review trail: `.agents/review/findings/pl-s2.md`.
+  - **S3 (durable Vela playlists and session-safe sequence playback) is
+    complete** (`304f493`, two independent Grok acceptances at r1). The
+    fail-closed JSON store, stable entries, editor, cross-source routing,
+    retained unavailable entries, and exact-session/fresh-anchor advancement
+    were independently red-proved; restored Rust passed 118 tests and Linux
+    real-app E2E passed 20/20. Removed sources are pre-marked unavailable;
+    configured-but-offline sources are skipped at route time. Exact guard and
+    review trail: `.agents/review/findings/pl-s3.md`.
   - **Already true, and it is what makes this cheap:** item keys are namespaced
     `<source_id>:<raw>` and `Registry::route` (`source/mod.rs:414`) dispatches per
     item, so a list mixing Plex and Jellyfin items already plays today.

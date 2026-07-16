@@ -383,8 +383,34 @@ path without resurrecting queue or test-only dispatch state. Before S3 enables
 auto-advance, add a per-play session identity so a replaced tracker's delayed
 finish cannot re-front an old item or stamp a newer same-key session.
 
-Next implementation slice: S3, Vela-native playlist persistence, editing,
-mixed-source playback, and cursor-driven auto-advance.
+### S3 — complete and externally accepted 2026-07-15
+
+Commit `304f493` adds a fail-closed, owner-only `playlists.json` store; stable
+playlist entries and full snapshots; durable CRUD with duplicates; retained
+unavailable entries; a sidebar editor and Add to Playlist submenu with owned
+status; and mixed-source playback that binds completion and advancement to the
+exact play session. Advancement re-reads the store, re-anchors on the stable
+entry ID, skips removed/offline sources, resumes later entries silently, and
+never writes the playlist while playing.
+
+The coder separately red-proved the storage, schema, CRUD, availability,
+session, recency, UI, persistence, stable-anchor, skip, and resume behaviors.
+Restored gates passed exact Node 26.5.0/npm 12.0.1, zero npm vulnerabilities,
+Svelte 0/0, frontend build, Rust 1.89 and stable checks, Clippy with warnings
+denied, 118 Rust tests, zero RustSec vulnerabilities with 17 allowed upstream
+warnings, and Linux real-app E2E 20/20. Two memory-isolated Grok 0.2.101 /
+`grok-4.5` sessions reviewed exact base `cdfc91a` and head `304f493`, each
+independently produced a focused red/green guard proof in a separate detached
+worktree, and accepted with no comments. Exact evidence:
+`.agents/review/findings/pl-s3.md`.
+
+Removed sources are pre-marked unavailable. A source that remains configured
+but is currently offline is discovered and skipped only when routing playback,
+because the registry exposes only constructed live sources; this is the
+accepted S3 limitation.
+
+Next implementation slice: S4, read-only Plex, Jellyfin, and Emby server
+playlists grouped beneath their source.
 
 ## Verification
 
