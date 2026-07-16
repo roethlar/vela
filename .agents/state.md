@@ -13,6 +13,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
   agree, as of `52e1a67`).
 
+- **UI EMBELLISHMENTS SLICE 1 ACTIVE (owner go 2026-07-16).** Implement only
+  the theme-correct foundation in `.agents/plans/ui-embellishments.md`: token
+  correctness, shared visual primitives, and icon unification. Slices 2–3 keep
+  separate go gates. The owner cannot playtest; captured dark/light visual
+  evidence, keyboard/reduced-motion inspection, canonical frontend checks, and
+  Linux E2E replace that gate. Primary Claude plan `openreview` is required
+  before code and primary Claude `codereview` after the slice; Grok is the
+  independent second reviewer.
+
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
   `.agents/plans/edit-error-auto-dismiss.md`. Failed watch-state edit errors
@@ -345,8 +354,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
-- `.agents/plans/ui-embellishments.md` (QUEUED — v1.0.0 item 1, parked at the
-  bottom)
+- `.agents/plans/ui-embellishments.md` (SLICE 1 ACTIVE — v1.0.0 item 1)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

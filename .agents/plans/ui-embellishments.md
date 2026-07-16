@@ -1,9 +1,11 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**QUEUED 2026-07-10 — decisions resolved, parked at the BOTTOM of the
-queue on owner order ("queue first, v1 polish goes to the bottom");
-per-slice go still required when picked up.** Owner rulings 2026-07-10:
+**SLICE 1 AUTHORIZED 2026-07-16 — owner go: "Work on the UI stuff."
+Implement and review only the theme-correct visual-language foundation in
+Slice 1. Slices 2 and 3 retain separate go gates.** The plan was queued
+2026-07-10 at the bottom of the functional work; that preceding work is now
+clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
 slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
 carving out a macos specific style is probably not worth it unless it's
 trivial", and it is not trivial (private API + transparent window +
@@ -59,8 +61,30 @@ compositor; Windows acrylic/mica is its own look), requires
 `macos-private-api` + transparent window + token rework for translucent
 surfaces. Real native-feel payoff, real cost — owner decision below.
 
-## Slices (each independently shippable: commit + reviewloop + version
-bump + owner playtest; ordered so later slices layer on earlier ones)
+## Slice 1 design calibration (2026-07-16)
+
+- **Subject / audience / job:** Vela is a desktop cinema-library browser for
+  people who care about their own server, artwork, and HDR playback. The UI's
+  single job is to make choosing and starting a title feel immediate.
+- **Color:** retain every existing theme's semantic palette. Slice 1 may add
+  derived accent tint/glow primitives with `color-mix`, but no new brand color
+  or theme-specific exception.
+- **Type:** retain Geist Variable for display, body, and utility roles. This
+  foundation slice fixes consistency, not typography; introducing a decorative
+  face would compete with poster artwork and violate the approved non-goals.
+- **Layout:** sidebar, cover-flow hero, rails, grids, and overlays remain
+  structurally unchanged.
+- **Signature:** the dimensional Continue Watching cover-flow and the user's
+  media art remain Vela's memorable element. Shared controls and line icons
+  become quieter and more coherent around it.
+- **Self-critique:** a new palette, font pairing, or decorative surface would
+  make this slice look more visibly "designed" but would be generic polish and
+  scope expansion. The subject-specific choice is restraint: let cinema art and
+  the cover-flow carry personality while removing theme and glyph drift.
+
+## Slices (each independently shippable: commit + primary Claude code review +
+independent Grok second review + version bump; ordered so later slices layer
+on earlier ones)
 
 ### Slice 1 — Foundation: theme-correct states, one visual language
 No new visuals; makes every later slice land evenly across all themes.
@@ -137,8 +161,11 @@ the record of what was evaluated; revisit only on a new owner ask.
   explicitly).
 - Theme sweep per slice: spot-check dark + one light theme (tokens, not
   per-theme CSS, should make the rest follow).
-- Owner playtest per slice — visual polish is owner-judged; screenshots
-  in the PR-style summary for before/after.
+- The owner is not available to playtest this track (explicit 2026-07-16).
+  Owner playtest is not a slice gate. Capture before/after screenshots in the
+  default dark theme and one light theme; inspect keyboard focus, the reduced-
+  motion state, and affected responsive layouts locally; include that evidence
+  with the automated verification and review record.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling
