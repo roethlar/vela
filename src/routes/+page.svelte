@@ -588,13 +588,16 @@
       }
       if (attempt !== continuationAttempt || !next) return;
       if (continuationSeen.has(next.ratingKey)) return;
-      continuationSeen.add(next.ratingKey);
+      const selectedNext = next;
       const session = await invoke<string | null>("play_item", {
-        item: next,
+        item: selectedNext,
         startFromBeginning: false,
         expectedSession: completed.sessionId,
       });
-      if (attempt === continuationAttempt) continuationSession = session;
+      if (attempt !== continuationAttempt || session === null) return;
+      continuationSeen.add(selectedNext.ratingKey);
+      continuationSession = session;
+      await refreshWatchState();
     } catch (e) {
       if (attempt === continuationAttempt) {
         setError(`Couldn't continue playing — ${String(e)}`);

@@ -1,6 +1,7 @@
 // Default TV-only continuation: next episode, season rollover, end-of-show,
 // and a delayed lookup that must yield to a newer manual play.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import {
@@ -91,6 +92,28 @@ const playbackInfoIds = () =>
     .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
     .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]);
 
+const resumeResponses = () =>
+  mock.state.served.filter(
+    (response) => response.path === `/Users/${mock.userId}/Items/Resume`,
+  ).length;
+
+function resetMockPlaybackState() {
+  mock.state.requests.length = 0;
+  mock.state.served.length = 0;
+  mock.state.playedArrivals.length = 0;
+  mock.state.playedServed.length = 0;
+  mock.state.checkins.length = 0;
+  for (const data of Object.values(mock.state.userData)) {
+    data.played = false;
+    data.positionTicks = 0;
+  }
+  // The faithful Resume hub must carry the same two items as the seeded local
+  // recents. E1 therefore remains a live stale-hub threat until PlayedItems is
+  // actually served.
+  mock.state.userData.e1.positionTicks = 10_000_000;
+  mock.state.userData.manual.positionTicks = 10_000_000;
+}
+
 export default {
   name: 'continuetv',
 
@@ -137,7 +160,10 @@ export default {
         ],
         s2: [episode('e3', 'Episode Three', 's2', 2, 1, 'e3.mp4')],
       },
+      serveResume: true,
     });
+    mock.state.userData.e1.positionTicks = 10_000_000;
+    mock.state.userData.manual.positionTicks = 10_000_000;
     // Missing continue_playing is intentional: only-tv is the default.
     seedConfig(configRoot, [mockSource(mock)], { recents: seededRecents() });
     seedPlaylists(configRoot, [
@@ -162,6 +188,19 @@ export default {
   },
 
   async run({ driver, screenshot, configRoot, restart }) {
+    const configFile = path.join(configRoot, 'config', 'vela', 'config.json');
+    const readConfig = () => JSON.parse(fs.readFileSync(configFile, 'utf8'));
+    const centeredEpisode = () =>
+      driver.exec(
+        `return document.querySelector('[aria-label="Continue watching"] + .flowmeta .y')?.textContent.trim() ?? null`,
+      );
+    const exactEpisodeHero = (episodeText) =>
+      driver.exec(
+        `const cards = [...document.querySelectorAll('[aria-label="Continue watching"] .flowcard')];
+         return document.querySelector('.flowmeta .y')?.textContent.trim() === ${JSON.stringify(episodeText)}
+           && cards.filter((card) => card.getAttribute('title') === 'Race Show').length === 1;`,
+      );
+
     await driver.waitFor(
       `return document.querySelectorAll('[aria-label="Continue watching"] .flowcard').length === 2`,
       'the seeded Continue Watching flow',
@@ -179,35 +218,59 @@ export default {
     const quitSockets = mpvSocketSnapshot();
     await driver.click(await driver.find('css selector', '.flowactions button.primary'));
     const quitEpisode = await nextMpv(quitSockets, 'e1');
+    const quitPlayedArrivals = mock.state.playedArrivals.length;
+    const quitPlayedServed = mock.state.playedServed.length;
+    const quitTombstones = [...(readConfig().hidden_from_continue ?? [])];
+    const quitResumeResponses = resumeResponses();
+    const quitStoppedResponses = mock.state.served.filter(
+      (response) =>
+        response.method === 'POST' && response.path === '/Sessions/Playing/Stopped',
+    ).length;
     quitEpisode.quit();
     quitEpisode.close();
     await pollUntil(
       () =>
-        mock.state.served.some(
+        mock.state.served.filter(
           (response) =>
             response.method === 'POST' && response.path === '/Sessions/Playing/Stopped',
-        ),
+        ).length > quitStoppedResponses,
       'the user-quit Stopped response',
     );
+    await pollUntil(
+      () => resumeResponses() > quitResumeResponses,
+      'the user-quit Home repaint',
+    );
     await holdsFor(
-      () =>
-        playbackInfoIds().length > 1
-          ? `user quit incorrectly continued: ${playbackInfoIds().join(',')}`
-          : false,
+      async () => {
+        if (playbackInfoIds().length > 1) {
+          return `user quit incorrectly continued: ${playbackInfoIds().join(',')}`;
+        }
+        if (mock.state.playedArrivals.length !== quitPlayedArrivals) {
+          return 'user quit sent a PlayedItems request';
+        }
+        if (mock.state.playedServed.length !== quitPlayedServed) {
+          return 'user quit received a PlayedItems response';
+        }
+        const tombstones = readConfig().hidden_from_continue ?? [];
+        if (JSON.stringify(tombstones) !== JSON.stringify(quitTombstones)) {
+          return `user quit changed completion tombstones: ${JSON.stringify(tombstones)}`;
+        }
+        if ((await centeredEpisode()) !== 'S1 · E1 – Episode One') {
+          return `the quit episode stopped being the centered eligible item`;
+        }
+        const action = await driver.exec(
+          `return document.querySelector('.flowactions button.primary')?.textContent.trim() ?? null`,
+        );
+        return action === 'Resume' ? false : `the quit item action became ${JSON.stringify(action)}`;
+      },
       2_500,
-      'user quit must not play the next episode',
+      'user quit must not curate, mark played, or continue',
     );
     assert.deepEqual(playbackInfoIds(), ['e1']);
 
     await restart(() => {
       seedConfig(configRoot, [mockSource(mock)], { recents: seededRecents() });
-      mock.state.requests.length = 0;
-      mock.state.served.length = 0;
-      mock.state.checkins.length = 0;
-      for (const data of Object.values(mock.state.userData)) {
-        data.played = false;
-        data.positionTicks = 0;
-      }
+      resetMockPlaybackState();
     });
     await driver.waitFor(
       `return document.querySelectorAll('[aria-label="Continue watching"] .flowcard').length === 2`,
@@ -217,8 +280,49 @@ export default {
     const seen = mpvSocketSnapshot();
     await driver.click(await driver.find('css selector', '.flowactions button.primary'));
     const first = await nextMpv(seen, 'e1');
+    const cleanPlayedArrivals = mock.state.playedArrivals.length;
+    const cleanPlayedServed = mock.state.playedServed.length;
+    mock.state.playedDelayMs = 8_000;
+    // Hold successful E2 negotiation long enough for both pre-successor Home
+    // reads to settle without an E2 recent. Only the required post-start
+    // refresh can then make E2 render.
+    mock.state.playbackInfoDelayMs = 3_000;
     await finishNaturally(first);
+    await pollUntil(
+      () => mock.state.playedArrivals.length > cleanPlayedArrivals,
+      'the automatic E1 PlayedItems request to arrive',
+    );
     const second = await nextMpv(seen, 'e2');
+    assert.equal(
+      mock.state.playedServed.length,
+      cleanPlayedServed,
+      'E2 must launch before the delayed E1 PlayedItems response is served',
+    );
+    await pollUntil(
+      async () => {
+        if (mock.state.playedServed.length !== cleanPlayedServed) {
+          throw new Error('the E1 PlayedItems response settled before the pre-response repaint proof');
+        }
+        return exactEpisodeHero('S1 · E2 – Episode Two');
+      },
+      'E2 rendered with E1 suppressed while PlayedItems is parked',
+      { timeoutMs: 7_000 },
+    );
+    assert.equal(mock.state.userData.e1.played, false, 'the delayed server mutation is still pending');
+    await pollUntil(
+      () => mock.state.playedServed.length > cleanPlayedServed,
+      'the delayed E1 PlayedItems response',
+      { timeoutMs: 12_000 },
+    );
+    assert.equal(mock.state.userData.e1.played, true, 'clean E1 EOF must mark the server item played');
+    await holdsFor(
+      async () =>
+        (await exactEpisodeHero('S1 · E2 – Episode Two'))
+          ? false
+          : 'E1 resurfaced or E2 left the hero after PlayedItems settled',
+      1_000,
+      'the post-response hero must retain E2 and suppress E1',
+    );
     await finishNaturally(second);
     const third = await nextMpv(seen, 'e3');
     await finishNaturally(third);
@@ -250,13 +354,7 @@ export default {
     // the user's newer player.
     await restart(() => {
       seedConfig(configRoot, [mockSource(mock)], { recents: seededRecents() });
-      mock.state.requests.length = 0;
-      mock.state.served.length = 0;
-      mock.state.checkins.length = 0;
-      for (const data of Object.values(mock.state.userData)) {
-        data.played = false;
-        data.positionTicks = 0;
-      }
+      resetMockPlaybackState();
     });
     await driver.waitFor(
       `return document.querySelectorAll('[aria-label="Continue watching"] .flowcard').length === 2`,

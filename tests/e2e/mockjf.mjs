@@ -61,6 +61,11 @@ export function startMockJellyfin({
     ),
     requests: [], // { method, path, query } in arrival order
     served: [], // { method, path, status } in RESPONSE order (see json())
+    // Dedicated watch-edit witnesses. Generic requests/served remain the
+    // authoritative whole-server logs, while these make it explicit whether a
+    // delayed PlayedItems mutation has merely arrived or has actually replied.
+    playedArrivals: [], // { method, path, itemId } in arrival order
+    playedServed: [], // { method, path, itemId, status } in response order
     checkins: [], // parsed /Sessions/Playing* bodies: { endpoint, body }
     contractViolations: [], // Items requests whose query broke the client contract
     // Scenario-mutable machinery (library-refresh-scan plan). Handlers read
@@ -493,6 +498,8 @@ export function startMockJellyfin({
       path.startsWith(`/Users/${userId}/`) &&
       findMovie(played[1])
     ) {
+      const playedRequest = { method: req.method, path, itemId: played[1] };
+      state.playedArrivals.push(playedRequest);
       // Bound at ARRIVAL. The edit's own server call is the longest wait in
       // `setWatched` and the user can leave DURING it — so a scenario has to be able
       // to park the edit itself, not just its recovery repaint (r20, pagefail case 9).
@@ -501,7 +508,11 @@ export function startMockJellyfin({
       const playedDelay = state.playedDelayMs;
       if (playedDelay > 0) state.playedDelayMs = 0; // one-shot
       const respondPlayed = () => {
-        if (unauthPlayed) return json({ error: "unauthenticated" }, 401);
+        if (unauthPlayed) {
+          json({ error: "unauthenticated" }, 401);
+          state.playedServed.push({ ...playedRequest, status: 401 });
+          return;
+        }
         // Real servers reset the resume point on BOTH transitions (Jellyfin
         // MarkPlayed/MarkUnplayed zero PlaybackPositionTicks; Plex scrobble/
         // unscrobble clears the view offset) — keeping it would let a stale
@@ -510,7 +521,8 @@ export function startMockJellyfin({
           state.userData[played[1]] = { played: true, positionTicks: 0 };
         if (req.method === "DELETE")
           state.userData[played[1]] = { played: false, positionTicks: 0 };
-        return json({});
+        json({});
+        state.playedServed.push({ ...playedRequest, status: 200 });
       };
       if (playedDelay > 0) {
         setTimeout(respondPlayed, playedDelay);
@@ -519,27 +531,28 @@ export function startMockJellyfin({
       return respondPlayed();
     }
     const pbinfo = /^\/Items\/([^/]+)\/PlaybackInfo$/.exec(path);
-    if (pbinfo && findMovie(pbinfo[1]) && state.failPlaybackInfo) {
+    if (pbinfo && findMovie(pbinfo[1])) {
+      const fail = state.failPlaybackInfo;
       const delay = state.playbackInfoDelayMs;
       if (delay > 0) state.playbackInfoDelayMs = 0; // one-shot, bound at ARRIVAL
-      const respond = () => json({ error: "mock: cannot resolve a stream" }, 500);
+      const respond = () => {
+        if (fail) return json({ error: "mock: cannot resolve a stream" }, 500);
+        return json({
+          MediaSources: [
+            {
+              Id: `ms-${pbinfo[1]}`,
+              SupportsDirectPlay: true,
+              SupportsDirectStream: true,
+            },
+          ],
+          PlaySessionId: `ps-${pbinfo[1]}`,
+        });
+      };
       if (delay > 0) {
         setTimeout(respond, delay);
         return;
       }
       return respond();
-    }
-    if (pbinfo && findMovie(pbinfo[1])) {
-      return json({
-        MediaSources: [
-          {
-            Id: `ms-${pbinfo[1]}`,
-            SupportsDirectPlay: true,
-            SupportsDirectStream: true,
-          },
-        ],
-        PlaySessionId: `ps-${pbinfo[1]}`,
-      });
     }
     if (path.startsWith("/Sessions/Playing")) {
       const endpoint = path.slice("/Sessions/Playing".length) || "/Start";

@@ -1,6 +1,7 @@
 // Continue Playing On must walk the literal rendered Continue Watching list,
 // never repeat a key, and begin only after a playlist's final item.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import {
@@ -70,6 +71,14 @@ const stoppedResponses = () =>
       response.method === 'POST' && response.path === '/Sessions/Playing/Stopped',
   ).length;
 
+const isResumeRequest = (request) =>
+  request.path === `/Users/${mock.userId}/Items/Resume`;
+
+function requestIndexAfter(start, predicate) {
+  const relative = mock.state.requests.slice(start).findIndex(predicate);
+  return relative < 0 ? -1 : start + relative;
+}
+
 export default {
   name: 'continueon',
 
@@ -113,6 +122,8 @@ export default {
   },
 
   async run({ driver, screenshot, configRoot, restart }) {
+    const configFile = path.join(configRoot, 'config', 'vela', 'config.json');
+    const readConfig = () => JSON.parse(fs.readFileSync(configFile, 'utf8'));
     await driver.waitFor(
       `return document.querySelectorAll('[aria-label="Continue watching"] .flowcard').length === 3`,
       'the merged three-item Continue Watching flow',
@@ -139,25 +150,128 @@ export default {
       ).length;
     const resumeAskedBefore = resumeRequests();
     const resumeServedBefore = resumeResponses();
+    const alphaRequestBoundary = mock.state.requests.length;
     mock.state.delayNextResumeMs = 5_000;
     await finishNaturally(alpha);
     await pollUntil(
       () => resumeRequests() > resumeAskedBefore,
       'the parked post-EOF Resume request',
     );
+    const earlyAlphaResumeIndex = requestIndexAfter(alphaRequestBoundary, isResumeRequest);
     const beta = await nextMpv(seen, 'on-b');
-    assert.equal(
-      resumeResponses(),
-      resumeServedBefore,
-      'Beta must be chosen from the already-rendered list before the fresh Resume response',
+    const betaPlaybackIndex = requestIndexAfter(
+      earlyAlphaResumeIndex + 1,
+      (request) => request.path === '/Items/on-b/PlaybackInfo',
+    );
+    // Early tracker refresh + dispatcher refresh + post-start refresh. The
+    // latest Resume after PlaybackInfo is therefore the post-start request,
+    // while `state.requests` supplies the required arrival provenance.
+    await pollUntil(
+      () => resumeRequests() >= resumeAskedBefore + 3,
+      'all post-Alpha Resume requests',
+    );
+    const postStartAlphaResumeIndex = mock.state.requests.reduce(
+      (latest, request, index) =>
+        index > betaPlaybackIndex && isResumeRequest(request) ? index : latest,
+      -1,
+    );
+    assert.ok(
+      earlyAlphaResumeIndex < betaPlaybackIndex && betaPlaybackIndex < postStartAlphaResumeIndex,
+      `expected early Resume < Beta PlaybackInfo < post-start Resume, got ${earlyAlphaResumeIndex}, ${betaPlaybackIndex}, ${postStartAlphaResumeIndex}`,
     );
     await pollUntil(
-      () => resumeResponses() > resumeServedBefore,
-      'the delayed Resume response',
+      () => resumeResponses() >= resumeServedBefore + 3,
+      'all post-Alpha Resume responses',
       { timeoutMs: 10_000 },
     );
+
+    // Charlie is deliberately retained only in the already-rendered hub. The
+    // early post-Beta Home load sees neither a Charlie server resume point nor
+    // a Charlie local recent, and its response is held until after the newer
+    // post-start load has centered Charlie.
+    mock.state.userData['on-c'].positionTicks = 0;
+    const betaResumeAskedBefore = resumeRequests();
+    const betaResumeServedBefore = resumeResponses();
+    const betaRequestBoundary = mock.state.requests.length;
+    mock.state.delayNextResumeMs = 8_000;
+    mock.state.playbackInfoDelayMs = 3_000;
     await finishNaturally(beta);
+    await pollUntil(
+      () => requestIndexAfter(betaRequestBoundary, isResumeRequest) >= 0,
+      'the parked early post-Beta Resume request',
+    );
+    const earlyBetaResumeIndex = requestIndexAfter(betaRequestBoundary, isResumeRequest);
+    await pollUntil(
+      () =>
+        requestIndexAfter(
+          earlyBetaResumeIndex + 1,
+          (request) => request.path === '/Items/on-c/PlaybackInfo',
+        ) >= 0,
+      'the delayed successful Charlie PlaybackInfo request',
+    );
+    const charliePlaybackIndex = requestIndexAfter(
+      earlyBetaResumeIndex + 1,
+      (request) => request.path === '/Items/on-c/PlaybackInfo',
+    );
+    assert.ok(
+      earlyBetaResumeIndex < charliePlaybackIndex,
+      'the old Resume load must begin before Charlie stream negotiation',
+    );
+    assert.equal(
+      mock.state.userData['on-c'].positionTicks,
+      0,
+      'the old Resume tuple must have no Charlie hub item',
+    );
+    await holdsFor(
+      () => {
+        const hasCharlie = (readConfig().recents ?? []).some(
+          (entry) => entry.item?.ratingKey === 'jf-mock:on-c',
+        );
+        return hasCharlie ? 'Charlie was recorded before delayed PlaybackInfo succeeded' : false;
+      },
+      1_000,
+      'the old Home load must settle its local reads before Charlie is recorded',
+    );
     const charlie = await nextMpv(seen, 'on-c');
+    await pollUntil(
+      () =>
+        (readConfig().recents ?? []).some(
+          (entry) => entry.item?.ratingKey === 'jf-mock:on-c' && entry.ended_at_ms === 0,
+        ),
+      'the open Charlie local recent',
+    );
+    await pollUntil(
+      () => resumeRequests() >= betaResumeAskedBefore + 3,
+      'all post-Beta Resume requests',
+    );
+    const postCharlieResumeIndex = mock.state.requests.reduce(
+      (latest, request, index) =>
+        index > charliePlaybackIndex && isResumeRequest(request) ? index : latest,
+      -1,
+    );
+    assert.ok(
+      charliePlaybackIndex < postCharlieResumeIndex,
+      'Charlie PlaybackInfo must precede its post-start Home request',
+    );
+    await driver.waitFor(
+      `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'On Charlie'`,
+      'Charlie centered by the post-start local recent',
+    );
+    await pollUntil(
+      () => resumeResponses() >= betaResumeServedBefore + 3,
+      'all post-Beta Resume responses including the delayed old load',
+      { timeoutMs: 12_000 },
+    );
+    await holdsFor(
+      async () =>
+        (await driver.exec(
+          `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'On Charlie'`,
+        ))
+          ? false
+          : 'the delayed older tuple displaced Charlie',
+      1_000,
+      'the stale post-Beta generation must not overwrite Charlie',
+    );
     await finishNaturally(charlie);
     await pollUntil(() => stoppedResponses() >= 3, 'three final Stopped responses');
     await holdsFor(

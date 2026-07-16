@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeClips, mockSource, pollUntil, seedConfig } from '../helpers.mjs';
+import { goHome, makeClips, mockSource, pollUntil, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 
@@ -146,12 +146,30 @@ export default {
 
     const first = await nextPlayer('server-one');
     await first.setProp('pause', true);
+    // Establish Home before the intermediate EOF. A later navigation would
+    // perform its own load and could not prove the dispatcher repainted the
+    // backend-owned successor.
+    await goHome(driver);
+    await driver.waitFor(
+      `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'Server First'`,
+      'Server First rendered before server-playlist advancement',
+    );
+    // Hold the successor until the early Home read has captured no Server
+    // Second recent. The dispatcher refresh is then the only repaint source.
+    healthy.state.playbackInfoDelayMs = 3_000;
     await first.setProp('time-pos', 9.2);
     await first.setProp('pause', false);
     first.close();
 
     const second = await nextPlayer('server-two');
     await second.setProp('pause', true);
+    await driver.waitFor(
+      `const cards = [...document.querySelectorAll('[aria-label="Continue watching"] .flowcard')];
+       return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'Server Second'
+         && cards.some((card) => card.getAttribute('title') === 'Server Second')
+         && !cards.some((card) => card.getAttribute('title') === 'Server First');`,
+      'the dispatcher repaint with Server Second rendered and Server First suppressed',
+    );
     assert.equal(
       fs.existsSync(localStore),
       false,

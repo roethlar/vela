@@ -177,9 +177,54 @@ pub fn run() {
                 loop {
                     let completion = advance_notify.next().await;
                     let state = app_handle.state::<AppState>();
+                    // Serialize the whole admitted-completion transaction with
+                    // explicit watched-state edits. Local curation and sequence
+                    // release happen before the owning server write, so an
+                    // offline server cannot stall the next video; retaining the
+                    // lock across that write makes any later user edit win.
+                    let _edit = state.watch_edit_lock.lock().await;
+                    let admitted = match commands::admit_clean_completion(&completion) {
+                        Ok(admitted) => admitted,
+                        Err(error) => {
+                            eprintln!("vela: couldn't persist clean playback completion: {error}");
+                            continue;
+                        }
+                    };
+                    if !admitted {
+                        // A newer same-key/watch-key session owns the item now.
+                        // Skip every clean-completion side effect: no sequence
+                        // advance, terminal continuation, refresh, or server mark.
+                        continue;
+                    }
+
+                    use tauri::Emitter;
                     if commands::advance_playlist(&state, &completion.session_id).await {
-                        use tauri::Emitter;
-                        let _ = app_handle.emit("continue-playing", completion);
+                        // Terminal policy reads the literal carousel that was
+                        // rendered before this event. Publish continuation before
+                        // any refresh or slow server synchronization can replace it.
+                        let _ = app_handle.emit("continue-playing", completion.clone());
+                    }
+
+                    // Always publish an authoritative post-curation refresh.
+                    // For an intermediate playlist boundary, advance_playlist
+                    // has already recorded the backend-owned successor recent.
+                    let source_id = completion
+                        .item_key
+                        .split_once(':')
+                        .map(|(source, _)| source)
+                        .unwrap_or_default();
+                    let _ = app_handle.emit(
+                        "playback-ended",
+                        serde_json::json!({
+                            "sourceId": source_id,
+                            "itemKey": completion.item_key.clone(),
+                        }),
+                    );
+
+                    if let Err(error) =
+                        commands::mark_clean_completion_played(&state, &completion).await
+                    {
+                        eprintln!("vela: automatic played-state update failed: {error}");
                     }
                 }
             });

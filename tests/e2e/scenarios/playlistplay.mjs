@@ -7,6 +7,7 @@ import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import {
   holdsFor,
+  goHome,
   makeClips,
   mockSource,
   pollUntil,
@@ -285,6 +286,18 @@ export default {
     );
     const bytesAfterEdit = fs.readFileSync(playlistFile);
 
+    // Keep Home visible across the backend-owned boundary. Navigating there
+    // after A2 starts would itself refetch and make a missing dispatcher repaint
+    // pass vacuously.
+    await goHome(driver);
+    await driver.waitFor(
+      `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'Beta Start'`,
+      'the active Beta Start recent on Home before playlist advancement',
+    );
+    // Let the pre-successor Home read settle while A2 cannot yet be recorded;
+    // without the dispatcher repaint, A2 may exist in mpv/config but not here.
+    mockA.state.playbackInfoDelayMs = 3_000;
+
     async function releaseToEof(session) {
       await session.mpv.setProp('time-pos', 9.2);
       await session.mpv.setProp('pause', false);
@@ -307,20 +320,28 @@ export default {
         return false;
       }
     }, 'the dispatcher-owned open recent for A2');
+    await driver.waitFor(
+      `const cards = [...document.querySelectorAll('[aria-label="Continue watching"] .flowcard')];
+       return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'Alpha Edited Next'
+         && cards.some((card) => card.getAttribute('title') === 'Alpha Edited Next')
+         && !cards.some((card) => card.getAttribute('title') === 'Beta Start');`,
+      'the dispatcher repaint with A2 rendered and completed B0 suppressed',
+    );
 
     await releaseToEof(editedNext);
     const originalNext = await nextMpv(mockA.port, 'a1');
     await originalNext.mpv.setProp('pause', true);
     await pollUntil(() => {
       try {
-        const recent = readConfig().recents?.find(
-          (entry) => entry.item?.ratingKey === 'jf-a:a2',
+        const config = readConfig();
+        return (
+          !(config.recents ?? []).some((entry) => entry.item?.ratingKey === 'jf-a:a2')
+          && (config.hidden_from_continue ?? []).includes('jf-a:a2')
         );
-        return recent?.ended_at_ms > 0 && recent.item.viewOffsetMs > 0 && recent.item.viewOffsetMs < 20_000;
       } catch {
         return false;
       }
-    }, 'the final A2 dispatcher position stamp');
+    }, 'the clean A2 completion removal and tombstone');
 
     await releaseToEof(originalNext);
     const last = await nextMpv(mockB.port, 'b1');
@@ -336,18 +357,41 @@ export default {
     await releaseToEof(last);
     await pollUntil(() => {
       try {
-        const recent = readConfig().recents?.find(
-          (entry) => entry.item?.ratingKey === 'jf-b:b1',
+        const config = readConfig();
+        return (
+          !(config.recents ?? []).some((entry) => entry.item?.ratingKey === 'jf-b:b1')
+          && (config.hidden_from_continue ?? []).includes('jf-b:b1')
         );
-        return recent?.ended_at_ms > 0;
       } catch {
         return false;
       }
-    }, 'the final mixed-source position stamp');
+    }, 'the final mixed-source completion curation');
 
     assert.deepEqual(fs.readFileSync(playlistFile), bytesAfterEdit, 'playback never writes playlists.json');
     assert.deepEqual(playbackInfoIds(mockA), ['a2', 'a1']);
     assert.deepEqual(playbackInfoIds(mockB), ['b0', 'b0', 'b1']);
+    // Return to the durable playlist after the visible-Home guard so the
+    // original unavailable-entry assertion remains part of this run.
+    await driver.click(
+      await driver.find(
+        'xpath',
+        `//button[contains(@class,'sideitem') and normalize-space(.)='Playlists']`,
+      ),
+    );
+    await driver.waitFor(
+      `return !!document.querySelector('section.playlists .playlistgrid button[aria-label^="Open Sequence,"]')`,
+      'the Sequence playlist after playback',
+    );
+    await driver.click(
+      await driver.find(
+        'css selector',
+        'section.playlists .playlistgrid button[aria-label^="Open Sequence,"]',
+      ),
+    );
+    await driver.waitFor(
+      `return document.querySelectorAll('section.playlists ol.entries > li').length === 6`,
+      'the unchanged edited sequence after playback',
+    );
     assert.equal(
       await driver.exec(
         `return !![...document.querySelectorAll('section.playlists ol.entries > li')]

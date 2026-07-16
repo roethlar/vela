@@ -2187,6 +2187,12 @@ struct PlaybackSignals {
 pub(crate) struct PlaybackCompletion {
     pub session_id: String,
     pub item_key: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub watch_key: Option<String>,
+    /// Internal ordering evidence for exact-session curation. The continuation
+    /// payload remains ids only.
+    #[serde(skip)]
+    pub started_at_ms: u64,
     pub media_type: Option<String>,
 }
 
@@ -2526,18 +2532,23 @@ async fn play_by_key(
     // post-launch record attempt has completed, or finish() could run first
     // and leave a permanently unstamped open entry behind.
     let recents_ready = std::sync::Arc::new(PlayStartGate::default());
+    let playback_started_at_ms = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
     let _release_recents_on_return = OpenPlayStartGateOnDrop(recents_ready.clone());
-    // End-of-session notifier → the `playback-ended` UI event, emitted after
-    // the final server check-in so a re-fetch it triggers sees the new watch
-    // state. Payload carries ids only — never URLs or tokens.
+    // Every tracker tail publishes a refresh after its final sampled server
+    // check-in. That keeps quit/error progress current; a joined clean EOF gets
+    // a second, authoritative refresh from the async dispatcher after exact-
+    // session completion curation and any backend-owned successor start.
+    // Payloads carry ids only — never URLs or tokens.
     let on_end: Option<playback::EndNotify> = {
         use tauri::Emitter;
         let app = state.app_handle.get().cloned();
         let source_id = src.id().to_string();
         let item_key = item.rating_key.clone();
+        let watch_key = item.watch_key.clone();
         let media_type = item.media_type.clone();
         let session_id = session_id.to_string();
         let recents_ready = recents_ready.clone();
+        let playback_started_at_ms = playback_started_at_ms.clone();
         let advance = state.playback_advance.clone();
         Some(std::sync::Arc::new(move |position_ms: u64| {
             if !recents_ready.wait_succeeded() {
@@ -2565,6 +2576,8 @@ async fn play_by_key(
             advance.mark_ended(PlaybackCompletion {
                 session_id: session_id.clone(),
                 item_key: item_key.clone(),
+                watch_key: watch_key.clone(),
+                started_at_ms: playback_started_at_ms.load(Ordering::SeqCst),
                 media_type: media_type.clone(),
             });
         }) as playback::EndNotify)
@@ -2590,11 +2603,13 @@ async fn play_by_key(
     .and_then(|r| r);
     let recent = item.clone();
     let recent_session = session_id.to_string();
+    let completion_started_at_ms = playback_started_at_ms.clone();
     let played = after_successful_play(played, || {
         let started_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
             .unwrap_or(0);
+        completion_started_at_ms.store(started_at_ms, Ordering::SeqCst);
         if let Err(e) = config::update(move |cfg| {
             crate::recents::record_play_start(
                 cfg,
@@ -3148,6 +3163,42 @@ pub async fn server_playlist_play(
     .map(|_| ())
 }
 
+/// Persist local completion for a joined clean EOF. The caller holds
+/// `watch_edit_lock`, keeping this admission ordered with explicit watched-
+/// state edits and the later best-effort server synchronization.
+pub(crate) fn admit_clean_completion(completion: &PlaybackCompletion) -> Result<bool, String> {
+    let play_key = completion.item_key.clone();
+    let watch_key = completion.watch_key.clone();
+    let session_id = completion.session_id.clone();
+    let started_at_ms = completion.started_at_ms;
+    config::update(move |cfg| {
+        Ok(crate::recents::complete_clean_session(
+            cfg,
+            &play_key,
+            watch_key.as_deref(),
+            &session_id,
+            started_at_ms,
+        ))
+    })
+}
+
+/// Best-effort owning-server half of a locally admitted clean completion. A
+/// merged item may play through one source while another owns watch state, so
+/// its explicit watch key takes precedence. The caller retains
+/// `watch_edit_lock` across this await; a later user edit therefore wins.
+pub(crate) async fn mark_clean_completion_played(
+    state: &AppState,
+    completion: &PlaybackCompletion,
+) -> Result<(), String> {
+    let key = completion
+        .watch_key
+        .as_deref()
+        .unwrap_or(&completion.item_key);
+    let routed = state.registry.lock().await.route(key);
+    let (source, raw) = routed?;
+    source.mark_played(&raw, true).await
+}
+
 /// Handle one fully-finished clean EOF. Returns true only when the exact active
 /// single item or playlist genuinely ended, authorizing the frontend to apply
 /// Continue Playing. The UUID prevents queued older work from replacing a
@@ -3420,6 +3471,8 @@ mod tests {
         PlaybackCompletion {
             session_id: session_id.to_string(),
             item_key: item_key.to_string(),
+            watch_key: None,
+            started_at_ms: 10,
             media_type: Some("episode".to_string()),
         }
     }
@@ -3534,8 +3587,10 @@ mod tests {
         advance.mark_ended(completion("new", "test:new"));
         assert_eq!(advance.take_ready(), None);
 
-        advance.mark_ended(completion("old", "test:old"));
-        assert_eq!(advance.take_ready(), Some(completion("old", "test:old")));
+        let mut completed = completion("old", "test:old");
+        completed.watch_key = Some("plex:watch-owner".to_string());
+        advance.mark_ended(completed.clone());
+        assert_eq!(advance.take_ready(), Some(completed));
         assert_eq!(advance.take_ready(), None);
     }
 

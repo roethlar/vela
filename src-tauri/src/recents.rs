@@ -50,6 +50,22 @@ fn entry_matches(entry: &RecentEntry, key: &str) -> bool {
     entry.item.rating_key == key || entry.item.watch_key.as_deref() == Some(key)
 }
 
+fn entry_matches_completion(entry: &RecentEntry, play_key: &str, watch_key: Option<&str>) -> bool {
+    entry_matches(entry, play_key) || watch_key.is_some_and(|key| entry_matches(entry, key))
+}
+
+fn add_tombstones(cfg: &mut AppConfig, keys: impl IntoIterator<Item = String>) {
+    for key in keys {
+        if !cfg.hidden_from_continue.iter().any(|held| held == &key) {
+            cfg.hidden_from_continue.push(key);
+        }
+    }
+    if cfg.hidden_from_continue.len() > MAX_HIDDEN {
+        let excess = cfg.hidden_from_continue.len() - MAX_HIDDEN;
+        cfg.hidden_from_continue.drain(..excess);
+    }
+}
+
 /// Record a play starting: newest first, one entry per item, capped.
 #[cfg(test)]
 pub fn record(cfg: &mut AppConfig, item: ItemDto) {
@@ -126,6 +142,66 @@ pub fn finish_session(
     }
 }
 
+/// Admit a joined clean EOF for exactly the playback incarnation that produced
+/// it. A replacement session sharing either the play identity or the owning
+/// server's watch identity wins: stale completion work must not remove or hide
+/// that replay. Older matching snapshots are curated with the completed one,
+/// because they represent the same underlying watch identity and would
+/// otherwise keep the carousel stale. The tracker may already have dropped the
+/// exact entry at the watched threshold, so its recorded start stamp remains
+/// part of the completion signal. Returns whether the completion was admitted
+/// and may therefore be synchronized to the owning server.
+pub fn complete_clean_session(
+    cfg: &mut AppConfig,
+    play_key: &str,
+    watch_key: Option<&str>,
+    session_id: &str,
+    started_at_ms: u64,
+) -> bool {
+    let exact_position = cfg.recents.iter().position(|entry| {
+        entry_matches_completion(entry, play_key, watch_key)
+            && entry.session_id.as_deref() == Some(session_id)
+    });
+    let completed_start = exact_position
+        .and_then(|position| {
+            let recorded = cfg.recents[position].started_at_ms;
+            (recorded > 0).then_some(recorded)
+        })
+        .unwrap_or(started_at_ms);
+    let has_newer_match = cfg.recents.iter().enumerate().any(|(position, entry)| {
+        if !entry_matches_completion(entry, play_key, watch_key)
+            || entry.session_id.as_deref() == Some(session_id)
+        {
+            return false;
+        }
+        if completed_start == 0 || entry.started_at_ms > completed_start {
+            return true;
+        }
+        entry.started_at_ms == completed_start
+            && exact_position.is_none_or(|exact| position < exact)
+    });
+    if has_newer_match {
+        return false;
+    }
+
+    let mut keys = vec![play_key.to_string()];
+    if let Some(key) = watch_key {
+        keys.push(key.to_string());
+    }
+    cfg.recents.retain(|entry| {
+        let matching_snapshot = entry_matches_completion(entry, play_key, watch_key);
+        if matching_snapshot {
+            keys.push(entry.item.rating_key.clone());
+            if let Some(key) = &entry.item.watch_key {
+                keys.push(key.clone());
+            }
+        }
+        !matching_snapshot
+    });
+    add_tombstones(cfg, keys);
+    true
+}
+
 /// Stamp a session's final position onto its entry (and re-front it: it is
 /// now the most recent thing that happened). An entry past the watched
 /// threshold is finished and leaves the list — the hero shows only
@@ -193,15 +269,7 @@ pub fn hide(cfg: &mut AppConfig, rating_key: &str) -> String {
         }
     }
     unrecord(cfg, rating_key);
-    for key in keys {
-        if !cfg.hidden_from_continue.iter().any(|k| k == &key) {
-            cfg.hidden_from_continue.push(key);
-        }
-    }
-    if cfg.hidden_from_continue.len() > MAX_HIDDEN {
-        let excess = cfg.hidden_from_continue.len() - MAX_HIDDEN;
-        cfg.hidden_from_continue.drain(..excess);
-    }
+    add_tombstones(cfg, keys);
     server_key
 }
 
@@ -419,6 +487,215 @@ mod tests {
         assert_eq!(cfg.recents[0].session_id.as_deref(), Some("new"));
         assert_eq!(cfg.recents[0].item.view_offset_ms, Some(0));
         assert_eq!(cfg.recents[0].ended_at_ms, 0);
+    }
+
+    #[test]
+    fn clean_completion_removes_the_exact_session_and_tombstones_every_identity() {
+        let mut cfg = AppConfig::default();
+        let mut merged = item("local:/shows/one.mkv", Some(100_000));
+        merged.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, merged, false, "completed".into(), 10);
+
+        assert!(complete_clean_session(
+            &mut cfg,
+            "local:/shows/one.mkv",
+            Some("plex:42"),
+            "completed",
+            10,
+        ));
+        assert!(cfg.recents.is_empty());
+        assert_eq!(
+            cfg.hidden_from_continue,
+            vec!["local:/shows/one.mkv".to_string(), "plex:42".to_string()]
+        );
+    }
+
+    #[test]
+    fn clean_completion_tombstones_supplied_identities_after_threshold_removal() {
+        let mut cfg = AppConfig::default();
+        let mut older = item("jf:older-face", Some(100_000));
+        older.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, older, false, "older".into(), 10);
+        let mut merged = item("local:/shows/one.mkv", Some(100_000));
+        merged.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, merged, false, "completed".into(), 20);
+        finish_session(&mut cfg, "local:/shows/one.mkv", "completed", 96_000, 20);
+        assert_eq!(cfg.recents.len(), 1, "only the completed snapshot was removed");
+        assert_eq!(cfg.recents[0].session_id.as_deref(), Some("older"));
+
+        assert!(complete_clean_session(
+            &mut cfg,
+            "local:/shows/one.mkv",
+            Some("plex:42"),
+            "completed",
+            20,
+        ));
+        assert!(cfg.recents.is_empty(), "older matching snapshots are curated too");
+        assert_eq!(
+            cfg.hidden_from_continue,
+            vec![
+                "local:/shows/one.mkv".to_string(),
+                "plex:42".to_string(),
+                "jf:older-face".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn clean_completion_admits_a_newer_exact_session_over_an_older_watch_sibling() {
+        let mut cfg = AppConfig::default();
+        let mut older = item("jf:older-face", Some(100_000));
+        older.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, older, false, "older".into(), 10);
+        finish_session(&mut cfg, "jf:older-face", "older", 30_000, 15);
+
+        let mut completed = item("local:/shows/one.mkv", Some(100_000));
+        completed.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, completed, false, "completed".into(), 20);
+
+        assert!(complete_clean_session(
+            &mut cfg,
+            "local:/shows/one.mkv",
+            Some("plex:42"),
+            "completed",
+            20,
+        ));
+        assert!(cfg.recents.is_empty());
+        assert_eq!(
+            cfg.hidden_from_continue,
+            vec![
+                "local:/shows/one.mkv".to_string(),
+                "plex:42".to_string(),
+                "jf:older-face".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn stale_clean_completion_cannot_curate_a_newer_same_key_session() {
+        let mut cfg = AppConfig::default();
+        record_play_start(
+            &mut cfg,
+            item("plex:42", Some(100_000)),
+            false,
+            "old".into(),
+            10,
+        );
+        record_play_start(
+            &mut cfg,
+            item("plex:42", Some(100_000)),
+            false,
+            "new".into(),
+            20,
+        );
+
+        assert!(!complete_clean_session(
+            &mut cfg,
+            "plex:42",
+            None,
+            "old",
+            10,
+        ));
+        assert_eq!(cfg.recents.len(), 1);
+        assert_eq!(cfg.recents[0].session_id.as_deref(), Some("new"));
+        assert!(cfg.hidden_from_continue.is_empty());
+    }
+
+    #[test]
+    fn stale_clean_completion_cannot_curate_a_newer_watch_key_session() {
+        let mut cfg = AppConfig::default();
+        let mut old = item("jf:old-face", Some(100_000));
+        old.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, old, false, "old".into(), 10);
+        let mut new = item("jf:new-face", Some(100_000));
+        new.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, new, false, "new".into(), 20);
+
+        assert!(!complete_clean_session(
+            &mut cfg,
+            "jf:old-face",
+            Some("plex:42"),
+            "old",
+            10,
+        ));
+        assert_eq!(cfg.recents.len(), 2, "stale curation changes no snapshots");
+        assert_eq!(cfg.recents[0].session_id.as_deref(), Some("new"));
+        assert_eq!(cfg.recents[1].session_id.as_deref(), Some("old"));
+        assert!(cfg.hidden_from_continue.is_empty());
+    }
+
+    #[test]
+    fn threshold_removed_completion_rejects_a_newer_open_replay() {
+        let mut cfg = AppConfig::default();
+        let mut completed = item("local:/shows/one.mkv", Some(100_000));
+        completed.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, completed, false, "completed".into(), 10);
+        finish_session(
+            &mut cfg,
+            "local:/shows/one.mkv",
+            "completed",
+            96_000,
+            15,
+        );
+        assert!(cfg.recents.is_empty());
+
+        let mut replay = item("jf:new-face", Some(100_000));
+        replay.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, replay, false, "replay".into(), 20);
+        assert!(!complete_clean_session(
+            &mut cfg,
+            "local:/shows/one.mkv",
+            Some("plex:42"),
+            "completed",
+            10,
+        ));
+        assert_eq!(cfg.recents.len(), 1);
+        assert_eq!(cfg.recents[0].session_id.as_deref(), Some("replay"));
+        assert!(cfg.hidden_from_continue.is_empty());
+    }
+
+    #[test]
+    fn replay_clears_clean_completion_tombstones() {
+        let mut cfg = AppConfig::default();
+        let mut merged = item("local:/shows/one.mkv", Some(100_000));
+        merged.watch_key = Some("plex:42".into());
+        record_play_start(&mut cfg, merged.clone(), false, "completed".into(), 10);
+        assert!(complete_clean_session(
+            &mut cfg,
+            "local:/shows/one.mkv",
+            Some("plex:42"),
+            "completed",
+            10,
+        ));
+
+        record_play_start(&mut cfg, merged, false, "replay".into(), 20);
+        assert!(cfg.hidden_from_continue.is_empty());
+        assert_eq!(cfg.recents[0].session_id.as_deref(), Some("replay"));
+    }
+
+    #[test]
+    fn sampled_finish_never_tombstones_without_a_joined_clean_eof() {
+        let mut cfg = AppConfig::default();
+        record_play_start(
+            &mut cfg,
+            item("plex:42", Some(100_000)),
+            false,
+            "quit".into(),
+            10,
+        );
+        finish_session(&mut cfg, "plex:42", "quit", 30_000, 20);
+        assert!(cfg.hidden_from_continue.is_empty());
+        assert_eq!(cfg.recents[0].session_id.as_deref(), Some("quit"));
+
+        finish_session(&mut cfg, "plex:42", "quit", 96_000, 30);
+        assert!(
+            cfg.recents.is_empty(),
+            "sampled threshold behavior stays intact"
+        );
+        assert!(
+            cfg.hidden_from_continue.is_empty(),
+            "a tracker tail alone is not proof of clean EOF"
+        );
     }
 
     #[test]
