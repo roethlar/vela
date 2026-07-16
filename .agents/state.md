@@ -126,9 +126,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   verdict because the local bridge refused connection and its one direct retry
   hit the Claude session limit. The next owner-authorized attempt was discarded
   before verdict when the owner replaced Claude's standing review prompt with a
-  neutral best-way-to-achieve-the-goal question (`85e7cd0`). A fresh goal-only
-  review is active; it must converge before the plan is surfaced for owner
-  approval. No implementation is authorized.
+  neutral best-way-to-achieve-the-goal question (`85e7cd0`). Goal-only r5 then
+  accepted `0dd5001` with no material finding and two compatible hardening
+  comments; the clarified head is receiving the same neutral r6 review before
+  the plan is surfaced for owner approval. No implementation is authorized.
 
 - **OWNER-GATED FOLLOW-UP: publish dependency refresh 0.1.51.** Implementation
   is COMPLETE; no push, CI dispatch, or release workflow was triggered. The
@@ -326,8 +327,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/dependency-lts-refresh.md` (COMPLETE — final canonical,
   native-package, live-server, and external integration review green)
 - `.agents/plans/playlists.md` (COMPLETE — five slices; externally accepted)
-- `.agents/plans/clean-eof-carousel.md` (DRAFT — goal-only Claude plan review
-  active; not owner-approved)
+- `.agents/plans/clean-eof-carousel.md` (DRAFT — goal-only Claude r5 accepted;
+  clarified head in r6, not owner-approved)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)

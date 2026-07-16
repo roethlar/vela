@@ -1,8 +1,8 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **DRAFT — Claude goal-only r5 review active; not surfaced or
-owner-approved.** The owner reported the regression on a locally built 0.1.51
-universal macOS DMG:
+Status: **DRAFT — Claude goal-only r5 accepted the prior head; r6 reviews the
+clarified head before surfacing; not owner-approved.** The owner reported the
+regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
 appears.
@@ -106,9 +106,13 @@ In the joined clean-EOF dispatcher:
 2. Commit exact-session local curation.
 3. Advance an intermediate playlist item, or emit terminal
    `continue-playing`, without waiting for the server mutation.
-4. Emit the existing refresh-only playback state event after any backend-owned
-   successor has been recorded, so Home can read both the tombstone and the new
-   recent.
+4. Unconditionally emit the existing refresh-only playback state event after
+   step 3. An intermediate backend-owned successor must already be recorded, so
+   Home reads both its recent and the tombstone. A terminal `continue-playing`
+   event must be emitted first, preserving `on` selection from the literal
+   already-rendered list; the following refresh then guarantees post-curation
+   repaint for `off` and every terminal mode instead of relying on the earlier
+   tracker event to lose a race with curation.
 5. For an admitted completion, route the namespaced key and call the source's
    existing `mark_played(raw, true)` while retaining watch-edit serialization.
    Log failure without rolling back local completion or sequence state.
@@ -164,8 +168,11 @@ test-only flow.
    - require the rendered hero to contain E2 and exclude E1 without a manual
      edit, both before and after the delayed server response;
    - require the server eventually records E1 as played;
-   - retain quit-no-continuation, rollover, Specials, show-end, and stale-session
-     assertions.
+   - strengthen the quit leg beyond no-continuation: snapshot PlayedItems
+     request/served counts and tombstones, then hold that user quit sends no
+     played-state write, adds no completion tombstone, and leaves the exact quit
+     item rendered/eligible;
+   - retain rollover, Specials, show-end, and stale-session assertions.
 3. `tests/e2e/scenarios/continueon.mjs`
    - retain the initial Alpha/Beta/Charlie rendered-order proof and the parked
      early post-Alpha Resume response;
@@ -213,8 +220,8 @@ Red-prove each claimed behavior separately after the fix is committed:
    stale and Charlie centered.
 5. Remove the newer-same-key guard: the Rust test loses the active replacement
    session/tombstone state.
-6. Treat every tracker end as clean: the existing quit leg performs a
-   PlayedItems write or suppresses E1 and fails independently.
+6. Treat every tracker end as clean: the explicit quit-leg PlayedItems,
+   tombstone, and rendered-identity absence assertions fail independently.
 7. Remove the dispatcher refresh after an intermediate playlist start: the
    playlist successor exists in config/mpv but not in the rendered hero.
 
@@ -363,3 +370,24 @@ discarded before verdict.**
 Round outcome: this is a discarded process attempt, not a content round. The
 goal-only rule landed in `.agents/playbooks/reviewloop.md` and
 `.agents/decisions.md`; r5 restarts against a new pinned head under that rule.
+
+**r5 — 2026-07-16T06:39:32Z — base `b42b3a7`, head `0dd5001`; verdict
+`accepted`.**
+
+- Claude Code 2.1.211 (`claude-fable-5`) received only the neutral goal question
+  plus pinned/read-only/schema mechanics. It returned the exact SHAs,
+  `guard_confirmed: false`, and no material finding.
+- Claude supplied two non-material hardening comments:
+  1. Clarify that the dispatcher emits a post-curation refresh unconditionally;
+     otherwise `off` can be read as relying on the early tracker refresh racing
+     curation.
+  2. Make the quit leg explicitly assert no PlayedItems write, no completion
+     suppression, and retained identity; no-continuation alone cannot trip red
+     proof 6.
+- Its remaining comment independently checked the relevant backend, frontend,
+  mock, and scenario paths, found no lock-order reversal, and judged the
+  alternatives inferior or intentionally deferred.
+
+Round outcome: the reviewed head is accepted. Both comments are concrete,
+compatible hardening, so they are incorporated before owner surfacing. That
+creates a new plan head; r6 asks the same unframed goal question against it.
