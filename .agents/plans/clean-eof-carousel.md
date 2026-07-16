@@ -1,6 +1,6 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **DRAFT — Claude r1 findings addressed; plan-review loop active; not
+Status: **DRAFT — Claude r2 finding addressed; plan-review loop active; not
 owner-approved.** The owner reported the regression on a locally built 0.1.51
 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
@@ -149,6 +149,10 @@ test-only flow.
    - retain the faithful Resume hub and stateful PlayedItems behavior;
    - expose separate arrival/served evidence for a delayed automatic
      PlayedItems response using the existing `playedDelayMs` machinery;
+   - make the existing arrival-bound, one-shot `playbackInfoDelayMs` delay a
+     successful PlaybackInfo response too, not only the current forced-failure
+     branch. This lets a scenario hold a successor before its local recent is
+     recorded without changing the response body or failing playback;
    - keep `state.requests` as the authoritative arrival-order log for Resume
      and PlaybackInfo provenance;
    - do not make Stopped implicitly set `played`, because that would hide the
@@ -163,18 +167,24 @@ test-only flow.
    - retain quit-no-continuation, rollover, Specials, show-end, and stale-session
      assertions.
 3. `tests/e2e/scenarios/continueon.mjs`
-   - retain the parked early post-EOF Resume response, and park Alpha's
-     automatic PlayedItems response for a strictly longer interval so that
-     delayed Resume is served while the server still reports Alpha unplayed;
-   - prove the literal rendered-list selection by request arrival order:
+   - retain the initial Alpha/Beta/Charlie rendered-order proof and the parked
+     early post-Alpha Resume response;
+   - prove Beta's literal rendered-list selection by request arrival order:
      parked early Resume, then Beta PlaybackInfo, then the post-start Resume.
      Do not retain the old total-served-count assertion at Beta's socket,
      because the newly required post-start refresh may already have served;
-   - after Beta starts and after the older response is delivered, require Beta
-     to be the current rendered card and Alpha to remain absent;
-   - prove from the served log that the older Resume landed before PlayedItems,
-     then allow PlayedItems to settle and keep proof that the run never repeats
-     a key.
+   - use the following Beta-to-Charlie transition for deterministic generation
+     coverage. Charlie is hub-only in the existing fixture. Before Beta EOF,
+     zero Charlie's mock server resume point without refreshing the UI, park
+     the early post-Beta Resume response, and delay Charlie's successful
+     PlaybackInfo response long enough for the old load's local reads to settle.
+     The retained literal carousel must still select Charlie;
+   - after Charlie starts, its newly recorded open recent makes the post-start
+     load center Charlie even though the live Resume hub omits it. Wait for both
+     post-Beta Resume responses, then hold that Charlie remains the centered
+     card; the delayed older snapshot contains neither a Charlie recent nor a
+     Charlie hub item;
+   - retain the full Alpha/Beta/Charlie no-repeat assertion in this same run.
 4. `tests/e2e/scenarios/playlistplay.mjs` and `serverplaylists.mjs`
    - after one backend-owned intermediate advance, require the successor recent
      to render and the completed item to remain suppressed;
@@ -194,11 +204,13 @@ Red-prove each claimed behavior separately after the fix is committed:
    E1 resurfaces from the server Resume hub and the identity assertion fails.
 3. Remove the post-successor refresh: E2 starts in mpv but never becomes the
    rendered hero card.
-4. While `continueon` holds PlayedItems longer than the delayed early Resume,
-   let the older EOF refresh reuse/win the successor generation. Its
-   pre-curation recents/tombstones and fire-time hub body still contain Alpha,
-   so it replaces Beta and fails the settled identity assertion. The restored
-   generation guard must keep that same response stale.
+4. Let the older post-Beta refresh reuse/win Charlie's successor generation in
+   `continueon`. Charlie's server resume point was zeroed before the old request
+   and its successful PlaybackInfo was held until that load's local reads
+   settled, so the old tuple contains no Charlie identity. Publishing it after
+   the newer post-start load removes Charlie from the center and fails the held
+   identity assertion. The restored generation guard must keep that same tuple
+   stale and Charlie centered.
 5. Remove the newer-same-key guard: the Rust test loses the active replacement
    session/tombstone state.
 6. Treat every tracker end as clean: the existing quit leg performs a
@@ -293,3 +305,28 @@ Finding 2 disposition: ADDRESSED — the plan now requires `playedDelayMs` to
 outlast `delayNextResumeMs` and proves the old Resume is served first. The
 stale snapshot therefore still carries Alpha, making generation-guard removal
 observable while the restored guard keeps Alpha suppressed.
+
+**r2 — 2026-07-16T05:40:32Z — base `b42b3a7`, head `3b99fbb`; round verdict
+`reopened`.**
+
+- Claude Code 2.1.211 (`claude-fable-5`) returned `reopened`,
+  `guard_confirmed: false`, with one ADMITTED finding:
+  1. MEDIUM — r1's second disposition controlled the delayed server hub but not
+     the concurrent local recents/tombstone reads. Completion curation usually
+     wins that race, so the old snapshot can already contain Alpha's tombstone;
+     removing the generation guard then leaves Beta centered and the required
+     mutation proof falsely green or flaky.
+
+Round outcome: the finding cites the separate Promise legs and dispatcher
+ordering and predicts failure of a required red proof, so it is admitted for
+revision before r3. It supersedes r1 finding 2's incomplete disposition; the
+r1 record remains intact as the history of that reviewed revision.
+
+Finding 1 disposition: ADDRESSED — the generation proof no longer depends on
+whether the old local reads precede completion curation. It uses the existing
+Beta-to-Charlie transition: Charlie is hub-only, its server resume point is
+zeroed without repainting the retained carousel, and its successful
+PlaybackInfo response is parked until the old local reads settle. The old
+tuple therefore has no Charlie, while the newer tuple has Charlie's open
+recent; wrongly publishing the old tuple deterministically removes the
+centered Charlie. The same run retains the three-key no-repeat proof.
