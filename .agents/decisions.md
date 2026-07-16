@@ -938,3 +938,33 @@ notarization require developer identities the project does not have. Arch is a
 real release target because the project will publish through AUR. Jellyfin and
 Emby share MediaBrowser ancestry, but that is evidence for an experimental
 compatibility posture, not a substitute for a live Emby integration test.
+
+## 2026-07-16 - Claude reviews use a minimally steered goal question
+
+Status: APPROVED (owner, 2026-07-16). STANDING — applies whenever Claude or
+another mythos-class model is selected as reviewer.
+
+Decision:
+For implemented code, ask whether the code as implemented is the best way to
+achieve the stated goal. Do not ask Claude to validate the code against the
+plan, and do not lead it with the author's diagnosis, a review checklist,
+suspected defects, prior findings, preferred fix, or desired verdict. A plan
+review uses the neutral analogue: whether the plan is the best way to achieve
+the goal.
+
+The prompt may still carry non-evaluative mechanics required by the reviewloop:
+one plain user-visible goal, exact base/head scope, immutability or disposable-
+worktree boundaries, guard/cleanup requirements for implemented code, and the
+structured output contract. These mechanics are not an invitation to frame the
+technical judgment.
+
+Reason:
+The owner finds mythos-class reviewers more capable with less steering. Asking
+them to grade an implementation against the author's plan anchors the review to
+the author's own decomposition and suppresses better alternatives—the exact
+question an independent reviewer should be free to answer.
+
+Supersedes:
+Any Claude prompt practice that supplied plan-validation framing or an authored
+failure-mode checklist. It does not weaken pinned-SHA, fail-closed, independent-
+reviewer, guard-proof, or owner-gated-action rules.

@@ -85,6 +85,30 @@ quick/wait toggle and no Strict/Faster WIP mode** — the prior async loop's
 parallelism knobs do not apply here. One finding is dispatched, reviewed, recorded,
 and acted on before the next is dispatched.
 
+## Claude / mythos-class prompt discipline
+
+Claude and other mythos-class reviewers work from a minimally steered goal
+question. For implemented code, the evaluative prompt is:
+
+> Is the code as implemented the best way to achieve this goal: `<goal>`?
+
+For a pre-implementation design review, use the exact analogue:
+
+> Is this plan the best way to achieve this goal: `<goal>`?
+
+Do not ask these reviewers to validate code against a plan. Do not prime them
+with the author's diagnosis, a path-by-path checklist, suspected defects,
+prior-review findings or dispositions, preferred implementation, or desired
+verdict. A later round receives the same neutral question against its new
+pinned SHA, not a defense of the intervening fix.
+
+Only non-evaluative mechanics may accompany the question: the repository and
+exact base/head scope; read-only or disposable-worktree boundaries; protected
+paths; required guard proof and cleanup for implemented code; and the output
+schema. The goal is one plain statement of user-visible outcome, not a disguised
+acceptance checklist. This prompt rule is specific to Claude/mythos-class
+reviewers; it does not silently change another named harness's prompt style.
+
 ## Deriving the reviewer incantation (probe-and-verify)
 
 The only harness-specific fact the loop needs is **how to run `<agent>` headless,
