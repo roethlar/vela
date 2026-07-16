@@ -3,6 +3,8 @@ name: drift
 description: Compare a doc, decision, or guidance claim against repo evidence and fix or report the conflict; also the deliberate state-hygiene pass. Use when the owner says drift.
 ---
 
+<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+
 Run the `drift` operator defined in this repo's `AGENTS.md` (Operator
 Requests): compare a doc, decision, or guidance claim against repo evidence
 and fix the lower-authority source, or report the unresolved conflict.

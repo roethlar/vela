@@ -1,0 +1,10 @@
+<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+
+Run the `openreview` playbook operator: read
+`.agents/playbooks/openreview.md` and follow it to get one unprimed,
+goal-first review of a whole change from the agent named in your request
+(e.g. `/openreview codex`, `/openreview grok`, `/openreview agy`). The named
+agent is the reviewer harness; it is dispatched headless and one-shot over a
+pinned base..head range per the playbook. If the playbook does not exist in
+this repo, say so rather than guessing. The playbook is the authoritative
+definition; this file is only a pointer.

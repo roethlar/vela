@@ -1,4 +1,6 @@
-# Playbook: synchronous cross-harness review (`review`)
+<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+
+# Playbook: synchronous cross-harness finding review (`codereview`)
 
 A portable workflow for reviewing a multi-fix sweep (security pass, refactor,
 bug-fix batch) on one git repo with strong per-fix verification. You — the agent in
@@ -6,7 +8,14 @@ the harness you launched from — play the **coder**. The **reviewer** is a seco
 independent agent harness (`codex`, `agy`, `grok`, a subagent, …) that you dispatch
 **headless and one-shot per finding** to get a different model's eyes on the fix.
 
-Invoke it with `review <agent>` (in Claude Code: the tab-completable `/review
+**Framing (deliberate):** this loop verifies specific findings against their
+recorded evidence — the reviewer is handed the finding record and judges the fix
+against it. That conformance priming is intentional here: it suits verification
+work, batch triage, and reviewer models that wander without a rubric. For an
+unprimed whole-change judgment — "is this the best way to achieve the goal?" —
+use the `openreview` playbook instead; the owner chooses per invocation, by name.
+
+Invoke it with `codereview <agent>` (in Claude Code: the tab-completable `/codereview
 <agent>`). This file is durable guidance; it defers to this repo's `AGENTS.md` and
 `.agents/` layout wherever they overlap. Where this playbook and the repo's
 invariants disagree, the invariants win.
@@ -75,9 +84,9 @@ create a parallel canon or bypass owner gates:
 
 ## Operator
 
-`review <agent>` is the harness-neutral entry. In Claude Code it is the
-tab-completable slash command `/review <agent>`; on another harness the owner speaks
-"review \<agent\>". `<agent>` names the reviewer harness to dispatch.
+`codereview <agent>` is the harness-neutral entry. In Claude Code it is the
+tab-completable slash command `/codereview <agent>`; on another harness the owner
+speaks "codereview \<agent\>". `<agent>` names the reviewer harness to dispatch.
 
 The flow is **synchronous by construction**: the coder dispatches the reviewer and
 blocks on its verdict before acting on that finding. There is therefore **no
@@ -85,37 +94,13 @@ quick/wait toggle and no Strict/Faster WIP mode** — the prior async loop's
 parallelism knobs do not apply here. One finding is dispatched, reviewed, recorded,
 and acted on before the next is dispatched.
 
-## Claude / mythos-class prompt discipline
-
-Claude and other mythos-class reviewers work from a minimally steered goal
-question. For implemented code, the evaluative prompt is:
-
-> Is the code as implemented the best way to achieve this goal: `<goal>`?
-
-For a pre-implementation design review, use the exact analogue:
-
-> Is this plan the best way to achieve this goal: `<goal>`?
-
-Do not ask these reviewers to validate code against a plan. Do not prime them
-with the author's diagnosis, a path-by-path checklist, suspected defects,
-prior-review findings or dispositions, preferred implementation, or desired
-verdict. A later round receives the same neutral question against its new
-pinned SHA, not a defense of the intervening fix.
-
-Only non-evaluative mechanics may accompany the question: the repository and
-exact base/head scope; read-only or disposable-worktree boundaries; protected
-paths; required guard proof and cleanup for implemented code; and the output
-schema. The goal is one plain statement of user-visible outcome, not a disguised
-acceptance checklist. This prompt rule is specific to Claude/mythos-class
-reviewers; it does not silently change another named harness's prompt style.
-
 ## Deriving the reviewer incantation (probe-and-verify)
 
 The only harness-specific fact the loop needs is **how to run `<agent>` headless,
 non-interactive, one-shot**. This is **not** shipped as a human-maintained table and
 **not** derived by parsing `--help` prose into a committed regex — both rot or break
 silently. Instead derive it live, per harness, per session, by probing — the same
-thing a capable agent already does when a human says "review this with grok":
+thing a capable agent already does when a human says "codereview this with grok":
 
 1. **Presence + surface.** `command -v <agent>`; then `<agent> --help` and
    `<agent> --version`. The top-level help usually reveals whether the headless entry
@@ -187,7 +172,7 @@ see the gate below):
    - **accepted** → the branch is ready for an **owner-gated** merge. Do not merge,
      push, or rewrite history on agent authority; leave the branch (or hand off a
      `merge-<id>` branch).
-   - **reopened** → apply fix-ups on the same branch, then re-run `review <agent>`.
+   - **reopened** → apply fix-ups on the same branch, then re-run `codereview <agent>`.
    - **invalid** → write `.agents/review/<id>.contested.md` (which kind of
      disagreement, the reason, what the owner must decide) and route to the owner.
      Disagreement is a recorded verdict, never a silent veto.
@@ -285,7 +270,7 @@ Short, human-readable scoreboard. Per-finding detail lives in
 ```markdown
 # Review status
 
-Workflow: see `.agents/playbooks/reviewloop.md`.
+Workflow: see `.agents/playbooks/codereview.md`.
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 
 ## Legend

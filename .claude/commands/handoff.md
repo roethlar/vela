@@ -1,3 +1,5 @@
+<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+
 Run the `handoff` operator defined in this repo's `AGENTS.md` (Operator
 Requests): a fast save-my-place snapshot — update `.agents/state.md` so the
 next session can resume without chat context; machine-specific facts go to
