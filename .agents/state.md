@@ -130,8 +130,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   accepted `0dd5001` with no material finding and two compatible hardening
   comments. Goal-only r6 accepted the clarified `f57d6a4` with no material
   finding, and goal-only r7 accepted the final `a13942b` plan with no material
-  finding. The owner approved the plan on 2026-07-16; implementation is now
-  authorized.
+  finding. The owner approved the plan on 2026-07-16. Code/test slice
+  `8894ca6` is implemented; all seven planned mutations failed for the right
+  reason and restored green, the canonical local gates and fresh-build Linux
+  E2E 24/24 pass, and Grok r1 accepted with independent guard proof. The
+  required second Grok review and 0.1.52 version bump remain.
 
 - **OWNER-GATED FOLLOW-UP: publish dependency refresh 0.1.51.** Implementation
   is COMPLETE; no push, CI dispatch, or release workflow was triggered. The
@@ -329,8 +332,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/dependency-lts-refresh.md` (COMPLETE — final canonical,
   native-package, live-server, and external integration review green)
 - `.agents/plans/playlists.md` (COMPLETE — five slices; externally accepted)
-- `.agents/plans/clean-eof-carousel.md` (APPROVED — goal-only Claude r7
-  accepted; implementation authorized)
+- `.agents/plans/clean-eof-carousel.md` (IMPLEMENTED — code slice `8894ca6`;
+  Grok r1 accepted, independent r2 and version bump pending)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)

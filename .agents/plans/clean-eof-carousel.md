@@ -1,6 +1,8 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **APPROVED — owner, 2026-07-16; implementation authorized.**
+Status: **IMPLEMENTED — code/test slice `8894ca6`; seven guards and canonical
+verification green; Grok r1 accepted, independent r2 pending; version bump
+pending.**
 The owner reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
@@ -440,3 +442,25 @@ Approved 2026-07-16:
 > completed card locally, sync played state to the owning server, and refresh
 > after starting the next episode. Quit, errors, and stale sessions remain
 > unchanged; a failed server sync will not restore the stale card.
+
+## Code review log
+
+Review scope: base `07ecb4674e4fab696d6f80f1b028669530dc332c`,
+implemented head `8894ca6baf268a9c3962aaac1f3417e57ec08339`.
+
+**r1 — 2026-07-16T13:56:38Z — Grok 0.2.101 / `grok-4.5`; verdict
+`accepted`.**
+
+- Grok independently disabled the newer-session admission boundary, observed
+  `threshold_removed_completion_rejects_a_newer_open_replay` fail because the
+  stale completion was admitted, restored the pinned head, reran the guard
+  green, and left its disposable worktree clean.
+- The structured result returned the exact base/head,
+  `guard_confirmed: true`, and no material comments.
+- Two earlier envelopes were rejected fail-closed and do not count as review
+  evidence: the first claimed proof without using tools; the second performed
+  the proof but exposed an operator-supplied invalid expansion of the short
+  base SHA. The accepted rerun used the repository's exact full base above.
+
+Round outcome: r1 accepted. A separate fresh Grok session must independently
+prove the tombstone guard before this code slice converges.
