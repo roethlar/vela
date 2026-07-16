@@ -26,14 +26,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   below; Slice 3 (subtle motion/empty-state pass) retains its owner go gate.
   Exact review evidence: `.agents/review/findings/ui-s1.md`.
 
-- **UI EMBELLISHMENTS SLICE 2 AUTHORIZED 2026-07-16; PLAN REVIEW ACTIVE.** The
+- **UI EMBELLISHMENTS SLICE 2 AUTHORIZED 2026-07-16; IMPLEMENTATION ACTIVE.** The
   owner's "continue" activates image-loading polish only. The refreshed
   implementation contract in `.agents/plans/ui-embellishments.md` inventories
   all runtime images, defines one cache/source-safe reveal action and fixed-frame
   failure underlays, and specifies held-response Linux, reduced-motion, theme,
-  and source-contract evidence. A fresh primary Claude `openreview` must
-  converge before code. Slice 3 remains separately owner-gated; no owner
-  playtest is required for this UI track.
+  and source-contract evidence. Primary Claude Fable 5 returned a clean,
+  exact-SHA `openreview` on the refreshed contract; the code gate is open.
+  Slice 3 remains separately owner-gated; no owner playtest is required for
+  this UI track.
 
 - **CAROUSEL DUPLICATE PLAY ACTION CORRECTION COMPLETE at 0.1.54 (owner go
   2026-07-16).** Playlist S1 added a primary Play/Resume row beneath the
@@ -335,7 +336,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   behind the functional
   work above; "queue first, v1 polish goes to the bottom", where "queue" means the
   work queue, not the play queue):** (1) UI embellishments — Slice 1 is complete
-  at 0.1.53; Slice 2 is owner-authorized and in refreshed plan review; Slice 3
+  at 0.1.53; Slice 2 is owner-authorized, plan-reviewed, and active; Slice 3
   remains separately owner-gated
   (`.agents/plans/ui-embellishments.md`; vibrancy CUT — Linux/Wayland first;
   motion SUBTLE, binding); (2) docs polish — a README that
@@ -381,7 +382,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
-- `.agents/plans/ui-embellishments.md` (SLICE 2 PLAN REVIEW ACTIVE — v1.0.0 item 1)
+- `.agents/plans/ui-embellishments.md` (SLICE 2 IMPLEMENTATION ACTIVE — v1.0.0 item 1)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

@@ -1,8 +1,8 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**SLICE 2 AUTHORIZED 2026-07-16; REFRESHED PLAN REVIEW REQUIRED BEFORE CODE.**
-The owner's "continue" activates image-loading polish only. Slice 1 is
+**SLICE 2 AUTHORIZED 2026-07-16; REFRESHED PLAN REVIEW CLEAN; IMPLEMENTATION
+ACTIVE.** The owner's "continue" activates image-loading polish only. Slice 1 is
 complete at Vela 0.1.53: the theme-correct visual-language foundation is
 implemented, guard-proven, visually inspected, and accepted by primary Claude
 plus independent Grok. Slice 3 retains its separate go gate. The plan was queued
@@ -376,6 +376,17 @@ head `a5e818c1d67f9b3c74614770e17625575449616a`; verdict `clean`.**
 The unprimed pass returned the exact SHAs, `verdict: clean`, and no findings.
 Plan review is converged. The owner's Slice 1 go is active; implementation may
 begin without reopening Slices 2–3.
+
+**Slice 2 r1 — 2026-07-16T22:30:32Z — Claude Code 2.1.211 /
+`claude-fable-5` — base `90ed3c84fe477eda4deb23c769331c4cf67b8d66`,
+head `a8c31f82ee1218fe512225caae16989fe0bea3e6`; verdict `clean`.**
+
+The unprimed goal-first review of the refreshed image-polish contract returned
+the exact SHAs, `verdict: clean`, and no findings. A preceding envelope was
+discarded fail-closed because the orchestrator had supplied an incorrectly
+expanded head coordinate; the one allowed schema retry used the actual full
+SHA and is the recorded result. Slice 2 plan review is converged and the
+owner's go is active; implementation may begin. Slice 3 remains gated.
 
 ## Slice 1 implementation record
 
