@@ -409,8 +409,38 @@ but is currently offline is discovered and skipped only when routing playback,
 because the registry exposes only constructed live sources; this is the
 accepted S3 limitation.
 
-Next implementation slice: S4, read-only Plex, Jellyfin, and Emby server
-playlists grouped beneath their source.
+### S4 — complete and externally accepted 2026-07-16
+
+Commit `963ef73` adds read-only video-playlist discovery and item loading for
+Plex plus the shared Jellyfin/Emby client; preserves namespaced identity,
+server order, duplicates, pagination, and safe path construction; retains an
+unavailable group for each failed source; and adds a structurally read-only
+detail view. Server-owned playback re-fetches fresh items and advances only the
+exact completed session without writing either server or Vela playlist state.
+
+The coder separately red-proved the source defaults, parser/query/mapping
+contracts, failure isolation, order, read-only UI, exact-session advancement,
+and both no-write boundaries. The first full Linux run exposed an integration
+guard ambiguity: `sortpersist` treated the new playlist-discovery request as a
+library listing. Commit `4090d73` scopes that guard to `ParentId` requests; its
+old-selector and disabled-persistence legs were independently proven red.
+Restored gates passed exact Node 26.5.0/npm 12.0.1, zero npm vulnerabilities,
+Svelte 0/0, frontend build, Rust 1.89 and stable checks, Clippy with warnings
+denied, 123 Rust tests, zero RustSec vulnerabilities with 17 allowed upstream
+warnings, and Linux real-app E2E 21/21.
+
+Two independent Grok 0.2.101 / `grok-4.5` sessions accepted exact base
+`97acab1` and implementation head `963ef73` with separate focused red/green
+proofs and no comments. Two fresh memory-isolated sessions then accepted exact
+base `963ef73` and integration head `4090d73`, again with separate Linux
+red/green proofs and no comments. Exact evidence:
+`.agents/review/findings/pl-s4.md`.
+
+Emby remains intentionally experimental for v1.0 because no live Emby server
+is available; it shares the documented MediaBrowser playlist lineage and the
+same authenticated implementation whose Jellyfin-shaped E2E contract is green.
+
+Next implementation slice: S5, Continue Playing modes and no-repeat behavior.
 
 ## Verification
 

@@ -167,7 +167,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/dependency-lts-refresh.md`.
 
 - **PLAYLIST IMPLEMENTATION ACTIVE: `.agents/plans/playlists.md`** (approved and
-  authorized 2026-07-15; S1 through S3 landed and were externally accepted, S4
+  authorized 2026-07-15; S1 through S4 landed and were externally accepted, S5
   is next).
   Product model and the two durable
   rulings: `.agents/decisions.md`
@@ -196,6 +196,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     real-app E2E passed 20/20. Removed sources are pre-marked unavailable;
     configured-but-offline sources are skipped at route time. Exact guard and
     review trail: `.agents/review/findings/pl-s3.md`.
+  - **S4 (read-only server playlists) is complete** (`963ef73`; integration
+    guard repair `4090d73`; independent Grok acceptances at r1). Plex and the
+    shared Jellyfin/experimental-Emby implementation discover video playlists,
+    retain per-source unavailable groups, preserve exact server order, and
+    re-fetch on exact-session sequence advancement. The separate detail surface
+    has no edit affordance, and playback writes neither the server playlist nor
+    `playlists.json`. Source/unit guards passed 123 Rust tests; every UI,
+    sequence, isolation, and no-write leg was red-proven; restored Linux
+    real-app E2E passed 21/21. Exact trail:
+    `.agents/review/findings/pl-s4.md`.
   - **Already true, and it is what makes this cheap:** item keys are namespaced
     `<source_id>:<raw>` and `Registry::route` (`source/mod.rs:414`) dispatches per
     item, so a list mixing Plex and Jellyfin items already plays today.

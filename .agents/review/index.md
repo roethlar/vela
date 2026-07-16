@@ -9,6 +9,18 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `pl-s4` CLOSED 2026-07-16: **accepted clean by two independent external
+reviewer sessions at r1, including the full-suite integration repair** (Grok
+0.2.101 / `grok-4.5`, each `guard_confirmed:true`). Implementation base
+`97acab1`, head `963ef73`; integration-guard base `963ef73`, head `4090d73`.
+Slice 4 adds read-only Plex/Jellyfin/experimental-Emby server playlists,
+per-source availability, and exact-session fresh-read sequence playback with
+no server or local playlist writes. The coder red-proved every claimed source,
+UI, sequence, and write boundary; restored verification passed 123 Rust tests
+and Linux real-app E2E 21/21. Four independent reviewer proofs across the two
+exact ranges returned no comments. Detail:
+`.agents/review/findings/pl-s4.md`.
+
 Loop `pl-s3` CLOSED 2026-07-15: **accepted clean by two independent external
 reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each
 `guard_confirmed:true`; base `cdfc91a`, reviewed head `304f493`). Slice 3 adds
