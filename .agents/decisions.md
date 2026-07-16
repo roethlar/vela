@@ -968,3 +968,21 @@ Supersedes:
 Any Claude prompt practice that supplied plan-validation framing or an authored
 failure-mode checklist. It does not weaken pinned-SHA, fail-closed, independent-
 reviewer, guard-proof, or owner-gated-action rules.
+
+## 2026-07-16 - Natural episode completion owns watched state and successor repaint
+
+Status: APPROVED (owner, 2026-07-16). Implementation plan:
+`.agents/plans/clean-eof-carousel.md`.
+
+Decision:
+Natural episode completion counts as watched, permanently removes the completed
+card locally, synchronizes played state to the owning server, and refreshes
+Continue Watching after starting the next episode. Quit, errors, and stale
+sessions remain unchanged. A failed server sync does not restore the stale
+card.
+
+Reason:
+A clean EOF previously updated progress but did not explicitly mark the
+episode played on Plex, and the automatic successor start did not own a newer
+Home refresh. The retained server hub could therefore resurrect the completed
+episode until a manual watched-state edit supplied both missing transitions.

@@ -1,6 +1,6 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **REVIEWED — Claude goal-only r7 accepted; awaiting owner approval.**
+Status: **APPROVED — owner, 2026-07-16; implementation authorized.**
 The owner reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
@@ -431,3 +431,12 @@ owner surfacing.
 Round outcome: the goal-only review converged with no material finding. The
 plan is ready for owner approval; no implementation is authorized until that
 approval is recorded.
+
+## Owner approval
+
+Approved 2026-07-16:
+
+> Natural episode completion will count as watched, permanently remove the
+> completed card locally, sync played state to the owning server, and refresh
+> after starting the next episode. Quit, errors, and stale sessions remain
+> unchanged; a failed server sync will not restore the stale card.
