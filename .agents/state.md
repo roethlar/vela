@@ -168,8 +168,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 - **PLAYLIST IMPLEMENTATION ACTIVE: `.agents/plans/playlists.md`** (approved and
   authorized 2026-07-15; S1 through S4 landed and were externally accepted;
-  S5 implementation and coder guard proofs are complete, with the active
-  external loop at `.agents/review/findings/pl-s5.md`).
+  S5 implementation, coder guard proofs, and two independent Grok acceptances
+  are complete; final full verification and durable closure remain).
   Product model and the two durable
   rulings: `.agents/decisions.md`
   (2026-07-14 — no play queue; video stays external). Five slices.

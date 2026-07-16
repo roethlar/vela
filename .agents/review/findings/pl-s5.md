@@ -3,7 +3,7 @@
 **Severity**: HIGH — a stale or non-EOF continuation can replace a newer manual
 play, while incorrect episode or playlist boundaries can loop, skip, or launch
 the wrong video without another user action.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `main` (approved playlists Slice 5)
 **Commits**: `6938c0f` (implementation), `18ae3d4` (backend-race guard repair),
 `0da06b7` (server-playlist terminal guard)
@@ -90,4 +90,30 @@ race is unrelated and remains a v1.0 release-note item.
 
 ## Reviewer comments
 
-Pending two independent, memory-isolated Grok reviews of the same pinned range.
+**Implementation r1-A — verdict recorded 2026-07-16T02:25:13Z — accepted.**
+Grok 0.2.101 (`grok-4.5`, session
+`019f68bb-9121-71d1-a257-f84b1b4bf8cb`) reviewed exact head
+`9d6716c288bae0eaad1f922b6343d4c6f9898fb1` against base
+`21ae7a043e45d8fcaf874c352403df86a17e7bd5` in its own detached worktree.
+It made `expected_session_matches` accept every session, observed the exact
+stale-session Rust guard fail at the old/new assertion, restored the head blob,
+observed the same exact test pass, and left the worktree clean.
+`guard_confirmed:true`; no material comments.
+
+Its first response was schema-valid but completed without any build or mutation
+evidence, so the orchestrator rejected the self-asserted guard boolean. The one
+allowed retry performed and reported the actual proof above; only that retry
+counts.
+
+**Implementation r1-B — verdict recorded 2026-07-16T02:25:13Z — accepted.**
+An independent, memory-isolated Grok 0.2.101 (`grok-4.5`, session
+`019f68b8-1922-7971-b35a-3bd556f6216a`) reviewed the same exact range in a
+separate detached worktree. It replaced the Jellyfin/Emby item-detail URL with
+a raw string join, observed the hostile-ID guard fail at the encoded `Items`
+path-segment assertion, restored exact head, observed GREEN, and left the
+worktree clean. `guard_confirmed:true`; no material comments.
+
+Its initial run completed the proof but hit the turn limit with no structured
+payload and therefore failed closed. The one allowed schema retry rechecked the
+exact head and clean worktree and returned the valid accepted payload recorded
+above. Neither reviewer saw the other's output.

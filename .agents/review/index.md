@@ -9,8 +9,13 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Loop `pl-s5` OPEN: implementation and coder guard proofs are complete; two
-independent Grok reviews are pending against the pinned Slice 5 range. Detail:
+Loop `pl-s5` CLOSED 2026-07-16: **accepted clean by two independent external
+reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each
+`guard_confirmed:true`; base `21ae7a0`, reviewed head `9d6716c`). Slice 5 adds
+three-mode Continue Playing, exact-session clean-EOF arbitration, cross-season
+episode walking, literal rendered-list ordering, no-repeat behavior, and both
+Vela/server playlist terminal handoff. Both reviewers independently produced
+focused red/restored-green proofs and returned no material comments. Detail:
 `.agents/review/findings/pl-s5.md`.
 
 Loop `pl-s4` CLOSED 2026-07-16: **accepted clean by two independent external
