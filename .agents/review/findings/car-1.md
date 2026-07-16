@@ -2,8 +2,8 @@
 
 **Severity**: LOW — the duplicate action does not launch the wrong item, but it
 adds a superfluous button and vertical clutter to Vela's primary Home surface.
-**Status**: In progress — implementation and guard proof complete; external
-reviews pending
+**Status**: In progress — primary Claude accepted; independent Grok review
+pending
 **Branch**: `main` (owner-approved focused correction)
 **Commits**: `507fb2fbd6d51ce2e73f6230f9c8806d18c559ce` (implementation),
 `c753f45be7e3539cfef2d65bdac69b72b1608d8b` and
@@ -75,4 +75,20 @@ playtest is required.
 
 ## Reviewer comments
 
-Primary Claude and independent Grok reviews pending.
+**Primary implementation review — recorded 2026-07-16T18:38:33Z — accepted.**
+Claude Code 2.1.211 (`claude-fable-5`, session
+`c257183f-78d8-48ee-a1a4-8cfcefe9b97c`) reviewed exact head
+`7c9046b0081f2fa249e5aa7857dce8c6523c9f76` against base
+`7d7bc99547a0baf1fdd16f9bee3744d3c52333cd` in a disposable worktree.
+It independently restored the base page's complete duplicate action row and
+observed the focused source contract fail for the intended reason, then
+restored the exact head and observed it pass. It separately removed the
+centered card's `play(it)` handler and replaced its dynamic accessible label;
+each positive guard failed on the exact missing behavior and returned green
+after restoration. The full Node contract set passed 6/6, the worktree was
+independently confirmed clean at the reviewed head, and the schema-valid
+result carried `guard_confirmed:true`, verdict `accepted`, and no material
+finding. Claude did not rerun the Linux-only E2E; the coder's focused and
+25/25 Linux runs remain that execution evidence.
+
+Independent Grok second review pending.

@@ -14,8 +14,10 @@ Loop `car-1` ACTIVE 2026-07-16: remove the duplicate Play/Resume action row
 beneath Continue Watching while preserving the centered card and its context
 menu. Implementation `507fb2f`; exact guard red/restored-green, affected Linux
 scenarios 4/4, full Linux E2E 25/25, and a separately red-proven reviewable
-source guard through `a1b839b`. Primary Claude and independent Grok reviews are
-pending. Detail: `.agents/review/findings/car-1.md`.
+source guard through `a1b839b`. Primary Claude Fable 5 accepted exact reviewed
+head `7c9046b` with `guard_confirmed:true` after breaking/restoring all three
+source-guard legs. Independent Grok review is pending. Detail:
+`.agents/review/findings/car-1.md`.
 
 Loop `ui-s1` CLOSED 2026-07-16: theme-correct visual-language foundation is
 implemented through `c1c4db4` and versioned as 0.1.53 at `0ce3629`. Primary
