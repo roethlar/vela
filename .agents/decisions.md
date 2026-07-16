@@ -941,8 +941,9 @@ compatibility posture, not a substitute for a live Emby integration test.
 
 ## 2026-07-16 - Claude reviews use a minimally steered goal question
 
-Status: APPROVED (owner, 2026-07-16). STANDING — applies whenever Claude or
-another mythos-class model is selected as reviewer.
+Status: APPROVED (owner, 2026-07-16). The plan/open-review portion remains
+active; the implemented-code prompt rule is superseded by the later 2026-07-16
+review-workflow decision below.
 
 Decision:
 For implemented code, ask whether the code as implemented is the best way to
@@ -968,6 +969,32 @@ Supersedes:
 Any Claude prompt practice that supplied plan-validation framing or an authored
 failure-mode checklist. It does not weaken pinned-SHA, fail-closed, independent-
 reviewer, guard-proof, or owner-gated-action rules.
+
+## 2026-07-16 - Claude is the primary reviewer; plans and code use distinct playbooks
+
+Status: APPROVED (owner, 2026-07-16). STANDING.
+
+Decision:
+Claude is the primary external reviewer for Codex-authored work. Use
+`openreview claude` for plans and `codereview claude` for implemented code.
+Grok is a separate second reviewer, never the primary code reviewer. A plan
+open review receives only the neutral best-way-to-achieve-the-goal question and
+mechanical coordinates. A code review follows the finding record and independent
+guard-proof contract of `.agents/playbooks/codereview.md`. Codex CLI remains
+self-review and never counts.
+
+Reason:
+Plan quality needs an unprimed whole-design judgment, while landed code needs
+finding-specific, independently red-proven verification. Naming the primary and
+secondary reviewers prevents an available Grok pass from silently replacing
+the required Claude pass.
+
+Supersedes:
+The interchangeable Claude-or-Grok reviewer selection in the 2026-07-14
+decision, and the neutral whole-change prompt for implemented code in the
+earlier 2026-07-16 Claude-prompt decision. It preserves that decision's neutral
+plan-review rule and every independent-review, pinned-SHA, fail-closed, guard,
+and owner-action boundary.
 
 ## 2026-07-16 - Natural episode completion owns watched state and successor repaint
 

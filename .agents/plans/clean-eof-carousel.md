@@ -1,9 +1,11 @@
 # Plan: clean episode completion advances Continue Watching
 
 Status: **IMPLEMENTED — code/test slice `8894ca6`, version 0.1.52
-`52e1a67`; seven guards, canonical verification, fresh-build Linux E2E, two
-independent Grok reviews, and universal macOS packaging green. Owner's real
-Plex completion playtest remains.**
+`52e1a67`; seven guards, canonical verification, fresh-build Linux E2E, and
+universal macOS packaging green. Two Grok guard reviews count as secondary.
+The refreshed primary Claude plan open review admitted one LOW lock-scope
+finding (`ceof-2`), and primary Claude code review is pending (`ceof-1`). The
+owner's real Plex completion playtest also remains open.**
 The owner reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
@@ -478,7 +480,26 @@ prove the tombstone guard before this code slice converges.
   was clean.
 
 Round outcome: both independent Grok sessions accepted the same pinned code
-slice after proving different guards. Code review has converged.
+slice after proving different guards. Under the owner's later reviewer-hierarchy
+clarification, these are secondary reviews; primary Claude code review is still
+required.
+
+## Refreshed open review
+
+**Recorded 2026-07-16T16:20:40Z — Claude Code 2.1.211 /
+`claude-fable-5` — base
+`b42b3a74cd8d9ad5e5b16f153d87d169fff8a408`, head
+`07ecb4674e4fab696d6f80f1b028669530dc332c`; verdict `findings`.**
+
+The refreshed `openreview` pass received only the neutral plan question plus
+mechanical coordinates and returned the exact SHAs with one LOW finding: the
+dispatcher holds the app-wide `watch_edit_lock` while Vela or server-playlist
+advancement can perform sequential stream-resolution network waits. A manual
+watched-state edit on any source can therefore appear frozen for the whole
+offline advancement window. The finding has exact code evidence, a predicted
+observable failure, and justified severity, so intake ADMITTED it as `ceof-2`.
+It does not invalidate the clean-EOF happy path; it keeps the plan open for an
+owner choice between a lock-scope repair and an explicitly accepted risk.
 
 ## Implementation record
 

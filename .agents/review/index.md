@@ -1,13 +1,25 @@
 # Review status
 
-Workflow: see `.agents/playbooks/reviewloop.md`. Reviewer harnesses are
-loop-specific. Under the standing 2026-07-15 owner amendment, Codex-authored
-changes require Grok or Claude; the historical Codex loops below remain
-evidence but are not precedent for self-review.
+Workflow: plan/whole-change review uses `.agents/playbooks/openreview.md`; code
+finding verification uses `.agents/playbooks/codereview.md`. Claude is the
+primary reviewer for Codex-authored plans and code; Grok is the independent
+second reviewer. Historical Codex loops remain evidence but are not precedent
+for self-review.
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
+
+Finding `ceof-2` OPEN 2026-07-16: Claude Fable 5 plan `openreview` found that
+clean-EOF dispatch holds the app-wide watch-edit lock across potentially long
+offline playlist advancement. The finding is ADMITTED at LOW severity; no code
+change is authorized until the owner chooses a revised plan. Detail:
+`.agents/review/findings/ceof-2.md`.
+
+Loop `ceof-1` PENDING 2026-07-16: the clean-EOF implementation at `8894ca6`
+has two accepted Grok guard proofs, now classified as secondary review. Its
+required primary Claude `codereview` is pending against the durable finding
+record. Detail: `.agents/review/findings/ceof-1.md`.
 
 Loop `pl-s5` CLOSED 2026-07-16: **accepted clean by two independent external
 reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each

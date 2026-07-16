@@ -116,7 +116,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; OWNER PLAYTEST OUTSTANDING.** The owner's 0.1.51
+- **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; REVIEW AND OWNER PLAYTEST OPEN.** The owner's 0.1.51
   macOS playtest found that a naturally completed episode remains the only
   Continue Watching card until it is manually marked watched. Diagnosis found
   a pre-existing missing explicit server played mutation plus Slice 5's
@@ -133,11 +133,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   finding. The owner approved the plan on 2026-07-16. Code/test slice
   `8894ca6` is implemented; all seven planned mutations failed for the right
   reason and restored green, the canonical local gates and fresh-build Linux
-  E2E 24/24 pass, and two independent Grok reviews accepted after separately
-  proving the newer-session and tombstone guards. Version 0.1.52 landed at
-  `52e1a67`, and its unsigned universal macOS DMG is checksum-valid with both
-  architectures. Only the owner's final real-Plex completion playtest remains;
-  verification and artifact details live in the plan.
+  E2E 24/24 pass, and two independent Grok secondary reviews accepted after
+  separately proving the newer-session and tombstone guards. Version 0.1.52
+  landed at `52e1a67`, and its unsigned universal macOS DMG is checksum-valid
+  with both architectures. The refreshed primary Claude plan `openreview` admitted one
+  LOW lock-scope finding, and primary Claude `codereview` of the implementation
+  is pending; exact status lives in `.agents/review/index.md`. The owner's final
+  real-Plex completion playtest also remains unresolved; verification and
+  artifact details live in the plan.
 
 - **OWNER-GATED FOLLOW-UP: publish dependency refresh 0.1.51.** Implementation
   is COMPLETE; no push, CI dispatch, or release workflow was triggered. The
