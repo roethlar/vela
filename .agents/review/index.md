@@ -15,7 +15,9 @@ opacity reveal over fixed fallbacks; the functional Plex QR remains the sole
 no-fade exception. All focused guard families were independently red-proven by
 the coder, canonical frontend verification is green, focused normal/reduced
 Linux runs pass, and the complete real-app suite passed 26/26. Primary Claude
-and independent Grok code reviews are pending. Detail:
+Fable 5 accepted exact head `0ccb269` against base `e98220e` with
+`guard_confirmed:true` and no material comments. Independent Grok code review
+is pending. Detail:
 `.agents/review/findings/ui-s2.md`.
 
 Loop `car-1` CLOSED 2026-07-16: remove the duplicate Play/Resume action row
