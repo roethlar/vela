@@ -1,10 +1,13 @@
 // UI foundation contract on the real Tauri/WebKit app. Screenshots remain
 // inspection evidence; deterministic assertions use DOM state and computed CSS.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { goHome, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
 let mock;
+const expectReducedMotion = process.env.VELA_E2E_EXPECT_REDUCED_MOTION === '1';
 
 const movie = {
   ratingKey: 'jf-mock:foundation',
@@ -80,10 +83,24 @@ async function chooseTheme(driver, label, id) {
 }
 
 async function focusSnapshot(driver, selector) {
+  await driver.waitFor(
+    `
+      const target = document.querySelector(${JSON.stringify(selector)});
+      if (!target) return false;
+      target.focus();
+      const probe = document.createElement('span');
+      probe.style.cssText = 'position:fixed;left:-9999px;border:1px solid var(--accent)';
+      document.body.append(probe);
+      const ready = document.activeElement === target
+        && getComputedStyle(target).borderTopColor === getComputedStyle(probe).borderTopColor;
+      probe.remove();
+      return ready;
+    `,
+    `${selector} theme focus styles`,
+  );
   return driver.exec(`
     const target = document.querySelector(${JSON.stringify(selector)});
     if (!target) return null;
-    target.focus();
     const probe = document.createElement('span');
     probe.style.cssText = [
       'position:fixed',
@@ -160,6 +177,17 @@ function assertSameStyles(label, snapshots, keys) {
   }
 }
 
+function assertMotionSuppressed(snapshot, label) {
+  const durations = snapshot.transitionDuration.split(',').map((duration) => {
+    const value = duration.trim();
+    return value.endsWith('ms') ? Number.parseFloat(value) : Number.parseFloat(value) * 1000;
+  });
+  assert.ok(
+    durations.length > 0 && durations.every((duration) => duration <= 0.01),
+    `${label} transition is not suppressed: ${snapshot.transitionDuration}`,
+  );
+}
+
 async function assertSettingsIcons(driver) {
   await openSettingsTab(driver, 'Player');
   await driver.waitFor(
@@ -188,6 +216,11 @@ export default {
   name: 'uifoundation',
 
   async seed({ configRoot }) {
+    if (expectReducedMotion) {
+      const gtkConfig = path.join(configRoot, 'config', 'gtk-3.0');
+      fs.mkdirSync(gtkConfig, { recursive: true });
+      fs.writeFileSync(path.join(gtkConfig, 'settings.ini'), '[Settings]\ngtk-enable-animations=false\n');
+    }
     mock = await startMockJellyfin({
       movies: [
         {
@@ -217,6 +250,13 @@ export default {
           && !!document.querySelector('[aria-label="Continue watching"] .flowcard.center')`,
         'the seeded Home foundation surfaces',
       );
+      if (expectReducedMotion) {
+        assert.equal(
+          await driver.exec(`return matchMedia('(prefers-reduced-motion: reduce)').matches`),
+          true,
+          'the reduced-motion run must expose the OS preference to WebKit',
+        );
+      }
 
       await chooseTheme(driver, 'Vela Dark', 'dark');
       await closeSettings(driver);
@@ -406,6 +446,20 @@ export default {
         { hero: heroPlayButton, detail: detailPlayButton },
         ['width', 'height', 'backgroundColor', 'color', 'borderRadius'],
       );
+      if (expectReducedMotion) {
+        for (const [label, snapshot] of Object.entries({
+          settingsPrimary,
+          playlistPrimary,
+          heroOverlay,
+          heroPlayButton,
+          heroPrimary,
+          detailOverlay,
+          detailPlayButton,
+          detailPrimary,
+        })) {
+          assertMotionSuppressed(snapshot, label);
+        }
+      }
       await screenshot('03-one-light-detail');
     } finally {
       // Do not leak a light theme into another scenario if WebKit shares its
