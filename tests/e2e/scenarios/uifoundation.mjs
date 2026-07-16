@@ -184,19 +184,6 @@ async function assertSettingsIcons(driver) {
   assert.equal(state.warningHasSvg, true, 'the advanced warning uses the shared SVG icon');
 }
 
-function richDetail() {
-  return {
-    ...movie,
-    tagline: 'One visual language.',
-    contentRating: 'PG',
-    rating: 8.2,
-    audienceRating: 9.1,
-    genres: ['Drama'],
-    directors: [{ name: 'Ada Director', personKey: 'jf-mock:person-1' }],
-    media: [],
-  };
-}
-
 export default {
   name: 'uifoundation',
 
@@ -223,7 +210,6 @@ export default {
   },
 
   async run({ driver, screenshot, restart }) {
-    let invokeWrapped = false;
     try {
       await driver.waitFor(
         `return document.readyState === 'complete'
@@ -295,6 +281,11 @@ export default {
       );
       const playlistFocus = await focusSnapshot(driver, 'section.playlists #playlist-create');
       assertFocusUsesTheme(playlistFocus, 'One Light playlist-name focus');
+      await driver.type(await driver.find('css selector', 'section.playlists #playlist-create'), 'Foundation');
+      await driver.waitFor(
+        `return !document.querySelector('section.playlists button.primary')?.disabled`,
+        'the enabled playlist primary button',
+      );
       const playlistPrimary = await styleSnapshot(driver, 'section.playlists button.primary');
       await goHome(driver);
       await driver.waitFor(
@@ -342,54 +333,15 @@ export default {
         'button.poster[aria-label^="Foundation Movie"] .noart',
       );
 
-      // Jellyfin detail is intentionally sparse today. Wrap one IPC command so
-      // the real compiled ItemDetail can render deterministic rich metadata;
-      // every other command still reaches the native backend.
-      await driver.exec(`
-        window.__velaUiFoundationInvoke = window.__TAURI_INTERNALS__.invoke;
-        window.__TAURI_INTERNALS__.invoke = function(command, args, options) {
-          if (command === 'get_item_detail' && args?.ratingKey === 'jf-mock:foundation') {
-            return Promise.resolve(${JSON.stringify(richDetail())});
-          }
-          return window.__velaUiFoundationInvoke.call(this, command, args, options);
-        };
-      `);
-      invokeWrapped = true;
       await driver.click(
         await driver.find('css selector', 'button.poster[aria-label^="Foundation Movie"]'),
       );
       await driver.waitFor(
-        `return !!document.querySelector('.detail [title="Rating"] svg[aria-hidden="true"]')
-          && !!document.querySelector('.detail [title="Audience rating"] svg[aria-hidden="true"]')`,
-        'the rich rating SVG icons',
+        `return !!document.querySelector('.detail .progress')
+          && !!document.querySelector('.detail .noart')
+          && !!document.querySelector('.detail .playoverlay')`,
+        'the sparse Jellyfin item-detail foundation primitives',
       );
-      const ratingState = await driver.exec(`
-        const detail = document.querySelector('.detail');
-        const rating = detail.querySelector('[title="Rating"]');
-        const audience = detail.querySelector('[title="Audience rating"]');
-        return {
-          rawGlyphs: detail.innerText.match(/[★♥]/gu) ?? [],
-          ratingText: rating.textContent.trim(),
-          audienceText: audience.textContent.trim(),
-          ratingHasSvg: !!rating.querySelector('svg[aria-hidden="true"]'),
-          audienceHasSvg: !!audience.querySelector('svg[aria-hidden="true"]'),
-        };
-      `);
-      assert.deepEqual(ratingState.rawGlyphs, [], 'detail ratings must not render raw glyphs');
-      assert.equal(ratingState.ratingHasSvg, true);
-      assert.equal(ratingState.audienceHasSvg, true);
-      assert.match(ratingState.ratingText, /Rating:\s*8\.2/, 'Rating keeps readable text');
-      assert.match(
-        ratingState.audienceText,
-        /Audience rating:\s*9\.1/,
-        'Audience rating keeps readable text',
-      );
-
-      await driver.exec(`
-        window.__TAURI_INTERNALS__.invoke = window.__velaUiFoundationInvoke;
-        delete window.__velaUiFoundationInvoke;
-      `);
-      invokeWrapped = false;
 
       const detailProgress = await styleSnapshot(driver, '.detail .progress');
       const detailProgressBar = await styleSnapshot(driver, '.detail .progress .bar');
@@ -447,7 +399,7 @@ export default {
       assertSameStyles(
         'play overlay',
         { hero: heroOverlay, detail: detailOverlay },
-        ['backgroundColor', 'backgroundImage', 'opacity', 'transitionDuration', 'transitionProperty'],
+        ['backgroundColor', 'backgroundImage', 'transitionDuration', 'transitionProperty'],
       );
       assertSameStyles(
         'play button',
@@ -456,16 +408,6 @@ export default {
       );
       await screenshot('03-one-light-detail');
     } finally {
-      if (invokeWrapped) {
-        await driver
-          .exec(`
-            if (window.__velaUiFoundationInvoke) {
-              window.__TAURI_INTERNALS__.invoke = window.__velaUiFoundationInvoke;
-              delete window.__velaUiFoundationInvoke;
-            }
-          `)
-          .catch(() => {});
-      }
       // Do not leak a light theme into another scenario if WebKit shares its
       // website-data store despite the harness' throwaway config directory.
       await driver

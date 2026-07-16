@@ -206,9 +206,15 @@ Slice 1 adds two focused guards:
   component ownership of the six primitives, undefined icon names, and dead
   icon definitions;
 - a Linux real-app `uifoundation` scenario that switches Dark ↔ One Light,
-  verifies theme persistence/selection and computed focus styles, renders
-  deterministic rating metadata to prove SVG icon replacement, and compares
-  the shared progress/primary/no-art primitives across their real surfaces.
+  verifies theme persistence/selection and computed focus styles, proves the
+  compiled Settings status/warning SVGs, and compares the shared progress,
+  primary-button, play-control, and no-art primitives across real Home,
+  playlist, Settings, grid, and sparse Jellyfin detail surfaces. The source
+  contract owns the star/heart rating-icon and readable-label proof: Jellyfin
+  intentionally has no rich detail implementation, and Tauri 2 exposes
+  `__TAURI_INTERNALS__.invoke` as non-writable and non-configurable, so feeding
+  fake rich metadata would require a production test hook. Slice 1 does not add
+  one merely to satisfy the harness.
 
 Red-prove the token, primitive-ownership/progress, and icon guard families
 separately after the implementation commit, restore from the committed head,
