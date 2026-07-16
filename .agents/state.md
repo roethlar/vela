@@ -24,8 +24,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (stale pre-playlist inventory, duplicated verification commands, undecided
   `color-mix` compatibility), all revised. Claude r2 then admitted one LOW
   ambiguity between tinted failure banners and a solid destructive button; the
-  plan now defines separate per-theme danger-action tokens and awaits a fresh
-  open review before code.
+  plan now defines separate per-theme danger-action tokens. Claude r3 found two
+  LOW omissions in that taxonomy (text-only destructive actions and existing
+  tinted Settings actions); the plan now defines danger foreground, tinted
+  secondary danger, and solid primary danger separately and awaits a fresh open
+  review before code.
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan

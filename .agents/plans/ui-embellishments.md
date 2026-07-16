@@ -78,9 +78,10 @@ surfaces. Real native-feel payoff, real cost — owner decision below.
   depending on `color-mix`; the standing Linux WebKitGTK 2.52.3 supports that
   function, but explicit tokens keep behavior deterministic on older WKWebView
   and WebView2 installations. It also adds `--danger-solid`,
-  `--danger-solid-hover`, and `--on-danger` because the existing `--danger-*`
-  trio describes tinted status banners, not destructive action buttons. No new
-  brand color or theme-specific exception.
+  `--danger-solid-hover`, and `--on-danger` for high-emphasis destructive
+  actions. Existing `--danger-text` remains the general danger foreground;
+  `--danger-bg` and `--danger-border` remain the tinted secondary/status
+  treatment. No new brand color or theme-specific exception.
 - **Type:** retain Geist Variable for display, body, and utility roles. This
   foundation slice fixes consistency, not typography; introducing a decorative
   face would compete with poster artwork and violate the approved non-goals.
@@ -107,11 +108,14 @@ No new visuals; makes every later slice land evenly across all themes.
    focus/current-state accent. Deliberate survivors are media-art black/white
    scrims and controls, the QR white quiet zone, theme-preview swatches, and the
    grain data URI; record any other survivor before landing. Use the existing
-   `--danger-bg`/`--danger-text`/`--danger-border` tokens for playlist and status
-   failures. Define `--danger-solid`, `--danger-solid-hover`, and `--on-danger`
-   in all 10 themes for destructive buttons; do not repurpose the banner-tint
-   tokens or allowlist a destructive literal. Tokenize hero-arrow and QR shadows
-   where a semantic shadow token applies.
+   `--danger-text` for failure copy and text-only destructive actions; combine
+   it with `--danger-bg`/`--danger-border` for tinted failure or secondary
+   destructive controls such as Settings Disconnect/Remove/Clear. Define
+   `--danger-solid`, `--danger-solid-hover`, and `--on-danger` in all 10 themes
+   only for the high-emphasis solid destructive action, such as a confirmed
+   playlist deletion. Preserve this existing hierarchy; do not restyle every
+   destructive control as solid and do not allowlist a destructive literal.
+   Tokenize hero-arrow and QR shadows where a semantic shadow token applies.
 2. Make `app.css` the single global owner of six visual primitives: play
    overlay/button, a 4px gradient progress bar, styled no-art placeholder,
    chip, person link, and primary button including hover/disabled/press states.
@@ -246,6 +250,19 @@ needs a solid destructive fill. The previous plan simultaneously required
 tokenization and prohibited an honest literal survivor, leaving no correct
 implementation. Addressed by defining explicit per-theme solid/hover/on-danger
 tokens and keeping the banner trio semantically separate. A fresh Claude plan
+`openreview` is required on this revised head before code begins.
+
+**r3 — recorded 2026-07-16 — Claude Code 2.1.211 / `claude-fable-5` —
+base `b2dea9276d9dac40a760bfc60cb3e28ec8128073`, head
+`ec686439badb3ead9bac74df9d6d8eaf5aba0201`; verdict `findings`.**
+
+The unprimed revised-plan review returned two LOW findings, both ADMITTED. The
+r2 taxonomy omitted text-only destructive actions, and it contradicted the
+existing tinted Settings Remove/Disconnect controls. Addressed by making
+`--danger-text` the general danger foreground, retaining background/border for
+tinted failure and secondary-destructive treatments, and reserving the new
+solid trio for high-emphasis confirmed destruction. This preserves the current
+visual hierarchy while removing every semantic literal. A fresh Claude plan
 `openreview` is required on this revised head before code begins.
 
 ## Decisions (resolved by owner 2026-07-10)
