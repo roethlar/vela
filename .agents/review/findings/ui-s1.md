@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — non-default themes could retain Vela Dark focus and
 danger colors while the same controls visibly changed weight, spacing, icon
 style, or progress thickness between surfaces.
-**Status**: In progress — primary Claude review pending
+**Status**: In progress — primary Claude accepted; independent Grok review pending
 **Branch**: `main` (approved Slice 1 implementation)
 **Commit**: `fe46850fe9d117c3745d5067a61e29b1ee058f27` plus focused integration fixes
 through `c1c4db4dee0eb196a7ccd480e2945e826ee23d07`
@@ -93,5 +93,24 @@ coverage. No production-only test hook was added.
 
 ## Reviewer comments
 
-Pending primary Claude Fable 5 review, followed by an independent Grok second
-review.
+**Primary implementation review — recorded 2026-07-16T18:01:14Z — accepted.**
+Claude Code 2.1.211 (`claude-fable-5`) reviewed exact head
+`969f06a08dea083cf54dd80518501ec3bdc34b22` against base
+`d96eb464130c9fd3b0a811fffb2eba15964b6e84` in a disposable worktree. It
+independently ran two mutations:
+
+1. Re-adding `.flowcard .progress { height: 6px; }` failed the exact component
+   primitive-ownership assertion; restoring the head returned it green.
+2. Replacing the audience heart SVG with `♥` failed because `heart` became dead;
+   restoring the head returned the icon contract green.
+
+Claude then passed the pinned Node/npm assertion, clean install, zero-vulnerability
+npm audit, canonical frontend check (5/5 Node tests and zero Svelte diagnostics),
+and production build. It source-reviewed the Linux-only scenario rather than
+re-running it on macOS; the coder's normal/reduced focused runs and final 25/25
+Linux suite remain that execution evidence. The schema-valid result carried the
+exact SHAs, `guard_confirmed:true`, verdict `accepted`, and no material finding.
+The orchestrator independently confirmed the worktree clean at the reviewed head
+before removing it.
+
+Independent Grok second review pending.
