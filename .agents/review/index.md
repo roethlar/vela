@@ -9,6 +9,10 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `pl-s5` OPEN: implementation and coder guard proofs are complete; two
+independent Grok reviews are pending against the pinned Slice 5 range. Detail:
+`.agents/review/findings/pl-s5.md`.
+
 Loop `pl-s4` CLOSED 2026-07-16: **accepted clean by two independent external
 reviewer sessions at r1, including the full-suite integration repair** (Grok
 0.2.101 / `grok-4.5`, each `guard_confirmed:true`). Implementation base
