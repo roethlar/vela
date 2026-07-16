@@ -382,7 +382,9 @@ focused Linux guard fail for the exact row; restoring the committed source
 returned it green. The affected scenarios passed 4/4 and the final Linux suite
 passed 25/25. A canonical source contract through `a1b839b` makes the same
 duplicate-row proof portable to external reviewers and was separately proven
-red/restored-green. External code-review status is owned by
+red/restored-green. Primary Claude Fable 5 and independent Grok 4.5 both
+accepted exact reviewed head `7c9046b` against base `7d7bc99` with independent
+guard proofs and no material finding. Exact review evidence:
 `.agents/review/findings/car-1.md`.
 
 ### S1 — complete and externally accepted 2026-07-15

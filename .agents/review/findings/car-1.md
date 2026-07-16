@@ -2,8 +2,8 @@
 
 **Severity**: LOW — the duplicate action does not launch the wrong item, but it
 adds a superfluous button and vertical clutter to Vela's primary Home surface.
-**Status**: In progress — primary Claude accepted; independent Grok review
-pending
+**Status**: Verified — primary Claude and independent Grok accepted with
+`guard_confirmed:true`
 **Branch**: `main` (owner-approved focused correction)
 **Commits**: `507fb2fbd6d51ce2e73f6230f9c8806d18c559ce` (implementation),
 `c753f45be7e3539cfef2d65bdac69b72b1608d8b` and
@@ -91,4 +91,12 @@ result carried `guard_confirmed:true`, verdict `accepted`, and no material
 finding. Claude did not rerun the Linux-only E2E; the coder's focused and
 25/25 Linux runs remain that execution evidence.
 
-Independent Grok second review pending.
+**Independent second review — recorded 2026-07-16T18:40:38Z — accepted.**
+Grok 0.2.101 (`grok-4.5`, session
+`019f6c3a-2ad5-7c01-8f7d-c25d4b220128`) reviewed the same exact head and base
+in a separate disposable worktree without seeing the primary verdict. It
+independently restored the deleted `.flowactions` row, observed the focused
+source contract fail with the intended duplicate-control message, restored the
+exact head, observed the guard pass, and left the worktree clean. The
+schema-valid result carried the exact SHAs, `guard_confirmed:true`, verdict
+`accepted`, and no material comments.

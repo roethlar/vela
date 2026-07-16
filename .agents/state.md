@@ -26,14 +26,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (subtle motion/empty-state pass) retain separate owner go gates. Exact review
   evidence: `.agents/review/findings/ui-s1.md`.
 
-- **CAROUSEL DUPLICATE PLAY ACTION CORRECTION IN REVIEW (owner go
+- **CAROUSEL DUPLICATE PLAY ACTION CORRECTION REVIEWED (owner go
   2026-07-16).** Playlist S1 added a primary Play/Resume row beneath the
   Continue Watching cover-flow even though the centered card already performs
   that action. Implementation `507fb2f` removes the complete row, retains card
   click/keyboard semantics, and keeps Play from Beginning in the context menu.
   The exact guard failed with the row restored and passed after restoration;
   affected Linux scenarios and the full 25/25 suite are green. External review
-  status: `.agents/review/findings/car-1.md`.
+  converged clean with independent Claude and Grok guard proofs. Patch version
+  bump remains before closure. Evidence: `.agents/review/findings/car-1.md`.
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
