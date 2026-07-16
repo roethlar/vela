@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import Icon from "$lib/Icon.svelte";
+  import { imageReveal } from "$lib/imageReveal";
   import { detailKeyOf, type Detail, type Item, type PersonRef, type PlayIntent } from "$lib/types";
 
   // Full-screen info page for a single item (movie / video). Renders the
@@ -50,7 +51,8 @@
   let inProgress = $derived((viewOffsetMs ?? 0) > 0);
   let played = $derived(detail?.played ?? item.played);
   let playable = $derived(item.mediaType !== "show" && item.mediaType !== "season");
-  let posterFailed = $state(false);
+  let posterUrl = $derived(poster ? posterSrc(poster) : null);
+  let backdropUrl = $derived(backdrop ? posterSrc(backdrop) : null);
   let pct = $derived(
     viewOffsetMs && durationMs
       ? Math.round(Math.min(100, (100 * viewOffsetMs) / durationMs))
@@ -95,25 +97,35 @@
 {/snippet}
 
 {#snippet castBody(c: NonNullable<Detail["cast"]>[number])}
-  {#if c.thumb}
-    <img
-      class="headshot"
-      src={posterSrc(c.thumb)}
-      alt={c.name}
-      loading="lazy"
-      onerror={(e) => ((e.currentTarget as HTMLImageElement).style.visibility = "hidden")}
-    />
-  {:else}
+  {@const headshotUrl = c.thumb ? posterSrc(c.thumb) : null}
+  <div class="headshotframe" aria-hidden="true">
     <div class="headshot placeholder" aria-hidden="true"><Icon name="film" size={22} stroke={1.5} /></div>
-  {/if}
+    {#if headshotUrl}
+      <img
+        class="headshot image-reveal image-cover"
+        src={headshotUrl}
+        use:imageReveal={headshotUrl}
+        alt=""
+        loading="lazy"
+        decoding="async"
+      />
+    {/if}
+  </div>
   <div class="castname">{c.name}</div>
   {#if c.role}<div class="castrole">{c.role}</div>{/if}
 {/snippet}
 
 <div class="detail" role="region" aria-label="Item details">
-  {#if backdrop}
+  {#if backdropUrl}
     <div class="backdrop" aria-hidden="true">
-      <img src={posterSrc(backdrop)} alt="" onerror={(e) => ((e.currentTarget as HTMLImageElement).style.display = "none")} />
+      <div class="backdrop-underlay" aria-hidden="true"></div>
+      <img
+        class="image-reveal image-cover"
+        src={backdropUrl}
+        use:imageReveal={backdropUrl}
+        alt=""
+        decoding="async"
+      />
     </div>
   {/if}
   <div class="body">
@@ -128,10 +140,15 @@
           oncontextmenu={(e) => onMenu(e, item)}
           aria-label={playable ? `${inProgress ? "Resume" : "Play"} ${title}` : title}
         >
-          {#if poster && !posterFailed}
-            <img src={posterSrc(poster)} alt={title} onerror={() => (posterFailed = true)} />
-          {:else}
-            <div class="noart">{title}</div>
+          <div class="noart" aria-hidden="true">{title}</div>
+          {#if posterUrl}
+            <img
+              class="image-reveal image-cover"
+              src={posterUrl}
+              use:imageReveal={posterUrl}
+              alt=""
+              decoding="async"
+            />
           {/if}
           {#if playable}
             <div class="playoverlay" aria-hidden="true">
@@ -251,6 +268,11 @@
     pointer-events: none;
     mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent);
     -webkit-mask-image: linear-gradient(to bottom, rgba(0, 0, 0, 0.55), transparent);
+  }
+  .backdrop-underlay {
+    position: absolute;
+    inset: 0;
+    background: var(--surface-sunken);
   }
   .backdrop img {
     width: 100%;
@@ -404,6 +426,11 @@
   .castcard {
     flex: 0 0 92px;
     text-align: center;
+  }
+  .headshotframe {
+    position: relative;
+    width: 92px;
+    height: 92px;
   }
   .headshot {
     width: 92px;

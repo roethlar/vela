@@ -2,6 +2,7 @@
   import { invoke } from "@tauri-apps/api/core";
   import Icon from "$lib/Icon.svelte";
   import { friendlyError } from "$lib/errors";
+  import { imageReveal } from "$lib/imageReveal";
   import type { Playlist, PlaylistEntry, PlaylistSummary } from "$lib/types";
 
   let {
@@ -263,14 +264,20 @@
         <ol class="entries" aria-label="Playlist items">
           {#each playlist.items as entry, index (entry.id)}
             {@const art = entry.item.poster ?? entry.item.seriesPoster}
+            {@const artUrl = art ? posterSrc(art) : null}
             {@const inProgress = (entry.item.viewOffsetMs ?? 0) > 0}
             <li class:unavailable={!entry.available}>
               <span class="position" aria-hidden="true">{index + 1}</span>
               <div class="thumb" aria-hidden="true">
-                {#if art}
-                  <img src={posterSrc(art)} alt="" onerror={(event) => ((event.currentTarget as HTMLImageElement).style.display = "none")} />
-                {:else}
-                  <Icon name="film" size={20} stroke={1.5} />
+                <Icon name="film" size={20} stroke={1.5} />
+                {#if artUrl}
+                  <img
+                    class="image-reveal image-cover"
+                    src={artUrl}
+                    use:imageReveal={artUrl}
+                    alt=""
+                    decoding="async"
+                  />
                 {/if}
               </div>
               <div class="entrymeta">
@@ -370,7 +377,7 @@
   .entries li { display: grid; grid-template-columns: 2rem 3rem minmax(8rem, 1fr) auto; gap: 0.7rem; align-items: center; padding: 0.55rem; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 10px; }
   .entries li.unavailable { opacity: 0.72; }
   .position { color: var(--text-dim); text-align: center; font-variant-numeric: tabular-nums; }
-  .thumb { width: 3rem; height: 3rem; border-radius: 6px; background: var(--surface-2); color: var(--text-dim); overflow: hidden; display: grid; place-items: center; }
+  .thumb { position: relative; width: 3rem; height: 3rem; border-radius: 6px; background: var(--surface-2); color: var(--text-dim); overflow: hidden; display: grid; place-items: center; }
   .thumb img { width: 100%; height: 100%; object-fit: cover; }
   .entrymeta { min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
   .entrymeta strong, .entrymeta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -1,6 +1,7 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import Icon from "$lib/Icon.svelte";
+  import { imageReveal } from "$lib/imageReveal";
   import { detailKeyOf, type Detail, type Item, type PersonRef, type PlayIntent } from "$lib/types";
 
   // The shared episode info page (binding UX ruling): ONE page per season —
@@ -128,6 +129,7 @@
   // Panel fields prefer rich detail, falling back to the listing episode.
   let panelSummary = $derived(detail?.summary ?? selected?.summary);
   let panelStill = $derived(detail?.poster ?? selected?.poster);
+  let panelStillUrl = $derived(panelStill ? posterSrc(panelStill) : null);
   let panelDuration = $derived(detail?.durationMs ?? selected?.durationMs);
   let panelViewOffset = $derived(detail?.viewOffsetMs ?? selected?.viewOffsetMs);
   let panelInProgress = $derived((panelViewOffset ?? 0) > 0);
@@ -136,12 +138,6 @@
       ? Math.round(Math.min(100, (100 * panelViewOffset) / panelDuration))
       : null
   );
-  let stillFailed = $state(false);
-  $effect(() => {
-    void selKey;
-    stillFailed = false; // each selection gets a fresh chance at its art
-  });
-
   let showTitle = $derived(
     selected?.grandparentTitle ?? seed.grandparentTitle ?? seed.parentTitle ?? ""
   );
@@ -226,6 +222,7 @@
       {:else}
         {#each episodes as e (e.ratingKey)}
           {@const pct = pctOf(e)}
+          {@const artUrl = e.poster ? posterSrc(e.poster) : null}
           <button
             class="eprow"
             class:selected={e.ratingKey === selKey}
@@ -234,8 +231,16 @@
             aria-current={e.ratingKey === selKey}
           >
             <div class="epthumb">
-              {#if e.poster}
-                <img src={posterSrc(e.poster)} alt="" loading="lazy" onerror={(ev) => ((ev.currentTarget as HTMLImageElement).style.visibility = "hidden")} />
+              <div class="noart" aria-hidden="true">{e.title}</div>
+              {#if artUrl}
+                <img
+                  class="image-reveal image-cover"
+                  src={artUrl}
+                  use:imageReveal={artUrl}
+                  alt=""
+                  loading="lazy"
+                  decoding="async"
+                />
               {/if}
               {#if pct !== null}
                 <div class="progress" aria-hidden="true"><div class="bar" style="width:{pct}%"></div></div>
@@ -262,10 +267,15 @@
     <div class="panel">
       {#if selected}
         <div class="stillwrap">
-          {#if panelStill && !stillFailed}
-            <img class="still" src={posterSrc(panelStill)} alt="" onerror={() => (stillFailed = true)} />
-          {:else}
-            <div class="still noart">{selected.title}</div>
+          <div class="still noart" aria-hidden="true">{selected.title}</div>
+          {#if panelStillUrl}
+            <img
+              class="still image-reveal image-cover"
+              src={panelStillUrl}
+              use:imageReveal={panelStillUrl}
+              alt=""
+              decoding="async"
+            />
           {/if}
         </div>
         <div class="paneltitle">
@@ -475,7 +485,9 @@
     padding-bottom: 3rem;
   }
   .stillwrap {
+    position: relative;
     max-width: 34rem;
+    aspect-ratio: 16 / 9;
   }
   .still {
     width: 100%;

@@ -9,10 +9,9 @@
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
   import { friendlyError } from "$lib/errors";
+  import { imageReveal } from "$lib/imageReveal";
   import { detailKeyOf, type ContinuePlayingMode, type Detail, type Item, type PlaybackContinuation, type PlaylistSummary, type PlayIntent, type ServerPlaylist, type ServerPlaylistGroup } from "$lib/types";
 
-  // Poster URLs that 404'd; fall back to the title placeholder for these.
-  let failedPosters = $state(new Set<string>());
   // Tracked timers, cleared on destroy / when superseded.
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
@@ -682,7 +681,6 @@
     hubs = [];
     continueHubs = [];
     sections = [];
-    failedPosters = new Set(); // bounded to the current view's posters
     const sg = ++sourceGen;
     const hg = ++homeGen;
     await Promise.all([loadSections(sg), loadHome(hg)]);
@@ -1011,7 +1009,6 @@
             offset = 0;
             hasMore = true;
             items = [];
-            failedPosters = new Set();
             loading = true;
             await loadMore(myGen, (msg) => {
               legFailures.push({ msg, current: () => myGen === loadGen });
@@ -1212,7 +1209,6 @@
     // here makes a SUCCESSFUL repaint show every item twice (it did — markwatched and
     // watchstate both went red). What must not survive is the EMPTY RESULT of a failure.
     items = [];
-    failedPosters = new Set(); // bounded to the current view's posters
     loading = true;
     // An auto-redirect keeps the banner: the refresh action publishes its
     // aggregate AFTER both legs settle, and Svelte's effect flush may land
@@ -2094,18 +2090,17 @@
           <!-- Fully watched: marked played AND not mid-resume (pct is the resume %). -->
           <div class="watchedbadge" aria-hidden="true"><Icon name="check" size={13} stroke={2.75} /></div>
         {/if}
-        {#if art && !failedPosters.has(art)}
+        <div class="noart" aria-hidden="true">{item.title}</div>
+        {#if art}
+          {@const src = posterSrc(art)}
           <img
-            src={posterSrc(art)}
-            alt={item.title}
+            class="image-reveal image-cover"
+            use:imageReveal={src}
+            src={src}
+            alt=""
             loading="lazy"
-            onerror={() => {
-              failedPosters.add(art);
-              failedPosters = failedPosters; // trigger reactivity → show placeholder
-            }}
+            decoding="async"
           />
-        {:else}
-          <div class="noart">{item.title}</div>
         {/if}
         {#if pct !== null}
           <!-- Decorative: the percentage is exposed on the button's aria-label
@@ -2161,17 +2156,16 @@
               aria-label={d === 0 ? `${hasResume(it) ? "Resume" : "Play"} ${it.grandparentTitle ?? it.title}` : `Show ${it.grandparentTitle ?? it.title}`}
             >
               <div class="art">
-                {#if art && !failedPosters.has(art)}
+                <div class="noart" aria-hidden="true">{it.grandparentTitle ?? it.title}</div>
+                {#if art}
+                  {@const src = posterSrc(art)}
                   <img
-                    src={posterSrc(art)}
+                    class="image-reveal image-cover"
+                    use:imageReveal={src}
+                    src={src}
                     alt=""
-                    onerror={() => {
-                      failedPosters.add(art);
-                      failedPosters = failedPosters;
-                    }}
+                    decoding="async"
                   />
-                {:else}
-                  <div class="noart">{it.grandparentTitle ?? it.title}</div>
                 {/if}
                 {#if d === 0}
                   <div class="playoverlay" aria-hidden="true">
@@ -2324,7 +2318,7 @@
       <p class="muted">Scan with your phone, or open Plex to authorize.</p>
       {#if pin.qrSvg}
         <button class="qr" onclick={() => openExternal(pin!.authUrl)} title="Open Plex to authorize">
-          <img src={pin.qrSvg} alt="Plex device-link QR code" />
+          <img src={pin.qrSvg} alt="Plex device-link QR code" decoding="async" />
         </button>
       {/if}
       <button class="primary authbtn" onclick={() => openExternal(pin!.authUrl)}>

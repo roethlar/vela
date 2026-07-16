@@ -11,6 +11,14 @@
 import fs from "node:fs";
 import http from "node:http";
 
+// One deterministic, valid 1x1 PNG. Image-polish scenarios care about a real
+// decode (naturalWidth > 0), not the pixels; keeping the bytes inline makes the
+// mock hermetic and gives every success an exact content type and length.
+const IMAGE_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64",
+);
+
 export function startMockJellyfin({
   userId = "u1",
   movies = [{ id: "m1", name: "Mock Movie", year: 2020 }],
@@ -52,6 +60,9 @@ export function startMockJellyfin({
     ...initialViews.flatMap((view) => view.movies),
     ...Object.values(initialChildren).flat(),
   ];
+  const heldImagePaths = new Set();
+  const image404Paths = new Set();
+  const pendingImages = new Map();
 
   const state = {
     // Per-movie UserData; Stopped check-ins update positionTicks like a real
@@ -66,6 +77,28 @@ export function startMockJellyfin({
     // delayed PlayedItems mutation has merely arrived or has actually replied.
     playedArrivals: [], // { method, path, itemId } in arrival order
     playedServed: [], // { method, path, itemId, status } in response order
+    imageArrivals: [], // { method, path } in request order
+    imageServed: [], // { method, path, status } in response order
+    heldImagePaths,
+    image404Paths,
+    holdImage(path) {
+      heldImagePaths.add(path);
+    },
+    releaseImage(path) {
+      heldImagePaths.delete(path);
+      const responders = pendingImages.get(path);
+      if (!responders) return;
+      pendingImages.delete(path);
+      for (const respond of responders) respond();
+    },
+    setImage404(path, enabled = true) {
+      if (enabled) image404Paths.add(path);
+      else image404Paths.delete(path);
+    },
+    releaseAllImages() {
+      heldImagePaths.clear();
+      for (const path of [...pendingImages.keys()]) state.releaseImage(path);
+    },
     checkins: [], // parsed /Sessions/Playing* bodies: { endpoint, body }
     contractViolations: [], // Items requests whose query broke the client contract
     // Scenario-mutable machinery (library-refresh-scan plan). Handlers read
@@ -178,6 +211,10 @@ export function startMockJellyfin({
     SeasonId: m.seasonId ?? undefined,
     SeriesName: m.seriesName ?? undefined,
     SeasonName: m.seasonName ?? undefined,
+    ImageTags: m.imageTag !== undefined ? { Primary: m.imageTag } : undefined,
+    BackdropImageTags:
+      m.backdropTag !== undefined ? [m.backdropTag] : undefined,
+    SeriesPrimaryImageTag: m.seriesPrimaryImageTag ?? undefined,
     UserData: {
       Played: state.userData[m.id].played,
       PlaybackPositionTicks: state.userData[m.id].positionTicks,
@@ -589,6 +626,44 @@ export function startMockJellyfin({
     if (stream && findMovie(stream[1])?.mediaFile) {
       return serveRange(req, res, findMovie(stream[1]).mediaFile);
     }
+    const image = /^\/Items\/([^/]+)\/Images\/(Primary|Backdrop\/0)$/.exec(path);
+    if (image && req.method === "GET") {
+      const request = { method: req.method, path };
+      state.imageArrivals.push(request);
+      // Bind both controls at arrival. A later toggle must not change the
+      // response already parked for this request.
+      const notFound = image404Paths.has(path) || !findMovie(image[1]);
+      const respond = () => {
+        if (res.destroyed || res.writableEnded) return;
+        const status = notFound ? 404 : 200;
+        if (notFound) {
+          res.writeHead(status, {
+            "Content-Type": "image/png",
+            "Content-Length": 0,
+          });
+          res.end();
+        } else {
+          res.writeHead(status, {
+            "Content-Type": "image/png",
+            "Content-Length": IMAGE_BYTES.length,
+          });
+          res.end(IMAGE_BYTES);
+        }
+        state.imageServed.push({ ...request, status });
+      };
+      if (heldImagePaths.has(path)) {
+        const responders = pendingImages.get(path) ?? new Set();
+        responders.add(respond);
+        pendingImages.set(path, responders);
+        res.once("close", () => {
+          if (res.writableEnded) return;
+          responders.delete(respond);
+          if (responders.size === 0) pendingImages.delete(path);
+        });
+        return;
+      }
+      return respond();
+    }
     // Scan-trigger endpoints (library-refresh-scan plan). VirtualFolders is
     // the JF bare admin route (a bare array, not an Items envelope); a 403
     // here is exactly what a real non-admin token gets, since the route is
@@ -641,7 +716,10 @@ export function startMockJellyfin({
         port: server.address().port,
         state,
         userId,
-        close: () => new Promise((r) => server.close(r)),
+        close: () => {
+          state.releaseAllImages();
+          return new Promise((r) => server.close(r));
+        },
       });
     });
   });
