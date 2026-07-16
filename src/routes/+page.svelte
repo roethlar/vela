@@ -6,9 +6,10 @@
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
   import PlaylistsView from "$lib/PlaylistsView.svelte";
+  import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
   import { friendlyError } from "$lib/errors";
-  import { detailKeyOf, type Detail, type Item, type PlaylistSummary, type PlayIntent } from "$lib/types";
+  import { detailKeyOf, type Detail, type Item, type PlaylistSummary, type PlayIntent, type ServerPlaylist, type ServerPlaylistGroup } from "$lib/types";
 
   // Poster URLs that 404'd; fall back to the title placeholder for these.
   let failedPosters = $state(new Set<string>());
@@ -62,6 +63,10 @@
   // Invalidates the playlist view after source availability or an external
   // Add-to-Playlist mutation changes what it should render.
   let playlistVersion = $state(0);
+  let serverPlaylistGroups = $state<ServerPlaylistGroup[]>([]);
+  let selectedServerPlaylist = $state<ServerPlaylist | null>(null);
+  let serverPlaylistVersion = $state(0);
+  let serverPlaylistGen = 0;
   let sections = $state<Section[]>([]);
   let hubs = $state<Hub[]>([]);
   let active = $state<Section | null>(null);
@@ -262,9 +267,11 @@
     if (mode === "home") {
       return loadHome(++homeGen);
     } else if (mode === "playlists") {
-      // Playlist snapshots are durable curation, not live watch-state mirrors.
-      // Keep this root intact while ensuring Home re-fetches when revisited.
+      // Vela playlist snapshots are durable curation, while a selected server
+      // playlist is live server data. Refresh only that read-only detail and
+      // keep either playlist root intact.
       hubs = [];
+      if (selectedServerPlaylist) serverPlaylistVersion++;
       return Promise.resolve();
     } else {
       // The hidden Home hubs are stale now; empty them so goHome() re-fetches.
@@ -312,7 +319,10 @@
     try {
       await loadSourceList();
       authenticated = sources.length > 0;
-      if (authenticated) await loadEverything();
+      if (authenticated) {
+        void loadServerPlaylists();
+        await loadEverything();
+      }
     } catch (e) {
       setError(String(e));
     }
@@ -323,6 +333,28 @@
       sources = await invoke<Source[]>("get_sources");
     } catch {
       /* non-fatal: switcher just won't show extra sources */
+    }
+  }
+
+  async function loadServerPlaylists(): Promise<void> {
+    const gen = ++serverPlaylistGen;
+    if (sources.length === 0) {
+      serverPlaylistGroups = [];
+      return;
+    }
+    try {
+      const loaded = await invoke<ServerPlaylistGroup[]>("get_server_playlists");
+      if (gen === serverPlaylistGen) serverPlaylistGroups = loaded;
+    } catch {
+      if (gen === serverPlaylistGen) {
+        serverPlaylistGroups = sources.map((source) => ({
+          sourceId: source.id,
+          sourceName: source.name,
+          sourceKind: source.kind,
+          available: false,
+          playlists: [],
+        }));
+      }
     }
   }
 
@@ -346,6 +378,7 @@
     // standing over the Welcome screen — a dead server's failure, with nothing
     // left on screen to explain it and no way to clear it (codex r14).
     navEpoch++;
+    serverPlaylistGen++;
     await loadSourceList();
     // And AGAIN, now that the change has actually landed. The bump above
     // invalidates whatever was in flight when Settings called us — but Settings
@@ -358,6 +391,10 @@
     navEpoch++;
     if (!sources.some((s) => s.id === activeSource)) activeSource = null;
     authenticated = sources.length > 0;
+    if (!sources.some((source) => source.id === selectedServerPlaylist?.sourceId)) {
+      selectedServerPlaylist = null;
+    }
+    void loadServerPlaylists();
     // A scan in flight belongs to a library in the list that just changed — it may
     // be a library of a source that is no longer configured. Its outcome is about
     // to be meaningless whichever branch we take: dropping the LAST source leaves
@@ -372,6 +409,7 @@
     editAttempt++;
     clearEditStatus();
     playlistVersion++;
+    serverPlaylistVersion++;
     if (mode === "playlists") {
       // Saved playlists remain available when the last source is removed;
       // the view reload marks those retained entries unavailable in place.
@@ -642,7 +680,14 @@
     setError(null);
     closeMenu();
     closeSectionMenu();
+    selectedServerPlaylist = null;
     mode = "playlists";
+    void loadServerPlaylists();
+  }
+
+  function openServerPlaylist(playlist: ServerPlaylist) {
+    openPlaylists();
+    selectedServerPlaylist = playlist;
   }
 
   // ---- Library refresh (library-refresh-scan plan, slice 1) ----------------
@@ -2122,7 +2167,7 @@
       <aside class="sidebar">
         <nav class="sidenav" aria-label="Library">
           <button class="sideitem" class:active={mode === "home"} onclick={goHome}>Home</button>
-          <button class="sideitem" class:active={mode === "playlists"} onclick={openPlaylists}>Playlists</button>
+          <button class="sideitem" class:active={mode === "playlists" && !selectedServerPlaylist} onclick={openPlaylists}>Playlists</button>
           {#if authenticated}
             <div class="sidegroup sidegroup-row">
               <span>Library</span>
@@ -2158,6 +2203,33 @@
                 </button>
               {/each}
             {/if}
+            {#if serverPlaylistGroups.length > 0}
+              <div class="sidegroup">Server Playlists</div>
+              {#each serverPlaylistGroups as group (group.sourceId)}
+                <div class="serverplaylistgroup" data-source-id={group.sourceId} data-playlist-state={group.available ? "available" : "unavailable"}>
+                  <div class="serversourcename">
+                    <span>{group.sourceName}</span>
+                    {#if group.sourceKind === "emby"}<small>Experimental</small>{/if}
+                  </div>
+                  {#if !group.available}
+                    <span class="serverplayliststate">Unavailable</span>
+                  {:else if group.playlists.length === 0}
+                    <span class="serverplayliststate">No video playlists</span>
+                  {:else}
+                    {#each group.playlists as playlist (playlist.key)}
+                      <button
+                        class="sideitem serverplaylistitem"
+                        class:active={selectedServerPlaylist?.key === playlist.key}
+                        aria-label={`Open ${playlist.title} from ${group.sourceName}`}
+                        onclick={() => openServerPlaylist(playlist)}
+                      >
+                        {playlist.title}
+                      </button>
+                    {/each}
+                  {/if}
+                </div>
+              {/each}
+            {/if}
             {#if sources.length > 1}
               <div class="sidegroup">Sources</div>
               <button class="sideitem" class:active={mode !== "playlists" && activeSource === null} onclick={() => selectSource(null)}>All</button>
@@ -2188,6 +2260,13 @@
       <div class="code">{pin.code}</div>
       <p class="muted">Waiting for you to authorize…</p>
     </div>
+  {:else if mode === "playlists" && selectedServerPlaylist}
+    <ServerPlaylistView
+      playlist={selectedServerPlaylist}
+      refreshVersion={serverPlaylistVersion}
+      {posterSrc}
+      onBack={openPlaylists}
+    />
   {:else if mode === "playlists"}
     <PlaylistsView sourceVersion={playlistVersion} {posterSrc} />
   {:else if !authenticated}
@@ -2514,6 +2593,39 @@
     align-items: center;
     justify-content: space-between;
     gap: 0.4rem;
+  }
+  .serverplaylistgroup {
+    margin-bottom: 0.45rem;
+  }
+  .serversourcename {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 0.4rem;
+    color: var(--text-dim);
+    font-size: 0.76rem;
+    padding: 0.3rem 0.65rem 0.15rem;
+  }
+  .serversourcename span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .serversourcename small {
+    color: var(--accent);
+    font-size: 0.58rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .serverplayliststate {
+    display: block;
+    color: var(--text-dim);
+    font-size: 0.75rem;
+    padding: 0.22rem 0.65rem 0.4rem 1.15rem;
+  }
+  .serverplaylistitem {
+    padding-left: 1.15rem;
+    font-size: 0.84rem;
   }
   .refreshbtn {
     display: inline-flex;

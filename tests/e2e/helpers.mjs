@@ -25,10 +25,13 @@ export function makeClips(configRoot, clipNames) {
 }
 
 // Config `sources` entry for a started mock server.
-export function mockSource(mock, { id = 'jf-mock', name = 'Mock JF' } = {}) {
+export function mockSource(
+  mock,
+  { id = 'jf-mock', name = 'Mock JF', kind = 'jellyfin' } = {},
+) {
   return {
     id,
-    kind: 'jellyfin',
+    kind,
     name,
     base_url: `http://127.0.0.1:${mock.port}`,
     access_token: 'mock-token',

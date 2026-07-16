@@ -8,10 +8,10 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
     namespace_key, CastMember, DetailDto, HubDto, ItemDto, MediaSource, MediaStreamDto,
-    MediaVersionDto, PersonRef, SectionDto, StreamResolution,
+    MediaVersionDto, PersonRef, PlaylistDto, SectionDto, StreamResolution,
 };
 use crate::playback::{ProgressTarget, TrackInfo};
-use crate::plex_library::{PlexDetail, PlexLibrary, PlexServer, PlexVideo};
+use crate::plex_library::{PlexDetail, PlexLibrary, PlexPlaylist, PlexServer, PlexVideo};
 
 pub struct PlexSource {
     id: String,
@@ -401,6 +401,16 @@ impl PlexSource {
         }
     }
 
+    fn to_playlist(&self, playlist: PlexPlaylist) -> PlaylistDto {
+        PlaylistDto {
+            key: namespace_key(&self.id, &playlist.rating_key),
+            title: playlist.title,
+            item_count: playlist.leaf_count,
+            source_id: self.id.clone(),
+            source_name: self.name.clone(),
+        }
+    }
+
     /// Map a fetched `/library/metadata/{rk}` record to the frontend [`DetailDto`],
     /// building image URLs through the same tokened transcode path as posters.
     /// A namespaced person key from a Plex tag id — only when the id is the
@@ -780,6 +790,66 @@ impl MediaSource for PlexSource {
         Ok(videos.into_iter().map(|v| self.to_item(&lib, v)).collect())
     }
 
+    async fn playlists(&self) -> Result<Vec<PlaylistDto>, String> {
+        const PAGE: usize = 200;
+        let fetch = |lib: PlexLibrary| async move {
+            let mut start = 0;
+            let mut playlists = Vec::new();
+            loop {
+                let page = lib
+                    .get_video_playlists(start, PAGE)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let count = page.len();
+                playlists.extend(page);
+                if count < PAGE {
+                    return Ok::<_, String>((lib, playlists));
+                }
+                start += count;
+            }
+        };
+        let lib = self.ensure_ready().await?;
+        let (_lib, playlists) = match fetch(lib).await {
+            Ok(result) => result,
+            Err(_) => fetch(self.rediscover().await?).await?,
+        };
+        Ok(playlists
+            .into_iter()
+            .map(|playlist| self.to_playlist(playlist))
+            .collect())
+    }
+
+    async fn playlist_items(&self, playlist_key: &str) -> Result<Vec<ItemDto>, String> {
+        validate_plex_id("playlist key", playlist_key)?;
+        const PAGE: usize = 200;
+        let fetch = |lib: PlexLibrary| async move {
+            let mut start = 0;
+            let mut items = Vec::new();
+            loop {
+                let page = lib
+                    .get_playlist_items(playlist_key, start, PAGE)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let count = page.len();
+                items.extend(page);
+                if count < PAGE {
+                    return Ok::<_, String>((lib, items));
+                }
+                start += count;
+            }
+        };
+        let lib = self.ensure_ready().await?;
+        let (lib, items) = match fetch(lib).await {
+            Ok(result) => result,
+            Err(_) => fetch(self.rediscover().await?).await?,
+        };
+        Ok(items
+            .into_iter()
+            .filter(|item| is_directly_playable_video(item.media_type.as_deref()))
+            .map(|item| self.to_item(&lib, item))
+            .collect())
+    }
+
     async fn item_detail(&self, item_key: &str) -> Result<DetailDto, String> {
         validate_plex_id("item key", item_key)?;
         let lib = self.ensure_ready().await?;
@@ -1022,6 +1092,10 @@ fn is_playable_video(media_type: Option<&str>) -> bool {
     )
 }
 
+fn is_directly_playable_video(media_type: Option<&str>) -> bool {
+    matches!(media_type, Some("movie" | "episode" | "clip"))
+}
+
 fn validate_plex_id(name: &str, value: &str) -> Result<(), String> {
     if !value.is_empty() && value.chars().all(|c| c.is_ascii_digit()) {
         Ok(())
@@ -1118,6 +1192,25 @@ mod tests {
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    #[test]
+    fn playlist_descriptor_uses_rating_key_namespace_not_content_path() {
+        let source = PlexSource::new(
+            "plex-a",
+            "Plex A",
+            PlexLibrary::new("token".to_string(), "client".to_string()),
+        );
+        let dto = source.to_playlist(PlexPlaylist {
+            rating_key: "2561805".to_string(),
+            title: "Background videos".to_string(),
+            leaf_count: Some(8),
+        });
+        assert_eq!(dto.key, "plex-a:2561805");
+        assert_eq!(dto.title, "Background videos");
+        assert_eq!(dto.item_count, Some(8));
+        assert_eq!(dto.source_id, "plex-a");
+        assert_eq!(dto.source_name, "Plex A");
+    }
 
     /// A minimal Plex-shaped HTTP server on 127.0.0.1, enough for `/identity`,
     /// the section list, and a scan. Every request path is recorded on ARRIVAL,

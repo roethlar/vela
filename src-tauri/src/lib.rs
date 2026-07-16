@@ -61,8 +61,8 @@ pub struct AppState {
     /// Joins mpv's clean-EOF signal to the matching completed tracker write.
     /// The async dispatcher in `run()` advances only that exact session.
     pub(crate) playback_advance: Arc<commands::PlaybackAdvance>,
-    /// Active Vela-playlist location. The cursor is in-memory by design; the
-    /// durable playlist never changes merely because it is played.
+    /// Active Vela- or server-playlist location. The cursor is in-memory by
+    /// design; neither playlist authority changes merely because it is played.
     pub(crate) playlist_cursor: AsyncMutex<Option<commands::PlaylistCursor>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
@@ -209,6 +209,9 @@ pub fn run() {
             commands::get_person_items,
             commands::set_watched,
             commands::play_item,
+            commands::get_server_playlists,
+            commands::get_server_playlist_items,
+            commands::server_playlist_play,
             commands::playlist_list,
             commands::playlist_get,
             commands::playlist_create,

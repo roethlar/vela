@@ -268,6 +268,20 @@ pub struct HubDto {
     pub source_name: String,
 }
 
+/// One read-only playlist owned by a media server. The playlist key is
+/// source-namespaced exactly like item and section keys, so it can be routed
+/// back to the source without exposing backend-specific identifiers to the UI.
+#[derive(Debug, Serialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaylistDto {
+    pub key: String,
+    pub title: String,
+    /// Some servers omit a count. The detail fetch remains authoritative.
+    pub item_count: Option<usize>,
+    pub source_id: String,
+    pub source_name: String,
+}
+
 /// What `resolve_stream` hands back to the playback layer: the media URL, where
 /// to resume from, and how (if at all) to report progress.
 pub struct StreamResolution {
@@ -360,6 +374,18 @@ pub trait MediaSource: Send + Sync {
     /// recorded follow-up).
     async fn person_items(&self, _person_key: &str, _kind: &str) -> Result<Vec<ItemDto>, String> {
         Err("this source doesn't support person browsing".to_string())
+    }
+
+    /// Read-only server-owned playlists. Unsupported sources contribute no
+    /// playlists rather than failing an aggregate view.
+    async fn playlists(&self) -> Result<Vec<PlaylistDto>, String> {
+        Ok(Vec::new())
+    }
+
+    /// Items in one server-owned playlist, in server order. Unsupported
+    /// sources return an empty list, matching [`Self::playlists`].
+    async fn playlist_items(&self, _playlist_key: &str) -> Result<Vec<ItemDto>, String> {
+        Ok(Vec::new())
     }
 }
 
@@ -533,5 +559,15 @@ mod tests {
             kind: "jellyfin",
         }));
         assert_eq!(reg.ids(), vec!["plex".to_string(), "jf".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn unsupported_sources_default_to_no_server_playlists() {
+        let source = Fake {
+            id: "plain",
+            kind: "plain",
+        };
+        assert!(source.playlists().await.unwrap().is_empty());
+        assert!(source.playlist_items("anything").await.unwrap().is_empty());
     }
 }

@@ -111,6 +111,16 @@ pub struct PlexHub {
     pub items: Vec<PlexVideo>,
 }
 
+/// Minimal metadata for one server-owned video playlist. Plex has emitted
+/// these rows under both `Playlist` and `Metadata` XML element names across
+/// server generations, so parsing is deliberately element-name tolerant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlexPlaylist {
+    pub rating_key: String,
+    pub title: String,
+    pub leaf_count: Option<usize>,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct LibrarySection {
@@ -751,6 +761,56 @@ impl PlexLibrary {
             .error_for_status()?;
         let body = resp.text().await?;
         Ok(videos_from_xml(&body))
+    }
+
+    /// Video playlists visible to the current Plex user. `type=15` is Plex's
+    /// playlist metadata type; `playlistType=video` excludes music playlists
+    /// that Vela cannot route to its video player.
+    pub async fn get_video_playlists(
+        &self,
+        start: usize,
+        size: usize,
+    ) -> Result<Vec<PlexPlaylist>, Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let query = vec![
+            ("type", "15".to_string()),
+            ("playlistType", "video".to_string()),
+            ("X-Plex-Container-Start", start.to_string()),
+            ("X-Plex-Container-Size", size.to_string()),
+        ];
+        let response = self
+            .client
+            .get(format!("{base}/playlists"))
+            .query(&query)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .send()
+            .await?
+            .error_for_status()?;
+        let body = response.text().await?;
+        playlists_from_xml(&body).map_err(|error| {
+            std::io::Error::new(std::io::ErrorKind::InvalidData, error).into()
+        })
+    }
+
+    /// One page of a Plex playlist, preserving its server order and duplicate
+    /// entries through the same mixed-element parser used by library listings.
+    pub async fn get_playlist_items(
+        &self,
+        playlist_id: &str,
+        start: usize,
+        size: usize,
+    ) -> Result<Vec<PlexVideo>, Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        self.get_items(
+            &format!("{base}/playlists/{playlist_id}/items"),
+            &[
+                ("X-Plex-Container-Start".to_string(), start.to_string()),
+                ("X-Plex-Container-Size".to_string(), size.to_string()),
+            ],
+        )
+        .await
     }
 
     /// Search across libraries. Returns playable/browsable results (movies,
@@ -1507,6 +1567,59 @@ fn videos_from_xml(body: &str) -> Vec<PlexVideo> {
     out
 }
 
+fn playlists_from_xml(body: &str) -> Result<Vec<PlexPlaylist>, String> {
+    let mut reader = quick_xml::Reader::from_str(body);
+    let mut buf = Vec::new();
+    let mut out = Vec::new();
+    loop {
+        match reader.read_event_into(&mut buf) {
+            Ok(quick_xml::events::Event::Empty(e))
+            | Ok(quick_xml::events::Event::Start(e)) => {
+                let tag = e.name().as_ref().to_owned();
+                if !matches!(tag.as_slice(), b"Playlist" | b"Metadata" | b"Directory") {
+                    buf.clear();
+                    continue;
+                }
+                let mut rating_key = None;
+                let mut title = None;
+                let mut media_type = None;
+                let mut playlist_type = None;
+                let mut leaf_count = None;
+                for attr in e.attributes() {
+                    let attr = attr.map_err(|error| error.to_string())?;
+                    match attr.key.as_ref() {
+                        b"ratingKey" => rating_key = Some(av(&attr)),
+                        b"title" => title = Some(av(&attr)),
+                        b"type" => media_type = Some(av(&attr)),
+                        b"playlistType" => playlist_type = Some(av(&attr)),
+                        b"leafCount" => leaf_count = av(&attr).parse().ok(),
+                        _ => {}
+                    }
+                }
+                let playlist_element = tag.as_slice() == b"Playlist";
+                if (playlist_element || media_type.as_deref() == Some("playlist"))
+                    && playlist_type.as_deref().is_none_or(|kind| kind == "video")
+                {
+                    if let (Some(rating_key), Some(title)) = (rating_key, title) {
+                        if !rating_key.is_empty() && !title.is_empty() {
+                            out.push(PlexPlaylist {
+                                rating_key,
+                                title,
+                                leaf_count,
+                            });
+                        }
+                    }
+                }
+            }
+            Ok(quick_xml::events::Event::Eof) => break,
+            Ok(_) => {}
+            Err(error) => return Err(error.to_string()),
+        }
+        buf.clear();
+    }
+    Ok(out)
+}
+
 fn video_from_attrs(e: &quick_xml::events::BytesStart) -> PlexVideo {
     let mut v = PlexVideo {
         key: String::new(),
@@ -1855,6 +1968,40 @@ mod tests {
             Some("/library/metadata/7/thumb/9")
         );
         assert_eq!(v.art.as_deref(), Some("/library/metadata/7/art/9"));
+    }
+
+    #[test]
+    fn playlist_xml_accepts_legacy_and_metadata_rows_but_only_video() {
+        let xml = r#"
+          <MediaContainer size="4">
+            <Playlist ratingKey="11" key="/playlists/11/items"
+                      title="Films &amp; Shorts" type="playlist"
+                      playlistType="video" leafCount="3" />
+            <Metadata ratingKey="12" key="/playlists/12/items"
+                      title="Smart Picks" type="playlist"
+                      playlistType="video" leafCount="8" />
+            <Metadata ratingKey="13" key="/playlists/13/items"
+                      title="Songs" type="playlist"
+                      playlistType="audio" leafCount="20" />
+            <Directory ratingKey="14" title="Not a playlist" type="collection" />
+          </MediaContainer>
+        "#;
+        assert_eq!(
+            playlists_from_xml(xml).unwrap(),
+            vec![
+                PlexPlaylist {
+                    rating_key: "11".to_string(),
+                    title: "Films & Shorts".to_string(),
+                    leaf_count: Some(3),
+                },
+                PlexPlaylist {
+                    rating_key: "12".to_string(),
+                    title: "Smart Picks".to_string(),
+                    leaf_count: Some(8),
+                },
+            ]
+        );
+        assert!(playlists_from_xml("<MediaContainer><Playlist").is_err());
     }
 
     #[test]

@@ -19,6 +19,10 @@ export function startMockJellyfin({
   // pre-existing scenarios are unaffected (library-refresh-scan plan).
   views = null,
   latest = [], // items for /Users/{userId}/Items/Latest → the "Recently Added" Home hub
+  // Read-only video playlists: [{ id, name, itemIds }]. Item ids may repeat;
+  // responses preserve that order exactly like Jellyfin/Emby.
+  playlists = [],
+  failPlaylistList = false,
   // Real servers don't persist sub-threshold positions (Plex's resume
   // minimum is ~60s); a Stopped report below this many ticks is accepted
   // but stores no resume point. Scenarios that must prove Vela's own
@@ -52,6 +56,11 @@ export function startMockJellyfin({
     // request, while viewsDelayMs is a knob that stays until reset.
     views: initialViews,
     latest: [...latest], // mutable Latest rail seed
+    playlists: playlists.map((playlist) => ({
+      ...playlist,
+      itemIds: [...playlist.itemIds],
+    })),
+    failPlaylistList,
     failNextViews: false, // one-shot: 500 the next /Users/{id}/Views
     viewsDelayMs: 0,
     failNextLatest: false, // one-shot: 500 the next /Users/{id}/Items/Latest
@@ -266,6 +275,36 @@ export function startMockJellyfin({
       }
       return respond();
     }
+    if (
+      path === `/Users/${userId}/Items` &&
+      query.IncludeItemTypes === "Playlist"
+    ) {
+      if (!authed(req)) return unauthorized(path);
+      if (
+        query.Recursive !== "true" ||
+        query.MediaTypes !== "Video" ||
+        query.SortBy !== "SortName" ||
+        query.SortOrder !== "Ascending" ||
+        !(query.Fields ?? "").split(",").includes("ChildCount") ||
+        query.Limit !== undefined
+      ) {
+        state.contractViolations.push({ path, query });
+        return json({ error: "playlist query contract violation" }, 400);
+      }
+      if (state.failPlaylistList) {
+        return json({ error: "mock playlist discovery failure" }, 500);
+      }
+      return json({
+        Items: state.playlists.map((playlist) => ({
+          Id: playlist.id,
+          Name: playlist.name,
+          Type: "Playlist",
+          MediaType: "Video",
+          ChildCount: playlist.itemIds.length,
+        })),
+        TotalRecordCount: state.playlists.length,
+      });
+    }
     if (path === `/Users/${userId}/Items`) {
       // Search goes to the same endpoint with searchTerm and NO ParentId
       // (jellyfin.rs search()); a real server filters by name. The client
@@ -348,6 +387,33 @@ export function startMockJellyfin({
         return;
       }
       return respondItems();
+    }
+    const playlistItems = /^\/Playlists\/([^/]+)\/Items$/.exec(path);
+    if (playlistItems && req.method === "GET") {
+      if (!authed(req)) return unauthorized(path);
+      const playlist = state.playlists.find((entry) => entry.id === playlistItems[1]);
+      if (!playlist) return json({ error: "playlist not found" }, 404);
+      if (
+        query.UserId !== userId ||
+        query.EnableUserData !== "true" ||
+        !(query.Fields ?? "").split(",").includes("Overview") ||
+        !(query.Fields ?? "").split(",").includes("ProviderIds") ||
+        query.StartIndex === undefined ||
+        query.Limit === undefined
+      ) {
+        state.contractViolations.push({ path, query });
+        return json({ error: "playlist items query contract violation" }, 400);
+      }
+      const start = Number(query.StartIndex);
+      const end = start + Number(query.Limit);
+      return json({
+        Items: playlist.itemIds
+          .slice(start, end)
+          .map((id) => findMovie(id))
+          .filter(Boolean)
+          .map(toJson),
+        TotalRecordCount: playlist.itemIds.length,
+      });
     }
     const single = /^\/Users\/[^/]+\/Items\/([^/]+)$/.exec(path);
     if (

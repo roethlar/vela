@@ -61,6 +61,22 @@ export type Playlist = {
   updatedMs: number;
 };
 
+export type ServerPlaylist = {
+  key: string;
+  title: string;
+  itemCount: number | null;
+  sourceId: string;
+  sourceName: string;
+};
+
+export type ServerPlaylistGroup = {
+  sourceId: string;
+  sourceName: string;
+  sourceKind: string;
+  available: boolean;
+  playlists: ServerPlaylist[];
+};
+
 export type CastMember = { name: string; role?: string; thumb?: string; personKey?: string };
 
 // A person credit (director/writer); `personKey` (namespaced, when the

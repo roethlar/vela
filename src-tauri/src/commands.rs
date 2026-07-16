@@ -2162,14 +2162,22 @@ pub(crate) struct PlaybackAdvance {
 
 #[derive(Debug, Clone)]
 pub(crate) struct PlaylistCursor {
+    owner: PlaylistOwner,
     playlist_id: String,
     entry_id: String,
     index: usize,
     session_id: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PlaylistOwner {
+    Vela,
+    Server,
+}
+
 #[derive(Debug, Clone)]
 struct PlaylistLocation {
+    owner: PlaylistOwner,
     playlist_id: String,
     entry_id: String,
     index: usize,
@@ -2361,6 +2369,7 @@ async fn play_by_key(
     // the replacement has a real stream do we provisionally install its
     // context; a later launch/tracker failure compare-restores the old one.
     let new_cursor = playlist.map(|location| PlaylistCursor {
+        owner: location.owner,
         playlist_id: location.playlist_id,
         entry_id: location.entry_id,
         index: location.index,
@@ -2554,6 +2563,72 @@ pub async fn play_item(
         .map_err(|failure| failure.message)
 }
 
+// ---- read-only server playlists -----------------------------------------
+
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ServerPlaylistGroupDto {
+    pub source_id: String,
+    pub source_name: String,
+    pub source_kind: String,
+    /// False only when this source's playlist discovery failed. A successful
+    /// empty list remains available and is distinguishable in the UI.
+    pub available: bool,
+    pub playlists: Vec<crate::source::PlaylistDto>,
+}
+
+/// List each source independently so one offline server leaves an unavailable
+/// group in place without hiding healthy servers' playlists. Calls run in
+/// parallel: several 15-second source timeouts must not serialize into a long
+/// frozen sidebar load.
+#[tauri::command]
+pub async fn get_server_playlists(
+    state: State<'_, AppState>,
+) -> Result<Vec<ServerPlaylistGroupDto>, String> {
+    let sources = state.registry.lock().await.all().to_vec();
+    let mut groups: Vec<_> = sources
+        .iter()
+        .map(|source| ServerPlaylistGroupDto {
+            source_id: source.id(),
+            source_name: source.name(),
+            source_kind: source.kind().to_string(),
+            available: false,
+            playlists: Vec::new(),
+        })
+        .collect();
+    let mut tasks = tokio::task::JoinSet::new();
+    for (index, source) in sources.into_iter().enumerate() {
+        tasks.spawn(async move { (index, source.playlists().await) });
+    }
+    while let Some(joined) = tasks.join_next().await {
+        match joined {
+            Ok((index, Ok(playlists))) => {
+                groups[index].available = true;
+                groups[index].playlists = playlists;
+            }
+            Ok((_index, Err(_))) => {}
+            Err(error) => eprintln!("vela: server playlist discovery task failed: {error}"),
+        }
+    }
+    Ok(groups)
+}
+
+async fn fetch_server_playlist_items(
+    state: &AppState,
+    playlist_key: &str,
+) -> Result<Vec<ItemDto>, String> {
+    let (source, raw) = state.registry.lock().await.route(playlist_key)?;
+    source.playlist_items(&raw).await
+}
+
+#[tauri::command]
+pub async fn get_server_playlist_items(
+    key: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ItemDto>, String> {
+    fetch_server_playlist_items(&state, &key).await
+}
+
 // ---- Vela playlists ------------------------------------------------------
 
 fn unix_now_ms() -> u64 {
@@ -2681,6 +2756,7 @@ async fn play_playlist_entries(
     for (index, entry) in items.into_iter().enumerate().skip(start_index) {
         let session_id = uuid::Uuid::new_v4().to_string();
         let location = PlaylistLocation {
+            owner: PlaylistOwner::Vela,
             playlist_id: playlist_id.clone(),
             entry_id: entry.id,
             index,
@@ -2739,6 +2815,68 @@ pub async fn playlist_play(
         .map(|_| ())
 }
 
+async fn play_server_playlist_entries(
+    state: &AppState,
+    playlist_key: String,
+    items: Vec<ItemDto>,
+    start_index: usize,
+    start_from_beginning: bool,
+    replace_session: Option<&str>,
+) -> Result<bool, String> {
+    if start_index >= items.len() {
+        return Err("server playlist position is out of range".to_string());
+    }
+    let mut last_unavailable = None;
+    for (index, item) in items.into_iter().enumerate().skip(start_index) {
+        let session_id = uuid::Uuid::new_v4().to_string();
+        let location = PlaylistLocation {
+            owner: PlaylistOwner::Server,
+            playlist_id: playlist_key.clone(),
+            entry_id: item.rating_key.clone(),
+            index,
+        };
+        let beginning = start_from_beginning && index == start_index;
+        match play_by_key(
+            state,
+            &item,
+            beginning,
+            &session_id,
+            Some(location),
+            replace_session,
+        )
+        .await
+        {
+            Ok(()) => return Ok(true),
+            Err(failure) if failure.kind == PlayFailureKind::Unavailable => {
+                last_unavailable = Some(failure.message);
+            }
+            Err(failure) if failure.kind == PlayFailureKind::Superseded => return Ok(false),
+            Err(failure) => return Err(failure.message),
+        }
+    }
+    Err(last_unavailable.unwrap_or_else(|| "server playlist has no playable items".to_string()))
+}
+
+#[tauri::command]
+pub async fn server_playlist_play(
+    key: String,
+    start_index: usize,
+    start_from_beginning: bool,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let items = fetch_server_playlist_items(&state, &key).await?;
+    play_server_playlist_entries(
+        &state,
+        key,
+        items,
+        start_index,
+        start_from_beginning,
+        None,
+    )
+    .await
+    .map(|_| ())
+}
+
 /// Handle one fully-finished clean EOF. The UUID payload prevents a queued
 /// older EOF from advancing or clearing a playlist the user started later.
 pub(crate) async fn advance_playlist(state: &AppState, ended_session: String) {
@@ -2746,6 +2884,37 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: String) {
     let Some(cursor) = cursor.filter(|cursor| cursor.session_id == ended_session) else {
         return;
     };
+    if cursor.owner == PlaylistOwner::Server {
+        let items = match fetch_server_playlist_items(state, &cursor.playlist_id).await {
+            Ok(items) => items,
+            Err(_) => {
+                clear_playlist_cursor_if(state, &ended_session).await;
+                return;
+            }
+        };
+        let next_index = cursor.index.saturating_add(1);
+        if next_index >= items.len() {
+            clear_playlist_cursor_if(state, &ended_session).await;
+            return;
+        }
+        match play_server_playlist_entries(
+            state,
+            cursor.playlist_id,
+            items,
+            next_index,
+            false,
+            Some(&ended_session),
+        )
+        .await
+        {
+            Ok(true) | Ok(false) => {}
+            Err(error) => {
+                eprintln!("vela: server playlist auto-advance stopped: {error}");
+                clear_playlist_cursor_if(state, &ended_session).await;
+            }
+        }
+        return;
+    }
     let lookup = cursor.playlist_id.clone();
     let playlist = match playlist_store(move || crate::playlists::get(&lookup)).await {
         Ok(playlist) => playlist,
@@ -3044,6 +3213,7 @@ mod tests {
     #[test]
     fn session_comparison_rejects_a_stale_dispatcher() {
         let cursor = PlaylistCursor {
+            owner: PlaylistOwner::Vela,
             playlist_id: "p".to_string(),
             entry_id: "entry".to_string(),
             index: 1,
@@ -3057,6 +3227,7 @@ mod tests {
     #[test]
     fn next_playlist_position_tracks_the_stable_entry_across_edits() {
         let cursor = PlaylistCursor {
+            owner: PlaylistOwner::Vela,
             playlist_id: "p".to_string(),
             entry_id: "current".to_string(),
             index: 1,

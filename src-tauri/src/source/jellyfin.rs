@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
-use super::{namespace_key, HubDto, ItemDto, MediaSource, SectionDto, StreamResolution};
+use super::{
+    namespace_key, HubDto, ItemDto, MediaSource, PlaylistDto, SectionDto, StreamResolution,
+};
 use crate::playback::{JellyfinTrack, ProgressTarget};
 
 /// From Cargo.toml, so the device-identity header can't drift from the package
@@ -104,6 +106,17 @@ fn scan_query() -> [(&'static str, &'static str); 6] {
     ]
 }
 
+fn playlist_list_query() -> [(&'static str, &'static str); 6] {
+    [
+        ("Recursive", "true"),
+        ("IncludeItemTypes", "Playlist"),
+        ("MediaTypes", "Video"),
+        ("SortBy", "SortName"),
+        ("SortOrder", "Ascending"),
+        ("Fields", "ChildCount"),
+    ]
+}
+
 // ---- HTTP client ---------------------------------------------------------
 
 pub struct JellyfinClient {
@@ -154,11 +167,19 @@ impl JellyfinClient {
         query: &[(&str, String)],
     ) -> Result<T, String> {
         let url = format!("{}{}", self.base_url, path);
+        self.get_json_url(&url, query).await
+    }
+
+    async fn get_json_url<T: DeserializeOwned>(
+        &self,
+        url: &str,
+        query: &[(&str, String)],
+    ) -> Result<T, String> {
         // Per-request timeout as a safety net: if the shared client ever fell back
         // to a default (no-timeout) build, a stuck request still can't hang here.
         let mut rb = self
             .http
-            .get(&url)
+            .get(url)
             .timeout(std::time::Duration::from_secs(15))
             .query(query);
         for (k, v) in self.auth_headers() {
@@ -313,6 +334,29 @@ impl JellyfinClient {
             return Err("invalid library id".to_string());
         }
         Ok(self.build_url(&["Items", item_id, "Refresh"], &scan_query()))
+    }
+
+    fn playlist_items_url(
+        &self,
+        playlist_id: &str,
+        start: usize,
+        size: usize,
+    ) -> Result<String, String> {
+        if playlist_id.is_empty() || playlist_id == "." || playlist_id == ".." {
+            return Err("invalid playlist id".to_string());
+        }
+        let start_value = start.to_string();
+        let size_value = size.to_string();
+        Ok(self.build_url(
+            &["Playlists", playlist_id, "Items"],
+            &[
+                ("UserId", self.user_id.as_str()),
+                ("Fields", "Overview,ProviderIds"),
+                ("EnableUserData", "true"),
+                ("StartIndex", start_value.as_str()),
+                ("Limit", size_value.as_str()),
+            ],
+        ))
     }
 
     /// POST with an empty body (the scan trigger). Same auth/timeout/401/403
@@ -519,6 +563,7 @@ struct AuthUser {
 struct ItemsResponse {
     #[serde(default)]
     items: Vec<BaseItem>,
+    total_record_count: Option<usize>,
 }
 
 #[derive(Deserialize)]
@@ -578,6 +623,8 @@ struct BaseItem {
     backdrop_image_tags: Option<Vec<String>>,
     image_tags: Option<ImageTags>,
     collection_type: Option<String>,
+    media_type: Option<String>,
+    child_count: Option<usize>,
     provider_ids: Option<std::collections::HashMap<String, String>>,
 }
 
@@ -708,6 +755,12 @@ fn map_type(t: Option<&str>) -> Option<String> {
         }
         .to_string(),
     )
+}
+
+fn is_video_playlist(item: &BaseItem) -> bool {
+    item.media_type
+        .as_deref()
+        .is_none_or(|kind| kind.eq_ignore_ascii_case("video"))
 }
 
 /// Translate the UI's Plex-style sort token to Jellyfin's SortBy/SortOrder.
@@ -869,6 +922,16 @@ impl JellyfinSource {
 
     fn user_items_path(&self) -> String {
         format!("/Users/{}/Items", self.client.user_id)
+    }
+
+    fn to_playlist(&self, item: &BaseItem) -> PlaylistDto {
+        PlaylistDto {
+            key: namespace_key(&self.id, &item.id),
+            title: item.name.clone().unwrap_or_default(),
+            item_count: item.child_count,
+            source_id: self.id.clone(),
+            source_name: self.name.clone(),
+        }
     }
 }
 
@@ -1076,6 +1139,62 @@ impl MediaSource for JellyfinSource {
         Ok(r.items.iter().map(|i| self.to_item(i)).collect())
     }
 
+    async fn playlists(&self) -> Result<Vec<PlaylistDto>, String> {
+        let query = playlist_list_query().map(|(key, value)| (key, value.to_string()));
+        let response: ItemsResponse = self
+            .client
+            .get_json(&self.user_items_path(), &query)
+            .await?;
+        Ok(response
+            .items
+            .iter()
+            // The query is authoritative; this defensive filter catches a
+            // server that ignores MediaTypes without rejecting older servers
+            // that omit MediaType from a filtered response.
+            .filter(|item| is_video_playlist(item))
+            .map(|item| self.to_playlist(item))
+            .collect())
+    }
+
+    async fn playlist_items(&self, playlist_key: &str) -> Result<Vec<ItemDto>, String> {
+        const PAGE: usize = 500;
+        let mut start = 0;
+        let mut all = Vec::new();
+        let mut previous_signature: Option<(String, String)> = None;
+        loop {
+            let url = self.client.playlist_items_url(playlist_key, start, PAGE)?;
+            let response: ItemsResponse = self.client.get_json_url(&url, &[]).await?;
+            let total = response.total_record_count;
+            let count = response.items.len();
+            if count == 0 {
+                break;
+            }
+            let signature = (
+                response.items.first().map(|item| item.id.clone()).unwrap_or_default(),
+                response.items.last().map(|item| item.id.clone()).unwrap_or_default(),
+            );
+            if start > 0 && previous_signature.as_ref() == Some(&signature) {
+                return Err("the server did not advance playlist pagination".to_string());
+            }
+            previous_signature = Some(signature);
+            all.extend(response.items);
+            start += count;
+            if total.is_some_and(|total| start >= total) || (total.is_none() && count < PAGE) {
+                break;
+            }
+        }
+        Ok(all
+            .iter()
+            .filter(|item| {
+                matches!(
+                    item.item_type.as_deref(),
+                    Some("Movie" | "Episode" | "Video" | "MusicVideo")
+                )
+            })
+            .map(|item| self.to_item(item))
+            .collect())
+    }
+
     async fn resolve_stream(
         &self,
         item_key: &str,
@@ -1149,6 +1268,73 @@ mod tests {
             vf_route(Flavor::Emby),
             ("/Library/VirtualFolders/Query", VfEnvelope::Items)
         );
+    }
+
+    #[test]
+    fn playlist_queries_are_read_only_video_contracts() {
+        assert_eq!(
+            playlist_list_query(),
+            [
+                ("Recursive", "true"),
+                ("IncludeItemTypes", "Playlist"),
+                ("MediaTypes", "Video"),
+                ("SortBy", "SortName"),
+                ("SortOrder", "Ascending"),
+                ("Fields", "ChildCount"),
+            ]
+        );
+        let client = JellyfinClient::new(
+            Flavor::Jellyfin,
+            "http://jf.example:8096/base",
+            "device",
+            "token",
+            "user-1",
+        );
+        let url = client
+            .playlist_items_url("../odd/id?x=1", 500, 500)
+            .expect("hostile ids are encoded as one segment");
+        let parsed = url::Url::parse(&url).unwrap();
+        let segments: Vec<_> = parsed.path_segments().unwrap().collect();
+        assert_eq!(segments[segments.len() - 3], "Playlists");
+        assert_eq!(segments[segments.len() - 1], "Items");
+        assert!(segments[segments.len() - 2].contains("%2F"));
+        assert!(segments[segments.len() - 2].contains("%3F"));
+        let query: std::collections::HashMap<_, _> = parsed.query_pairs().into_owned().collect();
+        assert_eq!(query.get("UserId").map(String::as_str), Some("user-1"));
+        assert_eq!(query.get("EnableUserData").map(String::as_str), Some("true"));
+        assert_eq!(query.get("StartIndex").map(String::as_str), Some("500"));
+        assert_eq!(query.get("Limit").map(String::as_str), Some("500"));
+    }
+
+    #[test]
+    fn jellyfin_and_emby_playlist_fixtures_map_video_descriptors() {
+        let parsed: ItemsResponse = serde_json::from_str(
+            r#"{
+              "Items": [
+                {"Id":"p-video","Name":"Film Night","Type":"Playlist","MediaType":"Video","ChildCount":3},
+                {"Id":"p-audio","Name":"Songs","Type":"Playlist","MediaType":"Audio","ChildCount":9}
+              ],
+              "TotalRecordCount":2
+            }"#,
+        )
+        .unwrap();
+        assert!(is_video_playlist(&parsed.items[0]));
+        assert!(!is_video_playlist(&parsed.items[1]));
+        for (flavor, source_id) in [
+            (Flavor::Jellyfin, "jf-one"),
+            (Flavor::Emby, "emby-one"),
+        ] {
+            let source = JellyfinSource::new(
+                source_id,
+                "Server",
+                JellyfinClient::new(flavor, "http://server", "dev", "token", "user"),
+            );
+            let dto = source.to_playlist(&parsed.items[0]);
+            assert_eq!(dto.key, format!("{source_id}:p-video"));
+            assert_eq!(dto.title, "Film Night");
+            assert_eq!(dto.item_count, Some(3));
+            assert_eq!(dto.source_id, source_id);
+        }
     }
 
     #[test]
