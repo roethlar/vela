@@ -1,10 +1,11 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**SLICE 1 COMPLETE 2026-07-16 at Vela 0.1.53.** The theme-correct
-visual-language foundation is implemented, guard-proven, visually inspected,
-and accepted by primary Claude plus independent Grok. Slices 2 and 3 retain
-separate go gates. The plan was queued
+**SLICE 2 AUTHORIZED 2026-07-16; REFRESHED PLAN REVIEW REQUIRED BEFORE CODE.**
+The owner's "continue" activates image-loading polish only. Slice 1 is
+complete at Vela 0.1.53: the theme-correct visual-language foundation is
+implemented, guard-proven, visually inspected, and accepted by primary Claude
+plus independent Grok. Slice 3 retains its separate go gate. The plan was queued
 2026-07-10 at the bottom of the functional work; that preceding work is now
 clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
 slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
@@ -96,6 +97,31 @@ surfaces. Real native-feel payoff, real cost — owner decision below.
   scope expansion. The subject-specific choice is restraint: let cinema art and
   the cover-flow carry personality while removing theme and glyph drift.
 
+## Slice 2 design calibration (2026-07-16)
+
+- **Signature and hierarchy:** artwork remains the visual subject. Loading
+  polish may soften its arrival but must add no competing ornament, blur,
+  scaling, gradient veil, or new color.
+- **Motion:** one 180ms opacity transition using `--ease`; no delay and no
+  transition of layout, transform, filter, or fallback content. Images remain
+  non-blocking and clickable throughout. The global reduced-motion rule makes
+  the transition effectively immediate without changing final visibility.
+- **Loading surface:** existing fixed dimensions and aspect ratios remain the
+  layout contract. Data-loading skeletons remain unchanged; they do not live
+  for each image request. A frame-local no-art or film-icon underlay is what
+  stays visible while an individual image loads and what remains after failure.
+- **Functional-image exception:** the Plex authorization QR is not media art.
+  It gets asynchronous decoding for consistency but no fade or fallback layer;
+  its white quiet zone and meaningful alternative text remain unchanged.
+- **Accessibility:** media art is decorative wherever the surrounding button,
+  title, or cast metadata already names the item. Underlay text/icons are
+  `aria-hidden`; the QR keeps its meaningful alternative text. Opacity never
+  removes an element's layout box or changes the control's accessible name.
+- **Self-critique:** a shimmer per frame or generated blurred placeholder would
+  be more conspicuous but would either invent motion around every poster or add
+  a cache pipeline. The restrained load/fallback layer directly fixes the pop
+  and blank-frame defects while keeping the art dominant.
+
 ## Slices (each independently shippable: commit + primary Claude code review +
 independent Grok second review + version bump; ordered so later slices layer
 on earlier ones)
@@ -132,17 +158,88 @@ No new visuals; makes every later slice land evenly across all themes.
    rating, and Watched text when decorative SVGs replace readable glyphs.
 
 ### Slice 2 — Image loading polish (the single most visible fix)
-1. Poster/backdrop/headshot fade-in: `opacity 0→1` CSS transition
-   driven by the img `load` event (class flip), `decoding="async"`
-   everywhere; skeleton shimmer already exists and now hands off
-   smoothly instead of popping.
-2. Unified failed-image treatment: detail/season thumbnails get the
-   grid's styled text placeholder instead of vanishing.
-3. DECLINED for v1.0.0 (recorded option for later): ThumbHash/BlurHash
+1. Add one DOM-preserving Svelte action in `src/lib/imageReveal.ts`. It accepts
+   the resolved source URL, removes its loaded class on initialization and a
+   source change, adds it only after a successful `load` with nonzero natural
+   width, removes it on `error`, and performs a queued
+   `complete && naturalWidth > 0` check so memory/disk-cached images whose load
+   event preceded attachment cannot remain transparent. Clean up both event
+   listeners. Keep the actual `<img>` in each owning component; a wrapper
+   component would break the existing scoped selectors.
+2. Add one global `.image-reveal` primitive in `app.css`: opacity zero by
+   default, opacity one in the loaded state, and only a 180ms opacity transition
+   using `--ease`. Apply it and the action to all nine media-art `<img>`
+   templates: grid/rail, Continue Watching, both playlist views, cast headshot,
+   detail backdrop/poster, episode-row still, and selected-episode still. Pass
+   the resolved URL to the action so in-place enrichment or selection changes
+   reset the old loaded state. Preserve the current eager/lazy choices: this
+   slice changes decoding and presentation, not fetch priority.
+3. Put the appropriate fixed-frame fallback underneath each media image rather
+   than hiding a broken element or retaining component-wide failure flags.
+   Grid/rail, Continue Watching, main detail poster, episode-row thumbnail, and
+   selected-episode still use the shared title-bearing `.noart`; cast headshots
+   and the two 3rem playlist thumbnails use the existing film icon; the
+   decorative detail backdrop falls back to its existing themed surface with
+   no text. Make the image an absolute cover layer within the already bounded
+   frame. Remove `failedPosters`, `posterFailed`, `stillFailed`, and every
+   inline `display:none` / `visibility:hidden` image-error handler. This also
+   prevents one failed URL from poisoning another surface or an enriched
+   replacement URL; navigation can retry an image after a server recovers.
+4. Add `decoding="async"` to all ten literal runtime `<img>` templates,
+   including the QR. The QR is the explicit sole exception from the action,
+   loaded class, cover layer, and fallback behavior.
+5. DECLINED for v1.0.0 (recorded option for later): ThumbHash/BlurHash
    placeholders. Media servers don't supply hashes, so Vela would have
    to decode + hash each poster once and cache it (new disk-cache
    infra) — real work for a subtle win over fade-in; revisit if poster
    loads still feel harsh after this slice.
+
+#### Slice 2 guard and real-app contract
+
+1. Add a focused Node contract wired into `npm run check`. Import the action
+   directly and prove an ordinary load reveals, an error/source update hides,
+   an already-complete cached image reveals, a later cached source reveals
+   after the queued check, and destroy detaches listeners. Its source half
+   inventories every literal runtime `<img>`: all ten require async decoding,
+   exactly the nine media images require the shared action/class/cover layer,
+   the QR must remain the sole no-fade exception, each media frame must retain
+   its specified underlay, and the old inline hide handlers/failure states are
+   forbidden.
+2. Extend the existing Jellyfin mock serializer with opt-in Primary, Backdrop,
+   and series-primary image tags and add the production URL shapes under
+   `/Items/{id}/Images/...`. The mock image controller records arrival and
+   response separately, can hold a named path until explicit release, can
+   return a named 404, and releases all pending responses before close. Serve a
+   tiny deterministic valid image with explicit content type/length and no
+   timers; a server-held response provides the positive unloaded-state witness.
+3. Add a focused Linux `imagepolish` real-app scenario. On a visible first card,
+   wait for the held request, assert fixed geometry, incomplete image, opacity
+   zero, and the configured opacity-only transition; release it, then
+   condition-wait for nonzero natural size, loaded state, and opacity one. Open
+   detail and repeat for a separately held backdrop. A distinct 404 poster must
+   leave its title-bearing detail fallback visible. Drill a mock show into its
+   season: a successful episode image must reveal in both row and panel, while
+   a failed episode must leave title-bearing `.noart` in both places, never a
+   visibly broken/hidden blank. Assert the mock response witnesses before every
+   failure claim.
+4. The scenario captures the held and loaded states in Vela Dark, then settled
+   success/failure states in One Light, restoring Dark in `finally`. A second
+   focused run uses the existing throwaway GTK reduced-motion preference,
+   first proves the WebKit media query is active, then repeats the held/release
+   path and requires every image transition duration to be at most 0.01ms.
+   Assertions wait on server/DOM predicates, never animation time or a sampled
+   mid-transition frame.
+5. Jellyfin/Emby intentionally lack rich cast detail, so hermetic E2E cannot
+   render Plex headshots. The complete source contract plus Svelte compilation
+   owns that surface; do not add a production IPC test hook or make live Plex a
+   gate merely to feed test metadata.
+
+Red-prove these Slice 2 guard families independently after the implementation
+commit, restoring from the committed head after each injection: successful
+load/loaded-class behavior; cached and changed-source reset behavior; complete
+async-decoding/media-surface inventory; failure-underlay taxonomy (including an
+episode thumbnail); and reduced-motion suppression. Rerun each focused guard
+green before the canonical frontend and full Linux suites.
 
 ### Slice 3 — Motion pass (subtle, in the app's existing language)
 1. Surface transitions: detail/season overlay enters with a short
@@ -297,7 +394,9 @@ Primary Claude Code 2.1.211 (`claude-fable-5`) and independent Grok 0.2.101
 (`grok-4.5`) both accepted exact reviewed head `969f06a` against base
 `d96eb464`, each with `guard_confirmed:true`, independent red/restored-green
 proof, and no material comments. The fail-closed record is
-`.agents/review/findings/ui-s1.md`. Slices 2–3 remain unauthorized.
+`.agents/review/findings/ui-s1.md`. At Slice 1 close, Slices 2–3 were still
+unauthorized; Slice 2 was activated separately on 2026-07-16 as recorded in the
+current status, while Slice 3 remains gated.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling
