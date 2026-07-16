@@ -13,6 +13,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
   agree, as of `c8aa15e`).
 
+- **ACTIVE REVIEW LOOP:** UI image-loading polish Slice 2; exact evidence and
+  reviewer status live in `.agents/review/findings/ui-s2.md`.
+
 - **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
   theme-correct foundation in `.agents/plans/ui-embellishments.md` now owns
   semantic theme states, six shared visual primitives, and typed SVG icons.

@@ -10,6 +10,14 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `ui-s2` ACTIVE 2026-07-16: media images now use a source-aware 180ms
+opacity reveal over fixed fallbacks; the functional Plex QR remains the sole
+no-fade exception. All focused guard families were independently red-proven by
+the coder, canonical frontend verification is green, focused normal/reduced
+Linux runs pass, and the complete real-app suite passed 26/26. Primary Claude
+and independent Grok code reviews are pending. Detail:
+`.agents/review/findings/ui-s2.md`.
+
 Loop `car-1` CLOSED 2026-07-16: remove the duplicate Play/Resume action row
 beneath Continue Watching while preserving the centered card and its context
 menu. Implementation `507fb2f`; exact guard red/restored-green, affected Linux
