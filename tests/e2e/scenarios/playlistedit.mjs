@@ -57,7 +57,7 @@ async function addTitle(driver, title, playlistName) {
   await openItemMenu(driver, title);
   const openAdd = await driver.find(
     'xpath',
-    `//button[@role='menuitem' and normalize-space(.)='Add to Playlist →']`,
+    `//button[@role='menuitem' and normalize-space(.)='Add to Playlist']`,
   );
   await driver.click(openAdd);
   await driver.waitFor(
