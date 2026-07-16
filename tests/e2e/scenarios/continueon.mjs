@@ -138,7 +138,9 @@ export default {
     );
 
     const seen = mpvSocketSnapshot();
-    await driver.click(await driver.find('css selector', '.flowactions button.primary'));
+    await driver.click(
+      await driver.find('css selector', '[aria-label="Continue watching"] .flowcard.center'),
+    );
     const alpha = await nextMpv(seen, 'on-a');
     const resumeRequests = () =>
       mock.state.requests.filter(

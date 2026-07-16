@@ -2135,7 +2135,6 @@
   {#snippet heroFlow()}
     {@const idx = heroClamp(heroPos)}
     {@const center = heroItems[idx]}
-    {@const centerInProgress = hasResume(center)}
     {@const centerEp =
       center.parentIndex != null && center.index != null
         ? `S${center.parentIndex} · E${center.index} – ${center.title}`
@@ -2205,14 +2204,6 @@
         {/if}
         {#if activeSource === null && sources.length > 1 && center.sourceId}
           <span class="y srctag">· {sourceNameOf(center.sourceId)}</span>
-        {/if}
-      </div>
-      <div class="flowactions" aria-label="Playback choices for {center.grandparentTitle ?? center.title}">
-        <button class="primary" onclick={() => play(center, "resume")}>
-          <Icon name="play" size={15} /> {centerInProgress ? "Resume" : "Play"}
-        </button>
-        {#if centerInProgress}
-          <button onclick={() => play(center, "beginning")}>Play from Beginning</button>
         {/if}
       </div>
     </section>
@@ -3011,28 +3002,6 @@
     align-items: center;
     text-align: center;
     margin-top: 0.5rem;
-  }
-  .flowactions {
-    display: flex;
-    justify-content: center;
-    gap: 0.5rem;
-    margin-top: 0.65rem;
-  }
-  .flowactions button {
-    font-size: 0.84rem;
-  }
-  .flowactions button:not(.primary) {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.35rem;
-    border: 1px solid var(--border);
-    border-radius: 0.45rem;
-    padding: 0.45rem 0.75rem;
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-    font: inherit;
-    font-size: 0.84rem;
   }
   /* Home rails */
   .home {

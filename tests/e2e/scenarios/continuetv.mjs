@@ -216,7 +216,9 @@ export default {
     // `playback-ended` also refreshes after a user closes mpv. That refresh
     // must never be mistaken for the clean-EOF continuation signal.
     const quitSockets = mpvSocketSnapshot();
-    await driver.click(await driver.find('css selector', '.flowactions button.primary'));
+    await driver.click(
+      await driver.find('css selector', '[aria-label="Continue watching"] .flowcard.center'),
+    );
     const quitEpisode = await nextMpv(quitSockets, 'e1');
     const quitPlayedArrivals = mock.state.playedArrivals.length;
     const quitPlayedServed = mock.state.playedServed.length;
@@ -259,9 +261,12 @@ export default {
           return `the quit episode stopped being the centered eligible item`;
         }
         const action = await driver.exec(
-          `return document.querySelector('.flowactions button.primary')?.textContent.trim() ?? null`,
+          `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')
+            ?.getAttribute('aria-label') ?? null`,
         );
-        return action === 'Resume' ? false : `the quit item action became ${JSON.stringify(action)}`;
+        return action?.startsWith('Resume ')
+          ? false
+          : `the quit item action became ${JSON.stringify(action)}`;
       },
       2_500,
       'user quit must not curate, mark played, or continue',
@@ -278,7 +283,9 @@ export default {
     );
 
     const seen = mpvSocketSnapshot();
-    await driver.click(await driver.find('css selector', '.flowactions button.primary'));
+    await driver.click(
+      await driver.find('css selector', '[aria-label="Continue watching"] .flowcard.center'),
+    );
     const first = await nextMpv(seen, 'e1');
     const cleanPlayedArrivals = mock.state.playedArrivals.length;
     const cleanPlayedServed = mock.state.playedServed.length;
@@ -361,7 +368,9 @@ export default {
       'the reset Continue Watching flow',
     );
     const raceSockets = mpvSocketSnapshot();
-    await driver.click(await driver.find('css selector', '.flowactions button.primary'));
+    await driver.click(
+      await driver.find('css selector', '[aria-label="Continue watching"] .flowcard.center'),
+    );
     const racedEpisode = await nextMpv(raceSockets, 'e1');
     const hierarchyResponses = () =>
       mock.state.served.filter(

@@ -117,7 +117,7 @@ export default {
     // before this clean EOF.
     const before = mpvSocketSnapshot();
     await driver.click(
-      await driver.find('css selector', '.flowactions button.primary'),
+      await driver.find('css selector', '[aria-label="Continue watching"] .flowcard.center'),
     );
     const socket = await waitForNewMpvSocket(before);
     const mpv = await MpvIpc.connect(socket);

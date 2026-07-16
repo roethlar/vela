@@ -353,7 +353,6 @@ export default {
         driver,
         '[aria-label="Continue watching"] .flowcard.center .playbtn',
       );
-      const heroPrimary = await styleSnapshot(driver, '.flowactions button.primary');
 
       await clickSide(driver, 'Mock Library');
       await driver.waitFor(
@@ -422,7 +421,6 @@ export default {
         {
           settings: settingsPrimary,
           playlists: playlistPrimary,
-          hero: heroPrimary,
           detail: detailPrimary,
         },
         [
@@ -452,7 +450,6 @@ export default {
           playlistPrimary,
           heroOverlay,
           heroPlayButton,
-          heroPrimary,
           detailOverlay,
           detailPlayButton,
           detailPrimary,

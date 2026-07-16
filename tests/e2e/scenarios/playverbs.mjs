@@ -1,7 +1,7 @@
-// Explicit playback verbs replace the deleted ephemeral queue. Fresh items
-// offer Play; in-progress items offer both Resume and Play from Beginning on
-// every playback surface. The mpv start-position checks prove those labels
-// drive distinct backend behavior rather than two names for the same action.
+// Explicit playback verbs replace the deleted ephemeral queue. Context menus
+// and details distinguish Play from Resume / Play from Beginning; the Continue
+// Watching card itself remains the sole visible Play/Resume control. The mpv
+// start-position checks prove the distinct verbs drive distinct behavior.
 import assert from "node:assert/strict";
 import path from "node:path";
 import {
@@ -30,6 +30,23 @@ async function openContextMenu(driver, title) {
   await driver.waitFor(
     `return !!document.querySelector('.ctxmenu')`,
     `context menu for ${title}`,
+  );
+}
+
+async function openHeroContextMenu(driver) {
+  await driver.exec(
+    `const el = document.querySelector('[aria-label="Continue watching"] .flowcard.center');
+     const r = el.getBoundingClientRect();
+     el.dispatchEvent(new MouseEvent('contextmenu', {
+       bubbles: true,
+       cancelable: true,
+       clientX: r.x + r.width / 2,
+       clientY: r.y + r.height / 2,
+     }));`,
+  );
+  await driver.waitFor(
+    `return !!document.querySelector('.ctxmenu')`,
+    "Continue Watching context menu",
   );
 }
 
@@ -152,25 +169,25 @@ export default {
 
     await goHome(driver);
     await driver.waitFor(
-      `return !!document.querySelector('.flowactions[aria-label^="Playback choices for"]')`,
-      "Continue Watching playback choices",
+      `const card = document.querySelector('[aria-label="Continue watching"] .flowcard.center');
+       return card?.getAttribute('aria-label')?.startsWith('Resume ') ?? false`,
+      "the in-progress Continue Watching card",
     );
-    const heroLabels = await driver.exec(
-      `return [...document.querySelectorAll('.flowactions[aria-label^="Playback choices for"] button')]
-        .map((button) => button.textContent.trim())`,
-    );
-    assert.deepEqual(
-      heroLabels,
-      ["Resume", "Play from Beginning"],
-      "the Continue Watching card exposes both explicit in-progress verbs",
-    );
-    assert.ok(
+    assert.equal(
       await driver.exec(
-        `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')
-          ?.getAttribute('aria-label')?.startsWith('Resume ') ?? false`,
+        `return document.querySelector('.flowactions') === null`,
       ),
-      "the center card's default action is semantically Resume",
+      true,
+      "the carousel must not duplicate its Play/Resume card with an action row",
     );
+    await openHeroContextMenu(driver);
+    const heroMenuLabels = await menuLabels(driver);
+    assert.ok(heroMenuLabels.includes("Resume"), "the hero context menu retains Resume");
+    assert.ok(
+      heroMenuLabels.includes("Play from Beginning"),
+      "the hero context menu retains Play from Beginning",
+    );
+    await driver.exec(`document.querySelector('.menubackdrop').click()`);
     await screenshot("01-explicit-playback-verbs");
   },
 };
