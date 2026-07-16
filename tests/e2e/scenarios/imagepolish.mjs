@@ -200,13 +200,16 @@ async function clickSidebar(driver, label) {
 }
 
 async function clickPoster(driver, title) {
+  const poster = `//button[contains(@class,'poster')
+    and (.//span[contains(@class,'t') and normalize-space(.)=${JSON.stringify(title)}]
+      or .//span[contains(@class,'y') and normalize-space(.)=${JSON.stringify(title)}])]`;
   await driver.waitFor(
-    `return !!document.querySelector(${JSON.stringify(`button.poster[aria-label^="${title}"]`)})`,
+    `return [...document.querySelectorAll('button.poster')].some((button) =>
+      [...button.querySelectorAll('.t, .y')]
+        .some((label) => label.textContent.trim() === ${JSON.stringify(title)}))`,
     `${title} poster`,
   );
-  await driver.click(
-    await driver.find('css selector', `button.poster[aria-label^="${title}"]`),
-  );
+  await driver.click(await driver.find('xpath', poster));
 }
 
 async function closeDetail(driver) {
