@@ -376,6 +376,13 @@ Plan `openreview` — 2026-07-16T18:17:59Z: Claude Code 2.1.211
 worktree. The schema-valid unprimed result was `verdict: clean` with no
 findings. Implementation is authorized.
 
+Implementation `507fb2f` removes the action row and updates all dependent E2E
+callers to use the centered card. Restoring the duplicate markup made the
+focused Linux guard fail for the exact row; restoring the committed source
+returned it green. The affected scenarios passed 4/4 and the final Linux suite
+passed 25/25. External code-review status is owned by
+`.agents/review/findings/car-1.md`.
+
 ### S1 — complete and externally accepted 2026-07-15
 
 Commit `ec5d613` deletes the queue model, six commands, queue UI/status/polling,

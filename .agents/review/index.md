@@ -10,6 +10,12 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `car-1` ACTIVE 2026-07-16: remove the duplicate Play/Resume action row
+beneath Continue Watching while preserving the centered card and its context
+menu. Implementation `507fb2f`; exact guard red/restored-green, affected Linux
+scenarios 4/4, and full Linux E2E 25/25. Primary Claude and independent Grok
+reviews are pending. Detail: `.agents/review/findings/car-1.md`.
+
 Loop `ui-s1` CLOSED 2026-07-16: theme-correct visual-language foundation is
 implemented through `c1c4db4` and versioned as 0.1.53 at `0ce3629`. Primary
 Claude Fable 5 and independent Grok 4.5 both accepted exact reviewed head
