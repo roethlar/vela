@@ -1,6 +1,6 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **DRAFT — Claude r3 review unavailable; not reviewed, surfaced, or
+Status: **DRAFT — Claude goal-only r5 review active; not surfaced or
 owner-approved.** The owner reported the regression on a locally built 0.1.51
 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
@@ -347,3 +347,19 @@ unavailable (fail-closed).**
 Round outcome: review remains fail-closed. Do not surface or implement this
 plan until the owner authorizes a later retry after the Claude limit resets or
 selects another external Claude model.
+
+**r4 attempt — 2026-07-16T06:25:15Z — base `b42b3a7`, head `6c47b48`;
+discarded before verdict.**
+
+- The owner authorized another `claude-fable-5` attempt. Its default-path
+  harness probe passed, but the review prompt still asked Claude to validate
+  authored diagnoses and a functional checklist against the plan.
+- While that process was running, the owner replaced the standing Claude
+  prompt protocol: mythos-class reviewers receive a neutral best-way-to-achieve-
+  the-goal question with no plan-validation framing. The operator aborted the
+  process after 27 turns. It returned no structured verdict and supplies no
+  review evidence.
+
+Round outcome: this is a discarded process attempt, not a content round. The
+goal-only rule landed in `.agents/playbooks/reviewloop.md` and
+`.agents/decisions.md`; r5 restarts against a new pinned head under that rule.
