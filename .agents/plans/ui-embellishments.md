@@ -77,7 +77,10 @@ surfaces. Real native-feel payoff, real cost — owner decision below.
   explicit `--accent-tint` and `--accent-glow` values to every theme rather than
   depending on `color-mix`; the standing Linux WebKitGTK 2.52.3 supports that
   function, but explicit tokens keep behavior deterministic on older WKWebView
-  and WebView2 installations. No new brand color or theme-specific exception.
+  and WebView2 installations. It also adds `--danger-solid`,
+  `--danger-solid-hover`, and `--on-danger` because the existing `--danger-*`
+  trio describes tinted status banners, not destructive action buttons. No new
+  brand color or theme-specific exception.
 - **Type:** retain Geist Variable for display, body, and utility roles. This
   foundation slice fixes consistency, not typography; introducing a decorative
   face would compete with poster artwork and violate the approved non-goals.
@@ -104,8 +107,11 @@ No new visuals; makes every later slice land evenly across all themes.
    focus/current-state accent. Deliberate survivors are media-art black/white
    scrims and controls, the QR white quiet zone, theme-preview swatches, and the
    grain data URI; record any other survivor before landing. Use the existing
-   `--danger-*` tokens for playlist and status failures. Tokenize hero-arrow and
-   QR shadows where a semantic shadow token applies.
+   `--danger-bg`/`--danger-text`/`--danger-border` tokens for playlist and status
+   failures. Define `--danger-solid`, `--danger-solid-hover`, and `--on-danger`
+   in all 10 themes for destructive buttons; do not repurpose the banner-tint
+   tokens or allowlist a destructive literal. Tokenize hero-arrow and QR shadows
+   where a semantic shadow token applies.
 2. Make `app.css` the single global owner of six visual primitives: play
    overlay/button, a 4px gradient progress bar, styled no-art placeholder,
    chip, person link, and primary button including hover/disabled/press states.
@@ -229,6 +235,18 @@ The revisions also incorporate a separate current-tree audit: one dead icon,
 the deleted queue, exact shared-style drift, playlist semantic-color drift, and
 a focused source plus real-app guard. A fresh Claude plan `openreview` is
 required on the revised head before code begins.
+
+**r2 — recorded 2026-07-16 — Claude Code 2.1.211 / `claude-fable-5` —
+base `306d66a007d59db9881eba6adbd3485de9ffc8e7`, head
+`b2dea9276d9dac40a760bfc60cb3e28ec8128073`; verdict `findings`.**
+
+The unprimed revised-plan review returned one LOW finding, ADMITTED: existing
+danger tokens describe subtle failure banners, while the playlist Delete action
+needs a solid destructive fill. The previous plan simultaneously required
+tokenization and prohibited an honest literal survivor, leaving no correct
+implementation. Addressed by defining explicit per-theme solid/hover/on-danger
+tokens and keeping the banner trio semantically separate. A fresh Claude plan
+`openreview` is required on this revised head before code begins.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling
