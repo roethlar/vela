@@ -356,7 +356,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- None recorded.
+- **UI image-loading polish Slice 2 independent review:** primary Claude Fable
+  5 accepted the exact range with an independent guard proof, but Grok 0.2.101's
+  only available model repeatedly canceled before completing its own mutation
+  proof. A claimed acceptance with no repository tool calls was discarded.
+  Slice 2 remains active at 0.1.54 and cannot be versioned until a fresh Grok
+  review returns a valid guard-confirmed verdict. Exact fail-closed evidence:
+  `.agents/review/findings/ui-s2.md`.
 
 ## Verification
 

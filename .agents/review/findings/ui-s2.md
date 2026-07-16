@@ -2,7 +2,8 @@
 
 **Severity**: MEDIUM — media art could pop into place, disappear into a blank
 frame on failure, or retain stale loaded state when an image URL changed.
-**Status**: In progress — primary Claude accepted; independent Grok review pending
+**Status**: In progress — primary Claude accepted; independent Grok review
+blocked with no valid verdict
 **Branch**: `main` (approved Slice 2 implementation)
 **Commit**: `830cabda963bb96ffa1eb525c5cc08a80f246def` plus focused E2E selector fix
 `c22a07edc075576804cec3e7d1ca9f493eb436ef`
@@ -108,4 +109,23 @@ production-regression mutation, expected focused failure, restoration, and
 green guard. The orchestrator independently confirmed that only the clean
 primary worktree remained after review.
 
-Independent Grok review pending.
+**Independent secondary review — recorded 2026-07-16T23:23:19Z — blocked;
+no verdict counted.** Grok 0.2.101 (`grok-4.5`) was dispatched against the same
+exact head and base without access to the primary verdict. The first CLI-created
+worktree silently opened the newer documentation head and correctly returned
+`invalid`; that attempt was discarded. In a verified detached worktree, one
+schema-valid `accepted` response claimed `guard_confirmed:true`, but its exported
+transcript contained no tool calls, so the orchestrator discarded it rather
+than accepting an unperformed proof.
+
+Fresh agentic sessions then read the governing record, exact range, action,
+CSS, source contract, media integrations, and E2E scenario and passed the
+focused baseline. Grok's headless runner repeatedly ended with
+`stopReason: Cancelled` before completing a mutation. One later session
+constructed a combined mutation/red/restore/green command, but Bash rejected
+its unquoted final parentheses at parse time; neither red nor green artifact
+was created. Subsequent context degraded into a nonexistent-file
+hallucination. `grok models` confirmed that `grok-4.5` is the only installed
+Grok model. The detached worktree remained clean at the reviewed head and was
+removed. Fail-closed result: there is no independent-secondary acceptance, so
+Slice 2 remains active and unversioned despite the clean primary review.

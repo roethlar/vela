@@ -16,8 +16,10 @@ no-fade exception. All focused guard families were independently red-proven by
 the coder, canonical frontend verification is green, focused normal/reduced
 Linux runs pass, and the complete real-app suite passed 26/26. Primary Claude
 Fable 5 accepted exact head `0ccb269` against base `e98220e` with
-`guard_confirmed:true` and no material comments. Independent Grok code review
-is pending. Detail:
+`guard_confirmed:true` and no material comments. Grok 0.2.101 is blocked: the
+only installed model repeatedly canceled before an executed mutation proof,
+and a schema-valid acceptance with no tool calls was discarded fail-closed.
+No secondary verdict counts; the loop remains active. Detail:
 `.agents/review/findings/ui-s2.md`.
 
 Loop `car-1` CLOSED 2026-07-16: remove the duplicate Play/Resume action row
