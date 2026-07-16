@@ -28,7 +28,13 @@ export default {
     const readCfg = () => JSON.parse(fs.readFileSync(configFile, 'utf8'));
     const listingSorts = () =>
       mock.state.requests
-        .filter((r) => r.method === 'GET' && r.path === `/Users/${mock.userId}/Items` && r.query.SortBy)
+        .filter(
+          (r) =>
+            r.method === 'GET' &&
+            r.path === `/Users/${mock.userId}/Items` &&
+            r.query.ParentId &&
+            r.query.SortBy,
+        )
         .map((r) => r.query.SortBy);
 
     // Open the library (default sort) and switch to "Year (newest)".
