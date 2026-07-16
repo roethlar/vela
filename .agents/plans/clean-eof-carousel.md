@@ -1,8 +1,9 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **IMPLEMENTED — code/test slice `8894ca6`; seven guards and canonical
-verification green; two independent Grok reviews accepted; version bump
-pending.**
+Status: **IMPLEMENTED — code/test slice `8894ca6`, version 0.1.52
+`52e1a67`; seven guards, canonical verification, fresh-build Linux E2E, two
+independent Grok reviews, and universal macOS packaging green. Owner's real
+Plex completion playtest remains.**
 The owner reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
@@ -478,3 +479,22 @@ prove the tombstone guard before this code slice converges.
 
 Round outcome: both independent Grok sessions accepted the same pinned code
 slice after proving different guards. Code review has converged.
+
+## Implementation record
+
+- Code and hermetic guards landed at `8894ca6`; the ordinary version/build-date
+  bump to 0.1.52 landed at `52e1a67`.
+- Each of the seven planned regressions failed for its specified observable
+  reason, was restored from the committed slice, and returned green.
+- The canonical local verification passed, including both Rust compile floors,
+  Clippy with warnings denied, all 140 Rust tests, both audits, Svelte/type
+  checks, and the production frontend build. The complete fresh-build Linux
+  real-app suite passed 24/24.
+- Grok r1 and r2 independently accepted the pinned code slice after proving
+  different guards.
+- The unsigned universal macOS build contains `x86_64` and `arm64` and
+  produced `dist/Vela_0.1.52_universal.dmg` with SHA-256
+  `94d02e4868e32deaab12d31c88099f37be0ae134fcc0d6922a43e66a82781c16`.
+- Outstanding manual evidence: naturally finish a real Plex episode on the
+  0.1.52 build and confirm the completed card disappears, Plex records it
+  watched, the next episode starts, and that successor owns the carousel.

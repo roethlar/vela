@@ -9,9 +9,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Version 0.1.51** (`package.json`, both lockfiles,
+- **Version 0.1.52** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `dc73627`).
+  agree, as of `52e1a67`).
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
@@ -116,7 +116,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **CLEAN-EOF CAROUSEL REGRESSION — GOAL-ONLY CLAUDE PLAN REVIEW ACTIVE.** The owner's 0.1.51
+- **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; OWNER PLAYTEST OUTSTANDING.** The owner's 0.1.51
   macOS playtest found that a naturally completed episode remains the only
   Continue Watching card until it is manually marked watched. Diagnosis found
   a pre-existing missing explicit server played mutation plus Slice 5's
@@ -134,8 +134,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `8894ca6` is implemented; all seven planned mutations failed for the right
   reason and restored green, the canonical local gates and fresh-build Linux
   E2E 24/24 pass, and two independent Grok reviews accepted after separately
-  proving the newer-session and tombstone guards. Only the ordinary 0.1.52
-  version bump remains.
+  proving the newer-session and tombstone guards. Version 0.1.52 landed at
+  `52e1a67`, and its unsigned universal macOS DMG is checksum-valid with both
+  architectures. Only the owner's final real-Plex completion playtest remains;
+  verification and artifact details live in the plan.
 
 - **OWNER-GATED FOLLOW-UP: publish dependency refresh 0.1.51.** Implementation
   is COMPLETE; no push, CI dispatch, or release workflow was triggered. The
@@ -333,8 +335,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/dependency-lts-refresh.md` (COMPLETE — final canonical,
   native-package, live-server, and external integration review green)
 - `.agents/plans/playlists.md` (COMPLETE — five slices; externally accepted)
-- `.agents/plans/clean-eof-carousel.md` (IMPLEMENTED — code slice `8894ca6`;
-  two Grok reviews accepted, version bump pending)
+- `.agents/plans/clean-eof-carousel.md` (IMPLEMENTED — 0.1.52 universal DMG
+  built; owner real-Plex completion playtest outstanding)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
