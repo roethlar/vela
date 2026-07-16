@@ -380,7 +380,9 @@ Implementation `507fb2f` removes the action row and updates all dependent E2E
 callers to use the centered card. Restoring the duplicate markup made the
 focused Linux guard fail for the exact row; restoring the committed source
 returned it green. The affected scenarios passed 4/4 and the final Linux suite
-passed 25/25. External code-review status is owned by
+passed 25/25. A canonical source contract through `a1b839b` makes the same
+duplicate-row proof portable to external reviewers and was separately proven
+red/restored-green. External code-review status is owned by
 `.agents/review/findings/car-1.md`.
 
 ### S1 — complete and externally accepted 2026-07-15

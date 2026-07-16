@@ -5,7 +5,9 @@ adds a superfluous button and vertical clutter to Vela's primary Home surface.
 **Status**: In progress — implementation and guard proof complete; external
 reviews pending
 **Branch**: `main` (owner-approved focused correction)
-**Commit**: `507fb2fbd6d51ce2e73f6230f9c8806d18c559ce`
+**Commits**: `507fb2fbd6d51ce2e73f6230f9c8806d18c559ce` (implementation),
+`c753f45be7e3539cfef2d65bdac69b72b1608d8b` and
+`a1b839b4a242ffdc4b03bdccec7d5828eedae3af` (reviewable source guard)
 
 ## Evidence
 
@@ -52,6 +54,10 @@ inventories a primary button that no longer exists.
   Fresh-build Linux `playverbs` failed at `the carousel must not duplicate its
   Play/Resume card with an action row`; restoring committed
   `src/routes/+page.svelte` returned the same scenario green.
+- The canonical source contract independently rejects the old action-row
+  markup while requiring the centered card's playback handler and dynamic
+  Play/Resume accessible label. Restoring the exact markup made only that
+  focused Node contract fail; restoring head `a1b839b` returned it green.
 - The four other selector-dependent Linux scenarios passed together, and the
   final real-app suite passed 25/25.
 - Local Node syntax checks, the canonical frontend check, and the production
