@@ -2,8 +2,8 @@
 
 **Severity**: MEDIUM — media art could pop into place, disappear into a blank
 frame on failure, or retain stale loaded state when an image URL changed.
-**Status**: In progress — primary Claude accepted; independent Grok review
-blocked with no valid verdict
+**Status**: Verified — primary Claude and owner-authorized independent Agy
+accepted with `guard_confirmed:true`; version bump pending
 **Branch**: `main` (approved Slice 2 implementation)
 **Commit**: `830cabda963bb96ffa1eb525c5cc08a80f246def` plus focused E2E selector fix
 `c22a07edc075576804cec3e7d1ca9f493eb436ef`
@@ -128,4 +128,23 @@ was created. Subsequent context degraded into a nonexistent-file
 hallucination. `grok models` confirmed that `grok-4.5` is the only installed
 Grok model. The detached worktree remained clean at the reviewed head and was
 removed. Fail-closed result: there is no independent-secondary acceptance, so
-Slice 2 remains active and unversioned despite the clean primary review.
+the Grok attempts do not count as review acceptance.
+
+**Independent substitute review — recorded 2026-07-16T23:34:14Z — accepted.**
+On the owner's explicit instruction, Agy 1.1.3 using `Gemini 3.1 Pro (High)`
+replaced Grok as the independent secondary reviewer. Agy reviewed the same
+exact head `0ccb269cc765eaa38d40ea93f8e61845500a6aa3` against base
+`e98220e9d4ce10f400fd50f1c67cd31b19db6ef8` in a verified detached worktree
+that predates both reviewer verdict records. Its runtime log confirms the
+requested model selection and conversation
+`df1bae8e-0900-40a1-8075-f2ae275b9ae2`.
+
+Agy independently mutated the production reveal path and ran the focused
+contract. The red run failed three load/source/cache assertions because valid
+images no longer revealed; after restoring from the reviewed head, all seven
+focused tests passed. The final worktree was empty at the exact reviewed SHA.
+Its parse-exact result carried both full SHAs, `guard_confirmed:true`, verdict
+`accepted`, and no material comments. The orchestrator verified the red and
+green logs, model-resolution log, clean worktree, and exact head before removing
+the disposable worktree. This acceptance satisfies the independent-secondary
+gate in lieu of the discarded Grok attempts.

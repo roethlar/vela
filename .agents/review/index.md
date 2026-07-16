@@ -10,16 +10,18 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Loop `ui-s2` ACTIVE 2026-07-16: media images now use a source-aware 180ms
-opacity reveal over fixed fallbacks; the functional Plex QR remains the sole
-no-fade exception. All focused guard families were independently red-proven by
+Loop `ui-s2` REVIEW VERIFIED 2026-07-16; version bump pending: media images now
+use a source-aware 180ms opacity reveal over fixed fallbacks; the functional
+Plex QR remains the sole no-fade exception. All focused guard families were
+independently red-proven by
 the coder, canonical frontend verification is green, focused normal/reduced
 Linux runs pass, and the complete real-app suite passed 26/26. Primary Claude
 Fable 5 accepted exact head `0ccb269` against base `e98220e` with
-`guard_confirmed:true` and no material comments. Grok 0.2.101 is blocked: the
-only installed model repeatedly canceled before an executed mutation proof,
-and a schema-valid acceptance with no tool calls was discarded fail-closed.
-No secondary verdict counts; the loop remains active. Detail:
+`guard_confirmed:true` and no material comments. Grok's failed attempts remain
+discarded; on the owner's instruction, Agy 1.1.3 / Gemini 3.1 Pro (High)
+replaced it and independently accepted the same exact range with
+`guard_confirmed:true`, executed red/restored-green evidence, and no material
+comments. The review gate is closed; Slice 2 versioning remains. Detail:
 `.agents/review/findings/ui-s2.md`.
 
 Loop `car-1` CLOSED 2026-07-16: remove the duplicate Play/Resume action row
