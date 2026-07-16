@@ -214,9 +214,9 @@ test("app.css exclusively owns the six shared visual primitives", () => {
 test("Continue Watching has no duplicate playback action row", () => {
   const page = sources.get("src/routes/+page.svelte");
   assert.ok(page, "the application page must exist");
-  assert.doesNotMatch(
-    page,
-    /\bflowactions\b|Playback choices for/,
+  assert.equal(
+    /\bflowactions\b|Playback choices for/.test(page),
+    false,
     "the centered carousel card already owns Play/Resume; do not add another action row",
   );
   assert.match(
