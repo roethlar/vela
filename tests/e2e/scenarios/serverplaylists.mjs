@@ -14,7 +14,11 @@ export default {
   name: 'serverplaylists',
 
   async seed({ configRoot }) {
-    const mediaDir = makeClips(configRoot, ['server-one.mp4', 'server-two.mp4']);
+    const mediaDir = makeClips(configRoot, [
+      'server-one.mp4',
+      'server-two.mp4',
+      'server-after.mp4',
+    ]);
     healthy = await startMockJellyfin({
       movies: [
         {
@@ -31,16 +35,45 @@ export default {
           runTimeTicks: 600_000_000,
           mediaFile: path.join(mediaDir, 'server-two.mp4'),
         },
+        {
+          id: 'server-after',
+          name: 'Server After',
+          year: 2026,
+          runTimeTicks: 600_000_000,
+          mediaFile: path.join(mediaDir, 'server-after.mp4'),
+        },
       ],
       playlists: [
         { id: 'night', name: 'Server Night', itemIds: ['server-one', 'server-two'] },
       ],
     });
     unavailable = await startMockJellyfin({ failPlaylistList: true });
-    seedConfig(configRoot, [
-      mockSource(healthy, { id: 'jf-playlists', name: 'Playlist Server' }),
-      mockSource(unavailable, { id: 'jf-offline', name: 'Unavailable Server' }),
-    ]);
+    seedConfig(
+      configRoot,
+      [
+        mockSource(healthy, { id: 'jf-playlists', name: 'Playlist Server' }),
+        mockSource(unavailable, { id: 'jf-offline', name: 'Unavailable Server' }),
+      ],
+      {
+        continue_playing: 'on',
+        recents: [
+          {
+            item: {
+              ratingKey: 'jf-playlists:server-after',
+              title: 'Server After',
+              durationMs: 60_000,
+              mediaType: 'movie',
+              viewOffsetMs: 1_000,
+              played: false,
+              sourceId: 'jf-playlists',
+              providerIds: [],
+            },
+            started_at_ms: 0,
+            ended_at_ms: 1,
+          },
+        ],
+      },
+    );
   },
 
   async cleanup() {
@@ -133,6 +166,20 @@ export default {
     );
     assert.deepEqual(healthy.state.contractViolations, []);
     assert.deepEqual(unavailable.state.contractViolations, []);
+    await second.setProp('time-pos', 9.2);
+    await second.setProp('pause', false);
     second.close();
+
+    const after = await nextPlayer('server-after');
+    await after.setProp('pause', true);
+    assert.deepEqual(
+      healthy.state.requests
+        .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
+        .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]),
+      ['server-one', 'server-two', 'server-after'],
+      'Continue Playing must begin only after the server playlist reaches its final item',
+    );
+    after.quit();
+    after.close();
   },
 };
