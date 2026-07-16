@@ -26,6 +26,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (subtle motion/empty-state pass) retain separate owner go gates. Exact review
   evidence: `.agents/review/findings/ui-s1.md`.
 
+- **CAROUSEL DUPLICATE PLAY ACTION CORRECTION AUTHORIZED (owner go
+  2026-07-16).** Playlist S1 added a primary Play/Resume row beneath the
+  Continue Watching cover-flow even though the centered card already performs
+  that action. Remove the complete row, retain card click/keyboard semantics,
+  and keep Play from Beginning in the context menu. Update the dependent E2E
+  selectors and guard the row's absence. Approved correction and verification
+  contract: `.agents/plans/playlists.md` (Focused correction).
+
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
   `.agents/plans/edit-error-auto-dismiss.md`. Failed watch-state edit errors

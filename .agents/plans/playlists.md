@@ -1,9 +1,11 @@
 # Plan: Playlists and Continue Playing
 
 Status: **COMPLETE 2026-07-16 — all five slices landed, verified, and were
-externally accepted.** Scope was approved by the owner 2026-07-14; the owner
-gave the implementation go on 2026-07-15. Product decisions that outlive this
-plan are in `.agents/decisions.md` (2026-07-14).
+externally accepted; focused carousel action-row correction authorized
+2026-07-16.** Scope was approved by the owner 2026-07-14; the owner gave the
+implementation go on 2026-07-15 and approved the correction below on
+2026-07-16. Product decisions that outlive this plan are in
+`.agents/decisions.md` (2026-07-14).
 
 Origin: the in-app play queue does not survive an app restart (owner,
 2026-07-14). The design discussion that followed concluded that **the queue
@@ -53,8 +55,10 @@ queue's deletion and is S2 below.
    so a deliberate rewatch keeps rolling.
 8. **The play verbs are Play / Resume / Play from Beginning / Add to Playlist →.**
    An item with no resume position offers **Play**. An in-progress item offers
-   **Resume** AND **Play from Beginning**, as two explicit choices, everywhere
-   playback can be started (context menu, detail page, Continue Watching card).
+   **Resume** AND **Play from Beginning**, as two explicit choices in the
+   context menu and detail page. **Owner amendment 2026-07-16:** the Continue
+   Watching card itself is already Play/Resume, so it has no duplicate action
+   row below it; Play from Beginning stays in its context menu.
 9. **There is NO resume prompt, and no countdown.** It was only ever wanted for
    an in-progress item reached by AUTO-ADVANCE — and mpv owns the screen by then,
    so there is nowhere to draw it. **Auto-advance onto an in-progress item
@@ -341,6 +345,29 @@ The largest slice; the editor is most of it.
   owner report.
 
 ## Implementation log
+
+### Focused correction — remove the duplicate carousel action row
+
+Owner report and approval 2026-07-16: the Play button beneath the Continue
+Watching cover-flow is superfluous because the centered card already performs
+the same Play/Resume action. Remove the complete `.flowactions` markup and its
+component CSS. Preserve the centered card's click, keyboard-button semantics,
+and dynamic `Play …` / `Resume …` accessible label. Preserve Play from
+Beginning in the card's existing context menu; context-menu and detail-page
+verbs otherwise remain unchanged.
+
+Update every E2E caller that used `.flowactions button.primary` to activate the
+centered card instead. Strengthen `playverbs` to require the action row to be
+absent while the centered in-progress card remains semantically Resume and its
+context menu retains Resume plus Play from Beginning. Remove the nonexistent
+hero primary button from the UI-foundation style comparison while retaining
+the other real primary-button surfaces. Red-prove the action-row absence guard
+by restoring the duplicate markup and observing the focused scenario fail,
+then restore the committed correction and pass it. Run canonical frontend
+verification, the affected Linux scenarios, and the full Linux E2E suite. The
+owner is unavailable to playtest, so automated and captured evidence remains
+the acceptance gate. Primary Claude code review plus independent Grok second
+review and the normal patch version bump close the correction.
 
 ### S1 — complete and externally accepted 2026-07-15
 

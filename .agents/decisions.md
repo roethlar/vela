@@ -694,7 +694,11 @@ feature. The servers' own playlists appear alongside them, READ-ONLY.
 
 THE PLAY VERBS ARE: Play (item with no resume position); Resume AND Play from
 Beginning, as two explicit choices (item in progress); Add to Playlist ->.
-Everywhere playback can be started.
+The context menu and detail surfaces expose those explicit choices. **Amendment
+2026-07-16:** the Continue Watching cover-flow is the deliberate exception:
+its centered card is already the visible Play/Resume control, so it has no
+duplicated action row underneath. Play from Beginning remains available from
+the card's context menu.
 
 THERE IS NO RESUME PROMPT AND NO COUNTDOWN. It was only ever wanted for an
 in-progress item reached by AUTO-ADVANCE, and mpv owns the screen by then, so
