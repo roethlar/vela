@@ -9,9 +9,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Version 0.1.53** (`package.json`, both lockfiles,
+- **Version 0.1.54** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `0ce3629`).
+  agree, as of `c8aa15e`).
 
 - **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
   theme-correct foundation in `.agents/plans/ui-embellishments.md` now owns
@@ -26,15 +26,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (subtle motion/empty-state pass) retain separate owner go gates. Exact review
   evidence: `.agents/review/findings/ui-s1.md`.
 
-- **CAROUSEL DUPLICATE PLAY ACTION CORRECTION REVIEWED (owner go
+- **CAROUSEL DUPLICATE PLAY ACTION CORRECTION COMPLETE at 0.1.54 (owner go
   2026-07-16).** Playlist S1 added a primary Play/Resume row beneath the
   Continue Watching cover-flow even though the centered card already performs
   that action. Implementation `507fb2f` removes the complete row, retains card
   click/keyboard semantics, and keeps Play from Beginning in the context menu.
   The exact guard failed with the row restored and passed after restoration;
   affected Linux scenarios and the full 25/25 suite are green. External review
-  converged clean with independent Claude and Grok guard proofs. Patch version
-  bump remains before closure. Evidence: `.agents/review/findings/car-1.md`.
+  converged clean with independent Claude and Grok guard proofs. Final 0.1.54
+  focused Linux build and screenshot inspection confirm the row is absent. No
+  owner playtest is required or pending. Evidence:
+  `.agents/review/findings/car-1.md`.
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan

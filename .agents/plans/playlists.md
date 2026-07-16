@@ -387,6 +387,11 @@ accepted exact reviewed head `7c9046b` against base `7d7bc99` with independent
 guard proofs and no material finding. Exact review evidence:
 `.agents/review/findings/car-1.md`.
 
+Version commit `c8aa15e` closes the correction at Vela 0.1.54. Post-bump local
+frontend/toolchain/build and locked Rust 1.89 checks passed. A fresh Linux
+0.1.54 `playverbs` run passed, and its final screenshot visibly contains no
+action row beneath the carousel.
+
 ### S1 — complete and externally accepted 2026-07-15
 
 Commit `ec5d613` deletes the queue model, six commands, queue UI/status/polling,

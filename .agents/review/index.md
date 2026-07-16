@@ -17,8 +17,8 @@ scenarios 4/4, full Linux E2E 25/25, and a separately red-proven reviewable
 source guard through `a1b839b`. Primary Claude Fable 5 accepted exact reviewed
 head `7c9046b` with `guard_confirmed:true` after breaking/restoring all three
 source-guard legs; independent Grok 4.5 accepted the same exact range with its
-own duplicate-row guard proof. Both returned no material finding. Detail:
-`.agents/review/findings/car-1.md`.
+own duplicate-row guard proof. Both returned no material finding. Final version
+0.1.54: `c8aa15e`. Detail: `.agents/review/findings/car-1.md`.
 
 Loop `ui-s1` CLOSED 2026-07-16: theme-correct visual-language foundation is
 implemented through `c1c4db4` and versioned as 0.1.53 at `0ce3629`. Primary

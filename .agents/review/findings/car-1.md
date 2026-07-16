@@ -7,7 +7,8 @@ adds a superfluous button and vertical clutter to Vela's primary Home surface.
 **Branch**: `main` (owner-approved focused correction)
 **Commits**: `507fb2fbd6d51ce2e73f6230f9c8806d18c559ce` (implementation),
 `c753f45be7e3539cfef2d65bdac69b72b1608d8b` and
-`a1b839b4a242ffdc4b03bdccec7d5828eedae3af` (reviewable source guard)
+`a1b839b4a242ffdc4b03bdccec7d5828eedae3af` (reviewable source guard),
+`c8aa15e177598496d497be89c7c716e89895d222` (Vela 0.1.54)
 
 ## Evidence
 
@@ -62,6 +63,11 @@ inventories a primary button that no longer exists.
   final real-app suite passed 25/25.
 - Local Node syntax checks, the canonical frontend check, and the production
   frontend build passed before the implementation commit.
+- At final version 0.1.54, the exact toolchain check, canonical frontend check
+  (6/6 Node tests and zero Svelte diagnostics), production build, and locked
+  Rust 1.89 compile passed locally. A fresh Linux 0.1.54 build passed
+  `playverbs`; its captured screenshot was inspected and contains the carousel
+  card, progress bar, and caption with no action row underneath.
 
 ## Coder dispute (if any)
 
