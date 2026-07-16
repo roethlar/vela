@@ -1,6 +1,6 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **DRAFT — Claude r2 finding addressed; plan-review loop active; not
+Status: **DRAFT — Claude r3 review unavailable; not reviewed, surfaced, or
 owner-approved.** The owner reported the regression on a locally built 0.1.51
 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
@@ -330,3 +330,20 @@ PlaybackInfo response is parked until the old local reads settle. The old
 tuple therefore has no Charlie, while the newer tuple has Charlie's open
 recent; wrongly publishing the old tuple deterministically removes the
 centered Charlie. The same run retains the three-key no-repeat proof.
+
+**r3 — 2026-07-16T06:09:57Z — base `b42b3a7`, head `43957b1`; round verdict
+unavailable (fail-closed).**
+
+- The first Claude Code 2.1.211 (`claude-fable-5`) process reached zero model
+  turns and returned `ConnectionRefused` because the configured local Claude
+  bridge was no longer listening. It supplied no review evidence.
+- The one playbook-permitted fresh-session retry kept the same model, prompt,
+  read-only tools, schema, base, and reviewed SHA while using Anthropic's direct
+  endpoint. It completed 34 review turns but terminated with HTTP 429 / Claude
+  session limit before returning the required structured verdict.
+- Neither process result is a review verdict. No r3 findings were admitted or
+  dismissed, and r2's revised disposition has not yet been externally accepted.
+
+Round outcome: review remains fail-closed. Do not surface or implement this
+plan until the owner authorizes a later retry after the Claude limit resets or
+selects another external Claude model.

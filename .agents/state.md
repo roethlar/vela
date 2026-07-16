@@ -116,12 +116,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **CLEAN-EOF CAROUSEL REGRESSION — PLAN REVIEW ACTIVE.** The owner's 0.1.51
+- **CLEAN-EOF CAROUSEL REGRESSION — PLAN REVIEW PAUSED, FAIL-CLOSED.** The owner's 0.1.51
   macOS playtest found that a naturally completed episode remains the only
   Continue Watching card until it is manually marked watched. Diagnosis found
   a pre-existing missing explicit server played mutation plus Slice 5's
   end-refresh/automatic-start repaint race. Draft plan:
-  `.agents/plans/clean-eof-carousel.md`; Claude reviewloop must converge before
+  `.agents/plans/clean-eof-carousel.md`. Claude r1 and r2 reopened concrete test
+  design issues, which are revised at `43957b1`; r3 then failed without a
+  verdict because the local bridge refused connection and its one direct retry
+  hit the Claude session limit. Claude reviewloop must still converge before
   the plan is surfaced for owner approval. No implementation is authorized.
 
 - **OWNER-GATED FOLLOW-UP: publish dependency refresh 0.1.51.** Implementation
@@ -320,7 +323,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/dependency-lts-refresh.md` (COMPLETE — final canonical,
   native-package, live-server, and external integration review green)
 - `.agents/plans/playlists.md` (COMPLETE — five slices; externally accepted)
-- `.agents/plans/clean-eof-carousel.md` (DRAFT — Claude plan review active)
+- `.agents/plans/clean-eof-carousel.md` (DRAFT — Claude r3 unavailable;
+  review fail-closed)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
