@@ -1,7 +1,7 @@
 # Plan: clean episode completion advances Continue Watching
 
 Status: **IMPLEMENTED — code/test slice `8894ca6`; seven guards and canonical
-verification green; Grok r1 accepted, independent r2 pending; version bump
+verification green; two independent Grok reviews accepted; version bump
 pending.**
 The owner reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
@@ -464,3 +464,17 @@ implemented head `8894ca6baf268a9c3962aaac1f3417e57ec08339`.
 
 Round outcome: r1 accepted. A separate fresh Grok session must independently
 prove the tombstone guard before this code slice converges.
+
+**r2 — 2026-07-16T14:00:20Z — Grok 0.2.101 / `grok-4.5`; verdict
+`accepted`.**
+
+- In a separate fresh disposable worktree, Grok removed clean-completion
+  tombstone publication while retaining session removal. The focused
+  threshold-removed identity guard failed because `hidden_from_continue` was
+  empty, then passed after restoration from the pinned head.
+- The structured result returned the exact base/head,
+  `guard_confirmed: true`, no material comments, and the restored worktree
+  was clean.
+
+Round outcome: both independent Grok sessions accepted the same pinned code
+slice after proving different guards. Code review has converged.
