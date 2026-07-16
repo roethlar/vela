@@ -247,7 +247,7 @@
               >
               <span class="epsub">
                 {#if e.durationMs}{runtimeLabel(e.durationMs)}{/if}
-                {#if e.played === true && pct === null}<span class="watchedmark" title="Watched"><Icon name="check" size={11} stroke={2.75} /></span>{/if}
+                {#if e.played === true && pct === null}<span class="watchedmark" title="Watched"><Icon name="check" size={11} stroke={2.75} /><span class="sr-only">Watched</span></span>{/if}
               </span>
             </div>
           </button>
@@ -277,7 +277,7 @@
         <div class="metarow">
           {#if detail?.originallyAvailableAt}<span>{detail.originallyAvailableAt}</span>{/if}
           {#if panelDuration}<span>{runtimeLabel(panelDuration)}</span>{/if}
-          {#if detail?.rating != null}<span title="Rating">★ {detail.rating.toFixed(1)}</span>{/if}
+          {#if detail?.rating != null}<span class="metric" title="Rating"><Icon name="star" size={13} /><span class="sr-only">Rating: </span>{detail.rating.toFixed(1)}</span>{/if}
           {#if selected.played === true && panelPct === null}<span class="chip watched"><Icon name="check" size={12} stroke={2.5} /> Watched</span>{/if}
         </div>
         <div class="playactions">
@@ -369,21 +369,6 @@
     color: var(--accent);
     text-decoration: underline;
   }
-  /* Person-browse affordance: identified director/writer names are links. */
-  .personlink {
-    appearance: none;
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-  }
-  .personlink:hover,
-  .personlink:focus-visible {
-    color: var(--accent);
-    text-decoration: underline;
-  }
   .heading .show {
     font-size: 1.3rem;
     font-weight: 700;
@@ -429,7 +414,7 @@
   }
   .eprow.selected {
     border-color: var(--accent);
-    background: var(--bg-blur);
+    background: var(--accent-tint);
   }
   .epthumb {
     position: relative;
@@ -445,18 +430,6 @@
     height: 100%;
     object-fit: cover;
     display: block;
-  }
-  .progress {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 3px;
-    background: rgba(0, 0, 0, 0.55);
-  }
-  .progress .bar {
-    height: 100%;
-    background: var(--accent);
   }
   .epmeta {
     display: flex;
@@ -507,19 +480,17 @@
   .still {
     width: 100%;
     aspect-ratio: 16 / 9;
-    object-fit: cover;
     border-radius: 0.6rem;
     border: 1px solid var(--border-subtle);
+  }
+  .still:not(.noart) {
+    object-fit: cover;
     background: var(--surface-sunken);
     display: block;
   }
   .still.noart {
     display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-muted);
     padding: 1rem;
-    text-align: center;
   }
   .paneltitle {
     margin-top: 0.8rem;
@@ -543,43 +514,39 @@
     color: var(--text-2);
     margin-bottom: 0.7rem;
   }
-  .chip {
+  .metric {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    padding: 0.08rem 0.45rem;
-    font-size: 0.8rem;
+    gap: 0.2rem;
   }
-  .chip.watched {
-    color: var(--accent);
-    border-color: var(--accent);
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
-  .playwide {
+  .playactions .playwide:not(.primary) {
     display: inline-flex;
     align-items: center;
     gap: 0.45rem;
     padding: 0.5rem 0.9rem;
     border-radius: 0.5rem;
     font-weight: 600;
+    border: 1px solid var(--border);
+    background: var(--surface-2);
+    color: var(--text);
+    cursor: pointer;
   }
   .playactions {
     display: flex;
     flex-wrap: wrap;
     gap: 0.45rem;
     margin-bottom: 0.9rem;
-  }
-  .playactions .playwide {
-    border: 1px solid var(--border);
-    background: var(--surface-2);
-    color: var(--text);
-    cursor: pointer;
-  }
-  .playactions .primary {
-    border-color: transparent;
-    background: var(--accent);
-    color: var(--on-accent);
   }
   .summary {
     margin: 0 0 0.9rem;

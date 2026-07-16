@@ -2079,7 +2079,7 @@
           item.title, // episode title (also the poster's alt / no-art text)
         ]
       : [item.title, ...(item.year != null ? [`${item.year}`] : [])]}
-    {@const label = `${parts.join(" — ")}${pct !== null ? ` — ${pct}% watched` : ""}`}
+    {@const label = `${parts.join(" — ")}${pct !== null ? ` — ${pct}% watched` : item.played === true ? " — watched" : ""}`}
     <button
       class="poster"
       class:landscape
@@ -2529,7 +2529,7 @@
       <button role="menuitem" onclick={() => removeFromContinue(mi)}>Remove from Continue Watching</button>
     {/if}
     {#if mi.mediaType !== "show" && mi.mediaType !== "season"}
-      <button role="menuitem" aria-expanded={addMenuOpen} onclick={toggleAddMenu}>Add to Playlist →</button>
+      <button role="menuitem" aria-expanded={addMenuOpen} onclick={toggleAddMenu}>Add to Playlist <Icon name="chevron" size={13} /></button>
       {#if addMenuOpen}
         <div class="addsubmenu" role="group" aria-label="Choose a playlist">
           {#if addMenuStatus}
@@ -2757,7 +2757,7 @@
   }
   .sideitem.active {
     color: var(--text-bright);
-    background: var(--surface-2);
+    background: var(--accent-tint);
   }
   .search {
     margin-left: auto;
@@ -2795,7 +2795,7 @@
   .search:focus {
     outline: none;
     border-color: var(--accent);
-    box-shadow: 0 0 0 3px rgba(229, 160, 13, 0.15);
+    box-shadow: 0 0 0 3px var(--accent-glow);
   }
   .crumbs {
     display: flex;
@@ -2915,31 +2915,6 @@
       border-color 0.18s var(--ease),
       transform 0.2s var(--ease);
   }
-  .playoverlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: linear-gradient(to top, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.05) 55%);
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.18s var(--ease);
-  }
-  .playbtn {
-    width: 2.9rem;
-    height: 2.9rem;
-    border-radius: 50%;
-    background: var(--accent);
-    color: var(--on-accent);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding-left: 0.15rem;
-    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
-    transform: scale(0.82);
-    transition: transform 0.18s var(--ease);
-  }
   .poster.landscape .art {
     aspect-ratio: 16 / 9;
   }
@@ -2948,32 +2923,6 @@
     height: 100%;
     object-fit: cover;
     display: block;
-  }
-  .noart {
-    width: 100%;
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0.6rem;
-    font-size: 0.82rem;
-    font-weight: 600;
-    line-height: 1.3;
-    color: var(--text-2);
-    text-align: center;
-    background: linear-gradient(150deg, var(--surface-2), var(--surface-sunken));
-  }
-  .progress {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 5px;
-    background: rgba(0, 0, 0, 0.5);
-  }
-  .progress .bar {
-    height: 100%;
-    background: linear-gradient(90deg, var(--accent), var(--accent-hover));
   }
   /* Continue Watching cover-flow: the centered card is capped at ~30% of the
      window height; older items fan behind-left, newer behind-right
@@ -3007,9 +2956,6 @@
     width: 100%;
     height: 100%;
     aspect-ratio: auto;
-  }
-  .flowcard .progress {
-    height: 6px;
   }
   .flowcard:focus-visible {
     outline: none;
@@ -3073,6 +3019,9 @@
     margin-top: 0.65rem;
   }
   .flowactions button {
+    font-size: 0.84rem;
+  }
+  .flowactions button:not(.primary) {
     display: inline-flex;
     align-items: center;
     gap: 0.35rem;
@@ -3084,11 +3033,6 @@
     cursor: pointer;
     font: inherit;
     font-size: 0.84rem;
-  }
-  .flowactions button.primary {
-    border-color: transparent;
-    background: var(--accent);
-    color: var(--on-accent);
   }
   /* Home rails */
   .home {
@@ -3222,7 +3166,7 @@
     border-radius: 12px;
     cursor: pointer;
     line-height: 0;
-    box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+    box-shadow: 0 6px 24px var(--shadow-md);
     transition: transform 0.1s ease;
   }
   .qr:hover {
@@ -3249,24 +3193,6 @@
   .small {
     font-size: 0.85rem;
   }
-  button.primary {
-    background: var(--accent);
-    color: var(--on-accent);
-    border: none;
-    border-radius: 6px;
-    padding: 0.55rem 1.1rem;
-    font-weight: 700;
-    cursor: pointer;
-    transition:
-      background 0.15s var(--ease),
-      transform 0.08s var(--ease);
-  }
-  button.primary:hover {
-    background: var(--accent-hover);
-  }
-  button.primary:active {
-    transform: translateY(1px);
-  }
   .mpvbar {
     display: flex;
     align-items: center;
@@ -3283,7 +3209,7 @@
   .mpvbar code {
     display: inline-block;
     margin-left: 0.5rem;
-    background: #00000040;
+    background: var(--surface-sunken);
     padding: 0.15rem 0.45rem;
     border-radius: 4px;
     font-family: ui-monospace, monospace;
@@ -3294,18 +3220,13 @@
     gap: 0.5rem;
     flex-shrink: 0;
   }
-  .mpvactions button {
-    background: #00000030;
+  .mpvactions button:not(.primary) {
+    background: var(--surface-sunken);
     color: var(--warn-text);
     border: 1px solid var(--warn-border);
     border-radius: 6px;
     padding: 0.4rem 0.9rem;
     cursor: pointer;
-  }
-  .mpvactions button.primary {
-    background: var(--accent);
-    color: var(--on-accent);
-    border: none;
   }
   .center {
     margin: auto;
@@ -3330,9 +3251,9 @@
     border-radius: 8px;
     font-size: 13px;
     line-height: 1.45;
-    color: var(--errfg, #ffb4a9);
-    background: var(--errbg, rgba(255, 80, 60, 0.12));
-    border: 1px solid var(--errborder, rgba(255, 80, 60, 0.28));
+    color: var(--danger-text);
+    background: var(--danger-bg);
+    border: 1px solid var(--danger-border);
   }
 
   /* The mpv BAR's own failure — never .error, which is the VIEW's. */
@@ -3340,12 +3261,12 @@
     margin: 6px 0 0;
     font-size: 12px;
     line-height: 1.4;
-    color: var(--errfg, #ffb4a9);
+    color: var(--danger-text);
   }
 
   /* Neutral transient status (scan started) — same slot as .error, calmer. */
   .notice {
-    background: rgba(255, 255, 255, 0.06);
+    background: var(--surface-2);
     color: var(--text-muted);
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
@@ -3367,7 +3288,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 1px 4px var(--shadow-md);
   }
 
   /* Right-click context menu */
@@ -3384,7 +3305,7 @@
     border: 1px solid var(--border);
     border-radius: 0.5rem;
     padding: 0.3rem;
-    box-shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+    box-shadow: 0 8px 28px var(--shadow-lg);
     display: flex;
     flex-direction: column;
     max-height: calc(100vh - 16px);
@@ -3435,7 +3356,7 @@
     padding: 0.45rem 0.6rem;
   }
   .addstatus.addfailure {
-    color: #ffb4ad;
+    color: var(--danger-text);
   }
 
 </style>

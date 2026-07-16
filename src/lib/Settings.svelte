@@ -447,9 +447,9 @@
       {#if mpv}
         <p class="muted small">
           {#if mpv.available}
-            ✓ Found mpv at <code class="path">{mpv.path}</code>
+            <span class="inlineicon"><Icon name="check" size={14} stroke={2.5} /></span>Found mpv at <code class="path">{mpv.path}</code>
           {:else}
-            ✗ mpv wasn't found. Install it below, or point Vela at an existing mpv.
+            <span class="inlineicon"><Icon name="close" size={14} stroke={2.5} /></span>mpv wasn't found. Install it below, or point Vela at an existing mpv.
           {/if}
         </p>
       {/if}
@@ -481,7 +481,7 @@
         {/if}
 
         <div class="warn">
-          <b>⚠ Advanced — requires mpv knowledge.</b>
+          <b><span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Advanced — requires mpv knowledge.</b>
           These options are passed straight to mpv, exactly as written. Wrong or
           unsupported options can degrade quality or stop playback. If you're not
           comfortable with mpv's command-line options, leave this blank — Vela's
@@ -529,7 +529,7 @@
           </p>
           {#if mpvAutocrop === "auto"}
             <p class="warn small">
-              ⚠ Automatic cropping runs at the start of every video and can be
+              <span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span>Automatic cropping runs at the start of every video and can be
               unreliable on HDR content — on some GPU/Wayland setups it may
               occasionally hang mpv (unkillable). If playback freezes, switch back to
               Off or Manual.
@@ -650,6 +650,8 @@
   .overlay {
     position: fixed;
     inset: 0;
+    /* A neutral black scrim must dim both light and dark themes; unlike a
+       surface color, its job is to suppress the whole app behind the modal. */
     background: rgba(0, 0, 0, 0.6);
     display: flex;
     justify-content: center;
@@ -665,7 +667,7 @@
     border-radius: 12px;
     width: min(780px, 100%);
     padding: 1.2rem 1.4rem 1.6rem;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 20px 60px var(--shadow-lg);
     cursor: default;
     animation: vela-pop 0.18s var(--ease);
   }
@@ -696,7 +698,7 @@
     background: var(--surface-2);
   }
   .tabs button.active {
-    background: var(--surface-2);
+    background: var(--accent-tint);
     color: var(--text-bright);
   }
   .tabcontent {
@@ -735,6 +737,7 @@
     border-color: var(--border-strong);
   }
   .themecard.active {
+    background: var(--accent-tint);
     border-color: var(--accent);
     box-shadow: 0 0 0 1px var(--accent);
   }
@@ -771,6 +774,11 @@
     font-size: 0.85rem;
     line-height: 1.4;
     margin-bottom: 0.6rem;
+  }
+  .inlineicon {
+    display: inline-flex;
+    margin-right: 0.22rem;
+    vertical-align: -0.17em;
   }
   .warn b {
     color: var(--warn-text);
@@ -911,27 +919,7 @@
     display: flex;
   }
   button.primary {
-    background: var(--accent);
-    color: var(--on-accent);
-    border: none;
-    border-radius: 6px;
-    padding: 0.55rem 1.1rem;
-    font-weight: 700;
-    cursor: pointer;
     align-self: flex-start;
-    transition:
-      background 0.15s var(--ease),
-      transform 0.08s var(--ease);
-  }
-  button.primary:hover {
-    background: var(--accent-hover);
-  }
-  button.primary:active {
-    transform: translateY(1px);
-  }
-  button.primary:disabled {
-    opacity: 0.6;
-    cursor: default;
   }
   .btnrow {
     display: flex;

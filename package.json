@@ -13,7 +13,7 @@
     "build:arch": "npm run tauri -- build --no-bundle && cd packaging/arch && makepkg -f",
     "build:linux": "tauri build --bundles deb,rpm",
     "preview": "vite preview",
-    "check": "node --test tests/build-script.test.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "node --test tests/build-script.test.mjs tests/ui-foundation.test.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "e2e": "node tests/e2e/run.mjs",
     "tauri": "tauri",
     "e2e:live": "bash scripts/e2e-live.sh"

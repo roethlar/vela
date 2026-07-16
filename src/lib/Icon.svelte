@@ -1,12 +1,27 @@
 <script lang="ts">
   // Inline line icons drawn on a 24px grid, stroked with currentColor so they
   // inherit text color and theme automatically. Lucide-style geometry (MIT).
+  type IconName =
+    | "settings"
+    | "playlist"
+    | "close"
+    | "back"
+    | "chevron"
+    | "check"
+    | "star"
+    | "heart"
+    | "alert"
+    | "plus"
+    | "play"
+    | "refresh"
+    | "film";
+
   let {
     name,
     size = 18,
     stroke = 2,
     class: cls = "",
-  }: { name: string; size?: number; stroke?: number; class?: string } = $props();
+  }: { name: IconName; size?: number; stroke?: number; class?: string } = $props();
 </script>
 
 <svg
@@ -20,6 +35,7 @@
   stroke-linecap="round"
   stroke-linejoin="round"
   aria-hidden="true"
+  focusable="false"
 >
   {#if name === "settings"}
     <line x1="21" x2="14" y1="4" y2="4" />
@@ -48,12 +64,17 @@
     <polyline points="9 18 15 12 9 6" />
   {:else if name === "check"}
     <polyline points="20 6 9 17 4 12" />
+  {:else if name === "star"}
+    <polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2" />
+  {:else if name === "heart"}
+    <path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 0 0 0-7.78z" />
+  {:else if name === "alert"}
+    <path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+    <line x1="12" y1="9" x2="12" y2="13" />
+    <line x1="12" y1="17" x2="12.01" y2="17" />
   {:else if name === "plus"}
     <line x1="12" y1="5" x2="12" y2="19" />
     <line x1="5" y1="12" x2="19" y2="12" />
-  {:else if name === "search"}
-    <circle cx="11" cy="11" r="8" />
-    <line x1="21" y1="21" x2="16.65" y2="16.65" />
   {:else if name === "play"}
     <polygon points="6 3 20 12 6 21 6 3" />
   {:else if name === "refresh"}

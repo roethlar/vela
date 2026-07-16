@@ -159,15 +159,14 @@
   button { font: inherit; }
   .back, .entryactions button { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); border-radius: 7px; padding: 0.4rem 0.65rem; cursor: pointer; }
   .back { display: inline-flex; align-items: center; gap: 0.3rem; border: none; }
-  button:hover:not(:disabled) { color: var(--text-bright); background: var(--surface-2); }
+  button:hover:not(:disabled):not(.primary) { color: var(--text-bright); background: var(--surface-2); }
   button:disabled { opacity: 0.45; cursor: default; }
   .heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; margin-bottom: 1rem; }
   .heading h1 { font-family: var(--font-display); font-size: clamp(1.8rem, 4vw, 3rem); margin: 0.1rem 0; letter-spacing: -0.035em; }
   .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.7rem; font-weight: 700; margin: 0; }
   .muted { color: var(--text-muted); margin: 0.2rem 0 0; }
-  .primary { display: inline-flex; align-items: center; gap: 0.3rem; border: none; background: var(--accent); color: var(--on-accent); border-radius: 8px; padding: 0.5rem 0.8rem; cursor: pointer; white-space: nowrap; }
   .status { color: var(--text-2); background: var(--surface); border-left: 3px solid var(--accent); border-radius: 5px; padding: 0.55rem 0.75rem; margin: 0.8rem 0; }
-  .status.failure { color: #ffb4ad; border-color: #e25d52; background: rgba(120, 24, 20, 0.24); }
+  .status.failure { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
   .empty { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 12px; padding: 2rem; text-align: center; }
   .entries { list-style: none; padding: 0; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.5rem; }
   .entries li { display: grid; grid-template-columns: 2rem 3rem minmax(8rem, 1fr) auto; gap: 0.7rem; align-items: center; padding: 0.55rem; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 10px; }

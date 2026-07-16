@@ -21,10 +21,15 @@
   --text-bright: #ffffff;
   --accent: #e5a00d;
   --accent-hover: #f2b32a;
+  --accent-tint: rgba(229, 160, 13, 0.08);
+  --accent-glow: rgba(229, 160, 13, 0.15);
   --on-accent: #1a1205;
   --danger-bg: #3a1d1d;
   --danger-text: #ffb4b4;
   --danger-border: #4a2a2a;
+  --danger-solid: #a62e29;
+  --danger-solid-hover: #c94a44;
+  --on-danger: #ffffff;
   --warn-bg: #2a2410;
   --warn-text: #f0d99a;
   --warn-border: #4a3f17;
@@ -52,10 +57,15 @@
   --text-bright: #ffffff;
   --accent: #bd93f9;
   --accent-hover: #cfacff;
+  --accent-tint: rgba(189, 147, 249, 0.08);
+  --accent-glow: rgba(189, 147, 249, 0.15);
   --on-accent: #21222c;
   --danger-bg: #432a32;
   --danger-text: #ff6e6e;
   --danger-border: #6d3a44;
+  --danger-solid: #ff5555;
+  --danger-solid-hover: #ff6e6e;
+  --on-danger: #21222c;
   --warn-bg: #403a28;
   --warn-text: #f1fa8c;
   --warn-border: #6b6440;
@@ -83,10 +93,15 @@
   --text-bright: #ffffff;
   --accent: #88c0d0;
   --accent-hover: #8fbcbb;
+  --accent-tint: rgba(136, 192, 208, 0.08);
+  --accent-glow: rgba(136, 192, 208, 0.15);
   --on-accent: #2e3440;
   --danger-bg: #3f3033;
   --danger-text: #bf616a;
   --danger-border: #5e4044;
+  --danger-solid: #9c4651;
+  --danger-solid-hover: #a94f5a;
+  --on-danger: #eceff4;
   --warn-bg: #3e3a2e;
   --warn-text: #ebcb8b;
   --warn-border: #5e5740;
@@ -114,10 +129,15 @@
   --text-bright: #eee8d5;
   --accent: #268bd2;
   --accent-hover: #3fa0e6;
+  --accent-tint: rgba(38, 139, 210, 0.08);
+  --accent-glow: rgba(38, 139, 210, 0.15);
   --on-accent: #002b36;
   --danger-bg: #3a2226;
   --danger-text: #dc322f;
   --danger-border: #5a2f30;
+  --danger-solid: #b52d2a;
+  --danger-solid-hover: #c02e2b;
+  --on-danger: #eee8d5;
   --warn-bg: #2f2c1e;
   --warn-text: #b58900;
   --warn-border: #574e2a;
@@ -145,10 +165,15 @@
   --text-bright: #fbf1c7;
   --accent: #fabd2f;
   --accent-hover: #ffd152;
+  --accent-tint: rgba(250, 189, 47, 0.08);
+  --accent-glow: rgba(250, 189, 47, 0.15);
   --on-accent: #282828;
   --danger-bg: #422a26;
   --danger-text: #fb4934;
   --danger-border: #5e3530;
+  --danger-solid: #fb4934;
+  --danger-solid-hover: #ff5f47;
+  --on-danger: #1d2021;
   --warn-bg: #3f3826;
   --warn-text: #fabd2f;
   --warn-border: #5e5330;
@@ -176,10 +201,15 @@
   --text-bright: #073642;
   --accent: #268bd2;
   --accent-hover: #1a7fc9;
+  --accent-tint: rgba(38, 139, 210, 0.08);
+  --accent-glow: rgba(38, 139, 210, 0.15);
   --on-accent: #fdf6e3;
   --danger-bg: #f7ddd9;
   --danger-text: #c4231f;
   --danger-border: #e3b5b0;
+  --danger-solid: #c4231f;
+  --danger-solid-hover: #aa1d1a;
+  --on-danger: #fdf6e3;
   --warn-bg: #f3e9c8;
   --warn-text: #8a6800;
   --warn-border: #d8c98f;
@@ -207,10 +237,15 @@
   --text-bright: #282828;
   --accent: #d79921;
   --accent-hover: #c78a14;
+  --accent-tint: rgba(215, 153, 33, 0.08);
+  --accent-glow: rgba(215, 153, 33, 0.15);
   --on-accent: #fbf1c7;
   --danger-bg: #f3d9cf;
   --danger-text: #cc241d;
   --danger-border: #e0aa9b;
+  --danger-solid: #cc241d;
+  --danger-solid-hover: #b01f19;
+  --on-danger: #fbf1c7;
   --warn-bg: #f1e3b4;
   --warn-text: #91670a;
   --warn-border: #d7bf72;
@@ -238,10 +273,15 @@
   --text-bright: #1e2030;
   --accent: #1e66f5;
   --accent-hover: #2b6ff7;
+  --accent-tint: rgba(30, 102, 245, 0.08);
+  --accent-glow: rgba(30, 102, 245, 0.15);
   --on-accent: #eff1f5;
   --danger-bg: #f0d6dc;
   --danger-text: #d20f39;
   --danger-border: #e0aab6;
+  --danger-solid: #d20f39;
+  --danger-solid-hover: #b80d32;
+  --on-danger: #eff1f5;
   --warn-bg: #f0e4cf;
   --warn-text: #a87410;
   --warn-border: #d8be8a;
@@ -269,10 +309,15 @@
   --text-bright: #26233a;
   --accent: #286983;
   --accent-hover: #2f7896;
+  --accent-tint: rgba(40, 105, 131, 0.08);
+  --accent-glow: rgba(40, 105, 131, 0.15);
   --on-accent: #faf4ed;
   --danger-bg: #f1dbdc;
   --danger-text: #b4637a;
   --danger-border: #ddb6b6;
+  --danger-solid: #9f536a;
+  --danger-solid-hover: #8f495f;
+  --on-danger: #faf4ed;
   --warn-bg: #f3e6cd;
   --warn-text: #95680f;
   --warn-border: #e0c690;
@@ -300,10 +345,15 @@
   --text-bright: #1c1d22;
   --accent: #4078f2;
   --accent-hover: #2f6bf0;
+  --accent-tint: rgba(64, 120, 242, 0.08);
+  --accent-glow: rgba(64, 120, 242, 0.15);
   --on-accent: #ffffff;
   --danger-bg: #f6dad7;
   --danger-text: #e45649;
   --danger-border: #eeb1ab;
+  --danger-solid: #c84036;
+  --danger-solid-hover: #b4362e;
+  --on-danger: #ffffff;
   --warn-bg: #f3e6c8;
   --warn-text: #986801;
   --warn-border: #dcc488;
@@ -415,6 +465,131 @@ h2 {
 
 * {
   box-sizing: border-box;
+}
+
+/* Shared visual primitives. Component styles own only layout and interaction
+   context around these classes so every surface keeps the same visual language. */
+.playoverlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.45), rgba(0, 0, 0, 0.05) 55%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s var(--ease);
+}
+
+.playbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  flex: none;
+  padding-left: 0.15rem;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+  transform: scale(0.82);
+  transition: transform 0.18s var(--ease);
+}
+
+.progress {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 4px;
+  overflow: hidden;
+  background: rgba(0, 0, 0, 0.55);
+  pointer-events: none;
+}
+
+.progress .bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-hover));
+}
+
+.noart {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  line-height: 1.3;
+  color: var(--text-2);
+  text-align: center;
+  background: linear-gradient(150deg, var(--surface-2), var(--surface-sunken));
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0.08rem 0.45rem;
+  border: 1px solid var(--border);
+  border-radius: 0.35rem;
+  color: var(--text-2);
+  font-size: 0.8rem;
+}
+
+.chip.watched {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.personlink {
+  appearance: none;
+  padding: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.personlink:hover,
+.personlink:focus-visible {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+button.primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  padding: 0.55rem 1.1rem;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition:
+    background 0.15s var(--ease),
+    transform 0.08s var(--ease);
+}
+
+button.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+button.primary:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+button.primary:disabled {
+  opacity: 0.6;
+  cursor: default;
 }
 
 ::-webkit-scrollbar {

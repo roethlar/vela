@@ -348,7 +348,7 @@
   button { font: inherit; }
   .back, .entryactions button, .rename button, .deletezone button { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); border-radius: 7px; padding: 0.4rem 0.65rem; cursor: pointer; }
   .back { display: inline-flex; align-items: center; gap: 0.3rem; border: none; }
-  button:hover:not(:disabled) { color: var(--text-bright); background: var(--surface-2); }
+  button:hover:not(:disabled):not(.primary):not(.danger) { color: var(--text-bright); background: var(--surface-2); }
   button:disabled { opacity: 0.45; cursor: default; }
   .heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; margin-bottom: 1rem; }
   .heading h1 { font-family: var(--font-display); font-size: clamp(1.8rem, 4vw, 3rem); margin: 0.1rem 0; letter-spacing: -0.035em; }
@@ -358,10 +358,9 @@
   label { display: block; color: var(--text-muted); font-size: 0.78rem; margin-bottom: 0.3rem; }
   .inline { display: flex; gap: 0.45rem; }
   input { min-width: 0; flex: 1; background: var(--surface); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 0.5rem 0.65rem; }
-  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px rgba(229, 160, 13, 0.15); }
-  .primary { display: inline-flex; align-items: center; gap: 0.3rem; border: none; background: var(--accent); color: var(--on-accent); border-radius: 8px; padding: 0.5rem 0.8rem; cursor: pointer; white-space: nowrap; }
+  input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
   .status { color: var(--text-2); background: var(--surface); border-left: 3px solid var(--accent); border-radius: 5px; padding: 0.55rem 0.75rem; margin: 0.8rem 0; }
-  .status.failure { color: #ffb4ad; border-color: #e25d52; background: rgba(120, 24, 20, 0.24); }
+  .status.failure { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
   .empty { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 12px; padding: 2rem; text-align: center; }
   .playlistgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.8rem; }
   .playlistgrid > button { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 0.2rem 0.7rem; align-items: center; text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; cursor: pointer; }
@@ -376,11 +375,12 @@
   .entrymeta { min-width: 0; display: flex; flex-direction: column; gap: 0.15rem; }
   .entrymeta strong, .entrymeta span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .entrymeta span { color: var(--text-muted); font-size: 0.8rem; }
-  .entrymeta .dead { color: #ffb4ad; font-weight: 650; }
+  .entrymeta .dead { color: var(--danger-text); font-weight: 650; }
   .entryactions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0.35rem; }
   .entryactions button { font-size: 0.78rem; padding: 0.35rem 0.5rem; }
-  .dangertext { color: #ff9e96 !important; }
-  .danger { background: #a62e29 !important; border-color: #c94a44 !important; color: white !important; }
+  .dangertext { color: var(--danger-text) !important; }
+  .danger { background: var(--danger-solid) !important; border-color: var(--danger-solid) !important; color: var(--on-danger) !important; }
+  .danger:hover:not(:disabled) { background: var(--danger-solid-hover) !important; border-color: var(--danger-solid-hover) !important; }
   .deletezone { display: flex; align-items: center; gap: 0.5rem; justify-content: flex-end; margin-top: 1.5rem; color: var(--text-muted); font-size: 0.85rem; }
   @media (max-width: 860px) {
     .heading { align-items: stretch; flex-direction: column; gap: 1rem; }

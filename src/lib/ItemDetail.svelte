@@ -165,8 +165,8 @@
           {#if year}<span>{year}</span>{/if}
           {#if durationMs}<span>{runtimeLabel(durationMs)}</span>{/if}
           {#if detail?.contentRating}<span class="chip">{detail.contentRating}</span>{/if}
-          {#if detail?.rating != null}<span title="Rating">★ {detail.rating.toFixed(1)}</span>{/if}
-          {#if detail?.audienceRating != null}<span title="Audience rating">♥ {detail.audienceRating.toFixed(1)}</span>{/if}
+          {#if detail?.rating != null}<span class="metric" title="Rating"><Icon name="star" size={13} /><span class="sr-only">Rating: </span>{detail.rating.toFixed(1)}</span>{/if}
+          {#if detail?.audienceRating != null}<span class="metric" title="Audience rating"><Icon name="heart" size={13} /><span class="sr-only">Audience rating: </span>{detail.audienceRating.toFixed(1)}</span>{/if}
           {#if played === true && pct === null}<span class="chip watched"><Icon name="check" size={12} stroke={2.5} /> Watched</span>{/if}
         </div>
         {#if detail?.genres?.length}
@@ -296,53 +296,15 @@
     object-fit: cover;
     display: block;
   }
-  .noart {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    height: 100%;
-    padding: 0.8rem;
-    color: var(--text-muted);
-    font-size: 0.95rem;
-    text-align: center;
-  }
-  .playoverlay {
-    position: absolute;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    opacity: 0;
-    transition: opacity 120ms ease;
-    background: rgba(0, 0, 0, 0.35);
-  }
   .posterframe:hover .playoverlay,
   .posterframe:focus-visible .playoverlay {
     opacity: 1;
   }
-  .playbtn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 3.2rem;
-    height: 3.2rem;
-    border-radius: 50%;
-    background: var(--accent);
-    color: var(--on-accent);
+  .posterframe:hover .playbtn,
+  .posterframe:focus-visible .playbtn {
+    transform: scale(1);
   }
-  .progress {
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    height: 4px;
-    background: rgba(0, 0, 0, 0.55);
-  }
-  .progress .bar {
-    height: 100%;
-    background: var(--accent);
-  }
-  .playwide {
+  .playactions .playwide:not(.primary) {
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -350,22 +312,15 @@
     padding: 0.55rem 0.9rem;
     border-radius: 0.5rem;
     font-weight: 600;
-  }
-  .playactions {
-    display: flex;
-    flex-direction: column;
-    gap: 0.45rem;
-  }
-  .playactions .playwide {
     border: 1px solid var(--border);
     background: var(--surface-2);
     color: var(--text);
     cursor: pointer;
   }
-  .playactions .primary {
-    border-color: transparent;
-    background: var(--accent);
-    color: var(--on-accent);
+  .playactions {
+    display: flex;
+    flex-direction: column;
+    gap: 0.45rem;
   }
   .info {
     flex: 1;
@@ -391,19 +346,21 @@
     color: var(--text-2);
     margin-bottom: 0.6rem;
   }
-  .chip {
+  .metric {
     display: inline-flex;
     align-items: center;
-    gap: 0.25rem;
-    border: 1px solid var(--border);
-    border-radius: 0.35rem;
-    padding: 0.08rem 0.45rem;
-    font-size: 0.8rem;
-    color: var(--text-2);
+    gap: 0.2rem;
   }
-  .chip.watched {
-    color: var(--accent);
-    border-color: var(--accent);
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
   }
   .genres {
     display: flex;
@@ -489,20 +446,6 @@
   }
   .castcard.clickable:hover .castname,
   .castcard.clickable:focus-visible .castname {
-    color: var(--accent);
-    text-decoration: underline;
-  }
-  .personlink {
-    appearance: none;
-    background: none;
-    border: none;
-    padding: 0;
-    font: inherit;
-    color: inherit;
-    cursor: pointer;
-  }
-  .personlink:hover,
-  .personlink:focus-visible {
     color: var(--accent);
     text-decoration: underline;
   }
