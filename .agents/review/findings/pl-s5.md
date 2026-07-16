@@ -76,6 +76,13 @@ provider-neutral backend command.
   terminates after its first item or its final item emits no continuation.
 - Every injection was restored from committed state; each exact Rust guard and
   each focused Linux scenario returned green after restoration.
+- Final local verification passed exact Node 26.5.0/npm 12.0.1, `npm ci`, zero
+  npm vulnerabilities, `npm run check` with Svelte 0/0, `npm run build`, Rust
+  1.89 and stable checks, Clippy with warnings denied, 132 Rust tests, and zero
+  RustSec vulnerabilities with 17 allowed upstream warnings.
+- All 13 changed product/E2E files matched the Linux VM copies by SHA-256. A
+  fresh application build followed by the complete Linux real-app suite passed
+  24/24.
 
 ## Coder dispute (if any)
 

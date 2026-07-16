@@ -166,10 +166,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Exact evidence lives in
   `.agents/plans/dependency-lts-refresh.md`.
 
-- **PLAYLIST IMPLEMENTATION ACTIVE: `.agents/plans/playlists.md`** (approved and
-  authorized 2026-07-15; S1 through S4 landed and were externally accepted;
-  S5 implementation, coder guard proofs, and two independent Grok acceptances
-  are complete; final full verification and durable closure remain).
+- **PLAYLIST IMPLEMENTATION COMPLETE: `.agents/plans/playlists.md`** (all five
+  approved slices landed, were red-proven, passed canonical verification, and
+  were externally accepted by 2026-07-16).
   Product model and the two durable
   rulings: `.agents/decisions.md`
   (2026-07-14 — no play queue; video stays external). Five slices.
@@ -207,17 +206,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     sequence, isolation, and no-write leg was red-proven; restored Linux
     real-app E2E passed 21/21. Exact trail:
     `.agents/review/findings/pl-s4.md`.
-  - **Already true, and it is what makes this cheap:** item keys are namespaced
-    `<source_id>:<raw>` and `Registry::route` (`source/mod.rs:414`) dispatches per
-    item, so a list mixing Plex and Jellyfin items already plays today.
-    Mixed-source playlists need no new dispatch machinery. Episode walking for
-    `only-tv` needs no new server API either — `children()` plus the season/show
-    keys already on `ItemDto` cover it.
-  - **The sharpest hazard:** the `on` continue-playing mode can replay an item the
-    server never marks watched, forever. It needs a no-repeat guard, and it must
-    walk the SAME Continue Watching list the carousel renders — a second source of
-    truth for "what plays next" is exactly the failure class per-surface-status was
-    built to kill.
+  - **S5 (Continue Playing) is complete** (`6938c0f`; guard repairs
+    `18ae3d4`/`0da06b7`; two independent Grok acceptances at r1). The persisted
+    `off` / `on` / `only-tv` policy defaults to `only-tv`; continuation requires
+    the exact cleanly-ended session; `on` walks the literal rendered Continue
+    Watching list with a per-run no-repeat guard; and `only-tv` walks watched or
+    unwatched episodes across seasons while respecting the Specials boundary.
+    Restored local gates passed 132 Rust tests and zero npm/RustSec
+    vulnerabilities; the exact 13-file VM sync and fresh-build Linux real-app
+    E2E passed 24/24. Exact trail: `.agents/review/findings/pl-s5.md`.
+    No playlist implementation gate remains. The owner deferred the final live
+    Plex smoke to release preparation; Emby remains explicitly experimental.
   - **The design churned hard before settling** (an "Up Next" consumption queue, a
     melded carousel, a 5-second resume countdown — all proposed, all rejected by
     the owner the same day). The decisions entry records what was rejected and why;
@@ -312,7 +311,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner confirmed 0.1.50)
 - `.agents/plans/dependency-lts-refresh.md` (COMPLETE — final canonical,
   native-package, live-server, and external integration review green)
-- `.agents/plans/playlists.md` (APPROVED — implementation active; five slices)
+- `.agents/plans/playlists.md` (COMPLETE — five slices; externally accepted)
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)

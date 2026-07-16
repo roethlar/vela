@@ -15,7 +15,9 @@ reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each
 three-mode Continue Playing, exact-session clean-EOF arbitration, cross-season
 episode walking, literal rendered-list ordering, no-repeat behavior, and both
 Vela/server playlist terminal handoff. Both reviewers independently produced
-focused red/restored-green proofs and returned no material comments. Detail:
+focused red/restored-green proofs and returned no material comments. Restored
+verification passed 132 Rust tests, zero npm/RustSec vulnerabilities, and the
+fresh-build Linux real-app suite 24/24. Detail:
 `.agents/review/findings/pl-s5.md`.
 
 Loop `pl-s4` CLOSED 2026-07-16: **accepted clean by two independent external

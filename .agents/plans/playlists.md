@@ -1,9 +1,9 @@
 # Plan: Playlists and Continue Playing
 
-Status: **APPROVED 2026-07-15 — implementation authorized by the owner.** Scope
-was approved by the owner 2026-07-14; the owner gave the implementation go on
-2026-07-15. Product decisions that outlive this plan are in
-`.agents/decisions.md` (2026-07-14).
+Status: **COMPLETE 2026-07-16 — all five slices landed, verified, and were
+externally accepted.** Scope was approved by the owner 2026-07-14; the owner
+gave the implementation go on 2026-07-15. Product decisions that outlive this
+plan are in `.agents/decisions.md` (2026-07-14).
 
 Origin: the in-app play queue does not survive an app restart (owner,
 2026-07-14). The design discussion that followed concluded that **the queue
@@ -440,7 +440,39 @@ Emby remains intentionally experimental for v1.0 because no live Emby server
 is available; it shares the documented MediaBrowser playlist lineage and the
 same authenticated implementation whose Jellyfin-shaped E2E contract is green.
 
-Next implementation slice: S5, Continue Playing modes and no-repeat behavior.
+### S5 — complete and externally accepted 2026-07-16
+
+Commit `6938c0f` adds the persisted `off` / `on` / `only-tv` setting (default
+`only-tv`); exact clean-EOF/tracker session arbitration for single-item, Vela
+playlist, and server-playlist playback; an expected-session guard that prevents
+a delayed continuation from replacing a newer manual play; and provider-neutral
+episode walking across Plex and the shared Jellyfin/experimental-Emby client.
+The frontend applies policy against the literal retained Continue Watching
+list, never repeats an item within one continuous `on` run, and hands off only
+at a true playlist terminal boundary.
+
+Commit `18ae3d4` repairs the stale-session integration guard so the competing
+manual play bypasses the page's own continuation reset and exercises the
+backend comparison. Commit `0da06b7` adds the missing server-playlist terminal
+handoff guard. The coder separately red-proved mode normalization and
+persistence, clean-EOF identity, session arbitration, watched-next selection,
+season rollover/end/Specials rules, provider hierarchy and safe paths, literal
+rendered-list selection, no-repeat behavior, and both Vela/server playlist
+boundaries. Every injection was restored from committed state.
+
+Restored verification passed exact Node 26.5.0/npm 12.0.1, zero npm
+vulnerabilities, Svelte 0/0, frontend build, Rust 1.89 and stable checks,
+Clippy with warnings denied, 132 Rust tests, zero RustSec vulnerabilities with
+17 allowed upstream warnings, and a fresh-build Linux real-app E2E run 24/24
+after all 13 synchronized files matched by SHA-256. Two independent Grok
+0.2.101 / `grok-4.5` sessions reviewed exact base `21ae7a0` and head `9d6716c`,
+independently produced focused red/restored-green proofs in separate detached
+worktrees, and accepted with no comments. Exact evidence:
+`.agents/review/findings/pl-s5.md`.
+
+The full playlist plan is complete. A final real Plex smoke remains deliberately
+deferred to release preparation by the owner; Emby remains experimental because
+no live Emby server is available.
 
 ## Verification
 
