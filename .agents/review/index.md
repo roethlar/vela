@@ -16,10 +16,12 @@ offline playlist advancement. The finding is ADMITTED at LOW severity; no code
 change is authorized until the owner chooses a revised plan. Detail:
 `.agents/review/findings/ceof-2.md`.
 
-Loop `ceof-1` PENDING 2026-07-16: the clean-EOF implementation at `8894ca6`
-has two accepted Grok guard proofs, now classified as secondary review. Its
-required primary Claude `codereview` is pending against the durable finding
-record. Detail: `.agents/review/findings/ceof-1.md`.
+Loop `ceof-1` CLOSED 2026-07-16: **primary Claude code review accepted with
+`guard_confirmed:true`** over exact base `07ecb467` and reviewed head
+`d6bcb12`. Claude independently broke/restored both the newer-session and
+tombstone guard families and passed all 140 Rust tests. Two prior accepted Grok
+guard proofs remain independent secondary review. Detail:
+`.agents/review/findings/ceof-1.md`.
 
 Loop `pl-s5` CLOSED 2026-07-16: **accepted clean by two independent external
 reviewer sessions at r1** (Grok 0.2.101 / `grok-4.5`, each

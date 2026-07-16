@@ -4,8 +4,8 @@ Status: **IMPLEMENTED — code/test slice `8894ca6`, version 0.1.52
 `52e1a67`; seven guards, canonical verification, fresh-build Linux E2E, and
 universal macOS packaging green. Two Grok guard reviews count as secondary.
 The refreshed primary Claude plan open review admitted one LOW lock-scope
-finding (`ceof-2`), and primary Claude code review is pending (`ceof-1`). The
-owner's real Plex completion playtest also remains open.**
+finding (`ceof-2`). Primary Claude code review accepted with independent guard
+proof (`ceof-1`). The owner's real Plex completion playtest remains open.**
 The owner reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
@@ -481,8 +481,30 @@ prove the tombstone guard before this code slice converges.
 
 Round outcome: both independent Grok sessions accepted the same pinned code
 slice after proving different guards. Under the owner's later reviewer-hierarchy
-clarification, these are secondary reviews; primary Claude code review is still
-required.
+clarification, these are secondary reviews.
+
+**Primary Claude review — recorded 2026-07-16T16:28:08Z — Claude Code
+2.1.211 / `claude-fable-5`; base
+`07ecb4674e4fab696d6f80f1b028669530dc332c`, reviewed head
+`d6bcb12cbf8e686aa587cb15a161e93d41937f0b`; verdict `accepted`.**
+
+- Claude independently disabled the newer-session refusal in
+  `complete_clean_session`; all three stale-completion guards failed at their
+  predicted assertions, then passed after exact restoration.
+- In a separate mutation it removed tombstone publication; all three identity
+  guards failed with an empty `hidden_from_continue` set while admission stayed
+  green, then passed after restoration.
+- The restored full Rust library suite passed 140 tests. The disposable
+  worktree finished clean at the exact reviewed head with
+  `guard_confirmed:true`.
+- Claude's only comment was a non-defect scope caveat: it source-reviewed but
+  did not rerun the Linux-only E2E legs from the macOS reviewer host. Their
+  existing fresh-build 24/24 run and the earlier individual red proofs remain
+  the execution evidence.
+
+Round outcome: primary Claude code review accepted. Together with the two Grok
+secondary passes, implementation review is complete; `ceof-2` remains a
+separate admitted plan finding.
 
 ## Refreshed open review
 
@@ -513,6 +535,9 @@ owner choice between a lock-scope repair and an explicitly accepted risk.
   real-app suite passed 24/24.
 - Grok r1 and r2 independently accepted the pinned code slice after proving
   different guards.
+- Primary Claude `codereview` independently red-proved both the newer-session
+  and tombstone guard families, restored the exact head, passed all 140 Rust
+  tests, and accepted with `guard_confirmed:true`.
 - The unsigned universal macOS build contains `x86_64` and `arm64` and
   produced `dist/Vela_0.1.52_universal.dmg` with SHA-256
   `94d02e4868e32deaab12d31c88099f37be0ae134fcc0d6922a43e66a82781c16`.

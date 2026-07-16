@@ -3,7 +3,7 @@
 **Severity**: HIGH — a naturally completed episode can remain the only visible
 Continue Watching card and require a manual watched-state edit before the next
 episode appears.
-**Status**: In progress — primary Claude review pending
+**Status**: Verified
 **Branch**: `main` (retrospective review after the owner clarified the reviewer
 hierarchy)
 **Commit**: `8894ca6baf268a9c3962aaac1f3417e57ec08339`
@@ -83,4 +83,24 @@ lock-scope issue admitted by the refreshed plan open review is `ceof-2`.
 Two Grok 0.2.101 / `grok-4.5` secondary reviews independently confirmed the
 newer-session and tombstone guards against exact base `07ecb4674e4fab696d6f80f1b028669530dc332c`
 and head `8894ca6baf268a9c3962aaac1f3417e57ec08339`; both returned accepted with
-`guard_confirmed:true` and no comments. Primary Claude `codereview` is pending.
+`guard_confirmed:true` and no comments.
+
+**Primary implementation review — recorded 2026-07-16T16:28:08Z — accepted.**
+Claude Code 2.1.211 (`claude-fable-5`) reviewed exact head
+`d6bcb12cbf8e686aa587cb15a161e93d41937f0b` against base
+`07ecb4674e4fab696d6f80f1b028669530dc332c` in its own disposable worktree. It
+independently ran two mutations:
+
+1. Disabling the `has_newer_match` refusal made the three stale-completion Rust
+   guards fail at the predicted assertions; restoring the head made them pass.
+2. Removing `add_tombstones` made the three identity guards fail with an empty
+   `hidden_from_continue` set while admission guards remained green; restoring
+   the head made them pass.
+
+The restored full Rust library suite passed 140 tests, the worktree was clean at
+the exact reviewed head, and the structured result returned
+`guard_confirmed:true`. Verdict: `accepted`. Claude's only comment was a
+non-defect scope caveat: the Linux-only E2E guard legs were source-reviewed but
+not rerun on the macOS reviewer host; their existing fresh-build suite and
+individual red proofs remain the execution evidence. The disposable worktree
+was removed after the orchestrator independently confirmed it clean.

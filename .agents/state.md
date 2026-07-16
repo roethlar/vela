@@ -136,11 +136,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   E2E 24/24 pass, and two independent Grok secondary reviews accepted after
   separately proving the newer-session and tombstone guards. Version 0.1.52
   landed at `52e1a67`, and its unsigned universal macOS DMG is checksum-valid
-  with both architectures. The refreshed primary Claude plan `openreview` admitted one
-  LOW lock-scope finding, and primary Claude `codereview` of the implementation
-  is pending; exact status lives in `.agents/review/index.md`. The owner's final
-  real-Plex completion playtest also remains unresolved; verification and
-  artifact details live in the plan.
+  with both architectures. The refreshed primary Claude plan `openreview`
+  admitted one LOW lock-scope finding. Primary Claude `codereview` then
+  independently red-proved the newer-session and tombstone guard families,
+  restored all 140 Rust tests green, and accepted the implementation; exact
+  status lives in `.agents/review/index.md`. The owner's final real-Plex
+  completion playtest remains unresolved; verification and artifact details
+  live in the plan.
 
 - **OWNER-GATED FOLLOW-UP: publish dependency refresh 0.1.51.** Implementation
   is COMPLETE; no push, CI dispatch, or release workflow was triggered. The

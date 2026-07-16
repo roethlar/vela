@@ -32,11 +32,14 @@ playback resolution do not.
 
 ## Approach
 
-Not approved. The candidate direction is to preserve one ordered lock ownership
-across local admission and automatic played-state synchronization while moving
-playlist advancement and its network resolution outside that hold. The exact
-ordering, ownership mechanism, and failure guard must be settled in the plan
-before code changes.
+Not approved. The smallest safe candidate is to retain the acquired lock across
+local admission and move that same guard into an automatic played-state future,
+while sequence advancement/publication runs concurrently outside the guard's
+effective lifetime. The played future must explicitly release the guard when
+its write finishes even if advancement remains parked. Dropping and reacquiring
+around advancement is unsafe: an explicit unwatched edit could land in the gap
+and then be overwritten by the later automatic watched write. Exact ownership
+and join behavior still require plan approval before code changes.
 
 ## Files changed
 
@@ -44,10 +47,12 @@ None.
 
 ## Guard proof
 
-Not implemented. A valid guard must park an offline or delayed playlist
-advancement, submit an unrelated explicit watched-state edit, and prove that the
-edit reaches its source before advancement is released while completion
-ordering remains correct.
+Not implemented. Extend the server-playlist mock to park its post-EOF item
+refetch. While that GET remains unserved, require the automatic PlayedItems POST
+to complete, then submit a later explicit DELETE and require it to complete,
+leaving final state unwatched before the playlist GET is released. Current code
+fails before either write; a concurrent implementation that retains the guard
+until advancement also finishes fails on the later DELETE.
 
 ## Coder dispute (if any)
 
