@@ -3,7 +3,8 @@
 ## Status
 **SLICE 1 AUTHORIZED 2026-07-16 — owner go: "Work on the UI stuff."
 Implement and review only the theme-correct visual-language foundation in
-Slice 1. Slices 2 and 3 retain separate go gates.** The plan was queued
+Slice 1. Primary Claude plan `openreview` converged clean at r4. Slices 2 and 3
+retain separate go gates.** The plan was queued
 2026-07-10 at the bottom of the functional work; that preceding work is now
 clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
 slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
@@ -264,6 +265,14 @@ tinted failure and secondary-destructive treatments, and reserving the new
 solid trio for high-emphasis confirmed destruction. This preserves the current
 visual hierarchy while removing every semantic literal. A fresh Claude plan
 `openreview` is required on this revised head before code begins.
+
+**r4 — 2026-07-16T17:15:35Z — Claude Code 2.1.211 /
+`claude-fable-5` — base `ec686439badb3ead9bac74df9d6d8eaf5aba0201`,
+head `a5e818c1d67f9b3c74614770e17625575449616a`; verdict `clean`.**
+
+The unprimed pass returned the exact SHAs, `verdict: clean`, and no findings.
+Plan review is converged. The owner's Slice 1 go is active; implementation may
+begin without reopening Slices 2–3.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling

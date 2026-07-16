@@ -27,8 +27,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   plan now defines separate per-theme danger-action tokens. Claude r3 found two
   LOW omissions in that taxonomy (text-only destructive actions and existing
   tinted Settings actions); the plan now defines danger foreground, tinted
-  secondary danger, and solid primary danger separately and awaits a fresh open
-  review before code.
+  secondary danger, and solid primary danger separately. Primary Claude plan
+  `openreview` r4 accepted exact head `a5e818c` with no findings; Slice 1 code is
+  authorized and active.
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
