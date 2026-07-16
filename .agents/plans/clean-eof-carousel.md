@@ -1,8 +1,7 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **DRAFT — Claude goal-only r6 accepted the prior head; r7 reviews one
-key-routing clarification before surfacing; not owner-approved.** The owner
-reported the regression on a locally built 0.1.51 universal macOS DMG:
+Status: **REVIEWED — Claude goal-only r7 accepted; awaiting owner approval.**
+The owner reported the regression on a locally built 0.1.51 universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
 appears.
@@ -412,3 +411,23 @@ creates a new plan head; r6 asks the same unframed goal question against it.
 Round outcome: the reviewed head is accepted. The key-routing clarification
 creates a new plan head; r7 asks the identical unframed goal question before
 owner surfacing.
+
+**r7 — 2026-07-16T07:04:05Z — base `b42b3a7`, head `a13942b`; verdict
+`accepted`.**
+
+- Claude Code 2.1.211 (`claude-fable-5`) received the identical neutral goal
+  question plus pinned/read-only/schema mechanics on its default connection
+  path. It returned the exact SHAs, `guard_confirmed: false`, and no material
+  finding.
+- Claude independently confirmed the defect chain, exact-session helper,
+  watch-key ownership routing, lock order, unconditional terminal refresh,
+  deterministic stale-generation proof, and all seven independent red-proof
+  targets.
+- Its remaining notes were explicitly non-material: an off-mode scenario would
+  duplicate the terminal curation path already guarded by the show-end leg; a
+  slow owning-server write can temporarily hold the edit lock; and Jellyfin's
+  own final tracking may make the explicit played write idempotent.
+
+Round outcome: the goal-only review converged with no material finding. The
+plan is ready for owner approval; no implementation is authorized until that
+approval is recorded.
