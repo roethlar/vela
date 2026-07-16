@@ -156,11 +156,11 @@
 <style>
   .serverplaylist { flex: 1; overflow-y: auto; padding: 1.2rem 1.5rem 3rem; }
   .toolbar { margin-bottom: 0.8rem; }
-  button { font: inherit; }
+  button:not(.primary) { font: inherit; }
   .back, .entryactions button { background: var(--surface); border: 1px solid var(--border); color: var(--text-2); border-radius: 7px; padding: 0.4rem 0.65rem; cursor: pointer; }
   .back { display: inline-flex; align-items: center; gap: 0.3rem; border: none; }
   button:hover:not(:disabled):not(.primary) { color: var(--text-bright); background: var(--surface-2); }
-  button:disabled { opacity: 0.45; cursor: default; }
+  button:disabled:not(.primary) { opacity: 0.45; cursor: default; }
   .heading { display: flex; align-items: flex-end; justify-content: space-between; gap: 2rem; margin-bottom: 1rem; }
   .heading h1 { font-family: var(--font-display); font-size: clamp(1.8rem, 4vw, 3rem); margin: 0.1rem 0; letter-spacing: -0.035em; }
   .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: 0.1em; font-size: 0.7rem; font-weight: 700; margin: 0; }

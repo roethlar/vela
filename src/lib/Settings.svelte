@@ -939,7 +939,7 @@
     padding: 0.55rem 1.1rem;
     cursor: pointer;
   }
-  .btnrow button:disabled {
+  .btnrow button:disabled:not(.primary) {
     opacity: 0.6;
     cursor: default;
   }

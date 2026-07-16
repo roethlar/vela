@@ -162,6 +162,7 @@ test("app.css exclusively owns the six shared visual primitives", () => {
     "border-color",
     "border-radius",
     "padding",
+    "font",
     "font-weight",
     "cursor",
     "opacity",
@@ -191,6 +192,14 @@ test("app.css exclusively owns the six shared visual primitives", () => {
         if (positiveSelector.includes(".primary")) {
           const visual = [...ownedProperties].filter((property) => primaryVisualProperties.has(property));
           assert.deepEqual(visual, [], `${file} visually overrides global primary in ${selector}`);
+        }
+        if (/^button(?::(?:hover|active|disabled|focus-visible))?$/.test(selector)) {
+          const visual = [...ownedProperties].filter((property) => primaryVisualProperties.has(property));
+          assert.deepEqual(
+            visual,
+            [],
+            `${file} has a generic ${selector} rule that visually overrides global primary`,
+          );
         }
         const positiveNoArtSelector = selector.replaceAll(/:not\(\.noart\)/g, "");
         if (positiveNoArtSelector.includes(".noart")) {
