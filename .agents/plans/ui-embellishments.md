@@ -16,29 +16,36 @@ track (owner, 2026-07-10): "1. UI embellishments … 2. polish docs …
 else that needs finishing first." This plan covers item 1 only; the
 v1.0.0 ordering lives in `.agents/state.md ## Next`.
 
-## Ground truth (frontend inventory, 2026-07-10)
-Five Svelte files + one global stylesheet; no CSS framework, no
-component library, no animation dependency. Svelte 5 runes throughout.
-Theming is fully tokenized (~30 semantic CSS variables × 10 dark/light
-themes, pre-paint applied from localStorage in `app.html`). One font
-(Geist Variable). Motion today is six shared `@keyframes` in `app.css`
-(shimmer/fade/pop/slide×2/rise) + per-component CSS transitions; the
-hero cover-flow is a pure-CSS 3D transform driven by inline styles.
-`prefers-reduced-motion` is a blanket CSS kill-switch (`app.css:372`) —
-any new motion must stay CSS-expressed (or CSS-variable-driven) so the
-blanket rule keeps covering it. Icons: one inline-SVG `Icon.svelte`
-(10 Lucide-style icons, 2 unused), with raw emoji glyphs (★ ♥ ✓ ✗ ⚠)
-still used in detail/settings surfaces.
+## Ground truth (frontend inventory, refreshed 2026-07-16)
 
-Known rough spots (inventory findings the slices below target):
-posters pop in with no fade; failed thumbs vanish (`visibility:hidden`)
-instead of showing the grid's styled placeholder; a few interactive
-states hardcode the DARK theme's accent rgba (search glow
-`+page.svelte:1596`, drawer row `:2294`) and break under the other 9
-themes; `.heroarrow`/QR hardcode literal colors; play-overlay/progress
-bar/chip styles are re-declared per component with drifted values
-(5px/4px/3px progress heights); empty states are plain text except the
-Welcome screen.
+Eight Svelte files + one global stylesheet; no CSS framework, component
+library, or animation dependency. Svelte 5 runes are used throughout. Theming
+maps semantic CSS variables across 10 dark/light themes, pre-paint applied from
+localStorage in `app.html`. One font (Geist Variable). Motion is six shared
+`@keyframes` in `app.css` (shimmer/fade/pop/slide×2/rise) plus per-component CSS
+transitions; the hero cover-flow is a pure-CSS 3D transform driven by inline
+styles. `prefers-reduced-motion` is a blanket CSS kill-switch; any new motion
+must stay CSS-expressed or CSS-variable-driven so it remains covered.
+
+`Icon.svelte` currently defines 11 inline SVG icons; only `search` is unused.
+Raw UI glyphs remain in item/season rating metadata and Settings status/warning
+copy. The play queue and its drawer were deleted by playlist Slice 1; no UI
+slice may target or resurrect them.
+
+Known rough spots, expressed by defect class so queued-plan line numbers cannot
+rot again:
+
+- posters pop in with no fade and some failed images vanish instead of using a
+  styled placeholder;
+- component styles contain hardcoded semantic accent and danger colors that
+  bypass the theme catalog, including search/playlist focus and playlist/error
+  states added after this plan was drafted;
+- `.heroarrow` and QR presentation retain literals that must be classified as
+  semantic UI color or deliberate media/quiet-zone contrast;
+- play overlay/button, progress, chip, no-art, person-link, and primary-button
+  styles are re-declared across components; progress alone has 6px, 5px, 4px,
+  and 3px variants;
+- empty states are plain text except the Welcome screen.
 
 ## Direction (and what we deliberately do NOT add)
 Build on the existing hand-rolled system: Svelte 5 built-ins
@@ -66,9 +73,11 @@ surfaces. Real native-feel payoff, real cost — owner decision below.
 - **Subject / audience / job:** Vela is a desktop cinema-library browser for
   people who care about their own server, artwork, and HDR playback. The UI's
   single job is to make choosing and starting a title feel immediate.
-- **Color:** retain every existing theme's semantic palette. Slice 1 may add
-  derived accent tint/glow primitives with `color-mix`, but no new brand color
-  or theme-specific exception.
+- **Color:** retain every existing theme's semantic palette. Slice 1 adds
+  explicit `--accent-tint` and `--accent-glow` values to every theme rather than
+  depending on `color-mix`; the standing Linux WebKitGTK 2.52.3 supports that
+  function, but explicit tokens keep behavior deterministic on older WKWebView
+  and WebView2 installations. No new brand color or theme-specific exception.
 - **Type:** retain Geist Variable for display, body, and utility roles. This
   foundation slice fixes consistency, not typography; introducing a decorative
   face would compete with poster artwork and violate the approved non-goals.
@@ -88,25 +97,35 @@ on earlier ones)
 
 ### Slice 1 — Foundation: theme-correct states, one visual language
 No new visuals; makes every later slice land evenly across all themes.
-1. Tokenize the hardcoded accent states with
-   `color-mix(in srgb, var(--accent) N%, transparent)` (or new
-   `--accent-glow`/`--accent-tint` tokens): search focus glow, drawer
-   current-row tint; replace `.heroarrow`/QR literals with tokens where
-   a token exists (QR stays white by design — quiet-zone contrast).
-2. De-duplicate the drifted shared styles into `app.css` utility
-   classes (or one shared block): play overlay, progress bar (one
-   height), chips, no-art placeholder, person link, primary button.
-3. Icon unification: add `star`, `heart`, `alert` (and whatever ✓/✗
-   need) to `Icon.svelte`; replace the emoji glyphs in
-   ItemDetail/SeasonDetail/Settings; delete or wire the 2 dead icons.
-   Keep the `·` middot separators (typography, not iconography).
+1. Sweep every component `<style>` hex/rgba literal against the theme catalog.
+   Replace any value that shadows an existing accent, danger, warning, text,
+   surface, border, or shadow meaning with semantic tokens. Add explicit
+   `--accent-tint`/`--accent-glow` values to all 10 themes and use them for every
+   focus/current-state accent. Deliberate survivors are media-art black/white
+   scrims and controls, the QR white quiet zone, theme-preview swatches, and the
+   grain data URI; record any other survivor before landing. Use the existing
+   `--danger-*` tokens for playlist and status failures. Tokenize hero-arrow and
+   QR shadows where a semantic shadow token applies.
+2. Make `app.css` the single global owner of six visual primitives: play
+   overlay/button, a 4px gradient progress bar, styled no-art placeholder,
+   chip, person link, and primary button including hover/disabled/press states.
+   Components keep only layout/context selectors and narrow generic button
+   rules so they cannot override `.primary`. Preserve existing class names and
+   E2E selectors.
+3. Icon unification: add typed `star`, `heart`, and `alert` geometries; reuse
+   existing `check`, `close`, and `chevron` for ✓, ✗, and the submenu arrow.
+   Replace raw glyphs in ItemDetail, SeasonDetail, Settings, and the add-to-
+   playlist menu; delete the sole unused `search` branch; make the icon name a
+   literal union so an unknown name cannot silently render an empty SVG. Keep
+   middot separators and prose arrows. Preserve accessible Rating, Audience
+   rating, and Watched text when decorative SVGs replace readable glyphs.
 
 ### Slice 2 — Image loading polish (the single most visible fix)
 1. Poster/backdrop/headshot fade-in: `opacity 0→1` CSS transition
    driven by the img `load` event (class flip), `decoding="async"`
    everywhere; skeleton shimmer already exists and now hands off
    smoothly instead of popping.
-2. Unified failed-image treatment: detail/season/queue thumbs get the
+2. Unified failed-image treatment: detail/season thumbnails get the
    grid's styled text placeholder instead of vanishing.
 3. DECLINED for v1.0.0 (recorded option for later): ThumbHash/BlurHash
    placeholders. Media servers don't supply hashes, so Vela would have
@@ -126,7 +145,7 @@ No new visuals; makes every later slice land evenly across all themes.
    subtle ground shadow/reflection under the center card, and easing
    consistency (`--ease` token everywhere).
 4. Designed empty states: give the plain-text empties (home, browse,
-   search, queue, episode panel) the Welcome treatment — an `Icon` +
+   search, playlists, server playlists, episode panel) the Welcome treatment — an `Icon` +
    one-line heading + muted hint, consistent spacing.
 5. Micro-interactions sweep: consistent press states (`translateY(1px)`
    exists on some buttons — apply the pattern), hover affordance on
@@ -148,8 +167,10 @@ the record of what was evaluated; revisit only on a new owner ask.
 - No embedded video, no layout restructuring — this is polish, not IA.
 
 ## Verification (every slice)
-- `npm run check` + `npm run build`; full CI set when `src-tauri`
-  changes (slice 4 only).
+- Run the canonical frontend verification set in
+  `.agents/repo-guidance.md` (Verification). Run the full cross-language set if
+  a slice changes `src-tauri`; do not restate the owned command enumeration
+  here.
 - Full E2E suite on the Linux VM — animations are exactly the kind of
   change that breaks driver waits (new transitions delay
   visibility/clickability); a suite pass is the no-regression gate.
@@ -166,6 +187,48 @@ the record of what was evaluated; revisit only on a new owner ask.
   default dark theme and one light theme; inspect keyboard focus, the reduced-
   motion state, and affected responsive layouts locally; include that evidence
   with the automated verification and review record.
+
+Slice 1 adds two focused guards:
+
+- a Node source-contract test, included by `npm run check`, that rejects
+  hardcoded semantic accent/danger literals, raw migrated glyphs, duplicate
+  component ownership of the six primitives, undefined icon names, and dead
+  icon definitions;
+- a Linux real-app `uifoundation` scenario that switches Dark ↔ One Light,
+  verifies theme persistence/selection and computed focus styles, renders
+  deterministic rating metadata to prove SVG icon replacement, and compares
+  the shared progress/primary/no-art primitives across their real surfaces.
+
+Red-prove the token, primitive-ownership/progress, and icon guard families
+separately after the implementation commit, restore from the committed head,
+and rerun each focused guard green before the full suite.
+
+## Plan open review
+
+**r1 — recorded 2026-07-16 — Claude Code 2.1.211 / `claude-fable-5` —
+base `3e7b97ab16a9caf30cf3c9798ad415e0dabbfe45`, head
+`306d66a007d59db9881eba6adbd3485de9ffc8e7`; verdict `findings`.**
+
+The unprimed plan review returned three schema-valid findings; intake ADMITTED
+all three because each carried exact evidence, an observable failure, and
+justified severity:
+
+1. MEDIUM — the July 10 inventory predated playlists and would send a cold
+   implementer toward a deleted drawer while missing new playlist accent/danger
+   literals. Addressed by refreshing current inventory, expressing the token
+   work as a complete defect-class sweep, and recording deliberate literals.
+2. LOW — the plan copied only part of the canonical verification list.
+   Addressed by replacing it with the repo-guidance pointer and keeping only
+   slice-specific visual/E2E gates here.
+3. LOW — `color-mix` was an undecided compatibility assumption with no existing
+   runtime proof. The Linux-first engine is WebKitGTK 2.52.3, but Slice 1 now
+   deterministically chooses explicit per-theme tint/glow tokens so older
+   cross-platform webviews do not rely on the function.
+
+The revisions also incorporate a separate current-tree audit: one dead icon,
+the deleted queue, exact shared-style drift, playlist semantic-color drift, and
+a focused source plus real-app guard. A fresh Claude plan `openreview` is
+required on the revised head before code begins.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling

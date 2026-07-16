@@ -20,7 +20,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   evidence, keyboard/reduced-motion inspection, canonical frontend checks, and
   Linux E2E replace that gate. Primary Claude plan `openreview` is required
   before code and primary Claude `codereview` after the slice; Grok is the
-  independent second reviewer.
+  independent second reviewer. Claude plan r1 admitted three plan defects
+  (stale pre-playlist inventory, duplicated verification commands, undecided
+  `color-mix` compatibility); all are revised in the plan and await a fresh
+  open review before code.
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
