@@ -3,7 +3,14 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { holdsFor, makeClips, mockSource, pollUntil, seedConfig } from '../helpers.mjs';
+import {
+  holdsFor,
+  makeClips,
+  mockSource,
+  pollUntil,
+  seedConfig,
+  seedPlaylists,
+} from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
 let mock;
@@ -133,6 +140,21 @@ export default {
     });
     // Missing continue_playing is intentional: only-tv is the default.
     seedConfig(configRoot, [mockSource(mock)], { recents: seededRecents() });
+    seedPlaylists(configRoot, [
+      {
+        id: 'manual-race',
+        name: 'Manual Race',
+        items: [
+          {
+            id: 'manual-entry',
+            item: { ...seededRecents()[1].item, viewOffsetMs: null },
+            sourceName: 'Mock JF',
+          },
+        ],
+        createdMs: 1,
+        updatedMs: 1,
+      },
+    ]);
   },
 
   async cleanup() {
@@ -221,9 +243,11 @@ export default {
     assert.deepEqual(mock.state.contractViolations, []);
     await screenshot('01-season-rollover');
 
-    // Fresh run: park the hierarchy lookup after E1 ends, start a movie
-    // manually, then let the old lookup resolve. The expected-session guard
-    // must keep E2 from replacing the user's newer player.
+    // Fresh run: park the hierarchy lookup after E1 ends, then start a movie
+    // through Playlists. That component invokes the backend directly, so the
+    // page-level continuation attempt counter cannot cancel the old lookup for
+    // us: the backend expected-session guard itself must keep E2 from replacing
+    // the user's newer player.
     await restart(() => {
       seedConfig(configRoot, [mockSource(mock)], { recents: seededRecents() });
       mock.state.requests.length = 0;
@@ -246,7 +270,7 @@ export default {
         (response) => response.path === `/Users/${mock.userId}/Items`,
       ).length;
     const hierarchyServedBefore = hierarchyResponses();
-    mock.state.delayNextChildrenMs = 3_500;
+    mock.state.delayNextChildrenMs = 5_000;
     await finishNaturally(racedEpisode);
     await pollUntil(
       () =>
@@ -258,10 +282,36 @@ export default {
       'the parked next-episode hierarchy request',
     );
     await driver.waitFor(
-      `return document.querySelector('.flowmeta .t')?.textContent.trim() === 'Manual Movie'`,
-      'Manual Movie to become the rendered Continue Watching head',
+      `return [...document.querySelectorAll('button.sideitem')]
+        .some((button) => button.textContent.trim() === 'Playlists')`,
+      'the Playlists sidebar entry',
     );
-    await driver.click(await driver.find('css selector', '.flowactions button.primary'));
+    await driver.click(
+      await driver.find(
+        'xpath',
+        `//button[contains(@class,'sideitem') and normalize-space(.)='Playlists']`,
+      ),
+    );
+    await driver.waitFor(
+      `return !!document.querySelector('section.playlists .playlistgrid button[aria-label^="Open Manual Race,"]')`,
+      'the Manual Race playlist',
+    );
+    await driver.click(
+      await driver.find(
+        'css selector',
+        'section.playlists .playlistgrid button[aria-label^="Open Manual Race,"]',
+      ),
+    );
+    await driver.waitFor(
+      `return document.querySelectorAll('section.playlists ol.entries > li').length === 1`,
+      'the manual playlist entry',
+    );
+    await driver.click(
+      await driver.find(
+        'xpath',
+        `//ol[@aria-label='Playlist items']/li[1]//div[contains(@class,'entryactions')]/button[1]`,
+      ),
+    );
     const manual = await nextMpv(raceSockets, 'manual');
     await pollUntil(
       () => hierarchyResponses() > hierarchyServedBefore,
