@@ -1,7 +1,8 @@
 # Plan: clean episode completion advances Continue Watching
 
-Status: **DRAFT — Claude plan-review loop active; not owner-approved.** The
-owner reported the regression on a locally built 0.1.51 universal macOS DMG:
+Status: **DRAFT — Claude r1 findings addressed; plan-review loop active; not
+owner-approved.** The owner reported the regression on a locally built 0.1.51
+universal macOS DMG:
 after an episode finishes, that episode remains the only Continue Watching
 card, and manually marking it watched is required before the next episode
 appears.
@@ -148,6 +149,8 @@ test-only flow.
    - retain the faithful Resume hub and stateful PlayedItems behavior;
    - expose separate arrival/served evidence for a delayed automatic
      PlayedItems response using the existing `playedDelayMs` machinery;
+   - keep `state.requests` as the authoritative arrival-order log for Resume
+     and PlaybackInfo provenance;
    - do not make Stopped implicitly set `played`, because that would hide the
      explicit clean-completion contract.
 2. `tests/e2e/scenarios/continuetv.mjs`
@@ -160,11 +163,18 @@ test-only flow.
    - retain quit-no-continuation, rollover, Specials, show-end, and stale-session
      assertions.
 3. `tests/e2e/scenarios/continueon.mjs`
-   - retain the parked post-EOF Resume response;
+   - retain the parked early post-EOF Resume response, and park Alpha's
+     automatic PlayedItems response for a strictly longer interval so that
+     delayed Resume is served while the server still reports Alpha unplayed;
+   - prove the literal rendered-list selection by request arrival order:
+     parked early Resume, then Beta PlaybackInfo, then the post-start Resume.
+     Do not retain the old total-served-count assertion at Beta's socket,
+     because the newly required post-start refresh may already have served;
    - after Beta starts and after the older response is delivered, require Beta
      to be the current rendered card and Alpha to remain absent;
-   - keep proof that Beta was selected before the fresh response and that the
-     run never repeats a key.
+   - prove from the served log that the older Resume landed before PlayedItems,
+     then allow PlayedItems to settle and keep proof that the run never repeats
+     a key.
 4. `tests/e2e/scenarios/playlistplay.mjs` and `serverplaylists.mjs`
    - after one backend-owned intermediate advance, require the successor recent
      to render and the completed item to remain suppressed;
@@ -184,8 +194,11 @@ Red-prove each claimed behavior separately after the fix is committed:
    E1 resurfaces from the server Resume hub and the identity assertion fails.
 3. Remove the post-successor refresh: E2 starts in mpv but never becomes the
    rendered hero card.
-4. Let the older EOF refresh reuse/win the successor generation: the delayed
-   `continueon` response replaces Beta and fails the settled identity assertion.
+4. While `continueon` holds PlayedItems longer than the delayed early Resume,
+   let the older EOF refresh reuse/win the successor generation. Its
+   pre-curation recents/tombstones and fire-time hub body still contain Alpha,
+   so it replaces Beta and fails the settled identity assertion. The restored
+   generation guard must keep that same response stale.
 5. Remove the newer-same-key guard: the Rust test loses the active replacement
    session/tombstone state.
 6. Treat every tracker end as clean: the existing quit leg performs a
@@ -249,4 +262,34 @@ design has no runnable new guard, so `guard_confirmed` is recorded as `false`;
 convergence requires Claude to return `accepted` with no material findings on a
 pinned plan revision after checking it against current code and tests.
 
-No completed rounds yet.
+**r1 — 2026-07-16T05:01:06Z — base `b42b3a7`, head `b609303`; round verdict
+`reopened`.**
+
+- Claude Code 2.1.211 (`claude-fable-5`) returned `reopened`,
+  `guard_confirmed: false`, with two ADMITTED findings:
+  1. HIGH — the retained `continueon` served-count assertion would race the
+     required post-start refresh. A correct implementation can serve that new
+     Resume response after Beta starts but before the scenario observes Beta's
+     socket, producing a false failure. The proof must use request-arrival
+     provenance instead.
+  2. MEDIUM — generation regression injection 4 would remain green because the
+     delayed Resume body is computed at response time, after Alpha's automatic
+     PlayedItems write normally removes it from the server hub. The scenario
+     must keep that write parked until after the stale Resume lands.
+- The first Claude process result was rejected fail-closed because model
+  safeguards refused its final structured response. The one permitted fresh
+  retry produced the substantive verdict recorded above on the same pinned
+  base/head.
+
+Round outcome: both findings cite current mock/scenario behavior and predicted
+observable failures, so both are admitted for revision before r2.
+
+Finding 1 disposition: ADDRESSED — the plan now replaces the racy response
+count with the ordered request proof `early Resume < Beta PlaybackInfo <
+post-start Resume`, which permits the post-start response to finish promptly
+without weakening rendered-list selection provenance.
+
+Finding 2 disposition: ADDRESSED — the plan now requires `playedDelayMs` to
+outlast `delayNextResumeMs` and proves the old Resume is served first. The
+stale snapshot therefore still carries Alpha, making generation-guard removal
+observable while the restored guard keeps Alpha suppressed.
