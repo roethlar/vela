@@ -1,10 +1,10 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**SLICE 1 AUTHORIZED 2026-07-16 — owner go: "Work on the UI stuff."
-Implement and review only the theme-correct visual-language foundation in
-Slice 1. Primary Claude plan `openreview` converged clean at r4. Slices 2 and 3
-retain separate go gates.** The plan was queued
+**SLICE 1 COMPLETE 2026-07-16 at Vela 0.1.53.** The theme-correct
+visual-language foundation is implemented, guard-proven, visually inspected,
+and accepted by primary Claude plus independent Grok. Slices 2 and 3 retain
+separate go gates. The plan was queued
 2026-07-10 at the bottom of the functional work; that preceding work is now
 clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
 slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
@@ -279,6 +279,25 @@ head `a5e818c1d67f9b3c74614770e17625575449616a`; verdict `clean`.**
 The unprimed pass returned the exact SHAs, `verdict: clean`, and no findings.
 Plan review is converged. The owner's Slice 1 go is active; implementation may
 begin without reopening Slices 2–3.
+
+## Slice 1 implementation record
+
+Implementation landed at `fe46850`, followed by focused cascade and test
+integration repairs through `c1c4db4`; `0ce3629` versioned the independently
+shippable slice as 0.1.53. The token, shared-primitive/progress, icon, and
+generic-button-cascade guard families were each proven red for the intended
+reason and restored green. Canonical frontend verification and a locked Rust
+1.89 compile passed at 0.1.53. Fresh-build Linux evidence includes normal and
+reduced-motion focused runs, the playlist selector integration, and a final
+25/25 real-app suite. Final dark Home and One Light Settings/detail screenshots
+were inspected; keyboard focus, shared computed styles, and reduced-motion
+behavior were covered without an owner playtest.
+
+Primary Claude Code 2.1.211 (`claude-fable-5`) and independent Grok 0.2.101
+(`grok-4.5`) both accepted exact reviewed head `969f06a` against base
+`d96eb464`, each with `guard_confirmed:true`, independent red/restored-green
+proof, and no material comments. The fail-closed record is
+`.agents/review/findings/ui-s1.md`. Slices 2–3 remain unauthorized.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling

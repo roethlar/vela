@@ -10,11 +10,12 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Loop `ui-s1` ACTIVE 2026-07-16: theme-correct visual-language foundation is
-implemented through `c1c4db4`; primary Claude Fable 5 accepted exact reviewed
-head `969f06a` with `guard_confirmed:true` after independently breaking and
-restoring the progress and heart-icon guards. Independent Grok second review is
-pending. Detail: `.agents/review/findings/ui-s1.md`.
+Loop `ui-s1` CLOSED 2026-07-16: theme-correct visual-language foundation is
+implemented through `c1c4db4` and versioned as 0.1.53 at `0ce3629`. Primary
+Claude Fable 5 and independent Grok 4.5 both accepted exact reviewed head
+`969f06a` against base `d96eb46` with `guard_confirmed:true`, after separately
+breaking and restoring the focused primitive/icon/theme guards. Both returned
+no material comments. Detail: `.agents/review/findings/ui-s1.md`.
 
 Finding `ceof-2` OPEN 2026-07-16: Claude Fable 5 plan `openreview` found that
 clean-EOF dispatch holds the app-wide watch-edit lock across potentially long

@@ -9,31 +9,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Version 0.1.52** (`package.json`, both lockfiles,
+- **Version 0.1.53** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `52e1a67`).
+  agree, as of `0ce3629`).
 
-- **UI EMBELLISHMENTS SLICE 1 ACTIVE (owner go 2026-07-16).** Implement only
-  the theme-correct foundation in `.agents/plans/ui-embellishments.md`: token
-  correctness, shared visual primitives, and icon unification. Slices 2–3 keep
-  separate go gates. The owner cannot playtest; captured dark/light visual
-  evidence, keyboard/reduced-motion inspection, canonical frontend checks, and
-  Linux E2E replace that gate. Primary Claude plan `openreview` is required
-  before code and primary Claude `codereview` after the slice; Grok is the
-  independent second reviewer. Claude plan r1 admitted three plan defects
-  (stale pre-playlist inventory, duplicated verification commands, undecided
-  `color-mix` compatibility), all revised. Claude r2 then admitted one LOW
-  ambiguity between tinted failure banners and a solid destructive button; the
-  plan now defines separate per-theme danger-action tokens. Claude r3 found two
-  LOW omissions in that taxonomy (text-only destructive actions and existing
-  tinted Settings actions); the plan now defines danger foreground, tinted
-  secondary danger, and solid primary danger separately. Primary Claude plan
-  `openreview` r4 accepted exact head `a5e818c` with no findings; Slice 1 code is
-  authorized and implemented through `c1c4db4`. Canonical frontend checks,
-  separately red-proven source guards, normal and reduced-motion focused Linux
-  runs, final Linux E2E 25/25, and dark/light screenshot inspection are green.
-  The active external code-review status is owned by
-  `.agents/review/findings/ui-s1.md` and `.agents/review/index.md`.
+- **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
+  theme-correct foundation in `.agents/plans/ui-embellishments.md` now owns
+  semantic theme states, six shared visual primitives, and typed SVG icons.
+  Implementation landed through `c1c4db4`; version `0ce3629`. Canonical
+  frontend checks, separately red-proven source guards, normal and
+  reduced-motion focused Linux runs, final Linux E2E 25/25, and dark/light
+  screenshot inspection are green. Primary Claude Fable 5 and independent Grok
+  4.5 each accepted the exact code range with separate red/green guard proofs
+  and no material findings. The owner is unavailable to playtest this track;
+  no playtest is required or pending. Slices 2 (image-loading polish) and 3
+  (subtle motion/empty-state pass) retain separate owner go gates. Exact review
+  evidence: `.agents/review/findings/ui-s1.md`.
 
 - **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
   Implemented at `01e30cf` from approved plan
@@ -322,9 +313,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **v1.0.0 RELEASE TRACK (owner, 2026-07-10, refined 2026-07-15 — ordered LAST,
   behind the functional
   work above; "queue first, v1 polish goes to the bottom", where "queue" means the
-  work queue, not the play queue):** (1) UI embellishments — plan QUEUED with
-  decisions resolved (`.agents/plans/ui-embellishments.md`: 3 slices; vibrancy CUT
-  — Linux/Wayland first; motion SUBTLE, binding); (2) docs polish — a README that
+  work queue, not the play queue):** (1) UI embellishments — Slice 1 is complete
+  at 0.1.53; Slices 2–3 remain separately owner-gated
+  (`.agents/plans/ui-embellishments.md`; vibrancy CUT — Linux/Wayland first;
+  motion SUBTLE, binding); (2) docs polish — a README that
   entices users to try it; (3) graphics + screenshots for socials. 2 and 3 are
   gated on 1 and on the functional work emptying; (4) harden the GitHub release
   build so missing platform artifacts fail closed, add the required Arch package
