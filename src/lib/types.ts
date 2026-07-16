@@ -38,6 +38,19 @@ export type Item = {
 // the server/local authority chain; "beginning" overrides both and starts at 0.
 export type PlayIntent = "resume" | "beginning";
 
+// Persisted Continue Playing policy. Missing or unknown backend values are
+// normalized to "only-tv", the product default.
+export type ContinuePlayingMode = "off" | "on" | "only-tv";
+
+// Clean-EOF notification emitted only after a single item or playlist has
+// genuinely run out. `sessionId` is handed back with an automatic play so the
+// backend can reject a continuation that a newer manual play superseded.
+export type PlaybackContinuation = {
+  sessionId: string;
+  itemKey: string;
+  mediaType?: string | null;
+};
+
 export type PlaylistSummary = {
   id: string;
   name: string;

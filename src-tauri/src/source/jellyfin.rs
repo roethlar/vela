@@ -8,7 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use super::{
-    namespace_key, HubDto, ItemDto, MediaSource, PlaylistDto, SectionDto, StreamResolution,
+    namespace_key, EpisodeContext, HubDto, ItemDto, MediaSource, PlaylistDto, SectionDto,
+    StreamResolution,
 };
 use crate::playback::{JellyfinTrack, ProgressTarget};
 
@@ -357,6 +358,13 @@ impl JellyfinClient {
                 ("Limit", size_value.as_str()),
             ],
         ))
+    }
+
+    fn user_item_url(&self, item_id: &str) -> Result<String, String> {
+        if item_id.is_empty() || item_id == "." || item_id == ".." {
+            return Err("invalid item id".to_string());
+        }
+        Ok(self.build_url(&["Users", &self.user_id, "Items", item_id], &[]))
     }
 
     /// POST with an empty body (the scan trigger). Same auth/timeout/401/403
@@ -933,6 +941,22 @@ impl JellyfinSource {
             source_name: self.name.clone(),
         }
     }
+
+    fn to_episode_context(&self, item: &BaseItem) -> Option<EpisodeContext> {
+        (item.item_type.as_deref() == Some("Episode")).then_some(EpisodeContext {
+            item_key: namespace_key(&self.id, &item.id),
+            season_key: item
+                .season_id
+                .as_deref()
+                .map(|key| namespace_key(&self.id, key)),
+            show_key: item
+                .series_id
+                .as_deref()
+                .map(|key| namespace_key(&self.id, key)),
+            episode_index: item.index_number,
+            season_index: item.parent_index_number,
+        })
+    }
 }
 
 #[async_trait]
@@ -1193,6 +1217,12 @@ impl MediaSource for JellyfinSource {
             })
             .map(|item| self.to_item(item))
             .collect())
+    }
+
+    async fn episode_context(&self, item_key: &str) -> Result<Option<EpisodeContext>, String> {
+        let url = self.client.user_item_url(item_key)?;
+        let item: BaseItem = self.client.get_json_url(&url, &[]).await?;
+        Ok(self.to_episode_context(&item))
     }
 
     async fn resolve_stream(
@@ -1489,6 +1519,16 @@ mod tests {
         let dto = src.to_item(&ep);
         assert_eq!(dto.parent_rating_key.as_deref(), Some("jfA:sea4"));
         assert_eq!(dto.grandparent_rating_key.as_deref(), Some("jfA:ser1"));
+        assert_eq!(
+            src.to_episode_context(&ep),
+            Some(EpisodeContext {
+                item_key: "jfA:ep7".into(),
+                season_key: Some("jfA:sea4".into()),
+                show_key: Some("jfA:ser1".into()),
+                episode_index: None,
+                season_index: None,
+            })
+        );
 
         // A season's parent is its series; it has no grandparent.
         let season = BaseItem {
@@ -1510,6 +1550,17 @@ mod tests {
         let dto = src.to_item(&movie);
         assert_eq!(dto.parent_rating_key, None);
         assert_eq!(dto.grandparent_rating_key, None);
+        assert_eq!(src.to_episode_context(&movie), None);
+    }
+
+    #[test]
+    fn episode_context_item_url_keeps_hostile_ids_in_one_segment() {
+        let url = test_client().user_item_url("../odd/id?x=1").unwrap();
+        let parsed = url::Url::parse(&url).unwrap();
+        let segments: Vec<_> = parsed.path_segments().unwrap().collect();
+        assert_eq!(segments[segments.len() - 2], "Items");
+        assert!(segments[segments.len() - 1].contains("%2F"));
+        assert!(segments[segments.len() - 1].contains("%3F"));
     }
 
     #[test]

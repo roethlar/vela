@@ -64,6 +64,10 @@ pub struct AppState {
     /// Active Vela- or server-playlist location. The cursor is in-memory by
     /// design; neither playlist authority changes merely because it is played.
     pub(crate) playlist_cursor: AsyncMutex<Option<commands::PlaylistCursor>>,
+    /// UUID of the latest successfully resolved playback context. Automatic
+    /// continuation supplies the completed UUID as an expectation so delayed
+    /// work can never replace a newer manual play.
+    pub(crate) active_playback_session: AsyncMutex<Option<String>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
@@ -116,6 +120,7 @@ pub fn run() {
         source_lock: AsyncMutex::new(()),
         playback_advance: Arc::new(commands::PlaybackAdvance::default()),
         playlist_cursor: AsyncMutex::new(None),
+        active_playback_session: AsyncMutex::new(None),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
     };
@@ -162,16 +167,20 @@ pub fn run() {
                 .app_handle
                 .set(app.handle().clone());
 
-            // Playback sequence dispatcher: a single item has nothing to do at
-            // clean EOF. Keep the notification loop alive so Slice 3 can attach
-            // the playlist cursor without rebuilding the mpv watcher plumbing.
+            // Playback sequence dispatcher: only the joined clean-EOF and
+            // final-tracker signal can advance a playlist or authorize Continue
+            // Playing. A user-closing mpv emits playback-ended for refresh, but
+            // never reaches this loop.
             let app_handle = app.handle().clone();
             let advance_notify = app.handle().state::<AppState>().playback_advance.clone();
             tauri::async_runtime::spawn(async move {
                 loop {
-                    let session_id = advance_notify.next().await;
+                    let completion = advance_notify.next().await;
                     let state = app_handle.state::<AppState>();
-                    commands::advance_playlist(&state, session_id).await;
+                    if commands::advance_playlist(&state, &completion.session_id).await {
+                        use tauri::Emitter;
+                        let _ = app_handle.emit("continue-playing", completion);
+                    }
                 }
             });
 
@@ -189,6 +198,8 @@ pub fn run() {
             commands::set_mpv_path,
             commands::get_mpv_advanced,
             commands::set_mpv_advanced,
+            commands::get_continue_playing,
+            commands::set_continue_playing,
             commands::install_mpv,
             commands::open_url,
             commands::link_begin,
@@ -209,6 +220,7 @@ pub fn run() {
             commands::get_person_items,
             commands::set_watched,
             commands::play_item,
+            commands::next_episode,
             commands::get_server_playlists,
             commands::get_server_playlist_items,
             commands::server_playlist_play,

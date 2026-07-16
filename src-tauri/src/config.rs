@@ -39,6 +39,11 @@ pub struct AppConfig {
     /// `"auto"` auto-fires mpv's live `video-crop`, which can hang mpv on some
     /// HDR/Wayland stacks — the Settings UI carries that warning.
     pub mpv_autocrop: Option<String>,
+    /// What to do after a clean EOF once a single item or named playlist has
+    /// genuinely ended: `"off"`, `"on"`, or `"only-tv"`. Missing and unknown
+    /// values fail closed to the product default (`"only-tv"`) in the command
+    /// layer, keeping older configs compatible without baking policy into serde.
+    pub continue_playing: Option<String>,
     /// Non-Plex sources (Jellyfin/Emby today; more later). Kept deliberately
     /// provider-neutral so backends can diverge without a schema change.
     #[serde(default)]

@@ -3,6 +3,7 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { onMount, onDestroy } from "svelte";
   import Icon from "$lib/Icon.svelte";
+  import type { ContinuePlayingMode } from "$lib/types";
 
   type Source = { id: string; name: string; kind: string };
 
@@ -28,11 +29,13 @@
     onChanged,
     onLinkPlex,
     onMpvChanged,
+    onContinuePlayingChanged,
   }: {
     onClose: () => void;
     onChanged: () => void;
     onLinkPlex: () => void;
     onMpvChanged?: (m: MpvInfo) => void;
+    onContinuePlayingChanged?: (mode: ContinuePlayingMode) => void;
   } = $props();
 
   // Modal focus management: move focus into the dialog on open, trap Tab inside,
@@ -135,6 +138,11 @@
   let mpvAdvBusy = $state(false);
   let showMpvHelp = $state(false);
 
+  // What a cleanly-finished single item or exhausted playlist should do next.
+  // The backend normalizes missing/unknown values to the product default.
+  let continuePlaying = $state<ContinuePlayingMode>("only-tv");
+  let continuePlayingBusy = $state(false);
+
   // Canned starting points shown in the contextual help. Each "Insert" appends its
   // options to the textarea so users can tweak from a working baseline.
   const mpvPresets: { label: string; args: string; help: string }[] = [
@@ -174,10 +182,11 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, mp, adv] = await Promise.all([
+      const [s, mp, adv, continueMode] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<MpvInfo>("check_mpv"),
         invoke<MpvAdvanced>("get_mpv_advanced"),
+        invoke<ContinuePlayingMode>("get_continue_playing"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
@@ -186,6 +195,7 @@
       mpvExtraArgs = adv.extraArgs;
       mpvUseOwnConfig = adv.useOwnConfig;
       mpvAutocrop = adv.autocrop;
+      continuePlaying = continueMode;
     } catch (e) {
       if (seq === loadSeq) err = String(e);
     }
@@ -321,6 +331,23 @@
     }
   }
 
+  async function saveContinuePlaying() {
+    if (continuePlayingBusy) return;
+    continuePlayingBusy = true;
+    err = null;
+    try {
+      const normalized = await invoke<ContinuePlayingMode>("set_continue_playing", {
+        mode: continuePlaying,
+      });
+      continuePlaying = normalized;
+      onContinuePlayingChanged?.(normalized);
+    } catch (e) {
+      err = String(e);
+    } finally {
+      continuePlayingBusy = false;
+    }
+  }
+
   // Append a preset's options to the textarea so the user tweaks from a baseline
   // rather than replacing what they already typed.
   function insertPreset(args: string) {
@@ -392,6 +419,29 @@
     {/if}
 
     {#if activeTab === "player"}
+    <section>
+      <h3>Continue Playing</h3>
+      <div class="form">
+        <div class="field">
+          <label for="continue-playing">After a video or playlist finishes</label>
+          <select id="continue-playing" bind:value={continuePlaying}>
+            <option value="off">Off</option>
+            <option value="on">On — continue through Continue Watching</option>
+            <option value="only-tv">TV only — play the next episode</option>
+          </select>
+          <p class="muted small">
+            TV only follows the show's episode order and rolls into the next season.
+            On walks the same Continue Watching list shown on Home.
+          </p>
+        </div>
+        <div class="btnrow">
+          <button class="primary" disabled={continuePlayingBusy} onclick={saveContinuePlaying}>
+            {continuePlayingBusy ? "Saving…" : "Save Continue Playing"}
+          </button>
+        </div>
+      </div>
+    </section>
+
     <section>
       <h3>mpv player</h3>
       {#if mpv}

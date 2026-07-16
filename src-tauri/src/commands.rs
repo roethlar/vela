@@ -9,7 +9,9 @@ use crate::config::{self, SourceConfig};
 use crate::playback;
 use crate::plex_library::PlexLibrary;
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
-use crate::source::{plex::PlexSource, DetailDto, HubDto, ItemDto, SectionDto};
+use crate::source::{
+    plex::PlexSource, DetailDto, EpisodeContext, HubDto, ItemDto, MediaSource, SectionDto,
+};
 use crate::{AppState, PLEX_SOURCE_ID};
 
 const PRODUCT: &str = "Vela";
@@ -669,6 +671,36 @@ pub fn set_mpv_advanced(
         }
         Ok(())
     })
+}
+
+/// Clamp the persisted Continue Playing mode to the three owner-approved
+/// values. Missing, empty, mixed-case, and future/hand-edited values all
+/// degrade to the safe product default instead of disabling binge playback.
+fn normalize_continue_playing(value: Option<&str>) -> String {
+    match value {
+        Some("off") => "off",
+        Some("on") => "on",
+        Some("only-tv") => "only-tv",
+        _ => "only-tv",
+    }
+    .to_string()
+}
+
+#[tauri::command]
+pub fn get_continue_playing() -> String {
+    let cfg = config::load_config().unwrap_or_default();
+    normalize_continue_playing(cfg.continue_playing.as_deref())
+}
+
+#[tauri::command]
+pub fn set_continue_playing(mode: String) -> Result<String, String> {
+    let normalized = normalize_continue_playing(Some(&mode));
+    let stored = (normalized != "only-tv").then(|| normalized.clone());
+    config::update(move |cfg| {
+        cfg.continue_playing = stored;
+        Ok(())
+    })?;
+    Ok(normalized)
 }
 
 /// Install mpv from inside the app. On Windows we assess the CPU and download a
@@ -2147,7 +2179,15 @@ const MAX_PLAYBACK_SIGNALS: usize = 64;
 #[derive(Default)]
 struct PlaybackSignals {
     eof: VecDeque<String>,
-    ended: VecDeque<String>,
+    ended: VecDeque<PlaybackCompletion>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PlaybackCompletion {
+    pub session_id: String,
+    pub item_key: String,
+    pub media_type: Option<String>,
 }
 
 /// Joins mpv's clean-EOF observation with the matching tracker's completed
@@ -2220,7 +2260,7 @@ impl PlayFailure {
 }
 
 impl PlaybackAdvance {
-    fn push_bounded(queue: &mut VecDeque<String>, session_id: String) {
+    fn push_eof_bounded(queue: &mut VecDeque<String>, session_id: String) {
         if !queue.iter().any(|held| held == &session_id) {
             queue.push_back(session_id);
             while queue.len() > MAX_PLAYBACK_SIGNALS {
@@ -2234,38 +2274,50 @@ impl PlaybackAdvance {
             .signals
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        Self::push_bounded(&mut signals.eof, session_id);
+        Self::push_eof_bounded(&mut signals.eof, session_id);
         drop(signals);
         self.changed.notify_one();
     }
 
-    fn mark_ended(&self, session_id: String) {
+    fn mark_ended(&self, completion: PlaybackCompletion) {
         let mut signals = self
             .signals
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        Self::push_bounded(&mut signals.ended, session_id);
-        drop(signals);
-        self.changed.notify_one();
-    }
-
-    fn take_ready(&self) -> Option<String> {
-        let mut signals = self
-            .signals
-            .lock()
-            .unwrap_or_else(|error| error.into_inner());
-        let eof_index = signals
-            .eof
+        if !signals
+            .ended
             .iter()
-            .position(|session| signals.ended.iter().any(|ended| ended == session))?;
-        let session = signals.eof.remove(eof_index)?;
-        if let Some(ended_index) = signals.ended.iter().position(|ended| ended == &session) {
-            signals.ended.remove(ended_index);
+            .any(|held| held.session_id == completion.session_id)
+        {
+            signals.ended.push_back(completion);
+            while signals.ended.len() > MAX_PLAYBACK_SIGNALS {
+                signals.ended.pop_front();
+            }
         }
-        Some(session)
+        drop(signals);
+        self.changed.notify_one();
     }
 
-    pub(crate) async fn next(&self) -> String {
+    fn take_ready(&self) -> Option<PlaybackCompletion> {
+        let mut signals = self
+            .signals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        let eof_index = signals.eof.iter().position(|session| {
+            signals
+                .ended
+                .iter()
+                .any(|ended| ended.session_id == *session)
+        })?;
+        let session = signals.eof.remove(eof_index)?;
+        let ended_index = signals
+            .ended
+            .iter()
+            .position(|ended| ended.session_id == session)?;
+        signals.ended.remove(ended_index)
+    }
+
+    pub(crate) async fn next(&self) -> PlaybackCompletion {
         loop {
             let changed = self.changed.notified();
             if let Some(session) = self.take_ready() {
@@ -2278,6 +2330,30 @@ impl PlaybackAdvance {
 
 fn cursor_matches_session(cursor: Option<&PlaylistCursor>, session_id: &str) -> bool {
     cursor.is_some_and(|current| current.session_id == session_id)
+}
+
+fn expected_session_matches(active: Option<&str>, expected: Option<&str>) -> bool {
+    expected.is_none_or(|expected| active == Some(expected))
+}
+
+async fn validate_playback_session(state: &AppState, expected_session: Option<&str>) -> bool {
+    let active = state.active_playback_session.lock().await;
+    expected_session_matches(active.as_deref(), expected_session)
+}
+
+async fn install_playback_session(state: &AppState, new_session: &str) {
+    *state.active_playback_session.lock().await = Some(new_session.to_string());
+}
+
+async fn clear_playback_session_if(state: &AppState, expected_session: &str) {
+    let mut active = state.active_playback_session.lock().await;
+    if active.as_deref() == Some(expected_session) {
+        *active = None;
+    }
+}
+
+async fn active_session_matches(state: &AppState, session_id: &str) -> bool {
+    state.active_playback_session.lock().await.as_deref() == Some(session_id)
 }
 
 /// Keep only recents whose source still exists. An entry from a removed
@@ -2348,11 +2424,8 @@ async fn play_by_key(
     // Serialize the whole resolve+stop-old+spawn sequence so overlapping triggers
     // can't both spawn an mpv and lose one of the child handles.
     let _play = state.play_lock.lock().await;
-    if let Some(expected) = replace_session {
-        let cursor = state.playlist_cursor.lock().await;
-        if !cursor_matches_session(cursor.as_ref(), expected) {
-            return Err(PlayFailure::superseded());
-        }
+    if !validate_playback_session(state, replace_session).await {
+        return Err(PlayFailure::superseded());
     }
     let (src, raw) = state
         .registry
@@ -2367,7 +2440,8 @@ async fn play_by_key(
 
     // A failed resolve leaves the currently-playing context intact. Only once
     // the replacement has a real stream do we provisionally install its
-    // context; a later launch/tracker failure compare-restores the old one.
+    // context. The play lock keeps the expected session valid between the
+    // check above and this installation.
     let new_cursor = playlist.map(|location| PlaylistCursor {
         owner: location.owner,
         playlist_id: location.playlist_id,
@@ -2379,6 +2453,7 @@ async fn play_by_key(
         let mut cursor = state.playlist_cursor.lock().await;
         std::mem::replace(&mut *cursor, new_cursor)
     };
+    install_playback_session(state, session_id).await;
 
     // Cancel the prior tracker and terminate the prior mpv so we never run two
     // players. The kill is a non-blocking syscall; the reap is handed to the
@@ -2460,6 +2535,7 @@ async fn play_by_key(
         let app = state.app_handle.get().cloned();
         let source_id = src.id().to_string();
         let item_key = item.rating_key.clone();
+        let media_type = item.media_type.clone();
         let session_id = session_id.to_string();
         let recents_ready = recents_ready.clone();
         let advance = state.playback_advance.clone();
@@ -2483,10 +2559,14 @@ async fn play_by_key(
             if let Some(app) = &app {
                 let _ = app.emit(
                     "playback-ended",
-                    serde_json::json!({ "sourceId": source_id, "itemKey": item_key }),
+                    serde_json::json!({ "sourceId": source_id, "itemKey": item_key.clone() }),
                 );
             }
-            advance.mark_ended(session_id.clone());
+            advance.mark_ended(PlaybackCompletion {
+                session_id: session_id.clone(),
+                item_key: item_key.clone(),
+                media_type: media_type.clone(),
+            });
         }) as playback::EndNotify)
     };
     let progress = resolved.progress;
@@ -2531,6 +2611,10 @@ async fn play_by_key(
     let stop = match played {
         Ok(stop) => stop,
         Err(message) => {
+            // The old player has already been terminated. Restore its cursor
+            // bookkeeping for the established failure contract, but never
+            // re-authorize its dead session for delayed continuation work.
+            clear_playback_session_if(state, session_id).await;
             let mut cursor = state.playlist_cursor.lock().await;
             if cursor
                 .as_ref()
@@ -2555,12 +2639,179 @@ async fn play_by_key(
 pub async fn play_item(
     item: ItemDto,
     start_from_beginning: bool,
+    expected_session: Option<String>,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<Option<String>, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
-    play_by_key(&state, &item, start_from_beginning, &session_id, None, None)
-        .await
-        .map_err(|failure| failure.message)
+    match play_by_key(
+        &state,
+        &item,
+        start_from_beginning,
+        &session_id,
+        None,
+        expected_session.as_deref(),
+    )
+    .await
+    {
+        Ok(()) => Ok(Some(session_id)),
+        Err(failure) if failure.kind == PlayFailureKind::Superseded => Ok(None),
+        Err(failure) => Err(failure.message),
+    }
+}
+
+const EPISODE_PAGE_SIZE: usize = 200;
+
+async fn all_children(
+    source: &std::sync::Arc<dyn MediaSource>,
+    raw_key: &str,
+) -> Result<Vec<ItemDto>, String> {
+    let mut start = 0;
+    let mut all = Vec::new();
+    let mut previous_signature: Option<(usize, String, String)> = None;
+    loop {
+        let page = source.children(raw_key, start, EPISODE_PAGE_SIZE).await?;
+        let count = page.len();
+        if count == 0 {
+            break;
+        }
+        let signature = (
+            count,
+            page.first()
+                .map(|item| item.rating_key.clone())
+                .unwrap_or_default(),
+            page.last()
+                .map(|item| item.rating_key.clone())
+                .unwrap_or_default(),
+        );
+        if start > 0 && previous_signature.as_ref() == Some(&signature) {
+            return Err("the server did not advance episode pagination".to_string());
+        }
+        previous_signature = Some(signature);
+        all.extend(page);
+        start += count;
+        if count < EPISODE_PAGE_SIZE {
+            break;
+        }
+    }
+    Ok(all)
+}
+
+fn episode_item(item: &ItemDto) -> bool {
+    item.media_type.as_deref() == Some("episode")
+}
+
+fn choose_next_episode(
+    context: &EpisodeContext,
+    seasons: &[(ItemDto, Vec<ItemDto>)],
+) -> Option<ItemDto> {
+    let current_season = seasons
+        .iter()
+        .position(|(season, _)| context.season_key.as_deref() == Some(&season.rating_key))
+        .or_else(|| {
+            context.season_index.and_then(|index| {
+                seasons
+                    .iter()
+                    .position(|(season, _)| season.index == Some(index))
+            })
+        })?;
+    let started_in_specials = seasons[current_season].0.index.or(context.season_index) == Some(0);
+
+    for (position, (season, episodes)) in seasons.iter().enumerate().skip(current_season) {
+        if position > current_season && !started_in_specials && season.index == Some(0) {
+            continue;
+        }
+        if position == current_season {
+            let current_episode = episodes
+                .iter()
+                .position(|episode| episode.rating_key == context.item_key)
+                .or_else(|| {
+                    context.episode_index.and_then(|index| {
+                        episodes
+                            .iter()
+                            .position(|episode| episode.index == Some(index))
+                    })
+                })?;
+            if let Some(next) = episodes
+                .iter()
+                .skip(current_episode + 1)
+                .find(|episode| episode_item(episode) && episode.rating_key != context.item_key)
+            {
+                return Some(next.clone());
+            }
+        } else if let Some(next) = episodes
+            .iter()
+            .find(|episode| episode_item(episode) && episode.rating_key != context.item_key)
+        {
+            return Some(next.clone());
+        }
+    }
+    None
+}
+
+fn current_season_position(context: &EpisodeContext, seasons: &[ItemDto]) -> Option<usize> {
+    seasons
+        .iter()
+        .position(|season| context.season_key.as_deref() == Some(&season.rating_key))
+        .or_else(|| {
+            context.season_index.and_then(|index| {
+                seasons
+                    .iter()
+                    .position(|season| season.index == Some(index))
+            })
+        })
+}
+
+async fn next_episode_impl(state: &AppState, item_key: &str) -> Result<Option<ItemDto>, String> {
+    let (source, raw_item_key) = state.registry.lock().await.route(item_key)?;
+    let Some(context) = source.episode_context(&raw_item_key).await? else {
+        return Ok(None);
+    };
+    let (Some(show_key), Some(_season_key)) =
+        (context.show_key.as_deref(), context.season_key.as_deref())
+    else {
+        return Ok(None);
+    };
+
+    let (show_source, raw_show_key) = state.registry.lock().await.route(show_key)?;
+    if show_source.id() != source.id() {
+        return Err("episode hierarchy crossed media sources".to_string());
+    }
+    let mut seasons = all_children(&show_source, &raw_show_key)
+        .await?
+        .into_iter()
+        .filter(|item| item.media_type.as_deref() == Some("season"))
+        .collect::<Vec<_>>();
+    seasons.sort_by_key(|season| season.index.unwrap_or(u32::MAX));
+    let Some(current_season) = current_season_position(&context, &seasons) else {
+        return Ok(None);
+    };
+    let started_in_specials = seasons[current_season].index.or(context.season_index) == Some(0);
+
+    let mut catalog = Vec::new();
+    for (position, season) in seasons.into_iter().enumerate().skip(current_season) {
+        if position > current_season && !started_in_specials && season.index == Some(0) {
+            continue;
+        }
+        let (season_source, raw_season_key) =
+            state.registry.lock().await.route(&season.rating_key)?;
+        if season_source.id() != source.id() {
+            return Err("episode hierarchy crossed media sources".to_string());
+        }
+        let episodes = all_children(&season_source, &raw_season_key).await?;
+        catalog.push((season, episodes));
+        if let Some(next) = choose_next_episode(&context, &catalog) {
+            return Ok(Some(next));
+        }
+    }
+    Ok(None)
+}
+
+#[tauri::command]
+pub async fn next_episode(
+    item_key: String,
+    state: State<'_, AppState>,
+) -> Result<Option<ItemDto>, String> {
+    next_episode_impl(&state, &item_key).await
 }
 
 // ---- read-only server playlists -----------------------------------------
@@ -2730,6 +2981,26 @@ async fn clear_playlist_cursor_if(state: &AppState, expected_session: &str) {
     }
 }
 
+/// Atomically prove that no newer play replaced this completed session and,
+/// for a playlist, clear only its exact terminal cursor. The active session is
+/// deliberately retained so the frontend can conditionally replace it with
+/// the Continue Playing successor.
+async fn finish_sequence_if_current(state: &AppState, ended_session: &str) -> bool {
+    let _play = state.play_lock.lock().await;
+    if !active_session_matches(state, ended_session).await {
+        return false;
+    }
+    let mut cursor = state.playlist_cursor.lock().await;
+    match cursor.as_ref() {
+        None => true,
+        Some(current) if current.session_id == ended_session => {
+            *cursor = None;
+            true
+        }
+        Some(_) => false,
+    }
+}
+
 fn next_playlist_index<'a>(
     mut entry_ids: impl Iterator<Item = &'a str>,
     item_count: usize,
@@ -2877,50 +3148,55 @@ pub async fn server_playlist_play(
     .map(|_| ())
 }
 
-/// Handle one fully-finished clean EOF. The UUID payload prevents a queued
-/// older EOF from advancing or clearing a playlist the user started later.
-pub(crate) async fn advance_playlist(state: &AppState, ended_session: String) {
+/// Handle one fully-finished clean EOF. Returns true only when the exact active
+/// single item or playlist genuinely ended, authorizing the frontend to apply
+/// Continue Playing. The UUID prevents queued older work from replacing a
+/// newer manual play.
+pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> bool {
     let cursor = state.playlist_cursor.lock().await.clone();
-    let Some(cursor) = cursor.filter(|cursor| cursor.session_id == ended_session) else {
-        return;
+    let Some(cursor) = cursor else {
+        return finish_sequence_if_current(state, ended_session).await;
+    };
+    if cursor.session_id != ended_session {
+        return false;
     };
     if cursor.owner == PlaylistOwner::Server {
         let items = match fetch_server_playlist_items(state, &cursor.playlist_id).await {
             Ok(items) => items,
             Err(_) => {
-                clear_playlist_cursor_if(state, &ended_session).await;
-                return;
+                clear_playlist_cursor_if(state, ended_session).await;
+                return false;
             }
         };
         let next_index = cursor.index.saturating_add(1);
         if next_index >= items.len() {
-            clear_playlist_cursor_if(state, &ended_session).await;
-            return;
+            return finish_sequence_if_current(state, ended_session).await;
         }
-        match play_server_playlist_entries(
+        let result = match play_server_playlist_entries(
             state,
             cursor.playlist_id,
             items,
             next_index,
             false,
-            Some(&ended_session),
+            Some(ended_session),
         )
         .await
         {
-            Ok(true) | Ok(false) => {}
+            Ok(true) | Ok(false) => false,
             Err(error) => {
                 eprintln!("vela: server playlist auto-advance stopped: {error}");
-                clear_playlist_cursor_if(state, &ended_session).await;
+                clear_playlist_cursor_if(state, ended_session).await;
+                false
             }
-        }
-        return;
+        };
+        return result;
     }
     let lookup = cursor.playlist_id.clone();
     let playlist = match playlist_store(move || crate::playlists::get(&lookup)).await {
         Ok(playlist) => playlist,
         Err(_) => {
-            clear_playlist_cursor_if(state, &ended_session).await;
-            return;
+            clear_playlist_cursor_if(state, ended_session).await;
+            return false;
         }
     };
     let next_index = next_playlist_index(
@@ -2929,8 +3205,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: String) {
         &cursor,
     );
     if next_index >= playlist.items.len() {
-        clear_playlist_cursor_if(state, &ended_session).await;
-        return;
+        return finish_sequence_if_current(state, ended_session).await;
     }
     // Use the same freshly-read snapshot that produced `next_index`. A second
     // read here would let an edit between the reads invalidate the stable-entry
@@ -2941,14 +3216,15 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: String) {
         playlist.items,
         next_index,
         false,
-        Some(&ended_session),
+        Some(ended_session),
     )
     .await
     {
-        Ok(true) | Ok(false) => {}
+        Ok(true) | Ok(false) => false,
         Err(error) => {
             eprintln!("vela: playlist auto-advance stopped: {error}");
-            clear_playlist_cursor_if(state, &ended_session).await;
+            clear_playlist_cursor_if(state, ended_session).await;
+            false
         }
     }
 }
@@ -3140,6 +3416,59 @@ fn attr(xml: &str, name: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn completion(session_id: &str, item_key: &str) -> PlaybackCompletion {
+        PlaybackCompletion {
+            session_id: session_id.to_string(),
+            item_key: item_key.to_string(),
+            media_type: Some("episode".to_string()),
+        }
+    }
+
+    fn catalog_item(key: &str, media_type: &str, index: u32, played: bool) -> ItemDto {
+        ItemDto {
+            rating_key: key.to_string(),
+            title: key.to_string(),
+            year: None,
+            summary: None,
+            duration_ms: None,
+            media_type: Some(media_type.to_string()),
+            poster: None,
+            series_poster: None,
+            backdrop: None,
+            view_offset_ms: None,
+            played: Some(played),
+            last_watched_at_ms: None,
+            added_at_ms: None,
+            index: Some(index),
+            parent_index: None,
+            grandparent_title: None,
+            parent_title: None,
+            parent_rating_key: None,
+            grandparent_rating_key: None,
+            source_id: "test".to_string(),
+            provider_ids: vec![],
+            backing: None,
+            canonical_id: None,
+            watch_key: None,
+            detail_key: None,
+        }
+    }
+
+    fn episode_context(
+        item: &str,
+        season: &str,
+        episode_index: u32,
+        season_index: u32,
+    ) -> EpisodeContext {
+        EpisodeContext {
+            item_key: item.to_string(),
+            season_key: Some(season.to_string()),
+            show_key: Some("test:show".to_string()),
+            episode_index: Some(episode_index),
+            season_index: Some(season_index),
+        }
+    }
+
     #[test]
     fn playback_start_mode_honors_resume_authority_and_forced_beginning() {
         assert_eq!(playback_start_ms(false, 7_000, 3_000), 7_000);
@@ -3202,12 +3531,20 @@ mod tests {
     fn playback_advance_joins_only_matching_eof_and_tracker_sessions() {
         let advance = PlaybackAdvance::default();
         advance.mark_eof("old".to_string());
-        advance.mark_ended("new".to_string());
+        advance.mark_ended(completion("new", "test:new"));
         assert_eq!(advance.take_ready(), None);
 
-        advance.mark_ended("old".to_string());
-        assert_eq!(advance.take_ready().as_deref(), Some("old"));
+        advance.mark_ended(completion("old", "test:old"));
+        assert_eq!(advance.take_ready(), Some(completion("old", "test:old")));
         assert_eq!(advance.take_ready(), None);
+    }
+
+    #[test]
+    fn conditional_play_rejects_only_a_stale_expected_session() {
+        assert!(expected_session_matches(Some("current"), None));
+        assert!(expected_session_matches(Some("current"), Some("current")));
+        assert!(!expected_session_matches(Some("newer"), Some("old")));
+        assert!(!expected_session_matches(None, Some("old")));
     }
 
     #[test]
@@ -3260,6 +3597,114 @@ mod tests {
         assert_eq!(normalize_autocrop(Some("")), "off");
         assert_eq!(normalize_autocrop(Some("AUTO")), "off");
         assert_eq!(normalize_autocrop(Some("on")), "off");
+    }
+
+    #[test]
+    fn normalize_continue_playing_clamps_to_known_states() {
+        assert_eq!(normalize_continue_playing(Some("off")), "off");
+        assert_eq!(normalize_continue_playing(Some("on")), "on");
+        assert_eq!(normalize_continue_playing(Some("only-tv")), "only-tv");
+        assert_eq!(normalize_continue_playing(None), "only-tv");
+        assert_eq!(normalize_continue_playing(Some("")), "only-tv");
+        assert_eq!(normalize_continue_playing(Some("ON")), "only-tv");
+        assert_eq!(normalize_continue_playing(Some("future-mode")), "only-tv");
+    }
+
+    #[test]
+    fn next_episode_selects_the_following_episode_even_when_watched() {
+        let context = episode_context("test:s1e1", "test:s1", 1, 1);
+        let catalog = vec![(
+            catalog_item("test:s1", "season", 1, false),
+            vec![
+                catalog_item("test:s1e1", "episode", 1, false),
+                catalog_item("test:s1e2", "episode", 2, true),
+                catalog_item("test:s1e3", "episode", 3, false),
+            ],
+        )];
+        assert_eq!(
+            choose_next_episode(&context, &catalog).map(|item| item.rating_key),
+            Some("test:s1e2".to_string())
+        );
+    }
+
+    #[test]
+    fn next_episode_rolls_into_the_next_season() {
+        let context = episode_context("test:s1e2", "test:s1", 2, 1);
+        let catalog = vec![
+            (
+                catalog_item("test:s1", "season", 1, false),
+                vec![
+                    catalog_item("test:s1e1", "episode", 1, false),
+                    catalog_item("test:s1e2", "episode", 2, false),
+                ],
+            ),
+            (
+                catalog_item("test:s2", "season", 2, false),
+                vec![catalog_item("test:s2e1", "episode", 1, false)],
+            ),
+        ];
+        assert_eq!(
+            choose_next_episode(&context, &catalog).map(|item| item.rating_key),
+            Some("test:s2e1".to_string())
+        );
+    }
+
+    #[test]
+    fn next_episode_stops_at_the_end_of_the_show_without_repeating() {
+        let context = episode_context("test:s1e1", "test:s1", 1, 1);
+        let catalog = vec![(
+            catalog_item("test:s1", "season", 1, false),
+            vec![catalog_item("test:s1e1", "episode", 1, false)],
+        )];
+        assert_eq!(
+            choose_next_episode(&context, &catalog).map(|item| item.rating_key),
+            None
+        );
+    }
+
+    #[test]
+    fn next_episode_skips_specials_when_the_run_started_in_a_normal_season() {
+        let context = episode_context("test:s1e1", "test:s1", 1, 1);
+        let catalog = vec![
+            (
+                catalog_item("test:s1", "season", 1, false),
+                vec![catalog_item("test:s1e1", "episode", 1, false)],
+            ),
+            (
+                catalog_item("test:specials", "season", 0, false),
+                vec![catalog_item("test:sp1", "episode", 1, false)],
+            ),
+            (
+                catalog_item("test:s2", "season", 2, false),
+                vec![catalog_item("test:s2e1", "episode", 1, false)],
+            ),
+        ];
+        assert_eq!(
+            choose_next_episode(&context, &catalog).map(|item| item.rating_key),
+            Some("test:s2e1".to_string())
+        );
+    }
+
+    #[test]
+    fn next_episode_honors_specials_when_the_run_started_there() {
+        let context = episode_context("test:sp2", "test:specials", 2, 0);
+        let catalog = vec![
+            (
+                catalog_item("test:specials", "season", 0, false),
+                vec![
+                    catalog_item("test:sp1", "episode", 1, false),
+                    catalog_item("test:sp2", "episode", 2, false),
+                ],
+            ),
+            (
+                catalog_item("test:s1", "season", 1, false),
+                vec![catalog_item("test:s1e1", "episode", 1, false)],
+            ),
+        ];
+        assert_eq!(
+            choose_next_episode(&context, &catalog).map(|item| item.rating_key),
+            Some("test:s1e1".to_string())
+        );
     }
 
     #[test]

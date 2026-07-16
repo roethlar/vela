@@ -282,6 +282,28 @@ pub struct PlaylistDto {
     pub source_name: String,
 }
 
+/// Minimal hierarchy identity needed to walk from one completed episode to
+/// the next. Keys stay source-namespaced so the command layer can route every
+/// container through the same registry boundary as ordinary browsing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EpisodeContext {
+    pub item_key: String,
+    pub season_key: Option<String>,
+    pub show_key: Option<String>,
+    pub episode_index: Option<u32>,
+    pub season_index: Option<u32>,
+}
+
+fn episode_context_from_detail(detail: DetailDto) -> Option<EpisodeContext> {
+    (detail.media_type.as_deref() == Some("episode")).then_some(EpisodeContext {
+        item_key: detail.rating_key,
+        season_key: detail.parent_rating_key,
+        show_key: detail.grandparent_rating_key,
+        episode_index: detail.index,
+        season_index: detail.parent_index,
+    })
+}
+
 /// What `resolve_stream` hands back to the playback layer: the media URL, where
 /// to resume from, and how (if at all) to report progress.
 pub struct StreamResolution {
@@ -366,6 +388,15 @@ pub trait MediaSource: Send + Sync {
     /// then Jellyfin/Emby, then local). Callers degrade gracefully on `Err`.
     async fn item_detail(&self, _item_key: &str) -> Result<DetailDto, String> {
         Err("this source doesn't provide item detail".to_string())
+    }
+
+    /// Resolve only the hierarchy fields Continue Playing needs. Rich-detail
+    /// sources get a default implementation; fixed-address MediaBrowser
+    /// sources override this with their existing single-item endpoint.
+    async fn episode_context(&self, item_key: &str) -> Result<Option<EpisodeContext>, String> {
+        self.item_detail(item_key)
+            .await
+            .map(episode_context_from_detail)
     }
 
     /// Everything in this source's libraries featuring a person (`kind` is
@@ -544,6 +575,39 @@ mod tests {
         assert!(json.contains("\"parentRatingKey\":\"s1:150\""));
         assert!(json.contains("\"grandparentRatingKey\":\"s1:100\""));
         assert!(json.contains("\"backdrop\":\"bd\""));
+    }
+
+    #[test]
+    fn detail_episode_context_keeps_exact_hierarchy_identity() {
+        let episode = DetailDto {
+            rating_key: "plex:300".into(),
+            media_type: Some("episode".into()),
+            index: Some(4),
+            parent_index: Some(2),
+            parent_rating_key: Some("plex:200".into()),
+            grandparent_rating_key: Some("plex:100".into()),
+            ..DetailDto::default()
+        };
+        assert_eq!(
+            episode_context_from_detail(episode),
+            Some(EpisodeContext {
+                item_key: "plex:300".into(),
+                season_key: Some("plex:200".into()),
+                show_key: Some("plex:100".into()),
+                episode_index: Some(4),
+                season_index: Some(2),
+            })
+        );
+
+        assert_eq!(
+            episode_context_from_detail(DetailDto {
+                rating_key: "plex:movie".into(),
+                media_type: Some("movie".into()),
+                ..DetailDto::default()
+            }),
+            None,
+            "non-episodes must stop only-tv continuation",
+        );
     }
 
     // The "still exists" set for read-time filtering (dead recents entries).

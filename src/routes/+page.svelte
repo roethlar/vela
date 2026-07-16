@@ -9,7 +9,7 @@
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
   import { friendlyError } from "$lib/errors";
-  import { detailKeyOf, type Detail, type Item, type PlaylistSummary, type PlayIntent, type ServerPlaylist, type ServerPlaylistGroup } from "$lib/types";
+  import { detailKeyOf, type ContinuePlayingMode, type Detail, type Item, type PlaybackContinuation, type PlaylistSummary, type PlayIntent, type ServerPlaylist, type ServerPlaylistGroup } from "$lib/types";
 
   // Poster URLs that 404'd; fall back to the title placeholder for these.
   let failedPosters = $state(new Set<string>());
@@ -17,10 +17,12 @@
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let unlistenPlaybackEnded: (() => void) | undefined;
+  let unlistenContinuePlaying: (() => void) | undefined;
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     unlistenPlaybackEnded?.();
+    unlistenContinuePlaying?.();
     linkGen++; // invalidate any in-flight link_poll so it won't reschedule after unmount
   });
 
@@ -226,6 +228,7 @@
     installUrl: string;
   };
   let mpvInfo = $state<MpvInfo | null>(null);
+  let continuePlayingMode = $state<ContinuePlayingMode>("only-tv");
   let copied = $state(false);
   let installingMpv = $state(false);
 
@@ -310,12 +313,18 @@
 
   onMount(() => {
     listen("playback-ended", refreshWatchState).then((un) => (unlistenPlaybackEnded = un));
+    listen<PlaybackContinuation>("continue-playing", handlePlaybackContinuation).then(
+      (un) => (unlistenContinuePlaying = un),
+    );
   });
 
   async function boot() {
     // Check mpv up front so we can prompt to install before the user hits play.
     invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     invoke<AppInfo>("get_app_info").then((a) => (appInfo = a)).catch(() => {});
+    invoke<ContinuePlayingMode>("get_continue_playing")
+      .then((mode) => (continuePlayingMode = mode))
+      .catch(() => {});
     try {
       await loadSourceList();
       authenticated = sources.length > 0;
@@ -419,6 +428,7 @@
       linkGen++;
       pin = null;
       hubs = [];
+      continueHubs = [];
       items = [];
       loading = false;
       setError(null);
@@ -439,6 +449,7 @@
       linkGen++; // and any in-flight Plex link poll
       pin = null;
       hubs = [];
+      continueHubs = [];
       sections = [];
       items = [];
       crumbs = [];
@@ -503,13 +514,20 @@
   // the server continue hubs, newest first, deduped. Index 0 = newest;
   // higher indices are older and fan behind-left of the centered card.
   let recents = $state<Item[]>([]);
+  // Retain the exact Home hub feed even while another surface invalidates its
+  // visible Home cache. Playlist playback produces `playback-ended` between
+  // entries; clearing the only copy there would make terminal continuation see
+  // a recents-only list that the carousel never rendered.
+  let continueHubs = $state<Hub[]>([]);
   // Keys the user removed from Continue Watching; suppressed from both hero
   // feeds even while a server hub still carries them.
   let continueTombstones = $state<string[]>([]);
   let heroPos = $state(0);
   let heroItems = $derived.by(() => {
     const scoped = activeSource ? recents.filter((r) => r.sourceId === activeSource) : recents;
-    const hubItems = hubs.filter((h) => hubPolicy(h) === "hero").flatMap((h) => h.items);
+    const hubItems = continueHubs
+      .filter((h) => hubPolicy(h) === "hero")
+      .flatMap((h) => h.items);
     const hidden = new Set(continueTombstones);
     const seen = new Set<string>();
     const out: Item[] = [];
@@ -528,6 +546,61 @@
   });
   function heroClamp(i: number): number {
     return Math.min(Math.max(i, 0), Math.max(heroItems.length - 1, 0));
+  }
+
+  // One automatic run at a time. A manual play has a different backend
+  // session, so its terminal event starts a fresh seen set. An automatic play
+  // stores the returned session; only that exact completion inherits the set.
+  let continuationSession: string | null = null;
+  let continuationSeen = new Set<string>();
+  let continuationAttempt = 0;
+
+  function resetContinuationRun() {
+    continuationAttempt++;
+    continuationSession = null;
+    continuationSeen = new Set();
+  }
+
+  function changeContinuePlayingMode(mode: ContinuePlayingMode) {
+    continuePlayingMode = mode;
+    resetContinuationRun();
+  }
+
+  async function handlePlaybackContinuation(event: { payload: PlaybackContinuation }) {
+    const completed = event.payload;
+    if (continuationSession !== completed.sessionId) {
+      continuationSeen = new Set();
+    }
+    continuationSeen.add(completed.itemKey);
+    continuationSession = null;
+    const attempt = ++continuationAttempt;
+
+    if (continuePlayingMode === "off") return;
+
+    try {
+      let next: Item | null = null;
+      if (continuePlayingMode === "on") {
+        // This is intentionally the literal derived list the Home carousel
+        // renders: same active-source scope, tombstones, dedup, and ordering.
+        next = heroItems.find((item) => !continuationSeen.has(item.ratingKey)) ?? null;
+      } else if (completed.mediaType === "episode") {
+        next = await invoke<Item | null>("next_episode", { itemKey: completed.itemKey });
+      }
+      if (attempt !== continuationAttempt || !next) return;
+      if (continuationSeen.has(next.ratingKey)) return;
+      continuationSeen.add(next.ratingKey);
+      const session = await invoke<string | null>("play_item", {
+        item: next,
+        startFromBeginning: false,
+        expectedSession: completed.sessionId,
+      });
+      if (attempt === continuationAttempt) continuationSession = session;
+    } catch (e) {
+      if (attempt === continuationAttempt) {
+        setError(`Couldn't continue playing — ${String(e)}`);
+        continuationSession = null;
+      }
+    }
   }
 
   // Bug 3 (owner UX ruling 2026-07-05): a scoped source's per-source Home must
@@ -604,6 +677,7 @@
     // Clear the previous source's content immediately so stale rails/tabs can't
     // be clicked (and browse/play the old source) while the new load is pending.
     hubs = [];
+    continueHubs = [];
     sections = [];
     failedPosters = new Set(); // bounded to the current view's posters
     const sg = ++sourceGen;
@@ -637,6 +711,7 @@
       ]);
       if (gen === homeGen) {
         hubs = h;
+        continueHubs = h;
         recents = r;
         continueTombstones = t;
       }
@@ -882,6 +957,7 @@
             ]);
             if (hg === homeGen && epoch === navEpoch) {
               hubs = h;
+              continueHubs = h;
               recents = r;
               continueTombstones = t;
             }
@@ -1444,10 +1520,15 @@
   }
 
   async function play(item: Item, intent: PlayIntent = "resume") {
+    // A user choice always starts a new run. The backend's expected-session
+    // check independently prevents an already-awaited continuation from
+    // replacing this play, including plays launched inside playlist views.
+    resetContinuationRun();
     try {
-      await invoke("play_item", {
+      await invoke<string | null>("play_item", {
         item,
         startFromBeginning: intent === "beginning",
+        expectedSession: null,
       });
     } catch (e) {
       // A Play started from an open detail is reported ON that detail, which survives a
@@ -1942,6 +2023,7 @@
       onChanged={onSourcesChanged}
       onLinkPlex={beginLink}
       onMpvChanged={(m) => (mpvInfo = m)}
+      onContinuePlayingChanged={changeContinuePlayingMode}
     />
   {/if}
 

@@ -18,6 +18,11 @@ export function startMockJellyfin({
   // Defaults to the original single 'lib1' view over `movies`, so
   // pre-existing scenarios are unaffected (library-refresh-scan plan).
   views = null,
+  // Optional show hierarchy keyed by parent id. Values are typed items, e.g.
+  // { show1: [{ id: 's1', type: 'Season', index: 1 }],
+  //   s1: [{ id: 'e1', type: 'Episode', seriesId: 'show1', seasonId: 's1', ... }] }.
+  // Empty by default so existing flat-library scenarios are unchanged.
+  children = {},
   latest = [], // items for /Users/{userId}/Items/Latest → the "Recently Added" Home hub
   // Read-only video playlists: [{ id, name, itemIds }]. Item ids may repeat;
   // responses preserve that order exactly like Jellyfin/Emby.
@@ -37,14 +42,22 @@ export function startMockJellyfin({
   const initialViews = views ?? [
     { id: "lib1", name: "Mock Library", collectionType: "movies", movies },
   ];
+  const initialChildren = Object.fromEntries(
+    Object.entries(children).map(([parentId, items]) => [
+      parentId,
+      items.map((item) => ({ ...item })),
+    ]),
+  );
+  const seededItems = [
+    ...initialViews.flatMap((view) => view.movies),
+    ...Object.values(initialChildren).flat(),
+  ];
 
   const state = {
     // Per-movie UserData; Stopped check-ins update positionTicks like a real
     // server, and PlayedItems POST/DELETE flip played.
     userData: Object.fromEntries(
-      initialViews
-        .flatMap((v) => v.movies)
-        .map((m) => [m.id, { played: false, positionTicks: 0 }]),
+      seededItems.map((m) => [m.id, { played: false, positionTicks: 0 }]),
     ),
     requests: [], // { method, path, query } in arrival order
     served: [], // { method, path, status } in RESPONSE order (see json())
@@ -55,6 +68,7 @@ export function startMockJellyfin({
     // rail mid-session; the one-shot flags are consumed by the next matching
     // request, while viewsDelayMs is a knob that stays until reset.
     views: initialViews,
+    children: initialChildren,
     latest: [...latest], // mutable Latest rail seed
     playlists: playlists.map((playlist) => ({
       ...playlist,
@@ -65,6 +79,8 @@ export function startMockJellyfin({
     viewsDelayMs: 0,
     failNextLatest: false, // one-shot: 500 the next /Users/{id}/Items/Latest
     delayNextLatestMs: 0, // one-shot delay for the next Latest request
+    delayNextResumeMs: 0, // one-shot delay for the next Resume response
+    delayNextChildrenMs: 0, // one-shot delay for the next hierarchy response
     failNextItems: false, // one-shot: 500 the next listing (a doomed loadMore)
     // one-shot: 401 the next listing. A 401 is the ONE failure a listing and a
     // scan report with the SAME text (both surface as RECONNECT_REQUIRED, which
@@ -125,7 +141,11 @@ export function startMockJellyfin({
   };
 
   const allMovies = () => state.views.flatMap((v) => v.movies);
-  const findMovie = (id) => allMovies().find((m) => m.id === id);
+  const allItems = () => [
+    ...allMovies(),
+    ...Object.values(state.children).flat(),
+  ];
+  const findMovie = (id) => allItems().find((m) => m.id === id);
   // A view's item TYPE follows its collectionType, because Vela asks each
   // library for the types that library holds (jellyfin.rs items(): a "show"
   // section is listed with IncludeItemTypes=Series, a "movie" one with
@@ -135,6 +155,8 @@ export function startMockJellyfin({
   const itemTypeOf = (view) =>
     view.collectionType === "tvshows" ? "Series" : "Movie";
   const typeOfItem = (id) => {
+    const explicit = findMovie(id)?.type;
+    if (explicit) return explicit;
     const view = state.views.find((v) => v.movies.some((m) => m.id === id));
     return view ? itemTypeOf(view) : "Movie";
   };
@@ -145,6 +167,12 @@ export function startMockJellyfin({
     ProductionYear: m.year ?? 2020,
     RunTimeTicks: m.runTimeTicks ?? 6_000_000_000, // default 10 min in 100ns ticks
     Overview: "A film that exists only for the harness.",
+    IndexNumber: m.index ?? undefined,
+    ParentIndexNumber: m.parentIndex ?? undefined,
+    SeriesId: m.seriesId ?? undefined,
+    SeasonId: m.seasonId ?? undefined,
+    SeriesName: m.seriesName ?? undefined,
+    SeasonName: m.seasonName ?? undefined,
     UserData: {
       Played: state.userData[m.id].played,
       PlaybackPositionTicks: state.userData[m.id].positionTicks,
@@ -246,15 +274,23 @@ export function startMockJellyfin({
     }
     if (path === `/Users/${userId}/Items/Resume`) {
       if (!serveResume) return json({ Items: [] });
-      return json({
-        Items: allMovies()
-          .filter(
-            (m) =>
-              state.userData[m.id].positionTicks > 0 &&
-              !state.userData[m.id].played,
-          )
-          .map(toJson),
-      });
+      const delay = state.delayNextResumeMs;
+      if (delay > 0) state.delayNextResumeMs = 0;
+      const respond = () =>
+        json({
+          Items: allItems()
+            .filter(
+              (m) =>
+                state.userData[m.id]?.positionTicks > 0 &&
+                !state.userData[m.id]?.played,
+            )
+            .map(toJson),
+        });
+      if (delay > 0) {
+        setTimeout(respond, delay);
+        return;
+      }
+      return respond();
     }
     if (path === `/Users/${userId}/Items/Latest`) {
       // BOTH one-shot flags are captured at ARRIVAL so they bind to THIS
@@ -351,6 +387,34 @@ export function startMockJellyfin({
           return;
         }
         return respondSearch();
+      }
+      const hierarchy = state.children[query.ParentId];
+      if (hierarchy) {
+        if (
+          query.StartIndex === undefined ||
+          query.Limit === undefined ||
+          query.SortBy !== "ParentIndexNumber,IndexNumber,SortName" ||
+          query.SortOrder !== "Ascending" ||
+          !(query.Fields ?? "").split(",").includes("Overview") ||
+          !(query.Fields ?? "").split(",").includes("ProviderIds")
+        ) {
+          state.contractViolations.push({ path, query });
+          return json({ error: "children query contract violation" }, 400);
+        }
+        const start = Number(query.StartIndex);
+        const end = start + Number(query.Limit);
+        const delay = state.delayNextChildrenMs;
+        if (delay > 0) state.delayNextChildrenMs = 0;
+        const respondChildren = () =>
+          json({
+            Items: hierarchy.slice(start, end).map(toJson),
+            TotalRecordCount: hierarchy.length,
+          });
+        if (delay > 0) {
+          setTimeout(respondChildren, delay);
+          return;
+        }
+        return respondChildren();
       }
       // Fail closed on the client's listing query contract (eh-12): a real
       // Jellyfin would return the wrong contents (or error) for a bad
