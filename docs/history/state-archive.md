@@ -4,6 +4,138 @@ Entries rotated verbatim out of `.agents/state.md` `## Now` when they stopped
 being live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-07-17 (drift pass — seven landed entries, v0.1.57)
+
+Context for readers: seven `## Now` entries were landed, externally accepted,
+and (where applicable) owner-confirmed, with no live decision depending on
+their detail anymore. They rotate here verbatim, in their original `## Now`
+order.
+
+- **OLED BLACK THEME COMPLETE at 0.1.57.** The owner-approved
+  direct slice at `6029dbf` adds a selectable literal-black canvas, removes its
+  gradient/grain, and lowers chrome luminance without dimming media. Five source
+  regressions and the real-app carousel-opacity regression were separately
+  proven red and restored green. Local frontend/Rust gates and a fresh focused
+  Linux run pass; its OLED Home screenshot was inspected. Claude Fable 5
+  accepted exact reviewed head `6e0144d` with an independent production-
+  mutation proof and no material finding. The exact implementation and version
+  surfaces were checksum-matched on Linux; a fresh `vela v0.1.57` binary built
+  and the complete real-app suite passed 27/27. Exact evidence:
+  `.agents/review/findings/oled-1.md`.
+
+- **UI EMBELLISHMENTS SLICE 3 COMPLETE at 0.1.56 (owner go 2026-07-16).**
+  The approved motion and designed-empty-state implementation lands through
+  `841f749`. Every focused source family was separately mutation-proven, three
+  initially vacuous guards were repaired and re-proven, normal and verified
+  reduced-motion focused Linux runs pass, final dark/light screenshots were
+  inspected, and the complete fresh-binary real-app suite passes 27/27. Primary
+  Claude Fable 5 accepted exact reviewed head `6075f52` with an independent
+  red/restored-green guard proof and no material finding. The owner then removed
+  Agy and the default secondary-review gate. Final local frontend/Rust gates and
+  the fresh `vela v0.1.56` Linux real-app suite pass 27/27. No owner playtest is
+  required. Exact evidence:
+  `.agents/review/findings/ui-s3.md`.
+
+- **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
+  theme-correct foundation in `.agents/plans/ui-embellishments.md` now owns
+  semantic theme states, six shared visual primitives, and typed SVG icons.
+  Implementation landed through `c1c4db4`; version `0ce3629`. Canonical
+  frontend checks, separately red-proven source guards, normal and
+  reduced-motion focused Linux runs, final Linux E2E 25/25, and dark/light
+  screenshot inspection are green. Primary Claude Fable 5 and independent Grok
+  4.5 each accepted the exact code range with separate red/green guard proofs
+  and no material findings. The owner is unavailable to playtest this track;
+  no playtest is required or pending. Slices 2 and 3 are complete below and
+  above, respectively.
+  Exact review evidence: `.agents/review/findings/ui-s1.md`.
+
+- **UI EMBELLISHMENTS SLICE 2 COMPLETE at 0.1.55 (owner go 2026-07-16).** One
+  cache/source-safe reveal action now owns nine media-art surfaces over fixed
+  failure underlays; all ten runtime images decode asynchronously and the Plex
+  QR remains the sole no-fade exception. Implementation `830cabd`, real-app
+  selector repair `c22a07e`, version `49c0dc9`. Focused guards were separately
+  proven red, canonical frontend plus complete Rust verification passed, normal
+  and reduced-motion Linux runs passed, the full real-app suite passed 26/26,
+  and six dark/light screenshots were inspected. Primary Claude Fable 5 and the
+  owner-authorized independent Agy/Gemini substitute accepted the exact range
+  with separate guard proofs and no findings. No owner playtest is required or
+  pending. Slice 3 is complete above. Exact
+  evidence:
+  `.agents/review/findings/ui-s2.md`.
+
+- **CAROUSEL DUPLICATE PLAY ACTION CORRECTION COMPLETE at 0.1.54 (owner go
+  2026-07-16).** Playlist S1 added a primary Play/Resume row beneath the
+  Continue Watching cover-flow even though the centered card already performs
+  that action. Implementation `507fb2f` removes the complete row, retains card
+  click/keyboard semantics, and keeps Play from Beginning in the context menu.
+  The exact guard failed with the row restored and passed after restoration;
+  affected Linux scenarios and the full 25/25 suite are green. External review
+  converged clean with independent Claude and Grok guard proofs. Final 0.1.54
+  focused Linux build and screenshot inspection confirm the row is absent. No
+  owner playtest is required or pending. Evidence:
+  `.agents/review/findings/car-1.md`.
+
+- **FAILED EDIT-ERROR AUTO-DISMISS: OWNER-CONFIRMED ON 0.1.50.**
+  Implemented at `01e30cf` from approved plan
+  `.agents/plans/edit-error-auto-dismiss.md`. Failed watch-state edit errors
+  retain their own line, follow navigation, clear after eight seconds, and
+  still clear immediately for a newer edit/source change; captured attempts
+  prevent a queued old timer from erasing a newer failure. Four distinct
+  regressions were proven red, the restored Linux suite is green, and both live
+  server paths passed. Grok independently proved the stale-timer ownership
+  guard, restored the head green, and accepted with no findings. Closed review
+  record: `.agents/review/findings/eet-1.md`. The owner built 0.1.50 and
+  confirmed the exact stopped-Plex timing path: the grid/title stayed present,
+  the named red edit line disappeared after about eight seconds, and the item
+  remained unwatched/actionable after Plex restart plus Refresh.
+
+- **FAILED-WATCH-EDIT RECOVERY: OWNER-CONFIRMED ON 0.1.49.** Implemented at
+  `b5c170a`; Grok accepted r1.
+  The owner playtest failed 2026-07-14 on 0.1.48; follow-up plan
+  `.agents/plans/failed-watch-edit-recovery.md` is IMPLEMENTED. The stopped-Plex
+  test showed a view failure and a named edit failure on separate lines, with no
+  raw URL. Recovery failed: the whole loaded Movies grid disappeared, and
+  **12 Years a Slave** remained absent after Plex returned even though Plex Web
+  showed it present and unwatched. Read-only diagnosis at `310c2ca` confirmed
+  Plex returns that exact item at index 5 of Vela's first-page query and Vela
+  has no tombstone for it. The frontend's failed-edit catch unnecessarily
+  re-enters the browse listing; backend rollback affects only Home
+  recents/tombstones. `b5c170a` replaces that browse reload with a Home-only
+  repair and strengthens the count-only guards to exact identity. The four
+  planned hermetic regressions were each proven red, the restored scenario is
+  green, the full Linux suite is 18/18, and the exact live Plex path passed.
+  Grok independently red-proved both the old broad recovery and the exact-
+  identity guard, restored the head green, and accepted with no findings.
+  The owner repeated the exact stopped-Plex path on installed 0.1.49 and
+  confirmed the grid/title remain present and the item remains unwatched. The
+  follow-up for the indefinite red edit line is implemented and Grok-accepted
+  at `01e30cf` under `.agents/plans/edit-error-auto-dismiss.md`. Closed recovery
+  review record:
+  `.agents/review/findings/fwer-1.md`. Original plan
+  `.agents/plans/per-surface-status.md`; decision `.agents/decisions.md`
+  (2026-07-14). Every failure now reports on the surface it belongs to: the
+  view's banner keeps listing/refresh/search failures, and the watch-state edit
+  (`fee7f0e`), the queue (`67358fd`), the mpv bar (`0f41c7b`) and the detail
+  page (`40dfc40`) each report their own. Slice 5 (`282702b`) then DELETED the
+  whole refereeing apparatus — the `owner` field, `ErrorOwner`, `clearOwned`,
+  per-surface clearing, the scope merge — net -67 lines. As of `282702b`: e2e
+  18/18, cargo test 95, clippy/svelte-check/build clean.
+  - **What it bought:** the defect class that ran for EIGHT review rounds
+    (r17-r24, each fix opening the next door, always the same loss — a failure
+    the user needed, silently gone) is structurally gone, because the fight over
+    one surface is gone. Slice 1 alone collapsed SIX e2e cases, three of which
+    had asserted that a failed edit must be SUPPRESSED when the user navigated
+    away — never right, just the price of sharing.
+  - **The queue and its status slice (`67358fd`) were deleted in playlist S1**
+    (`ec5d613`). The rewritten `surfaces` scenario still red-proves the detail
+    and edit lines that remain; exact proof and external review:
+    `.agents/review/findings/pl-s1.md`.
+  - The library-refresh-scan review loop is CLOSED at r24. Its evidence rotated
+    to `docs/history/state-archive.md` (2026-07-14); its two standing rules were
+    carved out first — the **review protocol** to `.agents/decisions.md` and
+    **guard discipline** to `.agents/repo-guidance.md`. Do not reopen the loop
+    against the shared banner.
+
 ## Rotated 2026-07-14 (drift pass — five completed tracks, v0.1.48)
 
 Context for readers: five tracks in `## Now` were COMPLETE and owner-verified,
