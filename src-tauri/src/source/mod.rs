@@ -60,7 +60,7 @@ pub struct SectionDto {
 }
 
 /// A playable/browsable item (movie, show, season, episode), source-tagged.
-/// `Deserialize` exists for the listing-cache/recents persistence round-trips.
+/// `Deserialize` exists for the recents persistence round-trip.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ItemDto {

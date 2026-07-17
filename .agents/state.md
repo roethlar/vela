@@ -242,12 +242,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   curation. Ship it as a known potential issue in the v1.0 release notes. Detail:
   `.agents/plans/continue-watching-watch-state.md` Review log r6 + Accepted edges.
 
-- **DRIFT FOUND 2026-07-14, NOT FIXED — needs an owner go (it is a code file):**
-  `src-tauri/src/source/mod.rs:63` has a comment referencing a "listing-cache"
-  that no longer exists (it died with the local-source removal, 2026-07-08).
-  Comment-only; fold it into the next slice that touches the file rather than
-  making a lone code commit. (`ISSUES.md`'s companion drift — an open P1 for a
-  metadata cache that no longer exists — was fixed in the same pass.)
+- **DRIFT FIXED (owner go, this session):** `src-tauri/src/source/mod.rs:63`
+  comment referenced a "listing-cache" that died with the local-source removal
+  (2026-07-08). Owner gave the go ("1 go"); comment now reads "recents
+  persistence round-trip" only — verified `Deserialize` on `ItemDto` survives
+  solely for `recents.rs` config embedding. (`ISSUES.md`'s companion drift was
+  fixed earlier, 2026-07-14 pass.)
 
 - **v1.0.0 RELEASE TRACK (owner, 2026-07-10, refined 2026-07-15 — ordered LAST,
   behind the functional
