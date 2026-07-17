@@ -11,8 +11,9 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Loop `ui-s3` ACTIVE at Vela 0.1.55: the approved motion and designed-empty-state
-slice is implemented through exact production head `841f749`. Every focused
+Loop `ui-s3` CLOSED 2026-07-17 at Vela 0.1.56 (`d3f3636`): the approved motion
+and designed-empty-state slice is implemented through exact production head
+`841f749`. Every focused
 behavior was separately mutation-proven; three initially vacuous source guards
 were repaired and re-proven, reduced-motion duration and transition regressions
 failed in the real app, and the existing image-polish geometry guard caught the
@@ -22,7 +23,8 @@ and the complete fresh-binary Linux real-app suite 27/27 pass. Primary Claude
 Code 2.1.212 / Fable 5 accepted exact head `6075f52` against base `c28dbd2` with
 an independently executed production-mutation proof, `guard_confirmed:true`,
 and no material finding. The owner removed Agy and the default secondary-review
-gate on 2026-07-17; code review is closed and the version bump remains. Detail:
+gate on 2026-07-17. Final local cross-language verification and a fresh
+`vela v0.1.56` Linux real-app suite 27/27 pass. Slice 3 is complete. Detail:
 `.agents/review/findings/ui-s3.md`.
 
 Loop `ui-s2` CLOSED 2026-07-16 at Vela 0.1.55 (`49c0dc9`): media images now use

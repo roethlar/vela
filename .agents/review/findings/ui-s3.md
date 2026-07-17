@@ -3,13 +3,13 @@
 **Severity**: MEDIUM — abrupt navigation, incomplete reduced-motion handling,
 and generic or misleading empty states made otherwise valid UI states feel
 broken or unfinished.
-**Status**: Primary Claude accepted with `guard_confirmed:true`; review closed
-by owner ruling at Vela 0.1.55; version bump pending
+**Status**: Verified — primary Claude accepted with `guard_confirmed:true`;
+complete at Vela 0.1.56
 **Branch**: `main` (approved Slice 3 implementation)
 **Base**: `c28dbd24bf6f40f57e96e59146b5d9ffc064334d`
 **Implementation**: `78b2f79` through
 `841f7493be74122901a0c84fb0f66c1f21005c3e`
-**Version**: 0.1.55 pending final Slice 3 bump
+**Version**: 0.1.56 at `d3f3636`
 
 ## Evidence
 
@@ -95,6 +95,13 @@ viewport fit.
   reduced-motion `uimotion` runs, and the complete fresh-binary Linux real-app
   suite 27/27. Final normal/reduced dark/light screenshots were inspected and
   the viewport-fit guards reported no overflow.
+- Final versioned closure at exact head `d3f3636`: pinned Node 26.5.0/npm
+  12.0.1, clean `npm ci`, zero npm vulnerabilities, 17/17 focused Node tests,
+  zero Svelte diagnostics, production build, Rust 1.89 and stable checks,
+  clippy with warnings denied, 140/140 Rust tests, and zero Rust
+  vulnerabilities. All seven version/build-date files matched the Linux venue
+  byte-for-byte; a fresh compile identified `vela v0.1.56` and the complete
+  real-app suite passed 27/27.
 
 ## Coder dispute (if any)
 

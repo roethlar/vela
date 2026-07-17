@@ -1,15 +1,14 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**SLICE 3 IMPLEMENTED; PRIMARY CODE REVIEW ACCEPTED; VERSION BUMP PENDING.**
-Slice 1 is complete at Vela 0.1.53 and Slice 2 at Vela 0.1.55. The owner's
-"go on Slice 3" activated
+**COMPLETE at Vela 0.1.56.** Slice 1 completed at Vela 0.1.53, Slice 2 at
+Vela 0.1.55, and Slice 3 at Vela 0.1.56. The owner's "go on Slice 3" activated
 only the subtle motion and designed-empty-state pass below. Primary Claude
 returned a clean unprimed `openreview` on the refreshed current-tree contract;
 implementation now lands through `841f749`, with exact guard and verification
 evidence in `.agents/review/findings/ui-s3.md`. Primary Claude accepted the exact
 code range with an independent guard proof. The owner then removed Agy and the
-default secondary-review requirement; the final version bump and closure remain.
+default secondary-review requirement. Final versioned verification is green.
 The plan was queued
 2026-07-10 at the bottom of the functional work; that preceding work is now
 clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
@@ -545,7 +544,7 @@ Primary Claude Code 2.1.211 (`claude-fable-5`) and independent Grok 0.2.101
 proof, and no material comments. The fail-closed record is
 `.agents/review/findings/ui-s1.md`. At Slice 1 close, Slices 2–3 were still
 unauthorized; Slice 2 was activated separately on 2026-07-16 as recorded in the
-current status, while Slice 3 remains gated.
+current status; Slice 3 was authorized separately and is complete below.
 
 ## Slice 2 implementation record
 
@@ -572,8 +571,39 @@ independent Agy 1.1.3 (`Gemini 3.1 Pro (High)`) both accepted exact reviewed
 head `0ccb269` against base `e98220e` with `guard_confirmed:true`, independent
 red/restored-green proof, and no material comments. Grok's failed attempts were
 discarded fail-closed and remain in the record rather than counting as review.
-Exact evidence: `.agents/review/findings/ui-s2.md`. Slice 3 remains
-unauthorized.
+Exact evidence: `.agents/review/findings/ui-s2.md`. Slice 3 was authorized
+separately and is complete below.
+
+## Slice 3 implementation record
+
+Implementation landed at `78b2f79`; focused source-guard repairs and the
+real-app viewport integration fix landed through `841f749`; `d3f3636` versioned
+the independently shippable slice as 0.1.56. One shared designed-empty component
+now owns exact settled-empty structure while parents retain copy, placement,
+actions, and loading/failure precedence. A restrained projector-settle motion
+language covers details, crumbs, cast, cover flow, buttons, episode rows, and
+watched badges; bounded delays and the global reduced-motion rail suppress both
+duration and delay without delaying interaction.
+
+Every empty category, exclusion, component semantic, animation surface, stagger,
+and microinteraction was independently mutation-proven. Three initially vacuous
+source guards were repaired and re-proven. Fresh normal and reduced-motion
+Linux runs passed; separate injected duration and transition exceptions failed
+on their observed 120ms values. The existing image-polish scenario caught a
+transient detail-width shift; content-viewport containment restored its strict
+geometry assertion without a functional wait or weakened check. Final
+normal/reduced dark/light screenshots were inspected.
+
+Claude Code 2.1.212 (`claude-fable-5`) accepted exact reviewed head `6075f52`
+against base `c28dbd2` with `guard_confirmed:true`, an independently executed
+production mutation, and no material finding. The owner subsequently removed
+Agy and the default secondary-review gate. At exact version head `d3f3636`, the
+pinned Node/npm assertion, clean install, npm audit, 17 focused Node tests,
+Svelte diagnostics, production build, Rust 1.89/stable checks, clippy, 140 Rust
+tests, and Cargo audit all pass. All seven version/build-date overlays matched
+the Linux venue byte-for-byte; a fresh `vela v0.1.56` build passed the complete
+real-app suite 27/27. Exact evidence:
+`.agents/review/findings/ui-s3.md`.
 
 ## Decisions (resolved by owner 2026-07-10)
 1. **Vibrancy: OUT** — Linux/Wayland-first app; macOS-specific styling
