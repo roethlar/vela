@@ -13,6 +13,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
   agree, as of `6029dbf`).
 
+- **v1.0 RELEASE PREPARATION IS READY; README POLISH IS NEXT.** Functional and
+  UI implementation through OLED Black is complete. The owner ran
+  `./scripts/build.sh` on 2026-07-17 and produced the unsigned universal macOS
+  0.1.57 DMG successfully; GitHub CI passed at `1300f00`, and the fresh Linux
+  real-app suite passed 27/27. Resume with the README work identified as item 2
+  in the ordered v1.0 release track under `## Next`; the deferred real-Plex
+  completion/error smoke remains the final pre-publication gate, not a blocker
+  for docs work.
+
 - **OLED BLACK THEME COMPLETE at 0.1.57.** The owner-approved
   direct slice at `6029dbf` adds a selectable literal-black canvas, removes its
   gradient/grain, and lowers chrome luminance without dimming media. Five source
@@ -179,6 +188,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   plans remain in `.agents/plans/` as design records.
 
 ## Next
+
+- **IMMEDIATE NEXT: v1.0 README/docs polish.** The functional and UI work is
+  complete, so release-track item 2 is unblocked. Rewrite the README to entice
+  users to try Vela, then continue through the ordered v1.0 release track below.
 
 - **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; REVIEW AND OWNER PLAYTEST OPEN.** The owner's 0.1.51
   macOS playtest found that a naturally completed episode remains the only
