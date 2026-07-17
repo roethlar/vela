@@ -308,13 +308,22 @@ function emptyStateTags(source) {
   }));
 }
 
-function callFor(file, fragments, icon) {
+function callFor(file, headingAttribute, hintAttribute, icon) {
   const source = sources.get(file);
   assert.ok(source, `${file} must exist`);
   const calls = emptyStateTags(source);
-  const call = calls.find(({ tag }) => fragments.every((fragment) => tag.includes(fragment)));
-  assert.ok(call, `${file} lacks EmptyState call containing: ${fragments.join(" / ")}`);
-  assert.match(call.tag, new RegExp(`\\bicon\\s*=\\s*["']${icon}["']`), `${fragments[0]} icon taxonomy`);
+  const call = calls.find(
+    ({ tag }) => tag.includes(headingAttribute) && tag.includes(hintAttribute),
+  );
+  assert.ok(
+    call,
+    `${file} lacks exact EmptyState call: ${headingAttribute} / ${hintAttribute}`,
+  );
+  assert.match(
+    call.tag,
+    new RegExp(`\\bicon\\s*=\\s*["']${icon}["']`),
+    `${headingAttribute} icon taxonomy`,
+  );
   return { ...call, file, source };
 }
 
@@ -354,17 +363,72 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
   assert.doesNotMatch(emptyStyle, /margin\s*:\s*auto|position\s*:\s*(?:absolute|fixed)|flex\s*:\s*1\b/, "parents own centering and in-flow placement");
 
   const categories = [
-    callFor("src/routes/+page.svelte", ["Welcome to Vela", "Connect Plex, Jellyfin, or Emby to start browsing your library in HDR."], "film"),
-    callFor("src/routes/+page.svelte", ["No titles on Home yet", "Choose a library from the sidebar to start browsing."], "film"),
-    callFor("src/routes/+page.svelte", ["No libraries found", "Check the connected server, then use Refresh libraries."], "film"),
-    callFor("src/routes/+page.svelte", ["No titles in this view", "Go back, refresh libraries, or choose another library."], "film"),
-    callFor("src/routes/+page.svelte", ["No matches for", "searchTerm", "Check the spelling or try a broader search."], "film"),
-    callFor("src/routes/+page.svelte", ["No titles found for", "personView.name", "Go back to keep browsing."], "film"),
-    callFor("src/lib/PlaylistsView.svelte", ["No playlists yet", "Name one above, then add titles from their context menus."], "playlist"),
-    callFor("src/lib/PlaylistsView.svelte", ["This playlist is empty", "Use a title's context menu to add it here."], "playlist"),
-    callFor("src/lib/ServerPlaylistView.svelte", ["This server playlist is empty", "playlist.sourceName", "then reopen it here."], "playlist"),
-    callFor("src/lib/SeasonDetail.svelte", ["No episodes in this season", "Go back and choose another season."], "film"),
-    callFor("src/lib/SeasonDetail.svelte", ["Choose an episode", "Select one from the list to see details and playback options."], "film"),
+    callFor(
+      "src/routes/+page.svelte",
+      'heading="Welcome to Vela"',
+      'hint="Connect Plex, Jellyfin, or Emby to start browsing your library in HDR."',
+      "film",
+    ),
+    callFor(
+      "src/routes/+page.svelte",
+      'heading="No titles on Home yet"',
+      'hint="Choose a library from the sidebar to start browsing."',
+      "film",
+    ),
+    callFor(
+      "src/routes/+page.svelte",
+      'heading="No libraries found"',
+      'hint="Check the connected server, then use Refresh libraries."',
+      "film",
+    ),
+    callFor(
+      "src/routes/+page.svelte",
+      'heading="No titles in this view"',
+      'hint="Go back, refresh libraries, or choose another library."',
+      "film",
+    ),
+    callFor(
+      "src/routes/+page.svelte",
+      'heading={`No matches for “${searchTerm}”`}',
+      'hint="Check the spelling or try a broader search."',
+      "film",
+    ),
+    callFor(
+      "src/routes/+page.svelte",
+      'heading={`No titles found for ${personView.name}`}',
+      'hint="Go back to keep browsing."',
+      "film",
+    ),
+    callFor(
+      "src/lib/PlaylistsView.svelte",
+      'heading="No playlists yet"',
+      'hint="Name one above, then add titles from their context menus."',
+      "playlist",
+    ),
+    callFor(
+      "src/lib/PlaylistsView.svelte",
+      'heading="This playlist is empty"',
+      'hint="Use a title\'s context menu to add it here."',
+      "playlist",
+    ),
+    callFor(
+      "src/lib/ServerPlaylistView.svelte",
+      'heading="This server playlist is empty"',
+      'hint={`Add videos on ${playlist.sourceName}, then reopen it here.`}',
+      "playlist",
+    ),
+    callFor(
+      "src/lib/SeasonDetail.svelte",
+      'heading="No episodes in this season"',
+      'hint="Go back and choose another season."',
+      "film",
+    ),
+    callFor(
+      "src/lib/SeasonDetail.svelte",
+      'heading="Choose an episode"',
+      'hint="Select one from the list to see details and playback options."',
+      "film",
+    ),
   ];
 
   const searchCall = categories[4];
