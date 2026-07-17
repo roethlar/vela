@@ -197,9 +197,12 @@ test("grid and cast entrances share a bounded rise while cover-flow depth and ea
     "the shared poster snippet must cap its 22ms stagger at index 14",
   );
   animationContract(ruleBody(pageStyle, ".poster"), "vela-rise", 400, "poster", { backwards: true });
+  const hubLoop =
+    /{#each\s+hub\.items\s+as\s+item,\s*i[^}]*}([\s\S]*?){\/each}/.exec(pageMarkup)?.[1];
+  assert.ok(hubLoop, "Home hub rendering must expose an index for the shared stagger");
   assert.match(
-    pageMarkup,
-    /{#each\s+hub\.items\s+as\s+item,\s*i[^}]*}[\s\S]*?{@render\s+poster\(item,\s*i,/,
+    hubLoop,
+    /{@render\s+poster\(item,\s*i,/,
     "Home hub cards must continue to use the same animated poster snippet as the grid",
   );
 
