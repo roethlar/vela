@@ -258,6 +258,44 @@ export default {
         );
       }
 
+      await chooseTheme(driver, 'OLED Black', 'oled');
+      await closeSettings(driver);
+      const oled = await driver.exec(`
+        const root = getComputedStyle(document.documentElement);
+        const body = getComputedStyle(document.body);
+        const center = getComputedStyle(document.querySelector('[aria-label="Continue watching"] .flowcard.center'));
+        const art = getComputedStyle(document.querySelector('[aria-label="Continue watching"] .flowcard.center .art'));
+        return {
+          rootBackground: root.backgroundColor,
+          bodyBackground: body.backgroundColor,
+          bodyImage: body.backgroundImage,
+          grainDisplay: getComputedStyle(document.querySelector('.grain')).display,
+          surface: root.getPropertyValue('--surface').trim(),
+          text: root.getPropertyValue('--text').trim(),
+          accent: root.getPropertyValue('--accent').trim(),
+          centerFilter: center.filter,
+          centerOpacity: center.opacity,
+          artOpacity: art.opacity,
+        };
+      `);
+      assert.deepEqual(
+        oled,
+        {
+          rootBackground: 'rgb(0, 0, 0)',
+          bodyBackground: 'rgb(0, 0, 0)',
+          bodyImage: 'none',
+          grainDisplay: 'none',
+          surface: '#070707',
+          text: '#c7c7c7',
+          accent: '#c58a0b',
+          centerFilter: 'brightness(1)',
+          centerOpacity: '1',
+          artOpacity: '1',
+        },
+        'OLED Black must dim chrome without dimming the centered media card',
+      );
+      await screenshot('00-oled-home');
+
       await chooseTheme(driver, 'Vela Dark', 'dark');
       await closeSettings(driver);
       const darkSearchFocus = await focusSnapshot(

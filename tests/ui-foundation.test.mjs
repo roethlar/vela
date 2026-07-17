@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcRoot = path.join(repoRoot, "src");
 const appCss = fs.readFileSync(path.join(srcRoot, "app.css"), "utf8");
+const appHtml = fs.readFileSync(path.join(srcRoot, "app.html"), "utf8");
 
 function filesBelow(dir, suffix) {
   return fs
@@ -53,6 +54,7 @@ function properties(declarations) {
 test("all themes define the Slice 1 accent and destructive-action tokens", () => {
   const expectedThemes = [
     "dark",
+    "oled",
     "dracula",
     "nord",
     "solarized-dark",
@@ -79,11 +81,44 @@ test("all themes define the Slice 1 accent and destructive-action tokens", () =>
   }
 
   assert.deepEqual([...blocks.keys()], expectedThemes, "the test must cover the complete theme catalog");
+  const settings = sources.get("src/lib/Settings.svelte");
+  const settingsThemeIds = [
+    ...settings.matchAll(/\{ id: "([^"]+)", label: "[^"]+", mode: "(?:dark|light)", swatch:/g),
+  ].map((match) => match[1]);
+  assert.deepEqual(settingsThemeIds, expectedThemes, "Settings must expose the complete theme catalog");
+  const prepaintIds = JSON.parse(appHtml.match(/var ids = (\[[^;]+\]);/)?.[1] ?? "[]");
+  assert.deepEqual(prepaintIds, expectedThemes, "first paint must accept the complete theme catalog");
   for (const [theme, body] of blocks) {
     for (const token of requiredTokens) {
       assert.match(body, new RegExp(`${token.replaceAll("-", "\\-")}\\s*:`), `${theme} is missing ${token}`);
     }
   }
+});
+
+test("OLED Black keeps a literal-black canvas and dims only chrome", () => {
+  const oled = appCss.match(/:root\[data-theme="oled"\]\s*\{([^}]*)\}/)?.[1];
+  assert.ok(oled, "app.css must define OLED Black");
+  const palette = new Map(
+    [...oled.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)].map((match) => [match[1], match[2].trim()]),
+  );
+  assert.equal(palette.get("--bg"), "#000000", "the OLED canvas must be literal black");
+  assert.equal(palette.get("--surface"), "#070707", "OLED controls stay near black");
+  assert.equal(palette.get("--surface-2"), "#0e0e0e", "raised OLED controls stay near black");
+  assert.equal(palette.get("--text"), "#c7c7c7", "OLED primary text is intentionally dimmed");
+  assert.equal(palette.get("--text-muted"), "#777777", "OLED muted text remains legible on black");
+  assert.equal(palette.get("--text-bright"), "#e6e6e6", "OLED bright UI never reaches media white");
+  assert.equal(palette.get("--accent"), "#c58a0b", "OLED keeps a dimmed Vela amber");
+
+  const overrides = [...appCss.matchAll(/:root\[data-theme="oled"\]\s+([^{}]+)\s*\{([^}]*)\}/g)].map(
+    (match) => ({ selector: match[1].trim(), declarations: match[2] }),
+  );
+  assert.deepEqual(
+    overrides.map(({ selector }) => selector),
+    ["body", ".grain"],
+    "OLED may suppress ambient chrome but must not dim media selectors",
+  );
+  assert.match(overrides[0].declarations, /background-image\s*:\s*none\s*;/);
+  assert.match(overrides[1].declarations, /display\s*:\s*none\s*;/);
 });
 
 test("component styles contain no hardcoded semantic accent or danger colors", () => {

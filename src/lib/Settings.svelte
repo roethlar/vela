@@ -87,6 +87,7 @@
   type ThemeDef = { id: string; label: string; mode: ThemeMode; swatch: [string, string, string] };
   const THEMES: ThemeDef[] = [
     { id: "dark", label: "Vela Dark", mode: "dark", swatch: ["#0b0d10", "#e5a00d", "#20262f"] },
+    { id: "oled", label: "OLED Black", mode: "dark", swatch: ["#000000", "#c58a0b", "#0e0e0e"] },
     { id: "dracula", label: "Dracula", mode: "dark", swatch: ["#282a36", "#bd93f9", "#50fa7b"] },
     { id: "nord", label: "Nord", mode: "dark", swatch: ["#2e3440", "#88c0d0", "#a3be8c"] },
     { id: "solarized-dark", label: "Solarized Dark", mode: "dark", swatch: ["#002b36", "#268bd2", "#859900"] },
@@ -638,7 +639,7 @@
           {/each}
         </div>
       {/each}
-      <p class="muted small">Color themes from popular open-source palettes.</p>
+      <p class="muted small">Choose a palette for your screen and room.</p>
     </section>
     {/if}
       </div>

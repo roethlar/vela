@@ -40,6 +40,44 @@
   color-scheme: dark;
 }
 
+/* ---- OLED Black ----
+   The canvas is literal black and the chrome stays deliberately low-luminance;
+   media art remains untouched so posters and video are the luminous planes. */
+:root[data-theme="oled"] {
+  --bg: #000000;
+  --bg-blur: rgba(0, 0, 0, 0.96);
+  --surface: #070707;
+  --surface-2: #0e0e0e;
+  --surface-sunken: #030303;
+  --border: #171717;
+  --border-subtle: #0f0f0f;
+  --border-strong: #303030;
+  --text: #c7c7c7;
+  --text-2: #a8a8a8;
+  --text-muted: #777777;
+  --text-dim: #555555;
+  --text-bright: #e6e6e6;
+  --accent: #c58a0b;
+  --accent-hover: #d89a12;
+  --accent-tint: rgba(197, 138, 11, 0.07);
+  --accent-glow: rgba(197, 138, 11, 0.13);
+  --on-accent: #0a0700;
+  --danger-bg: #210d0d;
+  --danger-text: #d98f8f;
+  --danger-border: #351818;
+  --danger-solid: #832823;
+  --danger-solid-hover: #9a332d;
+  --on-danger: #eeeeee;
+  --warn-bg: #181405;
+  --warn-text: #c2a760;
+  --warn-border: #302908;
+  --info: #7aa7cc;
+  --scrollbar: #191919;
+  --shadow-lg: rgba(0, 0, 0, 0.85);
+  --shadow-md: rgba(0, 0, 0, 0.7);
+  color-scheme: dark;
+}
+
 /* ---- Dracula ---- */
 :root[data-theme="dracula"] {
   --bg: #282a36;
@@ -448,6 +486,9 @@ body {
   background-image: radial-gradient(135% 85% at 50% -8%, var(--surface-sunken), transparent 55%);
   background-attachment: fixed;
 }
+:root[data-theme="oled"] body {
+  background-image: none;
+}
 /* Faint film grain over the whole UI for texture / to kill gradient banding. */
 .grain {
   position: fixed;
@@ -457,6 +498,9 @@ body {
   opacity: 0.022;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
   background-size: 120px 120px;
+}
+:root[data-theme="oled"] .grain {
+  display: none;
 }
 
 h1,

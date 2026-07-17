@@ -11,7 +11,7 @@
       // "light"/"system") falls back to dark instead of applying a dead data-theme.
       (function () {
         try {
-          var ids = ["dark", "dracula", "nord", "solarized-dark", "gruvbox-dark", "solarized-light", "gruvbox-light", "catppuccin-latte", "rose-pine-dawn", "one-light"];
+          var ids = ["dark", "oled", "dracula", "nord", "solarized-dark", "gruvbox-dark", "solarized-light", "gruvbox-light", "catppuccin-latte", "rose-pine-dawn", "one-light"];
           var t = localStorage.getItem("vela-theme");
           document.documentElement.setAttribute("data-theme", ids.indexOf(t) >= 0 ? t : "dark");
         } catch (e) {
