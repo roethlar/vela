@@ -3,8 +3,8 @@
 **Severity**: MEDIUM — abrupt navigation, incomplete reduced-motion handling,
 and generic or misleading empty states made otherwise valid UI states feel
 broken or unfinished.
-**Status**: Implementation and guard proof complete; external code review
-active at Vela 0.1.55
+**Status**: Primary Claude accepted with `guard_confirmed:true`; independent
+secondary review active at Vela 0.1.55
 **Branch**: `main` (approved Slice 3 implementation)
 **Base**: `c28dbd24bf6f40f57e96e59146b5d9ffc064334d`
 **Implementation**: `78b2f79` through
@@ -110,7 +110,25 @@ ruling.
 
 ## Reviewer comments
 
-Pending primary Claude Fable 5 and independent Agy / Gemini 3.1 Pro (High)
-reviews of one exact range. Neither review counts without an independently
-executed red/restored-green guard proof, schema-valid exact SHAs, and a clean
+**Primary implementation review — recorded 2026-07-17T01:34:25Z — accepted.**
+Claude Code 2.1.212 (`claude-fable-5`, session
+`d868f4c7-6e20-4a43-967b-d63b210c441b`) reviewed exact head
+`6075f52bc79d11d3cf482b1b6e440127dd22127f` against base
+`c28dbd24bf6f40f57e96e59146b5d9ffc064334d` in a verified detached worktree.
+It received the neutral goal-first question and no primary verdict or suggested
+finding. The parse-exact structured result carried both full SHAs,
+`guard_confirmed:true`, verdict `accepted`, and no material finding.
+
+The streamed tool transcript confirms that Claude independently changed the
+production item-detail entrance from 200ms to 320ms. The focused motion contract
+failed only the intended assertion (`item detail duration: 320 !== 200`) while
+the other three tests remained green. Claude restored the production file from
+the reviewed head, reran the contract 4/4 green and the complete focused Node
+set 17/17 green, and confirmed an empty diff and status at the exact reviewed
+SHA. The orchestrator verified the red and green output, exact head, and clean
+worktree before removing it.
+
+Independent Agy / Gemini 3.1 Pro (High) review of the same exact range remains
+pending. It does not receive the primary verdict and does not count without its
+own executed red/restored-green guard proof, schema-valid exact SHAs, and clean
 disposable worktree.

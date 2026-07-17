@@ -19,9 +19,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   initially vacuous guards were repaired and re-proven, normal and verified
   reduced-motion focused Linux runs pass, final dark/light screenshots were
   inspected, and the complete fresh-binary real-app suite passes 27/27. Primary
-  Claude Fable 5 and independent Agy / Gemini 3.1 Pro (High) review are the
-  remaining gates before the 0.1.56 version bump and Slice 3 closure. No owner
-  playtest is required. Exact evidence: `.agents/review/findings/ui-s3.md`.
+  Claude Fable 5 accepted exact reviewed head `6075f52` with an independent
+  red/restored-green guard proof and no material finding. Independent Agy /
+  Gemini 3.1 Pro (High) review is the remaining gate before the 0.1.56 version
+  bump and Slice 3 closure. No owner playtest is required. Exact evidence:
+  `.agents/review/findings/ui-s3.md`.
 
 - **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
   theme-correct foundation in `.agents/plans/ui-embellishments.md` now owns
