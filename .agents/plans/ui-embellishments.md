@@ -1,11 +1,11 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**SLICE 2 COMPLETE AT VELA 0.1.55; SLICE 3 OWNER-GATED.** Slice 1 is complete
-at Vela 0.1.53 and Slice 2 image-loading polish is implemented, guard-proven,
-visually inspected, canonically verified, and accepted by primary Claude plus
-the owner-authorized independent Agy/Gemini substitute. Slice 3 retains its
-separate go gate. The plan was queued
+**SLICE 3 AUTHORIZED 2026-07-16; CURRENT-TREE PLAN REFRESH AND PRIMARY CLAUDE
+OPEN REVIEW ACTIVE.** Slice 1 is complete at Vela 0.1.53 and Slice 2 at Vela
+0.1.55. The owner's "go on Slice 3" activates only the subtle motion and
+designed-empty-state pass below. Code remains gated until the refreshed Slice 3
+contract receives a clean unprimed Claude `openreview`. The plan was queued
 2026-07-10 at the bottom of the functional work; that preceding work is now
 clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
 slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
@@ -29,24 +29,27 @@ transitions; the hero cover-flow is a pure-CSS 3D transform driven by inline
 styles. `prefers-reduced-motion` is a blanket CSS kill-switch; any new motion
 must stay CSS-expressed or CSS-variable-driven so it remains covered.
 
-`Icon.svelte` currently defines 11 inline SVG icons; only `search` is unused.
-Raw UI glyphs remain in item/season rating metadata and Settings status/warning
-copy. The play queue and its drawer were deleted by playlist Slice 1; no UI
-slice may target or resurrect them.
+`Icon.svelte` defines 13 typed inline SVG icons, all used. Slice 1 removed the
+semantic-color, duplicate-primitive, and raw-glyph drift; Slice 2 gave every
+media image a fixed failure underlay and source-safe reveal. The play queue and
+its drawer were deleted by playlist Slice 1; no UI slice may target or
+resurrect them.
 
-Known rough spots, expressed by defect class so queued-plan line numbers cannot
-rot again:
+The remaining Slice 3 rough spots, refreshed against Vela 0.1.55:
 
-- posters pop in with no fade and some failed images vanish instead of using a
-  styled placeholder;
-- component styles contain hardcoded semantic accent and danger colors that
-  bypass the theme catalog, including search/playlist focus and playlist/error
-  states added after this plan was drafted;
-- `.heroarrow` and QR presentation retain literals that must be classified as
-  semantic UI color or deliberate media/quiet-zone contrast;
-- play overlay/button, progress, chip, no-art, person-link, and primary-button
-  styles are re-declared across components; progress alone has 6px, 5px, 4px,
-  and 3px variants;
+- item and season detail surfaces plus their mount-time crumb bars appear
+  without an entrance cue; Settings already owns the correct fade/pop and must
+  not be changed;
+- grid and Home hub cards already share one bounded poster stagger, but cast
+  cards do not; the reduced-motion blanket zeros duration but not animation or
+  transition delay, so staggered cards can remain in their backwards-filled
+  hidden pose for up to 308ms;
+- cover-flow transforms already use `--ease`, but the cards lack a compositor
+  hint and the centered image has no visual ground; the QR hover retains the
+  only non-deliberate bare `ease` timing;
+- press feedback exists only on primary buttons, episode rows have an abrupt
+  tint-only hover, and the grid watched badge appears without the existing
+  `vela-pop` cue;
 - empty states are plain text except the Welcome screen.
 
 ## Direction (and what we deliberately do NOT add)
@@ -122,9 +125,39 @@ surfaces. Real native-feel payoff, real cost — owner decision below.
   a cache pipeline. The restrained load/fallback layer directly fixes the pop
   and blank-frame defects while keeping the art dominant.
 
+## Slice 3 design calibration (2026-07-16)
+
+- **Subject / audience / job:** Vela remains a desktop cinema-library browser
+  for people choosing from their own media servers. Motion must clarify a
+  surface change or a direct manipulation; empty copy must point toward an
+  existing way forward.
+- **Color and type:** retain the complete semantic theme catalog and Geist
+  Variable. This slice adds no palette, font, gradient veil, or decorative icon
+  family. Media absence uses Vela's existing film-strip vocabulary; curation
+  absence uses the existing playlist icon.
+- **Layout:** preserve the sidebar, cover-flow, rails, grids, detail split,
+  playlist controls, and responsive breakpoints. One shared empty-state
+  component owns icon/heading/hint presentation while each surface continues
+  to own positioning and all existing controls.
+- **Motion signature:** a quiet "projector settle": detail surfaces rise and
+  fade once when mounted, their crumb bar arrives from above, and the centered
+  Continue Watching card gains one low, diffuse ground shadow. This shadow is
+  the slice's single aesthetic risk and reinforces Vela's existing cinematic
+  stage rather than decorating unrelated surfaces.
+- **Restraint:** do not add a second animation to Home hub cards—the shared
+  poster already gives both grids and hubs the bounded entrance stagger. Only
+  the previously static cast cards join that language. Settings keeps its
+  existing fade/pop. Watched pop applies only to the grid badge, not every
+  watched chip or every pre-watched episode in a list.
+- **Self-critique:** animating every rail, inventing search/person artwork, or
+  adding calls to action to every empty state would look more conspicuous but
+  would make a media browser feel templated and busy. Reusing two existing
+  icons, one shared keyframe language, and the controls already on screen keeps
+  the artwork and cover-flow as Vela's identity.
+
 ## Slices (each independently shippable: commit + primary Claude code review +
-independent Grok second review + version bump; ordered so later slices layer
-on earlier ones)
+independent Agy/Gemini 3.1 Pro second review + version bump; ordered so later
+slices layer on earlier ones)
 
 ### Slice 1 — Foundation: theme-correct states, one visual language
 No new visuals; makes every later slice land evenly across all themes.
@@ -241,23 +274,112 @@ async-decoding/media-surface inventory; failure-underlay taxonomy (including an
 episode thumbnail); and reduced-motion suppression. Rerun each focused guard
 green before the canonical frontend and full Linux suites.
 
-### Slice 3 — Motion pass (subtle, in the app's existing language)
-1. Surface transitions: detail/season overlay enters with a short
-   fade+rise (Svelte `transition:` or a `vela-*` keyframe — pick ONE
-   mechanism and note that Svelte-injected animations are still killed
-   by the reduced-motion blanket, verified at implementation), crumb
-   bar slides, Settings modal keeps its pop.
-2. Extend the grid's staggered `vela-rise` entrance to hub rails and
-   the cast rail (bounded stagger like the grid's 14-card cap).
-3. Hero cover-flow depth: `will-change: transform` on flowcards, a
-   subtle ground shadow/reflection under the center card, and easing
-   consistency (`--ease` token everywhere).
-4. Designed empty states: give the plain-text empties (home, browse,
-   search, playlists, server playlists, episode panel) the Welcome treatment — an `Icon` +
-   one-line heading + muted hint, consistent spacing.
-5. Micro-interactions sweep: consistent press states (`translateY(1px)`
-   exists on some buttons — apply the pattern), hover affordance on
-   episode rows, watched-badge pop-in (`vela-pop`).
+### Slice 3 — Motion and empty-state pass (subtle, in Vela's existing language)
+
+1. **CSS-only surface choreography.** Reuse `vela-rise` for a 200ms entrance
+   on the `ItemDetail` and `SeasonDetail` roots and `vela-slide-down` for a
+   160ms mount-time entrance on each page-level `.crumbs` branch. Do not key or
+   replay the crumb animation for an in-place crumb-array update. Keep the
+   Settings scrim/panel's existing `vela-fade`/`vela-pop`; do not add a second
+   mechanism or import a Svelte transition. Strengthen the global
+   `prefers-reduced-motion` block to zero animation and transition delays as
+   well as durations, because backwards-filled staggered cards otherwise stay
+   hidden during their original delay.
+2. **One entrance language and one grounded stage.** Preserve and guard the
+   current poster snippet's `Math.min(i, 14) * 22ms` delay: the same snippet
+   already animates browse grids and Home hub cards, so no rail animation is
+   added. Add the same bounded delay plus `vela-rise` only to cast cards. Add
+   `will-change: transform` to the at-most-nine rendered flowcards and one
+   pointerless, low-z `.flow::after` radial ellipse using the existing shadow
+   token beneath the centered card. Keep the existing reactive inline 3D
+   transforms and `--ease` timings. Replace the QR hover's bare `ease` with
+   `var(--ease)`; linear shimmer and spinner animations remain deliberate
+   exceptions.
+3. **One shared empty-state primitive.** Add `src/lib/EmptyState.svelte` with
+   one decorative typed `Icon`, one `h2`, one muted hint, and an optional
+   polite-status role. It owns only typography, spacing, and presentation;
+   parent surfaces own centering/in-flow placement and retain every existing
+   Back, crumb, sort, create, rename, delete, search, sidebar, and Settings
+   control. Migrate the Welcome state to this primitive so it is the actual
+   shared reference rather than a parallel component-local style.
+4. **Exact full-surface empty taxonomy.** Use the film icon for media absence
+   and the playlist icon for curation absence, with these headings and hints:
+   - Home with available library navigation: **No titles on Home yet** / Choose
+     a library from the sidebar to start browsing.
+   - Authenticated Home with no section or type navigation: **No libraries
+     found** / Check the connected server, then use Refresh libraries.
+   - Settled browse/container: **No titles in this view** / Go back, refresh
+     libraries, or choose another library.
+   - Search: **No matches for “{searchTerm}”** / Check the spelling or try a
+     broader search. This result alone uses the component's polite-status role.
+   - Person browse: **No titles found for {personView.name}** / Go back to keep
+     browsing.
+   - Vela playlist index: **No playlists yet** / Name one above, then add
+     titles from their context menus. Render it only when the list load did not
+     fail; a failed request must not simultaneously claim an authoritative
+     empty result.
+   - Empty Vela playlist: **This playlist is empty** / Use a title's context
+     menu to add it here.
+   - Empty server playlist: **This server playlist is empty** / Add videos on
+     {playlist.sourceName}, then reopen it here.
+   - Successfully loaded zero-episode season: **No episodes in this season** /
+     Go back and choose another season. If episodes exist but selection is
+     absent, use **Choose an episode** / Select one from the list to see details
+     and playback options.
+   Keep loaders (`aria-busy` and the episode skeleton), list failures, the
+   add-to-playlist menu's compact absence line, server-playlist sidebar
+   metadata, and Settings' inline no-server message outside the full empty
+   primitive. Split the season panel's current `!selected` conflation so neither
+   loading nor `listError` renders invitational empty copy. Correct the nearby
+   Home comment that still cites removed local/SMB/SSH sources while touching
+   that branch; do not change its routing behavior.
+5. **Composable micro-interactions.** Give every enabled button the same 1px
+   press feedback through the individual `translate` property, which composes
+   with poster, flowcard, hero-arrow, and QR `transform` geometry; remove the
+   duplicate primary-only transform implementation. Add a 2px horizontal
+   `translate` plus short `background`, `border-color`, and `translate`
+   transition to the already tinted episode-row hover. Apply `vela-pop` only to
+   `.watchedbadge`, not to static watched chips or episode marks. The reduced-
+   motion block must suppress the new individual-translate motion as well as
+   every new duration and delay.
+
+#### Slice 3 guard and real-app contract
+
+1. Add `tests/ui-motion.test.mjs` to `npm run check` with four source/CSS
+   contracts: CSS-only surface/crumb/Settings motion plus the complete reduced-
+   motion kill-switch; existing hub and new cast bounded stagger plus
+   cover-flow grounding/easing; composable press, episode hover, and grid-badge
+   pop; and the exact shared empty-state structure/inventory, including failure
+   and loading exclusions. The contract may name deliberate linear shimmer and
+   spinner timing, but no other bare easing exception.
+2. Add one hermetic Linux `uimotion` scenario. Seed populated movie/show
+   navigation, a zero-item library, a zero-episode season, an empty server
+   playlist, and a second connected source with no views. Use mock state plus
+   an ordinary refresh to make Continue Watching appear only after the initial
+   Home empty assertions. Exercise the reachable Home/no-library, browse,
+   no-match search, Vela playlist root/new empty detail, server playlist, and
+   zero-episode states. Person and rich cast remain source-contract-only because
+   Jellyfin/Emby do not expose Plex's rich person detail in this harness; do not
+   add a production test hook.
+3. In the normal run, assert computed animation names, 100–300ms durations,
+   `--ease` timing, bounded card delays, flowcard `will-change`, the grounded
+   pseudo-element, and parsed individual `translate` support. Wait only on
+   server/DOM predicates, never animation sleeps or sampled mid-animation
+   frames. Capture dark Home/detail and One Light empty-state screenshots and
+   inspect affected keyboard focus and existing responsive rules.
+4. Run the same focused scenario with the existing throwaway GTK
+   reduced-motion preference. First prove the WebKit media query is active,
+   then require every rendered Slice 3 animation/transition duration and delay
+   to be at most 0.01ms and the new individual translate to be suppressed.
+5. Red-prove each claimed family after the implementation commit, restoring
+   from the committed head after every injection: detail entrance, season
+   entrance, mount-time crumbs, preserved Settings pop, reduced-motion delay,
+   existing hub cap, cast animation/cap, flowcard hint, ground shadow, easing,
+   global press composition, episode hover, watched-badge pop, and each empty-
+   state category/loading-failure exclusion. Separately inject an unsuppressed
+   new animation and transition into the Linux reduced-motion run. Rerun each
+   focused guard green, then the canonical frontend checks and complete Linux
+   real-app suite.
 
 ### Slice 4 — CUT (owner ruling 2026-07-10)
 macOS vibrancy via `window-vibrancy` — cut: the app is Linux/Wayland
