@@ -483,7 +483,17 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
     const containingCall = emptyStateTags(source).find(({ tag }) => tag.includes(loader));
     assert.equal(containingCall, undefined, `${file} loader entered the settled-empty primitive`);
   }
-  assert.match(season, /loadingList\s*&&\s*episodes\.length\s*===\s*0[\s\S]*aria-hidden=["']true["']/, "episode skeleton remains outside EmptyState");
+  const episodeLoader =
+    /{#if\s+loadingList\s*&&\s*episodes\.length\s*===\s*0}([\s\S]*?){:else}/.exec(
+      season,
+    )?.[1];
+  assert.ok(episodeLoader, "episode loading must retain a dedicated skeleton branch");
+  assert.match(
+    episodeLoader,
+    /class=["']eprow skel["'][^>]*aria-hidden=["']true["']/,
+    "episode skeleton remains decorative and outside EmptyState",
+  );
+  assert.doesNotMatch(episodeLoader, /<EmptyState\b/, "episode loader cannot use EmptyState");
   assert.match(page, /class=["']addempty["'][^>]*>No playlists yet[^<]*<\/div>/, "compact add-menu absence stays compact");
   assert.match(page, /class=["']serverplayliststate["'][^>]*>No video playlists<\/span>/, "sidebar playlist metadata stays inline");
   assert.match(sources.get("src/lib/Settings.svelte"), /No servers yet\. Add one under Servers\./, "Settings no-server copy stays inline");
