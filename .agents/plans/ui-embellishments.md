@@ -1,11 +1,11 @@
 # Plan: UI embellishments for v1.0.0 (graphical elements, animations, polish)
 
 ## Status
-**SLICE 3 AUTHORIZED 2026-07-16; CURRENT-TREE PLAN REFRESH AND PRIMARY CLAUDE
-OPEN REVIEW ACTIVE.** Slice 1 is complete at Vela 0.1.53 and Slice 2 at Vela
-0.1.55. The owner's "go on Slice 3" activates only the subtle motion and
-designed-empty-state pass below. Code remains gated until the refreshed Slice 3
-contract receives a clean unprimed Claude `openreview`. The plan was queued
+**SLICE 3 AUTHORIZED 2026-07-16; REFRESHED PLAN REVIEW CLEAN; IMPLEMENTATION
+ACTIVE.** Slice 1 is complete at Vela 0.1.53 and Slice 2 at Vela 0.1.55. The
+owner's "go on Slice 3" activates only the subtle motion and designed-empty-
+state pass below. Primary Claude returned a clean unprimed `openreview` on the
+refreshed current-tree contract, so the code gate is open. The plan was queued
 2026-07-10 at the bottom of the functional work; that preceding work is now
 clear enough for the owner to activate UI polish. Owner rulings 2026-07-10:
 slice 4 (macOS vibrancy) is OUT — "app is linux/wayland first, so
@@ -509,6 +509,17 @@ discarded fail-closed because the orchestrator had supplied an incorrectly
 expanded head coordinate; the one allowed schema retry used the actual full
 SHA and is the recorded result. Slice 2 plan review is converged and the
 owner's go is active; implementation may begin. Slice 3 remains gated.
+
+**Slice 3 r1 — 2026-07-17T00:30:30Z — Claude Code 2.1.211 /
+`claude-fable-5` — base `a562fe4399326f316147d746bdfba17edd49968d`,
+head `4922adf61bcc555295ff96acdbe96918594266df`; verdict `clean`.**
+
+The unprimed goal-first review returned the exact SHAs, `verdict: clean`, and
+no findings. Its first response was discarded fail-closed because the result
+field wrapped the valid payload in prose; the one permitted schema-only retry
+returned only the parse-exact payload. The detached worktree remained clean at
+the reviewed head and was removed. Slice 3 plan review is converged and the
+owner's go is active; implementation may begin.
 
 ## Slice 1 implementation record
 
