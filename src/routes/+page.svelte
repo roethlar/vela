@@ -2679,6 +2679,7 @@
     flex: 1;
     min-width: 0;
     min-height: 0;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
   }
