@@ -109,9 +109,14 @@ async function styleSnapshot(driver, selector, pseudo = null) {
 }
 
 async function rootEase(driver) {
-  return driver.exec(
-    `return getComputedStyle(document.documentElement).getPropertyValue('--ease').trim()`,
-  );
+  return driver.exec(`
+    const node = document.createElement('div');
+    node.style.transitionTimingFunction = 'var(--ease)';
+    document.body.append(node);
+    const value = getComputedStyle(node).transitionTimingFunction;
+    node.remove();
+    return value;
+  `);
 }
 
 async function clickSidebar(driver, label) {
