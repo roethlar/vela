@@ -3,11 +3,12 @@
 **Severity**: MEDIUM — the existing near-black theme still illuminates OLED
 pixels across most of the window and does not let media art dominate a dark
 room.
-**Status**: Implementation and guard proof complete; primary Claude review
-pending at Vela 0.1.57
+**Status**: CLOSED 2026-07-17 — primary Claude Fable 5 review accepted with no
+material finding; final fresh-binary Linux suite passed 27/27
 **Branch**: `main` (owner-approved direct implementation)
 **Base**: `d1fd8eed7071ed6dd18b4a8917aa428e031a82b5`
 **Implementation**: `6029dbf1ce0551fb5552a1b37faba3ef4517dbfe`
+**Reviewed head**: `6e0144d19d01424ca900de7d50dd690d2b0089b5`
 **Version**: 0.1.57
 
 ## Evidence
@@ -73,6 +74,14 @@ Home state.
 - The normal real-app `uifoundation` run passed with a fresh binary. Its
   1280x800 OLED Home screenshot was inspected: black canvas and receded chrome
   are visually distinct, with the carousel remaining the focal plane.
+- Claude Fable 5 independently changed the production OLED background from
+  `#000000` to `#010101`; the focused test failed with the intended literal-
+  black assertion, then passed 6/6 after exact restoration. The detached
+  worktree was clean at the pinned reviewed head.
+- After review, the exact implementation files and all six 0.1.57 version
+  surfaces were checksum-matched on the Linux venue. A fresh `vela v0.1.57`
+  debug binary built and the complete real-app suite passed 27/27, including
+  `uifoundation`.
 
 ## Coder dispute (if any)
 
@@ -87,5 +96,9 @@ playtest is required before code review.
 
 ## Reviewer comments
 
-Pending Claude Fable 5 review of the exact pinned range with an independently
-executed red/restored-green guard proof.
+Claude Fable 5 accepted exact head `6e0144d19d01424ca900de7d50dd690d2b0089b5`
+against base `d1fd8eed7071ed6dd18b4a8917aa428e031a82b5` with
+`guard_confirmed:true` and no material finding. It found the token-only palette
+plus two ambient-suppression selectors to be the right implementation shape,
+confirmed picker/pre-paint synchronization and computed media-brightness E2E
+coverage, and found no other theme-id catalog or data-theme consumer.
