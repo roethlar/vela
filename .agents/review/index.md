@@ -11,6 +11,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `oled-1` ACTIVE at Vela 0.1.57 (`6029dbf`): OLED Black supplies a literal
+`#000000` canvas, removes the ambient gradient/grain, and dims chrome through
+semantic tokens without adding any media opacity or filter. Picker and
+first-paint catalogs are synchronized. Five source regressions and one real-app
+media-opacity regression were separately proven red and restored green; local
+frontend/Rust gates and the focused fresh-binary Linux scenario pass, and the
+OLED Home screenshot was inspected. Primary Claude Fable 5 review is pending.
+Detail: `.agents/review/findings/oled-1.md`.
+
 Loop `ui-s3` CLOSED 2026-07-17 at Vela 0.1.56 (`d3f3636`): the approved motion
 and designed-empty-state slice is implemented through exact production head
 `841f749`. Every focused

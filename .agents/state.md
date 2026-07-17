@@ -9,9 +9,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Version 0.1.56** (`package.json`, both lockfiles,
+- **Version 0.1.57** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `d3f3636`).
+  agree, as of `6029dbf`).
+
+- **OLED BLACK THEME IMPLEMENTED; PRIMARY REVIEW ACTIVE.** The owner-approved
+  direct slice at `6029dbf` adds a selectable literal-black canvas, removes its
+  gradient/grain, and lowers chrome luminance without dimming media. Five source
+  regressions and the real-app carousel-opacity regression were separately
+  proven red and restored green. Local frontend/Rust gates and a fresh focused
+  Linux run pass; its OLED Home screenshot was inspected. Claude Fable 5 review
+  is the remaining gate. Exact evidence: `.agents/review/findings/oled-1.md`.
 
 - **UI EMBELLISHMENTS SLICE 3 COMPLETE at 0.1.56 (owner go 2026-07-16).**
   The approved motion and designed-empty-state implementation lands through

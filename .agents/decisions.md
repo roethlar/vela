@@ -1064,3 +1064,24 @@ A clean EOF previously updated progress but did not explicitly mark the
 episode played on Plex, and the automatic successor start did not own a newer
 Home refresh. The retained server hub could therefore resurrect the completed
 episode until a manual watched-state edit supplied both missing transitions.
+
+## 2026-07-17 - OLED Black makes media the only luminous plane
+
+Status: APPROVED (owner, 2026-07-17). Implemented directly at Vela 0.1.57;
+review evidence: `.agents/review/findings/oled-1.md`.
+
+Decision:
+OLED Black is a selectable theme with a literal `#000000` canvas. Ambient
+gradient and film grain are absent. Text, controls, borders, status colors, and
+the Vela amber are dimmer than Vela Dark, while poster/backdrop imagery, video
+cards, and the Continue Watching carousel receive no OLED-specific opacity or
+brightness reduction.
+
+Reason:
+The app should disappear into a dark OLED viewing room while media remains the
+visual subject. Token-level dimming preserves focus and status contrast without
+the destructive image attenuation caused by a global opacity or filter.
+
+Supersedes:
+Nothing. This adds a purpose-built dark-room option without changing Vela Dark
+or any existing theme.
