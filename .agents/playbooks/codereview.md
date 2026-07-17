@@ -158,8 +158,15 @@ see the gate below):
    JSON envelope, payload not matching the schema, `verdict` not in the enum,
    `reviewed_sha` ≠ the dispatched head SHA, `base_sha` ≠ the dispatched base SHA,
    `guard_confirmed` not literally `true`} → the outcome is **not accepted**.
-   Re-prompt once with the schema restated; if it still fails, route the finding to
-   the owner as contested. A parse miss never silently becomes an accept. (The
+   **Extraction before rejection:** a prose-wrapped payload is not a parse miss —
+   scan it for candidate JSON objects, and when exactly one matches the schema, use
+   it; the review already happened, and surrounding prose is never an input to
+   acceptance. Zero or multiple schema matches → parse miss. On a parse miss,
+   re-prompt once for **re-emission only**: feed the reviewer its own output back
+   and ask for schema-only JSON — no re-review, no hint of the expected verdict.
+   If that still fails, route the finding to the owner as contested. Never re-run
+   a completed review to fix formatting. A parse miss never silently becomes an
+   accept. (The
    harness's JSON mode guarantees a valid *envelope*, not that the model filled the
    *payload* to schema — hence the inner parse, not envelope-validity alone.)
 4. **Record the verdict** into `.agents/review/findings/<id>.md` `## Reviewer

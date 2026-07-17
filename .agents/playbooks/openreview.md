@@ -73,9 +73,15 @@ never the reviewer — computes acceptance.** Fail closed: any of {non-zero exit
 missing/invalid JSON envelope, payload not matching the schema, `verdict` not in
 the enum, `reviewed_sha` ≠ the dispatched head SHA, `base_sha` ≠ the dispatched
 base SHA, `findings` non-empty with verdict `clean` or empty with verdict
-`findings`} → the outcome is **not** a clean pass. Re-prompt once with the
-schema restated; if it still fails, route to the owner as contested. A parse
-miss never silently becomes a clean verdict.
+`findings`} → the outcome is **not** a clean pass. **Extraction before
+rejection:** a prose-wrapped payload is not a parse miss — scan it for
+candidate JSON objects, and when exactly one matches the schema, use it; the
+review already happened, and surrounding prose is never an input to
+acceptance. Zero or multiple schema matches → parse miss. On a parse miss,
+re-prompt once for **re-emission only**: feed the reviewer its own output back
+and ask for schema-only JSON — no re-review, no hint of the expected verdict.
+If that still fails, route to the owner as contested. Never re-run a completed
+review to fix formatting. A parse miss never silently becomes a clean verdict.
 
 ## Downstream: findings enter the codereview machinery
 
