@@ -13,13 +13,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
   agree, as of `49c0dc9`).
 
-- **UI EMBELLISHMENTS SLICE 3 AUTHORIZED 2026-07-16; IMPLEMENTATION ACTIVE.**
-  The current-tree contract in `.agents/plans/ui-embellishments.md` removes
-  stale hub/hover work, adds the missing reduced-motion delay rail, and
-  specifies the exact empty taxonomy plus deterministic guards. Primary Claude
-  Fable 5 accepted exact plan head `4922adf` against base `a562fe4` with no
-  findings after a fail-closed schema retry. The code gate is open; no owner
-  playtest is required.
+- **UI EMBELLISHMENTS SLICE 3 IMPLEMENTED; EXTERNAL CODE REVIEW ACTIVE.**
+  The approved motion and designed-empty-state implementation lands through
+  `841f749`. Every focused source family was separately mutation-proven, three
+  initially vacuous guards were repaired and re-proven, normal and verified
+  reduced-motion focused Linux runs pass, final dark/light screenshots were
+  inspected, and the complete fresh-binary real-app suite passes 27/27. Primary
+  Claude Fable 5 and independent Agy / Gemini 3.1 Pro (High) review are the
+  remaining gates before the 0.1.56 version bump and Slice 3 closure. No owner
+  playtest is required. Exact evidence: `.agents/review/findings/ui-s3.md`.
 
 - **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
   theme-correct foundation in `.agents/plans/ui-embellishments.md` now owns
@@ -31,7 +33,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   4.5 each accepted the exact code range with separate red/green guard proofs
   and no material findings. The owner is unavailable to playtest this track;
   no playtest is required or pending. Slice 2 is complete below; Slice 3 is
-  owner-authorized and implementation-active.
+  implemented and in external code review above.
   Exact review evidence: `.agents/review/findings/ui-s1.md`.
 
 - **UI EMBELLISHMENTS SLICE 2 COMPLETE at 0.1.55 (owner go 2026-07-16).** One
@@ -44,7 +46,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   and six dark/light screenshots were inspected. Primary Claude Fable 5 and the
   owner-authorized independent Agy/Gemini substitute accepted the exact range
   with separate guard proofs and no findings. No owner playtest is required or
-  pending. Slice 3 is owner-authorized and implementation-active above. Exact
+  pending. Slice 3 is implemented and in external code review above. Exact
   evidence:
   `.agents/review/findings/ui-s2.md`.
 
@@ -348,7 +350,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   behind the functional
   work above; "queue first, v1 polish goes to the bottom", where "queue" means the
   work queue, not the play queue):** (1) UI embellishments — Slice 1 is complete
-  at 0.1.53 and Slice 2 at 0.1.55; Slice 3 is owner-authorized and active
+  at 0.1.53 and Slice 2 at 0.1.55; Slice 3 is implemented and in external review
   (`.agents/plans/ui-embellishments.md`; vibrancy CUT — Linux/Wayland first;
   motion SUBTLE, binding); (2) docs polish — a README that
   entices users to try it; (3) graphics + screenshots for socials. 2 and 3 are
@@ -393,7 +395,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/per-surface-status.md` (COMPLETE — owner playtest outstanding)
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
-- `.agents/plans/ui-embellishments.md` (SLICES 1–2 COMPLETE; SLICE 3 IMPLEMENTATION ACTIVE — v1.0.0 item 1)
+- `.agents/plans/ui-embellishments.md` (SLICES 1–2 COMPLETE; SLICE 3 IMPLEMENTED,
+  EXTERNAL CODE REVIEW ACTIVE — v1.0.0 item 1)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

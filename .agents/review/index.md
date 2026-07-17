@@ -10,6 +10,17 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Loop `ui-s3` ACTIVE at Vela 0.1.55: the approved motion and designed-empty-state
+slice is implemented through exact production head `841f749`. Every focused
+behavior was separately mutation-proven; three initially vacuous source guards
+were repaired and re-proven, reduced-motion duration and transition regressions
+failed in the real app, and the existing image-polish geometry guard caught the
+detail entrance's transient document scrollbar before viewport containment
+restored it. Canonical frontend verification, fresh normal/reduced focused runs,
+and the complete fresh-binary Linux real-app suite 27/27 pass. Primary Claude
+Fable 5 and independent Agy / Gemini 3.1 Pro (High) code review are pending over
+one exact pinned range. Detail: `.agents/review/findings/ui-s3.md`.
+
 Loop `ui-s2` CLOSED 2026-07-16 at Vela 0.1.55 (`49c0dc9`): media images now use
 a source-aware 180ms opacity reveal over fixed fallbacks; the functional Plex
 QR remains the sole no-fade exception. All focused guard families were
