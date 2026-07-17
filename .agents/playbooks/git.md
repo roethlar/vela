@@ -16,6 +16,10 @@ tab-completable `/git <operation> …`):
 - `git add-remote <server>`
 - `git branch-cleanup`
 
+Scope words are literal — `push remote`, `push all` — never composed forms
+like `push remote(all)`; suggest follow-ups to the owner in exactly this
+grammar.
+
 This file is durable guidance; it defers to the repo's `AGENTS.md` (Git
 Safety above all) and `.agents/` layout wherever they overlap.
 
@@ -126,3 +130,8 @@ what the owner must run to log in, and stop.
   `<server>` gets a plain-English question, not a best guess.
 - **Batched questions.** A wall of decisions is how mistakes get approved;
   one question, one answer, then the next.
+- **Approval as an override.** When a tool or harness warns an action is
+  destructive, prior approval of a *different* step is not a license to
+  proceed. Re-verify the fact that makes this action safe (e.g., the work
+  is fully contained in the main branch), state that verification, then
+  proceed — or ask again.
