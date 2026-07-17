@@ -1,5 +1,5 @@
 // Bug 3 (owner UX ruling 2026-07-05): clicking a source must never dead-end on
-// "Nothing on your home screen yet". Two directions, one scenario, both legs
+// the designed empty-Home state. Two directions, one scenario, both legs
 // now server sources (the original local leg died with the local sources):
 //   FIX — a server whose per-source Home settles empty (no Resume/Latest
 //     hubs, no recents) but which has library sections lands on its content,
@@ -61,7 +61,7 @@ export default {
       'the hub-serving per-source Home rail (Recently Added)',
     );
     const jfHome = await driver.exec(`return {
-      deadEnd: document.body.innerText.includes('Nothing on your home screen yet'),
+      deadEnd: document.body.innerText.includes('No titles on Home yet'),
       browsed: !!document.querySelector('.crumbs'),
       homeActive: [...document.querySelectorAll('button.sideitem')]
         .some(b => b.classList.contains('active') && b.textContent.trim() === 'Home'),
@@ -84,7 +84,7 @@ export default {
       'the hub-less source auto-opened onto its content grid',
     );
     const emptyView = await driver.exec(`return {
-      deadEnd: document.body.innerText.includes('Nothing on your home screen yet'),
+      deadEnd: document.body.innerText.includes('No titles on Home yet'),
       browsed: !!document.querySelector('.crumbs'),
     }`);
     assert.ok(!emptyView.deadEnd, 'clicking the hub-less source must not dead-end');
@@ -103,11 +103,11 @@ export default {
     await driver.click(homeBtn);
     await driver.waitFor(
       `return !!document.querySelector('button.poster[aria-label^="Empty Home Movie"]')
-       || document.body.innerText.includes('Nothing on your home screen yet')`,
+       || document.body.innerText.includes('No titles on Home yet')`,
       'the scoped Home to settle (content or dead-end)',
     );
     const afterHome = await driver.exec(`return {
-      deadEnd: document.body.innerText.includes('Nothing on your home screen yet'),
+      deadEnd: document.body.innerText.includes('No titles on Home yet'),
       onContent: !!document.querySelector('button.poster[aria-label^="Empty Home Movie"]'),
     }`);
     assert.ok(!afterHome.deadEnd, 'the Home button on a scoped hub-less source must not dead-end (finding 1)');

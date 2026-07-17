@@ -2,6 +2,7 @@
   import { invoke, convertFileSrc } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
   import { onMount, onDestroy, tick } from "svelte";
+  import EmptyState from "$lib/EmptyState.svelte";
   import Settings from "$lib/Settings.svelte";
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
@@ -606,11 +607,10 @@
   }
 
   // Bug 3 (owner UX ruling 2026-07-05): a scoped source's per-source Home must
-  // never terminate on the "Nothing on your home screen yet" dead-end. A
-  // local/SMB/SSH source contributes no Home hubs and a fresh mount has no
-  // recents, so its Home settles empty even though its library sections are in
-  // the sidebar. When that happens (and the source has sections), land on its
-  // content by opening the first section.
+  // never terminate on the empty-Home dead-end. A connected media server can
+  // expose library sections without contributing Home hubs or unfinished
+  // recents, so its scoped Home settles empty even though browseable content is
+  // in the sidebar. When that happens, land on its first section.
   //
   // This is REACTIVE rather than a tail of selectSource() so it fires on every
   // path that can reach an empty scoped Home — clicking the source, the Home
@@ -984,8 +984,8 @@
         // (the r3-2 design) invalidated whatever listing was already in
         // flight — and when this leg then returned early because the sections
         // fetch FAILED, that listing's result was discarded with nothing to
-        // replace it: the library rendered as EMPTY ("Nothing in this view
-        // yet"), unable to paginate, until the user navigated away (codex r5).
+        // replace it: the library rendered an authoritative empty state,
+        // unable to paginate, until the user navigated away (codex r5).
         // The in-flight load is left alone; it populates the grid normally,
         // and if this leg does reach its reset, the older generation is
         // discarded then — the machinery's ordinary behavior. What the early
@@ -2340,13 +2340,14 @@
   {:else if mode === "playlists"}
     <PlaylistsView sourceVersion={playlistVersion} {posterSrc} />
   {:else if !authenticated}
-    <div class="empty">
-      <div class="empty-icon" aria-hidden="true"><Icon name="film" size={46} stroke={1.5} /></div>
-      <h2>Welcome to Vela</h2>
-      <p class="muted empty-sub">
-        Connect Plex, Jellyfin, or Emby to start browsing your library in HDR.
-      </p>
-      <button class="primary" onclick={() => (showSettings = true)}>Add a source</button>
+    <div class="empty-center">
+      <EmptyState
+        icon="film"
+        heading="Welcome to Vela"
+        hint="Connect Plex, Jellyfin, or Emby to start browsing your library in HDR."
+      >
+        <button class="primary" onclick={() => (showSettings = true)}>Add a source</button>
+      </EmptyState>
     </div>
   {:else if detailView}
     <!-- The info surface replaces the content area but leaves home/browse
@@ -2403,9 +2404,25 @@
       {@render skelRails()}
     {:else if hubs.length === 0 && heroItems.length === 0}
       <!-- The hero is fed by Vela's own recents, independent of hubs: a
-           local-only setup with an unfinished play must still show
-           Continue Watching (2026-07-04 hero decision). -->
-      <div class="muted center">Nothing on your home screen yet — pick a library from the sidebar.</div>
+           connected source with an unfinished play must still show Continue
+           Watching (2026-07-04 hero decision). -->
+      {#if !error}
+        <div class="empty-center">
+          {#if sections.length === 0}
+            <EmptyState
+              icon="film"
+              heading="No libraries found"
+              hint="Check the connected server, then use Refresh libraries."
+            />
+          {:else}
+            <EmptyState
+              icon="film"
+              heading="No titles on Home yet"
+              hint="Choose a library from the sidebar to start browsing."
+            />
+          {/if}
+        </div>
+      {/if}
     {:else}
       <div class="home">
         {#if heroItems.length > 0}
@@ -2447,9 +2464,30 @@
       {/if}
     </div>
     {#if items.length === 0}
-      <div class="muted center">
-        {searchTerm ? "No matches found." : "Nothing in this view yet."}
-      </div>
+      {#if !error}
+        <div class="empty-center">
+          {#if searchTerm}
+            <EmptyState
+              icon="film"
+              heading={`No matches for “${searchTerm}”`}
+              hint="Check the spelling or try a broader search."
+              announce
+            />
+          {:else if personView}
+            <EmptyState
+              icon="film"
+              heading={`No titles found for ${personView.name}`}
+              hint="Go back to keep browsing."
+            />
+          {:else}
+            <EmptyState
+              icon="film"
+              heading="No titles in this view"
+              hint="Go back, refresh libraries, or choose another library."
+            />
+          {/if}
+        </div>
+      {/if}
     {:else}
       <main class="grid" bind:this={gridEl} onscroll={onScroll}>
         {#each items as item, i (item.ratingKey)}
@@ -2525,7 +2563,7 @@
           {#if addMenuLoading && addMenuPlaylists.length === 0}
             <div class="addempty" role="status">Loading playlists…</div>
           {:else if addMenuPlaylists.length === 0}
-            <div class="addempty">No playlists yet.</div>
+            <div class="addempty">No playlists yet — create one in Playlists.</div>
           {:else}
             {#each addMenuPlaylists as saved (saved.id)}
               <button role="menuitem" disabled={addMenuLoading} onclick={() => addToPlaylist(saved)}>
@@ -2788,6 +2826,7 @@
     gap: 0.4rem;
     padding: 0.7rem 1.25rem 0;
     flex-wrap: wrap;
+    animation: vela-slide-down 0.16s var(--ease);
   }
   .crumbs .sort {
     margin-left: auto;
@@ -2920,6 +2959,19 @@
     perspective: 1200px;
     overflow: hidden;
   }
+  .flow::after {
+    content: "";
+    position: absolute;
+    z-index: 0;
+    left: 50%;
+    bottom: 0.15rem;
+    width: min(62%, 34rem);
+    height: 11%;
+    transform: translateX(-50%);
+    background: radial-gradient(ellipse at center, var(--shadow-lg), transparent 72%);
+    filter: blur(8px);
+    pointer-events: none;
+  }
   .flowcard {
     appearance: none;
     background: transparent;
@@ -2933,6 +2985,7 @@
     left: 50%;
     height: 100%;
     aspect-ratio: 16 / 9;
+    will-change: transform;
     transition:
       transform 0.32s var(--ease),
       filter 0.32s var(--ease);
@@ -3070,30 +3123,9 @@
     align-items: center;
     gap: 0.4rem;
   }
-  .empty {
+  .empty-center {
     margin: auto;
-    text-align: center;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.9rem;
-  }
-  .empty-icon {
-    color: var(--accent);
-    line-height: 0;
-    margin-bottom: 0.2rem;
-  }
-  .empty h2 {
-    margin: 0;
-    color: var(--text);
-    font-size: 1.5rem;
-    font-weight: 700;
-    letter-spacing: -0.01em;
-  }
-  .empty-sub {
-    margin: 0;
-    max-width: 24rem;
-    line-height: 1.5;
+    width: min(100%, 32rem);
   }
 
   /* Loading skeletons */
@@ -3130,7 +3162,7 @@
     cursor: pointer;
     line-height: 0;
     box-shadow: 0 6px 24px var(--shadow-md);
-    transition: transform 0.1s ease;
+    transition: transform 0.1s var(--ease);
   }
   .qr:hover {
     transform: scale(1.02);
@@ -3252,6 +3284,7 @@
     align-items: center;
     justify-content: center;
     box-shadow: 0 1px 4px var(--shadow-md);
+    animation: vela-pop 0.13s var(--ease);
   }
 
   /* Right-click context menu */

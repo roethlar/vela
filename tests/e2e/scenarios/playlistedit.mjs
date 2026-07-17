@@ -262,7 +262,7 @@ export default {
     );
     await driver.click(confirmDelete);
     await driver.waitFor(
-      `return document.querySelector('section.playlists')?.textContent.includes('No playlists yet.') ?? false`,
+      `return document.querySelector('section.playlists')?.textContent.includes('No playlists yet') ?? false`,
       'the empty playlist list after deletion',
     );
     await pollUntil(() => readStore().playlists.length === 0, 'playlist deletion on disk');

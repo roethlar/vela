@@ -426,8 +426,11 @@ textarea:focus-visible,
   *::before,
   *::after {
     animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
+    transition-delay: 0ms !important;
+    translate: none !important;
   }
 }
 
@@ -577,6 +580,10 @@ h2 {
   text-decoration: underline;
 }
 
+button:active:not(:disabled) {
+  translate: 0 1px;
+}
+
 button.primary {
   display: inline-flex;
   align-items: center;
@@ -593,15 +600,11 @@ button.primary {
   white-space: nowrap;
   transition:
     background 0.15s var(--ease),
-    transform 0.08s var(--ease);
+    translate 0.08s var(--ease);
 }
 
 button.primary:hover:not(:disabled) {
   background: var(--accent-hover);
-}
-
-button.primary:active:not(:disabled) {
-  transform: translateY(1px);
 }
 
 button.primary:disabled {

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import EmptyState from "$lib/EmptyState.svelte";
   import Icon from "$lib/Icon.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
@@ -241,7 +242,7 @@
       </div>
     {/if}
     {#if loadingDetail && !playlist}
-      <div class="empty" aria-busy="true">Loading playlist…</div>
+      <div class="loadingstate" aria-busy="true">Loading playlist…</div>
     {:else if playlist}
       <div class="heading">
         <div>
@@ -259,7 +260,11 @@
       </div>
 
       {#if playlist.items.length === 0}
-        <div class="empty">This playlist is empty. Add items from any title's context menu.</div>
+        <EmptyState
+          icon="playlist"
+          heading="This playlist is empty"
+          hint="Use a title's context menu to add it here."
+        />
       {:else}
         <ol class="entries" aria-label="Playlist items">
           {#each playlist.items as entry, index (entry.id)}
@@ -332,10 +337,14 @@
       </div>
     {/if}
     {#if loadingList && playlists.length === 0}
-      <div class="empty" aria-busy="true">Loading playlists…</div>
-    {:else if playlists.length === 0}
-      <div class="empty">No playlists yet. Create one here, then add titles from their context menus.</div>
-    {:else}
+      <div class="loadingstate" aria-busy="true">Loading playlists…</div>
+    {:else if playlists.length === 0 && !listStatus?.failed}
+      <EmptyState
+        icon="playlist"
+        heading="No playlists yet"
+        hint="Name one above, then add titles from their context menus."
+      />
+    {:else if playlists.length > 0}
       <div class="playlistgrid">
         {#each playlists as saved (saved.id)}
           <button onclick={() => openPlaylist(saved.id)} aria-label={`Open ${saved.name}, ${saved.itemCount} items`}>
@@ -368,7 +377,7 @@
   input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
   .status { color: var(--text-2); background: var(--surface); border-left: 3px solid var(--accent); border-radius: 5px; padding: 0.55rem 0.75rem; margin: 0.8rem 0; }
   .status.failure { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
-  .empty { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 12px; padding: 2rem; text-align: center; }
+  .loadingstate { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 12px; padding: 2rem; text-align: center; }
   .playlistgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); gap: 0.8rem; }
   .playlistgrid > button { display: grid; grid-template-columns: auto 1fr; grid-template-rows: auto auto; gap: 0.2rem 0.7rem; align-items: center; text-align: left; background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 12px; padding: 1rem; cursor: pointer; }
   .playlistgrid .listicon { grid-row: 1 / 3; color: var(--accent); }

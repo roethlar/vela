@@ -860,7 +860,7 @@ export default {
     // leg then FAILS. The r3-2 design claimed `loadGen` at the click, which
     // invalidated that listing — and since the leg returned early, its result
     // was discarded with nothing to replace it: the library rendered EMPTY
-    // ("Nothing in this view yet"), unable to paginate, until the user
+    // (the designed empty-state surface), unable to paginate, until the user
     // navigated away (codex r5; r4's skeleton assertion passed straight
     // through it, because a released flag is not the same as a usable grid).
     // The in-flight load is now left alone: it populates the grid, and the

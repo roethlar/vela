@@ -12,7 +12,7 @@ import { pollUntil, openLibraryGrid, goHome, playAndQuit, makeClips, mockSource,
 import { startMockJellyfin } from '../mockjf.mjs';
 
 const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Resume Mock Movie"]`;
-const EMPTY_HOME = 'Nothing on your home screen yet';
+const EMPTY_HOME = 'No titles on Home yet';
 
 let mock;
 

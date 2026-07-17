@@ -215,17 +215,18 @@
       <section class="section">
         <h2>Cast</h2>
         <div class="castrow">
-          {#each detail.cast as c (c.name + (c.role ?? ""))}
+          {#each detail.cast as c, i (c.name + (c.role ?? ""))}
             {#if c.personKey && onPerson}
               <button
                 class="castcard clickable"
+                style="animation-delay: {Math.min(i, 14) * 22}ms;"
                 onclick={() => onPerson!(c.personKey!, "actor", c.name)}
                 title="Browse titles with {c.name}"
               >
                 {@render castBody(c)}
               </button>
             {:else}
-              <div class="castcard">{@render castBody(c)}</div>
+              <div class="castcard" style="animation-delay: {Math.min(i, 14) * 22}ms;">{@render castBody(c)}</div>
             {/if}
           {/each}
         </div>
@@ -259,6 +260,7 @@
     flex: 1;
     min-height: 0;
     overflow-y: auto;
+    animation: vela-rise 200ms var(--ease) backwards;
   }
   .backdrop {
     position: absolute;
@@ -426,6 +428,7 @@
   .castcard {
     flex: 0 0 92px;
     text-align: center;
+    animation: vela-rise 0.3s var(--ease) backwards;
   }
   .headshotframe {
     position: relative;

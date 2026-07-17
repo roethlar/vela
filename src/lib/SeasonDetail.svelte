@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import EmptyState from "$lib/EmptyState.svelte";
   import Icon from "$lib/Icon.svelte";
   import { imageReveal } from "$lib/imageReveal";
   import { detailKeyOf, type Detail, type Item, type PersonRef, type PlayIntent } from "$lib/types";
@@ -336,8 +337,26 @@
             {/each}
           </div>
         {/if}
+      {:else if loadingList}
+        <div class="panelpending" aria-busy="true">Loading episodes…</div>
+      {:else if listError}
+        <!-- The list owns its failure copy; do not imply that the season is empty. -->
+      {:else if episodes.length === 0}
+        <div class="panelempty">
+          <EmptyState
+            icon="film"
+            heading="No episodes in this season"
+            hint="Go back and choose another season."
+          />
+        </div>
       {:else}
-        <div class="panelempty">Select an episode.</div>
+        <div class="panelempty">
+          <EmptyState
+            icon="film"
+            heading="Choose an episode"
+            hint="Select one from the list to see details and playback options."
+          />
+        </div>
       {/if}
     </div>
   </div>
@@ -350,6 +369,7 @@
     display: flex;
     flex-direction: column;
     padding: 1rem 1.5rem 0;
+    animation: vela-rise 200ms var(--ease) backwards;
   }
   .topbar {
     display: flex;
@@ -418,9 +438,15 @@
     cursor: pointer;
     text-align: left;
     color: var(--text);
+    transition:
+      background 0.15s var(--ease),
+      border-color 0.15s var(--ease),
+      translate 0.12s var(--ease);
   }
   .eprow:hover {
     background: var(--bg-blur);
+    border-color: var(--border-subtle);
+    translate: 2px 0;
   }
   .eprow.selected {
     border-color: var(--accent);
@@ -594,9 +620,13 @@
     font-size: 0.88rem;
     color: var(--text-2);
   }
-  .panelempty {
-    color: var(--text-muted);
+  .panelpending {
     padding: 2rem 0;
+    color: var(--text-muted);
+  }
+  .panelempty {
+    max-width: 34rem;
+    margin: 0 auto;
   }
   .eprow.skel .epthumb {
     background: var(--surface-sunken);

@@ -1,5 +1,6 @@
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
+  import EmptyState from "$lib/EmptyState.svelte";
   import Icon from "$lib/Icon.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
@@ -119,9 +120,13 @@
   {/if}
 
   {#if loading}
-    <div class="empty" aria-busy="true">Loading server playlist…</div>
+    <div class="loadingstate" aria-busy="true">Loading server playlist…</div>
   {:else if items.length === 0 && !status?.failed}
-    <div class="empty">This server playlist is empty.</div>
+    <EmptyState
+      icon="playlist"
+      heading="This server playlist is empty"
+      hint={`Add videos on ${playlist.sourceName}, then reopen it here.`}
+    />
   {:else if items.length > 0}
     <ol class="entries" aria-label="Server playlist items">
       {#each items as item, index (`${item.ratingKey}:${index}`)}
@@ -174,7 +179,7 @@
   .muted { color: var(--text-muted); margin: 0.2rem 0 0; }
   .status { color: var(--text-2); background: var(--surface); border-left: 3px solid var(--accent); border-radius: 5px; padding: 0.55rem 0.75rem; margin: 0.8rem 0; }
   .status.failure { color: var(--danger-text); border-color: var(--danger-border); background: var(--danger-bg); }
-  .empty { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 12px; padding: 2rem; text-align: center; }
+  .loadingstate { color: var(--text-muted); border: 1px dashed var(--border); border-radius: 12px; padding: 2rem; text-align: center; }
   .entries { list-style: none; padding: 0; margin: 1rem 0; display: flex; flex-direction: column; gap: 0.5rem; }
   .entries li { display: grid; grid-template-columns: 2rem 3rem minmax(8rem, 1fr) auto; gap: 0.7rem; align-items: center; padding: 0.55rem; background: var(--surface); border: 1px solid var(--border-subtle); border-radius: 10px; }
   .position { color: var(--text-dim); text-align: center; font-variant-numeric: tabular-nums; }

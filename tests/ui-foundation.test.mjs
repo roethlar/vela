@@ -124,7 +124,13 @@ test("app.css exclusively owns the six shared visual primitives", () => {
   const primaryStates = [
     ["button.primary", ".primary"],
     ["button.primary:hover:not(:disabled)", "button.primary:hover", ".primary:hover:not(:disabled)", ".primary:hover"],
-    ["button.primary:active:not(:disabled)", "button.primary:active", ".primary:active:not(:disabled)", ".primary:active"],
+    [
+      "button.primary:active:not(:disabled)",
+      "button.primary:active",
+      ".primary:active:not(:disabled)",
+      ".primary:active",
+      "button:active:not(:disabled)",
+    ],
     ["button.primary:disabled", ".primary:disabled"],
   ];
   for (const alternatives of primaryStates) {
