@@ -1,10 +1,11 @@
 # Review status
 
 Workflow: plan/whole-change review uses `.agents/playbooks/openreview.md`; code
-finding verification uses `.agents/playbooks/codereview.md`. Claude is the
-primary reviewer for Codex-authored plans and code; Agy with Gemini 3.1 Pro is
-the independent second reviewer. Historical Codex and Grok loops remain
-evidence but are not precedent for current reviewer selection or self-review.
+finding verification uses `.agents/playbooks/codereview.md`. Claude Fable 5 is
+the required external reviewer for Codex-authored plans and code. Additional
+reviewers are owner-requested only; Agy is not used. Historical Agy and Grok
+loops remain valid evidence but are not precedent for current reviewer
+selection or self-review.
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
@@ -20,8 +21,9 @@ restored it. Canonical frontend verification, fresh normal/reduced focused runs,
 and the complete fresh-binary Linux real-app suite 27/27 pass. Primary Claude
 Code 2.1.212 / Fable 5 accepted exact head `6075f52` against base `c28dbd2` with
 an independently executed production-mutation proof, `guard_confirmed:true`,
-and no material finding. Independent Agy / Gemini 3.1 Pro (High) review is
-pending over the same pinned range. Detail: `.agents/review/findings/ui-s3.md`.
+and no material finding. The owner removed Agy and the default secondary-review
+gate on 2026-07-17; code review is closed and the version bump remains. Detail:
+`.agents/review/findings/ui-s3.md`.
 
 Loop `ui-s2` CLOSED 2026-07-16 at Vela 0.1.55 (`49c0dc9`): media images now use
 a source-aware 180ms opacity reveal over fixed fallbacks; the functional Plex

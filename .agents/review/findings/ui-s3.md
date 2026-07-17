@@ -3,8 +3,8 @@
 **Severity**: MEDIUM — abrupt navigation, incomplete reduced-motion handling,
 and generic or misleading empty states made otherwise valid UI states feel
 broken or unfinished.
-**Status**: Primary Claude accepted with `guard_confirmed:true`; independent
-secondary review active at Vela 0.1.55
+**Status**: Primary Claude accepted with `guard_confirmed:true`; review closed
+by owner ruling at Vela 0.1.55; version bump pending
 **Branch**: `main` (approved Slice 3 implementation)
 **Base**: `c28dbd24bf6f40f57e96e59146b5d9ffc064334d`
 **Implementation**: `78b2f79` through
@@ -128,7 +128,10 @@ set 17/17 green, and confirmed an empty diff and status at the exact reviewed
 SHA. The orchestrator verified the red and green output, exact head, and clean
 worktree before removing it.
 
-Independent Agy / Gemini 3.1 Pro (High) review of the same exact range remains
-pending. It does not receive the primary verdict and does not count without its
-own executed red/restored-green guard proof, schema-valid exact SHAs, and clean
-disposable worktree.
+**Secondary-review ruling — recorded 2026-07-17 — waived.** Agy's bounded
+headless probes could not produce a usable response because its command tool was
+permission-denied even with the documented noninteractive override. No Agy
+verdict was requested or counted. The owner directed the agent to stop using
+Agy, ruled Fable the materially important reviewer, and removed the default
+secondary-review gate. Claude's accepted primary verdict closes code review for
+this slice.

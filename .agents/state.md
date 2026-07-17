@@ -13,16 +13,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
   agree, as of `49c0dc9`).
 
-- **UI EMBELLISHMENTS SLICE 3 IMPLEMENTED; EXTERNAL CODE REVIEW ACTIVE.**
+- **UI EMBELLISHMENTS SLICE 3 IMPLEMENTED; REVIEW ACCEPTED; VERSION BUMP PENDING.**
   The approved motion and designed-empty-state implementation lands through
   `841f749`. Every focused source family was separately mutation-proven, three
   initially vacuous guards were repaired and re-proven, normal and verified
   reduced-motion focused Linux runs pass, final dark/light screenshots were
   inspected, and the complete fresh-binary real-app suite passes 27/27. Primary
   Claude Fable 5 accepted exact reviewed head `6075f52` with an independent
-  red/restored-green guard proof and no material finding. Independent Agy /
-  Gemini 3.1 Pro (High) review is the remaining gate before the 0.1.56 version
-  bump and Slice 3 closure. No owner playtest is required. Exact evidence:
+  red/restored-green guard proof and no material finding. The owner then removed
+  Agy and the default secondary-review gate. The 0.1.56 version bump and final
+  closure are the only remaining work. No owner playtest is required. Exact evidence:
   `.agents/review/findings/ui-s3.md`.
 
 - **UI EMBELLISHMENTS SLICE 1 COMPLETE at 0.1.53 (owner go 2026-07-16).** The
@@ -398,7 +398,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
 - `.agents/plans/ui-embellishments.md` (SLICES 1–2 COMPLETE; SLICE 3 IMPLEMENTED,
-  EXTERNAL CODE REVIEW ACTIVE — v1.0.0 item 1)
+  PRIMARY REVIEW ACCEPTED, VERSION BUMP PENDING — v1.0.0 item 1)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

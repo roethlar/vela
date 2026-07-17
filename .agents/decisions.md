@@ -805,6 +805,8 @@ Status: APPROVED (owner, 2026-07-14), AMENDED by the owner 2026-07-15.
 STANDING - applies to every review loop, not just the one that produced it.
 Carved out of `.agents/state.md` on 2026-07-14 so it survives that entry's
 rotation to the archive.
+The default reviewer-count rule is superseded by the 2026-07-17 Claude-only
+decision below; the author/external-review boundary remains standing.
 
 Decision:
 Reviewers must be independent of the author harness/model. A Codex author may
@@ -1002,7 +1004,7 @@ and owner-action boundary.
 
 ## 2026-07-16 - Agy with Gemini 3.1 Pro replaces Grok as the secondary reviewer
 
-Status: APPROVED (owner, 2026-07-16). STANDING.
+Status: SUPERSEDED by the 2026-07-17 Claude-only decision below.
 
 Decision:
 Claude remains the primary external reviewer for Codex-authored plans and
@@ -1021,6 +1023,29 @@ Only the named secondary-reviewer selection in the preceding 2026-07-16
 Claude-primary decision. Claude's primary role and all distinct-playbook,
 independence, pinned-SHA, fail-closed, guard-proof, and owner-action boundaries
 remain unchanged.
+
+## 2026-07-17 - Claude is the sole required external reviewer
+
+Status: APPROVED (owner, 2026-07-17). STANDING.
+
+Decision:
+Claude Fable 5 remains the required primary external reviewer for
+Codex-authored plans and code. Do not use Agy for new reviews. A second external
+reviewer is not required by default and is invoked only when the owner
+explicitly requests one for a task. Historical Agy and Grok verdicts remain
+valid evidence. Codex never reviews its own work.
+
+Reason:
+Agy's headless permission path consumed review effort without producing a
+verdict, while the owner considers Fable the materially important reviewer.
+The owner explicitly directed the agent to stop using Agy rather than spend
+more tokens recovering its harness.
+
+Supersedes:
+The default two-external-reviewer count in the 2026-07-14 review protocol and
+the Agy secondary selection above. It preserves Claude's primary role, neutral
+goal-first prompt, exact-SHA scope, fail-closed result parsing, independent
+guard proof for code, and every author/self-review and owner-action boundary.
 
 ## 2026-07-16 - Natural episode completion owns watched state and successor repaint
 
