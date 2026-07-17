@@ -192,6 +192,48 @@ async function closeSettings(driver) {
   );
 }
 
+async function assertViewportFit(driver, label) {
+  const geometry = await driver.exec(`
+    const rect = (selector) => {
+      const node = document.querySelector(selector);
+      if (!node) return null;
+      const box = node.getBoundingClientRect();
+      return { left: box.left, right: box.right, width: box.width };
+    };
+    return {
+      innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      bodyWidth: document.body.scrollWidth,
+      header: rect('header'),
+      search: rect('header .search'),
+      settings: rect('header .gear'),
+      footer: rect('.buildinfo'),
+    };
+  `);
+  const detail = `${label} viewport geometry: ${JSON.stringify(geometry)}`;
+  assert.ok(geometry.documentWidth <= geometry.innerWidth + 1, detail);
+  assert.ok(geometry.bodyWidth <= geometry.innerWidth + 1, detail);
+  for (const [surface, rect] of Object.entries({
+    header: geometry.header,
+    search: geometry.search,
+    settings: geometry.settings,
+    footer: geometry.footer,
+  })) {
+    assert.ok(rect, `${label} ${surface} must render`);
+    assert.ok(rect.left >= -1 && rect.right <= geometry.innerWidth + 1, detail);
+  }
+}
+
+async function captureSettled(driver, screenshot, name, label) {
+  await driver.waitFor(
+    `return document.getAnimations().every((animation) =>
+      animation.playState === 'finished' || animation.playState === 'idle')`,
+    `${label} animations to settle for screenshot inspection`,
+  );
+  await assertViewportFit(driver, label);
+  await screenshot(name);
+}
+
 async function chooseTheme(driver, label, id) {
   await openSettings(driver);
   await driver.click(
@@ -540,7 +582,7 @@ export default {
         'Refresh libraries must issue a new Resume request',
       );
       await assertHeroMotion(driver, ease);
-      await screenshot('01-dark-home');
+      await captureSettled(driver, screenshot, '01-dark-home', 'dark Home');
 
       await clickSidebar(driver, 'Motion Source');
       await clickSidebar(driver, 'Motion Movies');
@@ -566,7 +608,7 @@ export default {
       } else {
         assertTransition(detailPrimary, 'translate', 80, ease, 'detail primary action');
       }
-      await screenshot('02-dark-detail');
+      await captureSettled(driver, screenshot, '02-dark-detail', 'dark item detail');
 
       await driver.click(await driver.find('css selector', '.crumbs button.back'));
       await clickSidebar(driver, 'Empty Library');
@@ -588,7 +630,12 @@ export default {
 
       await chooseTheme(driver, 'One Light', 'one-light');
       await closeSettings(driver);
-      await screenshot('03-one-light-empty-library');
+      await captureSettled(
+        driver,
+        screenshot,
+        '03-one-light-empty-library',
+        'One Light empty library',
+      );
 
       const search = await driver.find(
         'css selector',
@@ -649,7 +696,12 @@ export default {
         'This server playlist is empty',
         'Add videos on Motion Source, then reopen it here.',
       );
-      await screenshot('04-one-light-empty-server-playlist');
+      await captureSettled(
+        driver,
+        screenshot,
+        '04-one-light-empty-server-playlist',
+        'One Light empty server playlist',
+      );
 
       await clickSidebar(driver, 'Motion Shows');
       await clickPoster(driver, 'Empty Show');
@@ -665,7 +717,12 @@ export default {
         'zero episodes must be a settled empty result, not a loader',
       );
       await assertCrumbAndSurfaceMotion(driver, '.season', ease, 'season detail');
-      await screenshot('05-one-light-empty-season');
+      await captureSettled(
+        driver,
+        screenshot,
+        '05-one-light-empty-season',
+        'One Light empty season',
+      );
 
       assert.deepEqual(mainMock.state.contractViolations, []);
       assert.deepEqual(emptyMock.state.contractViolations, []);
