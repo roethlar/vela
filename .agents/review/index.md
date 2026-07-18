@@ -13,12 +13,14 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Finding `wsp-1` OPEN 2026-07-18: a successful manual watched-state edit
-currently blanks a paginated browse grid, reloads only page one, and loses the
-owner's scroll position. The approved fix buffers a fresh authoritative listing
-through the prior depth, publishes once under exact root/generation ownership,
-and restores scroll without weakening merged watch-state truth. Branch:
-`fix/wsp-1-preserve-watch-edit-position`. Detail:
+Finding `wsp-1` PENDING REVIEW 2026-07-18: a successful manual watched-state
+edit used to blank a paginated browse grid, reload only page one, and lose the
+owner's scroll position. The implemented fix buffers a fresh authoritative
+listing through the prior depth, publishes once under exact
+root/generation ownership, and restores scroll without weakening merged
+watch-state truth. Seven behavior families have separate production-mutation
+red/restored-green proof; exact review head and Claude verdict remain pending.
+Branch: `fix/wsp-1-preserve-watch-edit-position`. Detail:
 `.agents/review/findings/wsp-1.md`.
 
 Loop `oled-1` CLOSED 2026-07-17 at Vela 0.1.57 (`6029dbf`): OLED Black

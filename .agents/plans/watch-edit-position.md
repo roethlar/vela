@@ -1,9 +1,9 @@
 # Plan: successful watch edits preserve browse depth and position
 
-Status: **APPROVED 2026-07-18.** The owner directed autonomous execution
-through the recorded work queue, with each code change reviewed through the
-Claude `codereview` playbook. This plan is binding for finding `wsp-1`; a
-material scope expansion requires a new plan.
+Status: **IMPLEMENTED; CLAUDE CODEREVIEW PENDING 2026-07-18.** The owner
+directed autonomous execution through the recorded work queue, with each code
+change reviewed through the Claude `codereview` playbook. This plan remains
+binding for finding `wsp-1`; a material scope expansion requires a new plan.
 
 ## Owner-visible problem
 
@@ -47,10 +47,10 @@ tearing down the grid.
 
 ## Implementation slice
 
-One code/test/version commit on
-`fix/wsp-1-preserve-watch-edit-position`, followed by finding-specific Claude
-`codereview`. The ordinary code-change bump advances Vela from 0.1.57 to
-0.1.58 through `scripts/bump.sh`.
+One code/test/version implementation commit plus one test-only guard-hardening
+commit on `fix/wsp-1-preserve-watch-edit-position`, followed by
+finding-specific Claude `codereview`. The ordinary code-change bump advances
+Vela from 0.1.57 to 0.1.58 through `scripts/bump.sh`.
 
 ### Stable listing request
 
@@ -151,4 +151,3 @@ only and restoring from the committed head:
   the edit race accepted for v1.0, Home curation semantics, or page size.
 - No optimistic-only UI, targeted page splice, scroll-index heuristic, polling,
   artificial delay, or test-only production hook.
-
