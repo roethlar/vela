@@ -289,8 +289,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- None for the active queue item. The final real-Plex smoke remains deferred to
-  release preparation by owner choice.
+- The playback-window-state draft cannot receive its required Claude
+  `openreview` yet. Claude Code 2.1.214 has no owner-confirmed frontier/max pair
+  or grade in the machine-local harness cache. Recommended ruling: confirm
+  `claude-opus-4-8` at max effort as competitive for openreview. Code remains
+  blocked until routing, review, and plan approval are complete.
+- The final real-Plex smoke remains deferred to release preparation by owner
+  choice.
 
 ## Verification
 

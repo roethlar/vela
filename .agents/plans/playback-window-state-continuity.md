@@ -1,6 +1,12 @@
 # Plan: preserve mpv window state across automatic continuation
 
-Status: **DRAFT — OWNER APPROVAL AND CLAUDE OPENREVIEW PENDING.**
+Status: **DRAFT — CLAUDE OPENREVIEW ROUTING AND OWNER APPROVAL PENDING.**
+
+The machine-local Claude Code 2.1.214 cache currently confirms only the
+standard code-review pair. The `openreview` playbook requires a separately
+owner-confirmed frontier model/effort pair and grade before dispatch and
+forbids inference from the code-review mapping. No plan-review verdict exists
+until that routing decision is recorded.
 
 ## Goal
 
