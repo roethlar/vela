@@ -132,6 +132,20 @@ export function startMockJellyfin({
     // writable at all (grok r17; refresh case 25).
     unauthNextPlayed: false,
     playedDelayMs: 0, // one-shot delay for the next watch-state edit
+    // Default-disabled one-shot used by completion ordering scenarios. A
+    // successful PlayedItems POST for `completedItemId` makes exactly the
+    // chosen follow-up eligible for the faithful Resume hub. Failed edits do
+    // not apply or consume it.
+    resumeAfterPlayed: null, // { completedItemId, followupItemId, positionTicks }
+    exposeResumeAfterPlayed(completedItemId, followupItemId, positionTicks = 10_000_000) {
+      if (!state.userData[completedItemId]) {
+        throw new Error(`mockjf: no completed item '${completedItemId}'`);
+      }
+      if (!state.userData[followupItemId]) {
+        throw new Error(`mockjf: no Resume follow-up '${followupItemId}'`);
+      }
+      state.resumeAfterPlayed = { completedItemId, followupItemId, positionTicks };
+    },
     itemsDelayMs: 0, // one-shot delay for the next listing
     // Scan-trigger machinery (library-refresh-scan plan): VirtualFolders is
     // seeded from the served views but kept SEPARATE — a grouped view added
@@ -544,6 +558,7 @@ export function startMockJellyfin({
       if (unauthPlayed) state.unauthNextPlayed = false; // one-shot
       const playedDelay = state.playedDelayMs;
       if (playedDelay > 0) state.playedDelayMs = 0; // one-shot
+      const resumeTransition = state.resumeAfterPlayed;
       const respondPlayed = () => {
         if (unauthPlayed) {
           json({ error: "unauthenticated" }, 401);
@@ -554,8 +569,18 @@ export function startMockJellyfin({
         // MarkPlayed/MarkUnplayed zero PlaybackPositionTicks; Plex scrobble/
         // unscrobble clears the view offset) — keeping it would let a stale
         // resume point survive a "full reset" and pass the old assertions.
-        if (req.method === "POST")
+        if (req.method === "POST") {
           state.userData[played[1]] = { played: true, positionTicks: 0 };
+          if (resumeTransition?.completedItemId === played[1]) {
+            state.userData[resumeTransition.followupItemId] = {
+              played: false,
+              positionTicks: resumeTransition.positionTicks,
+            };
+            if (state.resumeAfterPlayed === resumeTransition) {
+              state.resumeAfterPlayed = null;
+            }
+          }
+        }
         if (req.method === "DELETE")
           state.userData[played[1]] = { played: false, positionTicks: 0 };
         json({});

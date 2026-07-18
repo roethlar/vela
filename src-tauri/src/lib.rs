@@ -209,9 +209,17 @@ pub fn run() {
                         let _ = app_handle.emit("continue-playing", completion.clone());
                     }
 
-                    // Always publish an authoritative post-curation refresh.
-                    // For an intermediate playlist boundary, advance_playlist
-                    // has already recorded the backend-owned successor recent.
+                    if let Err(error) =
+                        commands::mark_clean_completion_played(&state, &completion).await
+                    {
+                        eprintln!("vela: automatic played-state update failed: {error}");
+                    }
+
+                    // Publish the authoritative post-curation refresh after the
+                    // owning server's played-state attempt settles, so newly
+                    // eligible hub items are visible without a manual refresh.
+                    // This remains unconditional on server success: local
+                    // curation and any backend-owned successor are already final.
                     let source_id = completion
                         .item_key
                         .split_once(':')
@@ -224,12 +232,6 @@ pub fn run() {
                             "itemKey": completion.item_key.clone(),
                         }),
                     );
-
-                    if let Err(error) =
-                        commands::mark_clean_completion_played(&state, &completion).await
-                    {
-                        eprintln!("vela: automatic played-state update failed: {error}");
-                    }
                 }
             });
 
