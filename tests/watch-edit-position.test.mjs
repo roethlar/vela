@@ -71,6 +71,19 @@ function assignmentsTo(node, name) {
   );
 }
 
+function propertyAssignments(node, objectName, propertyName) {
+  return descendants(
+    node,
+    (child) =>
+      ts.isBinaryExpression(child) &&
+      child.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isPropertyAccessExpression(child.left) &&
+      ts.isIdentifier(child.left.expression) &&
+      child.left.expression.text === objectName &&
+      child.left.name.text === propertyName,
+  );
+}
+
 function compact(node) {
   return node.getText(sourceFile).replaceAll(/\s+/g, "");
 }
@@ -108,6 +121,15 @@ test("successful manual watch edits enter the dedicated preserved-position path"
   assert.ok(
     serverEdit[0].getStart(sourceFile) < refresh.getStart(sourceFile),
     "only a confirmed server edit may start browse revalidation",
+  );
+  const playedAssignment = propertyAssignments(setWatched, "item", "played");
+  const offsetAssignment = propertyAssignments(setWatched, "item", "viewOffsetMs");
+  assert.deepEqual(playedAssignment.map(compact), ["item.played=played"]);
+  assert.deepEqual(offsetAssignment.map(compact), ["item.viewOffsetMs=0"]);
+  assert.ok(
+    serverEdit[0].getStart(sourceFile) < playedAssignment[0].getStart(sourceFile) &&
+      playedAssignment[0].getStart(sourceFile) < refresh.getStart(sourceFile),
+    "the confirmed local badge must publish before server-authoritative revalidation",
   );
   assert.equal(callsNamed(setWatched, "resetAndLoad").length, 0, "manual edits must not reset the grid");
   assert.equal(
