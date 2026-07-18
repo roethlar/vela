@@ -13,14 +13,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
   agree, as of `d900f8a`).
 
-- **v1.0 RELEASE PREPARATION IS READY; README POLISH IS NEXT.** Functional and
-  UI implementation through OLED Black is complete. The owner ran
+- **v1.0 README POLISH COMPLETE; OWNER-REPORTED ISSUE QUEUE IS NEXT.** The
+  user-first README rewrite landed at `d4d9e95`, correcting first-run, server-
+  parity, multi-Plex, privacy, build, and support claims while surfacing the
+  current product features. Functional and UI implementation through OLED
+  Black is complete. The owner ran
   `./scripts/build.sh` on 2026-07-17 and produced the unsigned universal macOS
   0.1.57 DMG successfully; GitHub CI passed at `1300f00`, and the fresh Linux
-  real-app suite passed 27/27. Resume with the README work identified as item 2
-  in the ordered v1.0 release track under `## Next`; the deferred real-Plex
-  completion/error smoke remains the final pre-publication gate, not a blocker
-  for docs work.
+  real-app suite passed 27/27. On 2026-07-18 the owner directed autonomous work
+  through the open queue before returning to release-track graphics. The
+  deferred real-Plex completion/error smoke remains the final pre-publication
+  gate.
 
 - **LIVE E2E (`npm run e2e:live`) — landed 2026-07-14, owner-approved.** Drives
   the app against the owner's REAL Plex and REAL Jellyfin from the Linux VM.
@@ -64,9 +67,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **IMMEDIATE NEXT: v1.0 README/docs polish.** The functional and UI work is
-  complete, so release-track item 2 is unblocked. Rewrite the README to entice
-  users to try Vela, then continue through the ordered v1.0 release track below.
+- **IMMEDIATE NEXT: work the open issue queue one item at a time.** The four
+  owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
+  older macOS `build.sh --native` failure follows them. Each code item gets its
+  own durable plan, guard proof, commit, and Claude MCP `codereview` before the
+  next begins. Outbound actions remain governed by `.agents/push-policy.md`.
 
 - **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; REVIEW AND OWNER PLAYTEST OPEN.** The owner's 0.1.51
   macOS playtest found that a naturally completed episode remains the only
@@ -255,9 +260,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   work queue, not the play queue):** (1) UI embellishments — Slice 1 is complete
   at 0.1.53, Slice 2 at 0.1.55, and Slice 3 at 0.1.56; item 1 is complete
   (`.agents/plans/ui-embellishments.md`; vibrancy CUT — Linux/Wayland first;
-  motion SUBTLE, binding); (2) docs polish — a README that
-  entices users to try it; (3) graphics + screenshots for socials. 2 and 3 are
-  gated on 1 and on the functional work emptying; (4) harden the GitHub release
+  motion SUBTLE, binding); (2) docs polish — complete at `d4d9e95`; (3)
+  graphics + screenshots for socials, deferred until the newly prioritized open
+  issue queue is empty; (4) harden the GitHub release
   build so missing platform artifacts fail closed, add the required Arch package
   for AUR publication, and ship unsigned binaries because the owner has no Apple
   or Windows developer credentials; (5) run the deferred final Plex/error smoke
