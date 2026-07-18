@@ -20,11 +20,13 @@ listing through the prior depth, publishes once under exact
 root/generation ownership, and restores scroll without weakening merged
 watch-state truth. Seven behavior families have separate production-mutation
 red/restored-green proof, local gates pass, and the exact-source Linux suite
-passed 28/28. Opus's exact-head static review found no material defect, but the
-Claude MCP Workflow subagent cannot execute its independent guard because ptk
-is not forwarded and Bash approval is interactive. All structured outputs had
-`guard_confirmed:false`; no accepted verdict exists, and literal T5 cannot run
-because Claude frontier is unconfirmed. Branch:
+passed 28/28. Two exact-head Opus static reviews found no material defect. The
+owner-directed MCP `--allowedTools` launch was proved on the server's direct
+Bash tool, which ran the focused guard 5/5, but Workflow's nested reviewer does
+not inherit that grant and still cannot execute its independent guard. Its
+latest structured result was environment-only `invalid` with
+`guard_confirmed:false`; no accepted verdict exists. Claude CLI transport or an
+explicit one-finding guard waiver is now owner-gated. Branch:
 `fix/wsp-1-preserve-watch-edit-position`. Detail:
 `.agents/review/findings/wsp-1.md`.
 

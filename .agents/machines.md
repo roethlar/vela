@@ -28,16 +28,20 @@ portable and may at most point here.
   its transcript. The owner-confirmed standard `codereview` pair lives in the
   gitignored `.agents/review/harnesses.local.json`; frontier and `openreview`
   mappings remain unconfirmed and therefore fail closed.
-- Reviewer MCP execution blocker (observed 2026-07-18 on `wsp-1`): Workflow
-  subagents do not receive the globally configured ptk MCP server. Their Bash
-  tool is still intercepted by the ptk hook; `PTK_DIRECT` reaches a separate
-  interactive approval gate that a headless subagent cannot answer, even with
-  `dangerouslyDisableSandbox:true`. An exact project-local detached worktree
-  restored source-read access but not command execution, so Opus could perform
-  a clean static review yet could not run the independent guard required for
-  `guard_confirmed:true`. The durable non-verdict record is
-  `.agents/review/findings/wsp-1.md`; do not loosen machine permissions or edit
-  toolkit-owned hooks without owner direction.
+- Reviewer MCP execution blocker (proved 2026-07-18 on `wsp-1`, Claude Code
+  2.1.214): the owner directed launching the server with `--allowedTools`.
+  The registration now uses
+  `--allowedTools=Read,Glob,Grep,Edit,Bash(*) mcp serve`, and the server's
+  direct Bash tool ran the focused Node guard 5/5 without an approval prompt.
+  A Workflow-launched reviewer is a second Claude process: it receives neither
+  the ptk MCP tool nor the server's individual allowed-tool grants, so the same
+  `node --test` call still reaches an unanswerable interactive approval gate.
+  Server-level `bypassPermissions` also did not propagate; Workflow did not
+  expose command-line or user custom agents with their own permission mode;
+  and the MCP `Agent` endpoint reported no available agent type. Opus can read
+  and statically review the exact head but cannot produce
+  `guard_confirmed:true` through this MCP surface. The durable dispatch record
+  and remaining transport ruling are in `.agents/review/findings/wsp-1.md`.
 
 ## Windows dev host (`F:\dev\vela`)
 

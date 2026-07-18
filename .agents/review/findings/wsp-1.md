@@ -2,12 +2,12 @@
 
 **Severity**: MEDIUM — a routine successful edit tears down a large library,
 returns it to page one, and forces the user to find their prior location again.
-**Status**: Review blocked — Claude MCP cannot execute the independent guard
+**Status**: Review blocked — Claude MCP Workflow cannot inherit command grants
 **Branch**: `fix/wsp-1-preserve-watch-edit-position`
 **Base**: `dd67c069af50ae0b6dfdb0092ac0fa1321e7d6b8`
 **Implementation commit**: `28f4a2d`
 **Guard commit**: `2ad5b0d`
-**Last dispatched head**: `3e6c23dc6dd6b5e03a852143cb8fbb41f733f32f`
+**Last dispatched head**: `557865c1c66c2d19d3c2cae0a378ab6dcdd5dc2b`
 **Accepted reviewed head**: pending
 
 ## Evidence
@@ -113,49 +113,55 @@ change general playback-ended refresh.
 
 Reviewer: claude / claude-opus-4-8 / high / standard
 
-Claude Code 2.1.214 was dispatched through its MCP Workflow route on
-2026-07-18 against base `dd67c069af50ae0b6dfdb0092ac0fa1321e7d6b8`
-and head `3e6c23dc6dd6b5e03a852143cb8fbb41f733f32f`. Transcript provenance records
-model `claude-opus-4-8`, effort `high`, entrypoint `mcp`, and the exact harness
-version. **No accepted verdict exists:** every structured result carried
-`guard_confirmed:false`, so the playbook's fail-closed acceptance check rejects
-it.
+Claude Code 2.1.214 was most recently dispatched through MCP Workflow run
+`wf_d26d3564-551` on 2026-07-18 against base
+`dd67c069af50ae0b6dfdb0092ac0fa1321e7d6b8` and exact head
+`557865c1c66c2d19d3c2cae0a378ab6dcdd5dc2b`. Its transcript records model
+`claude-opus-4-8`, effort `high`, entrypoint `mcp`, the exact worktree cwd, and
+Claude Code version 2.1.214. The structured result was `invalid` with
+`guard_confirmed:false`, explicitly because command execution was unavailable;
+it reported no material code defect. No accepted verdict exists.
 
-Three bounded dispatch attempts established the blocker rather than a code
-finding:
+The owner rejected settings-file permission rules and directed the correct
+server launch mechanism: `--allowedTools`. That path was implemented and
+proved rather than assumed:
 
-1. Workflow's automatic isolated worktree started at `3203a38`, nine commits
-   behind the pinned head, and correctly refused review.
-2. An orchestrator-created exact detached worktree under `/tmp` was outside
-   the nested reviewer's allowed path.
-3. An exact detached worktree under the project let Opus read the finding and
-   implementation. Its static review found no material defect and concluded
-   that the code appears correct and appropriately handles ownership,
-   buffering, merged authority, failure retention, and scroll restoration.
-   It still could not execute the required source guard: nested Workflow agents
-   do not receive the configured ptk MCP tool, while Bash is redirected to ptk
-   or requires interactive approval that a headless reviewer cannot answer.
-   `dangerouslyDisableSandbox`, background execution, and the exact authorized
-   command did not change that result.
+1. The MCP registration now launches
+   `claude --allowedTools=Read,Glob,Grep,Edit,Bash(*) mcp serve`.
+2. The server's direct Bash tool ran
+   `node --test tests/watch-edit-position.test.mjs` successfully, 5/5, in the
+   exact detached review worktree without an approval prompt.
+3. The Workflow-launched Opus reviewer still received an approval refusal for
+   every code-executing Node form. Workflow agents do not inherit the server's
+   individual allowed-tool grants and do not receive the configured ptk MCP
+   tool.
+4. A server-level `bypassPermissions` probe did not propagate to Workflow.
+   Command-line and user custom-agent permission modes were not visible in the
+   Workflow registry, and the MCP `Agent` endpoint exposed no runnable agent
+   type. These bounded probes left the exact worktree clean and were removed.
 
-The returned `reopened` strings explicitly describe an environment-only,
-inconclusive result, not a code defect. The literal T5 rule nevertheless makes
-any reopened payload a frontier redispatch; this machine has no owner-confirmed
-Claude frontier mapping. Review therefore fails closed pending owner direction
-and a capable runner. Do not merge this branch or begin the next code slice.
+Opus independently performed another full static review. It found the
+implementation coherent: the edit origin is captured before the server await;
+confirmed local state publishes only after success; buffered revalidation
+starts at zero, refills through prior depth, publishes once, restores scroll
+after `tick()`, and gates fetch/publication/restoration on exact ownership; the
+failure path retains the old grid. This is useful review evidence but does not
+replace the playbook's reviewer-executed red/green proof.
+
+The earlier `reopened` and current `invalid` payloads all describe this same
+environment-only failure, not a code objection. Review therefore remains
+failed closed. Do not merge this branch or begin the next code slice.
 
 ## Required owner ruling
 
-Recommended: authorize a narrowly scoped machine-local permission for the
-headless Claude reviewer to run read-only git inspection and this finding's
-focused `node --test` command in disposable review worktrees, and rule these
-environment-only `reopened` payloads failed dispatches eligible for a fresh
-standard Opus retry. This restores the approved proof without weakening its
-acceptance bar.
+Recommended: authorize this finding's independent review through the headless
+Claude CLI using Opus/high, the same allowed tools, the same exact disposable
+worktree, and the same structured verdict. Claude remains the reviewer; only
+the transport changes from MCP to CLI, because the installed MCP Workflow
+cannot pass command authority to its reviewer process.
 
-Alternatively, the owner can require literal T5, which first needs an
-owner-confirmed Claude frontier mapping and the same command-execution repair;
-or explicitly waive the reviewer-executed guard and accept Opus's clean static
-review plus the coder's independent mutation proofs as a one-finding exception.
-Until one option is chosen, review, merge, and the next code slice remain
-blocked.
+If MCP-only review remains mandatory, the executable reviewer guard cannot be
+satisfied on Claude Code 2.1.214. The remaining alternative is an explicit
+one-finding waiver accepting the two clean Opus static reviews plus the coder's
+separate production-mutation proofs. Until the owner chooses one of those two
+paths, review, merge, and the next code slice remain blocked.

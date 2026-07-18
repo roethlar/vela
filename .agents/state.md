@@ -9,11 +9,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **ACTIVE REVIEW LOOP: `wsp-1` — REVIEW RUNNER BLOCKED.** The first
-  2026-07-18 owner-reported queue item is implemented and fully coder-proven;
-  its approved plan, exact verification, failed-closed Claude dispatch record,
-  and required next ruling live in `.agents/review/findings/wsp-1.md` and
-  `.agents/review/index.md`. Machine-specific failure mechanics are in
+- **ACTIVE REVIEW LOOP: `wsp-1` — REVIEW TRANSPORT BLOCKED.** The first
+  2026-07-18 owner-reported queue item is implemented and fully coder-proven.
+  The owner-directed MCP `--allowedTools` launch works for the server itself,
+  but Claude Code 2.1.214 does not pass that authority into its Workflow
+  reviewer. The exact failed-closed dispatch record and the remaining Claude
+  CLI-or-waiver ruling live in `.agents/review/findings/wsp-1.md`; compact
+  status is in `.agents/review/index.md`, and machine mechanics are in
   `.agents/machines.md`.
 
 - **Version 0.1.57** (`package.json`, both lockfiles,

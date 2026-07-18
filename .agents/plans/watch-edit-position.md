@@ -1,6 +1,6 @@
 # Plan: successful watch edits preserve browse depth and position
 
-Status: **IMPLEMENTED; CLAUDE CODEREVIEW ENVIRONMENT-BLOCKED 2026-07-18.**
+Status: **IMPLEMENTED; CLAUDE CODEREVIEW TRANSPORT-BLOCKED 2026-07-18.**
 The owner directed autonomous execution through the recorded work queue, with
 each code change reviewed through the Claude `codereview` playbook. This plan
 remains binding for finding `wsp-1`; a material scope expansion requires a new
