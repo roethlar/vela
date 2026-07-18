@@ -75,6 +75,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
+- **ACTIVE APPROVED SLICE: mpv automatic window-state continuity.** The binding
+  implementation and guard design live in
+  `.agents/plans/playback-window-state-continuity.md`. Exact automatic
+  successors retain fullscreen and maximized state; manual starts and geometry
+  are unchanged. Implement, mutation-prove, commit, and Claude-code-review this
+  slice before taking the next owner-reported issue.
+
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The four
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
   older macOS `build.sh --native` failure follows them. Each code item gets its
