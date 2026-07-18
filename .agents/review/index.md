@@ -13,6 +13,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Finding `pws-1` PENDING CLAUDE REVIEW 2026-07-18: automatic playlist and
+Continue Playing successors now inherit the completed mpv process's actual
+fullscreen and maximized state under exact-session authority, while manual
+plays retain configured defaults. Eight production regressions have separate
+red/restored-green proof; final local verification and the exact-source Linux
+real-app suite 28/28 pass. Branch:
+`fix/pws-1-playback-window-state`. Detail:
+`.agents/review/findings/pws-1.md`.
+
 Finding `wsp-1` VERIFIED 2026-07-18: a successful manual watched-state
 edit used to blank a paginated browse grid, reload only page one, and lose the
 owner's scroll position. The implemented fix buffers a fresh authoritative

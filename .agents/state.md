@@ -79,8 +79,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   implementation and guard design live in
   `.agents/plans/playback-window-state-continuity.md`. Exact automatic
   successors retain fullscreen and maximized state; manual starts and geometry
-  are unchanged. Implement, mutation-prove, commit, and Claude-code-review this
-  slice before taking the next owner-reported issue.
+  are unchanged. Implementation and coder proof are complete; Claude review
+  status lives in `.agents/review/findings/pws-1.md`. Finish that review before
+  taking the next owner-reported issue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The four
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
