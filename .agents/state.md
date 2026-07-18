@@ -81,6 +81,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   own durable plan, guard proof, commit, and Claude `codereview` before the
   next begins. Outbound actions remain governed by `.agents/push-policy.md`.
 
+- **DRAFT NEXT PLAN: mpv automatic window-state continuity.** Code trace and
+  concurrency design are recorded in
+  `.agents/plans/playback-window-state-continuity.md`. The draft retains both
+  fullscreen and maximized state for exact-session automatic successors while
+  leaving manual starts and desktop geometry alone. Claude `openreview` and the
+  owner's plain-English boundary ruling are still required before code.
+
 - **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; REVIEW AND OWNER PLAYTEST OPEN.** The owner's 0.1.51
   macOS playtest found that a naturally completed episode remains the only
   Continue Watching card until it is manually marked watched. Diagnosis found
