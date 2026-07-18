@@ -81,13 +81,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   own durable plan, guard proof, commit, and Claude `codereview` before the
   next begins. Outbound actions remain governed by `.agents/push-policy.md`.
 
-- **DRAFT NEXT PLAN: mpv automatic window-state continuity.** Code trace and
-  concurrency design are recorded in
-  `.agents/plans/playback-window-state-continuity.md`. The draft retains both
-  fullscreen and maximized state for exact-session automatic successors while
-  leaving manual starts and desktop geometry alone. Claude `openreview` and the
-  owner's plain-English boundary ruling are still required before code.
-
 - **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; REVIEW AND OWNER PLAYTEST OPEN.** The owner's 0.1.51
   macOS playtest found that a naturally completed episode remains the only
   Continue Watching card until it is manually marked watched. Diagnosis found
@@ -289,13 +282,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- The playback-window-state draft cannot receive its required Claude
-  `openreview` yet. Claude Code 2.1.214 has no owner-confirmed frontier/max pair
-  or grade in the machine-local harness cache. Recommended ruling: confirm
-  `claude-opus-4-8` at max effort as competitive for openreview. Code remains
-  blocked until routing, review, and plan approval are complete.
-- The final real-Plex smoke remains deferred to release preparation by owner
-  choice.
+- None for the active queue item. The final real-Plex smoke remains deferred to
+  release preparation by owner choice.
 
 ## Verification
 
