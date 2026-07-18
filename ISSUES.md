@@ -3,14 +3,7 @@
 ## Open - Owner-Reported (2026-07-18)
 
 Observed during live use and code-traced 2026-07-18; implementation planning is
-still pending.
-
-- Marking an item watched from a library listing refreshes the entire page and
-  loses the current scroll position. The successful-edit path calls
-  `refreshWatchState()`, whose browse branch resets the listing to page one and
-  does not capture scroll position (`src/routes/+page.svelte`). The required
-  outcome is to preserve both loaded depth and the user's position; an in-place
-  item update is one possible implementation, not a settled design.
+still pending for the items below.
 - mpv fullscreen state is not preserved when playback advances to the next item
   in a playlist or automatic continuation. The next item opens windowed, so the
   user has to maximize or enter fullscreen again for every item. Every successor
@@ -28,6 +21,19 @@ still pending.
   distinguished in the UI (`src-tauri/src/lib.rs`, `commands.rs`, `config.rs`).
   Multi-Plex support needs one stable source identity per machine, displaying
   Plex's server name and optionally allowing a user alias.
+
+## Resolved - Owner-Reported (2026-07-18)
+
+- Marking an item watched from a library listing refreshed the entire page,
+  returned the grid to page one, and lost the current scroll position. Vela now
+  rebuilds the loaded range in a private server-authoritative buffer, publishes
+  it once under exact root ownership, and restores the mounted grid's scroll
+  after the DOM update. Failures retain the complete prior grid and confirmed
+  local edit. Implemented in Vela 0.1.58 under
+  `.agents/plans/watch-edit-position.md`; seven production regressions were
+  separately proven red/restored-green, the exact-source Linux suite passed,
+  and Claude accepted exact reviewed head `32b0777` with an independent guard
+  proof. Detail: `.agents/review/findings/wsp-1.md`.
 
 ## Open - Agent-Found (2026-07-15)
 
