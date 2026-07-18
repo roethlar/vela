@@ -51,6 +51,10 @@ export default {
     }];
     mockA = await startMockJellyfin({ movies: movie('a.mp4') });
     mockB = await startMockJellyfin({ movies: movie('b.mp4') });
+    // Both copies start watched. Unwatching the selected face later must not
+    // erase the other backing's still-authoritative watched state.
+    mockA.state.userData.m1.played = true;
+    mockB.state.userData.m1.played = true;
     seedConfig(configRoot, [
       mockSource(mockA, { id: 'jf-a', name: 'Mock JF A' }),
       mockSource(mockB, { id: 'jf-b', name: 'Mock JF B' }),
@@ -85,7 +89,74 @@ export default {
     );
     assert.equal(view.count, 1, 'the two servers must dedup to one merged card');
     assert.ok(view.tag, 'the merged card must be marked "2 sources"');
+    assert.equal(
+      await driver.exec(
+        `return !!document.querySelector('button.poster[aria-label^="Mock Movie"] .watchedbadge')`,
+      ),
+      true,
+      'either watched backing makes the merged card watched',
+    );
     await screenshot('01-merged');
+
+    // wsp-1 authority guard: the confirmed edit locally flips the clicked
+    // merged card, but a fresh offset-zero listing must aggregate the other
+    // backing and restore watched=true. An optimistic-only implementation
+    // stays falsely unwatched here.
+    const listingArrivals = (mock) =>
+      mock.state.requests.filter(
+        (r) => r.method === 'GET' && r.path === `/Users/${mock.userId}/Items`,
+      ).length;
+    const listingServed = (mock) =>
+      mock.state.served.filter(
+        (r) => r.method === 'GET' && r.path === `/Users/${mock.userId}/Items`,
+      ).length;
+    const beforeA = { arrived: listingArrivals(mockA), served: listingServed(mockA) };
+    const beforeB = { arrived: listingArrivals(mockB), served: listingServed(mockB) };
+    await driver.exec(
+      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]');
+       const r = el.getBoundingClientRect();
+       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
+    );
+    const unwatch = await driver
+      .waitFor(`return !!document.querySelector('.ctxmenu')`, 'merged context menu')
+      .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='Mark unwatched']`));
+    await driver.click(unwatch);
+    await pollUntil(
+      () => {
+        const a = mockA.state.requests.some(
+          (r) => r.method === 'DELETE' && r.path === `/Users/${mockA.userId}/PlayedItems/m1`,
+        );
+        const b = mockB.state.requests.some(
+          (r) => r.method === 'DELETE' && r.path === `/Users/${mockB.userId}/PlayedItems/m1`,
+        );
+        return a !== b ? { a, b } : null;
+      },
+      'exactly one merged backing to receive Mark unwatched',
+    );
+    assert.notEqual(
+      mockA.state.userData.m1.played,
+      mockB.state.userData.m1.played,
+      'one backing is unwatched while the other remains watched',
+    );
+    await pollUntil(
+      () =>
+        listingArrivals(mockA) > beforeA.arrived && listingArrivals(mockB) > beforeB.arrived
+          ? true
+          : null,
+      'fresh merged listing requests after Mark unwatched',
+    );
+    await pollUntil(
+      () =>
+        listingServed(mockA) > beforeA.served && listingServed(mockB) > beforeB.served
+          ? true
+          : null,
+      'fresh merged listing responses after Mark unwatched',
+    );
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Mock Movie"] .watchedbadge')`,
+      'merged watched badge retained from the untouched backing',
+    );
+    await screenshot('02-merged-watch-authority');
 
     // Play from each backing: each choice must stream from its own server.
     // The override must persist under the exact canonical key with the

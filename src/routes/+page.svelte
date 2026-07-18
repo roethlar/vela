@@ -259,9 +259,9 @@
   // `playback-ended` after its final server check-in, so the re-fetch below is
   // guaranteed to see the updated progress/played state (the hubs fetch itself
   // is live and uncached).
-  // Shared by the playback-ended event and successful watched-state edits:
-  // anything that changes server truth re-fetches hubs + recents so the hero
-  // flow and progress bars reflect it without a restart.
+  // Shared by the playback-ended event and explicit hero curation. Successful
+  // watched-state edits use refreshAfterWatchEdit instead: a browse listing has
+  // to retain its loaded depth and scroll while it revalidates server truth.
   // Returns the reload it kicked off, so a caller that must publish AFTER the
   // repaint can actually wait for it (an un-awaited `await` on a void function is
   // a no-op that looks correct — see setWatched, codex r18).
@@ -1189,6 +1189,85 @@
   // Bumped on every navigation; in-flight loads from an older generation are discarded.
   let loadGen = 0;
 
+  // Immutable coordinates for one paginated browse request. Besides making
+  // loadMore independent of reactive state after its request starts, this is
+  // the identity a successful watched-state edit must still own before its
+  // buffered revalidation may publish.
+  type ListingRequest =
+    | { kind: "children"; ratingKey: string }
+    | { kind: "type"; sectionType: string; sourceId: string | null; sort: string }
+    | {
+        kind: "section";
+        sectionKey: string;
+        sectionType: string;
+        binding: number;
+        sort: string;
+      };
+
+  function currentListingRequest(): ListingRequest | null {
+    if (mode !== "browse") return null;
+    const here = crumbs[crumbs.length - 1];
+    if (here?.ratingKey) return { kind: "children", ratingKey: here.ratingKey };
+    if (searchTerm || personView) return null;
+    if (activeType) {
+      return { kind: "type", sectionType: activeType, sourceId: activeSource, sort };
+    }
+    if (active) {
+      return {
+        kind: "section",
+        sectionKey: active.key,
+        sectionType: active.sectionType,
+        binding: active.binding ?? 0,
+        sort,
+      };
+    }
+    return null;
+  }
+
+  function sameListingRequest(a: ListingRequest, b: ListingRequest | null): boolean {
+    if (!b || a.kind !== b.kind) return false;
+    if (a.kind === "children" && b.kind === "children") {
+      return a.ratingKey === b.ratingKey;
+    }
+    if (a.kind === "type" && b.kind === "type") {
+      return (
+        a.sectionType === b.sectionType &&
+        a.sourceId === b.sourceId &&
+        a.sort === b.sort
+      );
+    }
+    if (a.kind === "section" && b.kind === "section") {
+      return (
+        a.sectionKey === b.sectionKey &&
+        a.sectionType === b.sectionType &&
+        a.binding === b.binding &&
+        a.sort === b.sort
+      );
+    }
+    return false;
+  }
+
+  function fetchListingPage(request: ListingRequest, start: number, size: number): Promise<Item[]> {
+    if (request.kind === "children") {
+      return invoke<Item[]>("get_children", { ratingKey: request.ratingKey, start, size });
+    }
+    if (request.kind === "type") {
+      return invoke<Item[]>("get_type_listing", {
+        sectionType: request.sectionType,
+        sort: request.sort,
+        start,
+        size,
+      });
+    }
+    return invoke<Item[]>("get_items", {
+      sectionKey: request.sectionKey,
+      sectionType: request.sectionType,
+      sort: request.sort,
+      start,
+      size,
+    });
+  }
+
   async function resetAndLoad({
     keepError = false,
     preserve = false,
@@ -1238,26 +1317,11 @@
   ): Promise<boolean> {
     if (loadingMore || !hasMore || myGen !== loadGen) return true;
     let failed = false;
-    const here = crumbs[crumbs.length - 1];
-    if (!here || (!here.ratingKey && !active && !activeType)) return true;
+    const request = currentListingRequest();
+    if (!request) return true;
     loadingMore = true;
     try {
-      const page = here.ratingKey
-        ? await invoke<Item[]>("get_children", { ratingKey: here.ratingKey, start: offset, size: PAGE })
-        : activeType
-          ? await invoke<Item[]>("get_type_listing", {
-              sectionType: activeType,
-              sort,
-              start: offset,
-              size: PAGE,
-            })
-          : await invoke<Item[]>("get_items", {
-              sectionKey: active!.key,
-              sectionType: active!.sectionType,
-              sort,
-              start: offset,
-              size: PAGE,
-            });
+      const page = await fetchListingPage(request, offset, PAGE);
       if (myGen !== loadGen) return true; // navigated away while awaiting; drop these
       items = [...items, ...page];
       offset += page.length;
@@ -1512,6 +1576,124 @@
     } finally {
       if (myGen === loadGen) loading = false;
     }
+  }
+
+  // The browse root that issued a manual watch edit. `set_watched` can take
+  // long enough for the user to navigate elsewhere, so completion may only
+  // repaint when these exact coordinates still describe the current root.
+  type WatchEditBrowseOrigin =
+    | { kind: "listing"; epoch: number; request: ListingRequest }
+    | { kind: "search"; epoch: number; query: string; sourceId: string | null }
+    | { kind: "person"; epoch: number; person: PersonView };
+
+  function watchEditBrowseOrigin(): WatchEditBrowseOrigin | null {
+    if (mode !== "browse") return null;
+    if (searchTerm && crumbs.length === 1) {
+      return { kind: "search", epoch: navEpoch, query: searchTerm, sourceId: activeSource };
+    }
+    if (personView && crumbs.length === 1) {
+      return { kind: "person", epoch: navEpoch, person: { ...personView } };
+    }
+    const request = currentListingRequest();
+    return request ? { kind: "listing", epoch: navEpoch, request } : null;
+  }
+
+  function ownsWatchEditOrigin(origin: WatchEditBrowseOrigin): boolean {
+    if (mode !== "browse" || navEpoch !== origin.epoch) return false;
+    if (origin.kind === "listing") {
+      return sameListingRequest(origin.request, currentListingRequest());
+    }
+    if (origin.kind === "search") {
+      return (
+        crumbs.length === 1 &&
+        searchTerm === origin.query &&
+        activeSource === origin.sourceId
+      );
+    }
+    return (
+      crumbs.length === 1 &&
+      personView?.key === origin.person.key &&
+      personView.kind === origin.person.kind
+    );
+  }
+
+  function restoreGridScroll(top: number) {
+    if (!gridEl) return;
+    gridEl.scrollTop = Math.min(top, Math.max(0, gridEl.scrollHeight - gridEl.clientHeight));
+  }
+
+  // Revalidate a paginated listing without ever unmounting its grid. Starting
+  // at zero is an authority boundary, not just a pagination choice: merged
+  // continuation pages reuse the backend's existing immutable snapshot.
+  async function reloadBrowseAfterWatchEdit(
+    origin: Extract<WatchEditBrowseOrigin, { kind: "listing" }>,
+  ): Promise<void> {
+    if (!ownsWatchEditOrigin(origin)) return;
+    const targetDepth = Math.max(offset, items.length);
+    if (targetDepth === 0) return;
+    const savedScrollTop = gridEl?.scrollTop ?? 0;
+    homeGen++; // invalidate any hidden Home load before clearing its cached rows
+    const myGen = ++loadGen;
+    loadingMore = true; // stale pagination cannot append while the buffer is built
+    setError(null);
+    const buffered: Item[] = [];
+    let start = 0;
+    let refreshedHasMore = true;
+    try {
+      while (buffered.length < targetDepth && refreshedHasMore) {
+        const page = await fetchListingPage(origin.request, start, PAGE);
+        if (myGen !== loadGen || !ownsWatchEditOrigin(origin)) return;
+        buffered.push(...page);
+        start += page.length;
+        refreshedHasMore = page.length >= PAGE;
+        if (page.length === 0) break;
+      }
+      if (myGen !== loadGen || !ownsWatchEditOrigin(origin)) return;
+      items = buffered;
+      offset = buffered.length;
+      hasMore = refreshedHasMore;
+      await tick();
+      if (myGen !== loadGen || !ownsWatchEditOrigin(origin)) return;
+      restoreGridScroll(savedScrollTop);
+    } catch (e) {
+      // The server edit already succeeded. This is a listing-revalidation
+      // failure, so retain the confirmed local card and the entire old grid.
+      if (myGen === loadGen && ownsWatchEditOrigin(origin)) {
+        setError(String(e), myGen);
+      }
+    } finally {
+      if (myGen === loadGen) loadingMore = false;
+    }
+  }
+
+  async function rerunQueryAfterWatchEdit(
+    origin: Exclude<WatchEditBrowseOrigin, { kind: "listing" }>,
+  ): Promise<void> {
+    if (!ownsWatchEditOrigin(origin)) return;
+    const savedScrollTop = gridEl?.scrollTop ?? 0;
+    const rerun =
+      origin.kind === "search"
+        ? runSearch(origin.query, { rerun: true })
+        : runPersonView(origin.person, { rerun: true });
+    // Both rerun functions claim their generation synchronously before their
+    // first await, so this is the exact result whose DOM update we may restore.
+    const myGen = loadGen;
+    await rerun;
+    if (myGen !== loadGen || !ownsWatchEditOrigin(origin)) return;
+    await tick();
+    if (myGen !== loadGen || !ownsWatchEditOrigin(origin)) return;
+    restoreGridScroll(savedScrollTop);
+  }
+
+  function refreshAfterWatchEdit(origin: WatchEditBrowseOrigin | null): Promise<unknown> {
+    if (mode === "home" || mode === "playlists") return refreshWatchState();
+    // Home is hidden under every browse root. Never let pre-edit hubs become
+    // authoritative when the user returns there.
+    hubs = [];
+    if (!origin || !ownsWatchEditOrigin(origin)) return Promise.resolve();
+    return origin.kind === "listing"
+      ? reloadBrowseAfterWatchEdit(origin)
+      : rerunQueryAfterWatchEdit(origin);
   }
 
   function hasResume(item: Pick<Item, "viewOffsetMs">): boolean {
@@ -1807,6 +1989,7 @@
 
   async function setWatched(item: Item, played: boolean) {
     closeMenu();
+    const browseOrigin = watchEditBrowseOrigin();
     // This attempt owns the edit line from here on; a newer edit supersedes it.
     const attempt = ++editAttempt;
     clearEditStatus(); // this attempt supersedes whatever the last one said
@@ -1814,15 +1997,14 @@
       // Merged cards may front a local file while a server backing owns the
       // watch state — route the action where it can actually be recorded.
       await invoke("set_watched", { ratingKey: item.watchKey ?? item.ratingKey, played });
-      // Reflect immediately (deep-reactive $state). Scrobble/unscrobble both clear
-      // the resume position, so drop the in-progress bar too — leaving a clean
-      // watched (✓) or unwatched state instead of a contradictory bar + badge.
+      // The server accepted the edit. Reflect that confirmed backing immediately
+      // (deep-reactive $state); the authoritative buffered repaint below may still
+      // adopt a more-progressed state from another merged backing.
       item.played = played;
       item.viewOffsetMs = 0;
-      // Curate the hero without a restart: the backend dropped the recents
-      // entry and tombstoned the key (both directions); the re-fetch drops
-      // any lingering server hub copy.
-      refreshWatchState();
+      // Curate Home and revalidate the originating browse root without tearing
+      // down its loaded pages or scroll container.
+      refreshAfterWatchEdit(browseOrigin);
     } catch (e) {
       // The backend curates BEFORE the server call and rolls back on failure. A Home
       // load inside that window may have rendered the transient state, so heal Home;
