@@ -1085,3 +1085,28 @@ the destructive image attenuation caused by a global opacity or filter.
 Supersedes:
 Nothing. This adds a purpose-built dark-room option without changing Vela Dark
 or any existing theme.
+
+## 2026-07-18 - Review routing is playbook-selected and model-free
+
+Status: APPROVED (owner, 2026-07-18). STANDING.
+
+Decision:
+Claude remains the required external reviewer harness for Codex-authored code,
+and Codex never reviews its own work. The owner selects `codereview` for
+finding-specific verification or `openreview` for an unprimed whole-change
+judgment per invocation. Concrete model, effort, tier, and transport mappings
+are machine-local, owner-confirmed inputs to the playbooks rather than tracked
+policy; a verified MCP transport is preferred where available. Additional
+reviewers remain owner-requested only.
+
+Reason:
+The new review playbooks route by capability tier and validate provenance from
+the dispatch transcript. Keeping a model name in standing tracked guidance
+would conflict with that routing and become stale independently of the harness.
+
+Supersedes:
+The concrete Fable 5 model selection in the 2026-07-17 reviewer decision. It
+preserves Claude's sole required external role, the ban on Codex self-review,
+the owner-only additional-reviewer rule, and all pinned-SHA, fail-closed,
+guard-proof, and owner-action boundaries. Historical verdicts keep their exact
+recorded model provenance.

@@ -1,11 +1,13 @@
 # Review status
 
-Workflow: plan/whole-change review uses `.agents/playbooks/openreview.md`; code
-finding verification uses `.agents/playbooks/codereview.md`. Claude Fable 5 is
-the required external reviewer for Codex-authored plans and code. Additional
-reviewers are owner-requested only; Agy is not used. Historical Agy and Grok
-loops remain valid evidence but are not precedent for current reviewer
-selection or self-review.
+Workflow: unprimed whole-change judgment uses
+`.agents/playbooks/openreview.md`; finding-specific fix verification uses
+`.agents/playbooks/codereview.md`. Claude is the required external reviewer
+harness for Codex-authored code; the concrete model, effort, tier, and transport
+resolve from the owner-confirmed machine-local harness cache. Additional
+reviewers are owner-requested only; Agy is not used. Historical Claude, Agy,
+and Grok loops retain their recorded provenance but are not precedent for
+current reviewer selection or self-review.
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`

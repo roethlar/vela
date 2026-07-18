@@ -23,6 +23,11 @@ portable and may at most point here.
   once) — and `grok --sandbox read-only -p "$(cat <prompt>)"`. **grok has twice
   returned only its preamble with no JSON verdict; that is a FAILED run, not a
   clean pass. Re-dispatch it, and never read silence as agreement.**
+- Reviewer MCP (verified 2026-07-18): the Claude Code server supports direct
+  Workflow dispatch and records model, effort, version, and MCP entrypoint in
+  its transcript. The owner-confirmed standard `codereview` pair lives in the
+  gitignored `.agents/review/harnesses.local.json`; frontier and `openreview`
+  mappings remain unconfirmed and therefore fail closed.
 
 ## Windows dev host (`F:\dev\vela`)
 
