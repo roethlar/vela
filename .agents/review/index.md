@@ -13,11 +13,13 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Finding `chr-1` ADMITTED 2026-07-18: after clean EOF, the authoritative Home
-refresh currently precedes the owning server's played-state response, so a
-newly eligible next episode can remain absent until manual Refresh. The approved
-smallest slice moves the existing dispatcher refresh after the server attempt,
-without delaying sequence release or adding reloads. Branch:
+Finding `chr-1` PENDING CLAUDE REVIEW 2026-07-18: after clean EOF, the
+authoritative Home refresh used to precede the owning server's played-state
+response, so a newly eligible next episode could remain absent until manual
+Refresh. Implementation `6ec2ba6` moves that one refresh after the settled
+attempt without delaying sequence release or adding reloads. Five production
+regressions were separately proven red/restored-green; all local gates and the
+fresh-build Linux real-app suite 29/29 pass. Branch:
 `fix/chr-1-post-mark-refresh`. Detail:
 `.agents/review/findings/chr-1.md`.
 

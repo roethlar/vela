@@ -10,7 +10,9 @@ recorded per item below.
   completes, with no second refresh after that mutation (`src-tauri/src/lib.rs`).
   A newly eligible server-hub episode can therefore miss the automatic refresh
   and appear only after the manual one. Approved implementation and guard plan:
-  `.agents/plans/clean-eof-hub-refresh.md` (`chr-1`).
+  `.agents/plans/clean-eof-hub-refresh.md` (`chr-1`). Implementation `6ec2ba6`
+  is complete with separate red/restored-green proofs and a fresh Linux 29/29;
+  Claude code review remains before this item moves to Resolved.
 - Vela currently models Plex as one fixed `plex` / `Plex` source bound to one
   reachable machine, so multiple Plex servers cannot coexist—not merely be
   distinguished in the UI (`src-tauri/src/lib.rs`, `commands.rs`, `config.rs`).

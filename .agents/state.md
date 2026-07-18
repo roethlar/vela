@@ -16,9 +16,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   red/restored-green stale-session proof and no comments. Exact status lives in
   `.agents/review/findings/pws-1.md`.
 
-- **Version 0.1.59** (`package.json`, both lockfiles,
-  `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `8d4c7bc`).
+- **Version 0.1.60 on the active `chr-1` branch** (`package.json`, both
+  lockfiles, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch
+  PKGBUILD agree, as of implementation `6ec2ba6`).
 
 - **v1.0 README POLISH COMPLETE; OWNER-REPORTED ISSUE QUEUE IS NEXT.** The
   user-first README rewrite landed at `d4d9e95`, correcting first-run, server-
@@ -74,11 +74,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **ACTIVE APPROVED SLICE `chr-1`: refresh Continue Watching after clean-EOF
-  played state settles.** Move the existing dispatcher-owned Home refresh after
-  the server attempt while keeping sequence release early and refresh counts
-  exact. Binding implementation and guard design:
-  `.agents/plans/clean-eof-hub-refresh.md`; review status:
+- **ACTIVE SLICE `chr-1` IMPLEMENTED; CLAUDE REVIEW PENDING.** The existing
+  dispatcher-owned Home refresh now runs after the clean-EOF server played-state
+  attempt, while sequence release stays early and failure still refreshes. Five
+  production regressions were separately proven red/restored-green; exact-head
+  local gates and the fresh-build Linux real-app suite 29/29 pass. Binding design:
+  `.agents/plans/clean-eof-hub-refresh.md`; exact evidence and review status:
   `.agents/review/findings/chr-1.md`.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
