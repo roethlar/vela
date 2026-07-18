@@ -2,12 +2,13 @@
 
 **Severity**: MEDIUM — a routine successful edit tears down a large library,
 returns it to page one, and forces the user to find their prior location again.
-**Status**: Pending review
+**Status**: Review blocked — Claude MCP cannot execute the independent guard
 **Branch**: `fix/wsp-1-preserve-watch-edit-position`
 **Base**: `dd67c069af50ae0b6dfdb0092ac0fa1321e7d6b8`
 **Implementation commit**: `28f4a2d`
 **Guard commit**: `2ad5b0d`
-**Reviewed head**: pending evidence commit
+**Last dispatched head**: `3e6c23dc6dd6b5e03a852143cb8fbb41f733f32f`
+**Accepted reviewed head**: pending
 
 ## Evidence
 
@@ -110,4 +111,51 @@ change general playback-ended refresh.
 
 ## Reviewer comments
 
-Pending Claude Opus review.
+Reviewer: claude / claude-opus-4-8 / high / standard
+
+Claude Code 2.1.214 was dispatched through its MCP Workflow route on
+2026-07-18 against base `dd67c069af50ae0b6dfdb0092ac0fa1321e7d6b8`
+and head `3e6c23dc6dd6b5e03a852143cb8fbb41f733f32f`. Transcript provenance records
+model `claude-opus-4-8`, effort `high`, entrypoint `mcp`, and the exact harness
+version. **No accepted verdict exists:** every structured result carried
+`guard_confirmed:false`, so the playbook's fail-closed acceptance check rejects
+it.
+
+Three bounded dispatch attempts established the blocker rather than a code
+finding:
+
+1. Workflow's automatic isolated worktree started at `3203a38`, nine commits
+   behind the pinned head, and correctly refused review.
+2. An orchestrator-created exact detached worktree under `/tmp` was outside
+   the nested reviewer's allowed path.
+3. An exact detached worktree under the project let Opus read the finding and
+   implementation. Its static review found no material defect and concluded
+   that the code appears correct and appropriately handles ownership,
+   buffering, merged authority, failure retention, and scroll restoration.
+   It still could not execute the required source guard: nested Workflow agents
+   do not receive the configured ptk MCP tool, while Bash is redirected to ptk
+   or requires interactive approval that a headless reviewer cannot answer.
+   `dangerouslyDisableSandbox`, background execution, and the exact authorized
+   command did not change that result.
+
+The returned `reopened` strings explicitly describe an environment-only,
+inconclusive result, not a code defect. The literal T5 rule nevertheless makes
+any reopened payload a frontier redispatch; this machine has no owner-confirmed
+Claude frontier mapping. Review therefore fails closed pending owner direction
+and a capable runner. Do not merge this branch or begin the next code slice.
+
+## Required owner ruling
+
+Recommended: authorize a narrowly scoped machine-local permission for the
+headless Claude reviewer to run read-only git inspection and this finding's
+focused `node --test` command in disposable review worktrees, and rule these
+environment-only `reopened` payloads failed dispatches eligible for a fresh
+standard Opus retry. This restores the approved proof without weakening its
+acceptance bar.
+
+Alternatively, the owner can require literal T5, which first needs an
+owner-confirmed Claude frontier mapping and the same command-execution repair;
+or explicitly waive the reviewer-executed guard and accept Opus's clean static
+review plus the coder's independent mutation proofs as a one-finding exception.
+Until one option is chosen, review, merge, and the next code slice remain
+blocked.

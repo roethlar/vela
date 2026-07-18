@@ -28,6 +28,16 @@ portable and may at most point here.
   its transcript. The owner-confirmed standard `codereview` pair lives in the
   gitignored `.agents/review/harnesses.local.json`; frontier and `openreview`
   mappings remain unconfirmed and therefore fail closed.
+- Reviewer MCP execution blocker (observed 2026-07-18 on `wsp-1`): Workflow
+  subagents do not receive the globally configured ptk MCP server. Their Bash
+  tool is still intercepted by the ptk hook; `PTK_DIRECT` reaches a separate
+  interactive approval gate that a headless subagent cannot answer, even with
+  `dangerouslyDisableSandbox:true`. An exact project-local detached worktree
+  restored source-read access but not command execution, so Opus could perform
+  a clean static review yet could not run the independent guard required for
+  `guard_confirmed:true`. The durable non-verdict record is
+  `.agents/review/findings/wsp-1.md`; do not loosen machine permissions or edit
+  toolkit-owned hooks without owner direction.
 
 ## Windows dev host (`F:\dev\vela`)
 

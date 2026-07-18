@@ -9,10 +9,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **ACTIVE REVIEW LOOP: `wsp-1`.** The first 2026-07-18 owner-reported queue
-  item has an approved binding plan at `.agents/plans/watch-edit-position.md`;
-  current status and the eventual Claude verdict live in
-  `.agents/review/findings/wsp-1.md` and `.agents/review/index.md`.
+- **ACTIVE REVIEW LOOP: `wsp-1` — REVIEW RUNNER BLOCKED.** The first
+  2026-07-18 owner-reported queue item is implemented and fully coder-proven;
+  its approved plan, exact verification, failed-closed Claude dispatch record,
+  and required next ruling live in `.agents/review/findings/wsp-1.md` and
+  `.agents/review/index.md`. Machine-specific failure mechanics are in
+  `.agents/machines.md`.
 
 - **Version 0.1.57** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
@@ -279,7 +281,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- None recorded.
+- `wsp-1` cannot receive an accepted Claude `codereview` verdict on the current
+  machine: the headless MCP Workflow reviewer cannot execute its mandatory
+  independent guard, and its environment-only `reopened` payload reaches the
+  playbook's unconfigured T5 frontier route. See the finding for the exact
+  owner ruling needed; no merge or next code slice proceeds meanwhile.
 
 ## Verification
 

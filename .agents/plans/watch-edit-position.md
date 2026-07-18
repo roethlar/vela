@@ -1,9 +1,10 @@
 # Plan: successful watch edits preserve browse depth and position
 
-Status: **IMPLEMENTED; CLAUDE CODEREVIEW PENDING 2026-07-18.** The owner
-directed autonomous execution through the recorded work queue, with each code
-change reviewed through the Claude `codereview` playbook. This plan remains
-binding for finding `wsp-1`; a material scope expansion requires a new plan.
+Status: **IMPLEMENTED; CLAUDE CODEREVIEW ENVIRONMENT-BLOCKED 2026-07-18.**
+The owner directed autonomous execution through the recorded work queue, with
+each code change reviewed through the Claude `codereview` playbook. This plan
+remains binding for finding `wsp-1`; a material scope expansion requires a new
+plan. The exact blocker and non-verdict dispatch record live in the finding.
 
 ## Owner-visible problem
 
