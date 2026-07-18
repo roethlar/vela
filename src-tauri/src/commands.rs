@@ -2196,6 +2196,15 @@ pub(crate) struct PlaybackCompletion {
     pub media_type: Option<String>,
 }
 
+/// The observation handle currently authorized for automatic window-state
+/// inheritance. The session id keeps delayed or manual work from sampling an
+/// unrelated mpv process.
+#[derive(Clone)]
+pub(crate) struct PlaybackWindowSession {
+    session_id: String,
+    observation: playback::WindowStateObservation,
+}
+
 /// Joins mpv's clean-EOF observation with the matching tracker's completed
 /// final write. The dispatcher receives a UUID only after both happened, so
 /// auto-advance cannot overtake recents/server progress and a stale EOF cannot
@@ -2342,6 +2351,19 @@ fn expected_session_matches(active: Option<&str>, expected: Option<&str>) -> boo
     expected.is_none_or(|expected| active == Some(expected))
 }
 
+fn inherited_window_state(
+    current: Option<&PlaybackWindowSession>,
+    replace_session: Option<&str>,
+) -> playback::PlaybackWindowState {
+    let Some(expected) = replace_session else {
+        return playback::PlaybackWindowState::default();
+    };
+    current
+        .filter(|current| current.session_id == expected)
+        .map(|current| current.observation.snapshot())
+        .unwrap_or_default()
+}
+
 async fn validate_playback_session(state: &AppState, expected_session: Option<&str>) -> bool {
     let active = state.active_playback_session.lock().await;
     expected_session_matches(active.as_deref(), expected_session)
@@ -2444,6 +2466,19 @@ async fn play_by_key(
         .await
         .map_err(PlayFailure::unavailable)?;
 
+    // Resolve first so the completed process can deliver its final IPC events
+    // while a slow server prepares the successor. Only an exact automatic
+    // replacement may sample the published observation; manual plays (`None`)
+    // deliberately start from configured defaults.
+    let inherited_window_state = {
+        let current = state
+            .playback_window_session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        inherited_window_state(current.as_ref(), replace_session)
+    };
+    let window_observation = playback::WindowStateObservation::default();
+
     // A failed resolve leaves the currently-playing context intact. Only once
     // the replacement has a real stream do we provisionally install its
     // context. The play lock keeps the expected session valid between the
@@ -2526,6 +2561,8 @@ async fn play_by_key(
         start_seconds: resume_ms as f64 / 1000.0,
         autocrop_script,
         autocrop_shim,
+        inherited_window_state,
+        window_observation: window_observation.clone(),
     };
     // The tracker can observe a very fast mpv exit before this async command
     // resumes from spawn_blocking. Hold its final recents stamp until the
@@ -2604,7 +2641,15 @@ async fn play_by_key(
     let recent = item.clone();
     let recent_session = session_id.to_string();
     let completion_started_at_ms = playback_started_at_ms.clone();
+    let launched_window_session = PlaybackWindowSession {
+        session_id: session_id.to_string(),
+        observation: window_observation,
+    };
     let played = after_successful_play(played, || {
+        *state
+            .playback_window_session
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(launched_window_session);
         let started_at_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|duration| duration.as_millis() as u64)
@@ -3541,6 +3586,74 @@ mod tests {
             Err("spawn failed".into())
         );
         assert_eq!(calls, 1, "a failed launch must not run the side effect");
+    }
+
+    #[test]
+    fn automatic_window_state_requires_the_exact_replaced_session() {
+        let observation = playback::WindowStateObservation::default();
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "fullscreen",
+            "data": true
+        }));
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "window-maximized",
+            "data": false
+        }));
+        let current = PlaybackWindowSession {
+            session_id: "completed".to_string(),
+            observation,
+        };
+
+        assert_eq!(
+            inherited_window_state(Some(&current), Some("completed")),
+            playback::PlaybackWindowState {
+                fullscreen: Some(true),
+                maximized: Some(false),
+            }
+        );
+        assert_eq!(
+            inherited_window_state(Some(&current), None),
+            playback::PlaybackWindowState::default(),
+            "manual play must not inherit the current process"
+        );
+        assert_eq!(
+            inherited_window_state(Some(&current), Some("stale")),
+            playback::PlaybackWindowState::default(),
+            "a delayed continuation must not inherit a newer process"
+        );
+        assert_eq!(
+            inherited_window_state(None, Some("completed")),
+            playback::PlaybackWindowState::default()
+        );
+    }
+
+    #[test]
+    fn window_session_publication_stays_behind_successful_launch_boundary() {
+        let published = std::sync::Mutex::new(None);
+        let failed_record = PlaybackWindowSession {
+            session_id: "failed".to_string(),
+            observation: playback::WindowStateObservation::default(),
+        };
+        let result = after_successful_play(Err::<(), _>("spawn failed".to_string()), || {
+            *published.lock().unwrap() = Some(failed_record)
+        });
+        assert_eq!(result, Err("spawn failed".to_string()));
+        assert!(published.lock().unwrap().is_none());
+
+        let successful_record = PlaybackWindowSession {
+            session_id: "launched".to_string(),
+            observation: playback::WindowStateObservation::default(),
+        };
+        after_successful_play(Ok(()), || {
+            *published.lock().unwrap() = Some(successful_record)
+        })
+        .unwrap();
+        assert_eq!(
+            published.lock().unwrap().as_ref().unwrap().session_id,
+            "launched"
+        );
     }
 
     #[test]

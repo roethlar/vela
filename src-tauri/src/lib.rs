@@ -68,6 +68,9 @@ pub struct AppState {
     /// continuation supplies the completed UUID as an expectation so delayed
     /// work can never replace a newer manual play.
     pub(crate) active_playback_session: AsyncMutex<Option<String>>,
+    /// Window-state observer for the latest successfully launched mpv session.
+    /// Exact automatic replacements may snapshot it; manual plays never do.
+    pub(crate) playback_window_session: Mutex<Option<commands::PlaybackWindowSession>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
@@ -121,6 +124,7 @@ pub fn run() {
         playback_advance: Arc::new(commands::PlaybackAdvance::default()),
         playlist_cursor: AsyncMutex::new(None),
         active_playback_session: AsyncMutex::new(None),
+        playback_window_session: Mutex::new(None),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
     };

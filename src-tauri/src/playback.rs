@@ -417,6 +417,82 @@ pub enum ProgressTarget {
     None,
 }
 
+/// Runtime mpv window state that may be carried to an exact automatic
+/// successor. `None` means mpv has not reported the property, which is distinct
+/// from an explicit `false` and therefore leaves configured launch options
+/// authoritative.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PlaybackWindowState {
+    pub fullscreen: Option<bool>,
+    pub maximized: Option<bool>,
+}
+
+/// Per-launch observation handle. Each IPC reader owns a fresh handle so a
+/// delayed event from an older mpv process cannot overwrite a newer session's
+/// published state.
+#[derive(Debug, Clone, Default)]
+pub struct WindowStateObservation {
+    state: Arc<Mutex<PlaybackWindowState>>,
+}
+
+impl WindowStateObservation {
+    pub fn snapshot(&self) -> PlaybackWindowState {
+        *self.state.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(crate) fn apply_ipc_event(&self, value: &serde_json::Value) {
+        let Some((property, enabled)) = window_property_change(value) else {
+            return;
+        };
+        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+        match property {
+            WindowProperty::Fullscreen => state.fullscreen = Some(enabled),
+            WindowProperty::Maximized => state.maximized = Some(enabled),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowProperty {
+    Fullscreen,
+    Maximized,
+}
+
+/// Accept only owned boolean property-change events. Observe-property command
+/// replies, nulls, numeric/string coercions, and unrelated properties must not
+/// invent state.
+fn window_property_change(value: &serde_json::Value) -> Option<(WindowProperty, bool)> {
+    if value.get("event")?.as_str()? != "property-change" {
+        return None;
+    }
+    let property = match value.get("name")?.as_str()? {
+        "fullscreen" => WindowProperty::Fullscreen,
+        "window-maximized" => WindowProperty::Maximized,
+        _ => return None,
+    };
+    Some((property, value.get("data")?.as_bool()?))
+}
+
+/// Explicit inherited flags follow user/autocrop options so observed runtime
+/// state wins under mpv's last-value-wins option handling. Unknown properties
+/// are omitted, preserving normal configuration behavior.
+fn window_state_args(state: PlaybackWindowState) -> Vec<String> {
+    let mut args = Vec::with_capacity(2);
+    if let Some(maximized) = state.maximized {
+        args.push(format!(
+            "--window-maximized={}",
+            if maximized { "yes" } else { "no" }
+        ));
+    }
+    if let Some(fullscreen) = state.fullscreen {
+        args.push(format!(
+            "--fullscreen={}",
+            if fullscreen { "yes" } else { "no" }
+        ));
+    }
+    args
+}
+
 /// What to play, as opposed to the supervision plumbing `play` also takes:
 /// the stream URL, the human title for mpv's window/OSD, the auth headers the
 /// stream needs (see [`write_header_include`]), and the resume offset.
@@ -437,6 +513,12 @@ pub struct PlaySpec {
     /// delay — the stock trigger skips its delay on `--start` resumes and
     /// races hwdec init (see the shim header + `.agents/plans/autocrop-resume.md`).
     pub autocrop_shim: Option<String>,
+    /// Actual state sampled from the exact automatic predecessor. Manual plays
+    /// and unknown properties use the default (both `None`).
+    pub inherited_window_state: PlaybackWindowState,
+    /// Fresh handle populated by this launch's IPC reader and published by the
+    /// command layer only after the full launch succeeds.
+    pub window_observation: WindowStateObservation,
 }
 
 /// mpv launch args for the autocrop feature, given the config `mode`
@@ -595,6 +677,10 @@ pub fn play(
         }
     }
 
+    for arg in window_state_args(spec.inherited_window_state) {
+        cmd.arg(arg);
+    }
+
     cmd.arg(format!("--input-ipc-server={}", ipc_path));
     // Drive mpv's window title and OSD media-title from the human title, NOT the
     // URL. Plex direct-stream URLs carry `?X-Plex-Token=…`, and mpv's default
@@ -677,13 +763,28 @@ pub fn play(
     // guards keep degenerate track targets (empty server base) on the untracked
     // path so the notifier still fires exactly once per session.
     let tracking = match progress {
-        ProgressTarget::Plex(info) if !info.server_base.is_empty() => {
-            start_tracking_plex(ipc_path, info, start_ms, stop_flag.clone(), on_end)
-        }
-        ProgressTarget::Jellyfin(track) if !track.base_url.is_empty() => {
-            start_tracking_jellyfin(ipc_path, track, start_ms, stop_flag.clone(), on_end)
-        }
-        _ => spawn_end_watcher(ipc_path, stop_flag.clone(), on_end),
+        ProgressTarget::Plex(info) if !info.server_base.is_empty() => start_tracking_plex(
+            ipc_path,
+            info,
+            start_ms,
+            stop_flag.clone(),
+            spec.window_observation.clone(),
+            on_end,
+        ),
+        ProgressTarget::Jellyfin(track) if !track.base_url.is_empty() => start_tracking_jellyfin(
+            ipc_path,
+            track,
+            start_ms,
+            stop_flag.clone(),
+            spec.window_observation.clone(),
+            on_end,
+        ),
+        _ => spawn_end_watcher(
+            ipc_path,
+            stop_flag.clone(),
+            spec.window_observation.clone(),
+            on_end,
+        ),
     };
     if let Err(e) = tracking {
         // mpv launched but we couldn't spawn its tracker threads (e.g. the OS is
@@ -760,6 +861,7 @@ fn spawn_position_reader(
     socket_path: String,
     initial_ms: u64,
     stop_flag: Arc<AtomicBool>,
+    window_observation: WindowStateObservation,
 ) -> std::io::Result<(Arc<AtomicU64>, Arc<AtomicBool>)> {
     let last_t_ms = Arc::new(AtomicU64::new(initial_ms));
     let done = Arc::new(AtomicBool::new(false));
@@ -798,8 +900,14 @@ fn spawn_position_reader(
             };
             let mut reader = BufReader::new(reader_clone);
 
-            // Ask mpv to push time-pos updates; then just drain every line.
-            let _ = stream.write_all(b"{\"command\":[\"observe_property\",1,\"time-pos\"]}\n");
+            // Ask mpv to push position and window-state updates; then drain every
+            // line. Distinct ids keep command replies unambiguous during IPC
+            // diagnostics, while parsing below trusts only named property events.
+            let _ = stream.write_all(
+                b"{\"command\":[\"observe_property\",1,\"time-pos\"]}\n\
+                  {\"command\":[\"observe_property\",2,\"fullscreen\"]}\n\
+                  {\"command\":[\"observe_property\",3,\"window-maximized\"]}\n",
+            );
 
             let mut line = String::new();
             loop {
@@ -819,6 +927,7 @@ fn spawn_position_reader(
                             last_t_ms_r.store((d * 1000.0) as u64, Ordering::Relaxed);
                         }
                     }
+                    window_observation.apply_ipc_event(&v);
                 }
             }
             done_r.store(true, Ordering::Relaxed);
@@ -845,9 +954,11 @@ fn start_tracking_plex(
     info: TrackInfo,
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
+    window_observation: WindowStateObservation,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let (last_t_ms, done) = spawn_position_reader(socket_path, start_ms, stop_flag.clone())?;
+    let (last_t_ms, done) =
+        spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-plex".into())
@@ -936,9 +1047,11 @@ fn start_tracking_jellyfin(
     track: JellyfinTrack,
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
+    window_observation: WindowStateObservation,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let (last_t_ms, done) = spawn_position_reader(socket_path, start_ms, stop_flag.clone())?;
+    let (last_t_ms, done) =
+        spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-jellyfin".into())
@@ -1023,14 +1136,16 @@ fn start_tracking_jellyfin(
 fn spawn_end_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
+    window_observation: WindowStateObservation,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
+    // Reuse the shared position reader: its `done` flag doubles as the EOF
+    // signal (set when mpv exits / the socket drops).
+    let (last_t_ms, done) =
+        spawn_position_reader(socket_path, 0, stop_flag.clone(), window_observation)?;
     let Some(on_end) = on_end else {
         return Ok(());
     };
-    // Reuse the shared position reader: its `done` flag doubles as the EOF
-    // signal (set when mpv exits / the socket drops).
-    let (last_t_ms, done) = spawn_position_reader(socket_path, 0, stop_flag.clone())?;
     std::thread::Builder::new()
         .name("mpv-end-watcher".into())
         .spawn(move || {
@@ -1051,6 +1166,134 @@ mod tests {
 
     fn tmp(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()))
+    }
+
+    #[test]
+    fn window_property_parser_accepts_only_named_boolean_change_events() {
+        assert_eq!(
+            window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "fullscreen",
+                "data": true
+            })),
+            Some((WindowProperty::Fullscreen, true))
+        );
+        assert_eq!(
+            window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "window-maximized",
+                "data": false
+            })),
+            Some((WindowProperty::Maximized, false))
+        );
+
+        for rejected in [
+            serde_json::json!({ "request_id": 2, "data": true }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "fullscreen",
+                "data": null
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "fullscreen",
+                "data": "yes"
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "window-minimized",
+                "data": true
+            }),
+            serde_json::json!({
+                "event": "end-file",
+                "name": "fullscreen",
+                "data": true
+            }),
+        ] {
+            assert_eq!(window_property_change(&rejected), None);
+        }
+    }
+
+    #[test]
+    fn window_observation_keeps_true_false_and_unknown_independent() {
+        let observation = WindowStateObservation::default();
+        assert_eq!(observation.snapshot(), PlaybackWindowState::default());
+
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "fullscreen",
+            "data": true
+        }));
+        assert_eq!(
+            observation.snapshot(),
+            PlaybackWindowState {
+                fullscreen: Some(true),
+                maximized: None,
+            }
+        );
+
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "fullscreen",
+            "data": false
+        }));
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "window-maximized",
+            "data": true
+        }));
+        assert_eq!(
+            observation.snapshot(),
+            PlaybackWindowState {
+                fullscreen: Some(false),
+                maximized: Some(true),
+            }
+        );
+    }
+
+    #[test]
+    fn inherited_window_args_emit_known_values_in_override_order() {
+        assert!(window_state_args(PlaybackWindowState::default()).is_empty());
+        assert_eq!(
+            window_state_args(PlaybackWindowState {
+                fullscreen: Some(true),
+                maximized: None,
+            }),
+            vec!["--fullscreen=yes"]
+        );
+        assert_eq!(
+            window_state_args(PlaybackWindowState {
+                fullscreen: Some(false),
+                maximized: Some(true),
+            }),
+            vec!["--window-maximized=yes", "--fullscreen=no"]
+        );
+    }
+
+    #[test]
+    fn playback_window_observation_handles_are_isolated_per_launch() {
+        let old = WindowStateObservation::default();
+        let successor = WindowStateObservation::default();
+        old.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "fullscreen",
+            "data": true
+        }));
+        successor.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "fullscreen",
+            "data": false
+        }));
+
+        assert_eq!(old.snapshot().fullscreen, Some(true));
+        assert_eq!(successor.snapshot().fullscreen, Some(false));
+
+        old.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "window-maximized",
+            "data": true
+        }));
+        assert_eq!(successor.snapshot().maximized, None);
     }
 
     #[test]

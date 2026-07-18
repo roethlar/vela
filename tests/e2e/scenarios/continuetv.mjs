@@ -81,6 +81,25 @@ async function nextMpv(seen, expectedId) {
   return mpv;
 }
 
+async function waitForMpvProperty(mpv, property, expected, what) {
+  await pollUntil(
+    async () => {
+      try {
+        const value = await mpv.getProp(property);
+        return value === expected ? { value } : null;
+      } catch {
+        return null;
+      }
+    },
+    what,
+  );
+}
+
+async function setMpvProperty(mpv, property, value, what) {
+  await mpv.setProp(property, value);
+  await waitForMpvProperty(mpv, property, value, what);
+}
+
 async function finishNaturally(mpv) {
   await mpv.setProp('time-pos', 9.2);
   await mpv.setProp('pause', false);
@@ -287,6 +306,12 @@ export default {
       await driver.find('css selector', '[aria-label="Continue watching"] .flowcard.center'),
     );
     const first = await nextMpv(seen, 'e1');
+    await setMpvProperty(
+      first,
+      'fullscreen',
+      true,
+      'the first episode fullscreen readback before clean EOF',
+    );
     const cleanPlayedArrivals = mock.state.playedArrivals.length;
     const cleanPlayedServed = mock.state.playedServed.length;
     mock.state.playedDelayMs = 8_000;
@@ -300,6 +325,12 @@ export default {
       'the automatic E1 PlayedItems request to arrive',
     );
     const second = await nextMpv(seen, 'e2');
+    await waitForMpvProperty(
+      second,
+      'fullscreen',
+      true,
+      'the frontend-selected next episode to inherit fullscreen state',
+    );
     assert.equal(
       mock.state.playedServed.length,
       cleanPlayedServed,

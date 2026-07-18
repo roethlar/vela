@@ -1,6 +1,7 @@
 // Playlist playback context: arbitrary start, same-key tracker replacement,
 // live edit re-read, mixed-source advancement, unavailable skip, silent
-// resume, dispatcher-owned recents, and byte-identical read-only playback.
+// resume, exact-session window-state inheritance, dispatcher-owned recents,
+// and byte-identical read-only playback.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -71,6 +72,52 @@ const playbackInfoIds = (mock) =>
     .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
     .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]);
 
+async function waitForMpvProperty(mpv, property, expected, what) {
+  await pollUntil(
+    async () => {
+      try {
+        const value = await mpv.getProp(property);
+        return value === expected ? { value } : null;
+      } catch {
+        return null;
+      }
+    },
+    what,
+  );
+}
+
+async function waitForWindowState(mpv, expected, what) {
+  await pollUntil(
+    async () => {
+      try {
+        const [fullscreen, maximized] = await Promise.all([
+          mpv.getProp('fullscreen'),
+          mpv.getProp('window-maximized'),
+        ]);
+        return fullscreen === expected.fullscreen && maximized === expected.maximized
+          ? { fullscreen, maximized }
+          : null;
+      } catch {
+        return null;
+      }
+    },
+    what,
+  );
+}
+
+async function setWindowState(mpv, state, what) {
+  await mpv.setProp('fullscreen', state.fullscreen);
+  await waitForMpvProperty(mpv, 'fullscreen', state.fullscreen, `${what} fullscreen readback`);
+  await mpv.setProp('window-maximized', state.maximized);
+  await waitForMpvProperty(
+    mpv,
+    'window-maximized',
+    state.maximized,
+    `${what} maximized readback`,
+  );
+  await waitForWindowState(mpv, state, what);
+}
+
 export default {
   name: 'playlistplay',
 
@@ -114,10 +161,17 @@ export default {
       ],
     });
     mockA.state.userData.a2.positionTicks = 10_000_000; // 1s resume
-    seedConfig(configRoot, [
-      mockSource(mockA, { id: 'jf-a', name: 'Mock JF A' }),
-      mockSource(mockB, { id: 'jf-b', name: 'Mock JF B' }),
-    ]);
+    seedConfig(
+      configRoot,
+      [
+        mockSource(mockA, { id: 'jf-a', name: 'Mock JF A' }),
+        mockSource(mockB, { id: 'jf-b', name: 'Mock JF B' }),
+      ],
+      {
+        mpv_extra_args:
+          '--vo=null\n--ao=null\n--window-maximized=yes\n--fullscreen=yes',
+      },
+    );
     seedPlaylists(configRoot, [
       {
         id: 'p-sequence',
@@ -201,6 +255,11 @@ export default {
     await clickRowAction(driver, 'Beta Start', 'Play');
     const firstBeta = await nextMpv(mockB.port, 'b0');
     await firstBeta.mpv.setProp('pause', true);
+    await setWindowState(
+      firstBeta.mpv,
+      { fullscreen: false, maximized: false },
+      'the first manually-started player to leave fullscreen and maximized state',
+    );
     const firstRecent = await pollUntil(() => {
       try {
         const recent = readConfig().recents?.[0];
@@ -220,6 +279,11 @@ export default {
     await clickRowAction(driver, 'Beta Start', 'Play');
     const secondBeta = await nextMpv(mockB.port, 'b0');
     await secondBeta.mpv.setProp('pause', true);
+    await waitForWindowState(
+      secondBeta.mpv,
+      { fullscreen: true, maximized: true },
+      'the manual replacement to use configured window state instead of inheriting',
+    );
     firstBeta.mpv.close();
     const replacement = await pollUntil(() => {
       try {
@@ -298,6 +362,12 @@ export default {
     // without the dispatcher repaint, A2 may exist in mpv/config but not here.
     mockA.state.playbackInfoDelayMs = 3_000;
 
+    await setWindowState(
+      secondBeta.mpv,
+      { fullscreen: false, maximized: false },
+      'the playlist predecessor window state before clean EOF',
+    );
+
     async function releaseToEof(session) {
       await session.mpv.setProp('time-pos', 9.2);
       await session.mpv.setProp('pause', false);
@@ -307,6 +377,11 @@ export default {
     await releaseToEof(secondBeta);
     const editedNext = await nextMpv(mockA.port, 'a2');
     await editedNext.mpv.setProp('pause', true);
+    await waitForWindowState(
+      editedNext.mpv,
+      { fullscreen: false, maximized: false },
+      'the automatic successor to inherit explicit windowed state over configured yes',
+    );
     const resumedAt = await editedNext.mpv.getProp('time-pos');
     assert.ok(
       resumedAt >= 0.7 && resumedAt < 3,
@@ -328,9 +403,19 @@ export default {
       'the dispatcher repaint with A2 rendered and completed B0 suppressed',
     );
 
+    await setWindowState(
+      editedNext.mpv,
+      { fullscreen: true, maximized: false },
+      'the first automatic successor window state before its clean EOF',
+    );
     await releaseToEof(editedNext);
     const originalNext = await nextMpv(mockA.port, 'a1');
     await originalNext.mpv.setProp('pause', true);
+    await waitForWindowState(
+      originalNext.mpv,
+      { fullscreen: true, maximized: false },
+      'the next automatic successor to inherit the freshly published observation',
+    );
     await pollUntil(() => {
       try {
         const config = readConfig();
