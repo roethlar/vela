@@ -1,9 +1,8 @@
 ---
 name: update-governance
 description: Refresh this repo's governance from the AgentGovernanceBootstrap toolkit. Use when the owner asks to update or refresh governance.
+# toolkit-owned; edits are drift — see AGENTS.md
 ---
-
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
 
 Refresh this repo's governance from the AgentGovernanceBootstrap toolkit:
 

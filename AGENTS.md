@@ -58,6 +58,10 @@ Treat these owner words as process requests:
 - `plan`: draft or update a durable plan before broad implementation work. Plan documents are written for agents, never the owner: self-contained and technical, implementable by a completely cold, less-capable agent — no human-facing summary prose, no chat or session references that need the originating conversation to make sense. The owner does not read plan documents; present every decision a plan needs in chat as roughly 25-50 plain-English words — the problem, the change, the cost or risk — one decision at a time, never a batch, no jargon. Record the owner's approved wording durably (the decisions log, the plan's status line) so the approval survives the chat.
 - `playbook <name>`: read `.agents/playbooks/<name>.md` and follow it. Playbooks are approved durable workflows; this operator is how a session invokes one by name. If the named playbook does not exist, say so rather than guessing.
 
+## Owner Gates
+
+Any question put to the owner — a plan decision, an approval, a contested finding — is written for an owner arriving cold, hours later, with no session memory. The ask itself carries everything needed to rule, in one short message: a line or two of context, the question, what concretely changes under each option, and the recommended option with its reason. State what stays blocked until the ruling lands; silence never authorizes proceeding. An ask the owner can only answer by scrolling back, opening a plan document, or re-reading a transcript is malformed — rewrite it.
+
 ## Verification
 
 Use the repo's current automated verification entry point recorded in `.agents/repo-guidance.md` (Verification).

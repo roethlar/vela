@@ -1,9 +1,8 @@
 ---
 name: git
 description: Run the git playbook for plain-English delegated git operations (push, reconcile, add-remote, branch-cleanup). Use when the owner says git <operation> or /git <operation>.
+# toolkit-owned; edits are drift — see AGENTS.md
 ---
-
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
 
 Run the `git` playbook operator: read `.agents/playbooks/git.md` and follow
 it to perform the requested git operation (push, reconcile, add-remote,

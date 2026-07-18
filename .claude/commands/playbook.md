@@ -1,4 +1,7 @@
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+---
+description: Read the named playbook under .agents/playbooks/ and follow it. Use when the owner says playbook <name>.
+# toolkit-owned; edits are drift — see AGENTS.md
+---
 
 Run the `playbook` operator defined in this repo's `AGENTS.md` (Operator
 Requests): read the named playbook at `.agents/playbooks/<name>.md` - the name

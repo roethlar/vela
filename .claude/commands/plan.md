@@ -1,4 +1,7 @@
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+---
+description: Draft or update a durable plan before broad implementation work. Use when the owner says plan.
+# toolkit-owned; edits are drift — see AGENTS.md
+---
 
 Run the `plan` operator defined in this repo's `AGENTS.md` (Operator Requests):
 draft or update a durable plan before broad implementation work. Plan documents

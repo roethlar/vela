@@ -1,4 +1,4 @@
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+<!-- toolkit-owned; edits are drift — see AGENTS.md -->
 
 # Playbook: goal-first whole-change review (`openreview`)
 
@@ -57,6 +57,21 @@ headless entry, JSON output mode, bounded smoke test — exactly as the
 (that section is the canonical recipe; do not duplicate it here). Dispatch
 headless, one-shot, in the harness's JSON output mode.
 
+Tier routing is fixed: `openreview` always dispatches the harness's
+owner-confirmed **frontier** pair at **max** effort (see the `codereview`
+playbook's "Reviewer tiers and routing") — no escalation headroom exists
+above it, so a contested round resolves by owner adjudication, never a
+stronger redispatch. Eligibility is carried by the frontier entry's
+`openreview_confirmed` field (amended 2026-07-18, owner adjudication of
+OR3): the pair is dispatchable here only when that field matches the
+current harness version. A `fallback`-grade pair so confirmed is a
+legitimate openreview reviewer — dispatched when no competitive-grade
+harness is available or when the owner names it — and its grade is
+recorded in the outcome. A missing or `null` `openreview_confirmed`
+blocks that harness fail-closed for this playbook and routes to the
+owner; the orchestrator never infers openreview eligibility from a
+codereview-only confirmation.
+
 ## Verdict contract (structured, fail-closed)
 
 The reviewer returns its verdict in the JSON envelope. Its result payload must
@@ -91,9 +106,19 @@ gate (evidence, predicted observable failure, justified severity — ADMITTED or
 DECLINED, recorded either way), and admitted findings are worked per that
 playbook's per-finding flow: one finding ↔ one branch ↔ one verdict, guard
 proof included. This playbook owns the dispatch and the verdict envelope;
-`codereview` owns everything downstream. A `clean` verdict is recorded as one
-plain sentence ("openreview <agent> over <base>..<head>: no material issue")
-wherever the repo tracks review outcomes.
+`codereview` owns everything downstream.
+
+Every outcome — clean or findings — records reviewer provenance
+(amended 2026-07-18, owner adjudication of OR5): the harness, resolved
+model id, effort, and grade, taken from the dispatch record of the
+session that produced the verdict, never reconstructed after the fact.
+A `clean` verdict is recorded as one plain sentence wherever the repo
+tracks review outcomes:
+"openreview <agent> (<model> @ <effort>, <grade>) over <base>..<head>:
+no material issue". A clean line without provenance is an incomplete
+record — a future reader must be able to tell **which** reviewer found
+nothing, or the once-per-harness-version confirmation economy is
+unauditable.
 
 ## Anti-patterns
 

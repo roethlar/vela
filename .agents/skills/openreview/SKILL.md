@@ -1,9 +1,8 @@
 ---
 name: openreview
 description: Run the openreview playbook with a named reviewer agent for an unprimed goal-first review of a whole change. Use when the owner says openreview <agent>.
+# toolkit-owned; edits are drift — see AGENTS.md
 ---
-
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
 
 Run the `openreview` playbook operator: read
 `.agents/playbooks/openreview.md` and follow it to get one unprimed,

@@ -1,4 +1,4 @@
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
+<!-- toolkit-owned; edits are drift — see AGENTS.md -->
 
 # Playbook: synchronous cross-harness finding review (`codereview`)
 
@@ -94,6 +94,11 @@ quick/wait toggle and no Strict/Faster WIP mode** — the prior async loop's
 parallelism knobs do not apply here. One finding is dispatched, reviewed, recorded,
 and acted on before the next is dispatched.
 
+`codereview <agent> frontier` is the only routing modifier: it forces the
+**frontier** tier for that dispatch (see "Reviewer tiers and routing") and the
+record carries `escalated: owner`. Provider choice stays in `<agent>` — no
+phrase silently re-routes to a different harness.
+
 ## Deriving the reviewer incantation (probe-and-verify)
 
 The only harness-specific fact the loop needs is **how to run `<agent>` headless,
@@ -120,14 +125,188 @@ thing a capable agent already does when a human says "codereview this with grok"
 4. **Use the verified incantation** to run the review. Probing is bounded to
    `--help`/`--version`/the trivial smoke prompt — never arbitrary commands.
 
-**Optional session cache (convenience, not source of truth).** Once verified, you may
-record an incantation in a gitignored machine-local file,
-`.agents/review/harnesses.local.json`, to skip re-probing next session. Harness
-availability and CLI syntax are machine-specific, so a `*.local.*` file is the correct
-home (consistent with the repo's treatment of `settings.local.json` as untracked
-machine state). The cache is advisory and **self-authored** — never hand-maintained;
-the source of truth is "re-derive by probing," so a stale cache self-corrects on the
-next smoke test.
+**Session cache (`.agents/review/harnesses.local.json`, machine-local).** Once
+verified, record the incantation in this gitignored machine-local file to skip
+re-probing next session (the incantation half is convenience, not source of
+truth). Harness availability and CLI syntax are machine-specific, so a
+`*.local.*` file is the correct home (consistent with the repo's treatment of
+`settings.local.json` as untracked machine state); `.gitignore` carries
+`.agents/review/*.local.json`, and the cache is **self-authored** — never
+hand-maintained. The source of truth for incantations is "re-derive by
+probing," so a stale cache self-corrects on the next smoke test.
+
+For **tier routing** the cache is load-bearing, not optional: it is the only
+place tier→(model, effort) resolution exists — committed text stays
+model-free. Each harness entry is keyed by harness version and additionally
+carries:
+
+```json
+"transport": "mcp | cli",
+"tiers": {
+  "standard": {"model": "<id>", "effort": "<level>", "flags": ["..."],
+               "confirmed": "<harness version>"},
+  "frontier": {"model": "<id>", "effort": "<level>", "flags": ["..."],
+               "confirmed": "<harness version>",
+               "grade": "competitive | fallback",
+               "openreview_confirmed": "<harness version | null>"}
+}
+```
+
+The probe additionally discovers the model-selection and effort flags and
+verifies the pinned model resolves, then **proposes** this mapping; the
+**owner confirms it once per harness version**, and the confirmation is
+recorded in the entry (`grade` is owner-declared, frontier-only).
+`openreview_confirmed` records that the same owner confirmation covers
+the pair's use by the `openreview` playbook at its ruled effort (OR3,
+owner-adjudicated 2026-07-18): a frontier pair the owner declared
+fallback-grade is fallback for **both** playbooks — the confirmation is
+per pair, not per playbook — so the field is set at the same
+confirmation moment, never inferred later. `null` means the owner has
+not confirmed the pair for openreview and that cell blocks fail-closed
+there. A
+single-model harness may still differentiate tiers by effort; only when both
+pairs are genuinely identical does it record the same pair under both tiers,
+explicitly. `transport` is `mcp` where a verified MCP registration exists for
+the harness, else `cli` — MCP is preferred where verified (thread continuity
+gives the repair-delta natively; parameterized invocation retires flag
+drift; no shell-quoting layer), but registrations are machine-local user
+config: committed text names transports, never server registrations.
+
+Cache validity is **lazy** — no per-session ping. A hit on unchanged harness
+version + profile skips the full probe; each tier's pin is then validated,
+envelope and pin together, on its **first real dispatch** of the session. A
+model-not-found, connection, or equivalent error invalidates that cache
+entry, forces a re-probe, and retries the dispatch once. Model IDs retire
+without harness version bumps, so the cache never becomes the sole
+unverified pin.
+
+Effort binds at dispatch boundaries: on the MCP route effort is fixed at
+conversation creation and follow-ups inherit it, so a redispatch that keeps
+the pinned pair rides the in-thread repair-delta at cached-input prices,
+while any tier or effort change necessarily opens a fresh conversation at
+cold-prime cost — which the fresh-session rule for escalations already
+mandates.
+
+### Dispatch provenance: the `Reviewer:` line
+
+Every finding record and index row carries one provenance line:
+
+```text
+Reviewer: <harness> / <resolved model id> / <effort> / <tier>
+  [escalated: <ordered list of ALL matched triggers>]
+```
+
+`escalated:` lists **every** matched trigger in order (e.g.
+`escalated: T1,T2,T5`), never one arbitrarily chosen ID; an owner force is
+recorded as `escalated: owner`; a frontier-ceiling reopen records
+`T5 (ceiling)`. The line is copied from the **invocation transcript** — the
+MCP result envelope or the CLI JSON stream — never from the reviewer's
+prose. **A review with no transcript is not a review**: an unreachable
+server, a failed call, or absent transcript metadata means the dispatch
+failed, whatever text came back. Dispatch is a direct tool call — no model
+sits in the router seat to improvise around a dead server.
+
+## Reviewer tiers and routing
+
+Review dispatch is routed, not ambient. The playbooks own the *meaning* of two
+reviewer tiers; committed text never names a concrete model — model names rot,
+and rot in an installed artifact is drift:
+
+- **standard** — the owner-confirmed best-value (model, effort) pair on the
+  dispatched harness; sufficient for the tightly framed conformance verdicts
+  this playbook issues. `codereview` dispatches standard at **high** effort.
+- **frontier** — an owner-confirmed pair strictly stronger than standard *as
+  configured*; required for escalated findings. `codereview` dispatches
+  frontier at **xhigh** effort, whether frontier was reached by escalation or
+  owner force. Where the harness does not expose the ruled level, the
+  owner-confirmed pair is authoritative as recorded.
+
+Effort is part of tier identity: capability ordering holds only for configured
+(model, effort) pairs, never bare model names — a flagship name may
+legitimately sit in standard, and tiers on a single-model harness may differ
+by effort alone. The monotonic effort ladder `high < xhigh < max` tracks
+review depth. There are exactly two tiers, only tiers issue verdicts, and
+there is no third role: no economy/cheap-model role exists for any review
+work — cheapness comes from routing, not from a weaker tier.
+
+A tier resolves to today's (model ID, effort flags) pair only at invocation
+time, from the version-keyed machine-local cache (see "Deriving the reviewer
+incantation"); the owner confirms each tier→pair mapping once per harness
+version, and the confirmation is recorded in the cache entry. **Fail closed:**
+a dispatch whose tier has no owner-confirmed cache entry blocks and asks the
+owner — nothing guesses. Tier strength is an owner judgment, not a probe
+inference: neither "stronger" nor "best value" is resolvable from `--help`
+output.
+
+A frontier entry is owner-graded `competitive` or `fallback` at confirmation.
+A fallback-grade frontier is the same class at more effort, not a strictly
+stronger adjudicator — the grade drives the halt rule under "Escalation
+triggers" below.
+
+## Escalation triggers (standard → frontier)
+
+`codereview` dispatches standard by default. Mechanical triggers are evaluated
+deterministically from the diff and the finding record before any reviewer
+runs; judgment arrives only via the `reopened` verdict. Any matched trigger
+routes that finding's review (or re-review) to frontier:
+
+- **T1 — sensitive path (mechanical, pre-review).** The diff touches a
+  sensitive path. Matching is executable, not semantic: changed paths are
+  tested against git-pathspec globs. Default globs: `**/auth*`, `**/secret*`,
+  `**/*credential*`, `**/crypto*`, `**/migrations/**`, `**/schema*`,
+  `**/*.proto`, `**/wire/**`, `**/serializ*`. The committed file
+  `.agents/review/sensitive-paths` is the per-repo override, with **replace**
+  semantics (present ⇒ it is the whole list). Glob matching is approximate by
+  construction; the owner override below is the recourse — never per-session
+  invention of new patterns.
+- **T2 — recorded severity (mechanical, pre-dispatch).** The finding record's
+  committed `**Severity**:` field reads CRITICAL or HIGH (impact line
+  required, per the severity gate). Such findings route straight to frontier
+  without consuming a standard round. T2 reads the finding record only —
+  never the verdict envelope, which carries no severity field.
+- **T3 — guard-proof integrity (mechanical, orchestrator-evaluated).** The
+  guard proof artifact is missing, its verification command exits nonzero, or
+  one orchestrator-run repeat disagrees with the recorded result (flake).
+  These checks run outside any reviewer. T3 is a **pre-dispatch blocker,
+  not an escalation** (amended 2026-07-18, owner adjudication of OR4): a
+  failed integrity check means there is no valid evidence to review, so
+  the round halts and returns to the coder (or the owner, if the coder
+  cannot reproduce) until a deterministic proof exists — dispatching a
+  frontier reviewer at broken evidence would spend the scarcest tier on
+  input that no tier can adjudicate. Proof-*quality* judgment is not T3:
+  a reviewer that distrusts a *valid* proof issues `reopened`, which
+  escalates via T5.
+- **T4 — declared-file drift (mechanical, post-repair).** Exact path-set
+  comparison of the repair commits against the declared file set snapshotted
+  in the repair record. Expansion beyond it does **not** silently trigger a
+  replay — it halts the round and routes to the owner as contested,
+  preserving the declared-files contract. "Approach drift" is judgment, not
+  T4: it reaches the reviewer, who reopens (→ T5), or the owner. Full replay
+  happens only on an explicit owner ask.
+- **T5 — reopen (mechanical).** Any `reopened` finding escalates one tier on
+  redispatch — ceiling at frontier, **within the harness the owner named**;
+  no trigger silently consumes another provider's quota. If the prior round
+  was already frontier, the reopen re-dispatches frontier in a **fresh
+  session** of the same harness and records `escalated: T5 (ceiling)`.
+  Switching provider requires an explicit owner dispatch.
+
+**Owner override.** The operator phrase `codereview <agent> frontier` forces
+frontier for that dispatch and is recorded as `escalated: owner` — never by
+hand-editing the cache.
+
+**Fallback-grade halt.** Where the confirmed frontier entry carries
+`"grade": "fallback"`, any trigger that would route to frontier — T1–T5
+alike — instead halts the finding as contested to the owner: escalation must
+buy a strictly stronger adjudicator, and auto-dispatching the same class at
+more effort is escalation theater. At the halt the owner either accepts the
+fallback dispatch (recorded `escalated: <triggers> (fallback accepted:
+owner)`) or re-dispatches on a competitive-frontier harness via the owner
+phrase — provider switching stays owner-only.
+
+Escalation opens a **fresh conversation, always** — a tier or effort change
+never rides an existing reviewer thread; the re-prime is the price of fresh
+eyes. Mid-thread effort nudges on an existing conversation are rejected as
+anchored escalation.
 
 ## Per-finding flow
 
@@ -137,7 +316,10 @@ see the gate below):
 1. **Finish the fix** on a per-finding branch `fix/<id>-<slug>`, smallest coherent
    slice, touching only the files the finding doc declares.
 2. **Dispatch the reviewer** headless and one-shot, in the harness's **JSON output
-   mode** (the flag found while probing). Pass an **explicit base**: the reviewed
+   mode** (the flag found while probing), at the routed tier's owner-confirmed
+   (model, effort) pair — **standard at high** unless an escalation trigger or
+   the owner phrase routes **frontier at xhigh** (see "Reviewer tiers and
+   routing"). Pass an **explicit base**: the reviewed
    branch **head SHA** and the **base SHA** (the merge-base with the main branch at
    dispatch time), so the reviewer evaluates `git diff <base-sha>..<head-sha>` against
    a fixed snapshot — a `main..branch` range is *not* stable if the main branch moves.
@@ -170,19 +352,43 @@ see the gate below):
    harness's JSON mode guarantees a valid *envelope*, not that the model filled the
    *payload* to schema — hence the inner parse, not envelope-validity alone.)
 4. **Record the verdict** into `.agents/review/findings/<id>.md` `## Reviewer
-   comments` **before acting** — the durable trail. Capture: reviewer **harness name +
-   version**, **reviewed head SHA + base SHA**, **`guard_confirmed`**, the
-   **verdict**, a UTC **timestamp**, and the comments. Flip the finding **Status** and
-   the index row. State whether this record is committed (it should be, as part of the
-   verification history).
+   comments` **before acting** — the durable trail. Capture: the **`Reviewer:`
+   provenance line** (transcript-sourced; see "Dispatch provenance"), reviewer
+   **harness name + version**, **reviewed head SHA + base SHA**,
+   **`guard_confirmed`**, the **verdict**, a UTC **timestamp**, and the
+   comments. Flip the finding **Status** and the index row. State whether this
+   record is committed (it should be, as part of the verification history).
 5. **Act on the recorded verdict:**
    - **accepted** → the branch is ready for an **owner-gated** merge. Do not merge,
      push, or rewrite history on agent authority; leave the branch (or hand off a
      `merge-<id>` branch).
-   - **reopened** → apply fix-ups on the same branch, then re-run `codereview <agent>`.
+   - **reopened** → apply fix-ups on the same branch, then re-run
+     `codereview <agent>` as a **repair-delta redispatch** (see below). The
+     reopen escalates one tier on redispatch (trigger T5).
    - **invalid** → write `.agents/review/<id>.contested.md` (which kind of
      disagreement, the reason, what the owner must decide) and route to the owner.
-     Disagreement is a recorded verdict, never a silent veto.
+     Disagreement is a recorded verdict, never a silent veto. Where a third
+     harness holds a verified `harnesses.local.json` entry on this machine, the
+     contested record **names it as an available adjudicator** — an offer, not
+     a dispatch: engaging it takes an explicit owner go, and no harness
+     adjudicates a dispute it authored a side of.
+
+## Repair-delta redispatch (reopened findings)
+
+A redispatch after a repair does not replay the full review. The packet is:
+the finding ID + the original finding text + the repair diff + the
+verification command + the guard proof. Pin mechanics for the redispatch
+round: `base` = the head SHA the finding was raised against (the pre-repair
+head), `head` = the current branch head; the **orchestrator computes the
+repair diff** from those pins and pipes it to the reviewer — the reviewer
+does not rediscover scope from SHAs. This amends the base/head dispatch
+contract above for redispatch rounds explicitly; it is not a silent
+departure. The guard proof still executes against the full current head in
+the reviewer's disposable worktree — only the *review mandate* narrows:
+confirm the specific predicted failure is closed and no adjacent regression
+exists in the touched surface, NOT re-review the whole branch. Full replay
+happens only on an explicit owner ask — including after a T4 halt.
+`openreview` remains the whole-change instrument.
 
 ## Finding intake and triage
 
@@ -264,9 +470,11 @@ Anything uncertain, out of scope, or overlapping another finding the reviewer sh
 grade explicitly. Empty if nothing.
 
 ## Reviewer comments
-Reviewer harness + version, reviewed/base SHA, guard_confirmed, verdict, UTC
-timestamp, and the comments. On reopen the coder addresses these and re-runs the
-review.
+`Reviewer: <harness> / <resolved model id> / <effort> / <tier>` — plus
+`escalated: <ordered trigger list>` when routing escalated — copied from the
+invocation transcript, never from reviewer prose. Then: reviewer harness +
+version, reviewed/base SHA, guard_confirmed, verdict, UTC timestamp, and the
+comments. On reopen the coder addresses these and re-runs the review.
 ```
 
 ## Status index: `.agents/review/index.md`
@@ -289,10 +497,14 @@ Per-finding detail: see `.agents/review/findings/<id>.md`.
 
 ## Findings
 
-| ID    | Severity | Impact (one line)            | Status | Branch |
-|-------|----------|------------------------------|--------|--------|
-| sec-1 | HIGH     | <observable consequence>     | `[ ]`  |        |
-| ...   | ...      | ...                          | ...    | ...    |
+| ID    | Severity | Impact (one line)            | Status | Branch | Reviewer |
+|-------|----------|------------------------------|--------|--------|----------|
+| sec-1 | HIGH     | <observable consequence>     | `[ ]`  |        |          |
+| ...   | ...      | ...                          | ...    | ...    | ...      |
+
+The Reviewer column carries the same transcript-sourced provenance line as the
+finding record, compacted: `<harness>/<model>/<effort>/<tier>` plus
+`esc:<triggers>` when routing escalated.
 ```
 
 Add one line to `.agents/state.md` while a loop is active, e.g. "Active review loop:
@@ -349,4 +561,6 @@ Name them when they appear; they are process defects, not code defects.
 - **Adjudicator (optional)**: when coder and reviewer disagree (a contested record), a
   third role — or the owner — reads the finding, the dispute, and the guard proof and
   issues a final ADMIT/DECLINE. Useful when the coder and reviewer are two models prone
-  to deferring to each other.
+  to deferring to each other. Candidate adjudicators are surfaced, never
+  self-dispatched: the contested record names third harnesses with verified
+  cache entries, and the owner engages one (or rules directly).

@@ -1,9 +1,8 @@
 ---
 name: codereview
 description: Run the codereview playbook with a named reviewer agent to verify the current finding against its record. Use when the owner says codereview <agent>.
+# toolkit-owned; edits are drift — see AGENTS.md
 ---
-
-<!-- Installed by governance refresh; do not edit. Any change here is drift and is restored on the next refresh. Route changes through the toolkit owner. -->
 
 Run the `codereview` playbook operator: read
 `.agents/playbooks/codereview.md` and follow it to review the current finding
