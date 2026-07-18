@@ -3,12 +3,12 @@
 **Severity**: MEDIUM — every automatically continued item opens with configured
 defaults instead of the window state the user just chose, forcing repeated
 fullscreen/maximize actions through a playlist or episode run.
-**Status**: In progress — implementation and coder guard proof complete; Claude
-code review pending
+**Status**: Verified — Claude accepted the exact reviewed head with an
+independent red/restored-green guard proof and no comments
 **Branch**: `fix/pws-1-playback-window-state`
 **Base**: `f40da74a31be1ab4554b142ce0c1d5ee8b594e9d`
 **Implementation commit**: `97091e624aeb1376a692c74a9b79d8b674efd30a`
-**Last dispatched head**: pending
+**Last dispatched head**: `8d4c7bc67c4c466a55fec807de22f7e650875bfc`
 
 ## Evidence
 
@@ -107,4 +107,18 @@ manual plays or app restarts remain intentionally out of scope.
 
 ## Reviewer comments
 
-Pending Claude code review.
+Reviewer: Claude Code / claude-opus-4-8 / high / standard
+
+- Harness: Claude Code 2.1.214 over MCP
+- Reviewed head: `8d4c7bc67c4c466a55fec807de22f7e650875bfc`
+- Base: `f40da74a31be1ab4554b142ce0c1d5ee8b594e9d`
+- `guard_confirmed`: `true`
+- Verdict: `accepted`
+- Timestamp: `2026-07-18T20:05:33.227Z`
+- Comments: none
+
+The reviewer independently removed the exact-session comparison, observed
+`automatic_window_state_requires_the_exact_replaced_session` fail at the stale
+continuation assertion for the intended reason, restored the exact reviewed
+head, and observed the focused guard pass. The restored worktree was clean and
+all 146 Rust tests passed.

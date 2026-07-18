@@ -9,17 +9,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **`wsp-1` IMPLEMENTED AND EXTERNALLY ACCEPTED.** The first 2026-07-18
-  owner-reported queue item preserves loaded library depth and scroll through a
-  successful watch edit while retaining server-authoritative merged state.
-  Claude Opus/high accepted exact head `32b0777` with an independent
-  production-mutation red/restored-green proof and no material finding. The
-  exact verdict lives in `.agents/review/findings/wsp-1.md`; compact status is
-  in `.agents/review/index.md`.
+- **`pws-1` IMPLEMENTED AND EXTERNALLY ACCEPTED.** Exact automatic successors
+  retain the completed mpv process's actual fullscreen and maximized state;
+  manual starts retain configured defaults. Claude Code 2.1.214 /
+  `claude-opus-4-8` / high accepted exact head `8d4c7bc` with an independent
+  red/restored-green stale-session proof and no comments. Exact status lives in
+  `.agents/review/findings/pws-1.md`.
 
-- **Version 0.1.58** (`package.json`, both lockfiles,
+- **Version 0.1.59** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `28f4a2d`).
+  agree, as of `8d4c7bc`).
 
 - **v1.0 README POLISH COMPLETE; OWNER-REPORTED ISSUE QUEUE IS NEXT.** The
   user-first README rewrite landed at `d4d9e95`, correcting first-run, server-
@@ -75,15 +74,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **ACTIVE APPROVED SLICE: mpv automatic window-state continuity.** The binding
-  implementation and guard design live in
-  `.agents/plans/playback-window-state-continuity.md`. Exact automatic
-  successors retain fullscreen and maximized state; manual starts and geometry
-  are unchanged. Implementation and coder proof are complete; Claude review
-  status lives in `.agents/review/findings/pws-1.md`. Finish that review before
-  taking the next owner-reported issue.
+- **NEXT OWNER-REPORTED SLICE: refresh Continue Watching after clean-EOF played
+  state settles.** The automatic refresh currently precedes the server
+  `mark_played` completion, so a newly eligible next episode may not appear
+  until manual Refresh. Trace and queue authority live at the top of
+  `ISSUES.md`; draft the durable implementation/guard plan before code.
 
-- **IMMEDIATE NEXT: work the open issue queue one item at a time.** The four
+- **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
   older macOS `build.sh --native` failure follows them. Each code item gets its
   own durable plan, guard proof, commit, and Claude `codereview` before the

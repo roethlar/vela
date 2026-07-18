@@ -4,12 +4,6 @@
 
 Observed during live use and code-traced 2026-07-18; implementation planning is
 still pending for the items below.
-- mpv fullscreen state is not preserved when playback advances to the next item
-  in a playlist or automatic continuation. The next item opens windowed, so the
-  user has to maximize or enter fullscreen again for every item. Every successor
-  starts a new mpv process with `--no-config`, and Vela captures no fullscreen,
-  maximized, or geometry state to apply to that process (`commands.rs`,
-  `playback.rs`).
 - Continue Watching does not add the next episode when a new series first
   becomes relevant to the carousel until the user clicks Refresh. Automatic
   post-playback refresh runs before the clean-EOF server `mark_played` request
@@ -23,6 +17,15 @@ still pending for the items below.
   Plex's server name and optionally allowing a user alias.
 
 ## Resolved - Owner-Reported (2026-07-18)
+
+- Automatic playlist and Continue Playing successors now retain the completed
+  mpv process's actual fullscreen and maximized state. Manual starts keep their
+  configured defaults, and unknown state remains untouched. Implemented in Vela
+  0.1.59 under `.agents/plans/playback-window-state-continuity.md`; eight
+  production regressions were separately proven red/restored-green, the exact-
+  source Linux suite passed 28/28, and Claude accepted exact reviewed head
+  `8d4c7bc` with an independent guard proof. Detail:
+  `.agents/review/findings/pws-1.md`.
 
 - Marking an item watched from a library listing refreshed the entire page,
   returned the grid to page one, and lost the current scroll position. Vela now

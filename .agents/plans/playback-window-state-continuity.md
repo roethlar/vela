@@ -1,8 +1,11 @@
 # Plan: preserve mpv window state across automatic continuation
 
-Status: **APPROVED 2026-07-18.** The owner approved carrying actual fullscreen
+Status: **COMPLETE 2026-07-18.** The owner approved carrying actual fullscreen
 and maximized state into exact automatic successors. Manual plays retain their
-configured defaults; window size and position remain untouched.
+configured defaults; window size and position remain untouched. Claude accepted
+exact reviewed head `8d4c7bc` with an independent red/restored-green guard
+proof and no comments; canonical local checks and the fresh Linux real-app suite
+28/28 pass.
 
 ## Goal
 
