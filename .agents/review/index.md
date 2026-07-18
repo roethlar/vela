@@ -13,21 +13,20 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Finding `wsp-1` REVIEW BLOCKED 2026-07-18: a successful manual watched-state
+Finding `wsp-1` VERIFIED 2026-07-18: a successful manual watched-state
 edit used to blank a paginated browse grid, reload only page one, and lose the
 owner's scroll position. The implemented fix buffers a fresh authoritative
 listing through the prior depth, publishes once under exact
 root/generation ownership, and restores scroll without weakening merged
 watch-state truth. Seven behavior families have separate production-mutation
 red/restored-green proof, local gates pass, and the exact-source Linux suite
-passed 28/28. Two exact-head Opus static reviews found no material defect. The
-owner-directed MCP `--allowedTools` launch was proved on the server's direct
-Bash tool, which ran the focused guard 5/5, but Workflow's nested reviewer does
-not inherit that grant and still cannot execute its independent guard. Its
-latest structured result was environment-only `invalid` with
-`guard_confirmed:false`; no accepted verdict exists. Claude CLI transport or an
-explicit one-finding guard waiver is now owner-gated. Branch:
-`fix/wsp-1-preserve-watch-edit-position`. Detail:
+passed 28/28. After the owner authorized a one-finding transport fallback,
+Claude Code 2.1.214 / Opus 4.8 / high accepted exact head `32b0777` against base
+`dd67c06` with `guard_confirmed:true`. Claude independently restored the old
+grid-tearing refresh, observed the focused guard fail for the intended reason,
+restored exact head, and observed 5/5 green with an empty status and diff. No
+material defect was found. Branch: `fix/wsp-1-preserve-watch-edit-position`.
+Detail:
 `.agents/review/findings/wsp-1.md`.
 
 Loop `oled-1` CLOSED 2026-07-17 at Vela 0.1.57 (`6029dbf`): OLED Black

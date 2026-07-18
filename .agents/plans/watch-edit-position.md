@@ -1,10 +1,10 @@
 # Plan: successful watch edits preserve browse depth and position
 
-Status: **IMPLEMENTED; CLAUDE CODEREVIEW TRANSPORT-BLOCKED 2026-07-18.**
+Status: **IMPLEMENTED; CLAUDE CODEREVIEW ACCEPTED 2026-07-18.**
 The owner directed autonomous execution through the recorded work queue, with
 each code change reviewed through the Claude `codereview` playbook. This plan
 remains binding for finding `wsp-1`; a material scope expansion requires a new
-plan. The exact blocker and non-verdict dispatch record live in the finding.
+plan. The exact accepted verdict and guard proof live in the finding.
 
 ## Owner-visible problem
 
@@ -141,7 +141,7 @@ only and restoring from the committed head:
 - Linux real-app focused scenarios: `watchposition`, `markwatched`,
   `mergedview`, `pagefail`, `refresh`, and `watchcurate`
 - fresh-build full Linux `npm run e2e`
-- Claude MCP `codereview` at pinned base/head, with an independent
+- Claude `codereview` at pinned base/head, with an independent
   production-only mutation of the focused macOS-capable guard and exact
   restore/green/clean proof
 

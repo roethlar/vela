@@ -9,18 +9,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **ACTIVE REVIEW LOOP: `wsp-1` — REVIEW TRANSPORT BLOCKED.** The first
-  2026-07-18 owner-reported queue item is implemented and fully coder-proven.
-  The owner-directed MCP `--allowedTools` launch works for the server itself,
-  but Claude Code 2.1.214 does not pass that authority into its Workflow
-  reviewer. The exact failed-closed dispatch record and the remaining Claude
-  CLI-or-waiver ruling live in `.agents/review/findings/wsp-1.md`; compact
-  status is in `.agents/review/index.md`, and machine mechanics are in
-  `.agents/machines.md`.
+- **`wsp-1` IMPLEMENTED AND EXTERNALLY ACCEPTED.** The first 2026-07-18
+  owner-reported queue item preserves loaded library depth and scroll through a
+  successful watch edit while retaining server-authoritative merged state.
+  Claude Opus/high accepted exact head `32b0777` with an independent
+  production-mutation red/restored-green proof and no material finding. The
+  exact verdict lives in `.agents/review/findings/wsp-1.md`; compact status is
+  in `.agents/review/index.md`.
 
-- **Version 0.1.57** (`package.json`, both lockfiles,
+- **Version 0.1.58** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
-  agree, as of `d900f8a`).
+  agree, as of `28f4a2d`).
 
 - **v1.0 README POLISH COMPLETE; OWNER-REPORTED ISSUE QUEUE IS NEXT.** The
   user-first README rewrite landed at `d4d9e95`, correcting first-run, server-
@@ -79,7 +78,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The four
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
   older macOS `build.sh --native` failure follows them. Each code item gets its
-  own durable plan, guard proof, commit, and Claude MCP `codereview` before the
+  own durable plan, guard proof, commit, and Claude `codereview` before the
   next begins. Outbound actions remain governed by `.agents/push-policy.md`.
 
 - **CLEAN-EOF CAROUSEL REGRESSION — IMPLEMENTED; REVIEW AND OWNER PLAYTEST OPEN.** The owner's 0.1.51
@@ -283,11 +282,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- `wsp-1` cannot receive an accepted Claude `codereview` verdict on the current
-  machine: the headless MCP Workflow reviewer cannot execute its mandatory
-  independent guard, and its environment-only `reopened` payload reaches the
-  playbook's unconfigured T5 frontier route. See the finding for the exact
-  owner ruling needed; no merge or next code slice proceeds meanwhile.
+- None for the active queue item. The final real-Plex smoke remains deferred to
+  release preparation by owner choice.
 
 ## Verification
 

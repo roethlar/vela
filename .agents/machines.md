@@ -40,8 +40,16 @@ portable and may at most point here.
   expose command-line or user custom agents with their own permission mode;
   and the MCP `Agent` endpoint reported no available agent type. Opus can read
   and statically review the exact head but cannot produce
-  `guard_confirmed:true` through this MCP surface. The durable dispatch record
-  and remaining transport ruling are in `.agents/review/findings/wsp-1.md`.
+  `guard_confirmed:true` through this MCP surface.
+- Reviewer CLI fallback (verified 2026-07-18 on `wsp-1`, Claude Code 2.1.214):
+  `claude --allowedTools=Read,Glob,Grep,Edit,Bash(*) --model=opus
+  --effort=high --output-format=stream-json --verbose --json-schema=<schema>
+  --no-session-persistence -p <prompt>` ran headlessly in an exact detached
+  worktree. It resolved `claude-opus-4-8`, exposed the complete tool transcript,
+  independently produced the required production red/restored-green proof,
+  returned a schema-valid verdict, and left the worktree clean. The owner
+  authorized this transport for `wsp-1` only; it is not a standing replacement
+  for MCP.
 
 ## Windows dev host (`F:\dev\vela`)
 
