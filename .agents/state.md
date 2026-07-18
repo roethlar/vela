@@ -9,6 +9,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- **ACTIVE REVIEW LOOP: `wsp-1`.** The first 2026-07-18 owner-reported queue
+  item has an approved binding plan at `.agents/plans/watch-edit-position.md`;
+  current status and the eventual Claude verdict live in
+  `.agents/review/findings/wsp-1.md` and `.agents/review/index.md`.
+
 - **Version 0.1.57** (`package.json`, both lockfiles,
   `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
   agree, as of `d900f8a`).
