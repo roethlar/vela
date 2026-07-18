@@ -1,5 +1,22 @@
 # Issue Queue
 
+## Open - Owner-Reported (2026-07-18)
+
+Observed during live use; recorded as reported and not yet code-triaged.
+
+- Marking an item watched from a library listing refreshes the entire page and
+  loses the current scroll position. The edit should update the affected item
+  in place and preserve the user's position in the library.
+- mpv fullscreen state is not preserved when playback advances to the next item
+  in a playlist or automatic continuation. The next item opens windowed, so the
+  user has to maximize or enter fullscreen again for every item.
+- Continue Watching does not add the next episode when a new series first
+  becomes relevant to the carousel until the user clicks Refresh. Automatic
+  post-playback refresh is not making that newly eligible series visible.
+- Plex sources use the fixed display name `Plex`, leaving multiple Plex servers
+  indistinguishable. Each discovered server needs a stable human-readable label
+  based on its server name or a user-defined alias.
+
 ## Open - Agent-Found (2026-07-15)
 
 - `scripts/build.sh --native` fails on macOS's Bash 3 after the toolchain check
