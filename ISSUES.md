@@ -2,14 +2,15 @@
 
 ## Open - Owner-Reported (2026-07-18)
 
-Observed during live use and code-traced 2026-07-18; implementation planning is
-still pending for the items below.
+Observed during live use and code-traced 2026-07-18; implementation status is
+recorded per item below.
 - Continue Watching does not add the next episode when a new series first
   becomes relevant to the carousel until the user clicks Refresh. Automatic
   post-playback refresh runs before the clean-EOF server `mark_played` request
   completes, with no second refresh after that mutation (`src-tauri/src/lib.rs`).
   A newly eligible server-hub episode can therefore miss the automatic refresh
-  and appear only after the manual one.
+  and appear only after the manual one. Approved implementation and guard plan:
+  `.agents/plans/clean-eof-hub-refresh.md` (`chr-1`).
 - Vela currently models Plex as one fixed `plex` / `Plex` source bound to one
   reachable machine, so multiple Plex servers cannot coexist—not merely be
   distinguished in the UI (`src-tauri/src/lib.rs`, `commands.rs`, `config.rs`).

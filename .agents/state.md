@@ -74,11 +74,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **NEXT OWNER-REPORTED SLICE: refresh Continue Watching after clean-EOF played
-  state settles.** The automatic refresh currently precedes the server
-  `mark_played` completion, so a newly eligible next episode may not appear
-  until manual Refresh. Trace and queue authority live at the top of
-  `ISSUES.md`; draft the durable implementation/guard plan before code.
+- **ACTIVE APPROVED SLICE `chr-1`: refresh Continue Watching after clean-EOF
+  played state settles.** Move the existing dispatcher-owned Home refresh after
+  the server attempt while keeping sequence release early and refresh counts
+  exact. Binding implementation and guard design:
+  `.agents/plans/clean-eof-hub-refresh.md`; review status:
+  `.agents/review/findings/chr-1.md`.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the

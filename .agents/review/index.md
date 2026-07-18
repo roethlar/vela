@@ -13,6 +13,14 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Finding `chr-1` ADMITTED 2026-07-18: after clean EOF, the authoritative Home
+refresh currently precedes the owning server's played-state response, so a
+newly eligible next episode can remain absent until manual Refresh. The approved
+smallest slice moves the existing dispatcher refresh after the server attempt,
+without delaying sequence release or adding reloads. Branch:
+`fix/chr-1-post-mark-refresh`. Detail:
+`.agents/review/findings/chr-1.md`.
+
 Finding `pws-1` VERIFIED 2026-07-18: automatic playlist and
 Continue Playing successors now inherit the completed mpv process's actual
 fullscreen and maximized state under exact-session authority, while manual
