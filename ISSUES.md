@@ -2,20 +2,32 @@
 
 ## Open - Owner-Reported (2026-07-18)
 
-Observed during live use; recorded as reported and not yet code-triaged.
+Observed during live use and code-traced 2026-07-18; implementation planning is
+still pending.
 
 - Marking an item watched from a library listing refreshes the entire page and
-  loses the current scroll position. The edit should update the affected item
-  in place and preserve the user's position in the library.
+  loses the current scroll position. The successful-edit path calls
+  `refreshWatchState()`, whose browse branch resets the listing to page one and
+  does not capture scroll position (`src/routes/+page.svelte`). The required
+  outcome is to preserve both loaded depth and the user's position; an in-place
+  item update is one possible implementation, not a settled design.
 - mpv fullscreen state is not preserved when playback advances to the next item
   in a playlist or automatic continuation. The next item opens windowed, so the
-  user has to maximize or enter fullscreen again for every item.
+  user has to maximize or enter fullscreen again for every item. Every successor
+  starts a new mpv process with `--no-config`, and Vela captures no fullscreen,
+  maximized, or geometry state to apply to that process (`commands.rs`,
+  `playback.rs`).
 - Continue Watching does not add the next episode when a new series first
   becomes relevant to the carousel until the user clicks Refresh. Automatic
-  post-playback refresh is not making that newly eligible series visible.
-- Plex sources use the fixed display name `Plex`, leaving multiple Plex servers
-  indistinguishable. Each discovered server needs a stable human-readable label
-  based on its server name or a user-defined alias.
+  post-playback refresh runs before the clean-EOF server `mark_played` request
+  completes, with no second refresh after that mutation (`src-tauri/src/lib.rs`).
+  A newly eligible server-hub episode can therefore miss the automatic refresh
+  and appear only after the manual one.
+- Vela currently models Plex as one fixed `plex` / `Plex` source bound to one
+  reachable machine, so multiple Plex servers cannot coexist—not merely be
+  distinguished in the UI (`src-tauri/src/lib.rs`, `commands.rs`, `config.rs`).
+  Multi-Plex support needs one stable source identity per machine, displaying
+  Plex's server name and optionally allowing a user alias.
 
 ## Open - Agent-Found (2026-07-15)
 
