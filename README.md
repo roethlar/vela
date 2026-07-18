@@ -1,172 +1,237 @@
-# Vela
+<p align="center">
+  <img src="src-tauri/icons/128x128@2x.png" width="128" height="128" alt="Vela logo">
+</p>
 
-A native, HDR-capable media client for Linux, macOS, and Windows. It browses
-**Plex, Jellyfin, and Emby** libraries in a custom UI — unified across
-servers or one at a time — and plays video through **mpv** in its own
-window, which is the reliable way to get true HDR passthrough (10-bit PQ/BT.2020
-negotiated with the display).
+<h1 align="center">Vela</h1>
 
-## Architecture
+<p align="center">
+  <strong>Your media servers, one HDR-first desktop client.</strong><br>
+  Plex · Jellyfin · experimental Emby &nbsp;—&nbsp; Linux · macOS · Windows
+</p>
 
-- **UI:** [Tauri 2](https://tauri.app) + SvelteKit (TypeScript). The frontend
-  (`src/`) talks to a Rust backend (`src-tauri/`) over Tauri commands.
-- **Sources:** each backend implements a `MediaSource` trait (`src-tauri/src/source/`)
-  behind a `SourceRegistry`. Plex (`plex.rs`) and Jellyfin/Emby (`jellyfin.rs`,
-  one client with a `Flavor` for the small differences). Item keys are
-  source-namespaced; commands fan out for the unified view or scope to one source.
-- **Playback:** the system **`mpv`** binary is launched as its own window. HDR is
-  negotiated by mpv (`--vo=gpu-next --target-colorspace-hint=yes`); the app does
-  not embed video in the webview (that would force SDR). The GPU backend is
-  chosen per platform — Vulkan over the Wayland/X11 WSI on Linux, Vulkan over
-  Metal (`macvk`) on macOS, and D3D11 (DXGI HDR) on Windows.
-- **Progress/Resume:** tracked over mpv's JSON IPC channel (a Unix domain socket
-  on Linux/macOS, an emulated named pipe on Windows) and reported back to the
-  server — Plex timelines, Jellyfin/Emby playback check-ins — so resume works
-  across sessions.
+Vela brings server libraries into a focused native desktop interface and hands
+video playback to [mpv](https://mpv.io/) in its own window. That separation is
+the point: the library gets a polished app UI, while video keeps mpv's mature
+codec, GPU, tone-mapping, and HDR output path instead of being constrained by a
+webview player.
 
-## Requirements
+Vela is approaching its first public release. Plex is the primary and most
+deeply exercised backend, Jellyfin has been tested against a real server, and
+Emby currently ships as an experimental sibling of the Jellyfin integration.
 
-Vela exists to get **HDR on Wayland**, so it targets a reasonably modern GPU and an HDR
-display. The hardware below is what the HDR experience expects. Vela won't stop you
-running it on weaker hardware — it just won't perform well, and HDR won't engage. Your
-call.
+## Why Vela
 
-**Display + session**
-- An **HDR-capable display in HDR mode** (HDR10/PQ).
-- **Linux:** a **Wayland** compositor with HDR/color-management — **KDE Plasma 6+** or a
-  recent **Hyprland**. X11 is unsupported for HDR.
-- **macOS:** an EDR-capable display (most modern Macs / XDR displays).
-- **Windows:** Windows 10/11 with HDR enabled.
+- **HDR-first playback.** Vela launches the system mpv with `gpu-next` and
+  platform-aware output defaults for HDR passthrough on Linux, macOS, and
+  Windows.
+- **One place to browse.** Search or browse individual sources, or use the
+  deduplicated All view to see titles across servers and choose a backing source
+  when more than one has the same media.
+- **Continue where you left off.** A media-first Continue Watching cover-flow
+  combines server resume data with Vela's recent plays. Resume, restart, remove,
+  or mark watched from the item menu.
+- **Video-native sequences.** Create editable Vela playlists across sources,
+  browse server playlists without modifying them, and optionally continue into
+  the next episode or rendered Continue Watching item after a clean finish.
+- **A real library interface.** Infinite scrolling, persistent per-library
+  sorting, search, show/season/episode navigation, rich Plex details, clickable
+  people, library scans, and manual refresh are built in.
+- **Designed for the room.** Eleven palettes include a literal-black OLED theme;
+  subtle motion, art reveal, and optional mpv autocrop keep the interface out of
+  the video's way.
 
-**GPU (working Vulkan + HDR output)**
-- **AMD:** Radeon RX 400 / Polaris or newer on the `amdgpu` driver. RDNA or newer
-  recommended for 4K HDR. Legacy `radeon`-driver GPUs, including TeraScale / HD 5000/6000
-  and older GCN cards requiring manual `amdgpu` enablement, are unsupported.
-- **NVIDIA:** Maxwell / GTX 900 or newer with proprietary driver 535+; RTX-class
-  recommended for 4K HDR.
-- **Intel:** Skylake / Gen9 or newer; Arc/Xe recommended for 4K HDR.
+## Server support
 
-> Note: the low end of "supported" (e.g. a 2015 iGPU) may not sustain **4K60 HDR** with
-> the full `gpu-hq` profile. 1080p HDR is the realistic floor on such parts.
+| Server | Status | Current scope |
+| --- | --- | --- |
+| **Plex** | Primary | Device-PIN sign-in, libraries, search, rich details, watch state, Continue Watching, scans, and server playlists. Vela currently binds one Plex machine per config. |
+| **Jellyfin** | Supported | Multiple connections, libraries, search, playback/check-ins, watch state, and server playlists. Real-server smoke tested; some detail views are sparser than Plex. |
+| **Emby** | Experimental | Uses the shared Jellyfin-family client and is covered where the APIs overlap, but has not yet been exercised against a real Emby server. |
 
-**Player**
-- **`mpv` 0.38+** (required for `gpu-next`/libplacebo HDR). Vela can install a
-  current build for you on first run, auto-detects common install locations, and
-  lets you point Settings → Player at a custom mpv executable.
-- Tooling to build: Rust and Node.js, plus the platform's Tauri prerequisites
-  (Linux: `webkit2gtk-4.1`, `libsoup-3.0`; macOS: Xcode Command Line Tools;
-  Windows: WebView2 runtime + MSVC Build Tools). See the
-  [Tauri prerequisites](https://tauri.app/start/prerequisites/).
+Plex playback requires a reachable direct HTTPS server connection. Plex Relay
+is deliberately not used by default for HDR playback, so remote playback may
+require Plex Remote Access or joining the server's network.
 
-## Run (development)
+## Install and run
 
-Activate the Node version pinned by `.node-version` and the npm version pinned
-by `package.json`'s `packageManager`, then verify them before installing:
+Public installers are still being prepared for the first release. Until then,
+build Vela from source. Release binaries will be unsigned: macOS Gatekeeper and
+Windows SmartScreen may require an explicit approval.
+
+### Runtime requirements
+
+- **mpv 0.38 or newer is recommended.** mpv is not bundled, so it remains
+  independently updateable. Vela detects common install locations, can offer a
+  package-manager install on first run, and accepts a custom executable under
+  Settings → Player. Vela currently verifies that mpv runs, not its exact
+  version.
+- **HDR playback needs an HDR-capable display, OS session, and GPU path.** On
+  Linux, use a Wayland compositor with HDR/color-management support such as KDE
+  Plasma 6 or a current Hyprland; X11 is not an HDR path. On macOS, use an
+  EDR-capable display. On Windows 10/11, enable HDR in system settings.
+### Build an installer
+
+Building needs Rust, Node.js, and
+[Tauri's platform prerequisites](https://tauri.app/start/prerequisites/).
+Debian-family Linux needs WebKitGTK 4.1, libsoup 3, GTK 3, librsvg,
+Ayatana AppIndicator, and `patchelf`; macOS needs Xcode Command Line Tools;
+Windows needs WebView2, MSVC Build Tools, and PowerShell 7 for the wrapper
+below. The current Arch PKGBUILD targets x86_64.
+
+Install the Node and npm versions pinned by `.node-version` and `package.json`,
+then run:
+
+```bash
+git clone https://github.com/roethlar/vela.git
+cd vela
+node scripts/check-js-toolchain.mjs
+npm ci
+./scripts/build.sh
+```
+
+On Windows, use the equivalent PowerShell wrapper:
+
+```powershell
+pwsh scripts/build.ps1
+```
+
+The wrapper builds the native package for its host and prints the artifact
+location. The macOS default is a universal Apple Silicon + Intel DMG;
+Debian-family Linux defaults to an AppImage; Arch builds a pacman package; and
+Windows builds an NSIS installer. Linux `.deb` and `.rpm` bundles can be forced
+with:
+
+```bash
+./scripts/build.sh --bundles deb,rpm
+```
+
+### First run
+
+1. Open Settings → Servers.
+2. Link Plex with its device code, or add Jellyfin/Emby with a username and
+   password or API key.
+3. Choose a library and play. With multiple connections, the sidebar also lets
+   you choose All or an individual source.
+
+Movies play from their detail view. Shows drill through seasons and episodes.
+Continue Watching cards play directly; their context menu exposes resume and
+play-from-beginning actions.
+
+## Player and HDR notes
+
+Vela launches mpv as a separate process and tracks it through mpv's JSON IPC.
+Progress and completion are reported back through Plex timelines or
+Jellyfin/Emby playback check-ins, allowing server-side resume across sessions.
+
+By default Vela uses a predictable `--no-config` mpv profile. Settings → Player
+can opt into your own `mpv.conf` or append custom mpv options; those settings can
+also override Vela's HDR defaults or prevent playback, so change them
+deliberately.
+
+Black-bar cropping is Off by default. Manual mode runs on `Shift+C`; Automatic
+mode attempts every video. Automatic crop detection can be unreliable with HDR
+on some GPU/Wayland combinations and may occasionally hang mpv, so Manual is
+the safer option when that occurs.
+
+On NVIDIA + Wayland, Vela disables WebKitGTK's DMABUF renderer at startup to
+avoid a known webview crash. This affects the library UI renderer, not mpv's
+video output, and has no effect on macOS or Windows.
+
+## Configuration and privacy
+
+Vela stores `config.json` and `playlists.json` in the platform configuration
+directory:
+
+- Linux: `~/.config/vela/`
+- macOS: `~/Library/Application Support/com.vela.vela/`
+- Windows: `%APPDATA%\vela\vela\config\`
+
+Back up both files to preserve connected servers, preferences, recents, and
+Vela playlists. On Unix, Vela writes its configuration with owner-only
+permissions.
+
+Plex stream credentials are sent as an HTTP header through an owner-only mpv
+include file rather than being placed in the media URL or process arguments.
+Jellyfin/Emby stream URLs and server image URLs can contain access tokens, so
+those tokens remain visible locally to the Vela webview or mpv process. Vela
+does not send analytics or proxy credentials through a third party.
+
+Configs written by older Vela builds may still contain removed local-folder,
+SMB, or SSH fields, including old SMB credentials. Current builds preserve but
+ignore those fields so rollback remains possible. Removing them permanently is
+a manual edit of `config.json`.
+
+## Known limitations
+
+- Only one Plex machine can be connected at a time. Multiple Jellyfin and Emby
+  connections are supported.
+- Media-version selection is automatic and heuristic: Vela favors candidates
+  that look suitable for direct play, then HDR, resolution, and bitrate. There
+  is no manual version picker yet.
+- Emby remains experimental until it receives live-server integration testing.
+- HDR fidelity ultimately depends on mpv, its GPU backend, the display, and the
+  operating system's color-management path.
+
+Current pre-release bugs and follow-up work are tracked in
+[ISSUES.md](ISSUES.md).
+
+## Development
+
+Run the app in development mode after installing the pinned toolchain and
+dependencies:
+
+```bash
+npm run tauri dev
+```
+
+The core verification set is:
 
 ```bash
 node scripts/check-js-toolchain.mjs
 npm ci
-npm run tauri dev
+npm audit
+npm run check
+npm run build
+
+cd src-tauri
+cargo +1.89.0 check --locked
+cargo +stable check --locked
+cargo +stable clippy --all-targets --locked -- -D warnings
+cargo +stable test --locked
+cargo audit --file Cargo.lock
+cd ..
 ```
 
-On first launch you'll get a `plex.tv/link` code (with a QR/clickable link) to
-authorize a Plex account. Use the **⚙ Sources** panel to add more: Jellyfin/Emby
-servers (username + password, or an API key). The
-header source switcher toggles between the unified view and a single source.
-Clicking a title opens its info page — movies play from there, shows drill
-season → episode — while the Continue Watching carousel plays directly.
-
-> NVIDIA + Wayland (Linux only): the app disables WebKitGTK's DMABUF renderer
-> (`WEBKIT_DISABLE_DMABUF_RENDERER=1`) at startup to avoid a known webview crash.
-> This has no effect on macOS (WKWebView) or Windows (WebView2).
-
-## Test
+Linux end-to-end tests drive the real debug app, WebKitGTK, and mpv on a private
+Xvfb display with a throwaway Vela config:
 
 ```bash
-npm run check   # svelte-check (frontend types)
-cd src-tauri && cargo test --locked && cargo clippy --all-targets --locked -- -D warnings
+npm run e2e                    # build and run every scenario
+npm run e2e -- --skip-build    # reuse the current debug binary
+npm run e2e -- playback        # run one scenario by name
 ```
 
-End-to-end tests drive the real debug app (Linux only) — WebDriver for the
-UI, mpv's JSON IPC for playback — headless on a private Xvfb display, with
-a throwaway config so your real `~/.config/vela` is never touched:
+The E2E venue needs `tauri-driver`, Xvfb, ffmpeg, mpv, bsdtar, and curl. The
+first run downloads the pinned WebKitWebDriver described in
+[tests/e2e/README.md](tests/e2e/README.md); artifacts land under
+`tests/e2e/artifacts/`.
 
-```bash
-npm run e2e                    # build the debug app, run all scenarios
-npm run e2e -- --skip-build    # reuse the existing debug binary
-npm run e2e -- playback        # one scenario by name
-```
+## Architecture
 
-Requires `tauri-driver` (`cargo install tauri-driver`), `Xvfb`, `ffmpeg`,
-`mpv`, `bsdtar`, and `curl`; the first run downloads a pinned
-WebKitWebDriver into a gitignored vendor dir. Screenshots and driver logs
-land in `tests/e2e/artifacts/`. Knobs: `VELA_E2E_HEADED=1` runs on the
-real desktop, `VELA_E2E_DEBUG=1` logs each WebDriver call with timing.
-Details: `tests/e2e/README.md`.
+- **Desktop shell:** Tauri 2 with a static SvelteKit/Svelte 5 frontend in
+  `src/` and a Rust backend in `src-tauri/`.
+- **Sources:** Plex and the shared Jellyfin/Emby client implement a common
+  `MediaSource` interface behind a source registry. Item keys are namespaced by
+  source, allowing unified browsing and cross-source playlists.
+- **Playback:** mpv runs out of process. Vela owns launch configuration,
+  stream authentication (including credential-safe Plex headers), JSON IPC,
+  progress tracking, and sequence handoff; mpv owns decoding and video output.
+- **Persistence:** defensive, atomic JSON stores keep application config and
+  playlists separate, with cross-process locking and fail-closed parsing.
 
-## Build (release)
+## License
 
-```bash
-npm run tauri build
-```
-
-Linux release installers can be built directly:
-
-```bash
-npm run build:linux
-```
-
-The Linux build emits `.deb` and `.rpm` artifacts under
-`src-tauri/target/release/bundle/`. These installers register Vela through the
-freedesktop application database, installing the desktop entry under
-`/usr/share/applications` and icons under `/usr/share/icons/hicolor`, so GNOME
-and KDE show Vela in their application launchers after install.
-
-On Arch Linux, build a native pacman package instead:
-
-```bash
-npm run build:arch
-```
-
-This emits `packaging/arch/vela-<version>-1-x86_64.pkg.tar.zst` from the local
-checkout using the PKGBUILD in `packaging/arch/`. It installs the same desktop
-entry and hicolor icons, and pacman's desktop/icon hooks refresh the launchers
-when the package is installed.
-
-## Configuration
-
-Config (including the Plex auth token) is stored in the platform config dir:
-`~/.config/vela/config.json` on Linux,
-`~/Library/Application Support/com.vela.vela/config.json`
-on macOS, and `%APPDATA%\vela\vela\config\config.json`
-on Windows. On Unix it is written `0600`.
-
-Configs written by older builds may still contain local-folder / SMB / SSH
-source fields (including stored SMB credentials). Current builds parse,
-ignore, and preserve those fields so rolling back to an older build still
-works; removing them — credentials included — is a manual edit of
-`config.json`.
-
-## Status
-
-Builds and runs on Linux, macOS, and Windows (the mpv IPC layer is
-platform-abstracted: Unix domain socket on Linux/macOS, named pipe on Windows).
-
-Working: Plex device-PIN auth + server discovery, multi-source library browsing
-(unified or per-source) with infinite scroll, show/season/episode drill-down,
-search, mpv HDR playback, Plex progress/resume, and an in-app source manager
-(Jellyfin/Emby connect).
-
-Verification note: Plex is exercised end-to-end, and Jellyfin has been
-smoke-tested against a real server. The Emby path is implemented and
-unit-tested where logic allows, but live integration against a real server
-is still pending.
-
-Known limitations: Plex/Jellyfin/Emby media-version selection is heuristic: Vela
-prefers direct-play/direct-stream candidates, HDR, higher resolution, and higher
-bitrate where the source exposes that metadata, but it does not yet offer a
-manual version picker. Server stream/poster URLs carry the access token
-(Plex/Jellyfin/Emby), so the token is visible locally — in the webview DOM and
-in mpv's process arguments. This is an accepted **local-only** exposure (your
-own machine, not the network); there is no token proxy. HDR fidelity
-depends on the platform's mpv GPU backend and display support.
+Vela is licensed under the [MIT License](LICENSE). The bundled upstream
+`autocrop.lua` mpv script is GPL-2.0-or-later; its license and provenance are
+included under
+[`src-tauri/resources/mpv-scripts/`](src-tauri/resources/mpv-scripts/PROVENANCE.md).
