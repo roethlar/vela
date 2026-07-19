@@ -244,21 +244,6 @@
     }
   }
 
-  async function unlinkPlex() {
-    if (!confirm("Disconnect the Plex account? You'll need to re-link to use it again.")) return;
-    busy = true;
-    err = null;
-    try {
-      await invoke("unlink_plex");
-      await load();
-      onChanged();
-    } catch (e) {
-      err = String(e);
-    } finally {
-      busy = false;
-    }
-  }
-
   function applyMpv(m: MpvInfo) {
     mpv = m;
     mpvPathInput = m.configuredPath ?? "";
@@ -409,11 +394,7 @@
         <div class="row">
           <span class="badge">{s.kind}</span>
           <span class="name">{s.name}</span>
-          {#if s.kind === "plex"}
-            <button class="rm" disabled={busy} onclick={unlinkPlex}>Disconnect</button>
-          {:else}
-            <button class="rm" disabled={busy} onclick={() => removeSource(s.id)}>Remove</button>
-          {/if}
+          <button class="rm" disabled={busy} onclick={() => removeSource(s.id)}>Remove</button>
         </div>
       {/each}
     </section>

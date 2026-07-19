@@ -276,6 +276,22 @@ test("multi-server Plex linking pauses for an explicit credential-free server ch
   );
 });
 
+test("Settings removes every connected server by its exact source id", () => {
+  const settings = sources.get("src/lib/Settings.svelte");
+
+  assert.doesNotMatch(settings, /unlink_plex|unlinkPlex|>Disconnect</);
+  assert.match(
+    settings,
+    /\{#each sources as s \(s\.id\)\}[\s\S]*onclick=\{\(\) => removeSource\(s\.id\)\}>Remove<\/button>[\s\S]*\{\/each\}/,
+    "Plex, Jellyfin, and Emby rows must all use the normal exact-id removal path",
+  );
+  assert.match(
+    settings,
+    /onLinkPlex\(\); onClose\(\);[\s\S]*>Link Plex…<\/button>/,
+    "repeatable Plex linking must stay available after a source is connected",
+  );
+});
+
 test("Continue Watching has no duplicate playback action row", () => {
   const page = sources.get("src/routes/+page.svelte");
   assert.ok(page, "the application page must exist");
