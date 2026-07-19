@@ -1,7 +1,8 @@
 # Plan: multiple Plex servers (multi-Plex)
 
-Status: **IN PROGRESS — all owner decisions in; Slices 1-3 complete, Slice 4
-next.** Owner-reported 2026-07-18 (ISSUES.md).
+Status: **IN PROGRESS — four listed slices complete; the approved Settings
+playback-preference control is still missing and blocks codereview/merge.**
+Owner-reported 2026-07-18 (ISSUES.md).
 Evidence below is from fresh main (post-5248fe6) tracing.
 
 ## Goal
@@ -97,6 +98,13 @@ The exact shape of the Settings control is an implementation detail:
 drafted in the collapse slice and shown to the owner for review before
 build, not invented in this plan.
 
+**Takeover audit (2026-07-19): NOT IMPLEMENTED.** The completed branch retains
+the existing per-title context-menu override, but no Settings control chooses
+the default backing. Same-kind Plex ties still fall through to stable registry
+order in `rank_backings`. This owner-approved requirement was omitted from the
+implementation slices below; its UI shape must be shown to the owner before
+code, exactly as required above. External codereview and merge remain blocked.
+
 ## Implementation slices
 
 1. **Config foundation + migration.** Teach the restore path to build a
@@ -166,6 +174,23 @@ the merge per repo policy.
   mutations (legacy hardcoded ID, account-wide unlink, and missing repeat-link
   action) failed the intended guard and restored exact; frontend check and
   production build pass.
+- **Slice 4 — two-source verification: COMPLETE** (`5e63462`). A hermetic TLS
+  Plex mock now runs two independent machines with distinct credentials and
+  exact protocol contracts. The real app proves both rows restore, a shared
+  provider ID collapses to one card with two backings, each explicit backing
+  persists its canonical override and resolves against the selected server,
+  removing Plex A deletes only its Settings row, and Plex B keeps its token,
+  machine pin, UI row, and live library refresh.
+- Four independent production mutations disabled all-row startup restore,
+  override persistence, exact-row removal, and cross-source deduplication.
+  Each rebuilt real app failed at its intended E2E assertion; the committed
+  bytes were restored and checksum-matched on the Linux venue. The clean
+  rebuilt `multiplex` scenario passed, followed by the complete hermetic E2E
+  suite at 30/30. Restored canonical gates pass: pinned Node/npm, clean install,
+  zero-vulnerability npm audit, 26 frontend guards with zero Svelte diagnostics,
+  production build, Rust 1.89/stable checks, warning-free clippy, all 167 Rust
+  tests, and zero-vulnerability Cargo audit with the accepted 17 warning-class
+  notices.
 
 ## Non-goals (until decided otherwise)
 
