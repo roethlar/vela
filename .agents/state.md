@@ -9,11 +9,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **ACTIVE REVIEW LOOP: see `.agents/review/index.md` (`mpx-1`).** Claude
-  Fable xhigh review is blocked on transport authorization; the owner capped
-  the loop at three substantive rounds. The MCP attempt failed provenance and
-  command permissions before verdict and did not count as a round.
-
 - **MULTI-PLEX FOUR LISTED SLICES COMPLETE ON `fix/mpx-1-multi-plex`; ONE
   APPROVED REQUIREMENT IS MISSING.** The implementation is committed through
   `5e63462`.
@@ -24,11 +19,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   production regressions failed their intended assertions and restored exact.
   Canonical Node/Rust/build/audit gates pass (26 frontend guards, 167 Rust
   tests, zero known vulnerabilities; Cargo retains 17 accepted warning-class
-  notices). A takeover audit found that the plan's required user-facing
+  notices). Claude Code 2.1.215 / `claude-fable-5` / xhigh accepted the core
+  finding at exact head `c32a59b` with an independent red/restored-green guard
+  proof and no comments; exact status lives in `.agents/review/findings/mpx-1.md`.
+  A takeover audit found that the plan's required user-facing
   Settings preference for default duplicate-copy playback was never drafted or
   implemented; same-kind Plex ties still use registry order unless a title has
-  the older context-menu override. This blocks codereview and merge. Durable
-  evidence: `.agents/plans/multi-plex.md`.
+  the older context-menu override. This blocks merge and requires its own
+  post-implementation review. Durable evidence:
+  `.agents/plans/multi-plex.md`.
 
 - **`chr-1` MERGED to `main` — accepted by owner-directed in-session Claude
   review.**

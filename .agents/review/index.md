@@ -13,15 +13,17 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-Finding `mpx-1` BLOCKED ON REVIEW TRANSPORT 2026-07-19: multi-Plex
-implementation and its two-machine real-app proof are committed on
-`fix/mpx-1-multi-plex`. The first MCP attempt did not count: it resolved Opus
-instead of owner-requested Fable and could not run git/cargo through the
-unanswerable approval gate. An exact `claude-fable-5` MCP retry failed the same
-way and also did not count. A direct CLI smoke probe resolved Fable xhigh, but
-that permission-granted transport needs owner authorization for this finding.
-The known missing Settings playback-preference control remains disclosed and
-blocks merge. Detail: `.agents/review/findings/mpx-1.md`.
+Finding `mpx-1` VERIFIED 2026-07-19: the independent multi-Plex source model,
+legacy migration, repeatable identity-pinned linking, exact-row removal, and
+two-machine collapse/override proof were accepted in substantive round 1 by
+Claude Code 2.1.215 / `claude-fable-5` / xhigh / standard at exact head
+`c32a59b` against base `34ad47c`, with `guard_confirmed:true` and no comments.
+Claude independently broke exact-row removal, observed the focused Rust guard
+fail, restored it green, and left the detached worktree clean. The two earlier
+MCP transport failures did not count as rounds. The separately approved but
+unimplemented Settings default-playback preference remains disclosed and
+blocks merge; this accepted finding does not waive it. Branch:
+`fix/mpx-1-multi-plex`. Detail: `.agents/review/findings/mpx-1.md`.
 
 Finding `chr-1` VERIFIED 2026-07-19: after clean EOF, the
 authoritative Home refresh used to precede the owning server's played-state

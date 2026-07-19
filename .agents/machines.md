@@ -62,6 +62,10 @@ portable and may at most point here.
   branch `fix/mpx-1-multi-plex` (the implementation branch
   `worktree-multi-plex` remains at pre-review head `c24c132`), was recreated
   from current `main` at `34ad47c` after the prior worktree was found absent.
+  Three detached reviewer worktrees remain after the review and are clean:
+  `mpx-1-fable-r1` at `b90002a`, `mpx-1-fable-exact-r1` at `72628de`, and
+  `mpx-1-fable-cli-r1` at accepted head `c32a59b`. They were not removed
+  because cleanup is destructive and has not been separately authorized.
 
 ## Windows dev host (`F:\dev\vela`)
 

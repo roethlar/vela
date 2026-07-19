@@ -1,7 +1,8 @@
 # Plan: multiple Plex servers (multi-Plex)
 
-Status: **IN PROGRESS — four listed slices complete; the approved Settings
-playback-preference control is still missing and blocks codereview/merge.**
+Status: **IN PROGRESS — four listed slices are externally accepted; the
+approved Settings playback-preference control is still missing and blocks
+merge.**
 Owner-reported 2026-07-18 (ISSUES.md).
 Evidence below is from fresh main (post-5248fe6) tracing.
 
@@ -103,7 +104,9 @@ the existing per-title context-menu override, but no Settings control chooses
 the default backing. Same-kind Plex ties still fall through to stable registry
 order in `rank_backings`. This owner-approved requirement was omitted from the
 implementation slices below; its UI shape must be shown to the owner before
-code, exactly as required above. External codereview and merge remain blocked.
+code, exactly as required above. The recorded four-slice implementation was
+externally accepted at `mpx-1` round 1; the missing preference control and
+merge remain blocked.
 
 ## Implementation slices
 

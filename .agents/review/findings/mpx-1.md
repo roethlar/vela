@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — a second Plex server cannot coexist under the legacy
 singleton model, so users lose independent credentials, routing, and removal.
-**Status**: In progress
+**Status**: Verified
 **Branch**: `fix/mpx-1-multi-plex`
 **Commit**: implementation `a0c2d14` through `5e63462`; evidence/status
 `c24c132`
@@ -85,8 +85,9 @@ The approved plan separately requires a Settings control that chooses the
 default playback source for duplicate titles. That control was never drafted
 or implemented; same-kind Plex ties still fall through to stable registry
 order unless the existing per-title context-menu override applies. The plan and
-state record this as an implementation blocker. The reviewer must grade whether
-that omission prevents this finding from being accepted.
+state record this as an implementation blocker. The round-1 reviewer was asked
+to grade the omission and accepted the recorded finding; that verdict does not
+waive the owner-approved requirement or make the branch merge-ready.
 
 ## Reviewer comments
 
@@ -133,3 +134,25 @@ Fable at high, not the requested xhigh, and performed no review. The
 orchestrator rejected the dispatch before verdict. The disposable worktree
 remained clean at the pinned head. This retry also does not consume a
 substantive round.
+
+### Substantive round 1 — accepted
+
+`Reviewer: claude / claude-fable-5 / xhigh / standard`
+
+- Harness: Claude Code 2.1.215 headless CLI
+- Reviewed head: `c32a59bf70b80b80aac8a59177ffb37d0ba56dc4`
+- Base: `34ad47c628cf176f68ddfb0ace7138fae1ec2083`
+- `guard_confirmed`: true
+- Verdict: accepted
+- Timestamp: 2026-07-19T23:30:51Z
+
+The invocation transcript confirms the exact requested model and xhigh effort
+on the standard service tier. In its detached disposable worktree, Claude
+changed exact-ID removal to delete every Plex row, observed the focused Rust
+guard fail because zero rows remained, restored the original line, observed
+the guard pass, and confirmed an empty status and diff at the reviewed SHA.
+The orchestrator independently repeated the clean-tree, empty-diff, and exact-
+SHA checks. Claude returned no comments after explicitly reviewing the known
+Settings preference gap. This verdict verifies the recorded `mpx-1` finding;
+it does not implement or waive that separately approved requirement, which
+remains a merge blocker.
