@@ -90,12 +90,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **RESUME FIRST:** clean the failed reviewer transport's temporary local
-  artifacts recorded under the macOS host in `.agents/machines.md`, after
-  confirming its disposable worktree is clean at `fe8eebe`. Do not retry
-  Claude MCP review on Claude Code 2.1.214: the exact child-tool capability is
-  proven unavailable. `chr-1` merged to `main` at `5248fe6` on 2026-07-19; no
-  chr-1 gate remains besides the deferred real-Plex smoke.
+- **Reviewer-transport cleanup COMPLETE (2026-07-19):** the `chr-1` temporary
+  local artifacts recorded under the macOS host in `.agents/machines.md` are
+  cleaned with owner approval; the disposable worktree was confirmed clean at
+  `fe8eebe` and removed. Do not retry Claude MCP review on Claude Code
+  2.1.214: the exact child-tool capability is proven unavailable. `chr-1`
+  merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
+  the deferred real-Plex smoke.
 
 - **THEN: multi-Plex is the next queue item.** Read-only tracing established
   that the data plane already separates distinct source IDs, while account
