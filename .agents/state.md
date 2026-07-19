@@ -113,10 +113,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   control's exact shape gets drafted in the collapse slice and shown to the
   owner before build). Implementation slices are at the end of the plan file:
   config foundation + migration, repeatable link flow, Settings per-row
-  Remove, then verification. NO multi-Plex code has changed yet — Slice 1 was
-  started only as far as opening a dedicated worktree, which sits at `7c61998`
-  BEHIND main; fast-forward it onto main before writing any code (worktree
-  host facts: `.agents/machines.md`). `ISSUES.md` owns the queue.
+  Remove, then verification. NO multi-Plex code has changed yet. The dedicated
+  worktree was recreated from current `main` at `34ad47c`; worktree host facts
+  live in `.agents/machines.md`. `ISSUES.md` owns the queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the

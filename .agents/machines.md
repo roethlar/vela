@@ -59,10 +59,8 @@ portable and may at most point here.
   `fe8eebe` and removed during branch cleanup (`git worktree list` shows only
   main). No Claude review process is running.
 - Multi-Plex worktree (2026-07-19): `.claude/worktrees/multi-plex` on branch
-  `worktree-multi-plex` was opened for the multi-Plex slices. It is clean but
-  sits at `7c61998`, BEHIND main (the plan/decision commits landed on main
-  after it was created). Fast-forward the branch onto main before writing any
-  Slice 1 code.
+  `worktree-multi-plex` was recreated from current `main` at `34ad47c` for the
+  multi-Plex slices after the previously recorded worktree was found absent.
 
 ## Windows dev host (`F:\dev\vela`)
 
