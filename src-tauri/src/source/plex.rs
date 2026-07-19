@@ -73,6 +73,7 @@ pub fn build_source(
     )))
 }
 
+#[cfg(not(test))]
 async fn persist_source_binding(
     source_id: &str,
     source_name: Option<&str>,
@@ -137,6 +138,11 @@ pub struct PlexSource {
     /// most one attempt in the source's lifetime; the sections path keeps trying
     /// while the machine is unknown (see `ensure_ready`, codex r16).
     identity_probed: AtomicBool,
+    /// Test observation of the production persistence boundary. The config
+    /// writer itself is covered as a pure mutation below; this proves the live
+    /// identity/discovery paths actually hand their binding to it.
+    #[cfg(test)]
+    persisted_binding: std::sync::Mutex<Option<(Option<String>, String, String)>>,
 }
 
 /// How hard a caller is willing to work to learn WHICH server this is.
@@ -158,6 +164,32 @@ impl PlexSource {
             lib: AsyncMutex::new(lib),
             binding: AtomicU64::new(0),
             identity_probed: AtomicBool::new(false),
+            #[cfg(test)]
+            persisted_binding: std::sync::Mutex::new(None),
+        }
+    }
+
+    async fn persist_binding(
+        &self,
+        source_name: Option<&str>,
+        base_url: &str,
+        machine_identifier: &str,
+    ) -> Result<(), String> {
+        #[cfg(test)]
+        {
+            *self
+                .persisted_binding
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = Some((
+                source_name.map(str::to_string),
+                base_url.to_string(),
+                machine_identifier.to_string(),
+            ));
+            Ok(())
+        }
+        #[cfg(not(test))]
+        {
+            persist_source_binding(&self.id, source_name, base_url, machine_identifier).await
         }
     }
 
@@ -250,13 +282,9 @@ impl PlexSource {
                         let current_lib = guard.clone();
                         drop(guard);
                         if let Some((base, machine_identifier)) = learned {
-                            if let Err(error) = persist_source_binding(
-                                &self.id,
-                                None,
-                                &base,
-                                &machine_identifier,
-                            )
-                            .await
+                            if let Err(error) = self
+                                .persist_binding(None, &base, &machine_identifier)
+                                .await
                             {
                                 eprintln!(
                                     "plex: failed to persist learned server identity ({error}); will probe again next launch"
@@ -321,13 +349,9 @@ impl PlexSource {
         }
         let base = updated.server_base().unwrap_or_default();
         let machine_identifier = updated.server_machine_id().unwrap_or_default();
-        if let Err(e) = persist_source_binding(
-            &self.id,
-            Some(&chosen.name),
-            &base,
-            &machine_identifier,
-        )
-        .await
+        if let Err(e) = self
+            .persist_binding(Some(&chosen.name), &base, &machine_identifier)
+            .await
         {
             // Non-fatal for this session (the server is selected in memory), but
             // surface it so a persistent lock/permission/disk failure isn't silent.
@@ -1619,6 +1643,15 @@ mod tests {
             identified[0].key, unidentified[0].key,
             "...so the root the user is standing on is still the same library"
         );
+        let persisted = source
+            .persisted_binding
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+            .expect("the recovered identity reaches per-source persistence");
+        assert_eq!(persisted.0, None, "an identity probe does not rename the source");
+        assert_eq!(persisted.1, format!("http://127.0.0.1:{port}"));
+        assert_eq!(persisted.2, "machine-A");
     }
 
     /// A list from a server we are NO LONGER BOUND TO must not be served at all.
