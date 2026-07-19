@@ -98,8 +98,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **THEN: multi-Plex — plan DECIDED; Slice 1 COMPLETE, Slice 2 (repeatable
-  link flow) is the resume point.** Read-only tracing (re-confirmed on
+- **THEN: multi-Plex — plan DECIDED; Slices 1-2 COMPLETE, Slice 3 (Settings
+  per-row Remove) is the resume point.** Read-only tracing (re-confirmed on
   post-5248fe6 main)
   established that the data plane already separates distinct source IDs, while
   account discovery, persistence, restore, link/unlink, and Settings still
@@ -119,9 +119,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   minted per-source Plex row, every persisted `"plex"` route is re-keyed with
   crash-safe retry, and restored/rediscovered sources retain their exact
   machine pin. Twenty-two production mutations failed their intended guards;
-  restored MSRV/stable/clippy/test/audit gates pass. The dedicated worktree was
-  recreated from current `main` at `34ad47c`; worktree host facts live in
-  `.agents/machines.md`. `ISSUES.md` owns the queue.
+  restored MSRV/stable/clippy/test/audit gates pass. Slice 2 landed at
+  `64291bb` with guard hardening at `54fe020`: every repeatable link mints an
+  independent source, auto-connects one reachable direct HTTPS machine or
+  pauses on a credential-free multi-machine picker, holds pending credentials
+  only in bounded expiring backend memory, and routes Plex removal through the
+  normal exact-id path. Twenty-two Slice 2 production mutations failed their
+  intended assertions and restored exact. Exact-head frontend and Rust gates
+  pass (167 Rust tests; both audits at zero known vulnerabilities, with the
+  accepted Cargo warning-class notices). Slice 3 now replaces Settings'
+  obsolete Plex Disconnect branch with the normal per-row Remove control. The
+  dedicated worktree was recreated from current `main` at `34ad47c`; worktree
+  host facts live in `.agents/machines.md`. `ISSUES.md` owns the queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the

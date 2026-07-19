@@ -1,6 +1,6 @@
 # Plan: multiple Plex servers (multi-Plex)
 
-Status: **IN PROGRESS — all owner decisions in; Slice 1 complete, Slice 2
+Status: **IN PROGRESS — all owner decisions in; Slices 1-2 complete, Slice 3
 next.** Owner-reported 2026-07-18 (ISSUES.md).
 Evidence below is from fresh main (post-5248fe6) tracing.
 
@@ -141,6 +141,24 @@ the merge per repo policy.
   restored from the committed implementation. Restored Rust 1.89/stable check,
   stable clippy, all Rust tests, and Cargo audit pass; audit reports only the
   repository's accepted warning-class notices.
+- **Slice 2 — repeatable link flow: COMPLETE** (`64291bb`; decision/UI guard
+  hardening `54fe020`). Every authorization mints a fresh `plex-{uuid}` source
+  bound at birth to one identity-verified direct HTTPS machine. One reachable
+  machine connects automatically; several pause on a name-only frontend picker
+  while the token remains in a bounded, expiring backend session. Completed
+  sessions are retained briefly for idempotent poll retries. The literal Plex
+  id, account-wide unlink command, and Plex removal refusal are retired; normal
+  per-id removal preserves every other source.
+- Twenty-two production mutations separately proved fresh ID minting; token,
+  device, endpoint, and machine-pin persistence; unpinned, non-HTTPS, and relay
+  refusal; credential-free picker serialization; exact-machine selection;
+  independent removal; session expiry and bounds; identifier-less and duplicate
+  candidate rejection; wrong and missing identity rejection; zero/one/many
+  reachable-server decisions; and both frontend choice handoffs. Each failed its
+  intended assertion and was reverse-applied to the committed bytes. Restored
+  Node/npm pins, clean install, npm audit/check/build, Rust 1.89/stable checks,
+  clippy, all 167 Rust tests, and Cargo audit pass; both audits report zero known
+  vulnerabilities and Cargo retains the accepted 17 warning-class notices.
 
 ## Non-goals (until decided otherwise)
 
