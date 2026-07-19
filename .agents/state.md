@@ -9,7 +9,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **MULTI-PLEX FOUR LISTED SLICES COMPLETE ON `worktree-multi-plex`; ONE
+- **ACTIVE REVIEW LOOP: see `.agents/review/index.md` (`mpx-1`).** Claude
+  Fable xhigh is reviewing the multi-Plex finding; the owner capped the loop at
+  three rounds.
+
+- **MULTI-PLEX FOUR LISTED SLICES COMPLETE ON `fix/mpx-1-multi-plex`; ONE
   APPROVED REQUIREMENT IS MISSING.** The implementation is committed through
   `5e63462`.
   Per-source credentials and machine pins, full legacy-route migration,

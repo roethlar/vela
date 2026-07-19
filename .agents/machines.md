@@ -58,9 +58,10 @@ portable and may at most point here.
   `.claude/worktrees/chr-1-opus-review` worktree was confirmed clean at
   `fe8eebe` and removed during branch cleanup (`git worktree list` shows only
   main). No Claude review process is running.
-- Multi-Plex worktree (2026-07-19): `.claude/worktrees/multi-plex` on branch
-  `worktree-multi-plex` was recreated from current `main` at `34ad47c` for the
-  multi-Plex slices after the previously recorded worktree was found absent.
+- Multi-Plex worktree (2026-07-19): `.claude/worktrees/multi-plex`, review
+  branch `fix/mpx-1-multi-plex` (the implementation branch
+  `worktree-multi-plex` remains at pre-review head `c24c132`), was recreated
+  from current `main` at `34ad47c` after the prior worktree was found absent.
 
 ## Windows dev host (`F:\dev\vela`)
 

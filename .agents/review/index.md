@@ -13,6 +13,12 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+Finding `mpx-1` IN PROGRESS 2026-07-19: multi-Plex implementation and its
+two-machine real-app proof are committed on `fix/mpx-1-multi-plex`; Claude
+Fable xhigh review is pending. The known missing Settings playback-preference
+control is disclosed in the finding record and blocks merge unless resolved by
+the review/owner flow. Detail: `.agents/review/findings/mpx-1.md`.
+
 Finding `chr-1` VERIFIED 2026-07-19: after clean EOF, the
 authoritative Home refresh used to precede the owning server's played-state
 response, so a newly eligible next episode could remain absent until manual
