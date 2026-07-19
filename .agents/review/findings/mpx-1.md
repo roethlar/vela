@@ -112,3 +112,24 @@ separately resolved `claude-fable-5` at xhigh, but the permission-granted CLI
 transport is not authorized for this finding. The disposable worktree remained
 clean at the exact reviewed SHA. This failed transport attempt does not consume
 one of the owner's three substantive rounds.
+
+### Exact-model MCP retry — not a substantive review round
+
+`Reviewer: claude / claude-opus-4-8 / xhigh / standard` (initial invocation
+transcript; owner pinned `claude-fable-5` exactly)
+
+- Harness: Claude Code 2.1.215 MCP Workflow
+- Reviewed head: `72628dee7245c5e905b5a75f8b6585d1894b644a`
+- Base: `34ad47c628cf176f68ddfb0ace7138fae1ec2083`
+- `guard_confirmed`: false
+- Outcome: transport/provenance failure; no code verdict
+- Timestamp: 2026-07-19T23:18:34Z
+
+Retrying with the full `claude-fable-5` ID produced the same initial invocation
+provenance (`claude-opus-4-8` at xhigh) and the first git command again reached
+an unanswerable approval gate. The halted agent re-emitted a schema-valid
+`reopened` payload with `guard_confirmed:false`; that re-emission itself ran as
+Fable at high, not the requested xhigh, and performed no review. The
+orchestrator rejected the dispatch before verdict. The disposable worktree
+remained clean at the pinned head. This retry also does not consume a
+substantive round.

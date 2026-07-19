@@ -17,7 +17,8 @@ Finding `mpx-1` BLOCKED ON REVIEW TRANSPORT 2026-07-19: multi-Plex
 implementation and its two-machine real-app proof are committed on
 `fix/mpx-1-multi-plex`. The first MCP attempt did not count: it resolved Opus
 instead of owner-requested Fable and could not run git/cargo through the
-unanswerable approval gate. A direct CLI smoke probe resolved Fable xhigh, but
+unanswerable approval gate. An exact `claude-fable-5` MCP retry failed the same
+way and also did not count. A direct CLI smoke probe resolved Fable xhigh, but
 that permission-granted transport needs owner authorization for this finding.
 The known missing Settings playback-preference control remains disclosed and
 blocks merge. Detail: `.agents/review/findings/mpx-1.md`.
