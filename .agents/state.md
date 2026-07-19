@@ -9,7 +9,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **`chr-1` VERIFIED — accepted by owner-directed in-session Claude review.**
+- **`chr-1` MERGED to `main` — accepted by owner-directed in-session Claude
+  review.**
   The clean-EOF dispatcher now emits its authoritative Home refresh after the
   best-effort server played-state attempt while releasing playlist/Continue
   Playing work first. Implementation `6ec2ba6`; exact-head evidence/docs
@@ -21,8 +22,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   it accepted `6ec2ba6` at head `5a7cabf` with no material issues (same-vendor
   caveat recorded). Verdict and evidence: `.agents/review/findings/chr-1.md`.
   The governance defect and its prevention are filed as
-  `https://github.com/roethlar/AgentGovernanceBootstrap/issues/6`. Merge of
-  `fix/chr-1-post-mark-refresh` remains owner-gated.
+  `https://github.com/roethlar/AgentGovernanceBootstrap/issues/6`. The owner
+  approved the merge on 2026-07-19; `main` fast-forwarded to `5248fe6`.
 
 - **`pws-1` IMPLEMENTED AND EXTERNALLY ACCEPTED.** Exact automatic successors
   retain the completed mpv process's actual fullscreen and maximized state;
@@ -31,9 +32,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   red/restored-green stale-session proof and no comments. Exact status lives in
   `.agents/review/findings/pws-1.md`.
 
-- **Version 0.1.60 on the active `chr-1` branch** (`package.json`, both
-  lockfiles, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch
-  PKGBUILD agree, as of implementation `6ec2ba6`).
+- **Version 0.1.60 on `main`** (`package.json`, both lockfiles,
+  `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the Arch PKGBUILD
+  agree, as of implementation `6ec2ba6`, merged at `5248fe6`).
 
 - **v1.0 README POLISH COMPLETE; OWNER-REPORTED ISSUE QUEUE IS NEXT.** The
   user-first README rewrite landed at `d4d9e95`, correcting first-run, server-
@@ -89,12 +90,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **RESUME FIRST:** `chr-1` is review-accepted; the next gate is the
-  owner-approved merge of `fix/chr-1-post-mark-refresh`. Separately, clean the
-  failed reviewer transport's temporary local artifacts recorded under the
-  macOS host in `.agents/machines.md`, after confirming its disposable
-  worktree is clean at `fe8eebe`. Do not retry Claude MCP review on Claude
-  Code 2.1.214: the exact child-tool capability is proven unavailable.
+- **RESUME FIRST:** clean the failed reviewer transport's temporary local
+  artifacts recorded under the macOS host in `.agents/machines.md`, after
+  confirming its disposable worktree is clean at `fe8eebe`. Do not retry
+  Claude MCP review on Claude Code 2.1.214: the exact child-tool capability is
+  proven unavailable. `chr-1` merged to `main` at `5248fe6` on 2026-07-19; no
+  chr-1 gate remains besides the deferred real-Plex smoke.
 
 - **THEN: multi-Plex is the next queue item.** Read-only tracing established
   that the data plane already separates distinct source IDs, while account
@@ -311,10 +312,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- **`chr-1` merge:** review is accepted, but merging
-  `fix/chr-1-post-mark-refresh` into the main branch awaits an explicit owner
-  go. The final real-Plex smoke remains deferred to release preparation by
-  owner choice.
+- **None for `chr-1`:** the branch is merged to `main` (`5248fe6`,
+  owner-approved 2026-07-19). The final real-Plex smoke remains deferred to
+  release preparation by owner choice.
 
 ## Verification
 
