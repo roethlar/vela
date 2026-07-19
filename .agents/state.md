@@ -98,18 +98,25 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **THEN: multi-Plex is the next queue item.** Read-only tracing (re-confirmed
-  on post-5248fe6 main) established that the data plane already separates
-  distinct source IDs, while account discovery, persistence, restore,
-  link/unlink, and Settings still assume one literal `plex` source. The DRAFT
-  plan at `.agents/plans/multi-plex.md` has the core decisions answered
-  (2026-07-19): multiple accounts, repeatable link flow (one account + one
-  server per link, pinned at birth), full re-key with a `"plex"`-sweeping
-  migration, credentials on per-source `sources` entries, per-row Remove with
-  no account-wide disconnect. ONE question stays open — whether duplicates
-  across Plex accounts keep collapsing into one row (current cross-source
-  behavior) or list once per account. No multi-Plex code has changed and none
-  may until that answer lands; `ISSUES.md` owns the queue.
+- **THEN: multi-Plex — plan DECIDED; Slice 1 (config foundation + migration)
+  is the resume point.** Read-only tracing (re-confirmed on post-5248fe6 main)
+  established that the data plane already separates distinct source IDs, while
+  account discovery, persistence, restore, link/unlink, and Settings still
+  assume one literal `plex` source. The plan at `.agents/plans/multi-plex.md`
+  has ALL owner decisions answered (2026-07-19): multiple accounts, repeatable
+  link flow (one account + one server per link, pinned at birth), full re-key
+  with a `"plex"`-sweeping migration, credentials on per-source `sources`
+  entries, per-row Remove with no account-wide disconnect, and — the last open
+  question, closed at `13827e4` — duplicate copies keep collapsing while WHICH
+  copy plays is an explicit user choice in Settings (rejected: added-order
+  default, automatic best-copy heuristics, first-play remembered picker; the
+  control's exact shape gets drafted in the collapse slice and shown to the
+  owner before build). Implementation slices are at the end of the plan file:
+  config foundation + migration, repeatable link flow, Settings per-row
+  Remove, then verification. NO multi-Plex code has changed yet — Slice 1 was
+  started only as far as opening a dedicated worktree, which sits at `7c61998`
+  BEHIND main; fast-forward it onto main before writing any code (worktree
+  host facts: `.agents/machines.md`). `ISSUES.md` owns the queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
