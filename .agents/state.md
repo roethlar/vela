@@ -9,9 +9,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **MULTI-PLEX FOUR LISTED SLICES COMPLETE ON `fix/mpx-1-multi-plex`; ONE
-  APPROVED REQUIREMENT IS MISSING.** The implementation is committed through
-  `5e63462`.
+- **MULTI-PLEX CORE MERGED TO `main`; SETTINGS FOLLOW-UP OPEN.** The four
+  listed implementation slices are committed through `5e63462`, with review
+  evidence through `3a1dd8b`.
   Per-source credentials and machine pins, full legacy-route migration,
   repeatable identity-verified linking, exact Settings removal, and two-server
   collapse/override behavior are implemented. Slice 4's real-app TLS scenario
@@ -25,8 +25,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   A takeover audit found that the plan's required user-facing
   Settings preference for default duplicate-copy playback was never drafted or
   implemented; same-kind Plex ties still use registry order unless a title has
-  the older context-menu override. This blocks merge and requires its own
-  post-implementation review. Durable evidence:
+  the older context-menu override. On 2026-07-19 the owner explicitly directed
+  the accepted core to merge with this control deferred. It remains the next
+  implementation slice and requires its own post-implementation review.
+  Durable evidence:
   `.agents/plans/multi-plex.md`.
 
 - **`chr-1` MERGED to `main` — accepted by owner-directed in-session Claude
@@ -121,8 +123,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **NEXT: owner review of the missing multi-Plex Settings control.** The plan
   requires its exact UI shape to be shown before code. After approval,
   implement and guard-prove the default playback preference, rerun canonical
-  verification, then request external codereview. Do not push, merge, or
-  substitute a reviewer transport without explicit owner direction.
+  verification, then request external codereview. The accepted core review
+  does not cover this follow-up.
 
 - **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the

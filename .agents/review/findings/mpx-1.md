@@ -155,4 +155,11 @@ The orchestrator independently repeated the clean-tree, empty-diff, and exact-
 SHA checks. Claude returned no comments after explicitly reviewing the known
 Settings preference gap. This verdict verifies the recorded `mpx-1` finding;
 it does not implement or waive that separately approved requirement, which
-remains a merge blocker.
+remained a merge blocker pending the owner disposition below.
+
+## Owner disposition
+
+After the accepted review, the owner explicitly directed merge on 2026-07-19
+with the Settings default-playback preference deferred as an open follow-up.
+This authorizes the reviewed core to land; it does not mark the missing
+requirement implemented or reviewed.

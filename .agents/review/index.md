@@ -22,8 +22,10 @@ Claude independently broke exact-row removal, observed the focused Rust guard
 fail, restored it green, and left the detached worktree clean. The two earlier
 MCP transport failures did not count as rounds. The separately approved but
 unimplemented Settings default-playback preference remains disclosed and
-blocks merge; this accepted finding does not waive it. Branch:
-`fix/mpx-1-multi-plex`. Detail: `.agents/review/findings/mpx-1.md`.
+open; after the accepted review, the owner explicitly directed the core to
+merge with that control deferred as a follow-up. Branch:
+`fix/mpx-1-multi-plex` (landed on `main`). Detail:
+`.agents/review/findings/mpx-1.md`.
 
 Finding `chr-1` VERIFIED 2026-07-19: after clean EOF, the
 authoritative Home refresh used to precede the owning server's played-state

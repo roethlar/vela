@@ -59,7 +59,8 @@ portable and may at most point here.
   `fe8eebe` and removed during branch cleanup (`git worktree list` shows only
   main). No Claude review process is running.
 - Multi-Plex worktree (2026-07-19): `.claude/worktrees/multi-plex`, review
-  branch `fix/mpx-1-multi-plex` (the implementation branch
+  branch `fix/mpx-1-multi-plex`, landed on `main` at `3a1dd8b` by explicit
+  owner direction (the implementation branch
   `worktree-multi-plex` remains at pre-review head `c24c132`), was recreated
   from current `main` at `34ad47c` after the prior worktree was found absent.
   Three detached reviewer worktrees remain after the review and are clean:
