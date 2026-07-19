@@ -1,9 +1,8 @@
 # Plan: multiple Plex servers (multi-Plex)
 
-Status: **DRAFT — core decisions answered 2026-07-19; one question open.**
-Owner-reported 2026-07-18 (ISSUES.md). Evidence below is from fresh main
-(post-5248fe6) tracing; no implementation until the open question is
-answered.
+Status: **DECIDED — all owner decisions in; implementation not
+started.** Owner-reported 2026-07-18 (ISSUES.md).
+Evidence below is from fresh main (post-5248fe6) tracing.
 
 ## Goal
 
@@ -77,15 +76,50 @@ must not apply to secondary sources.
    `remove_source` Plex refusal are retired. Removing one source never
    touches another.
 
-## Open question
+5. **Duplicates keep collapsing (answered 2026-07-19).** The same title on
+   two Plex accounts shows as one library entry; the per-title override
+   remains the escape hatch — identical to Plex+Jellyfin behavior today.
 
-**Duplicates across Plex accounts.** Vela already collapses the same title
-found on several servers into one row and picks a default copy to play
-(per-title override wins). With two Plex accounts holding the same movie:
-(a) keep that behavior — one row, app picks the copy, override per title; or
-(b) show the title once per Plex account (breaks with how Plex+Jellyfin
-merge today). Awaiting owner answer; the "tie-breaking" question is moot
-unless (a).
+## Decision: which copy plays
+
+**Owner decision: the user decides, in Settings.** Which copy of a
+duplicated title plays is governed by a user-facing Settings control —
+not by a hardcoded source order, not by runtime capability/bitrate
+heuristics, and not by a play-time prompt that saves a default. The
+existing per-title override remains the escape hatch above whatever the
+setting says.
+
+Rejected by owner: (a) stable added-order pick; (b) automatic
+"best-copy" selection (HDR/resolution/bitrate/connection); (c)
+first-play picker with remembered choice.
+
+The exact shape of the Settings control is an implementation detail:
+drafted in the collapse slice and shown to the owner for review before
+build, not invented in this plan.
+
+## Implementation slices
+
+1. **Config foundation + migration.** Teach the restore path to build a
+   `PlexSource` from a `sources` entry (a Plex sibling of
+   `jellyfin::build_source`, machine-id pin included). One-shot migration:
+   fold the legacy `auth_token`/`client_identifier`/`last_server_*` fields
+   into a minted-id `sources` entry, then sweep every persisted `"plex"`
+   reference (per-title overrides, playlists — enumerate stores during the
+   slice) to the minted id. Legacy fields retired.
+2. **Repeatable link flow.** Link command mints a fresh id per link and binds
+   exactly one server, pinned at birth: auto-bind when the account has one
+   reachable server, frontend picker when several. `unlink_plex` and the
+   `remove_source` Plex refusal retired; removal goes through the normal
+   per-id path.
+3. **Settings.** Plex rows get per-row Remove like every other source; the
+   `s.kind === "plex"` Disconnect branch goes away; link button stays and can
+   be used repeatedly.
+4. **Verification.** Unit coverage for migration + restore + link mint;
+   e2e scenario with two mock Plex sources proving separation (independent
+   remove) and collapse (shared title, one row, override works).
+
+Each slice lands reviewable on the feature branch; Claude codereview gates
+the merge per repo policy.
 
 ## Non-goals (until decided otherwise)
 
