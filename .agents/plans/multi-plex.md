@@ -1,7 +1,7 @@
 # Plan: multiple Plex servers (multi-Plex)
 
-Status: **DECIDED — all owner decisions in; implementation not
-started.** Owner-reported 2026-07-18 (ISSUES.md).
+Status: **IN PROGRESS — all owner decisions in; Slice 1 complete, Slice 2
+next.** Owner-reported 2026-07-18 (ISSUES.md).
 Evidence below is from fresh main (post-5248fe6) tracing.
 
 ## Goal
@@ -120,6 +120,27 @@ build, not invented in this plan.
 
 Each slice lands reviewable on the feature branch; Claude codereview gates
 the merge per repo policy.
+
+## Implementation log
+
+- **Slice 1 — config foundation + migration: COMPLETE** (`a0c2d14`; live
+  persistence guard `ef0bca4`). Plex credentials, saved endpoint, and stable
+  machine identity now live on provider-neutral `sources` rows; startup builds
+  every Plex row independently and rediscovery/identity learning updates only
+  the matching row without blocking an async worker.
+- The one-shot migration mints a non-legacy id, re-keys the config's last
+  section, merged overrides, recents (including hierarchy/watch/detail/backing
+  identities), Continue Watching tombstones, per-library sorts, and every Vela
+  playlist item. A persisted cross-file marker makes a crash or unreadable
+  playlist retry the same minted id; a missing playlist file stays missing.
+- Twenty-two production mutations separately proved the startup hook,
+  credential transfer and retirement, every routing-key family, playlist
+  rewrite, retry/fail-closed behavior, idempotence, endpoint/credential/pin
+  restore, invalid-pin refusal, exact-row binding updates, and the live
+  identity-to-persistence handoff. Each failed its intended assertion and was
+  restored from the committed implementation. Restored Rust 1.89/stable check,
+  stable clippy, all Rust tests, and Cargo audit pass; audit reports only the
+  repository's accepted warning-class notices.
 
 ## Non-goals (until decided otherwise)
 

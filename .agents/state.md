@@ -98,8 +98,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **THEN: multi-Plex — plan DECIDED; Slice 1 (config foundation + migration)
-  is the resume point.** Read-only tracing (re-confirmed on post-5248fe6 main)
+- **THEN: multi-Plex — plan DECIDED; Slice 1 COMPLETE, Slice 2 (repeatable
+  link flow) is the resume point.** Read-only tracing (re-confirmed on
+  post-5248fe6 main)
   established that the data plane already separates distinct source IDs, while
   account discovery, persistence, restore, link/unlink, and Settings still
   assume one literal `plex` source. The plan at `.agents/plans/multi-plex.md`
@@ -113,9 +114,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   control's exact shape gets drafted in the collapse slice and shown to the
   owner before build). Implementation slices are at the end of the plan file:
   config foundation + migration, repeatable link flow, Settings per-row
-  Remove, then verification. NO multi-Plex code has changed yet. The dedicated
-  worktree was recreated from current `main` at `34ad47c`; worktree host facts
-  live in `.agents/machines.md`. `ISSUES.md` owns the queue.
+  Remove, then verification. Slice 1 landed at `a0c2d14` with live-persistence
+  guard hardening at `ef0bca4`: legacy singleton credentials migrate into a
+  minted per-source Plex row, every persisted `"plex"` route is re-keyed with
+  crash-safe retry, and restored/rediscovered sources retain their exact
+  machine pin. Twenty-two production mutations failed their intended guards;
+  restored MSRV/stable/clippy/test/audit gates pass. The dedicated worktree was
+  recreated from current `main` at `34ad47c`; worktree host facts live in
+  `.agents/machines.md`. `ISSUES.md` owns the queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
@@ -356,6 +362,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
 - `.agents/plans/ui-embellishments.md` (COMPLETE at 0.1.56 — v1.0.0 item 1)
+- `.agents/plans/multi-plex.md` (IN PROGRESS — Slice 1 complete; Slice 2 next)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)
