@@ -14,10 +14,6 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use source::SourceRegistry;
 
-/// Retired persisted id accepted only by the legacy link/unlink flow until the
-/// repeatable-link slice replaces those commands. Startup migration re-keys it.
-pub const PLEX_SOURCE_ID: &str = "plex";
-
 /// Human-friendly OS name reported to media servers (X-Plex-Platform, etc.).
 pub fn platform_name() -> &'static str {
     match std::env::consts::OS {
@@ -58,6 +54,10 @@ pub struct AppState {
     /// Serializes source mutations (add/remove) so they apply in order
     /// without holding the registry lock across config file I/O.
     pub source_lock: AsyncMutex<()>,
+    /// Backend-only Plex authorization sessions. Tokens wait here while the
+    /// user chooses among several reachable physical servers; the frontend sees
+    /// only server names and stable machine identifiers.
+    pub(crate) plex_link_sessions: AsyncMutex<commands::PlexLinkSessions>,
     /// Joins mpv's clean-EOF signal to the matching completed tracker write.
     /// The async dispatcher in `run()` advances only that exact session.
     pub(crate) playback_advance: Arc<commands::PlaybackAdvance>,
@@ -111,6 +111,7 @@ pub fn run() {
         play_lock: AsyncMutex::new(()),
         watch_edit_lock: AsyncMutex::new(()),
         source_lock: AsyncMutex::new(()),
+        plex_link_sessions: AsyncMutex::new(Default::default()),
         playback_advance: Arc::new(commands::PlaybackAdvance::default()),
         playlist_cursor: AsyncMutex::new(None),
         active_playback_session: AsyncMutex::new(None),
@@ -234,7 +235,6 @@ pub fn run() {
             commands::connect_jellyfin,
             commands::connect_jellyfin_token,
             commands::remove_source,
-            commands::unlink_plex,
             commands::check_mpv,
             commands::set_mpv_path,
             commands::get_mpv_advanced,
@@ -245,6 +245,7 @@ pub fn run() {
             commands::open_url,
             commands::link_begin,
             commands::link_poll,
+            commands::link_select_server,
             commands::get_hubs,
             commands::get_sections,
             commands::set_section_sort,

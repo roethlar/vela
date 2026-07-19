@@ -215,7 +215,14 @@
     authUrl: string;
     qrSvg: string;
   };
+  type PlexServerChoice = { machineIdentifier: string; name: string };
+  type LinkPoll =
+    | { status: "pending" }
+    | { status: "chooseServer"; servers: PlexServerChoice[] }
+    | { status: "connected"; source: Source };
   let pin = $state<Pin | null>(null);
+  let plexServerChoices = $state<PlexServerChoice[]>([]);
+  let selectingPlexServer = $state(false);
 
   // mpv availability (for the install prompt). null = not checked yet.
   type MpvInfo = {
@@ -1090,6 +1097,8 @@
     navEpoch++;
     if (pollTimer) clearTimeout(pollTimer); // drop any pending poll from a prior attempt
     pin = null; // abandon any previously shown code immediately, so a failed
+    plexServerChoices = [];
+    selectingPlexServer = false;
     // (or superseded) begin can't leave a dead, unpolled code on screen
     try {
       const p = await invoke<Pin>("link_begin");
@@ -1118,17 +1127,17 @@
   async function pollLink(gen: number) {
     if (gen !== linkGen || !pin) return;
     try {
-      const ok = await invoke<boolean>("link_poll", {
+      const result = await invoke<LinkPoll>("link_poll", {
         pinId: pin.id,
         clientIdentifier: pin.clientIdentifier,
       });
       if (gen !== linkGen) return; // a newer link attempt superseded this one
-      if (ok) {
-        pin = null;
-        authenticated = true;
-        navEpoch++; // the linked source resets the view (see beginLink)
-        await loadSourceList(); // surface the new Plex source in the switcher
-        await loadEverything();
+      if (result.status === "connected") {
+        await finishLink(gen);
+        return;
+      }
+      if (result.status === "chooseServer") {
+        plexServerChoices = result.servers;
         return;
       }
     } catch (e) {
@@ -1137,10 +1146,40 @@
       if (gen === linkGen) {
         setError(String(e));
         pin = null;
+        plexServerChoices = [];
       }
       return;
     }
     if (gen === linkGen) pollTimer = setTimeout(() => pollLink(gen), 2000);
+  }
+
+  async function finishLink(gen: number) {
+    if (gen !== linkGen) return;
+    pin = null;
+    plexServerChoices = [];
+    authenticated = true;
+    navEpoch++; // the linked source resets the view (see beginLink)
+    await loadSourceList(); // surface the new Plex source in the switcher
+    await loadEverything();
+  }
+
+  async function selectPlexServer(machineIdentifier: string) {
+    if (!pin || selectingPlexServer) return;
+    const gen = linkGen;
+    const currentPin = pin;
+    selectingPlexServer = true;
+    try {
+      await invoke<Source>("link_select_server", {
+        pinId: currentPin.id,
+        clientIdentifier: currentPin.clientIdentifier,
+        machineIdentifier,
+      });
+      await finishLink(gen);
+    } catch (e) {
+      if (gen === linkGen) setError(String(e));
+    } finally {
+      if (gen === linkGen) selectingPlexServer = false;
+    }
   }
 
   // `auto`: the APP is navigating (the empty-Home redirect below), not the
@@ -2496,21 +2535,37 @@
     <div class="content">
   {#if pin}
     <div class="link">
-      <h2>Link this device</h2>
-      <p class="muted">Scan with your phone, or open Plex to authorize.</p>
-      {#if pin.qrSvg}
-        <button class="qr" onclick={() => openExternal(pin!.authUrl)} title="Open Plex to authorize">
-          <img src={pin.qrSvg} alt="Plex device-link QR code" decoding="async" />
+      {#if plexServerChoices.length > 0}
+        <h2>Choose a Plex server</h2>
+        <p class="muted">This account has several reachable servers. Add one now; you can link the account again for another.</p>
+        <div class="plex-server-choices">
+          {#each plexServerChoices as server (server.machineIdentifier)}
+            <button
+              class="primary plex-server-choice"
+              disabled={selectingPlexServer}
+              onclick={() => selectPlexServer(server.machineIdentifier)}
+            >
+              {server.name}
+            </button>
+          {/each}
+        </div>
+      {:else}
+        <h2>Link this device</h2>
+        <p class="muted">Scan with your phone, or open Plex to authorize.</p>
+        {#if pin.qrSvg}
+          <button class="qr" onclick={() => openExternal(pin!.authUrl)} title="Open Plex to authorize">
+            <img src={pin.qrSvg} alt="Plex device-link QR code" decoding="async" />
+          </button>
+        {/if}
+        <button class="primary authbtn" onclick={() => openExternal(pin!.authUrl)}>
+          Open Plex to authorize
         </button>
+        <p class="muted small">
+          Or go to <b>plex.tv/link</b> and enter this code:
+        </p>
+        <div class="code">{pin.code}</div>
+        <p class="muted">Waiting for you to authorize…</p>
       {/if}
-      <button class="primary authbtn" onclick={() => openExternal(pin!.authUrl)}>
-        Open Plex to authorize
-      </button>
-      <p class="muted small">
-        Or go to <b>plex.tv/link</b> and enter this code:
-      </p>
-      <div class="code">{pin.code}</div>
-      <p class="muted">Waiting for you to authorize…</p>
     </div>
   {:else if mode === "playlists" && selectedServerPlaylist}
     <ServerPlaylistView
@@ -3357,6 +3412,15 @@
   }
   .authbtn {
     margin: 0.5rem 0 0.2rem;
+  }
+  .plex-server-choices {
+    width: min(100%, 24rem);
+    display: grid;
+    gap: 0.65rem;
+    margin-top: 0.8rem;
+  }
+  .plex-server-choice {
+    width: 100%;
   }
   .code {
     font-size: 2.5rem;

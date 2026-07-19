@@ -474,6 +474,31 @@ impl PlexLibrary {
         None
     }
 
+    /// Return one reachable connection for every distinct physical server.
+    ///
+    /// A Plex resource can advertise several connections for the same machine.
+    /// Linking needs all reachable *machines* for its picker, but only one
+    /// connection per machine. Identifier-less entries are deliberately rejected:
+    /// a newly linked source must be pinned before it can issue server-local keys.
+    pub async fn reachable_servers_by_machine(
+        &self,
+        servers: &[PlexServer],
+        allow_relay: bool,
+    ) -> Vec<PlexServer> {
+        let mut reachable = Vec::new();
+        let mut selected_machines = std::collections::HashSet::new();
+        for server in ordered_server_candidates(servers, allow_relay) {
+            if !link_candidate_needs_probe(&server, &selected_machines) {
+                continue;
+            }
+            if self.server_is_reachable(&server).await {
+                selected_machines.insert(server.machine_identifier.clone());
+                reachable.push(server);
+            }
+        }
+        reachable
+    }
+
     async fn server_is_reachable(&self, server: &PlexServer) -> bool {
         let base = server_origin(server);
         let resp = match self
@@ -506,7 +531,7 @@ impl PlexLibrary {
                 return false;
             }
         };
-        identity_machine_identifier(&body).as_deref() == Some(server.machine_identifier.as_str())
+        server_identity_matches(server, &body)
     }
 
     fn parse_resources_stream(
@@ -1446,6 +1471,19 @@ fn ordered_server_candidates(servers: &[PlexServer], allow_relay: bool) -> Vec<P
     indexed.into_iter().map(|(_, _, server)| server).collect()
 }
 
+fn link_candidate_needs_probe(
+    server: &PlexServer,
+    selected_machines: &std::collections::HashSet<String>,
+) -> bool {
+    !server.machine_identifier.is_empty()
+        && !selected_machines.contains(&server.machine_identifier)
+}
+
+fn server_identity_matches(server: &PlexServer, identity_xml: &str) -> bool {
+    identity_machine_identifier(identity_xml).as_deref()
+        == Some(server.machine_identifier.as_str())
+}
+
 fn server_candidate_priority(server: &PlexServer, allow_relay: bool) -> Option<u8> {
     if server.scheme != "https" {
         return None;
@@ -2314,5 +2352,29 @@ mod tests {
             identity_machine_identifier(xml).as_deref(),
             Some("machine-1")
         );
+    }
+
+    #[test]
+    fn link_candidates_require_an_unselected_machine_identifier() {
+        let selected = std::collections::HashSet::from(["alpha-id".to_string()]);
+        let alpha = server("alpha", "https", "alpha.example", false, false);
+        let beta = server("beta", "https", "beta.example", false, false);
+        let mut unknown = server("unknown", "https", "unknown.example", false, false);
+        unknown.machine_identifier.clear();
+
+        assert!(!link_candidate_needs_probe(&alpha, &selected));
+        assert!(link_candidate_needs_probe(&beta, &selected));
+        assert!(!link_candidate_needs_probe(&unknown, &selected));
+    }
+
+    #[test]
+    fn reachable_server_identity_must_match_the_discovery_machine() {
+        let alpha = server("alpha", "https", "alpha.example", false, false);
+        let matching = r#"<MediaContainer machineIdentifier="alpha-id" />"#;
+        let other = r#"<MediaContainer machineIdentifier="other-id" />"#;
+
+        assert!(server_identity_matches(&alpha, matching));
+        assert!(!server_identity_matches(&alpha, other));
+        assert!(!server_identity_matches(&alpha, "<MediaContainer />"));
     }
 }

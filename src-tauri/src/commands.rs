@@ -1,18 +1,17 @@
 use serde::Serialize;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::Path;
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
+use std::time::{Duration, Instant};
 use tauri::State;
 
 use crate::config::{self, SourceConfig};
 use crate::playback;
-use crate::plex_library::PlexLibrary;
+use crate::plex_library::{PlexLibrary, PlexServer};
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
-use crate::source::{
-    plex::PlexSource, DetailDto, EpisodeContext, HubDto, ItemDto, MediaSource, SectionDto,
-};
-use crate::{AppState, PLEX_SOURCE_ID};
+use crate::source::{plex, DetailDto, EpisodeContext, HubDto, ItemDto, MediaSource, SectionDto};
+use crate::AppState;
 
 const PRODUCT: &str = "Vela";
 /// Derived from Cargo.toml's `version` so it can't drift from package metadata.
@@ -59,7 +58,7 @@ pub struct AppInfoDto {
 }
 
 /// A configured source, for the UI's source switcher / per-source filtering.
-#[derive(Serialize)]
+#[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SourceDto {
     id: String,
@@ -78,6 +77,72 @@ pub struct PinDto {
     /// Inline SVG QR encoding `auth_url`, for scanning from a phone.
     qr_svg: String,
 }
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlexServerChoiceDto {
+    machine_identifier: String,
+    name: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum LinkPollDto {
+    Pending,
+    ChooseServer { servers: Vec<PlexServerChoiceDto> },
+    Connected { source: SourceDto },
+}
+
+pub(crate) enum PlexLinkSession {
+    ChooseServer {
+        created_at: Instant,
+        client_identifier: String,
+        token: String,
+        servers: Vec<PlexServer>,
+    },
+    Connected {
+        created_at: Instant,
+        client_identifier: String,
+        source: SourceDto,
+    },
+}
+
+impl PlexLinkSession {
+    fn created_at(&self) -> Instant {
+        match self {
+            Self::ChooseServer { created_at, .. } | Self::Connected { created_at, .. } => {
+                *created_at
+            }
+        }
+    }
+
+    fn client_identifier(&self) -> &str {
+        match self {
+            Self::ChooseServer {
+                client_identifier, ..
+            }
+            | Self::Connected {
+                client_identifier, ..
+            } => client_identifier,
+        }
+    }
+
+    fn response(&self) -> LinkPollDto {
+        match self {
+            Self::ChooseServer { servers, .. } => LinkPollDto::ChooseServer {
+                servers: server_choices(servers),
+            },
+            Self::Connected { source, .. } => LinkPollDto::Connected {
+                source: source.clone(),
+            },
+        }
+    }
+}
+
+pub(crate) type PlexLinkSessions = HashMap<String, PlexLinkSession>;
+
+const PLEX_LINK_SESSION_TTL: Duration = Duration::from_secs(15 * 60);
+const MAX_PLEX_LINK_SESSIONS: usize = 8;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -199,36 +264,23 @@ pub async fn connect_jellyfin_token(
     register_source(&state, cfg).await
 }
 
-/// Remove a configured (non-Plex) source by id. The Plex source is managed by
-/// the link/unlink flow, not here, so it's explicitly off-limits — and we only
-/// touch ids that actually exist in the persisted source list.
+/// Remove one configured source by id, regardless of provider. Credentials are
+/// stored per row, so removing one Plex server cannot affect another server or
+/// account.
 #[tauri::command]
 pub async fn remove_source(id: String, state: State<'_, AppState>) -> Result<(), String> {
-    if id == PLEX_SOURCE_ID {
-        return Err("the Plex source can't be removed here".into());
-    }
+    let _source_guard = state.source_lock.lock().await;
     let id2 = id.clone();
-    config::update(move |cfg| {
-        if !cfg.sources.iter().any(|s| s.id == id2) {
-            return Err("no such source".to_string());
-        }
-        cfg.sources.retain(|s| s.id != id2);
-        Ok(())
-    })?;
+    config_store(move || config::update(move |cfg| remove_source_config(cfg, &id2))).await?;
     state.registry.lock().await.remove(&id);
     Ok(())
 }
 
-/// Unlink the Plex account: clear the stored auth token and drop the live Plex
-/// source. The client identifier is kept so a later re-link reuses the same device
-/// identity. This is the counterpart to the link flow that `remove_source` defers to.
-#[tauri::command]
-pub async fn unlink_plex(state: State<'_, AppState>) -> Result<(), String> {
-    config::update(|cfg| {
-        cfg.auth_token = None;
-        Ok(())
-    })?;
-    state.registry.lock().await.remove(PLEX_SOURCE_ID);
+fn remove_source_config(cfg: &mut config::AppConfig, source_id: &str) -> Result<(), String> {
+    if !cfg.sources.iter().any(|source| source.id == source_id) {
+        return Err("no such source".to_string());
+    }
+    cfg.sources.retain(|source| source.id != source_id);
     Ok(())
 }
 
@@ -237,19 +289,33 @@ async fn register_source(
     state: &State<'_, AppState>,
     cfg: SourceConfig,
 ) -> Result<SourceDto, String> {
+    let _source_guard = state.source_lock.lock().await;
     let source = jellyfin::build_source(&cfg).ok_or("could not build source from config")?;
     let dto = SourceDto {
         id: source.id(),
         name: source.name(),
         kind: source.kind().to_string(),
     };
-    config::update(move |stored| {
-        stored.upsert_source(cfg);
-        Ok(())
+    config_store(move || {
+        config::update(move |stored| {
+            stored.upsert_source(cfg);
+            Ok(())
+        })
     })
+    .await
     .map_err(|e| format!("connected but failed to save config: {}", e))?;
     state.registry.lock().await.upsert(source);
     Ok(dto)
+}
+
+async fn config_store<T, F>(operation: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(operation)
+        .await
+        .map_err(|error| format!("config task failed: {error}"))?
 }
 
 /// Normalize a user-entered server URL: default to http:// if no scheme, trim `/`.
@@ -937,13 +1003,127 @@ fn plex_link_url(code: &str) -> String {
     format!("https://plex.tv/link/?pin={}", enc(code))
 }
 
-/// Poll a pending PIN. Returns true once linked (and wires up the client).
+fn server_choices(servers: &[PlexServer]) -> Vec<PlexServerChoiceDto> {
+    servers
+        .iter()
+        .map(|server| PlexServerChoiceDto {
+            machine_identifier: server.machine_identifier.clone(),
+            name: server.name.clone(),
+        })
+        .collect()
+}
+
+fn server_for_machine<'a>(
+    servers: &'a [PlexServer],
+    machine_identifier: &str,
+) -> Result<&'a PlexServer, String> {
+    servers
+        .iter()
+        .find(|server| server.machine_identifier == machine_identifier)
+        .ok_or_else(|| "that Plex server is not part of this link session".to_string())
+}
+
+fn prune_link_sessions(sessions: &mut PlexLinkSessions, now: Instant) {
+    sessions.retain(|_, session| {
+        now.saturating_duration_since(session.created_at()) <= PLEX_LINK_SESSION_TTL
+    });
+}
+
+fn insert_link_session(sessions: &mut PlexLinkSessions, pin_id: String, session: PlexLinkSession) {
+    prune_link_sessions(sessions, Instant::now());
+    if !sessions.contains_key(&pin_id) && sessions.len() >= MAX_PLEX_LINK_SESSIONS {
+        if let Some(oldest) = sessions
+            .iter()
+            .min_by_key(|(_, session)| session.created_at())
+            .map(|(id, _)| id.clone())
+        {
+            sessions.remove(&oldest);
+        }
+    }
+    sessions.insert(pin_id, session);
+}
+
+fn plex_source_config(
+    token: String,
+    client_identifier: String,
+    server: &PlexServer,
+) -> Result<SourceConfig, String> {
+    if server.machine_identifier.trim().is_empty() {
+        return Err("Plex server did not report a stable machine identifier".to_string());
+    }
+    if server.scheme != "https" || server.relay {
+        return Err("Plex linking requires a direct HTTPS server connection".to_string());
+    }
+    let mut library = PlexLibrary::new(token.clone(), client_identifier.clone());
+    library.set_server(server.clone());
+    let base_url = library
+        .server_base()
+        .ok_or_else(|| "Plex server did not report a usable endpoint".to_string())?;
+    Ok(SourceConfig {
+        id: format!("plex-{}", uuid::Uuid::new_v4()),
+        kind: "plex".to_string(),
+        name: if server.name.trim().is_empty() {
+            "Plex".to_string()
+        } else {
+            server.name.clone()
+        },
+        base_url,
+        access_token: Some(token),
+        api_key: None,
+        user_id: None,
+        device_id: Some(client_identifier),
+        machine_identifier: Some(server.machine_identifier.clone()),
+    })
+}
+
+async fn connect_plex_source(
+    state: &AppState,
+    token: String,
+    client_identifier: String,
+    server: &PlexServer,
+) -> Result<SourceDto, String> {
+    let cfg = plex_source_config(token, client_identifier, server)?;
+    let source = plex::build_source(&cfg).ok_or("could not build linked Plex source")?;
+    let dto = SourceDto {
+        id: source.id(),
+        name: source.name(),
+        kind: source.kind().to_string(),
+    };
+
+    let _source_guard = state.source_lock.lock().await;
+    config_store(move || {
+        config::update(move |stored| {
+            stored.upsert_source(cfg);
+            Ok(())
+        })
+    })
+    .await
+    .map_err(|error| format!("authenticated but failed to save config: {error}"))?;
+    state.registry.lock().await.upsert(source);
+    Ok(dto)
+}
+
+/// Poll a pending PIN. Authorization remains backend-only: once plex.tv issues
+/// a token, this command either connects the sole reachable physical server or
+/// keeps the credentials in an expiring in-memory session while the UI chooses
+/// among several server names.
 #[tauri::command]
 pub async fn link_poll(
     pin_id: String,
     client_identifier: String,
     state: State<'_, AppState>,
-) -> Result<bool, String> {
+) -> Result<LinkPollDto, String> {
+    {
+        let mut sessions = state.plex_link_sessions.lock().await;
+        prune_link_sessions(&mut sessions, Instant::now());
+        if let Some(session) = sessions.get(&pin_id) {
+            if session.client_identifier() != client_identifier {
+                return Err("link session does not match this device".to_string());
+            }
+            return Ok(session.response());
+        }
+    }
+
     let client = plextv_client()?;
     let resp = client
         .get(format!("https://plex.tv/api/v2/pins/{}", pin_id))
@@ -968,30 +1148,143 @@ pub async fn link_poll(
     let body = resp.text().await.map_err(|e| e.to_string())?;
     let token = match attr(&body, "authToken") {
         Some(t) if !t.is_empty() => t,
-        _ => return Ok(false), // 200 with no token yet = still pending
+        _ => return Ok(LinkPollDto::Pending), // 200 with no token yet
     };
 
-    // Persist and build the client. Surface a save failure so the user isn't
-    // silently logged out on the next launch.
-    let (token2, cid2) = (token.clone(), client_identifier.clone());
-    config::update(move |cfg| {
-        cfg.auth_token = Some(token2);
-        cfg.client_identifier = Some(cid2);
-        Ok(())
-    })
-    .map_err(|e| format!("authenticated but failed to save config: {}", e))?;
-
-    let lib = PlexLibrary::new(token, client_identifier);
-    state
-        .registry
-        .lock()
+    let library = PlexLibrary::new(token.clone(), client_identifier.clone());
+    let discovered = library
+        .discover_servers()
         .await
-        .upsert(std::sync::Arc::new(PlexSource::new(
-            PLEX_SOURCE_ID,
-            "Plex",
-            lib,
-        )));
-    Ok(true)
+        .map_err(|error| format!("could not discover Plex servers: {error}"))?;
+    let mut reachable = library
+        .reachable_servers_by_machine(&discovered, false)
+        .await;
+    if reachable.is_empty() {
+        return Err("No reachable direct HTTPS Plex server was found. Check Plex Remote Access or connect to the server's network; Plex Relay is not used for HDR playback.".to_string());
+    }
+
+    if reachable.len() == 1 {
+        let source = connect_plex_source(
+            &state,
+            token,
+            client_identifier.clone(),
+            &reachable.remove(0),
+        )
+        .await?;
+        let response = LinkPollDto::Connected {
+            source: source.clone(),
+        };
+        {
+            let mut sessions = state.plex_link_sessions.lock().await;
+            insert_link_session(
+                &mut sessions,
+                pin_id,
+                PlexLinkSession::Connected {
+                    created_at: Instant::now(),
+                    client_identifier,
+                    source,
+                },
+            );
+        }
+        return Ok(response);
+    }
+
+    let response = LinkPollDto::ChooseServer {
+        servers: server_choices(&reachable),
+    };
+    {
+        let mut sessions = state.plex_link_sessions.lock().await;
+        insert_link_session(
+            &mut sessions,
+            pin_id,
+            PlexLinkSession::ChooseServer {
+                created_at: Instant::now(),
+                client_identifier,
+                token,
+                servers: reachable,
+            },
+        );
+    }
+    Ok(response)
+}
+
+/// Complete a multi-server Plex link without ever sending its auth token to the
+/// frontend. Removing the pending session before persistence makes a double
+/// click one-shot; a persistence failure restores the same choice for retry.
+#[tauri::command]
+pub async fn link_select_server(
+    pin_id: String,
+    client_identifier: String,
+    machine_identifier: String,
+    state: State<'_, AppState>,
+) -> Result<SourceDto, String> {
+    let pending = {
+        let mut sessions = state.plex_link_sessions.lock().await;
+        prune_link_sessions(&mut sessions, Instant::now());
+        let session = sessions
+            .get(&pin_id)
+            .ok_or_else(|| "Plex link session expired — please restart linking.".to_string())?;
+        if session.client_identifier() != client_identifier {
+            return Err("link session does not match this device".to_string());
+        }
+        if let PlexLinkSession::Connected { source, .. } = session {
+            return Ok(source.clone());
+        }
+        let PlexLinkSession::ChooseServer { servers, .. } = session else {
+            unreachable!();
+        };
+        server_for_machine(servers, &machine_identifier)?;
+        sessions
+            .remove(&pin_id)
+            .expect("link session disappeared while locked")
+    };
+
+    let PlexLinkSession::ChooseServer {
+        created_at,
+        client_identifier,
+        token,
+        servers,
+    } = pending
+    else {
+        unreachable!();
+    };
+    let server = server_for_machine(&servers, &machine_identifier)
+        .cloned()
+        .expect("selected server was validated while locked");
+
+    match connect_plex_source(&state, token.clone(), client_identifier.clone(), &server).await {
+        Ok(source) => {
+            {
+                let mut sessions = state.plex_link_sessions.lock().await;
+                insert_link_session(
+                    &mut sessions,
+                    pin_id,
+                    PlexLinkSession::Connected {
+                        created_at: Instant::now(),
+                        client_identifier,
+                        source: source.clone(),
+                    },
+                );
+            }
+            Ok(source)
+        }
+        Err(error) => {
+            {
+                let mut sessions = state.plex_link_sessions.lock().await;
+                insert_link_session(
+                    &mut sessions,
+                    pin_id,
+                    PlexLinkSession::ChooseServer {
+                        created_at,
+                        client_identifier,
+                        token,
+                        servers,
+                    },
+                );
+            }
+            Err(error)
+        }
+    }
 }
 
 // ---- library browsing ----------------------------------------------------
@@ -3514,6 +3807,46 @@ fn attr(xml: &str, name: &str) -> Option<String> {
 mod tests {
     use super::*;
 
+    fn linked_server(name: &str, machine_identifier: &str) -> PlexServer {
+        PlexServer {
+            name: name.to_string(),
+            host: format!("{machine_identifier}.plex.direct"),
+            port: 32400,
+            scheme: "https".to_string(),
+            uri: format!("https://{machine_identifier}.plex.direct:32400"),
+            local: false,
+            relay: false,
+            machine_identifier: machine_identifier.to_string(),
+            version: "1.0".to_string(),
+        }
+    }
+
+    fn source_config(id: &str) -> SourceConfig {
+        SourceConfig {
+            id: id.to_string(),
+            kind: "plex".to_string(),
+            name: id.to_string(),
+            base_url: format!("https://{id}.example:32400"),
+            access_token: Some(format!("token-{id}")),
+            api_key: None,
+            user_id: None,
+            device_id: Some(format!("client-{id}")),
+            machine_identifier: Some(format!("machine-{id}")),
+        }
+    }
+
+    fn connected_session(created_at: Instant, id: &str) -> PlexLinkSession {
+        PlexLinkSession::Connected {
+            created_at,
+            client_identifier: format!("client-{id}"),
+            source: SourceDto {
+                id: id.to_string(),
+                name: id.to_string(),
+                kind: "plex".to_string(),
+            },
+        }
+    }
+
     fn completion(session_id: &str, item_key: &str) -> PlaybackCompletion {
         PlaybackCompletion {
             session_id: session_id.to_string(),
@@ -3901,6 +4234,156 @@ mod tests {
     #[test]
     fn weak_pin_uses_plex_link_url() {
         assert_eq!(plex_link_url("ABCD"), "https://plex.tv/link/?pin=ABCD");
+    }
+
+    #[test]
+    fn plex_link_mints_a_fresh_nonlegacy_source_id_each_time() {
+        let server = linked_server("Home", "machine-a");
+        let first = plex_source_config("token".into(), "client".into(), &server).unwrap();
+        let second = plex_source_config("token".into(), "client".into(), &server).unwrap();
+
+        assert!(first.id.starts_with("plex-"));
+        assert_ne!(first.id, "plex");
+        assert_ne!(first.id, second.id);
+    }
+
+    #[test]
+    fn plex_link_persists_credentials_endpoint_and_machine_together() {
+        let server = linked_server("Home", "machine-a");
+        let cfg = plex_source_config("secret-token".into(), "device-a".into(), &server).unwrap();
+
+        assert_eq!(cfg.kind, "plex");
+        assert_eq!(cfg.name, "Home");
+        assert_eq!(cfg.base_url, "https://machine-a.plex.direct:32400");
+        assert_eq!(cfg.access_token.as_deref(), Some("secret-token"));
+        assert_eq!(cfg.device_id.as_deref(), Some("device-a"));
+        assert_eq!(cfg.machine_identifier.as_deref(), Some("machine-a"));
+        assert!(plex::build_source(&cfg).is_some());
+    }
+
+    #[test]
+    fn plex_link_refuses_an_unpinned_server() {
+        let server = linked_server("Unknown", "");
+        assert!(plex_source_config("token".into(), "client".into(), &server).is_err());
+    }
+
+    #[test]
+    fn plex_link_refuses_a_non_https_server() {
+        let mut server = linked_server("Home", "machine-a");
+        server.scheme = "http".to_string();
+        server.uri = "http://machine-a.example:32400".to_string();
+        assert!(plex_source_config("token".into(), "client".into(), &server).is_err());
+    }
+
+    #[test]
+    fn plex_link_refuses_a_relay_server() {
+        let mut server = linked_server("Relay", "machine-a");
+        server.relay = true;
+        assert!(plex_source_config("token".into(), "client".into(), &server).is_err());
+    }
+
+    #[test]
+    fn plex_server_picker_returns_names_and_ids_but_never_credentials() {
+        let session = PlexLinkSession::ChooseServer {
+            created_at: Instant::now(),
+            client_identifier: "private-client".to_string(),
+            token: "private-token".to_string(),
+            servers: vec![linked_server("Home", "machine-a")],
+        };
+
+        let value = serde_json::to_value(session.response()).unwrap();
+        let rendered = value.to_string();
+        assert_eq!(value["status"], "chooseServer");
+        assert_eq!(value["servers"][0]["name"], "Home");
+        assert_eq!(value["servers"][0]["machineIdentifier"], "machine-a");
+        assert!(!rendered.contains("private-token"));
+        assert!(!rendered.contains("private-client"));
+    }
+
+    #[test]
+    fn plex_link_poll_statuses_match_the_frontend_contract() {
+        let pending = serde_json::to_value(LinkPollDto::Pending).unwrap();
+        let connected = serde_json::to_value(LinkPollDto::Connected {
+            source: SourceDto {
+                id: "plex-one".to_string(),
+                name: "Home".to_string(),
+                kind: "plex".to_string(),
+            },
+        })
+        .unwrap();
+
+        assert_eq!(pending["status"], "pending");
+        assert_eq!(connected["status"], "connected");
+        assert_eq!(connected["source"]["id"], "plex-one");
+    }
+
+    #[test]
+    fn plex_server_selection_matches_the_exact_machine() {
+        let servers = vec![
+            linked_server("Home", "machine-a"),
+            linked_server("Remote", "machine-b"),
+        ];
+
+        assert_eq!(
+            server_for_machine(&servers, "machine-b").unwrap().name,
+            "Remote"
+        );
+        assert!(server_for_machine(&servers, "machine-c").is_err());
+    }
+
+    #[test]
+    fn removing_one_plex_source_preserves_the_other() {
+        let mut cfg = config::AppConfig {
+            sources: vec![source_config("plex-a"), source_config("plex-b")],
+            ..Default::default()
+        };
+
+        remove_source_config(&mut cfg, "plex-a").unwrap();
+
+        assert_eq!(cfg.sources.len(), 1);
+        assert_eq!(cfg.sources[0].id, "plex-b");
+        assert_eq!(cfg.sources[0].access_token.as_deref(), Some("token-plex-b"));
+    }
+
+    #[test]
+    fn plex_link_sessions_expire_in_memory() {
+        let now = Instant::now();
+        let mut sessions = PlexLinkSessions::new();
+        sessions.insert(
+            "expired".to_string(),
+            connected_session(now - PLEX_LINK_SESSION_TTL - Duration::from_secs(1), "old"),
+        );
+        sessions.insert("fresh".to_string(), connected_session(now, "new"));
+
+        prune_link_sessions(&mut sessions, now);
+
+        assert!(!sessions.contains_key("expired"));
+        assert!(sessions.contains_key("fresh"));
+    }
+
+    #[test]
+    fn plex_link_sessions_evict_the_oldest_at_the_bound() {
+        let now = Instant::now();
+        let mut sessions = PlexLinkSessions::new();
+        for index in 0..MAX_PLEX_LINK_SESSIONS {
+            sessions.insert(
+                format!("pin-{index}"),
+                connected_session(
+                    now - Duration::from_secs((MAX_PLEX_LINK_SESSIONS - index) as u64),
+                    &format!("source-{index}"),
+                ),
+            );
+        }
+
+        insert_link_session(
+            &mut sessions,
+            "new-pin".to_string(),
+            connected_session(now, "new-source"),
+        );
+
+        assert_eq!(sessions.len(), MAX_PLEX_LINK_SESSIONS);
+        assert!(!sessions.contains_key("pin-0"));
+        assert!(sessions.contains_key("new-pin"));
     }
 
     // Recents from a source that no longer exists (e.g. the removed
