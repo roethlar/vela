@@ -2,11 +2,13 @@
 
 **Severity**: MEDIUM — a newly eligible next episode can remain absent from
 Continue Watching until the user manually refreshes Home
-**Status**: In progress — implementation and coder guard proof complete; Claude review pending
+**Status**: Verified — accepted by in-session Claude review, 2026-07-19
 **Branch**: `fix/chr-1-post-mark-refresh`
 **Base**: `f1d70f5dc421ce52913d1af02ac4e8ffb41a957a`
 **Implementation commit**: `6ec2ba65acd5ecf4fbf6c12d54bfaa44e7e6f3d7`
-**Last dispatched head**: pending
+**Last dispatched head**: none — headless MCP dispatch waived by the owner
+after the transport failure; reviewed in the interactive session at head
+`5a7cabf6c94492482b182ca447f8434a9abf13e4`
 
 ## Evidence
 
@@ -91,4 +93,33 @@ dependent Home eligibility transition; production source APIs remain unchanged.
 
 ## Reviewer comments
 
-Pending Claude code review.
+**Verdict: Accepted — no material issues found.** Reviewed 2026-07-19 by the
+interactive Claude Code 2.1.215 session at the owner's explicit direction
+after the headless MCP transport was proven unavailable. Same-vendor,
+same-session review without detached-worktree isolation — recorded as a
+deliberate deviation from the codereview playbook, owner-approved.
+
+Verified against the record at `6ec2ba6` (zero code drift to head `5a7cabf`):
+
+- `src-tauri/src/lib.rs:204-234` is a pure reorder inside the joined
+  dispatcher: sequence release (`advance_playlist` + `continue-playing`)
+  stays before the server await; `mark_clean_completion_played` error is
+  logged; exactly one unconditional `playback-ended` follows.
+- The pre-mutation repaint claim holds: the only other `playback-ended`
+  emitter is the tracker tail at `src-tauri/src/commands.rs:2609`, which
+  stamps recents before emitting and is untouched by this commit.
+- `tests/e2e/mockjf.mjs` one-shot `resumeAfterPlayed` applies only in the
+  POST-success branch; the 401 early-return neither applies nor consumes it,
+  and consumption is identity-guarded against re-armed transitions.
+- The source guard masks non-code, isolates the dispatcher spawn block, and
+  asserts emit count, ordering, and unconditional depth; it ran green at
+  head during review. `completionhub` covers delayed success, delayed 401,
+  exact Resume counts, fallback hero, and no successor mpv.
+- Version surfaces agree at 0.1.60 across `package.json`, both lockfiles,
+  `src-tauri/Cargo.toml`, `src-tauri/tauri.conf.json`, and the Arch PKGBUILD.
+
+Non-blocking observation: the authoritative refresh now waits on the server
+write, so a hung (never-settling) `mark_played` would defer it and stall the
+serial dispatcher loop — but the mark await already sat inside this locked
+block before the change, so the exposure is pre-existing, and the tracker
+emit covers the visible repaint regardless.
