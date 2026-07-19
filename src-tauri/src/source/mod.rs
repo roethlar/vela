@@ -141,6 +141,51 @@ pub struct BackingRef {
     pub rating_key: String,
 }
 
+fn rekey_namespaced(value: &mut String, old_source_id: &str, new_source_id: &str) {
+    let Some((source_id, raw)) = value.split_once(':') else {
+        return;
+    };
+    if source_id == old_source_id {
+        *value = namespace_key(new_source_id, raw);
+    }
+}
+
+/// Re-key every routing identity carried by a persisted item snapshot.
+///
+/// Only recents and Vela playlists deserialize `ItemDto`; live DTOs are built
+/// fresh by their source. Keeping this traversal beside the type prevents a
+/// config migration from updating the front-facing key while silently leaving
+/// a parent, watch/detail target, or merged backing routed to the retired id.
+pub(crate) fn rekey_item_source(
+    item: &mut ItemDto,
+    old_source_id: &str,
+    new_source_id: &str,
+) {
+    rekey_namespaced(&mut item.rating_key, old_source_id, new_source_id);
+    if item.source_id == old_source_id {
+        item.source_id = new_source_id.to_string();
+    }
+    for key in [
+        &mut item.parent_rating_key,
+        &mut item.grandparent_rating_key,
+        &mut item.watch_key,
+        &mut item.detail_key,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        rekey_namespaced(key, old_source_id, new_source_id);
+    }
+    if let Some(backings) = &mut item.backing {
+        for backing in backings {
+            rekey_namespaced(&mut backing.rating_key, old_source_id, new_source_id);
+            if backing.source_id == old_source_id {
+                backing.source_id = new_source_id.to_string();
+            }
+        }
+    }
+}
+
 /// Full metadata for a single item — the detail / "more info" surface. A superset
 /// of the listing [`ItemDto`], fetched on demand so the grid path stays lean. Every
 /// rich field is optional / possibly-empty so a sparse backend (a local file with

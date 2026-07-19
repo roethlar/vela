@@ -13,6 +13,111 @@ use super::{
 use crate::playback::{ProgressTarget, TrackInfo};
 use crate::plex_library::{PlexDetail, PlexLibrary, PlexPlaylist, PlexServer, PlexVideo};
 
+fn library_from_config(cfg: &crate::config::SourceConfig) -> Option<PlexLibrary> {
+    if cfg.kind != "plex" || cfg.id.trim().is_empty() || cfg.name.trim().is_empty() {
+        return None;
+    }
+    let token = cfg.access_token.clone().filter(|value| !value.is_empty())?;
+    let client_identifier = cfg.device_id.clone().filter(|value| !value.is_empty())?;
+    let mut lib = PlexLibrary::new(token, client_identifier);
+
+    if !cfg.base_url.trim().is_empty() {
+        let parsed = url::Url::parse(&cfg.base_url).ok();
+        let endpoint = parsed.as_ref().and_then(|url| {
+            if url.scheme() != "https" {
+                return None;
+            }
+            Some((
+                url.host_str()?.to_string(),
+                url.port_or_known_default()?,
+            ))
+        });
+        if let Some((host, port)) = endpoint {
+            lib.set_server_manual(host, port, true, Some(cfg.name.clone()));
+            if let Some(machine_identifier) = cfg
+                .machine_identifier
+                .clone()
+                .filter(|value| !value.is_empty())
+            {
+                lib.set_machine_identifier(machine_identifier);
+            }
+        } else if cfg
+            .machine_identifier
+            .as_deref()
+            .is_some_and(|value| !value.is_empty())
+        {
+            // Never discard a known physical-server pin and then rediscover
+            // freely across the account. A malformed saved endpoint with a pin
+            // is a broken source, not authorization to choose another machine.
+            return None;
+        }
+    } else if cfg
+        .machine_identifier
+        .as_deref()
+        .is_some_and(|value| !value.is_empty())
+    {
+        return None;
+    }
+    Some(lib)
+}
+
+/// Rebuild one persisted Plex source. Credentials and physical-server binding
+/// live together on the source row, so restoring N rows creates N independent
+/// clients without any process-global Plex singleton.
+pub fn build_source(
+    cfg: &crate::config::SourceConfig,
+) -> Option<std::sync::Arc<dyn MediaSource>> {
+    let lib = library_from_config(cfg)?;
+    Some(std::sync::Arc::new(PlexSource::new(
+        &cfg.id, &cfg.name, lib,
+    )))
+}
+
+async fn persist_source_binding(
+    source_id: &str,
+    source_name: Option<&str>,
+    base_url: &str,
+    machine_identifier: &str,
+) -> Result<(), String> {
+    let source_id = source_id.to_string();
+    let source_name = source_name.map(str::to_string);
+    let base_url = base_url.to_string();
+    let machine_identifier = machine_identifier.to_string();
+    tokio::task::spawn_blocking(move || {
+        crate::config::update(move |cfg| {
+            update_source_binding(
+                cfg,
+                &source_id,
+                source_name.as_deref(),
+                &base_url,
+                &machine_identifier,
+            )
+        })
+    })
+    .await
+    .map_err(|error| format!("could not join Plex config persistence: {error}"))?
+}
+
+fn update_source_binding(
+    cfg: &mut crate::config::AppConfig,
+    source_id: &str,
+    source_name: Option<&str>,
+    base_url: &str,
+    machine_identifier: &str,
+) -> Result<(), String> {
+    let source = cfg
+        .sources
+        .iter_mut()
+        .find(|source| source.kind == "plex" && source.id == source_id)
+        .ok_or_else(|| "persisted Plex source disappeared".to_string())?;
+    if let Some(name) = source_name {
+        source.name = name.to_string();
+    }
+    source.base_url = base_url.to_string();
+    source.machine_identifier = Some(machine_identifier.to_string());
+    Ok(())
+}
+
 pub struct PlexSource {
     id: String,
     name: String,
@@ -98,11 +203,11 @@ impl PlexSource {
                 let lib = guard.clone();
                 let binding = self.binding.load(Ordering::SeqCst); // pairs with THIS clone
                 drop(guard); // never hold the lock across the network call below
-                // A server restored from config carries no machine identifier
-                // (`set_server_manual`), which would leave rediscovery UNPINNED
-                // and free to repoint this source at another account server —
-                // under section keys that only mean anything on the original
-                // (codex r7). Learn who we are talking to.
+                // A legacy server restored without a persisted machine identifier
+                // would leave rediscovery UNPINNED and free to repoint this source
+                // at another account server — under section keys that only mean
+                // anything on the original (codex r7). Learn it once and persist
+                // the pin onto this source row.
                 let may_probe = rediscovery_pin(lib.server_machine_id()).is_none()
                     && match probe {
                         Probe::WhileUnknown => true,
@@ -134,11 +239,31 @@ impl PlexSource {
                         // wrong-server scan, reached through the machinery built to
                         // forbid it (codex r19). The binding is the proof of sameness,
                         // and this was the one writer that never asked for it.
-                        if current == binding && rediscovery_pin(guard.server_machine_id()).is_none()
+                        let learned = if current == binding
+                            && rediscovery_pin(guard.server_machine_id()).is_none()
                         {
-                            guard.set_machine_identifier(id);
+                            guard.set_machine_identifier(id.clone());
+                            guard.server_base().map(|base| (base, id))
+                        } else {
+                            None
+                        };
+                        let current_lib = guard.clone();
+                        drop(guard);
+                        if let Some((base, machine_identifier)) = learned {
+                            if let Err(error) = persist_source_binding(
+                                &self.id,
+                                None,
+                                &base,
+                                &machine_identifier,
+                            )
+                            .await
+                            {
+                                eprintln!(
+                                    "plex: failed to persist learned server identity ({error}); will probe again next launch"
+                                );
+                            }
                         }
-                        return Ok((guard.clone(), current));
+                        return Ok((current_lib, current));
                     }
                 }
                 // No probe, or it FAILED: we return the clone we took above, so we
@@ -194,13 +319,16 @@ impl PlexSource {
         if !installed {
             return Ok((updated, binding)); // another task got there first — use its server
         }
-        let (host, port, scheme) = (chosen.host.clone(), chosen.port, chosen.scheme.clone());
-        if let Err(e) = crate::config::update(move |cfg| {
-            cfg.last_server_host = Some(host);
-            cfg.last_server_port = Some(port);
-            cfg.last_server_scheme = Some(scheme);
-            Ok::<(), String>(())
-        }) {
+        let base = updated.server_base().unwrap_or_default();
+        let machine_identifier = updated.server_machine_id().unwrap_or_default();
+        if let Err(e) = persist_source_binding(
+            &self.id,
+            Some(&chosen.name),
+            &base,
+            &machine_identifier,
+        )
+        .await
+        {
             // Non-fatal for this session (the server is selected in memory), but
             // surface it so a persistent lock/permission/disk failure isn't silent.
             eprintln!(
@@ -1184,6 +1312,7 @@ fn scan_path(key: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::SourceConfig;
     use crate::plex_library::{
         PlexDetail, PlexDetailMedia, PlexDetailPart, PlexRole, PlexStream, PlexTag,
     };
@@ -1192,6 +1321,72 @@ mod tests {
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;
+
+    fn plex_config(base_url: &str, machine_identifier: Option<&str>) -> SourceConfig {
+        SourceConfig {
+            id: "plex-configured".to_string(),
+            kind: "plex".to_string(),
+            name: "Living Room".to_string(),
+            base_url: base_url.to_string(),
+            access_token: Some("token".to_string()),
+            api_key: None,
+            user_id: None,
+            device_id: Some("client".to_string()),
+            machine_identifier: machine_identifier.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn persisted_source_restores_credentials_endpoint_and_machine_pin() {
+        let cfg = plex_config("https://plex.example", Some("machine-A"));
+        let lib = library_from_config(&cfg).expect("complete Plex config restores");
+        assert_eq!(lib.server_base().as_deref(), Some("https://plex.example:443"));
+        assert_eq!(lib.server_machine_id().as_deref(), Some("machine-A"));
+        assert_eq!(lib.auth_token_clone(), "token");
+        assert_eq!(lib.client_identifier_clone(), "client");
+
+        let source = build_source(&cfg).expect("source builds");
+        assert_eq!(source.id(), "plex-configured");
+        assert_eq!(source.name(), "Living Room");
+        assert_eq!(source.kind(), "plex");
+
+        let invalid_pinned = plex_config("http://plex.example", Some("machine-A"));
+        assert!(
+            library_from_config(&invalid_pinned).is_none(),
+            "a known pin may not be discarded into free account discovery"
+        );
+    }
+
+    #[test]
+    fn binding_persistence_updates_only_the_matching_plex_row() {
+        let mut cfg = crate::config::AppConfig {
+            sources: vec![
+                plex_config("https://a.example", Some("machine-A")),
+                SourceConfig {
+                    id: "plex-other".to_string(),
+                    name: "Other".to_string(),
+                    base_url: "https://b.example".to_string(),
+                    machine_identifier: Some("machine-B".to_string()),
+                    ..plex_config("", None)
+                },
+            ],
+            ..Default::default()
+        };
+        update_source_binding(
+            &mut cfg,
+            "plex-configured",
+            Some("Renamed A"),
+            "https://a-new.example:443",
+            "machine-A",
+        )
+        .unwrap();
+        assert_eq!(cfg.sources[0].name, "Renamed A");
+        assert_eq!(cfg.sources[0].base_url, "https://a-new.example:443");
+        assert_eq!(cfg.sources[0].machine_identifier.as_deref(), Some("machine-A"));
+        assert_eq!(cfg.sources[1].name, "Other");
+        assert_eq!(cfg.sources[1].base_url, "https://b.example");
+        assert_eq!(cfg.sources[1].machine_identifier.as_deref(), Some("machine-B"));
+    }
 
     #[test]
     fn playlist_descriptor_uses_rating_key_namespace_not_content_path() {

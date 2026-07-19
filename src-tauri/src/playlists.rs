@@ -130,6 +130,41 @@ fn update<R>(mutate: impl FnOnce(&mut PlaylistFile) -> Result<R, String>) -> Res
     update_at(&data, &lock, mutate)
 }
 
+fn rekey_source_id_in(file: &mut PlaylistFile, old_source_id: &str, new_source_id: &str) {
+    for playlist in &mut file.playlists {
+        for entry in &mut playlist.items {
+            crate::source::rekey_item_source(&mut entry.item, old_source_id, new_source_id);
+        }
+    }
+}
+
+pub(crate) fn migrate_source_id_at(
+    data_path: &Path,
+    lock_path: &Path,
+    old_source_id: &str,
+    new_source_id: &str,
+) -> Result<(), String> {
+    match std::fs::symlink_metadata(data_path) {
+        Ok(_) => update_at(data_path, lock_path, |file| {
+            rekey_source_id_in(file, old_source_id, new_source_id);
+            Ok(())
+        }),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("could not inspect playlists: {error}")),
+    }
+}
+
+/// Re-key persisted Vela playlist routing during the one-shot multi-Plex
+/// migration. A genuinely absent playlist store stays absent; a corrupt or
+/// inaccessible one fails closed so config retains its retry marker.
+pub(crate) fn migrate_source_id(
+    old_source_id: &str,
+    new_source_id: &str,
+) -> Result<(), String> {
+    let (data, lock) = paths()?;
+    migrate_source_id_at(&data, &lock, old_source_id, new_source_id)
+}
+
 pub fn load() -> Result<PlaylistFile, String> {
     let (data, _) = paths()?;
     load_at(&data)

@@ -12,10 +12,10 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex};
 use tokio::sync::Mutex as AsyncMutex;
 
-use plex_library::PlexLibrary;
-use source::{plex::PlexSource, SourceRegistry};
+use source::SourceRegistry;
 
-/// Stable id for the (single) Plex source. Multi-server support can suffix this.
+/// Retired persisted id accepted only by the legacy link/unlink flow until the
+/// repeatable-link slice replaces those commands. Startup migration re-keys it.
 pub const PLEX_SOURCE_ID: &str = "plex";
 
 /// Human-friendly OS name reported to media servers (X-Plex-Platform, etc.).
@@ -92,22 +92,12 @@ pub fn run() {
         config::AppConfig::default()
     });
     let mut registry = SourceRegistry::default();
-    if let (Some(token), Some(cid)) = (cfg.auth_token.clone(), cfg.client_identifier.clone()) {
-        let mut lib = PlexLibrary::new(token, cid);
-        if let (Some(host), Some(port), Some(scheme)) = (
-            cfg.last_server_host.clone(),
-            cfg.last_server_port,
-            cfg.last_server_scheme.clone(),
-        ) {
-            if scheme == "https" {
-                lib.set_server_manual(host, port, true, Some("Saved Server".to_string()));
-            }
-        }
-        registry.upsert(Arc::new(PlexSource::new(PLEX_SOURCE_ID, "Plex", lib)));
-    }
-    // Restore any configured Jellyfin/Emby sources.
+    // Restore every configured source. Plex now uses the same per-row model as
+    // Jellyfin/Emby; `load_config` has already migrated the old singleton.
     for src_cfg in &cfg.sources {
-        if let Some(src) = source::jellyfin::build_source(src_cfg) {
+        if let Some(src) = source::plex::build_source(src_cfg)
+            .or_else(|| source::jellyfin::build_source(src_cfg))
+        {
             registry.upsert(src);
         }
     }

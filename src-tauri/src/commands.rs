@@ -167,6 +167,7 @@ pub async fn connect_jellyfin(
         api_key: None,
         user_id: Some(authed.user_id),
         device_id: Some(authed.device_id),
+        machine_identifier: None,
     };
     register_source(&state, cfg).await
 }
@@ -193,6 +194,7 @@ pub async fn connect_jellyfin_token(
         api_key: Some(api_key),
         user_id: Some(authed.user_id),
         device_id: Some(authed.device_id),
+        machine_identifier: None,
     };
     register_source(&state, cfg).await
 }
