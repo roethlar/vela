@@ -1023,6 +1023,19 @@ fn server_for_machine<'a>(
         .ok_or_else(|| "that Plex server is not part of this link session".to_string())
 }
 
+enum ReachableServerDecision {
+    Connect(PlexServer),
+    Choose(Vec<PlexServer>),
+}
+
+fn decide_reachable_servers(mut servers: Vec<PlexServer>) -> Result<ReachableServerDecision, String> {
+    match servers.len() {
+        0 => Err("No reachable direct HTTPS Plex server was found. Check Plex Remote Access or connect to the server's network; Plex Relay is not used for HDR playback.".to_string()),
+        1 => Ok(ReachableServerDecision::Connect(servers.remove(0))),
+        _ => Ok(ReachableServerDecision::Choose(servers)),
+    }
+}
+
 fn prune_link_sessions(sessions: &mut PlexLinkSessions, now: Instant) {
     sessions.retain(|_, session| {
         now.saturating_duration_since(session.created_at()) <= PLEX_LINK_SESSION_TTL
@@ -1156,38 +1169,37 @@ pub async fn link_poll(
         .discover_servers()
         .await
         .map_err(|error| format!("could not discover Plex servers: {error}"))?;
-    let mut reachable = library
+    let reachable = library
         .reachable_servers_by_machine(&discovered, false)
         .await;
-    if reachable.is_empty() {
-        return Err("No reachable direct HTTPS Plex server was found. Check Plex Remote Access or connect to the server's network; Plex Relay is not used for HDR playback.".to_string());
-    }
-
-    if reachable.len() == 1 {
-        let source = connect_plex_source(
-            &state,
-            token,
-            client_identifier.clone(),
-            &reachable.remove(0),
-        )
-        .await?;
-        let response = LinkPollDto::Connected {
-            source: source.clone(),
-        };
-        {
-            let mut sessions = state.plex_link_sessions.lock().await;
-            insert_link_session(
-                &mut sessions,
-                pin_id,
-                PlexLinkSession::Connected {
-                    created_at: Instant::now(),
-                    client_identifier,
-                    source,
-                },
-            );
+    let reachable = match decide_reachable_servers(reachable)? {
+        ReachableServerDecision::Connect(server) => {
+            let source = connect_plex_source(
+                &state,
+                token,
+                client_identifier.clone(),
+                &server,
+            )
+            .await?;
+            let response = LinkPollDto::Connected {
+                source: source.clone(),
+            };
+            {
+                let mut sessions = state.plex_link_sessions.lock().await;
+                insert_link_session(
+                    &mut sessions,
+                    pin_id,
+                    PlexLinkSession::Connected {
+                        created_at: Instant::now(),
+                        client_identifier,
+                        source,
+                    },
+                );
+            }
+            return Ok(response);
         }
-        return Ok(response);
-    }
+        ReachableServerDecision::Choose(servers) => servers,
+    };
 
     let response = LinkPollDto::ChooseServer {
         servers: server_choices(&reachable),
@@ -4329,6 +4341,33 @@ mod tests {
             "Remote"
         );
         assert!(server_for_machine(&servers, "machine-c").is_err());
+    }
+
+    #[test]
+    fn one_reachable_plex_server_connects_without_a_picker() {
+        let decision = decide_reachable_servers(vec![linked_server("Home", "machine-a")]).unwrap();
+        let ReachableServerDecision::Connect(server) = decision else {
+            panic!("one server must connect directly");
+        };
+        assert_eq!(server.machine_identifier, "machine-a");
+    }
+
+    #[test]
+    fn several_reachable_plex_servers_require_a_picker() {
+        let decision = decide_reachable_servers(vec![
+            linked_server("Home", "machine-a"),
+            linked_server("Remote", "machine-b"),
+        ])
+        .unwrap();
+        let ReachableServerDecision::Choose(servers) = decision else {
+            panic!("several servers must wait for a choice");
+        };
+        assert_eq!(servers.len(), 2);
+    }
+
+    #[test]
+    fn no_reachable_plex_server_fails_linking() {
+        assert!(decide_reachable_servers(Vec::new()).is_err());
     }
 
     #[test]

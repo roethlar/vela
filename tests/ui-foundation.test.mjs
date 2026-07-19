@@ -252,6 +252,30 @@ test("app.css exclusively owns the six shared visual primitives", () => {
   }
 });
 
+test("multi-server Plex linking pauses for an explicit credential-free server choice", () => {
+  const page = sources.get("src/routes/+page.svelte");
+  const choiceType = page.match(/type PlexServerChoice = \{([^}]+)\}/)?.[1] ?? "";
+
+  assert.match(choiceType, /machineIdentifier:\s*string/);
+  assert.match(choiceType, /name:\s*string/);
+  assert.doesNotMatch(choiceType, /token|credential|clientIdentifier/i);
+  assert.match(
+    page,
+    /result\.status === "chooseServer"[\s\S]*plexServerChoices = result\.servers;[\s\S]*return;/,
+    "polling must stop and publish the backend's server choices",
+  );
+  assert.match(
+    page,
+    /invoke<Source>\("link_select_server",\s*\{[\s\S]*machineIdentifier,/,
+    "the selected stable machine identifier must return to the backend",
+  );
+  assert.match(
+    page,
+    /\{#each plexServerChoices as server \(server\.machineIdentifier\)\}/,
+    "every reachable physical server must be rendered once",
+  );
+});
+
 test("Continue Watching has no duplicate playback action row", () => {
   const page = sources.get("src/routes/+page.svelte");
   assert.ok(page, "the application page must exist");
