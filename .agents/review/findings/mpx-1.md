@@ -90,4 +90,25 @@ that omission prevents this finding from being accepted.
 
 ## Reviewer comments
 
-Pending Claude Fable xhigh review.
+### Failed transport attempt — not a substantive review round
+
+`Reviewer: claude / claude-opus-4-8 / xhigh / standard` (transcript-sourced;
+owner requested Fable xhigh)
+
+- Harness: Claude Code 2.1.215 MCP Workflow
+- Reviewed head: `b90002aee37a6e483aa3cc69bceef41deef821f5`
+- Base: `34ad47c628cf176f68ddfb0ace7138fae1ec2083`
+- `guard_confirmed`: false
+- Outcome: transport/provenance failure; no code verdict
+- Timestamp: 2026-07-19T23:11:40Z
+
+The MCP workflow ignored the requested Fable pin and its invocation transcript
+resolved `claude-opus-4-8` at xhigh. Every `git` and `cargo` command then reached
+an unanswerable approval gate, so the reviewer could not inspect the pinned diff
+or execute the required red/restored-green proof. Its eventual payload reported
+`reopened` and `guard_confirmed:false`, but also failed the strict result schema;
+the orchestrator rejected it before verdict. A bounded direct CLI smoke probe
+separately resolved `claude-fable-5` at xhigh, but the permission-granted CLI
+transport is not authorized for this finding. The disposable worktree remained
+clean at the exact reviewed SHA. This failed transport attempt does not consume
+one of the owner's three substantive rounds.

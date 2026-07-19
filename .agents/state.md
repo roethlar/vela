@@ -10,8 +10,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Now
 
 - **ACTIVE REVIEW LOOP: see `.agents/review/index.md` (`mpx-1`).** Claude
-  Fable xhigh is reviewing the multi-Plex finding; the owner capped the loop at
-  three rounds.
+  Fable xhigh review is blocked on transport authorization; the owner capped
+  the loop at three substantive rounds. The MCP attempt failed provenance and
+  command permissions before verdict and did not count as a round.
 
 - **MULTI-PLEX FOUR LISTED SLICES COMPLETE ON `fix/mpx-1-multi-plex`; ONE
   APPROVED REQUIREMENT IS MISSING.** The implementation is committed through
