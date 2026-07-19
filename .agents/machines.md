@@ -50,6 +50,14 @@ portable and may at most point here.
   returned a schema-valid verdict, and left the worktree clean. The owner
   authorized this transport for `wsp-1` only; it is not a standing replacement
   for MCP.
+- Temporary `chr-1` reviewer artifacts (2026-07-18; cleanup pending): the
+  ignored `.claude/settings.local.json` has four session-added allow entries —
+  `Bash`, `Bash(*)`, `Bash(node *)`, and `Bash(perl *)`; remove exactly those
+  entries and preserve every pre-existing permission. Delete
+  `/tmp/claude-mcp-review.mjs`. Before removing
+  `.claude/worktrees/chr-1-opus-review`, confirm it is clean at `fe8eebe` and
+  inspect any difference rather than discarding it. No Claude review process is
+  still running.
 
 ## Windows dev host (`F:\dev\vela`)
 

@@ -9,6 +9,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- **`chr-1` IMPLEMENTED AND FULLY CODER-VERIFIED; NO VALID CLAUDE VERDICT.**
+  The clean-EOF dispatcher now emits its authoritative Home refresh after the
+  best-effort server played-state attempt while releasing playlist/Continue
+  Playing work first. Implementation `6ec2ba6`; exact-head evidence/docs
+  `fe8eebe`; version 0.1.60; local canonical gates and fresh Linux real-app E2E
+  29/29 passed, with five independent production mutation proofs restored
+  exactly. The required Claude MCP review did not complete: Claude Code 2.1.214
+  reviewer children could not inherit launch-granted command permissions, so
+  every resulting verdict is invalid and no review is running. Exact change
+  evidence: `.agents/review/findings/chr-1.md`. The governance defect and its
+  prevention are filed as
+  `https://github.com/roethlar/AgentGovernanceBootstrap/issues/6`.
+
 - **`pws-1` IMPLEMENTED AND EXTERNALLY ACCEPTED.** Exact automatic successors
   retain the completed mpv process's actual fullscreen and maximized state;
   manual starts retain configured defaults. Claude Code 2.1.214 /
@@ -74,13 +87,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **ACTIVE SLICE `chr-1` IMPLEMENTED; CLAUDE REVIEW PENDING.** The existing
-  dispatcher-owned Home refresh now runs after the clean-EOF server played-state
-  attempt, while sequence release stays early and failure still refreshes. Five
-  production regressions were separately proven red/restored-green; exact-head
-  local gates and the fresh-build Linux real-app suite 29/29 pass. Binding design:
-  `.agents/plans/clean-eof-hub-refresh.md`; exact evidence and review status:
-  `.agents/review/findings/chr-1.md`.
+- **RESUME FIRST:** clean only the failed `chr-1` reviewer transport's temporary
+  local artifacts recorded under the macOS host in `.agents/machines.md`, after
+  confirming its disposable worktree is clean at `fe8eebe`. Do not retry Claude
+  MCP review on Claude Code 2.1.214: the exact child-tool capability is proven
+  unavailable. `chr-1` remains blocked on an owner-approved review disposition,
+  a verified future MCP transport, or an explicit waiver.
+
+- **THEN: multi-Plex is the next queue item.** Read-only tracing established
+  that the data plane already separates distinct source IDs, while account
+  discovery, persistence, restore, link/unlink, and Settings still assume one
+  literal `plex` source. No durable plan is approved and no multi-Plex code has
+  changed. Draft the binding plan from fresh repo evidence and present its
+  owner decisions in plain English before implementation; `ISSUES.md` owns the
+  queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
@@ -289,8 +309,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- None for the active queue item. The final real-Plex smoke remains deferred to
-  release preparation by owner choice.
+- **`chr-1` external review:** the owner-required Claude MCP route cannot run
+  the reviewer guard through Claude Code 2.1.214. Direct Claude CLI was proven
+  only for an earlier finding and is not standing authorization for this one.
+  No review process is running; repeated permission probes are forbidden by the
+  stalled-progress rule. The final real-Plex smoke remains deferred to release
+  preparation by owner choice.
 
 ## Verification
 
