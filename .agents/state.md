@@ -98,13 +98,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **THEN: multi-Plex is the next queue item.** Read-only tracing established
-  that the data plane already separates distinct source IDs, while account
-  discovery, persistence, restore, link/unlink, and Settings still assume one
-  literal `plex` source. No durable plan is approved and no multi-Plex code has
-  changed. Draft the binding plan from fresh repo evidence and present its
-  owner decisions in plain English before implementation; `ISSUES.md` owns the
-  queue.
+- **THEN: multi-Plex is the next queue item.** Read-only tracing (re-confirmed
+  on post-5248fe6 main) established that the data plane already separates
+  distinct source IDs, while account discovery, persistence, restore,
+  link/unlink, and Settings still assume one literal `plex` source. A DRAFT
+  plan now exists at `.agents/plans/multi-plex.md` with five owner decisions
+  (scope, identity/migration, credential layout, Settings behavior,
+  tie-breaking) presented in plain English. No multi-Plex code has changed and
+  none may until the owner answers; `ISSUES.md` owns the queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
