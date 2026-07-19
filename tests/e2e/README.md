@@ -12,7 +12,7 @@ npm run e2e -- smoke           # run one scenario by name
 ```
 
 - Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
-  (`xorg-server-xvfb`), `bsdtar`, `curl`, and — for the playback-driving
+  (`xorg-server-xvfb`), `bsdtar`, `curl`, `openssl`, and — for the playback-driving
   scenarios — `ffmpeg` and `mpv`. Server flows run against in-process mock
   Jellyfin servers (`mockjf.mjs`) whose Range-capable streams serve
   ffmpeg-generated clips; no real server or network is touched.

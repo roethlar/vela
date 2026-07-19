@@ -81,6 +81,9 @@ async function runScenario(scenario, tauriDriverBin) {
   // The app reads XDG_CONFIG_HOME=<configRoot>/config, so a seeded config
   // file belongs at <configRoot>/config/vela/config.json.
   if (scenario.seed) await scenario.seed({ configRoot, repoRoot });
+  const scenarioEnv = scenario.environment
+    ? await scenario.environment({ configRoot, repoRoot })
+    : {};
   let cleanupPromise = null;
   const runCleanup = scenario.cleanup
     ? () => {
@@ -109,6 +112,7 @@ async function runScenario(scenario, tauriDriverBin) {
       env: {
         ...process.env,
         ...displayEnv,
+        ...scenarioEnv,
         XDG_CONFIG_HOME: path.join(configRoot, 'config'),
       },
       stdio: ['ignore', logFd, logFd],
