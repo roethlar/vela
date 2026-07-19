@@ -4,15 +4,6 @@
 
 Observed during live use and code-traced 2026-07-18; implementation status is
 recorded per item below.
-- Continue Watching does not add the next episode when a new series first
-  becomes relevant to the carousel until the user clicks Refresh. Automatic
-  post-playback refresh runs before the clean-EOF server `mark_played` request
-  completes, with no second refresh after that mutation (`src-tauri/src/lib.rs`).
-  A newly eligible server-hub episode can therefore miss the automatic refresh
-  and appear only after the manual one. Approved implementation and guard plan:
-  `.agents/plans/clean-eof-hub-refresh.md` (`chr-1`). Implementation `6ec2ba6`
-  is complete with separate red/restored-green proofs and a fresh Linux 29/29;
-  Claude code review remains before this item moves to Resolved.
 - Vela currently models Plex as one fixed `plex` / `Plex` source bound to one
   reachable machine, so multiple Plex servers cannot coexist—not merely be
   distinguished in the UI (`src-tauri/src/lib.rs`, `commands.rs`, `config.rs`).
@@ -20,6 +11,18 @@ recorded per item below.
   Plex's server name and optionally allowing a user alias.
 
 ## Resolved - Owner-Reported (2026-07-18)
+
+- Continue Watching missed a newly eligible next episode until manual Refresh
+  because the automatic post-playback refresh ran before the clean-EOF server
+  `mark_played` request settled. The authoritative Home refresh now runs after
+  that settled attempt without delaying sequence release or adding reloads.
+  Implemented under `.agents/plans/clean-eof-hub-refresh.md` (`chr-1`,
+  implementation `6ec2ba6`); five production regressions were separately
+  proven red/restored-green, the local gates and fresh-build Linux real-app
+  suite 29/29 pass, and Claude accepted with no material issues. Merged to
+  `main` at `5248fe6` on 2026-07-19. Detail:
+  `.agents/review/findings/chr-1.md`. The real-Plex smoke remains deferred to
+  the owner's next live session (non-fatal; observation only).
 
 - Automatic playlist and Continue Playing successors now retain the completed
   mpv process's actual fullscreen and maximized state. Manual starts keep their
