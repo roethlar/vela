@@ -1,6 +1,6 @@
 # Plan: multiple Plex servers (multi-Plex)
 
-Status: **IN PROGRESS — all owner decisions in; Slices 1-2 complete, Slice 3
+Status: **IN PROGRESS — all owner decisions in; Slices 1-3 complete, Slice 4
 next.** Owner-reported 2026-07-18 (ISSUES.md).
 Evidence below is from fresh main (post-5248fe6) tracing.
 
@@ -159,6 +159,13 @@ the merge per repo policy.
   Node/npm pins, clean install, npm audit/check/build, Rust 1.89/stable checks,
   clippy, all 167 Rust tests, and Cargo audit pass; both audits report zero known
   vulnerabilities and Cargo retains the accepted 17 warning-class notices.
+- **Slice 3 — Settings per-row removal: COMPLETE** (`bfe1a2c`). The Connected
+  list no longer treats Plex as an account singleton: every provider row calls
+  normal removal with its exact source ID and displays Remove, while Link Plex
+  remains available under Servers for repeat use. Three independent UI
+  mutations (legacy hardcoded ID, account-wide unlink, and missing repeat-link
+  action) failed the intended guard and restored exact; frontend check and
+  production build pass.
 
 ## Non-goals (until decided otherwise)
 

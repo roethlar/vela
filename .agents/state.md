@@ -98,8 +98,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **THEN: multi-Plex — plan DECIDED; Slices 1-2 COMPLETE, Slice 3 (Settings
-  per-row Remove) is the resume point.** Read-only tracing (re-confirmed on
+- **THEN: multi-Plex — plan DECIDED; Slices 1-3 COMPLETE, Slice 4
+  (two-source verification) is the resume point.** Read-only tracing
+  (re-confirmed on
   post-5248fe6 main)
   established that the data plane already separates distinct source IDs, while
   account discovery, persistence, restore, link/unlink, and Settings still
@@ -127,10 +128,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   normal exact-id path. Twenty-two Slice 2 production mutations failed their
   intended assertions and restored exact. Exact-head frontend and Rust gates
   pass (167 Rust tests; both audits at zero known vulnerabilities, with the
-  accepted Cargo warning-class notices). Slice 3 now replaces Settings'
-  obsolete Plex Disconnect branch with the normal per-row Remove control. The
-  dedicated worktree was recreated from current `main` at `34ad47c`; worktree
-  host facts live in `.agents/machines.md`. `ISSUES.md` owns the queue.
+  accepted Cargo warning-class notices). Slice 3 landed at `bfe1a2c`: Settings
+  now removes every provider row by its exact source ID, contains no Plex
+  account-wide unlink path, and leaves Link Plex available for repeat use.
+  Three UI mutations failed their intended guard and restored exact; frontend
+  check/build pass. Slice 4 adds the planned two-mock-Plex separation,
+  independent-removal, collapse, and override verification. The dedicated
+  worktree was recreated from current `main` at `34ad47c`; worktree host facts
+  live in `.agents/machines.md`. `ISSUES.md` owns the queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
