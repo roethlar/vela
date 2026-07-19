@@ -1,8 +1,9 @@
 # Plan: multiple Plex servers (multi-Plex)
 
-Status: **DRAFT — awaiting owner decisions.** Owner-reported 2026-07-18
-(ISSUES.md). Evidence below is from fresh main (post-5248fe6) tracing; no
-implementation may start until the owner answers the decisions section.
+Status: **DRAFT — core decisions answered 2026-07-19; one question open.**
+Owner-reported 2026-07-18 (ISSUES.md). Evidence below is from fresh main
+(post-5248fe6) tracing; no implementation until the open question is
+answered.
 
 ## Goal
 
@@ -55,27 +56,36 @@ Every additional Plex source must be born pinned to a `machineIdentifier`,
 and the reachability probe's acceptance of identifier-less discovery entries
 must not apply to secondary sources.
 
-## Owner decisions needed (plain English)
+## Owner decisions (answered 2026-07-19)
 
-1. **What does "multi-Plex" mean for you?**
-   (a) several servers under your one Plex account; (b) several Plex
-   accounts; (c) both. — (a) is the cheapest useful step: discovery already
-   lists every server the account can reach. (b)/(c) additionally need
-   per-source tokens and a reworked link flow.
-2. **Identity of the existing server.** Keep the current binding as id
-   `"plex"` and mint `plex-<machineIdentifier>` ids only for added servers
-   (no migration; persisted per-title overrides and watch keys that mention
-   `"plex"` keep working), or re-key everything uniformly (needs a config
-   and override migration). Recommendation: keep `"plex"`.
-3. **Where credentials live.** Keep the account singletons and add a
-   per-server binding list, or fold Plex entries into `sources` like
-   Jellyfin/Emby (bigger config migration; changes what unlink means).
-4. **Settings behavior.** With N servers: does account Disconnect drop all of
-   them? Do added servers get per-row Remove? When you link an account that
-   has several reachable servers, auto-add all of them or show a picker?
-5. **Tie-breaking between Plex servers.** Today equal-rank backings fall back
-   to registry order. Accept that, or do you want an explicit per-server
-   priority control?
+1. **Scope: multiple Plex accounts.** Each link adds one account bound to one
+   server, exactly like today's single Plex — the link flow just becomes
+   repeatable. An account with several servers can be linked again to add the
+   second server as its own source. Every new source is born pinned to its
+   `machineIdentifier` (hazard above).
+2. **Re-key everything.** The legacy `"plex"` id goes away; every Plex source
+   (including the existing one) gets a unique id minted at link time. A
+   migration must re-key the existing config binding and sweep every
+   persisted store that names `"plex"` (per-title overrides, playlists, any
+   other stored source references — enumerate at implementation time).
+3. **Credentials move into the source list.** Follows from #1: the one-slot
+   account fields (`auth_token`/`client_identifier`/`last_server_*`) are
+   retired by the migration; each Plex login is stored on its own `sources`
+   entry with its own token, like Jellyfin/Emby.
+4. **No account-wide disconnect.** Each Plex source gets its own per-row
+   Remove in Settings, same as Jellyfin/Emby. `unlink_plex` and the
+   `remove_source` Plex refusal are retired. Removing one source never
+   touches another.
+
+## Open question
+
+**Duplicates across Plex accounts.** Vela already collapses the same title
+found on several servers into one row and picks a default copy to play
+(per-title override wins). With two Plex accounts holding the same movie:
+(a) keep that behavior — one row, app picks the copy, override per title; or
+(b) show the title once per Plex account (breaks with how Plex+Jellyfin
+merge today). Awaiting owner answer; the "tie-breaking" question is moot
+unless (a).
 
 ## Non-goals (until decided otherwise)
 

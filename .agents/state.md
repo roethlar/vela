@@ -101,11 +101,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **THEN: multi-Plex is the next queue item.** Read-only tracing (re-confirmed
   on post-5248fe6 main) established that the data plane already separates
   distinct source IDs, while account discovery, persistence, restore,
-  link/unlink, and Settings still assume one literal `plex` source. A DRAFT
-  plan now exists at `.agents/plans/multi-plex.md` with five owner decisions
-  (scope, identity/migration, credential layout, Settings behavior,
-  tie-breaking) presented in plain English. No multi-Plex code has changed and
-  none may until the owner answers; `ISSUES.md` owns the queue.
+  link/unlink, and Settings still assume one literal `plex` source. The DRAFT
+  plan at `.agents/plans/multi-plex.md` has the core decisions answered
+  (2026-07-19): multiple accounts, repeatable link flow (one account + one
+  server per link, pinned at birth), full re-key with a `"plex"`-sweeping
+  migration, credentials on per-source `sources` entries, per-row Remove with
+  no account-wide disconnect. ONE question stays open — whether duplicates
+  across Plex accounts keep collapsing into one row (current cross-source
+  behavior) or list once per account. No multi-Plex code has changed and none
+  may until that answer lands; `ISSUES.md` owns the queue.
 
 - **IMMEDIATE NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
