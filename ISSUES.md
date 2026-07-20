@@ -1,14 +1,15 @@
 # Issue Queue
 
-## Open - Owner-Reported (2026-07-18)
+## In Progress - Owner-Reported (2026-07-18)
 
 Observed during live use and code-traced 2026-07-18; implementation status is
 recorded per item below.
-- Vela currently models Plex as one fixed `plex` / `Plex` source bound to one
-  reachable machine, so multiple Plex servers cannot coexist—not merely be
-  distinguished in the UI (`src-tauri/src/lib.rs`, `commands.rs`, `config.rs`).
-  Multi-Plex support needs one stable source identity per machine, displaying
-  Plex's server name and optionally allowing a user alias.
+- Multi-Plex core is merged at `ad27cf0`: each linked account/machine has an
+  independent stable source identity, credentials, machine pin, Settings row,
+  removal path, and merged-title backing. The remaining follow-up is the
+  user-facing duplicate-copy playback policy and title-level watched fan-out in
+  `.agents/plans/playback-source-policy.md`; current same-kind ties still use
+  registry order unless a Play Version override exists.
 
 ## Resolved - Owner-Reported (2026-07-18)
 

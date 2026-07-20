@@ -44,7 +44,7 @@ Emby currently ships as an experimental sibling of the Jellyfin integration.
 
 | Server | Status | Current scope |
 | --- | --- | --- |
-| **Plex** | Primary | Device-PIN sign-in, libraries, search, rich details, watch state, Continue Watching, scans, and server playlists. Vela currently binds one Plex machine per config. |
+| **Plex** | Primary | Multiple accounts/servers (one linked source per machine), Device-PIN sign-in, libraries, search, rich details, watch state, Continue Watching, scans, and server playlists. |
 | **Jellyfin** | Supported | Multiple connections, libraries, search, playback/check-ins, watch state, and server playlists. Real-server smoke tested; some detail views are sparser than Plex. |
 | **Emby** | Experimental | Uses the shared Jellyfin-family client and is covered where the APIs overlap, but has not yet been exercised against a real Emby server. |
 

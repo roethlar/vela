@@ -84,30 +84,19 @@ must not apply to secondary sources.
 
 ## Decision: which copy plays
 
-**Owner decision: the user decides, in Settings.** Which copy of a
-duplicated title plays is governed by a user-facing Settings control —
-not by a hardcoded source order, not by runtime capability/bitrate
-heuristics, and not by a play-time prompt that saves a default. The
-existing per-title override remains the escape hatch above whatever the
-setting says.
+**SUPERSEDED 2026-07-19.** The earlier rejection of automatic best-copy
+selection was replaced by the owner's explicit four-mode policy: Prefer Best,
+Prefer Compatible, Prefer Fastest Source, and Ask Every Time, with Prefer Best
+as the default and Play Version retained as the per-title override. The complete
+settled behavior and its implementation design live in
+`.agents/plans/playback-source-policy.md`; do not reconstruct it from this
+core multi-Plex plan.
 
-Rejected by owner: (a) stable added-order pick; (b) automatic
-"best-copy" selection (HDR/resolution/bitrate/connection); (c)
-first-play picker with remembered choice.
-
-The exact shape of the Settings control is an implementation detail:
-drafted in the collapse slice and shown to the owner for review before
-build, not invented in this plan.
-
-**Takeover audit (2026-07-19): NOT IMPLEMENTED.** The completed branch retains
-the existing per-title context-menu override, but no Settings control chooses
-the default backing. Same-kind Plex ties still fall through to stable registry
-order in `rank_backings`. This owner-approved requirement was omitted from the
-implementation slices below; its UI shape must be shown to the owner before
-code, exactly as required above. The recorded four-slice implementation was
-externally accepted at `mpx-1` round 1. On 2026-07-19 the owner explicitly
-directed merge with the missing preference control deferred as an open
-follow-up.
+The completed branch retains the existing per-title context-menu override, but
+no Settings control chooses the default backing. Same-kind Plex ties still fall
+through to stable registry order in `rank_backings`. The recorded four-slice
+core was externally accepted at `mpx-1` round 1 and merged by owner direction;
+the superseding playback-policy plan owns the open follow-up.
 
 ## Implementation slices
 

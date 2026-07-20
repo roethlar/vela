@@ -9,7 +9,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **MULTI-PLEX CORE MERGED TO `main`; SETTINGS FOLLOW-UP OPEN.** The four
+- **MULTI-PLEX CORE MERGED TO `main`; PLAYBACK-POLICY FOLLOW-UP PLANNED.** The four
   listed implementation slices are committed through `5e63462`, with review
   evidence through `3a1dd8b`.
   Per-source credentials and machine pins, full legacy-route migration,
@@ -22,12 +22,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   notices). Claude Code 2.1.215 / `claude-fable-5` / xhigh accepted the core
   finding at exact head `c32a59b` with an independent red/restored-green guard
   proof and no comments; exact status lives in `.agents/review/findings/mpx-1.md`.
-  A takeover audit found that the plan's required user-facing
-  Settings preference for default duplicate-copy playback was never drafted or
-  implemented; same-kind Plex ties still use registry order unless a title has
-  the older context-menu override. On 2026-07-19 the owner explicitly directed
-  the accepted core to merge with this control deferred. It remains the next
-  implementation slice and requires its own post-implementation review.
+  A takeover audit found that the user-facing default duplicate-copy policy was
+  never implemented; same-kind Plex ties still use registry order unless a title
+  has the older context-menu override. The owner has now settled four modes,
+  automatic display compatibility, sequence-scoped Ask behavior, and title-level
+  watched fan-out. The draft implementation and verification design is
+  `.agents/plans/playback-source-policy.md`; one owner-directed Claude Fable
+  openreview is its approval gate.
   Durable evidence:
   `.agents/plans/multi-plex.md`.
 
@@ -120,11 +121,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **NEXT: owner review of the missing multi-Plex Settings control.** The plan
-  requires its exact UI shape to be shown before code. After approval,
-  implement and guard-prove the default playback preference, rerun canonical
-  verification, then request external codereview. The accepted core review
-  does not cover this follow-up.
+- **NEXT: one Claude Fable openreview of the playback-source-policy plan.** A
+  clean verdict authorizes implementation; any finding returns to the owner.
+  After a clean plan gate, implement the five guarded slices in
+  `.agents/plans/playback-source-policy.md`, run canonical verification, and
+  request the required external code review. The accepted multi-Plex core
+  review does not cover this follow-up.
 
 - **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
@@ -365,7 +367,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/autocrop-resume.md` (IMPLEMENTED — owner-confirmed)
 - `.agents/plans/show-last-episode-sort.md` (LANDED — owner-confirmed)
 - `.agents/plans/ui-embellishments.md` (COMPLETE at 0.1.56 — v1.0.0 item 1)
-- `.agents/plans/multi-plex.md` (IN PROGRESS — Slice 1 complete; Slice 2 next)
+- `.agents/plans/multi-plex.md` (CORE COMPLETE — playback policy moved to the
+  plan below)
+- `.agents/plans/playback-source-policy.md` (DRAFT — owner-settled behavior;
+  one Fable openreview is the implementation gate)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

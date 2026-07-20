@@ -1110,3 +1110,44 @@ preserves Claude's sole required external role, the ban on Codex self-review,
 the owner-only additional-reviewer rule, and all pinned-SHA, fail-closed,
 guard-proof, and owner-action boundaries. Historical verdicts keep their exact
 recorded model provenance.
+
+## 2026-07-19 - Duplicate-copy playback is policy-driven and watched state is title-level
+
+Status: APPROVED (owner, 2026-07-19). Implementation plan:
+`.agents/plans/playback-source-policy.md`.
+
+Decision:
+Settings exposes four duplicate-copy playback modes: Prefer Best (the default),
+Prefer Compatible, Prefer Fastest Source, and Ask Every Time. Best ranks
+resolution first, HDR within a resolution tier, then bitrate. Compatible uses
+automatic resolution and HDR detection for the playback display, with an
+advanced manual fallback only when detection is unavailable or wrong. Fastest
+ranks same machine, then LAN, then internet. The Settings page explains these
+orders inline. The existing Play Version menu remains the persistent per-title
+override for automatic modes.
+
+Ask Every Time prompts on every standalone duplicate play and does not persist
+the answer. For a Vela playlist or TV continuation it asks at the first logical
+item with multiple copies, retains that source only for the current playback
+run, and asks again if that source lacks a later item. A server-owned playlist
+remains unavailable when its owner server is offline; Vela does not reroute or
+pretend it can advance it.
+
+Played/unplayed state belongs to the logical title, not one version. Manual
+watched edits and natural clean completion independently update every configured
+backing. Successful updates survive partial offline failure; no offline update
+queue is created. Resume/progress remains specific to the source/version that
+played.
+
+Reason:
+Most users should get the best copy automatically while retaining an explicit
+diagnostic mode and a precise per-title escape hatch. Display-aware selection
+avoids HDR/4K choices the playback machine cannot use, locality gives a
+predictable low-latency option, and title-level watched fan-out prevents two
+servers carrying the same media from visibly disagreeing after playback.
+
+Supersedes:
+The rejected automatic best-copy and prompt choices in
+`.agents/plans/multi-plex.md`. It does not change the decisions that video stays
+in external mpv, server playlists are read-only, or partial resume position is
+owned by the selected server.
