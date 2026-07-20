@@ -32,6 +32,8 @@ jobs:
 
   bundle:
     needs: npm-audit
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
