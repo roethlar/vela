@@ -22,7 +22,9 @@ async function executable(file, body) {
   await chmod(file, 0o755);
 }
 
-test("an explicit Linux build collects only fresh requested bundles", async (t) => {
+const posixBashUnavailable = process.platform === "win32" ? "requires a POSIX /bin/bash" : false;
+
+test("an explicit Linux build collects only fresh requested bundles", { skip: posixBashUnavailable }, async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "vela-build-script-"));
   t.after(() => rm(root, { recursive: true, force: true }));
 
