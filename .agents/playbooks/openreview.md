@@ -57,6 +57,12 @@ headless entry, JSON output mode, bounded smoke test — exactly as the
 (that section is the canonical recipe; do not duplicate it here). Dispatch
 headless, one-shot, in the harness's JSON output mode.
 
+Launch the reviewer **self-permissioned**, per the `codereview` playbook's
+"Self-permissioning launch" rule (canonical): its minimal tool set is granted at
+launch — never by editing `settings.json`. openreview's reviewer needs that same
+read-only-plus-disposable-worktree set to inspect the repo and run its bounded
+smoke test.
+
 Tier routing is fixed: `openreview` always dispatches the harness's
 owner-confirmed **frontier** pair at **max** effort (see the `codereview`
 playbook's "Reviewer tiers and routing") — no escalation headroom exists
@@ -71,6 +77,11 @@ recorded in the outcome. A missing or `null` `openreview_confirmed`
 blocks that harness fail-closed for this playbook and routes to the
 owner; the orchestrator never infers openreview eligibility from a
 codereview-only confirmation.
+
+Model naming rides the `codereview` playbook's "Model map and dispatch
+grammar" section (canonical): nickname→slug resolution and its fetch
+contract apply here unchanged, and a resolved nickname confers nothing —
+`openreview_confirmed` above remains the only eligibility gate.
 
 ## Verdict contract (structured, fail-closed)
 
