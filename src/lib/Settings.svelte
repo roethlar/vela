@@ -3,7 +3,12 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { onMount, onDestroy } from "svelte";
   import Icon from "$lib/Icon.svelte";
-  import type { ContinuePlayingMode } from "$lib/types";
+  import type {
+    ContinuePlayingMode,
+    DisplayProfile,
+    PlaybackPreferences,
+    PlaybackSourcePolicy,
+  } from "$lib/types";
 
   type Source = { id: string; name: string; kind: string };
 
@@ -144,6 +149,40 @@
   let continuePlaying = $state<ContinuePlayingMode>("only-tv");
   let continuePlayingBusy = $state(false);
 
+  // Duplicate-copy selection and the display profile used by Compatible.
+  let playbackPreferences = $state<PlaybackPreferences | null>(null);
+  let playbackSourcePolicy = $state<PlaybackSourcePolicy>("best");
+  let playbackResolutionOverride = $state("");
+  let playbackHdrOverride = $state("");
+  let playbackPreferencesBusy = $state(false);
+
+  const playbackPolicies: {
+    value: PlaybackSourcePolicy;
+    label: string;
+    summary: string;
+  }[] = [
+    {
+      value: "best",
+      label: "Prefer Best",
+      summary: "Highest resolution first, then HDR within that resolution, then bitrate.",
+    },
+    {
+      value: "compatible",
+      label: "Prefer Compatible",
+      summary: "Match this machine's playback display resolution and HDR state.",
+    },
+    {
+      value: "fastest",
+      label: "Prefer Fastest Source",
+      summary: "Same machine first, then local network, then internet; best quality breaks ties.",
+    },
+    {
+      value: "ask",
+      label: "Ask Every Time",
+      summary: "Ask which server copy to use whenever a manual play has duplicates.",
+    },
+  ];
+
   // Canned starting points shown in the contextual help. Each "Insert" appends its
   // options to the textarea so users can tweak from a working baseline.
   const mpvPresets: { label: string; args: string; help: string }[] = [
@@ -183,11 +222,12 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, mp, adv, continueMode] = await Promise.all([
+      const [s, mp, adv, continueMode, playbackPrefs] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<MpvInfo>("check_mpv"),
         invoke<MpvAdvanced>("get_mpv_advanced"),
         invoke<ContinuePlayingMode>("get_continue_playing"),
+        invoke<PlaybackPreferences>("get_playback_preferences"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
@@ -197,6 +237,7 @@
       mpvUseOwnConfig = adv.useOwnConfig;
       mpvAutocrop = adv.autocrop;
       continuePlaying = continueMode;
+      applyPlaybackPreferences(playbackPrefs);
     } catch (e) {
       if (seq === loadSeq) err = String(e);
     }
@@ -334,6 +375,47 @@
     }
   }
 
+  function applyPlaybackPreferences(preferences: PlaybackPreferences) {
+    playbackPreferences = preferences;
+    playbackSourcePolicy = preferences.policy;
+    playbackResolutionOverride = preferences.resolutionOverride ?? "";
+    playbackHdrOverride = preferences.hdrOverride ?? "";
+  }
+
+  async function savePlaybackPreferences() {
+    if (playbackPreferencesBusy) return;
+    playbackPreferencesBusy = true;
+    err = null;
+    try {
+      await invoke("set_playback_preferences", {
+        policy: playbackSourcePolicy,
+        resolutionOverride: playbackResolutionOverride || null,
+        hdrOverride: playbackHdrOverride || null,
+      });
+      applyPlaybackPreferences(
+        await invoke<PlaybackPreferences>("get_playback_preferences")
+      );
+    } catch (e) {
+      err = String(e);
+    } finally {
+      playbackPreferencesBusy = false;
+    }
+  }
+
+  function displaySummary(display: DisplayProfile): string {
+    const resolution =
+      display.widthPx > 0 && display.heightPx > 0
+        ? `${display.widthPx} × ${display.heightPx}`
+        : "resolution unknown";
+    const hdr =
+      display.hdr === "enabled"
+        ? "HDR enabled"
+        : display.hdr === "disabled"
+          ? "SDR / HDR disabled"
+          : "HDR state unknown";
+    return `${display.name || "Unknown display"} — ${resolution}, ${hdr}`;
+  }
+
   // Append a preset's options to the textarea so the user tweaks from a baseline
   // rather than replacing what they already typed.
   function insertPreset(args: string) {
@@ -401,6 +483,90 @@
     {/if}
 
     {#if activeTab === "player"}
+    <section>
+      <h3>Duplicate playback source</h3>
+      <div class="form">
+        <fieldset class="policygrid">
+          <legend>When the same title exists on more than one server</legend>
+          {#each playbackPolicies as policy}
+            <label class:active={playbackSourcePolicy === policy.value} class="policycard">
+              <input
+                type="radio"
+                name="playback-source-policy"
+                value={policy.value}
+                bind:group={playbackSourcePolicy}
+              />
+              <span>
+                <b>{policy.label}</b>
+                <small>{policy.summary}</small>
+              </span>
+            </label>
+          {/each}
+        </fieldset>
+
+        <div class="helpbox">
+          <b>How Vela decides</b>
+          <p><b>Best:</b> resolution → HDR within that resolution → bitrate. A 4K SDR copy beats a 1080p HDR copy.</p>
+          <p><b>Compatible:</b> stay at or below the playback display's resolution and match its current HDR state when possible.</p>
+          <p><b>Fastest:</b> this machine → local network → internet, then Best within that tier.</p>
+          <p>
+            <b>Manual override:</b> <b>Play Version</b> on a title's menu permanently chooses a server for the three automatic modes.
+            In Ask Every Time it answers only that play and is never saved. During a playlist or TV continuation, Ask keeps the first
+            choice only for that playback session and asks again if the chosen server lacks a later item.
+          </p>
+        </div>
+
+        {#if playbackPreferences}
+          <div class="displaystatus" aria-live="polite">
+            <b>Detected playback display</b>
+            <span>{displaySummary(playbackPreferences.detectedDisplay)}</span>
+            {#if playbackPreferences.detectedDisplay.evidence === "mpv-observed"}
+              <small>Observed from the current or most recent mpv playback output.</small>
+            {:else}
+              <small>Detected from the monitor containing Vela's window.</small>
+            {/if}
+            {#if playbackPreferences.effectiveDisplay.evidence === "manual-override"}
+              <small><b>Compatible will use:</b> {displaySummary(playbackPreferences.effectiveDisplay)}</small>
+            {/if}
+          </div>
+        {/if}
+
+        <details class="advanced-display">
+          <summary>Advanced display override</summary>
+          <p class="muted small">
+            Leave both on Auto unless native detection is unavailable or wrong. Resolution and HDR can be overridden independently.
+          </p>
+          <div class="overridegrid">
+            <div class="field">
+              <label for="playback-resolution-override">Resolution</label>
+              <select id="playback-resolution-override" bind:value={playbackResolutionOverride}>
+                <option value="">Auto (detected)</option>
+                <option value="720p">1280 × 720</option>
+                <option value="1080p">1920 × 1080</option>
+                <option value="1440p">2560 × 1440</option>
+                <option value="2160p">3840 × 2160 (4K)</option>
+                <option value="4320p">7680 × 4320 (8K)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label for="playback-hdr-override">HDR</label>
+              <select id="playback-hdr-override" bind:value={playbackHdrOverride}>
+                <option value="">Auto (detected)</option>
+                <option value="enabled">HDR enabled</option>
+                <option value="disabled">SDR / HDR disabled</option>
+              </select>
+            </div>
+          </div>
+        </details>
+
+        <div class="btnrow">
+          <button class="primary" disabled={playbackPreferencesBusy} onclick={savePlaybackPreferences}>
+            {playbackPreferencesBusy ? "Saving…" : "Save playback source preference"}
+          </button>
+        </div>
+      </div>
+    </section>
+
     <section>
       <h3>Continue Playing</h3>
       <div class="form">
@@ -701,6 +867,93 @@
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
     gap: 0.5rem;
+  }
+  .policygrid {
+    border: 0;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+  }
+  .policygrid legend {
+    color: var(--text-2);
+    font-size: 0.8rem;
+    margin-bottom: 0.4rem;
+  }
+  .policycard {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.65rem;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--surface-sunken);
+    cursor: pointer;
+  }
+  .policycard.active {
+    border-color: var(--accent);
+    background: var(--accent-tint);
+    box-shadow: 0 0 0 1px var(--accent);
+  }
+  .policycard input {
+    margin: 0.15rem 0 0;
+    flex: none;
+  }
+  .policycard span {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .policycard b {
+    color: var(--text);
+  }
+  .policycard small {
+    color: var(--text-muted);
+    line-height: 1.35;
+  }
+  .helpbox,
+  .displaystatus {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 0.65rem 0.75rem;
+    background: var(--surface);
+    font-size: 0.82rem;
+    line-height: 1.4;
+  }
+  .helpbox p {
+    margin: 0.35rem 0 0;
+  }
+  .displaystatus {
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+  }
+  .displaystatus small {
+    color: var(--text-muted);
+  }
+  .advanced-display {
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 0.55rem 0.65rem;
+    background: var(--surface-sunken);
+  }
+  .advanced-display summary {
+    cursor: pointer;
+    color: var(--text-2);
+    font-size: 0.85rem;
+    font-weight: 600;
+  }
+  .overridegrid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.6rem;
+  }
+  @media (max-width: 680px) {
+    .policygrid,
+    .overridegrid {
+      grid-template-columns: 1fr;
+    }
   }
   .themecard {
     display: flex;

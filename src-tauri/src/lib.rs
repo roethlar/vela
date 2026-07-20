@@ -1,10 +1,13 @@
 mod commands;
 mod config;
+mod display;
+mod locality;
 mod playback;
 mod playlists;
 mod plex_api;
 mod plex_library;
 mod recents;
+mod selection;
 mod source;
 mod storage;
 
@@ -241,6 +244,8 @@ pub fn run() {
             commands::set_mpv_advanced,
             commands::get_continue_playing,
             commands::set_continue_playing,
+            commands::get_playback_preferences,
+            commands::set_playback_preferences,
             commands::install_mpv,
             commands::open_url,
             commands::link_begin,

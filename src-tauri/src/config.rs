@@ -53,6 +53,17 @@ pub struct AppConfig {
     /// values fail closed to the product default (`"only-tv"`) in the command
     /// layer, keeping older configs compatible without baking policy into serde.
     pub continue_playing: Option<String>,
+    /// How duplicate copies are selected at the shared play boundary. Kept as
+    /// a tolerant string so a future/hand-edited value cannot make the entire
+    /// credential-bearing config unreadable; the command layer normalizes it
+    /// to `best`.
+    pub playback_source_policy: Option<String>,
+    /// Optional compatibility-display resolution override. Closed string
+    /// values are normalized by the command layer; missing/unknown means Auto.
+    pub playback_display_resolution: Option<String>,
+    /// Optional compatibility-display HDR override (`enabled`/`disabled`).
+    /// Missing/unknown means Auto.
+    pub playback_display_hdr: Option<String>,
     /// Persisted media-server connections (Plex, Jellyfin, and Emby). Kept
     /// deliberately provider-neutral so backends can diverge without a schema
     /// change.
@@ -752,6 +763,26 @@ mod tests {
             back.section_sorts.get("plex-1:6").map(String::as_str),
             Some("episodeAddedAt:desc")
         );
+    }
+
+    #[test]
+    fn playback_preferences_are_optional_and_round_trip_without_affecting_old_configs() {
+        let old: AppConfig = serde_json::from_str(r#"{"auth_token":"tok"}"#).expect("parses");
+        assert_eq!(old.playback_source_policy, None);
+        assert_eq!(old.playback_display_resolution, None);
+        assert_eq!(old.playback_display_hdr, None);
+
+        let cfg = AppConfig {
+            playback_source_policy: Some("ask".to_string()),
+            playback_display_resolution: Some("2160p".to_string()),
+            playback_display_hdr: Some("disabled".to_string()),
+            ..Default::default()
+        };
+        let saved = serde_json::to_string(&cfg).expect("serializes");
+        let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
+        assert_eq!(back.playback_source_policy.as_deref(), Some("ask"));
+        assert_eq!(back.playback_display_resolution.as_deref(), Some("2160p"));
+        assert_eq!(back.playback_display_hdr.as_deref(), Some("disabled"));
     }
 
     // Rollback rail for the 2026-07-08 local-source removal: every inert

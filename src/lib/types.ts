@@ -42,6 +42,24 @@ export type PlayIntent = "resume" | "beginning";
 // normalized to "only-tv", the product default.
 export type ContinuePlayingMode = "off" | "on" | "only-tv";
 
+export type PlaybackSourcePolicy = "best" | "compatible" | "fastest" | "ask";
+export type HdrState = "enabled" | "disabled" | "unknown";
+export type DisplayEvidence = "native" | "mpv-observed" | "manual-override";
+export type DisplayProfile = {
+  name?: string | null;
+  widthPx: number;
+  heightPx: number;
+  hdr: HdrState;
+  evidence: DisplayEvidence;
+};
+export type PlaybackPreferences = {
+  policy: PlaybackSourcePolicy;
+  resolutionOverride?: string | null;
+  hdrOverride?: "enabled" | "disabled" | null;
+  detectedDisplay: DisplayProfile;
+  effectiveDisplay: DisplayProfile;
+};
+
 // Clean-EOF notification emitted only after a single item or playlist has
 // genuinely run out. `sessionId` is handed back with an automatic play so the
 // backend can reject a continuation that a newer manual play superseded.

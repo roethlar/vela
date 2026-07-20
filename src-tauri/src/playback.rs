@@ -433,6 +433,7 @@ pub struct PlaybackWindowState {
 #[derive(Debug, Clone, Default)]
 pub struct WindowStateObservation {
     state: Arc<Mutex<PlaybackWindowState>>,
+    display: Arc<Mutex<crate::display::ObservedDisplay>>,
 }
 
 impl WindowStateObservation {
@@ -440,14 +441,31 @@ impl WindowStateObservation {
         *self.state.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    pub(crate) fn display_snapshot(&self) -> crate::display::ObservedDisplay {
+        self.display
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone()
+    }
+
     pub(crate) fn apply_ipc_event(&self, value: &serde_json::Value) {
-        let Some((property, enabled)) = window_property_change(value) else {
-            return;
-        };
-        let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        match property {
-            WindowProperty::Fullscreen => state.fullscreen = Some(enabled),
-            WindowProperty::Maximized => state.maximized = Some(enabled),
+        if let Some((property, enabled)) = window_property_change(value) {
+            let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
+            match property {
+                WindowProperty::Fullscreen => state.fullscreen = Some(enabled),
+                WindowProperty::Maximized => state.maximized = Some(enabled),
+            }
+        }
+        if let Some(change) = display_property_change(value) {
+            let mut display = self
+                .display
+                .lock()
+                .unwrap_or_else(|error| error.into_inner());
+            match change {
+                DisplayPropertyChange::Names(names) => display.names = names,
+                DisplayPropertyChange::Width(width) => display.width_px = Some(width),
+                DisplayPropertyChange::Height(height) => display.height_px = Some(height),
+            }
         }
     }
 }
@@ -473,6 +491,45 @@ fn window_property_change(value: &serde_json::Value) -> Option<(WindowProperty, 
     Some((property, value.get("data")?.as_bool()?))
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum DisplayPropertyChange {
+    Names(Vec<String>),
+    Width(u32),
+    Height(u32),
+}
+
+/// mpv reports actual output identity and pixel dimensions as property-change
+/// events. Accept only the exact JSON types: malformed replies must not invent
+/// compatibility evidence.
+fn display_property_change(value: &serde_json::Value) -> Option<DisplayPropertyChange> {
+    if value.get("event")?.as_str()? != "property-change" {
+        return None;
+    }
+    match value.get("name")?.as_str()? {
+        "display-names" => Some(DisplayPropertyChange::Names(
+            value
+                .get("data")?
+                .as_array()?
+                .iter()
+                .map(|name| name.as_str().map(str::to_string))
+                .collect::<Option<Vec<_>>>()?,
+        )),
+        "display-width" => value
+            .get("data")?
+            .as_u64()
+            .and_then(|width| u32::try_from(width).ok())
+            .filter(|width| *width > 0)
+            .map(DisplayPropertyChange::Width),
+        "display-height" => value
+            .get("data")?
+            .as_u64()
+            .and_then(|height| u32::try_from(height).ok())
+            .filter(|height| *height > 0)
+            .map(DisplayPropertyChange::Height),
+        _ => None,
+    }
+}
+
 /// Explicit inherited flags follow user/autocrop options so observed runtime
 /// state wins under mpv's last-value-wins option handling. Unknown properties
 /// are omitted, preserving normal configuration behavior.
@@ -491,6 +548,12 @@ fn window_state_args(state: PlaybackWindowState) -> Vec<String> {
         ));
     }
     args
+}
+
+fn screen_name_arg(name: Option<&str>) -> Option<String> {
+    name.map(str::trim)
+        .filter(|name| !name.is_empty())
+        .map(|name| format!("--screen-name={name}"))
 }
 
 /// What to play, as opposed to the supervision plumbing `play` also takes:
@@ -516,6 +579,9 @@ pub struct PlaySpec {
     /// Actual state sampled from the exact automatic predecessor. Manual plays
     /// and unknown properties use the default (both `None`).
     pub inherited_window_state: PlaybackWindowState,
+    /// Native output containing Vela's window for a manual play, or the exact
+    /// observed predecessor output for an automatic successor.
+    pub screen_name: Option<String>,
     /// Fresh handle populated by this launch's IPC reader and published by the
     /// command layer only after the full launch succeeds.
     pub window_observation: WindowStateObservation,
@@ -679,6 +745,11 @@ pub fn play(
 
     for arg in window_state_args(spec.inherited_window_state) {
         cmd.arg(arg);
+    }
+    if let Some(screen_arg) = screen_name_arg(spec.screen_name.as_deref()) {
+        // Reassert after user options. On Wayland this is a placement request,
+        // not a guarantee; the compositor's actual choice is observed over IPC.
+        cmd.arg(screen_arg);
     }
 
     cmd.arg(format!("--input-ipc-server={}", ipc_path));
@@ -906,7 +977,10 @@ fn spawn_position_reader(
             let _ = stream.write_all(
                 b"{\"command\":[\"observe_property\",1,\"time-pos\"]}\n\
                   {\"command\":[\"observe_property\",2,\"fullscreen\"]}\n\
-                  {\"command\":[\"observe_property\",3,\"window-maximized\"]}\n",
+                  {\"command\":[\"observe_property\",3,\"window-maximized\"]}\n\
+                  {\"command\":[\"observe_property\",4,\"display-names\"]}\n\
+                  {\"command\":[\"observe_property\",5,\"display-width\"]}\n\
+                  {\"command\":[\"observe_property\",6,\"display-height\"]}\n",
             );
 
             let mut line = String::new();
@@ -1252,6 +1326,95 @@ mod tests {
     }
 
     #[test]
+    fn display_property_parser_accepts_only_owned_typed_change_events() {
+        assert_eq!(
+            display_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "display-names",
+                "data": ["DP-1", "HDMI-A-1"]
+            })),
+            Some(DisplayPropertyChange::Names(vec![
+                "DP-1".to_string(),
+                "HDMI-A-1".to_string()
+            ]))
+        );
+        assert_eq!(
+            display_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "display-width",
+                "data": 3840
+            })),
+            Some(DisplayPropertyChange::Width(3840))
+        );
+        assert_eq!(
+            display_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "display-height",
+                "data": 2160
+            })),
+            Some(DisplayPropertyChange::Height(2160))
+        );
+        for rejected in [
+            serde_json::json!({ "request_id": 4, "data": ["DP-1"] }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "display-names",
+                "data": ["DP-1", 2]
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "display-width",
+                "data": "3840"
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "display-height",
+                "data": 0
+            }),
+        ] {
+            assert_eq!(display_property_change(&rejected), None);
+        }
+    }
+
+    #[test]
+    fn display_observation_is_complete_and_isolated_per_launch() {
+        let old = WindowStateObservation::default();
+        let successor = WindowStateObservation::default();
+        for event in [
+            serde_json::json!({
+                "event": "property-change",
+                "name": "display-names",
+                "data": ["DP-1"]
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "display-width",
+                "data": 2560
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "display-height",
+                "data": 1440
+            }),
+        ] {
+            old.apply_ipc_event(&event);
+        }
+        assert_eq!(
+            old.display_snapshot(),
+            crate::display::ObservedDisplay {
+                names: vec!["DP-1".to_string()],
+                width_px: Some(2560),
+                height_px: Some(1440),
+            }
+        );
+        assert_eq!(
+            successor.display_snapshot(),
+            crate::display::ObservedDisplay::default(),
+            "an older IPC reader cannot publish into a successor's handle"
+        );
+    }
+
+    #[test]
     fn inherited_window_args_emit_known_values_in_override_order() {
         assert!(window_state_args(PlaybackWindowState::default()).is_empty());
         assert_eq!(
@@ -1268,6 +1431,16 @@ mod tests {
             }),
             vec!["--window-maximized=yes", "--fullscreen=no"]
         );
+    }
+
+    #[test]
+    fn screen_name_uses_the_backend_name_option_and_ignores_empty_values() {
+        assert_eq!(
+            screen_name_arg(Some("XG27UQDMS (16843009)")),
+            Some("--screen-name=XG27UQDMS (16843009)".to_string())
+        );
+        assert_eq!(screen_name_arg(Some("  ")), None);
+        assert_eq!(screen_name_arg(None), None);
     }
 
     #[test]

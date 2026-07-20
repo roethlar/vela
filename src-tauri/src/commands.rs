@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 use tauri::State;
 
 use crate::config::{self, SourceConfig};
+use crate::display::{self, DisplayOverrides, HdrOverride, ResolutionOverride};
 use crate::playback;
 use crate::plex_library::{PlexLibrary, PlexServer};
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
@@ -769,6 +770,70 @@ pub fn set_continue_playing(mode: String) -> Result<String, String> {
         Ok(())
     })?;
     Ok(normalized)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackPreferencesDto {
+    policy: crate::selection::PlaybackSourcePolicy,
+    resolution_override: Option<String>,
+    hdr_override: Option<String>,
+    detected_display: display::DisplayProfile,
+    effective_display: display::DisplayProfile,
+}
+
+fn playback_display_overrides(cfg: &config::AppConfig) -> DisplayOverrides {
+    DisplayOverrides {
+        resolution: ResolutionOverride::normalize(cfg.playback_display_resolution.as_deref()),
+        hdr: HdrOverride::normalize(cfg.playback_display_hdr.as_deref()),
+    }
+}
+
+#[tauri::command]
+pub async fn get_playback_preferences(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PlaybackPreferencesDto, String> {
+    let cfg = config::load_config().unwrap_or_default();
+    let observed = state
+        .playback_window_session
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
+        .as_ref()
+        .map(|session| session.observation.display_snapshot());
+    let detected_display = display::detect_profile(&app, observed).await;
+    let overrides = playback_display_overrides(&cfg);
+    Ok(PlaybackPreferencesDto {
+        policy: crate::selection::PlaybackSourcePolicy::normalize(
+            cfg.playback_source_policy.as_deref(),
+        ),
+        resolution_override: overrides
+            .resolution
+            .map(|value| value.as_str().to_string()),
+        hdr_override: overrides.hdr.map(|value| value.as_str().to_string()),
+        effective_display: display::apply_overrides(&detected_display, overrides),
+        detected_display,
+    })
+}
+
+#[tauri::command]
+pub fn set_playback_preferences(
+    policy: String,
+    resolution_override: Option<String>,
+    hdr_override: Option<String>,
+) -> Result<(), String> {
+    let policy = crate::selection::PlaybackSourcePolicy::normalize(Some(&policy));
+    let resolution = ResolutionOverride::normalize(resolution_override.as_deref());
+    let hdr = HdrOverride::normalize(hdr_override.as_deref());
+    config::update(move |cfg| {
+        cfg.playback_source_policy =
+            (policy != crate::selection::PlaybackSourcePolicy::Best)
+                .then(|| policy.as_str().to_string());
+        cfg.playback_display_resolution =
+            resolution.map(|value| value.as_str().to_string());
+        cfg.playback_display_hdr = hdr.map(|value| value.as_str().to_string());
+        Ok(())
+    })
 }
 
 /// Install mpv from inside the app. On Windows we assess the CPU and download a
@@ -2671,6 +2736,16 @@ fn inherited_window_state(
         .unwrap_or_default()
 }
 
+fn inherited_screen_name(
+    current: Option<&PlaybackWindowSession>,
+    replace_session: Option<&str>,
+) -> Option<String> {
+    let expected = replace_session?;
+    current
+        .filter(|current| current.session_id == expected)
+        .and_then(|current| current.observation.display_snapshot().names.into_iter().next())
+}
+
 async fn validate_playback_session(state: &AppState, expected_session: Option<&str>) -> bool {
     let active = state.active_playback_session.lock().await;
     expected_session_matches(active.as_deref(), expected_session)
@@ -2777,12 +2852,22 @@ async fn play_by_key(
     // while a slow server prepares the successor. Only an exact automatic
     // replacement may sample the published observation; manual plays (`None`)
     // deliberately start from configured defaults.
-    let inherited_window_state = {
+    let (inherited_window_state, inherited_screen_name) = {
         let current = state
             .playback_window_session
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        inherited_window_state(current.as_ref(), replace_session)
+        (
+            inherited_window_state(current.as_ref(), replace_session),
+            inherited_screen_name(current.as_ref(), replace_session),
+        )
+    };
+    let screen_name = if inherited_screen_name.is_some() {
+        inherited_screen_name
+    } else if let Some(app) = state.app_handle.get() {
+        display::current_screen_name(app).await
+    } else {
+        None
     };
     let window_observation = playback::WindowStateObservation::default();
 
@@ -2869,6 +2954,7 @@ async fn play_by_key(
         autocrop_script,
         autocrop_shim,
         inherited_window_state,
+        screen_name,
         window_observation: window_observation.clone(),
     };
     // The tracker can observe a very fast mpv exit before this async command
@@ -3948,6 +4034,11 @@ mod tests {
             "name": "window-maximized",
             "data": false
         }));
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "display-names",
+            "data": ["DP-1"]
+        }));
         let current = PlaybackWindowSession {
             session_id: "completed".to_string(),
             observation,
@@ -3974,6 +4065,12 @@ mod tests {
             inherited_window_state(None, Some("completed")),
             playback::PlaybackWindowState::default()
         );
+        assert_eq!(
+            inherited_screen_name(Some(&current), Some("completed")).as_deref(),
+            Some("DP-1")
+        );
+        assert_eq!(inherited_screen_name(Some(&current), None), None);
+        assert_eq!(inherited_screen_name(Some(&current), Some("stale")), None);
     }
 
     #[test]
@@ -4123,6 +4220,18 @@ mod tests {
         assert_eq!(normalize_continue_playing(Some("")), "only-tv");
         assert_eq!(normalize_continue_playing(Some("ON")), "only-tv");
         assert_eq!(normalize_continue_playing(Some("future-mode")), "only-tv");
+    }
+
+    #[test]
+    fn playback_display_override_normalization_is_independent_and_fail_safe() {
+        let cfg = config::AppConfig {
+            playback_display_resolution: Some("2160p".to_string()),
+            playback_display_hdr: Some("future-hdr".to_string()),
+            ..Default::default()
+        };
+        let normalized = playback_display_overrides(&cfg);
+        assert_eq!(normalized.resolution, Some(ResolutionOverride::P2160));
+        assert_eq!(normalized.hdr, None);
     }
 
     #[test]

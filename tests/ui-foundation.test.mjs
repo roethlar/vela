@@ -252,6 +252,27 @@ test("app.css exclusively owns the six shared visual primitives", () => {
   }
 });
 
+test("Player Settings exposes the four duplicate-source policies and exact priority help", () => {
+  const settings = sources.get("src/lib/Settings.svelte");
+  assert.ok(settings, "Settings source is available");
+  const policies = [...settings.matchAll(/value: "(best|compatible|fastest|ask)",\s+label: "([^"]+)"/g)]
+    .map((match) => [match[1], match[2]]);
+  assert.deepEqual(policies, [
+    ["best", "Prefer Best"],
+    ["compatible", "Prefer Compatible"],
+    ["fastest", "Prefer Fastest Source"],
+    ["ask", "Ask Every Time"],
+  ]);
+  assert.match(settings, /resolution → HDR within that resolution → bitrate/);
+  assert.match(settings, /this machine → local network → internet/);
+  assert.match(settings, /Play Version/);
+  assert.match(settings, /only for that playback session/);
+  assert.match(settings, /Advanced display override/);
+  assert.match(settings, /Resolution and HDR can be overridden independently/);
+  assert.match(settings, /invoke<PlaybackPreferences>\("get_playback_preferences"\)/);
+  assert.match(settings, /invoke\("set_playback_preferences"/);
+});
+
 test("multi-server Plex linking pauses for an explicit credential-free server choice", () => {
   const page = sources.get("src/routes/+page.svelte");
   const choiceType = page.match(/type PlexServerChoice = \{([^}]+)\}/)?.[1] ?? "";

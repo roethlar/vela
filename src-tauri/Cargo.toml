@@ -31,6 +31,27 @@ qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 async-trait = "0.1"
 tauri-plugin-dialog = "2"
 base64 = "0.22"
+if-addrs = "0.15"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSScreen"] }
+objc2-core-graphics = { version = "0.3", default-features = false, features = ["std", "CGDirectDisplay", "CGDisplayConfiguration"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSEnumerator", "NSObject", "NSString"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Devices_Display", "Win32_Foundation", "Win32_Graphics_Gdi"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+wayland-client = "0.31"
+wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+
+# crates.io's wayland-scanner 0.31.10 still pins vulnerable quick-xml 0.39.
+# Upstream has updated the same compatible scanner to quick-xml 0.41 but has
+# not cut a release; pin that exact upstream revision so cargo audit remains
+# fail-closed without carrying a runtime fork.
+[patch.crates-io]
+wayland-scanner = { git = "https://github.com/Smithay/wayland-rs.git", rev = "a55c54b4e138e29181d63908ece06fd2a13550a0" }
 
 # Smaller, faster release binary for a desktop app. (Debug builds, which the
 # Tauri dev workflow uses, are unaffected.)
