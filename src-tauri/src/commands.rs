@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::collections::{HashMap, VecDeque};
+#[cfg(not(target_os = "windows"))]
 use std::path::Path;
+#[cfg(not(target_os = "windows"))]
 use std::process::{Command, Stdio};
 use std::sync::atomic::Ordering;
 use std::time::{Duration, Instant};
@@ -402,6 +404,7 @@ struct MpvInstallInfo {
     install_url: String,
 }
 
+#[cfg(not(target_os = "windows"))]
 #[derive(Clone)]
 struct CommandInstaller {
     program: String,
@@ -410,6 +413,7 @@ struct CommandInstaller {
     description: String,
 }
 
+#[cfg(not(target_os = "windows"))]
 impl CommandInstaller {
     fn info(self) -> MpvInstallInfo {
         MpvInstallInfo {
@@ -625,10 +629,12 @@ fn linux_manual_install_command() -> String {
     "Install mpv with your distro's package manager".to_string()
 }
 
+#[cfg(not(target_os = "windows"))]
 fn strings(values: &[&str]) -> Vec<String> {
     values.iter().map(|value| (*value).to_string()).collect()
 }
 
+#[cfg(not(target_os = "windows"))]
 fn find_executable(candidates: &[&str]) -> Option<String> {
     for candidate in candidates {
         if candidate.contains(std::path::MAIN_SEPARATOR) {
