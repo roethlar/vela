@@ -15,7 +15,7 @@
 //
 // Plex CANNOT be proxied (HTTPS behind a plex.direct certificate), so "the server goes
 // away" means the real service is stopped, through a control endpoint on the Mac. It is
-// restored on every handled exit path. The one watch-state fixture is proven clean before
+// restored on every handled exit path. Every watch-state fixture is proven clean before
 // use and restored directly by both the scenario and the runner's signal cleanup. See
 // scripts/live-control.mjs for the independent service-restoration backstop.
 import assert from "node:assert/strict";
@@ -28,7 +28,7 @@ const CREDS = "/tmp/vela-live-creds.json";
 const SECTION = "Movies";
 const TARGET = "12 Years a Slave";
 let creds;
-let restoreRatingKey = null;
+let restoreItems = new Map();
 let restorePromise = null;
 let invokeSequence = 0;
 
@@ -118,6 +118,8 @@ const getChildren = (driver, ratingKey) =>
   );
 const getDetail = (driver, ratingKey) =>
   invokeProjected(driver, "get_item_detail", { ratingKey }, DETAIL_PROJECTION);
+const getRecents = (driver) =>
+  invokeProjected(driver, "get_recents", {}, ITEM_PROJECTION);
 
 const control = async (path) => {
   const res = await fetch(`${creds.control}${path}`, { method: "GET" });
@@ -199,6 +201,12 @@ function rawPlexKey(namespacedKey) {
   return raw;
 }
 
+function registerCleanRestore(item) {
+  assert.equal(item.played, false, `${item.title} must begin unwatched`);
+  assert.equal(item.viewOffsetMs ?? 0, 0, `${item.title} must begin with zero progress`);
+  restoreItems.set(rawPlexKey(item.ratingKey), item.title);
+}
+
 async function discoverFixtures(driver) {
   const sections = await getSections(driver);
   const movieSection = sections.find(
@@ -212,7 +220,7 @@ async function discoverFixtures(driver) {
   assert.equal(movie.mediaType, "movie", `${TARGET} must remain a movie`);
   assert.equal(movie.played, false, `${TARGET} must begin unwatched`);
   assert.equal(movie.viewOffsetMs ?? 0, 0, `${TARGET} must begin with zero progress`);
-  restoreRatingKey = rawPlexKey(movie.ratingKey);
+  registerCleanRestore(movie);
 
   const movieDetail = await getDetail(driver, movie.ratingKey);
   assert.equal(movieDetail.ratingKey, movie.ratingKey);
@@ -237,28 +245,54 @@ async function discoverFixtures(driver) {
   );
 
   let episodePath = null;
-  for (const show of uniqueShows.slice(0, 12)) {
+  for (const show of uniqueShows.slice(0, 24)) {
     const seasons = (await getChildren(driver, show.ratingKey)).filter(
       (item) => item.mediaType === "season",
     );
-    for (const season of seasons.slice(0, 3)) {
+    for (const season of seasons.slice(0, 5)) {
       const episodes = (await getChildren(driver, season.ratingKey)).filter(
         (item) => item.mediaType === "episode",
       );
-      for (const episode of episodes.slice(0, 3)) {
-        if (episodes.filter((candidate) => candidate.title === episode.title).length !== 1) {
+      for (let index = 0; index < episodes.length - 1; index++) {
+        const episode = episodes[index];
+        const successor = episodes[index + 1];
+        if (
+          episode.played !== false ||
+          (episode.viewOffsetMs ?? 0) !== 0 ||
+          successor.played !== false ||
+          (successor.viewOffsetMs ?? 0) !== 0 ||
+          episodes.filter((candidate) => candidate.title === episode.title).length !== 1 ||
+          episodes.filter((candidate) => candidate.title === successor.title).length !== 1
+        ) {
           continue;
         }
         const detail = await getDetail(driver, episode.ratingKey);
+        const successorDetail = await getDetail(driver, successor.ratingKey);
         if (
           detail.parentRatingKey === season.ratingKey &&
           detail.grandparentRatingKey === show.ratingKey &&
           detail.index != null &&
           detail.parentIndex != null &&
           detail.media > 0 &&
-          detail.streams > 0
+          detail.streams > 0 &&
+          successorDetail.parentRatingKey === season.ratingKey &&
+          successorDetail.grandparentRatingKey === show.ratingKey &&
+          successorDetail.index != null &&
+          successorDetail.parentIndex != null &&
+          successorDetail.media > 0 &&
+          successorDetail.streams > 0
         ) {
-          episodePath = { showSection, show, season, episode, detail };
+          registerCleanRestore(episode);
+          registerCleanRestore(successor);
+          episodePath = {
+            showSection,
+            show,
+            season,
+            episode,
+            detail,
+            successor,
+            successorDetail,
+          };
           break;
         }
       }
@@ -268,7 +302,7 @@ async function discoverFixtures(driver) {
   }
   assert.ok(
     episodePath,
-    "a real show must expose a season and episode with parent keys and media streams",
+    "a real show must expose two clean adjacent episodes with parent keys and media streams",
   );
 
   return { movieSection, movie, movieDetail, ...episodePath };
@@ -313,6 +347,129 @@ async function exerciseEpisodeUi(driver, fixtures) {
   );
 }
 
+async function waitForMpvExit(socketPath, what) {
+  await pollUntil(
+    () =>
+      new Promise((resolve) => {
+        const probe = createConnection(socketPath);
+        probe.once("connect", () => {
+          probe.destroy();
+          resolve(false);
+        });
+        probe.once("error", () => resolve(true));
+      }),
+    what,
+    { timeoutMs: 15000 },
+  );
+}
+
+async function assertSecurePlexStream(mpv, what) {
+  return pollUntil(
+    () =>
+      mpv
+        .getProp("path")
+        .then((path) =>
+          typeof path === "string" &&
+          path.startsWith("https://") &&
+          !/X-Plex-Token/i.test(path)
+            ? path
+            : null,
+        )
+        .catch(() => null),
+    what,
+    { timeoutMs: 40000 },
+  );
+}
+
+async function completeEpisodeAndContinue(driver, fixtures) {
+  const seen = mpvSocketSnapshot();
+  const play = await driver.find("css selector", ".season .panel button.primary.playwide");
+  await driver.click(play);
+
+  const firstSocket = await waitForNewMpvSocket(seen, { timeoutMs: 40000 });
+  seen.add(firstSocket);
+  const first = await MpvIpc.connect(firstSocket);
+  let releasedToEof = false;
+  try {
+    await assertSecurePlexStream(first, "the real Plex episode stream");
+    const mediaTitle = await first.getProp("media-title");
+    assert.equal(mediaTitle, fixtures.episode.title, "mpv must receive the selected episode title");
+    const duration = await pollUntil(
+      () => first.getProp("duration").then((value) => (value > 1 ? value : null)).catch(() => null),
+      "the real Plex episode duration",
+      { timeoutMs: 40000 },
+    );
+    await first.setProp("time-pos", Math.max(0, duration - 0.8));
+    await first.setProp("pause", false);
+    releasedToEof = true;
+  } finally {
+    if (!releasedToEof) {
+      try {
+        first.quit();
+      } catch {
+        /* the runner's process teardown remains the final backstop */
+      }
+    }
+    // Once released, do not send quit: the natural EOF is the behavior under test.
+    first.close();
+  }
+  const secondSocket = await waitForNewMpvSocket(seen, { timeoutMs: 90000 });
+  seen.add(secondSocket);
+  const second = await MpvIpc.connect(secondSocket);
+  try {
+    await assertSecurePlexStream(second, "the automatically continued Plex episode stream");
+    const successorTitle = await pollUntil(
+      () => second.getProp("media-title").catch(() => null),
+      "the automatic successor's media title",
+      { timeoutMs: 40000 },
+    );
+    assert.equal(
+      successorTitle,
+      fixtures.successor.title,
+      "only-tv must launch the adjacent real Plex episode",
+    );
+    assert.equal(await second.getProp("pause"), true, "the automatic successor must remain paused");
+
+    await pollUntil(
+      async () => {
+        const episode = (await getChildren(driver, fixtures.season.ratingKey)).find(
+          (item) => item.ratingKey === fixtures.episode.ratingKey,
+        );
+        return episode?.played === true ? true : null;
+      },
+      `${fixtures.episode.title} to read back as watched from Plex after clean EOF`,
+      { timeoutMs: 90000, intervalMs: 1000 },
+    );
+
+    await pollUntil(
+      async () => {
+        const recents = await getRecents(driver);
+        const completed = recents.some((item) => item.ratingKey === fixtures.episode.ratingKey);
+        const successor = recents.some((item) => item.ratingKey === fixtures.successor.ratingKey);
+        return !completed && successor ? true : null;
+      },
+      "the completed episode to disappear and its successor to enter Vela recents",
+      { timeoutMs: 90000, intervalMs: 1000 },
+    );
+
+    await openSection(driver, "Home");
+    const expectedEpisode = `S${fixtures.successor.parentIndex} · E${fixtures.successor.index} – ${fixtures.successor.title}`;
+    await driver.waitFor(
+      `return document.querySelector('[aria-label="Continue watching"] + .flowmeta .y')?.textContent.trim() === ${JSON.stringify(expectedEpisode)}`,
+      "the automatic successor in Continue Watching without manual Refresh",
+      { timeoutMs: 60000 },
+    );
+  } finally {
+    try {
+      second.quit();
+    } catch {
+      /* socket teardown below is the proof */
+    }
+    second.close();
+  }
+  await waitForMpvExit(secondSocket, "the automatic successor's mpv process to exit");
+}
+
 async function exerciseMovieDetailUi(driver) {
   await openSection(driver, SECTION);
   await clickPoster(driver, TARGET);
@@ -332,21 +489,7 @@ async function playMovieAndQuit(driver) {
   const socketPath = await waitForNewMpvSocket(before, { timeoutMs: 40000 });
   const mpv = await MpvIpc.connect(socketPath);
   try {
-    await pollUntil(
-      () =>
-        mpv
-          .getProp("path")
-          .then((path) =>
-            typeof path === "string" &&
-            path.startsWith("https://") &&
-            !/X-Plex-Token/i.test(path)
-              ? true
-              : null,
-          )
-          .catch(() => null),
-      "mpv to load the real Plex stream",
-      { timeoutMs: 40000 },
-    );
+    await assertSecurePlexStream(mpv, "mpv to load the real Plex stream");
     const paused = await mpv.getProp("pause");
     assert.equal(paused, true, "the live Plex probe must remain paused");
     const duration = await pollUntil(
@@ -375,19 +518,7 @@ async function playMovieAndQuit(driver) {
     }
     mpv.close();
   }
-  await pollUntil(
-    () =>
-      new Promise((resolve) => {
-        const probe = createConnection(socketPath);
-        probe.once("connect", () => {
-          probe.destroy();
-          resolve(false);
-        });
-        probe.once("error", () => resolve(true));
-      }),
-    "the real Plex mpv process to exit",
-    { timeoutMs: 10000 },
-  );
+  await waitForMpvExit(socketPath, "the real Plex mpv process to exit");
 }
 
 async function roundTripWatchState(driver, movieSection) {
@@ -450,41 +581,52 @@ function restoreUrl(ratingKey) {
   return url;
 }
 
-async function restoreTargetWatchState(driver = null, movieSection = null) {
+async function restoreTargetWatchState(driver = null, fixtures = null) {
   if (restorePromise) return restorePromise;
   restorePromise = (async () => {
     await control("/plex/start");
-    if (!restoreRatingKey) return;
-    const ratingKey = restoreRatingKey;
+    if (restoreItems.size === 0) return;
     const headers = { "X-Plex-Token": creds.plex.auth_token };
     if (creds.plex.client_identifier) {
       headers["X-Plex-Client-Identifier"] = creds.plex.client_identifier;
     }
-    await pollUntil(
-      async () => {
-        try {
-          const response = await fetch(restoreUrl(ratingKey), { method: "GET", headers });
-          return response.ok ? true : null;
-        } catch {
-          return null;
-        }
-      },
-      `${TARGET}'s Plex watch state cleanup`,
-      { timeoutMs: 90000, intervalMs: 1000 },
-    );
-    if (driver && movieSection) {
+    for (const [ratingKey, title] of restoreItems) {
       await pollUntil(
         async () => {
-          const item = (await getItems(driver, movieSection)).find(
-            (candidate) => candidate.title === TARGET,
-          );
-          return item?.played === false && (item.viewOffsetMs ?? 0) === 0 ? true : null;
+          try {
+            const response = await fetch(restoreUrl(ratingKey), { method: "GET", headers });
+            return response.ok ? true : null;
+          } catch {
+            return null;
+          }
         },
-        `${TARGET}'s restored Plex state to read back through Vela`,
+        `${title}'s Plex watch state cleanup`,
+        { timeoutMs: 90000, intervalMs: 1000 },
+      );
+    }
+    if (driver && fixtures) {
+      await pollUntil(
+        async () => {
+          const movie = (await getItems(driver, fixtures.movieSection)).find(
+            (item) => item.ratingKey === fixtures.movie.ratingKey,
+          );
+          const episodes = await getChildren(driver, fixtures.season.ratingKey);
+          const restoredEpisodes = [fixtures.episode, fixtures.successor].map((expected) =>
+            episodes.find((item) => item.ratingKey === expected.ratingKey),
+          );
+          return movie?.played === false &&
+            (movie.viewOffsetMs ?? 0) === 0 &&
+            restoredEpisodes.every(
+              (item) => item?.played === false && (item.viewOffsetMs ?? 0) === 0,
+            )
+            ? true
+            : null;
+        },
+        "every touched Plex item to read back as unwatched with zero progress",
         { timeoutMs: 60000, intervalMs: 1000 },
       );
     }
-    restoreRatingKey = null;
+    restoreItems.clear();
   })();
   try {
     return await restorePromise;
@@ -516,10 +658,10 @@ export default {
   },
 
   async run({ driver }) {
-    restoreRatingKey = null;
+    restoreItems = new Map();
     let primaryError = null;
     let restorationError = null;
-    let movieSection = null;
+    let fixtures = null;
     try {
     // ── 1. A real Plex server, real libraries, real section keys ────────────
     await driver.waitFor(
@@ -551,10 +693,10 @@ export default {
     // The backend calls return only a deliberately projected, token-free shape.
     // They prove the migrated serde path itself; the rich-only UI selectors prove
     // the detail surfaces did not silently fall back to sparse listing data.
-    const fixtures = await discoverFixtures(driver);
-    movieSection = fixtures.movieSection;
+    fixtures = await discoverFixtures(driver);
     assert.equal(fixtures.movie.ratingKey, fixtures.movieDetail.ratingKey);
     await exerciseEpisodeUi(driver, fixtures);
+    await completeEpisodeAndContinue(driver, fixtures);
     await exerciseMovieDetailUi(driver);
     await playMovieAndQuit(driver);
     await roundTripWatchState(driver, fixtures.movieSection);
@@ -690,7 +832,7 @@ export default {
       // only after proving it started clean. Restore it directly even when a UI
       // assertion fails; unlike scenario.cleanup, this failure is not swallowed.
       try {
-        await restoreTargetWatchState(primaryError ? null : driver, movieSection);
+        await restoreTargetWatchState(primaryError ? null : driver, fixtures);
       } catch (error) {
         restorationError = error;
       }
