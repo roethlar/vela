@@ -33,7 +33,7 @@ export function mockSource(
     id,
     kind,
     name,
-    base_url: `http://127.0.0.1:${mock.port}`,
+    base_url: mock.baseUrl ?? `http://127.0.0.1:${mock.port}`,
     access_token: 'mock-token',
     user_id: mock.userId,
     device_id: 'e2e-device',

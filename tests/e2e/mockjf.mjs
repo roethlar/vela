@@ -46,6 +46,11 @@ export function startMockJellyfin({
   // empty list so pre-existing scenarios keep a recents-only hero feed and
   // their EMPTY_HOME assertions.
   serveResume = false,
+  // Bind separately from the URL clients use. The playback-policy scenario
+  // exposes one dual-stack mock through an IPv4-mapped IPv6 URL so locality
+  // ranking sees a non-loopback endpoint while the fixture remains hermetic.
+  listenHost = "127.0.0.1",
+  connectHost = listenHost,
 } = {}) {
   const initialViews = views ?? [
     { id: "lib1", name: "Mock Library", collectionType: "movies", movies },
@@ -113,6 +118,7 @@ export function startMockJellyfin({
       itemIds: [...playlist.itemIds],
     })),
     failPlaylistList,
+    failPlaylistItems: false,
     failNextViews: false, // one-shot: 500 the next /Users/{id}/Views
     viewsDelayMs: 0,
     failNextLatest: false, // one-shot: 500 the next /Users/{id}/Items/Latest
@@ -229,6 +235,7 @@ export function startMockJellyfin({
     BackdropImageTags:
       m.backdropTag !== undefined ? [m.backdropTag] : undefined,
     SeriesPrimaryImageTag: m.seriesPrimaryImageTag ?? undefined,
+    ProviderIds: m.providerIds ?? undefined,
     UserData: {
       Played: state.userData[m.id].played,
       PlaybackPositionTicks: state.userData[m.id].positionTicks,
@@ -511,6 +518,9 @@ export function startMockJellyfin({
     const playlistItems = /^\/Playlists\/([^/]+)\/Items$/.exec(path);
     if (playlistItems && req.method === "GET") {
       if (!authed(req)) return unauthorized(path);
+      if (state.failPlaylistItems) {
+        return json({ error: "mock playlist owner unavailable" }, 500);
+      }
       const playlist = state.playlists.find((entry) => entry.id === playlistItems[1]);
       if (!playlist) return json({ error: "playlist not found" }, 404);
       if (
@@ -594,13 +604,14 @@ export function startMockJellyfin({
     }
     const pbinfo = /^\/Items\/([^/]+)\/PlaybackInfo$/.exec(path);
     if (pbinfo && findMovie(pbinfo[1])) {
+      const movie = findMovie(pbinfo[1]);
       const fail = state.failPlaybackInfo;
       const delay = state.playbackInfoDelayMs;
       if (delay > 0) state.playbackInfoDelayMs = 0; // one-shot, bound at ARRIVAL
       const respond = () => {
         if (fail) return json({ error: "mock: cannot resolve a stream" }, 500);
         return json({
-          MediaSources: [
+          MediaSources: movie.mediaSources ?? [
             {
               Id: `ms-${pbinfo[1]}`,
               SupportsDirectPlay: true,
@@ -744,9 +755,11 @@ export function startMockJellyfin({
   });
 
   return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
+    server.listen(0, listenHost, () => {
+      const urlHost = connectHost.includes(":") ? `[${connectHost}]` : connectHost;
       resolve({
         port: server.address().port,
+        baseUrl: `http://${urlHost}:${server.address().port}`,
         state,
         userId,
         close: () => {

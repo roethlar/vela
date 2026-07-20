@@ -2,18 +2,18 @@
 // instances carrying the same title): the consolidated Movies listing
 // dedups to ONE card marked "2 sources", the context menu offers
 // "Play Version" exposes both backings, each backing plays from its own server's
-// stream, and the per-title override persists in merged_overrides.
+// stream, title-level watch edits reach both servers, and clean EOF fans out once.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { pollUntil, makeClips, mockSource, seedConfig } from '../helpers.mjs';
+import { holdsFor, pollUntil, makeClips, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
 let mockA;
 let mockB;
 
-async function playFromMenu(driver, menuLabel) {
+async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
   const before = mpvSocketSnapshot();
   await driver.exec(
     `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]');
@@ -32,15 +32,22 @@ async function playFromMenu(driver, menuLabel) {
     'Play Version submenu',
   );
   const item = await driver.find(
-    'xpath',
-    `//*[@role='group' and @aria-label='Play Version']//button[@role='menuitem' and normalize-space(.)='${menuLabel}']`,
+      'xpath',
+      `//*[@role='group' and @aria-label='Play Version']//button[@role='menuitem' and (` +
+        `normalize-space(.)='${menuLabel}' or normalize-space(.)='Resume on ${menuLabel}')]`,
   );
   await driver.click(item);
   const mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
   let loaded;
   try {
     loaded = await pollUntil(() => mpv.getProp('path').catch(() => null), `mpv to load via "${menuLabel}"`);
-    mpv.quit();
+    if (finish) {
+      await mpv.setProp('pause', true);
+      await mpv.setProp('time-pos', 9.2);
+      await mpv.setProp('pause', false);
+    } else {
+      mpv.quit();
+    }
   } finally {
     mpv.close();
   }
@@ -63,8 +70,8 @@ export default {
     }];
     mockA = await startMockJellyfin({ movies: movie('a.mp4') });
     mockB = await startMockJellyfin({ movies: movie('b.mp4') });
-    // Both copies start watched. Unwatching the selected face later must not
-    // erase the other backing's still-authoritative watched state.
+    // Both copies start watched so one title-level unwatch can prove that the
+    // command reaches both physical servers.
     mockA.state.userData.m1.played = true;
     mockB.state.userData.m1.played = true;
     seedConfig(configRoot, [
@@ -110,10 +117,7 @@ export default {
     );
     await screenshot('01-merged');
 
-    // wsp-1 authority guard: the confirmed edit locally flips the clicked
-    // merged card, but a fresh offset-zero listing must aggregate the other
-    // backing and restore watched=true. An optimistic-only implementation
-    // stays falsely unwatched here.
+    // Title-level Mark unwatched must independently reach both backings.
     const listingArrivals = (mock) =>
       mock.state.requests.filter(
         (r) => r.method === 'GET' && r.path === `/Users/${mock.userId}/Items`,
@@ -134,22 +138,16 @@ export default {
       .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='Mark unwatched']`));
     await driver.click(unwatch);
     await pollUntil(
-      () => {
-        const a = mockA.state.requests.some(
+      () =>
+        mockA.state.requests.some(
           (r) => r.method === 'DELETE' && r.path === `/Users/${mockA.userId}/PlayedItems/m1`,
-        );
-        const b = mockB.state.requests.some(
+        ) && mockB.state.requests.some(
           (r) => r.method === 'DELETE' && r.path === `/Users/${mockB.userId}/PlayedItems/m1`,
-        );
-        return a !== b ? { a, b } : null;
-      },
-      'exactly one merged backing to receive Mark unwatched',
+        ),
+      'both merged backings to receive Mark unwatched',
     );
-    assert.notEqual(
-      mockA.state.userData.m1.played,
-      mockB.state.userData.m1.played,
-      'one backing is unwatched while the other remains watched',
-    );
+    assert.equal(mockA.state.userData.m1.played, false, 'backing A must become unwatched');
+    assert.equal(mockB.state.userData.m1.played, false, 'backing B must become unwatched');
     await pollUntil(
       () =>
         listingArrivals(mockA) > beforeA.arrived && listingArrivals(mockB) > beforeB.arrived
@@ -165,10 +163,44 @@ export default {
       'fresh merged listing responses after Mark unwatched',
     );
     await driver.waitFor(
-      `return !!document.querySelector('button.poster[aria-label^="Mock Movie"] .watchedbadge')`,
-      'merged watched badge retained from the untouched backing',
+      `return !document.querySelector('button.poster[aria-label^="Mock Movie"] .watchedbadge')`,
+      'merged watched badge cleared after both backings settle',
     );
-    await screenshot('02-merged-watch-authority');
+    await screenshot('02-title-level-unwatched');
+
+    // One offline backing must not undo the healthy server. The action-owned
+    // warning names only the failed source and the authoritative merged card
+    // retains the successful watched state.
+    mockB.state.unauthNextPlayed = true;
+    const beforePartialA = { arrived: listingArrivals(mockA), served: listingServed(mockA) };
+    const beforePartialB = { arrived: listingArrivals(mockB), served: listingServed(mockB) };
+    await driver.exec(
+      `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]');
+       const r = el.getBoundingClientRect();
+       el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
+    );
+    const watch = await driver
+      .waitFor(`return !!document.querySelector('.ctxmenu')`, 'merged context menu for partial watch')
+      .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='Mark watched']`));
+    await driver.click(watch);
+    await driver.waitFor(
+      `const warning = document.querySelector('.editwarning');
+       return warning?.textContent.includes('1 of 2 sources') && warning.textContent.includes('Mock JF B');`,
+      'non-destructive partial-success warning naming Mock JF B',
+    );
+    assert.equal(mockA.state.userData.m1.played, true, 'healthy backing success must be retained');
+    assert.equal(mockB.state.userData.m1.played, false, 'offline backing keeps its older state');
+    await pollUntil(
+      () =>
+        listingServed(mockA) > beforePartialA.served && listingServed(mockB) > beforePartialB.served &&
+        listingArrivals(mockA) > beforePartialA.arrived && listingArrivals(mockB) > beforePartialB.arrived,
+      'authoritative refresh after partial watched success',
+    );
+    await driver.waitFor(
+      `return !!document.querySelector('button.poster[aria-label^="Mock Movie"] .watchedbadge')`,
+      'successful backing keeps the merged watched badge',
+    );
+    await screenshot('03-partial-watch-warning');
 
     // Play from each backing: each choice must stream from its own server.
     // The override must persist under the exact canonical key with the
@@ -197,5 +229,30 @@ export default {
       `backing B must play server B's stream, got ${streamB}`,
     );
     await pollUntil(() => overrideValue() === 'jf-b', `the override to flip to ${CANONICAL} → jf-b`);
+
+    // Natural completion carries the immutable backing set captured at launch
+    // and marks both servers exactly once, independent of the chosen stream.
+    const postCount = (mock) => mock.state.requests.filter(
+      (request) => request.method === 'POST' && request.path === `/Users/${mock.userId}/PlayedItems/m1`,
+    ).length;
+    const beforeCompletionA = postCount(mockA);
+    const beforeCompletionB = postCount(mockB);
+    const completedStream = await playFromMenu(driver, 'Mock JF B', { finish: true });
+    assert.ok(completedStream.startsWith(`${mockB.baseUrl}/Videos/m1/stream`));
+    await pollUntil(
+      () => postCount(mockA) === beforeCompletionA + 1 && postCount(mockB) === beforeCompletionB + 1,
+      'clean EOF to mark both title backings played once',
+      { timeoutMs: 20_000 },
+    );
+    await holdsFor(
+      () =>
+        postCount(mockA) > beforeCompletionA + 1 || postCount(mockB) > beforeCompletionB + 1
+          ? 'clean EOF repeated a backing mutation'
+          : null,
+      1_000,
+      'clean EOF all-backing mutation to remain single-shot',
+    );
+    assert.equal(mockA.state.userData.m1.played, true);
+    assert.equal(mockB.state.userData.m1.played, true);
   },
 };

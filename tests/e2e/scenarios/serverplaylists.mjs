@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import {
   goHome,
+  holdsFor,
   logicalPlaybackInfoIds,
   makeClips,
   mockSource,
@@ -191,18 +192,39 @@ export default {
     );
     assert.deepEqual(healthy.state.contractViolations, []);
     assert.deepEqual(unavailable.state.contractViolations, []);
+
+    // Lose the owning playlist server before the next cursor read. Even with
+    // another title waiting in Continue Playing, owner loss must stop this run
+    // without treating the cached playlist as exhausted or rerouting it.
+    const playlistItemRequests = () => healthy.state.requests.filter(
+      (request) => request.method === 'GET' && request.path === '/Playlists/night/Items',
+    ).length;
+    const beforeOwnerLoss = playlistItemRequests();
+    healthy.state.failPlaylistItems = true;
     await second.setProp('time-pos', 9.2);
     await second.setProp('pause', false);
     second.close();
 
-    const after = await nextPlayer('server-after');
-    await after.setProp('pause', true);
+    await pollUntil(
+      () => playlistItemRequests() > beforeOwnerLoss,
+      'the failed owner-only playlist cursor read',
+    );
+    await holdsFor(
+      () => [...mpvSocketSnapshot()].some((socket) => !seen.has(socket))
+        ? 'owner loss launched another player'
+        : null,
+      3_000,
+      'offline server playlist to remain stopped',
+    );
     assert.deepEqual(
       logicalPlaybackInfoIds(healthy),
-      ['server-one', 'server-two', 'server-after'],
-      'Continue Playing must begin only after the server playlist reaches its final item',
+      ['server-one', 'server-two'],
+      'owner loss must not masquerade as playlist exhaustion and enter Continue Playing',
     );
-    after.quit();
-    after.close();
+    assert.deepEqual(
+      logicalPlaybackInfoIds(unavailable),
+      [],
+      'an alternate configured server must never receive a rerouted playlist play',
+    );
   },
 };
