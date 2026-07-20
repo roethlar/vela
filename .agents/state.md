@@ -34,10 +34,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   display detection and overrides, mpv output observation/placement, locality,
   and pure ranking foundations are implemented. Local canonical gates and the
   final fresh Linux real-app suite pass; all new behaviors were independently
-  red-proven and restored. Exact evidence and the remaining Windows-native CI
-  proof live in the playback policy plan.
-  Durable evidence:
-  `.agents/plans/multi-plex.md`.
+  red-proven and restored. Slice 2 is complete at `7d9a00e`: every play path now
+  enumerates and exactly resolves provider versions, applies the automatic
+  source policies and persistent Play Version override, keeps authenticated
+  Jellyfin/Emby stream credentials out of URLs/argv, and preserves all merged
+  hierarchy backings through navigation and TV continuation. Local canonical
+  gates and the byte-identical fresh Linux real-app suite pass (30/30); exact
+  guard evidence and the remaining Windows-native CI proof live in the playback
+  policy plan.
+  Durable evidence: `.agents/plans/multi-plex.md` and
+  `.agents/plans/playback-source-policy.md`.
 
 - **`chr-1` MERGED to `main` — accepted by owner-directed in-session Claude
   review.**
@@ -128,12 +134,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **NEXT: implement Slice 2 of the approved playback-source-policy plan.** Add
-  the provider-neutral playback-version contract, exact Plex/Jellyfin/Emby
-  resolution, shared automatic policy selection at every play boundary,
-  persistent Play Version behavior, and merged show/season/episode backings.
-  The exact approved design and remaining slices live in
-  `.agents/plans/playback-source-policy.md`.
+- **NEXT: implement Slice 3 of the approved playback-source-policy plan.** Add
+  the bounded Ask Every Time handshake and accessible source-choice modal,
+  make Play Version one-shot in Ask mode, retain source affinity only inside
+  the exact current playlist/TV continuation run, and re-prompt when that
+  source lacks a later item. The exact approved design and remaining slices
+  live in `.agents/plans/playback-source-policy.md`.
 
 - **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the

@@ -41,6 +41,43 @@ secured Wayland scanner cannot be replaced by the API-incompatible upstream
 git revision without the dependency guard failing. Every mutation was restored
 to the committed bytes and the affected guard reran green.
 
+### Slice 2 — complete
+
+Implementation `7d9a00e` adds the provider-neutral version boundary, exact and
+fresh Plex/Jellyfin/Emby resolution, direct-play eligibility plus shared
+Best/Compatible/Fastest ranking on every play path, persistent Play Version
+source choice, endpoint locality refresh, and merged show/season/episode
+backings through navigation and TV continuation. Plex preserves every part of
+the selected Media row. Jellyfin/Emby revalidate the exact MediaSourceId and
+fresh PlaySessionId, and their stream token now travels only in mpv's owner-only
+header include rather than the URL or argv.
+
+The merged hierarchy fetches every page from every parent copy concurrently,
+keeps provider ids authoritative, uses season/episode coordinates only inside
+one canonical parent, refuses same-source or ambiguous false merges, and keeps
+each backing's own parent path. A sequence can therefore cross a season using
+all server copies even when the displayed face belongs to only one.
+
+Local canonical Node/npm audit/check/build, Rust MSRV/stable check, clippy,
+unit, and Cargo-audit gates pass (30 frontend guards, 198 Rust tests, zero known
+vulnerabilities; 17 accepted Cargo warning-class notices). The byte-identical
+Linux source passed exact npm/stable/clippy checks and a fresh-build real-app
+E2E run (30/30). The mock stream rejects URL credentials and unauthenticated
+media requests, proving the header reaches mpv's request while the URL remains
+credential-free.
+
+Independent mutations proved the direct-play tier, known-dimension compatible
+fallback, hierarchy coordinate fallback and provider-id conflict rules,
+same-source separation and per-backing parent paths, all-parent continuation,
+stable exact Plex identity and complete split-part preservation, exact
+Jellyfin/Emby MediaSource plus fresh session and token-free URL, migration of
+backing hierarchy keys, the Play Version UI contract, and hierarchy arguments
+through both browse surfaces. A self-review also caught a Windows-on-ARM-only
+installer fallback corruption that host compilation could not see; a new
+cross-platform source guard failed when the fallback was changed away from
+`false`, then passed after exact restoration. Every mutation was restored and
+its affected guard reran green.
+
 ## Goal
 
 When the same logical video exists on more than one configured media server,
