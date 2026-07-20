@@ -145,7 +145,14 @@ if [ "$mode" = arch ]; then
   npm run build:arch
 else
   echo "==> Host: $os   bundles: $bundles${extra_args[*]:+   ${extra_args[*]}}"
-  npm run tauri -- build --bundles "$bundles" "${extra_args[@]}"
+  # Bash 3.2 treats an empty array expansion as an unset variable under `set
+  # -u`. macOS ships that Bash, and --native deliberately leaves extra_args
+  # empty, so omit the expansion entirely in that case.
+  if [ "${#extra_args[@]}" -gt 0 ]; then
+    npm run tauri -- build --bundles "$bundles" "${extra_args[@]}"
+  else
+    npm run tauri -- build --bundles "$bundles"
+  fi
 fi
 
 # --- Collect artifacts into dist/ ---------------------------------------------

@@ -109,3 +109,55 @@ printf 'fresh\\n' > src-tauri/target/release/bundle/rpm/Vela-0.1.51-1.aarch64.rp
     "Vela_0.1.39_aarch64.AppImage",
   ]);
 });
+
+test("the native macOS build works with Bash 3 empty-array nounset semantics", { skip: posixBashUnavailable }, async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), "vela-build-native-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const scripts = path.join(root, "scripts");
+  const fakeBin = path.join(root, "fake-bin");
+  const bundleRoot = path.join(
+    root,
+    "src-tauri",
+    "target",
+    "release",
+    "bundle",
+  );
+  await Promise.all([
+    mkdir(scripts, { recursive: true }),
+    mkdir(fakeBin, { recursive: true }),
+    mkdir(path.join(root, "node_modules"), { recursive: true }),
+  ]);
+
+  const source = await readFile(path.join(repoRoot, "scripts", "build.sh"), "utf8");
+  const script = path.join(scripts, "build.sh");
+  await writeFile(script, source);
+  await chmod(script, 0o755);
+  await writeFile(path.join(root, "node_modules", ".package-lock.json"), "{}\n");
+
+  await executable(path.join(fakeBin, "uname"), "#!/bin/sh\nprintf 'Darwin\\n'\n");
+  await executable(path.join(fakeBin, "node"), "#!/bin/sh\nexit 0\n");
+  await executable(
+    path.join(fakeBin, "npm"),
+    `#!/bin/sh
+set -eu
+expected='run tauri -- build --bundles dmg'
+[ "$*" = "$expected" ] || { printf 'unexpected npm command: %s\n' "$*" >&2; exit 99; }
+mkdir -p src-tauri/target/release/bundle/dmg src-tauri/target/release/bundle/macos
+printf 'dmg\n' > src-tauri/target/release/bundle/dmg/Vela_1.0.0_aarch64.dmg
+mkdir -p src-tauri/target/release/bundle/macos/Vela.app
+printf 'app\n' > src-tauri/target/release/bundle/macos/Vela.app/marker
+`,
+  );
+
+  const run = spawnSync("/bin/bash", [script, "--native"], {
+    cwd: root,
+    encoding: "utf8",
+    env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
+  });
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  assert.deepEqual((await readdir(path.join(root, "dist"))).sort(), [
+    "Vela.app",
+    "Vela_1.0.0_aarch64.dmg",
+  ]);
+});
