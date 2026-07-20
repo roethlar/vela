@@ -9,59 +9,32 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **PLAYBACK-SOURCE POLICY COMPLETE ON FEATURE BRANCH.** The Multi-Plex core's
-  four listed implementation slices remain merged through `5e63462`, with
-  review evidence through `3a1dd8b`.
-  Per-source credentials and machine pins, full legacy-route migration,
-  repeatable identity-verified linking, exact Settings removal, and two-server
-  collapse/override behavior are implemented. Slice 4's real-app TLS scenario
-  passed alone and in the complete Linux hermetic suite (30/30); four targeted
-  production regressions failed their intended assertions and restored exact.
-  Canonical Node/Rust/build/audit gates pass (26 frontend guards, 167 Rust
-  tests, zero known vulnerabilities; Cargo retains 17 accepted warning-class
-  notices). Claude Code 2.1.215 / `claude-fable-5` / xhigh accepted the core
-  finding at exact head `c32a59b` with an independent red/restored-green guard
-  proof and no comments; exact status lives in `.agents/review/findings/mpx-1.md`.
-  A takeover audit found that the user-facing default duplicate-copy policy was
-  never implemented; same-kind Plex ties still use registry order unless a title
-  has the older context-menu override. The owner has now settled four modes,
-  automatic display compatibility, sequence-scoped Ask behavior, and title-level
-  watched fan-out. The implementation and verification design in
-  `.agents/plans/playback-source-policy.md` is owner-approved: one owner-directed
-  Claude Fable max-effort openreview returned clean over exact range
-  `ad27cf0..13405dc` with no findings. Slice 1 is complete at implementation
-  `c7ac901` plus Wayland dependency compatibility fix `cadbbb0`: policy/config/UI,
-  display detection and overrides, mpv output observation/placement, locality,
-  and pure ranking foundations are implemented. Local canonical gates and the
-  final fresh Linux real-app suite pass; all new behaviors were independently
-  red-proven and restored. Slice 2 is complete at `7d9a00e`: every play path now
-  enumerates and exactly resolves provider versions, applies the automatic
-  source policies and persistent Play Version override, keeps authenticated
-  Jellyfin/Emby stream credentials out of URLs/argv, and preserves all merged
-  hierarchy backings through navigation and TV continuation. Local canonical
-  gates and the byte-identical fresh Linux real-app suite pass (30/30); exact
-  guard evidence and the remaining Windows-native CI proof live in the playback
-  policy plan. Slice 3 is complete at implementation `7720d2a` with guard
-  hardening `a749974`/`b4b702b`: Ask Every Time now uses a bounded single-use
-  choice handshake, one-shot Play Version behavior, an accessible source modal,
-  exact TV/Vela-playlist run affinity and missing-copy re-prompt, while server
-  playlists remain owner-bound. Canonical local gates, every independent
-  mutation proof, and the byte-identical fresh Linux real-app suite pass
-  (30/30). Slice 4 is complete at `3391986`: manual watch edits and exact clean
-  EOF fan out concurrently across every configured title backing, partial
-  success is non-destructive and credential-safe, zero success alone restores
-  local curation, and resume/progress remains selected-source-only. Integration
-  `62133b3` plus safe-error correction `c07abc8` cover the four policies,
-  overrides, Ask run lifetime, merged hierarchy, both watch paths, and offline
-  server-playlist ownership in the two-server Linux fixture. All focused runs
-  and eight independent production mutations pass. Documentation `f9be3da` and
-  version 0.1.61 at `95ba4b8` close Slice 5. The complete local canonical set is
-  green (32 frontend/static guards, 205 Rust tests, zero known vulnerabilities,
-  17 accepted Cargo warning notices). Every tracked source byte matched on
-  Linux, where exact frontend/stable/clippy gates, a fresh-build real-app suite
-  (31/31), and 0.1.61 arm64 deb/rpm release bundles pass. The owner explicitly
-  ended further Fable reviews after the clean one-pass plan review; no
-  implementation Fable review was run.
+- **PLAYBACK-SOURCE POLICY COMPLETE ON FEATURE BRANCH AT 0.1.62.** The
+  Multi-Plex core remains complete through `5e63462`, with accepted review
+  evidence through `3a1dd8b`. The approved playback plan implements Prefer
+  Best, Prefer Compatible, Prefer Fastest Source, and Ask Every Time; exact
+  per-title Play Version behavior; display-aware selection; sequence-scoped Ask
+  affinity; merged hierarchy continuation; title-level watched fan-out; and the
+  offline server-playlist boundary. Slice implementations are `c7ac901` plus
+  `cadbbb0`, `7d9a00e`, `7720d2a` plus `a749974`/`b4b702b`, `3391986`, and
+  integration `62133b3` plus `c07abc8`.
+
+  Windows-native validation exposed and closed four portability findings in
+  one commit each: path normalization `35a54de`, a Windows-only skip for the
+  POSIX packaging harness `1cd3e0e`, Unix-helper cfg cleanup `ed4c745`, and
+  warning-clean DisplayConfig initialization `54c2f09`. Every guard was
+  independently regressed on Windows, failed for the intended reason, restored,
+  and reran green. Version 0.1.62 is `1a2bef5`.
+
+  Exact implementation head `1a2bef5` passes the complete macOS canonical set;
+  exact tracked Linux bytes pass toolchain/npm audit/frontend/stable/clippy,
+  fresh-build real-app E2E, and arm64 deb/rpm packaging; and an independently
+  hash-matched Windows archive passes frontend, Rust 1.89/stable, warning-free
+  clippy, native Rust tests, and NSIS packaging. With explicit owner approval,
+  the 0.1.62 installer replaced 0.1.37 on `netwatch-01` and verified the installed
+  registration/executable at 0.1.62. The owner explicitly ended further Fable
+  reviews after the clean one-pass plan review; none were run during the
+  implementation or Windows closeout.
   Durable evidence: `.agents/plans/multi-plex.md` and
   `.agents/plans/playback-source-policy.md`.
 
@@ -396,12 +369,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/multi-plex.md` (CORE COMPLETE — playback policy moved to the
   plan below)
 - `.agents/plans/playback-source-policy.md` (COMPLETE — one Fable max-effort
-  openreview clean over `ad27cf0..13405dc`; COMPLETE at version 0.1.61: Slice 1
+  openreview clean over `ad27cf0..13405dc`; COMPLETE at version 0.1.62: Slice 1
   at
   `c7ac901`/`cadbbb0`, Slice 2 at `7d9a00e`, Slice 3 at
   `7720d2a`/`a749974`/`b4b702b`, Slice 4 at `3391986`, and final integration
-  coverage at `62133b3`/`c07abc8`; local/Linux/package validation complete,
-  with further Fable review withdrawn by the owner)
+  coverage at `62133b3`/`c07abc8`; macOS/Linux/Windows native validation and
+  packages complete, with further Fable review withdrawn by the owner)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

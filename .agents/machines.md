@@ -89,6 +89,22 @@ Relocated out of `.agents/state.md` 2026-07-14 (drift pass). Recorded
 - Checkout is `autocrlf=true`: empty-diff "modified" files are line-ending
   noise.
 
+## Windows validation host (`netwatch-01`)
+
+Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
+
+- Windows x64 build 26200, PowerShell 7.6.3, Visual Studio Build Tools 18.7.3,
+  and the Windows SDK can compile, test, and package Vela natively. The Linux
+  WebKitDriver E2E harness remains Linux-only.
+- The host-wide Node 24/npm 11 pair was left unchanged. Playback-policy
+  validation used checksum-verified Node 26.5.0, npm 12.0.1, and Rust 1.89 in
+  task-isolated temporary locations, then the host's stable Rust for rolling
+  checks.
+- With owner approval, the unsigned 0.1.62 NSIS package replaced Vela 0.1.37
+  in place. The current per-user installation is
+  `C:\Users\michael\AppData\Local\Vela\Vela.exe`; both its file metadata and
+  the uninstall registration report 0.1.62.
+
 ## Linux VM (E2E host)
 
 Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.

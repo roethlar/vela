@@ -2,9 +2,10 @@
 
 Status: **COMPLETE — owner settled the product behavior on 2026-07-19; one
 Claude Fable `openreview` passed over exact plan range `ad27cf0..13405dc`; all
-five implementation slices, version 0.1.61, canonical validation, fresh Linux
-real-app E2E, and Linux package builds are complete. The owner ended further
-Fable reviews after the clean plan review.**
+five implementation slices, the Windows-native closeout, version 0.1.62,
+canonical validation, fresh Linux real-app E2E, and native Linux/Windows
+package builds are complete. The owner ended further Fable reviews after the
+clean plan review.**
 
 ## Plan review
 
@@ -29,10 +30,9 @@ upstream's quick-xml 0.41 security/compatibility changes; its provenance is in
 Local canonical Node, npm audit/check/build, Rust MSRV/stable check, clippy,
 unit, and cargo-audit gates passed. The final byte-identical Linux copy passed
 native check/clippy/unit/frontend validation and a fresh-build real-app E2E run
-(30/30). Windows native display compilation remains unverified locally because
-the macOS cross-check reaches Tauri's resource build before Vela and this host
-lacks `llvm-rc`; GitHub Windows CI remains the native proof when the owner later
-authorizes a push.
+(30/30). The later Windows-native closeout below compiled and tested this
+adapter on Windows; the earlier macOS cross-check could not reach Vela because
+that host lacked the Windows resource compiler.
 
 Independent production mutations proved: unknown policy fails safe to Best;
 Best ranks resolution before HDR; Compatible respects display fit; Fastest
@@ -178,6 +178,39 @@ build passed all 31 real-app E2E scenarios, and release packaging produced the
 0.1.61 arm64 deb and rpm bundles. On 2026-07-19 the owner explicitly ended
 further Fable reviews after the clean one-pass plan review; no implementation
 Fable review was run.
+
+### Windows-native closeout — complete
+
+The owner approved native cleanup and validation after the first Windows run
+exposed host-path and cfg-specific failures. Four one-finding commits close
+them: `35a54de` normalizes static-guard paths, `1cd3e0e` skips only the
+Linux-package harness on Windows, `ed4c745` excludes Unix-only mpv installer
+helpers there, and `54c2f09` initializes the Windows DisplayConfig records
+without warning-producing reassignment. Each guard was independently regressed
+on Windows, failed for its exact intended reason, restored from committed
+bytes, and reran green. `1a2bef5` bumps every release surface to 0.1.62.
+
+The complete macOS canonical set passes at 0.1.62: exact Node/npm, clean
+install, npm audit/check/build, Rust 1.89 and stable checks, warning-free
+clippy, 205 Rust tests, and Cargo audit with zero vulnerabilities plus the 17
+accepted warning-class notices. Exact tracked bytes at implementation head
+`1a2bef5` passed the Linux toolchain/npm audit/frontend/stable/clippy gates, a
+fresh Tauri build and all 31 real-app scenarios, and produced the 0.1.62 arm64
+deb and rpm bundles.
+
+An independent `git archive` of exact head `1a2bef5` had SHA-256
+`76822b81a5a8978771dc806a89503c03d3106e662cfa8d39c90a6d71243eb4c7` on
+both the macOS source host and `netwatch-01`. On Windows x64 it passed the
+pinned Node/npm check, clean install, npm audit, 31 portable guards with the
+one POSIX-only harness intentionally skipped, zero Svelte diagnostics, the
+frontend production build, Rust 1.89 and stable checks, warning-free clippy,
+and 202 Windows Rust tests. The native build produced
+`Vela_0.1.62_x64-setup.exe` (2,139,264 bytes, SHA-256
+`4e4396b408855a64a8ce34b774212648393fbc8dfa27166e9bd00a2464e767d5`,
+product/file version 0.1.62, unsigned as expected). With explicit owner
+approval, its silent installer exited zero and replaced the host's 0.1.37
+installation in place; the uninstall registration and installed executable
+both report 0.1.62.
 
 ## Goal
 
