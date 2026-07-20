@@ -281,11 +281,21 @@ test("Player Settings exposes the four duplicate-source policies and exact prior
   assert.match(page, /role="dialog"/);
   assert.match(page, /aria-modal="true"/);
   assert.match(page, /handleSourceChoiceDialogKeydown/);
+  assert.match(page, /sourceChoicePreviousFocus = document\.activeElement/);
+  assert.match(page, /previous\?\.isConnected[\s\S]{0,80}previous\.focus\(\)/);
+  assert.match(page, /querySelector<HTMLButtonElement>\("button\.choice"\)\?\.focus\(\)/);
   assert.match(page, /listen<\{ requestId: string \}>\("source-choice-required"/);
   assert.match(page, /get_playback_source_choice/);
   assert.match(page, /if \(sourceChoiceRequest\)[\s\S]{0,180}cancelSourceChoice\(\)/);
   assert.match(page, /async function play\([\s\S]{0,500}invalidateContinuationRun\(\)/);
-  assert.match(page, /onManualPlay=\{invalidateContinuationRun\}/);
+  assert.equal(
+    [...page.matchAll(/onManualPlay=\{invalidateContinuationRun\}/g)].length,
+    2,
+    "both Vela and server playlist manual starts invalidate delayed continuation work",
+  );
+  for (const component of ["src/lib/PlaylistsView.svelte", "src/lib/ServerPlaylistView.svelte"]) {
+    assert.match(sources.get(component), /onManualPlay\?\.\(\);\s*try \{/);
+  }
   assert.doesNotMatch(
     page,
     /playFrom[\s\S]{0,700}set_merged_override/,

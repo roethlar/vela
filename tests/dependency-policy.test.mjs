@@ -120,6 +120,13 @@ test("Ask source choices stay one-shot, session-safe, and credential-free", asyn
   assert.ok(resolve, "the source-choice resolver must remain registered");
   assert.match(resolve, /\.take_at\(&request_id, Instant::now\(\)\)/);
   assert.match(resolve, /persist_explicit_choice: false/);
+
+  const emittedChoice = commands.match(
+    /fn emit_source_choice_required\((?<body>[\s\S]*?)\n\}/,
+  )?.groups?.body;
+  assert.ok(emittedChoice, "automatic sequence choices must use an id-only event");
+  assert.match(emittedChoice, /json!\(\{ "requestId": request_id \}\)/);
+  assert.doesNotMatch(emittedChoice, /choices|title|source_name|quality_label/);
   assert.match(lib, /commands::get_playback_source_choice/);
   assert.match(lib, /commands::resolve_playback_source_choice/);
   assert.match(lib, /commands::cancel_playback_source_choice/);
