@@ -473,8 +473,8 @@ export default {
         "the failed edit must not manufacture a view failure",
       );
       assert.ok(
-        failedLine.includes("reconnect"),
-        "the edit the user asked for failed, so its own line says how to recover",
+        failedLine.includes("failed on all 1 configured source(s): Mock JF"),
+        "the edit failure names the source without exposing provider error details",
       );
     } finally {
       // A passing no-request guard deliberately leaves these armed. Disarm before the
@@ -666,7 +666,7 @@ export default {
     await pollUntil(
       async () => {
         const e = await editLine(driver);
-        return e && e.includes("reconnect") ? true : null;
+        return e && e.includes("failed on all 1 configured source(s): Mock JF") ? true : null;
       },
       "the user asked for this change and it did not happen — they are told so, wherever they now are",
     );
