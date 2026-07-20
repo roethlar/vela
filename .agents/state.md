@@ -41,7 +41,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   hierarchy backings through navigation and TV continuation. Local canonical
   gates and the byte-identical fresh Linux real-app suite pass (30/30); exact
   guard evidence and the remaining Windows-native CI proof live in the playback
-  policy plan.
+  policy plan. Slice 3 is complete at implementation `7720d2a` with guard
+  hardening `a749974`/`b4b702b`: Ask Every Time now uses a bounded single-use
+  choice handshake, one-shot Play Version behavior, an accessible source modal,
+  exact TV/Vela-playlist run affinity and missing-copy re-prompt, while server
+  playlists remain owner-bound. Canonical local gates, every independent
+  mutation proof, and the byte-identical fresh Linux real-app suite pass
+  (30/30).
   Durable evidence: `.agents/plans/multi-plex.md` and
   `.agents/plans/playback-source-policy.md`.
 
@@ -134,12 +140,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **NEXT: implement Slice 3 of the approved playback-source-policy plan.** Add
-  the bounded Ask Every Time handshake and accessible source-choice modal,
-  make Play Version one-shot in Ask mode, retain source affinity only inside
-  the exact current playlist/TV continuation run, and re-prompt when that
-  source lacks a later item. The exact approved design and remaining slices
-  live in `.agents/plans/playback-source-policy.md`.
+- **NEXT: implement Slice 4 of the approved playback-source-policy plan.** Fan
+  manual watched/unwatched and exact clean-EOF played state out to every title
+  backing, preserve selected-source-only resume/check-ins, report partial
+  success, and roll local curation back only when every backing fails. The exact
+  approved design and remaining slices live in
+  `.agents/plans/playback-source-policy.md`.
 
 - **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the

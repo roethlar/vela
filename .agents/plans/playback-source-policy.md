@@ -78,6 +78,48 @@ cross-platform source guard failed when the fallback was changed away from
 `false`, then passed after exact restoration. Every mutation was restored and
 its affected guard reran green.
 
+### Slice 3 — complete
+
+Implementation `7720d2a` adds the bounded, 120-second, single-use Ask Every
+Time handshake and tagged play results at the shared backend boundary. Choices
+contain only source name/id, locality, and that source's Best resolution/HDR
+label; automatic continuation emits only the request id. Resolution consumes
+the exact request, confirms that the selected source was offered, probes it
+again, and never persists the answer. Ask ignores older title overrides, while
+Play Version remains persistent in automatic modes and becomes one-shot in Ask.
+
+Exact run affinity is backend-owned for TV continuation and Vela playlists.
+The first item with multiple reachable copies asks, a reachable affinity is
+reused, one fallback replaces it directly, and multiple fallbacks ask again.
+Manual launch, cancellation of an automatic continuation choice, sequence
+exhaustion, and exact-session replacement clear only the affected run. Opening
+or cancelling a manual prompt leaves existing playback context intact. Server
+playlists probe only their owner backing and never cross-source reroute.
+
+The accessible modal names each source, locality, and quality, focuses the
+first choice, traps Tab, restores prior focus, and lets Escape/backdrop/Cancel
+consume the request without launching. Cards, details, TV continuation, Vela
+playlists, and server playlists all handle the tagged result; manual entry
+invalidates delayed frontend continuation work before it can race the backend's
+exact-session check. Guard hardening landed at `a749974` and `b4b702b`.
+
+Local canonical Node/npm audit/check/build, Rust MSRV/stable check, clippy,
+unit, and Cargo-audit gates pass (31 frontend/static guards, 203 Rust tests,
+zero known vulnerabilities; 17 accepted Cargo warning-class notices). The
+byte-identical Linux source passed exact toolchain/frontend/stable/clippy checks
+and a fresh-build real-app E2E run (30/30).
+
+Independent mutations proved capacity, expiration, single-use consumption,
+exact-session cancellation, source grouping and per-source Best labels; first
+duplicate prompt, affinity reuse, one-fallback failover, multi-fallback
+re-prompt; no premature affinity, chosen-fallback replacement, standalone-only
+and Ask-only lifetime; credential-free DTOs, Ask override bypass, one-shot Play
+Version resolution, owner-only server playlists, prompt cancellation preserving
+the active run, consumed request ids, and id-only events; plus modal semantics,
+Tab trapping, focus entry/restore, Escape cancellation, event lookup, all manual
+entry invalidation, and the explicit Play Version route. Every mutation failed
+its intended assertion, was restored to committed bytes, and reran green.
+
 ## Goal
 
 When the same logical video exists on more than one configured media server,
