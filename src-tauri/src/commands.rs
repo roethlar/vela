@@ -2975,6 +2975,8 @@ pub async fn set_watched(
 // ---- playback ------------------------------------------------------------
 
 const MAX_PLAYBACK_SIGNALS: usize = 64;
+const MAX_PLAYBACK_CHOICES: usize = 16;
+const PLAYBACK_CHOICE_TTL: Duration = Duration::from_secs(120);
 
 #[derive(Default)]
 struct PlaybackSignals {
@@ -2994,6 +2996,122 @@ pub(crate) struct PlaybackCompletion {
     #[serde(skip)]
     pub started_at_ms: u64,
     pub media_type: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackSourceChoiceDto {
+    pub source_id: String,
+    pub source_name: String,
+    pub locality: String,
+    pub quality_label: String,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PlaybackSourceChoiceRequestDto {
+    pub request_id: String,
+    pub title: String,
+    pub choices: Vec<PlaybackSourceChoiceDto>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "camelCase")]
+pub enum PlayCommandResult {
+    Started { session_id: String },
+    Superseded,
+    SourceChoiceRequired {
+        request: PlaybackSourceChoiceRequestDto,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PlaybackRunKind {
+    Series,
+    VelaPlaylist,
+    ServerPlaylist,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct PlaybackRunState {
+    session_id: String,
+    kind: PlaybackRunKind,
+    affinity_source_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct PendingPlaybackChoice {
+    request: PlaybackSourceChoiceRequestDto,
+    created_at: Instant,
+    item: ItemDto,
+    start_from_beginning: bool,
+    session_id: String,
+    playlist: Option<PlaylistLocation>,
+    replace_session: Option<String>,
+    run_kind: Option<PlaybackRunKind>,
+}
+
+#[derive(Default)]
+pub(crate) struct PlaybackChoiceRequests {
+    entries: VecDeque<PendingPlaybackChoice>,
+}
+
+impl PlaybackChoiceRequests {
+    fn prune_at(&mut self, now: Instant) {
+        self.entries.retain(|entry| {
+            now.checked_duration_since(entry.created_at)
+                .is_some_and(|age| age <= PLAYBACK_CHOICE_TTL)
+        });
+    }
+
+    fn insert_at(&mut self, pending: PendingPlaybackChoice, now: Instant) {
+        self.prune_at(now);
+        self.entries
+            .retain(|entry| entry.request.request_id != pending.request.request_id);
+        self.entries.push_back(pending);
+        while self.entries.len() > MAX_PLAYBACK_CHOICES {
+            self.entries.pop_front();
+        }
+    }
+
+    fn request_at(
+        &mut self,
+        request_id: &str,
+        now: Instant,
+    ) -> Option<PlaybackSourceChoiceRequestDto> {
+        self.prune_at(now);
+        self.entries
+            .iter()
+            .find(|entry| entry.request.request_id == request_id)
+            .map(|entry| entry.request.clone())
+    }
+
+    fn take_at(&mut self, request_id: &str, now: Instant) -> Option<PendingPlaybackChoice> {
+        self.prune_at(now);
+        let index = self
+            .entries
+            .iter()
+            .position(|entry| entry.request.request_id == request_id)?;
+        self.entries.remove(index)
+    }
+
+    fn clear(&mut self) {
+        self.entries.clear();
+    }
+
+    fn clear_for_session(&mut self, session_id: &str) {
+        self.entries.retain(|entry| {
+            entry.replace_session.as_deref() != Some(session_id)
+                && entry.session_id != session_id
+        });
+    }
+
+    fn has_manual_pending(&mut self, now: Instant) -> bool {
+        self.prune_at(now);
+        self.entries
+            .iter()
+            .any(|entry| entry.replace_session.is_none())
+    }
 }
 
 /// The observation handle currently authorized for automatic window-state
@@ -3179,9 +3297,20 @@ async fn validate_playback_session(state: &AppState, expected_session: Option<&s
     expected_session_matches(active.as_deref(), expected_session)
 }
 
-async fn install_playback_session(state: &AppState, new_session: &str, item: &ItemDto) {
+async fn install_playback_session(
+    state: &AppState,
+    new_session: &str,
+    item: &ItemDto,
+    run_kind: Option<PlaybackRunKind>,
+    affinity_source_id: Option<String>,
+) {
     *state.active_playback_session.lock().await = Some(new_session.to_string());
     *state.active_playback_item.lock().await = Some((new_session.to_string(), item.clone()));
+    *state.playback_run.lock().await = run_kind.map(|kind| PlaybackRunState {
+        session_id: new_session.to_string(),
+        kind,
+        affinity_source_id,
+    });
 }
 
 async fn clear_playback_session_if(state: &AppState, expected_session: &str) {
@@ -3194,6 +3323,13 @@ async fn clear_playback_session_if(state: &AppState, expected_session: &str) {
             .is_some_and(|(session, _)| session == expected_session)
         {
             *item = None;
+        }
+        let mut run = state.playback_run.lock().await;
+        if run
+            .as_ref()
+            .is_some_and(|run| run.session_id == expected_session)
+        {
+            *run = None;
         }
     }
 }
@@ -3260,10 +3396,25 @@ pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
 /// All play contexts use the same lock discipline regardless of trigger.
 struct PlaybackSelection {
-    source: std::sync::Arc<dyn MediaSource>,
+    source_id: String,
     raw_item_key: String,
     version_id: Option<String>,
     item: ItemDto,
+}
+
+enum PlaybackSelectionOutcome {
+    Ready {
+        selection: Box<PlaybackSelection>,
+        ask_mode: bool,
+    },
+    Choice(Vec<PlaybackSourceChoiceDto>),
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AskSourceDecision {
+    UseSource(String),
+    Prompt,
+    NoCandidate,
 }
 
 fn playback_backings(item: &ItemDto) -> Vec<BackingRef> {
@@ -3308,11 +3459,107 @@ async fn playback_compatibility_target(
     })
 }
 
+fn playback_source_choices(
+    candidates: &[crate::selection::PlaybackCandidate],
+    versions: &[PlaybackVersion],
+) -> Vec<PlaybackSourceChoiceDto> {
+    let mut source_ids = candidates
+        .iter()
+        .map(|candidate| candidate.source_id.clone())
+        .collect::<Vec<_>>();
+    source_ids.sort();
+    source_ids.dedup();
+    let mut choices = Vec::with_capacity(source_ids.len());
+    for source_id in source_ids {
+        let mut source_candidates = candidates
+            .iter()
+            .filter(|candidate| candidate.source_id == source_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        crate::selection::rank_candidates(
+            &mut source_candidates,
+            crate::selection::PlaybackSourcePolicy::Best,
+            None,
+        );
+        let Some(best) = source_candidates.first() else {
+            continue;
+        };
+        let source_name = versions
+            .iter()
+            .find(|version| version.source_id == source_id)
+            .map(|version| version.source_name.clone())
+            .unwrap_or_else(|| source_id.clone());
+        let locality = match best.locality {
+            crate::locality::EndpointLocality::SameMachine => "same-machine",
+            crate::locality::EndpointLocality::Lan => "lan",
+            crate::locality::EndpointLocality::Internet => "internet",
+        };
+        let resolution = if best.width > 0 && best.height > 0 {
+            format!("{}×{}", best.width, best.height)
+        } else {
+            "Unknown resolution".to_string()
+        };
+        choices.push(PlaybackSourceChoiceDto {
+            source_id,
+            source_name,
+            locality: locality.to_string(),
+            quality_label: if best.hdr {
+                format!("{resolution} · HDR")
+            } else {
+                format!("{resolution} · SDR")
+            },
+        });
+    }
+    choices.sort_by(|left, right| {
+        left.source_name
+            .to_lowercase()
+            .cmp(&right.source_name.to_lowercase())
+            .then_with(|| left.source_id.cmp(&right.source_id))
+    });
+    choices
+}
+
+fn ask_source_decision(
+    candidates: &[crate::selection::PlaybackCandidate],
+    affinity_source_id: Option<&str>,
+) -> AskSourceDecision {
+    let mut source_ids = candidates
+        .iter()
+        .map(|candidate| candidate.source_id.as_str())
+        .collect::<Vec<_>>();
+    source_ids.sort_unstable();
+    source_ids.dedup();
+    if let Some(affinity) = affinity_source_id.filter(|affinity| source_ids.contains(affinity)) {
+        return AskSourceDecision::UseSource(affinity.to_string());
+    }
+    match source_ids.as_slice() {
+        [] => AskSourceDecision::NoCandidate,
+        [source_id] => AskSourceDecision::UseSource((*source_id).to_string()),
+        [_, _, ..] => AskSourceDecision::Prompt,
+    }
+}
+
+fn next_playback_affinity(
+    ask_mode: bool,
+    run_kind: Option<PlaybackRunKind>,
+    explicit_source_id: Option<&str>,
+    prior_affinity: Option<&str>,
+    selected_source_id: &str,
+) -> Option<String> {
+    (ask_mode
+        && run_kind.is_some()
+        && (explicit_source_id.is_some() || prior_affinity.is_some()))
+    .then(|| selected_source_id.to_string())
+}
+
 async fn select_playback_version(
     state: &AppState,
     item: &ItemDto,
     replace_session: Option<&str>,
-) -> Result<PlaybackSelection, PlayFailure> {
+    explicit_source_id: Option<&str>,
+    affinity_source_id: Option<&str>,
+    server_owned: bool,
+) -> Result<PlaybackSelectionOutcome, PlayFailure> {
     const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
     let cfg = config::load_config().map_err(|_| {
@@ -3321,7 +3568,8 @@ async fn select_playback_version(
     let policy = crate::selection::PlaybackSourcePolicy::normalize(
         cfg.playback_source_policy.as_deref(),
     );
-    let override_source = (policy != crate::selection::PlaybackSourcePolicy::Ask)
+    let override_source = (explicit_source_id.is_none()
+        && policy != crate::selection::PlaybackSourcePolicy::Ask)
         .then(|| {
             item.canonical_id
                 .as_ref()
@@ -3329,8 +3577,13 @@ async fn select_playback_version(
                 .cloned()
         })
         .flatten();
-    let mut backings = playback_backings(item);
-    if let Some(source_id) = override_source.as_deref() {
+    let preferred_source = explicit_source_id.or(override_source.as_deref());
+    let mut backings = if server_owned {
+        vec![crate::source::backing_ref_of(item)]
+    } else {
+        playback_backings(item)
+    };
+    if let Some(source_id) = preferred_source {
         backings.retain(|backing| backing.source_id == source_id);
         if backings.is_empty() {
             let source_name = state
@@ -3374,10 +3627,7 @@ async fn select_playback_version(
 
     let mut versions: Vec<PlaybackVersion> = Vec::new();
     let mut legacy = Vec::new();
-    let mut probed_sources: HashMap<
-        String,
-        (std::sync::Arc<dyn MediaSource>, String),
-    > = HashMap::new();
+    let mut probed_sources: HashMap<String, String> = HashMap::new();
     while let Some(joined) = probes.join_next().await {
         let Ok((backing, source, raw, result)) = joined else {
             continue;
@@ -3387,7 +3637,7 @@ async fn select_playback_version(
                 legacy.push((backing, source, raw));
             }
             Ok(Ok(found)) => {
-                probed_sources.insert(source.id(), (source, raw));
+                probed_sources.insert(source.id(), raw);
                 versions.extend(found);
             }
             Ok(Err(_)) | Err(_) => {}
@@ -3396,8 +3646,8 @@ async fn select_playback_version(
 
     if versions.is_empty() {
         legacy.sort_by(|left, right| left.0.source_id.cmp(&right.0.source_id));
-        let Some((backing, source, raw)) = legacy.into_iter().next() else {
-            let name = if let Some(source_id) = override_source.as_deref() {
+        let Some((backing, _source, raw)) = legacy.into_iter().next() else {
+            let name = if let Some(source_id) = preferred_source {
                 state
                     .registry
                     .lock()
@@ -3414,12 +3664,15 @@ async fn select_playback_version(
         };
         let mut selected_item = item.clone();
         selected_item.rating_key = backing.rating_key;
-        selected_item.source_id = backing.source_id;
-        return Ok(PlaybackSelection {
-            source,
+        selected_item.source_id = backing.source_id.clone();
+        return Ok(PlaybackSelectionOutcome::Ready {
+            selection: Box::new(PlaybackSelection {
+            source_id: backing.source_id,
             raw_item_key: raw,
             version_id: None,
             item: selected_item,
+            }),
+            ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
         });
     }
 
@@ -3453,6 +3706,18 @@ async fn select_playback_version(
             locality,
         });
     }
+    if policy == crate::selection::PlaybackSourcePolicy::Ask && explicit_source_id.is_none() {
+        match ask_source_decision(&candidates, affinity_source_id) {
+            AskSourceDecision::UseSource(source_id) => {
+                candidates.retain(|candidate| candidate.source_id == source_id);
+            }
+            AskSourceDecision::Prompt => {
+                let choices = playback_source_choices(&candidates, &versions);
+                return Ok(PlaybackSelectionOutcome::Choice(choices));
+            }
+            AskSourceDecision::NoCandidate => {}
+        }
+    }
     let target = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
         playback_compatibility_target(state, replace_session, &cfg).await
     } else {
@@ -3468,36 +3733,138 @@ async fn select_playback_version(
             version.source_id == winner.source_id && version.version_id == winner.version_id
         })
         .ok_or_else(|| PlayFailure::fatal("playback selection lost its source".to_string()))?;
-    let (source, raw_item_key) = probed_sources
+    let raw_item_key = probed_sources
         .remove(&version.source_id)
         .ok_or_else(|| PlayFailure::fatal("playback selection lost its route".to_string()))?;
     let mut selected_item = item.clone();
     selected_item.rating_key = version.item_key;
-    selected_item.source_id = version.source_id;
-    Ok(PlaybackSelection {
-        source,
-        raw_item_key,
-        version_id: Some(version.version_id),
-        item: selected_item,
+    selected_item.source_id = version.source_id.clone();
+    Ok(PlaybackSelectionOutcome::Ready {
+        selection: Box::new(PlaybackSelection {
+            source_id: version.source_id,
+            raw_item_key,
+            version_id: Some(version.version_id),
+            item: selected_item,
+        }),
+        ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
     })
+}
+
+struct PlayLaunchRequest<'a> {
+    item: &'a ItemDto,
+    start_from_beginning: bool,
+    session_id: &'a str,
+    playlist: Option<PlaylistLocation>,
+    replace_session: Option<&'a str>,
+    run_kind: Option<PlaybackRunKind>,
+    explicit_source_id: Option<&'a str>,
+    persist_explicit_choice: bool,
 }
 
 async fn play_by_key(
     state: &AppState,
-    item: &ItemDto,
-    start_from_beginning: bool,
-    session_id: &str,
-    playlist: Option<PlaylistLocation>,
-    replace_session: Option<&str>,
-) -> Result<(), PlayFailure> {
+    request: PlayLaunchRequest<'_>,
+) -> Result<PlayCommandResult, PlayFailure> {
     // Serialize the whole resolve+stop-old+spawn sequence so overlapping triggers
     // can't both spawn an mpv and lose one of the child handles.
     let _play = state.play_lock.lock().await;
+    play_by_key_locked(state, request).await
+}
+
+async fn play_by_key_locked(
+    state: &AppState,
+    request: PlayLaunchRequest<'_>,
+) -> Result<PlayCommandResult, PlayFailure> {
+    let PlayLaunchRequest {
+        item,
+        start_from_beginning,
+        session_id,
+        playlist,
+        replace_session,
+        run_kind,
+        explicit_source_id,
+        persist_explicit_choice,
+    } = request;
     if !validate_playback_session(state, replace_session).await {
         return Err(PlayFailure::superseded());
     }
-    let selection = select_playback_version(state, item, replace_session).await?;
-    let src = selection.source;
+    if replace_session.is_none() {
+        state.playback_choices.lock().await.clear();
+    }
+    let prior_affinity = if let (Some(expected), Some(kind)) = (replace_session, run_kind) {
+        state
+            .playback_run
+            .lock()
+            .await
+            .as_ref()
+            .filter(|run| run.session_id == expected && run.kind == kind)
+            .and_then(|run| run.affinity_source_id.clone())
+    } else {
+        None
+    };
+    let server_owned = run_kind == Some(PlaybackRunKind::ServerPlaylist);
+    let selection = select_playback_version(
+        state,
+        item,
+        replace_session,
+        explicit_source_id,
+        prior_affinity.as_deref(),
+        server_owned,
+    )
+    .await?;
+    let (selection, ask_mode) = match selection {
+        PlaybackSelectionOutcome::Ready {
+            selection,
+            ask_mode,
+        } => (*selection, ask_mode),
+        PlaybackSelectionOutcome::Choice(choices) => {
+            let request = PlaybackSourceChoiceRequestDto {
+                request_id: uuid::Uuid::new_v4().to_string(),
+                title: item.title.clone(),
+                choices,
+            };
+            state.playback_choices.lock().await.insert_at(
+                PendingPlaybackChoice {
+                    request: request.clone(),
+                    created_at: Instant::now(),
+                    item: item.clone(),
+                    start_from_beginning,
+                    session_id: session_id.to_string(),
+                    playlist,
+                    replace_session: replace_session.map(str::to_string),
+                    run_kind,
+                },
+                Instant::now(),
+            );
+            return Ok(PlayCommandResult::SourceChoiceRequired { request });
+        }
+    };
+    if persist_explicit_choice && !ask_mode {
+        if let (Some(source_id), Some(canonical_id)) =
+            (explicit_source_id, item.canonical_id.as_deref())
+        {
+            let canonical_id = canonical_id.to_string();
+            let source_id = source_id.to_string();
+            config::update(move |cfg| {
+                cfg.merged_overrides.insert(canonical_id, source_id);
+                Ok(())
+            })
+            .map_err(PlayFailure::fatal)?;
+        }
+    }
+    let next_affinity = next_playback_affinity(
+        ask_mode,
+        run_kind,
+        explicit_source_id,
+        prior_affinity.as_deref(),
+        &selection.source_id,
+    );
+    let src = state
+        .registry
+        .lock()
+        .await
+        .get(&selection.source_id)
+        .ok_or_else(|| PlayFailure::unavailable("the selected source was removed".to_string()))?;
     let item = &selection.item;
     let resolved = match selection.version_id.as_deref() {
         Some(version_id) => {
@@ -3548,7 +3915,7 @@ async fn play_by_key(
         let mut cursor = state.playlist_cursor.lock().await;
         std::mem::replace(&mut *cursor, new_cursor)
     };
-    install_playback_session(state, session_id, item).await;
+    install_playback_session(state, session_id, item, run_kind, next_affinity).await;
 
     // Cancel the prior tracker and terminate the prior mpv so we never run two
     // players. The kill is a non-blocking syscall; the reap is handed to the
@@ -3745,7 +4112,9 @@ async fn play_by_key(
         .lock()
         .unwrap_or_else(|e| e.into_inner()) = Some(stop);
     recents_ready.succeed();
-    Ok(())
+    Ok(PlayCommandResult::Started {
+        session_id: session_id.to_string(),
+    })
 }
 
 /// Play one item, either resuming its resolved position or explicitly starting
@@ -3755,23 +4124,137 @@ pub async fn play_item(
     item: ItemDto,
     start_from_beginning: bool,
     expected_session: Option<String>,
+    series_continuation: Option<bool>,
+    explicit_source_id: Option<String>,
     state: State<'_, AppState>,
-) -> Result<Option<String>, String> {
+) -> Result<PlayCommandResult, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
     match play_by_key(
         &state,
-        &item,
-        start_from_beginning,
-        &session_id,
-        None,
-        expected_session.as_deref(),
+        PlayLaunchRequest {
+            item: &item,
+            start_from_beginning,
+            session_id: &session_id,
+            playlist: None,
+            replace_session: expected_session.as_deref(),
+            run_kind: series_continuation
+                .unwrap_or(false)
+                .then_some(PlaybackRunKind::Series),
+            explicit_source_id: explicit_source_id.as_deref(),
+            persist_explicit_choice: explicit_source_id.is_some(),
+        },
     )
     .await
     {
-        Ok(()) => Ok(Some(session_id)),
-        Err(failure) if failure.kind == PlayFailureKind::Superseded => Ok(None),
+        Ok(result) => Ok(result),
+        Err(failure) if failure.kind == PlayFailureKind::Superseded => {
+            Ok(PlayCommandResult::Superseded)
+        }
         Err(failure) => Err(failure.message),
     }
+}
+
+#[tauri::command]
+pub async fn get_playback_source_choice(
+    request_id: String,
+    state: State<'_, AppState>,
+) -> Result<PlaybackSourceChoiceRequestDto, String> {
+    state
+        .playback_choices
+        .lock()
+        .await
+        .request_at(&request_id, Instant::now())
+        .ok_or_else(|| "this source choice expired or was superseded".to_string())
+}
+
+#[tauri::command]
+pub async fn resolve_playback_source_choice(
+    request_id: String,
+    source_id: String,
+    state: State<'_, AppState>,
+) -> Result<PlayCommandResult, String> {
+    let _play = state.play_lock.lock().await;
+    let pending = state
+        .playback_choices
+        .lock()
+        .await
+        .take_at(&request_id, Instant::now())
+        .ok_or_else(|| "this source choice expired or was superseded".to_string())?;
+    if !pending
+        .request
+        .choices
+        .iter()
+        .any(|choice| choice.source_id == source_id)
+    {
+        return Err("that source was not offered for this playback request".to_string());
+    }
+    match play_by_key_locked(
+        &state,
+        PlayLaunchRequest {
+            item: &pending.item,
+            start_from_beginning: pending.start_from_beginning,
+            session_id: &pending.session_id,
+            playlist: pending.playlist,
+            replace_session: pending.replace_session.as_deref(),
+            run_kind: pending.run_kind,
+            explicit_source_id: Some(&source_id),
+            persist_explicit_choice: false,
+        },
+    )
+    .await
+    {
+        Ok(result) => Ok(result),
+        Err(failure) if failure.kind == PlayFailureKind::Superseded => {
+            Ok(PlayCommandResult::Superseded)
+        }
+        Err(failure) => Err(failure.message),
+    }
+}
+
+#[tauri::command]
+pub async fn cancel_playback_source_choice(
+    request_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let _play = state.play_lock.lock().await;
+    let Some(pending) = state
+        .playback_choices
+        .lock()
+        .await
+        .take_at(&request_id, Instant::now())
+    else {
+        return Ok(false);
+    };
+    if let Some(expected) = pending.replace_session.as_deref() {
+        clear_playlist_cursor_if(&state, expected).await;
+        let mut run = state.playback_run.lock().await;
+        if run.as_ref().is_some_and(|run| run.session_id == expected) {
+            *run = None;
+        }
+    }
+    Ok(true)
+}
+
+#[tauri::command]
+pub async fn finish_playback_run(
+    session_id: String,
+    state: State<'_, AppState>,
+) -> Result<bool, String> {
+    let _play = state.play_lock.lock().await;
+    let mut run = state.playback_run.lock().await;
+    let cleared = run
+        .as_ref()
+        .is_some_and(|run| run.session_id == session_id);
+    if cleared {
+        *run = None;
+    }
+    drop(run);
+    state
+        .playback_choices
+        .lock()
+        .await
+        .clear_for_session(&session_id);
+    Ok(cleared)
 }
 
 const EPISODE_PAGE_SIZE: usize = 200;
@@ -4225,6 +4708,17 @@ async fn clear_playlist_cursor_if(state: &AppState, expected_session: &str) {
     if cursor_matches_session(cursor.as_ref(), expected_session) {
         *cursor = None;
     }
+    drop(cursor);
+    let mut run = state.playback_run.lock().await;
+    if run.as_ref().is_some_and(|run| {
+        run.session_id == expected_session
+            && matches!(
+                run.kind,
+                PlaybackRunKind::VelaPlaylist | PlaybackRunKind::ServerPlaylist
+            )
+    }) {
+        *run = None;
+    }
 }
 
 /// Atomically prove that no newer play replaced this completed session and,
@@ -4241,6 +4735,14 @@ async fn finish_sequence_if_current(state: &AppState, ended_session: &str) -> bo
         None => true,
         Some(current) if current.session_id == ended_session => {
             *cursor = None;
+            drop(cursor);
+            let mut run = state.playback_run.lock().await;
+            if run
+                .as_ref()
+                .is_some_and(|run| run.session_id == ended_session)
+            {
+                *run = None;
+            }
             true
         }
         Some(_) => false,
@@ -4264,7 +4766,7 @@ async fn play_playlist_entries(
     start_index: usize,
     start_from_beginning: bool,
     replace_session: Option<&str>,
-) -> Result<bool, String> {
+) -> Result<PlayCommandResult, String> {
     if start_index >= items.len() {
         return Err("playlist position is out of range".to_string());
     }
@@ -4281,19 +4783,26 @@ async fn play_playlist_entries(
         let beginning = start_from_beginning && index == start_index;
         match play_by_key(
             state,
-            &entry.item,
-            beginning,
-            &session_id,
-            Some(location),
-            replace_session,
+            PlayLaunchRequest {
+                item: &entry.item,
+                start_from_beginning: beginning,
+                session_id: &session_id,
+                playlist: Some(location),
+                replace_session,
+                run_kind: Some(PlaybackRunKind::VelaPlaylist),
+                explicit_source_id: None,
+                persist_explicit_choice: false,
+            },
         )
         .await
         {
-            Ok(()) => return Ok(true),
+            Ok(result) => return Ok(result),
             Err(failure) if failure.kind == PlayFailureKind::Unavailable => {
                 last_unavailable = Some(failure.message);
             }
-            Err(failure) if failure.kind == PlayFailureKind::Superseded => return Ok(false),
+            Err(failure) if failure.kind == PlayFailureKind::Superseded => {
+                return Ok(PlayCommandResult::Superseded)
+            }
             Err(failure) => return Err(failure.message),
         }
     }
@@ -4306,7 +4815,7 @@ async fn play_playlist_from(
     start_index: usize,
     start_from_beginning: bool,
     replace_session: Option<&str>,
-) -> Result<bool, String> {
+) -> Result<PlayCommandResult, String> {
     let lookup = playlist_id.clone();
     let playlist = playlist_store(move || crate::playlists::get(&lookup)).await?;
     play_playlist_entries(
@@ -4326,10 +4835,8 @@ pub async fn playlist_play(
     start_index: usize,
     start_from_beginning: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
-    play_playlist_from(&state, id, start_index, start_from_beginning, None)
-        .await
-        .map(|_| ())
+) -> Result<PlayCommandResult, String> {
+    play_playlist_from(&state, id, start_index, start_from_beginning, None).await
 }
 
 async fn play_server_playlist_entries(
@@ -4339,7 +4846,7 @@ async fn play_server_playlist_entries(
     start_index: usize,
     start_from_beginning: bool,
     replace_session: Option<&str>,
-) -> Result<bool, String> {
+) -> Result<PlayCommandResult, String> {
     if start_index >= items.len() {
         return Err("server playlist position is out of range".to_string());
     }
@@ -4355,19 +4862,26 @@ async fn play_server_playlist_entries(
         let beginning = start_from_beginning && index == start_index;
         match play_by_key(
             state,
-            &item,
-            beginning,
-            &session_id,
-            Some(location),
-            replace_session,
+            PlayLaunchRequest {
+                item: &item,
+                start_from_beginning: beginning,
+                session_id: &session_id,
+                playlist: Some(location),
+                replace_session,
+                run_kind: Some(PlaybackRunKind::ServerPlaylist),
+                explicit_source_id: None,
+                persist_explicit_choice: false,
+            },
         )
         .await
         {
-            Ok(()) => return Ok(true),
+            Ok(result) => return Ok(result),
             Err(failure) if failure.kind == PlayFailureKind::Unavailable => {
                 last_unavailable = Some(failure.message);
             }
-            Err(failure) if failure.kind == PlayFailureKind::Superseded => return Ok(false),
+            Err(failure) if failure.kind == PlayFailureKind::Superseded => {
+                return Ok(PlayCommandResult::Superseded)
+            }
             Err(failure) => return Err(failure.message),
         }
     }
@@ -4380,7 +4894,7 @@ pub async fn server_playlist_play(
     start_index: usize,
     start_from_beginning: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<PlayCommandResult, String> {
     let items = fetch_server_playlist_items(&state, &key).await?;
     play_server_playlist_entries(
         &state,
@@ -4391,7 +4905,6 @@ pub async fn server_playlist_play(
         None,
     )
     .await
-    .map(|_| ())
 }
 
 /// Persist local completion for a joined clean EOF. The caller holds
@@ -4430,11 +4943,29 @@ pub(crate) async fn mark_clean_completion_played(
     source.mark_played(&raw, true).await
 }
 
+fn emit_source_choice_required(state: &AppState, request_id: &str) {
+    use tauri::Emitter;
+    if let Some(app) = state.app_handle.get() {
+        let _ = app.emit(
+            "source-choice-required",
+            serde_json::json!({ "requestId": request_id }),
+        );
+    }
+}
+
 /// Handle one fully-finished clean EOF. Returns true only when the exact active
 /// single item or playlist genuinely ended, authorizing the frontend to apply
 /// Continue Playing. The UUID prevents queued older work from replacing a
 /// newer manual play.
 pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> bool {
+    if state
+        .playback_choices
+        .lock()
+        .await
+        .has_manual_pending(Instant::now())
+    {
+        return false;
+    }
     let cursor = state.playlist_cursor.lock().await.clone();
     let Some(cursor) = cursor else {
         return finish_sequence_if_current(state, ended_session).await;
@@ -4464,7 +4995,11 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
         )
         .await
         {
-            Ok(true) | Ok(false) => false,
+            Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => false,
+            Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
+                emit_source_choice_required(state, &request.request_id);
+                false
+            }
             Err(error) => {
                 eprintln!("vela: server playlist auto-advance stopped: {error}");
                 clear_playlist_cursor_if(state, ended_session).await;
@@ -4502,7 +5037,11 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
     )
     .await
     {
-        Ok(true) | Ok(false) => false,
+        Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => false,
+        Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
+            emit_source_choice_required(state, &request.request_id);
+            false
+        }
         Err(error) => {
             eprintln!("vela: playlist auto-advance stopped: {error}");
             clear_playlist_cursor_if(state, ended_session).await;
@@ -4776,6 +5315,221 @@ mod tests {
             watch_key: None,
             detail_key: None,
         }
+    }
+
+    fn pending_choice(
+        request_id: &str,
+        created_at: Instant,
+        replace_session: Option<&str>,
+    ) -> PendingPlaybackChoice {
+        PendingPlaybackChoice {
+            request: PlaybackSourceChoiceRequestDto {
+                request_id: request_id.to_string(),
+                title: "Title".to_string(),
+                choices: vec![PlaybackSourceChoiceDto {
+                    source_id: "source-a".to_string(),
+                    source_name: "Source A".to_string(),
+                    locality: "lan".to_string(),
+                    quality_label: "1920×1080 · SDR".to_string(),
+                }],
+            },
+            created_at,
+            item: catalog_item("source-a:item", "movie", 0, false),
+            start_from_beginning: false,
+            session_id: format!("future-{request_id}"),
+            playlist: None,
+            replace_session: replace_session.map(str::to_string),
+            run_kind: Some(PlaybackRunKind::Series),
+        }
+    }
+
+    #[test]
+    fn playback_choice_requests_are_bounded_expiring_and_single_use() {
+        let now = Instant::now();
+        let mut requests = PlaybackChoiceRequests::default();
+        for index in 0..=MAX_PLAYBACK_CHOICES {
+            requests.insert_at(
+                pending_choice(&format!("request-{index}"), now, None),
+                now,
+            );
+        }
+        assert_eq!(requests.entries.len(), MAX_PLAYBACK_CHOICES);
+        assert!(requests.request_at("request-0", now).is_none());
+        assert!(requests.request_at("request-16", now).is_some());
+        assert!(requests.take_at("request-16", now).is_some());
+        assert!(requests.take_at("request-16", now).is_none());
+
+        requests.insert_at(pending_choice("expired", now, None), now);
+        assert!(requests
+            .request_at("expired", now + PLAYBACK_CHOICE_TTL + Duration::from_millis(1))
+            .is_none());
+    }
+
+    #[test]
+    fn playback_choice_cancellation_is_scoped_to_the_exact_run() {
+        let now = Instant::now();
+        let mut requests = PlaybackChoiceRequests::default();
+        requests.insert_at(pending_choice("old", now, Some("old-session")), now);
+        requests.insert_at(pending_choice("new", now, Some("new-session")), now);
+        requests.clear_for_session("old-session");
+        assert!(requests.request_at("old", now).is_none());
+        assert!(requests.request_at("new", now).is_some());
+    }
+
+    #[test]
+    fn ask_choices_group_by_source_and_show_that_sources_best_version() {
+        let candidates = vec![
+            crate::selection::PlaybackCandidate {
+                source_id: "source-a".to_string(),
+                version_id: "1080-hdr".to_string(),
+                width: 1920,
+                height: 1080,
+                hdr: true,
+                bitrate: 20,
+                direct_play_rank: 0,
+                locality: crate::locality::EndpointLocality::Lan,
+            },
+            crate::selection::PlaybackCandidate {
+                source_id: "source-a".to_string(),
+                version_id: "4k-sdr".to_string(),
+                width: 3840,
+                height: 2160,
+                hdr: false,
+                bitrate: 80,
+                direct_play_rank: 0,
+                locality: crate::locality::EndpointLocality::Lan,
+            },
+            crate::selection::PlaybackCandidate {
+                source_id: "source-b".to_string(),
+                version_id: "720".to_string(),
+                width: 1280,
+                height: 720,
+                hdr: false,
+                bitrate: 8,
+                direct_play_rank: 0,
+                locality: crate::locality::EndpointLocality::Internet,
+            },
+        ];
+        let version = |source_id: &str, source_name: &str| PlaybackVersion {
+            source_id: source_id.to_string(),
+            source_name: source_name.to_string(),
+            item_key: format!("{source_id}:item"),
+            version_id: "opaque".to_string(),
+            width: 0,
+            height: 0,
+            hdr: false,
+            bitrate: 0,
+            direct_play_rank: 0,
+            endpoint: url::Url::parse("https://example.test").unwrap(),
+            provider_verified_local: false,
+        };
+        let choices = playback_source_choices(
+            &candidates,
+            &[
+                version("source-a", "Alpha"),
+                version("source-b", "Beta"),
+            ],
+        );
+        assert_eq!(choices.len(), 2);
+        assert_eq!(choices[0].source_name, "Alpha");
+        assert_eq!(choices[0].quality_label, "3840×2160 · SDR");
+        assert_eq!(choices[0].locality, "lan");
+        assert_eq!(choices[1].quality_label, "1280×720 · SDR");
+        let public = serde_json::to_string(&choices).unwrap();
+        assert!(!public.contains("version_id"));
+        assert!(!public.contains("endpoint"));
+    }
+
+    #[test]
+    fn ask_affinity_exists_only_for_the_current_explicit_or_existing_run() {
+        assert_eq!(
+            next_playback_affinity(
+                true,
+                Some(PlaybackRunKind::Series),
+                None,
+                None,
+                "source-a",
+            ),
+            None,
+            "a one-source item must not suppress a later first duplicate prompt"
+        );
+        assert_eq!(
+            next_playback_affinity(
+                true,
+                Some(PlaybackRunKind::Series),
+                Some("source-a"),
+                None,
+                "source-a",
+            )
+            .as_deref(),
+            Some("source-a")
+        );
+        assert_eq!(
+            next_playback_affinity(
+                true,
+                Some(PlaybackRunKind::VelaPlaylist),
+                None,
+                Some("offline"),
+                "source-b",
+            )
+            .as_deref(),
+            Some("source-b"),
+            "a lone reachable fallback becomes the run's new affinity"
+        );
+        assert_eq!(
+            next_playback_affinity(true, None, Some("source-a"), None, "source-a"),
+            None,
+            "standalone Ask choices never persist in memory"
+        );
+        assert_eq!(
+            next_playback_affinity(
+                false,
+                Some(PlaybackRunKind::Series),
+                Some("source-a"),
+                Some("source-a"),
+                "source-a",
+            ),
+            None,
+            "automatic policies do not inherit Ask affinity"
+        );
+    }
+
+    #[test]
+    fn ask_source_decision_prompts_only_when_the_run_has_multiple_alternatives() {
+        let candidate = |source_id: &str| crate::selection::PlaybackCandidate {
+            source_id: source_id.to_string(),
+            version_id: format!("{source_id}-version"),
+            width: 1920,
+            height: 1080,
+            hdr: false,
+            bitrate: 10,
+            direct_play_rank: 0,
+            locality: crate::locality::EndpointLocality::Lan,
+        };
+        let duplicate = vec![candidate("source-a"), candidate("source-b")];
+        assert_eq!(
+            ask_source_decision(&duplicate, None),
+            AskSourceDecision::Prompt,
+            "the first duplicate in a run must ask"
+        );
+        assert_eq!(
+            ask_source_decision(&duplicate, Some("source-a")),
+            AskSourceDecision::UseSource("source-a".to_string()),
+            "a reachable run affinity must be reused"
+        );
+        assert_eq!(
+            ask_source_decision(&[candidate("source-b")], Some("offline")),
+            AskSourceDecision::UseSource("source-b".to_string()),
+            "one reachable fallback must be selected directly"
+        );
+        assert_eq!(
+            ask_source_decision(
+                &[candidate("source-b"), candidate("source-c")],
+                Some("offline"),
+            ),
+            AskSourceDecision::Prompt,
+            "multiple fallbacks must replace the affinity through a new prompt"
+        );
     }
 
     fn episode_context(

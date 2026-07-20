@@ -4,18 +4,22 @@
   import Icon from "$lib/Icon.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
-  import type { Item, ServerPlaylist } from "$lib/types";
+  import type { Item, PlayCommandResult, ServerPlaylist } from "$lib/types";
 
   let {
     playlist,
     refreshVersion = 0,
     posterSrc,
     onBack,
+    onManualPlay,
+    onPlaybackResult,
   }: {
     playlist: ServerPlaylist;
     refreshVersion?: number;
     posterSrc: (poster: string) => string;
     onBack: () => void;
+    onManualPlay?: () => void;
+    onPlaybackResult?: (result: PlayCommandResult) => void;
   } = $props();
 
   type Status = { text: string; failed: boolean };
@@ -64,12 +68,14 @@
     const attempt = ++playAttempt;
     playing = true;
     status = null;
+    onManualPlay?.();
     try {
-      await invoke("server_playlist_play", {
+      const result = await invoke<PlayCommandResult>("server_playlist_play", {
         key,
         startIndex: index,
         startFromBeginning: beginning,
       });
+      onPlaybackResult?.(result);
       if (attempt === playAttempt && playlist.key === key) {
         status = { text: `Playing “${item.title}”.`, failed: false };
       }

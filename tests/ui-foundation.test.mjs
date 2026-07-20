@@ -276,7 +276,21 @@ test("Player Settings exposes the four duplicate-source policies and exact prior
   assert.ok(page, "main page source is available");
   assert.match(page, />Play Version <Icon name="chevron"/);
   assert.match(page, /aria-label="Play Version"/);
-  assert.match(page, /set_merged_override/);
+  assert.match(page, /explicitSourceId/);
+  assert.match(page, /resolve_playback_source_choice/);
+  assert.match(page, /role="dialog"/);
+  assert.match(page, /aria-modal="true"/);
+  assert.match(page, /handleSourceChoiceDialogKeydown/);
+  assert.match(page, /listen<\{ requestId: string \}>\("source-choice-required"/);
+  assert.match(page, /get_playback_source_choice/);
+  assert.match(page, /if \(sourceChoiceRequest\)[\s\S]{0,180}cancelSourceChoice\(\)/);
+  assert.match(page, /async function play\([\s\S]{0,500}invalidateContinuationRun\(\)/);
+  assert.match(page, /onManualPlay=\{invalidateContinuationRun\}/);
+  assert.doesNotMatch(
+    page,
+    /playFrom[\s\S]{0,700}set_merged_override/,
+    "Ask-mode Play Version choices must go through the one-shot backend path",
+  );
 });
 
 test("merged hierarchy coordinates travel through browse and season pagination", () => {

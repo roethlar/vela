@@ -43,6 +43,24 @@ export type Item = {
 // the server/local authority chain; "beginning" overrides both and starts at 0.
 export type PlayIntent = "resume" | "beginning";
 
+export type PlaybackSourceChoice = {
+  sourceId: string;
+  sourceName: string;
+  locality: "same-machine" | "lan" | "internet";
+  qualityLabel: string;
+};
+
+export type PlaybackSourceChoiceRequest = {
+  requestId: string;
+  title: string;
+  choices: PlaybackSourceChoice[];
+};
+
+export type PlayCommandResult =
+  | { status: "started"; sessionId: string }
+  | { status: "superseded" }
+  | { status: "sourceChoiceRequired"; request: PlaybackSourceChoiceRequest };
+
 // Persisted Continue Playing policy. Missing or unknown backend values are
 // normalized to "only-tv", the product default.
 export type ContinuePlayingMode = "off" | "on" | "only-tv";

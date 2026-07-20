@@ -11,18 +11,37 @@
   import SeasonDetail from "$lib/SeasonDetail.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
-  import { detailKeyOf, type ContinuePlayingMode, type Detail, type Item, type PlaybackContinuation, type PlaylistSummary, type PlayIntent, type ServerPlaylist, type ServerPlaylistGroup } from "$lib/types";
+  import {
+    detailKeyOf,
+    type ContinuePlayingMode,
+    type Detail,
+    type Item,
+    type PlaybackContinuation,
+    type PlaybackSourceChoiceRequest,
+    type PlaylistSummary,
+    type PlayCommandResult,
+    type PlayIntent,
+    type ServerPlaylist,
+    type ServerPlaylistGroup,
+  } from "$lib/types";
 
   // Tracked timers, cleared on destroy / when superseded.
   let copyTimer: ReturnType<typeof setTimeout> | undefined;
   let pollTimer: ReturnType<typeof setTimeout> | undefined;
   let unlistenPlaybackEnded: (() => void) | undefined;
   let unlistenContinuePlaying: (() => void) | undefined;
+  let unlistenSourceChoice: (() => void) | undefined;
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     unlistenPlaybackEnded?.();
     unlistenContinuePlaying?.();
+    unlistenSourceChoice?.();
+    if (sourceChoiceRequest) {
+      void invoke("cancel_playback_source_choice", {
+        requestId: sourceChoiceRequest.requestId,
+      });
+    }
     linkGen++; // invalidate any in-flight link_poll so it won't reschedule after unmount
   });
 
@@ -329,6 +348,9 @@
     listen<PlaybackContinuation>("continue-playing", handlePlaybackContinuation).then(
       (un) => (unlistenContinuePlaying = un),
     );
+    listen<{ requestId: string }>("source-choice-required", handleSourceChoiceEvent).then(
+      (un) => (unlistenSourceChoice = un),
+    );
   });
 
   async function boot() {
@@ -568,10 +590,133 @@
   let continuationSeen = new Set<string>();
   let continuationAttempt = 0;
 
-  function resetContinuationRun() {
+  let sourceChoiceRequest = $state<PlaybackSourceChoiceRequest | null>(null);
+  let sourceChoiceBusy = $state(false);
+  let sourceChoiceDialog: HTMLDivElement | undefined = $state();
+  let sourceChoiceOnStarted: ((sessionId: string) => void) | null = null;
+  let sourceChoicePreviousFocus: HTMLElement | null = null;
+
+  function localityLabel(locality: string): string {
+    if (locality === "same-machine") return "This computer";
+    if (locality === "lan") return "Local network";
+    return "Internet";
+  }
+
+  function closeSourceChoiceUi(requestId?: string) {
+    if (requestId && sourceChoiceRequest?.requestId !== requestId) return;
+    sourceChoiceRequest = null;
+    sourceChoiceBusy = false;
+    sourceChoiceOnStarted = null;
+    const previous = sourceChoicePreviousFocus;
+    sourceChoicePreviousFocus = null;
+    if (previous?.isConnected) void tick().then(() => previous.focus());
+  }
+
+  async function presentSourceChoice(
+    request: PlaybackSourceChoiceRequest,
+    onStarted: ((sessionId: string) => void) | null = null,
+  ) {
+    if (sourceChoiceRequest?.requestId === request.requestId) {
+      if (onStarted) sourceChoiceOnStarted = onStarted;
+      return;
+    }
+    if (sourceChoiceRequest) {
+      void invoke("cancel_playback_source_choice", {
+        requestId: sourceChoiceRequest.requestId,
+      });
+    }
+    sourceChoicePreviousFocus = document.activeElement as HTMLElement | null;
+    sourceChoiceRequest = request;
+    sourceChoiceOnStarted = onStarted;
+    sourceChoiceBusy = false;
+    await tick();
+    sourceChoiceDialog?.querySelector<HTMLButtonElement>("button.choice")?.focus();
+  }
+
+  async function handlePlayCommandResult(
+    result: PlayCommandResult,
+    onStarted: ((sessionId: string) => void) | null = null,
+  ) {
+    if (result.status === "started") {
+      onStarted?.(result.sessionId);
+    } else if (result.status === "sourceChoiceRequired") {
+      await presentSourceChoice(result.request, onStarted);
+    }
+  }
+
+  async function choosePlaybackSource(sourceId: string) {
+    const request = sourceChoiceRequest;
+    if (!request || sourceChoiceBusy) return;
+    const onStarted = sourceChoiceOnStarted;
+    sourceChoiceBusy = true;
+    try {
+      const result = await invoke<PlayCommandResult>("resolve_playback_source_choice", {
+        requestId: request.requestId,
+        sourceId,
+      });
+      if (sourceChoiceRequest?.requestId !== request.requestId) return;
+      closeSourceChoiceUi(request.requestId);
+      await handlePlayCommandResult(result, onStarted);
+    } catch (error) {
+      if (sourceChoiceRequest?.requestId !== request.requestId) return;
+      closeSourceChoiceUi(request.requestId);
+      const said = `Couldn't play “${request.title}” — ${String(error)}`;
+      if (detailView) detailStatus = said;
+      else setError(said);
+    }
+  }
+
+  function cancelSourceChoice() {
+    const requestId = sourceChoiceRequest?.requestId;
+    if (!requestId || sourceChoiceBusy) return;
+    closeSourceChoiceUi(requestId);
+    void invoke("cancel_playback_source_choice", { requestId });
+  }
+
+  function handleSourceChoiceDialogKeydown(event: KeyboardEvent) {
+    if (event.key !== "Tab" || !sourceChoiceDialog) return;
+    const buttons = Array.from(
+      sourceChoiceDialog.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"),
+    );
+    if (buttons.length === 0) {
+      event.preventDefault();
+      return;
+    }
+    const current = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (event.shiftKey && current <= 0) {
+      event.preventDefault();
+      buttons.at(-1)?.focus();
+    } else if (!event.shiftKey && current === buttons.length - 1) {
+      event.preventDefault();
+      buttons[0].focus();
+    }
+  }
+
+  async function handleSourceChoiceEvent(event: { payload: { requestId: string } }) {
+    try {
+      const request = await invoke<PlaybackSourceChoiceRequest>("get_playback_source_choice", {
+        requestId: event.payload.requestId,
+      });
+      await presentSourceChoice(request);
+    } catch {
+      // The request may have expired or a newer manual play may have replaced it.
+    }
+  }
+
+  function finishPlaybackRun(sessionId: string) {
+    void invoke("finish_playback_run", { sessionId });
+  }
+
+  function invalidateContinuationRun() {
     continuationAttempt++;
     continuationSession = null;
     continuationSeen = new Set();
+  }
+
+  function resetContinuationRun() {
+    const previousSession = continuationSession;
+    invalidateContinuationRun();
+    if (previousSession) finishPlaybackRun(previousSession);
   }
 
   function changeContinuePlayingMode(mode: ContinuePlayingMode) {
@@ -588,7 +733,10 @@
     continuationSession = null;
     const attempt = ++continuationAttempt;
 
-    if (continuePlayingMode === "off") return;
+    if (continuePlayingMode === "off") {
+      finishPlaybackRun(completed.sessionId);
+      return;
+    }
 
     try {
       let next: Item | null = null;
@@ -602,23 +750,35 @@
           sessionId: completed.sessionId,
         });
       }
-      if (attempt !== continuationAttempt || !next) return;
-      if (continuationSeen.has(next.ratingKey)) return;
+      if (attempt !== continuationAttempt || !next) {
+        finishPlaybackRun(completed.sessionId);
+        return;
+      }
+      if (continuationSeen.has(next.ratingKey)) {
+        finishPlaybackRun(completed.sessionId);
+        return;
+      }
       const selectedNext = next;
-      const session = await invoke<string | null>("play_item", {
+      const result = await invoke<PlayCommandResult>("play_item", {
         item: selectedNext,
         startFromBeginning: false,
         expectedSession: completed.sessionId,
+        seriesContinuation:
+          continuePlayingMode === "only-tv" && selectedNext.mediaType === "episode",
+        explicitSourceId: null,
       });
-      if (attempt !== continuationAttempt || session === null) return;
-      continuationSeen.add(selectedNext.ratingKey);
-      continuationSession = session;
+      await handlePlayCommandResult(result, (session) => {
+        if (attempt !== continuationAttempt) return;
+        continuationSeen.add(selectedNext.ratingKey);
+        continuationSession = session;
+      });
       await refreshWatchState();
     } catch (e) {
       if (attempt === continuationAttempt) {
         setError(`Couldn't continue playing — ${String(e)}`);
         continuationSession = null;
       }
+      finishPlaybackRun(completed.sessionId);
     }
   }
 
@@ -1785,16 +1945,30 @@
     return (item.viewOffsetMs ?? 0) > 0;
   }
 
-  async function play(item: Item, intent: PlayIntent = "resume") {
+  async function play(
+    item: Item,
+    intent: PlayIntent = "resume",
+    explicitSourceId: string | null = null,
+  ) {
     // A user choice always starts a new run. The backend's expected-session
     // check independently prevents an already-awaited continuation from
     // replacing this play, including plays launched inside playlist views.
-    resetContinuationRun();
+    invalidateContinuationRun();
     try {
-      await invoke<string | null>("play_item", {
+      const seriesContinuation =
+        continuePlayingMode === "only-tv" && item.mediaType === "episode";
+      const result = await invoke<PlayCommandResult>("play_item", {
         item,
         startFromBeginning: intent === "beginning",
         expectedSession: null,
+        seriesContinuation,
+        explicitSourceId,
+      });
+      await handlePlayCommandResult(result, (sessionId) => {
+        if (seriesContinuation) {
+          continuationSeen.add(item.ratingKey);
+          continuationSession = sessionId;
+        }
       });
     } catch (e) {
       // A Play started from an open detail is reported ON that detail, which survives a
@@ -1808,27 +1982,19 @@
     }
   }
 
-  // Play a merged title from a specific backing source and remember the
-  // choice for this title (it wins over the default ranking from now on).
+  // Play a merged title from a specific backing source. The backend persists
+  // this title override in automatic modes and keeps it one-shot in Ask mode.
   async function playFrom(
     item: Item,
     b: { sourceId: string; ratingKey: string },
     intent: PlayIntent = "resume",
   ) {
     closeMenu();
-    try {
-      if (item.canonicalId) {
-        await invoke("set_merged_override", { canonicalId: item.canonicalId, sourceId: b.sourceId });
-      }
-      await play({ ...item, ratingKey: b.ratingKey, sourceId: b.sourceId }, intent);
-    } catch (e) {
-      // Only the source-preference write can land here — `play` reports its own failure
-      // and does not rethrow. Same rule either way: report on the surface the user is
-      // actually looking at (slice 4).
-      const said = `Couldn't play “${item.title}” — ${String(e)}`;
-      if (detailView) detailStatus = said;
-      else setError(said);
-    }
+    await play(
+      { ...item, ratingKey: b.ratingKey, sourceId: b.sourceId },
+      intent,
+      b.sourceId,
+    );
   }
 
   // The menu's Play entry must take `mi` as an argument BEFORE closing the
@@ -2632,9 +2798,16 @@
       refreshVersion={serverPlaylistVersion}
       {posterSrc}
       onBack={openPlaylists}
+      onManualPlay={invalidateContinuationRun}
+      onPlaybackResult={(result) => void handlePlayCommandResult(result)}
     />
   {:else if mode === "playlists"}
-    <PlaylistsView sourceVersion={playlistVersion} {posterSrc} />
+    <PlaylistsView
+      sourceVersion={playlistVersion}
+      {posterSrc}
+      onManualPlay={invalidateContinuationRun}
+      onPlaybackResult={(result) => void handlePlayCommandResult(result)}
+    />
   {:else if !authenticated}
     <div class="empty-center">
       <EmptyState
@@ -2812,7 +2985,11 @@
       // Menus first (topmost surfaces), then the detail —
       // Escape with the scan menu open must not close a detail underneath it
       // (codex code review r1, finding 4).
-      if (menu && versionMenuOpen) versionMenuOpen = false;
+      if (sourceChoiceRequest) {
+        e.preventDefault();
+        cancelSourceChoice();
+      }
+      else if (menu && versionMenuOpen) versionMenuOpen = false;
       else if (menu && addMenuOpen) closeAddMenu();
       else if (menu) closeMenu();
       else if (sectionMenu) closeSectionMenu();
@@ -2820,6 +2997,51 @@
     }
   }}
 />
+
+{#if sourceChoiceRequest}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div
+    class="sourcechoicebackdrop"
+    role="presentation"
+    onclick={(event) => {
+      if (event.target === event.currentTarget) cancelSourceChoice();
+    }}
+  >
+    <div
+      class="sourcechoicedialog"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="source-choice-title"
+      aria-describedby="source-choice-help"
+      tabindex="-1"
+      bind:this={sourceChoiceDialog}
+      onkeydown={handleSourceChoiceDialogKeydown}
+    >
+      <p class="eyebrow">Ask Every Time</p>
+      <h2 id="source-choice-title">Choose a source for “{sourceChoiceRequest.title}”</h2>
+      <p id="source-choice-help" class="muted">
+        Vela will use the best available version on the source you choose.
+      </p>
+      <div class="sourcechoices">
+        {#each sourceChoiceRequest.choices as choice (choice.sourceId)}
+          <button
+            class="choice"
+            disabled={sourceChoiceBusy}
+            onclick={() => choosePlaybackSource(choice.sourceId)}
+          >
+            <span class="choicename">{choice.sourceName}</span>
+            <span class="choicefacts">
+              {localityLabel(choice.locality)} · {choice.qualityLabel}
+            </span>
+          </button>
+        {/each}
+      </div>
+      <div class="sourcechoiceactions">
+        <button disabled={sourceChoiceBusy} onclick={cancelSourceChoice}>Cancel</button>
+      </div>
+    </div>
+  </div>
+{/if}
 
 {#if menu}
   {@const mi = menu.item}
@@ -3665,6 +3887,71 @@
   }
   .addstatus.addfailure {
     color: var(--danger-text);
+  }
+
+  .sourcechoicebackdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 60;
+    display: grid;
+    place-items: center;
+    padding: 1rem;
+    background: rgba(0, 0, 0, 0.6);
+    animation: vela-fade 0.16s var(--ease);
+  }
+  .sourcechoicedialog {
+    width: min(34rem, 100%);
+    max-height: calc(100vh - 2rem);
+    overflow-y: auto;
+    padding: 1.25rem;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--surface);
+    box-shadow: 0 20px 60px var(--shadow-lg);
+    animation: vela-pop 0.18s var(--ease);
+  }
+  .sourcechoicedialog h2 {
+    margin: 0.2rem 0 0.35rem;
+    font-size: 1.2rem;
+  }
+  .sourcechoices {
+    display: grid;
+    gap: 0.55rem;
+    margin-top: 1rem;
+  }
+  .sourcechoices .choice {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.2rem;
+    width: 100%;
+    padding: 0.8rem 0.9rem;
+    color: var(--text);
+    text-align: left;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+    border-radius: 8px;
+    cursor: pointer;
+  }
+  .sourcechoices .choice:hover,
+  .sourcechoices .choice:focus-visible {
+    border-color: var(--accent);
+  }
+  .sourcechoices .choice:disabled {
+    opacity: 0.55;
+    cursor: default;
+  }
+  .choicename {
+    font-weight: 650;
+  }
+  .choicefacts {
+    color: var(--text-muted);
+    font-size: 0.82rem;
+  }
+  .sourcechoiceactions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 1rem;
   }
 
 </style>

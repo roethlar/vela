@@ -76,6 +76,12 @@ pub struct AppState {
     /// asks for the next episode, so this in-memory copy preserves the merged
     /// hierarchy without exposing it in the id-only completion event.
     pub(crate) active_playback_item: AsyncMutex<Option<(String, source::ItemDto)>>,
+    /// Exact in-memory Ask-mode run state. Affinity is tied to one active
+    /// series/Vela-playlist session and is never persisted.
+    pub(crate) playback_run: AsyncMutex<Option<commands::PlaybackRunState>>,
+    /// Bounded, expiring source-choice requests. Resolved stream URLs,
+    /// provider sessions, and auth headers never enter this store or its DTOs.
+    pub(crate) playback_choices: AsyncMutex<commands::PlaybackChoiceRequests>,
     /// Window-state observer for the latest successfully launched mpv session.
     /// Exact automatic replacements may snapshot it; manual plays never do.
     pub(crate) playback_window_session: Mutex<Option<commands::PlaybackWindowSession>>,
@@ -127,6 +133,8 @@ pub fn run() {
         playlist_cursor: AsyncMutex::new(None),
         active_playback_session: AsyncMutex::new(None),
         active_playback_item: AsyncMutex::new(None),
+        playback_run: AsyncMutex::new(None),
+        playback_choices: AsyncMutex::new(Default::default()),
         playback_window_session: Mutex::new(None),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
@@ -277,6 +285,10 @@ pub fn run() {
             commands::get_person_items,
             commands::set_watched,
             commands::play_item,
+            commands::get_playback_source_choice,
+            commands::resolve_playback_source_choice,
+            commands::cancel_playback_source_choice,
+            commands::finish_playback_run,
             commands::next_episode,
             commands::get_server_playlists,
             commands::get_server_playlist_items,

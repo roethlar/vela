@@ -4,14 +4,23 @@
   import Icon from "$lib/Icon.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
-  import type { Playlist, PlaylistEntry, PlaylistSummary } from "$lib/types";
+  import type {
+    Playlist,
+    PlaylistEntry,
+    PlaylistSummary,
+    PlayCommandResult,
+  } from "$lib/types";
 
   let {
     sourceVersion = 0,
     posterSrc,
+    onManualPlay,
+    onPlaybackResult,
   }: {
     sourceVersion?: number;
     posterSrc: (poster: string) => string;
+    onManualPlay?: () => void;
+    onPlaybackResult?: (result: PlayCommandResult) => void;
   } = $props();
 
   type Status = { text: string; failed: boolean };
@@ -126,6 +135,7 @@
     const attempt = ++detailActionAttempt;
     detailBusy = true;
     detailStatus = null;
+    onManualPlay?.();
     try {
       await invoke(command, args);
       if (attempt !== detailActionAttempt || selectedId !== id) return;
@@ -199,13 +209,20 @@
     detailBusy = true;
     detailStatus = null;
     try {
-      await invoke("playlist_play", {
+      const result = await invoke<PlayCommandResult>("playlist_play", {
         id,
         startIndex: index,
         startFromBeginning: beginning,
       });
+      onPlaybackResult?.(result);
       if (attempt === detailActionAttempt && selectedId === id) {
-        detailStatus = { text: `Playing “${entry.item.title}”.`, failed: false };
+        detailStatus = {
+          text:
+            result.status === "sourceChoiceRequired"
+              ? `Choose a source for “${entry.item.title}”.`
+              : `Playing “${entry.item.title}”.`,
+          failed: false,
+        };
       }
     } catch (error) {
       if (attempt === detailActionAttempt && selectedId === id) {

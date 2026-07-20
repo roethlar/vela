@@ -79,3 +79,49 @@ test("non-x86 Windows cannot select an x86-64-v3 mpv build", async () => {
   assert.ok(fallback, "the non-x86 Windows fallback must remain explicit");
   assert.match(fallback, /^\s*false\s*$/);
 });
+
+test("Ask source choices stay one-shot, session-safe, and credential-free", async () => {
+  const commands = await readFile(
+    path.join(repoRoot, "src-tauri", "src", "commands.rs"),
+    "utf8",
+  );
+  const lib = await readFile(path.join(repoRoot, "src-tauri", "src", "lib.rs"), "utf8");
+
+  const publicChoice = commands.match(
+    /pub struct PlaybackSourceChoiceDto \{(?<body>[\s\S]*?)\n\}/,
+  )?.groups?.body;
+  assert.ok(publicChoice, "the public source-choice DTO must remain explicit");
+  assert.match(publicChoice, /source_id/);
+  assert.match(publicChoice, /source_name/);
+  assert.match(publicChoice, /locality/);
+  assert.match(publicChoice, /quality_label/);
+  assert.doesNotMatch(publicChoice, /token|url|endpoint|header|session/i);
+
+  const select = commands.match(
+    /async fn select_playback_version\((?<body>[\s\S]*?)\n\}\n\nstruct PlayLaunchRequest/,
+  )?.groups?.body;
+  assert.ok(select, "the shared playback selector must remain available");
+  assert.match(select, /policy != crate::selection::PlaybackSourcePolicy::Ask/);
+  assert.match(select, /if server_owned \{\s*vec!\[crate::source::backing_ref_of\(item\)\]/);
+
+  const launchPrefix = commands.match(
+    /async fn play_by_key_locked\((?<body>[\s\S]*?)let prior_affinity =/,
+  )?.groups?.body;
+  assert.ok(launchPrefix, "the serialized playback launch boundary must remain explicit");
+  assert.doesNotMatch(
+    launchPrefix,
+    /playback_run\.lock\(\)\.await\s*=\s*None|playlist_cursor\.lock\(\)\.await\s*=\s*None/,
+    "opening a cancellable prompt must not erase the current playback run",
+  );
+
+  const resolve = commands.match(
+    /pub async fn resolve_playback_source_choice\((?<body>[\s\S]*?)\n\}\n\n#\[tauri::command\]\npub async fn cancel_playback_source_choice/,
+  )?.groups?.body;
+  assert.ok(resolve, "the source-choice resolver must remain registered");
+  assert.match(resolve, /\.take_at\(&request_id, Instant::now\(\)\)/);
+  assert.match(resolve, /persist_explicit_choice: false/);
+  assert.match(lib, /commands::get_playback_source_choice/);
+  assert.match(lib, /commands::resolve_playback_source_choice/);
+  assert.match(lib, /commands::cancel_playback_source_choice/);
+  assert.match(lib, /commands::finish_playback_run/);
+});
