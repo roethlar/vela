@@ -26,9 +26,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   never implemented; same-kind Plex ties still use registry order unless a title
   has the older context-menu override. The owner has now settled four modes,
   automatic display compatibility, sequence-scoped Ask behavior, and title-level
-  watched fan-out. The draft implementation and verification design is
-  `.agents/plans/playback-source-policy.md`; one owner-directed Claude Fable
-  openreview is its approval gate.
+  watched fan-out. The implementation and verification design in
+  `.agents/plans/playback-source-policy.md` is owner-approved: one owner-directed
+  Claude Fable max-effort openreview returned clean over exact range
+  `ad27cf0..13405dc` with no findings.
   Durable evidence:
   `.agents/plans/multi-plex.md`.
 
@@ -121,12 +122,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **NEXT: one Claude Fable openreview of the playback-source-policy plan.** A
-  clean verdict authorizes implementation; any finding returns to the owner.
-  After a clean plan gate, implement the five guarded slices in
-  `.agents/plans/playback-source-policy.md`, run canonical verification, and
-  request the required external code review. The accepted multi-Plex core
-  review does not cover this follow-up.
+- **NEXT: implement Slice 1 of the approved playback-source-policy plan.** Add
+  the persisted four-mode setting, explicit inline help, display diagnostics
+  and override foundation, native display adapters, mpv display observation,
+  locality classification, and pure ranking guards. The exact approved design
+  and remaining slices live in `.agents/plans/playback-source-policy.md`.
 
 - **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
@@ -369,8 +369,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/ui-embellishments.md` (COMPLETE at 0.1.56 — v1.0.0 item 1)
 - `.agents/plans/multi-plex.md` (CORE COMPLETE — playback policy moved to the
   plan below)
-- `.agents/plans/playback-source-policy.md` (DRAFT — owner-settled behavior;
-  one Fable openreview is the implementation gate)
+- `.agents/plans/playback-source-policy.md` (APPROVED — one Fable max-effort
+  openreview clean over `ad27cf0..13405dc`; Slice 1 next)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

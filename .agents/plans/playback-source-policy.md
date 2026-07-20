@@ -1,8 +1,15 @@
 # Plan: duplicate-copy playback policy and title-level watched state
 
-Status: **DRAFT — owner settled the product behavior on 2026-07-19. One
-Claude Fable `openreview` is the approval gate: a clean verdict authorizes
-implementation; any finding returns to the owner before code.**
+Status: **APPROVED FOR IMPLEMENTATION — owner settled the product behavior on
+2026-07-19 and made one clean Claude Fable `openreview` the approval gate. The
+gate passed over exact range `ad27cf0..13405dc`; implementation is authorized.**
+
+## Plan review
+
+`openreview claude` (`claude-fable-5` @ max, competitive) over
+`ad27cf01ac9183ee8d2f5d713ea5fb535a895b93..13405dc16dca4c48808ace805674f0013161b53e`:
+no material issue. The schema-valid one-shot verdict returned `clean` with the
+exact base/head pair and an empty findings array on 2026-07-19.
 
 ## Goal
 
