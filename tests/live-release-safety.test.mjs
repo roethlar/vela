@@ -26,6 +26,15 @@ test("every live Plex completion fixture is registered clean before playback", (
   );
 });
 
+test("the live Plex server is started before Vela receives its saved connection", () => {
+  const seed = sourceSlice("async seed({ configRoot })", "async cleanup()");
+  assert.ok(
+    seed.indexOf('control("/plex/start")') >= 0 &&
+      seed.indexOf('control("/plex/start")') < seed.indexOf("seedConfig(configRoot"),
+    "Plex must be serving before the app launches and performs its initial library load",
+  );
+});
+
 test("live Plex cleanup restores every registered item and verifies zero state", () => {
   const cleanup = sourceSlice("async function restoreTargetWatchState", "export default");
   assert.match(cleanup, /for \(const \[ratingKey, title\] of restoreItems\)/);

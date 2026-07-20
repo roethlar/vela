@@ -568,17 +568,37 @@ async function roundTripWatchState(driver, movieSection) {
   assert.equal(restored?.viewOffsetMs ?? 0, 0, `${TARGET} must have zero Plex progress after the round trip`);
 }
 
-function restoreUrl(ratingKey) {
+function plexUrl(pathname) {
   const plex = creds.plex;
   const host = plex.last_server_host;
   const bracketed = host.includes(":") && !host.startsWith("[") ? `[${host}]` : host;
   const port = Number(plex.last_server_port ?? 32400);
-  assert.equal(plex.last_server_scheme, "https", "live Plex cleanup requires saved HTTPS");
+  assert.equal(plex.last_server_scheme, "https", "live Plex verification requires saved HTTPS");
   assert.ok(Number.isInteger(port) && port > 0 && port <= 65535, "saved Plex port is valid");
-  const url = new URL(`https://${bracketed}:${port}/:/unscrobble`);
+  return new URL(pathname, `https://${bracketed}:${port}`);
+}
+
+function restoreUrl(ratingKey) {
+  const url = plexUrl("/:/unscrobble");
   url.searchParams.set("identifier", "com.plexapp.plugins.library");
   url.searchParams.set("key", ratingKey);
   return url;
+}
+
+async function waitForPlexReady() {
+  const headers = { "X-Plex-Token": creds.plex.auth_token };
+  await pollUntil(
+    async () => {
+      try {
+        const response = await fetch(plexUrl("/identity"), { method: "GET", headers });
+        return response.ok ? true : null;
+      } catch {
+        return null;
+      }
+    },
+    "the restored Plex server to accept HTTPS requests",
+    { timeoutMs: 90000, intervalMs: 1000 },
+  );
 }
 
 async function restoreTargetWatchState(driver = null, fixtures = null) {
@@ -642,6 +662,8 @@ export default {
     if (!fs.existsSync(CREDS)) throw new Error(`live: no credentials at ${CREDS}`);
     creds = JSON.parse(fs.readFileSync(CREDS, "utf8"));
     if (!creds.plex) throw new Error("live: no saved https Plex server in the Vela config");
+    await control("/plex/start");
+    await waitForPlexReady();
     // Plex is restored from TOP-LEVEL config, not from `sources` (lib.rs).
     seedConfig(configRoot, [], {
       ...creds.plex,
