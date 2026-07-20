@@ -94,16 +94,191 @@ jobs:
           releaseName: ${{ startsWith(github.ref, 'refs/tags/') && format('Vela {0}', github.ref_name) || '' }}
           releaseDraft: true
 
-      - name: Upload bundles as workflow artifacts
+      - name: Require the universal macOS DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          compgen -G '${{ matrix.bundle_dir }}/dmg/*.dmg' >/dev/null || {
+            echo 'The universal macOS DMG is missing.' >&2
+            exit 1
+          }
+
+      - name: Require every Linux bundle
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          for pattern in \
+            '${{ matrix.bundle_dir }}/appimage/*.AppImage' \
+            '${{ matrix.bundle_dir }}/deb/*.deb' \
+            '${{ matrix.bundle_dir }}/rpm/*.rpm'
+          do
+            compgen -G "$pattern" >/dev/null || {
+              echo "Required Linux artifact is missing: $pattern" >&2
+              exit 1
+            }
+          done
+
+      - name: Require both Windows installers
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          @('msi/*.msi', 'nsis/*-setup.exe') | ForEach-Object {
+            $pattern = Join-Path '${{ matrix.bundle_dir }}' $_
+            if (-not (Get-ChildItem -Path $pattern -ErrorAction SilentlyContinue)) {
+              throw "Required Windows artifact is missing: $pattern"
+            }
+          }
+
+      - name: Upload the macOS bundle
+        if: runner.os == 'macOS'
         uses: actions/upload-artifact@v7
         with:
-          name: vela-${{ matrix.os }}
-          if-no-files-found: ignore
+          name: vela-macos
+          if-no-files-found: error
+          path: ${{ matrix.bundle_dir }}/dmg/*.dmg
+
+      - name: Upload the Linux bundles
+        if: runner.os == 'Linux'
+        uses: actions/upload-artifact@v7
+        with:
+          name: vela-linux
+          if-no-files-found: error
           path: |
-            ${{ matrix.bundle_dir }}/dmg/*.dmg
-            ${{ matrix.bundle_dir }}/macos/*.app
             ${{ matrix.bundle_dir }}/appimage/*.AppImage
             ${{ matrix.bundle_dir }}/deb/*.deb
             ${{ matrix.bundle_dir }}/rpm/*.rpm
+
+      - name: Upload the Windows installers
+        if: runner.os == 'Windows'
+        uses: actions/upload-artifact@v7
+        with:
+          name: vela-windows
+          if-no-files-found: error
+          path: |
             ${{ matrix.bundle_dir }}/msi/*.msi
             ${{ matrix.bundle_dir }}/nsis/*-setup.exe
+
+  arch:
+    name: Arch package
+    needs: npm-audit
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+    steps:
+      - name: Install Arch build dependencies
+        run: |
+          pacman -Syu --noconfirm \
+            git \
+            hicolor-icon-theme \
+            libappindicator-gtk3 \
+            librsvg \
+            libsoup3 \
+            mpv \
+            patchelf \
+            rustup \
+            webkit2gtk-4.1
+
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .node-version
+          package-manager-cache: false
+
+      - name: Activate pinned npm
+        run: npm install --global npm@12.0.1
+
+      - name: Prepare non-root package builder
+        run: |
+          useradd --create-home vela-builder
+          chown -R vela-builder:vela-builder "$GITHUB_WORKSPACE"
+
+      - name: Build Arch package
+        shell: bash
+        run: |
+          runuser -u vela-builder -- env \
+            HOME=/home/vela-builder \
+            GITHUB_WORKSPACE="$GITHUB_WORKSPACE" \
+            PATH="$PATH" \
+            bash -c '
+              set -euo pipefail
+              export PATH="$HOME/.cargo/bin:$PATH"
+              cd "$GITHUB_WORKSPACE"
+              rustup default stable
+              node scripts/check-js-toolchain.mjs
+              npm ci
+              npm run build:arch
+            '
+
+      - name: Require the Arch package
+        shell: bash
+        run: |
+          compgen -G 'packaging/arch/*.pkg.tar.zst' >/dev/null || {
+            echo 'The Arch package is missing.' >&2
+            exit 1
+          }
+
+      - name: Upload the Arch package
+        uses: actions/upload-artifact@v7
+        with:
+          name: vela-arch
+          if-no-files-found: error
+          path: packaging/arch/*.pkg.tar.zst
+
+  inventory:
+    name: Verify release inventory
+    needs: [bundle, arch]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: artifacts
+
+      - name: Require every promised artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          require_one() {
+            label="$1"
+            root="$2"
+            pattern="$3"
+            find "$root" -maxdepth 1 -type f -name "$pattern" -print -quit |
+              grep -q . || {
+                echo "Missing release artifact: $label" >&2
+                exit 1
+              }
+          }
+
+          require_one 'universal macOS DMG' artifacts/vela-macos '*.dmg'
+          require_one 'Linux AppImage' artifacts/vela-linux '*.AppImage'
+          require_one 'Debian package' artifacts/vela-linux '*.deb'
+          require_one 'RPM package' artifacts/vela-linux '*.rpm'
+          require_one 'Windows MSI' artifacts/vela-windows '*.msi'
+          require_one 'Windows NSIS installer' artifacts/vela-windows '*-setup.exe'
+          require_one 'Arch package' artifacts/vela-arch '*.pkg.tar.zst'
+
+          while IFS= read -r -d '' file; do
+            hash="$(sha256sum "$file" | cut -d ' ' -f 1)"
+            printf '%s  %s\n' "$hash" "$(basename "$file")"
+          done < <(find artifacts -type f -print0 | sort -z) > artifacts/SHA256SUMS
+
+      - name: Upload checksums
+        uses: actions/upload-artifact@v7
+        with:
+          name: vela-sha256sums
+          if-no-files-found: error
+          path: artifacts/SHA256SUMS
+
+      - name: Attach Arch package and checksums to tagged draft
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          gh release upload "$GITHUB_REF_NAME" \
+            artifacts/vela-arch/*.pkg.tar.zst \
+            artifacts/SHA256SUMS \
+            --clobber
