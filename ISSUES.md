@@ -1,17 +1,17 @@
 # Issue Queue
 
-## In Progress - Owner-Reported (2026-07-18)
-
-Observed during live use and code-traced 2026-07-18; implementation status is
-recorded per item below.
-- Multi-Plex core is merged at `ad27cf0`: each linked account/machine has an
-  independent stable source identity, credentials, machine pin, Settings row,
-  removal path, and merged-title backing. The remaining follow-up is the
-  user-facing duplicate-copy playback policy and title-level watched fan-out in
-  `.agents/plans/playback-source-policy.md`; current same-kind ties still use
-  registry order unless a Play Version override exists.
-
 ## Resolved - Owner-Reported (2026-07-18)
+
+- Duplicate copies now use the explicit Player setting chosen by the user:
+  Prefer Best, Prefer Compatible, Prefer Fastest Source, or Ask Every Time.
+  Play Version supplies the documented automatic-mode override; Ask retains a
+  choice only for the current Vela playlist or TV-continuation run; server
+  playlists remain owner-bound. Manual watch edits and exact natural completion
+  independently update every currently configured title backing, with safe
+  partial-failure reporting and no offline queue. Implemented under
+  `.agents/plans/playback-source-policy.md`; focused two-server production E2E
+  and independent regression mutations pass. Final release validation is the
+  plan's remaining integration gate.
 
 - Continue Watching missed a newly eligible next episode until manual Refresh
   because the automatic post-playback refresh ran before the clean-EOF server

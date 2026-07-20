@@ -120,6 +120,51 @@ Tab trapping, focus entry/restore, Escape cancellation, event lookup, all manual
 entry invalidation, and the explicit Play Version route. Every mutation failed
 its intended assertion, was restored to committed bytes, and reran green.
 
+### Slice 4 — complete
+
+Implementation `3391986` changes manual played/unplayed mutation from one
+display-face key to the full immutable title backing set. It deduplicates every
+configured `(source_id, raw_key)`, resolves all routes before awaiting, releases
+registry/config locks, and calls every target concurrently. The result contains
+only successful/failed counts and safe source names. Partial success keeps the
+successful title state and displays a neutral warning; zero success alone
+restores Vela's local curate-before-network mutation.
+
+Exact clean EOF captures the launched item's backing set in the backend-owned
+completion record and performs the same fan-out once. Resume/progress check-ins
+remain selected-source-only. The dispatcher retains the more specific approved
+clean-EOF ordering: local curation and sequence continuation/release occur
+before the best-effort server fan-out, then the authoritative Home refresh runs
+after that fan-out settles. This prevents network latency from delaying the
+next item while preventing a stale pre-mutation repaint.
+
+Local targeted checks pass (32 frontend/static guards, 205 Rust tests). Ten
+independent mutations proved backing deduplication, concurrent execution,
+credential-safe failures, partial-success behavior, zero-success rollback,
+full-item frontend IPC, neutral partial UI, immutable exact-session completion
+backings, and the required continuation/fan-out/refresh ordering. Each mutation
+failed its intended assertion, was restored to committed bytes, and reran green.
+
+### Slice 5 — integration coverage complete; release gates in progress
+
+Integration `62133b3` adds a hermetic two-server duplicate fixture with distinct
+quality/locality, provider versions, and merged hierarchy. It proves Best,
+Compatible, Fastest, persistent and one-shot Play Version behavior, Ask prompt
+lifetime and run affinity, manual and clean-EOF all-backing watch updates, and
+owner loss during a server-playlist run. Safe all-source failure expectation
+`c07abc8` aligns the older page-failure scenario with the credential-safe
+result contract.
+
+Eight independent production E2E mutations each failed the intended assertion:
+Compatible and Fastest falling back to Best, disabled override and Ask paths,
+lost merged hierarchy backings, face-only manual and clean-EOF watch mutation,
+and treating server-playlist owner loss as normal sequence exhaustion. After
+exact restoration, all affected scenarios passed. The full Linux suite passed
+30 of 31 before the older page-failure expectation was corrected; that scenario
+then passed alone. A final fresh complete run remains required after the version
+bump. On 2026-07-19 the owner explicitly ended further Fable reviews after the
+clean one-pass plan review; no implementation Fable review is to be run.
+
 ## Goal
 
 When the same logical video exists on more than one configured media server,
@@ -368,9 +413,10 @@ credentials. A partial result refreshes the merged surface and displays a
 non-destructive warning.
 
 Carry the immutable backing identity set in `PlaybackCompletion`. On exact
-natural EOF, the dispatcher performs the same best-effort played fan-out before
-its authoritative Home refresh and before successor repaint. Quit, error,
-replaced, stale-session, and partial playback paths do not fan out played state.
+natural EOF, the dispatcher releases or starts eligible sequence continuation
+before the same best-effort played fan-out, then performs its authoritative Home
+refresh after fan-out settles. Quit, error, replaced, stale-session, and partial
+playback paths do not fan out played state.
 
 ## Implementation slices
 
@@ -396,8 +442,9 @@ the committed bytes, and rerunning green.
    fixture with distinct media versions/localities and merged hierarchy. Prove
    all four policies, override precedence, Ask session lifetime/re-prompt,
    offline server playlist behavior, and all-backing watched fan-out. Update
-   README/ISSUES, bump once, run the canonical suite plus fresh Linux real-app
-   E2E, then run the required Claude `codereview` over the complete code range.
+   README/ISSUES, bump once, and run the canonical suite plus fresh Linux
+   real-app E2E. The previously planned Fable implementation review was
+   withdrawn by the owner after the clean one-pass plan review.
 
 ## Guard matrix
 

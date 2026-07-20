@@ -47,7 +47,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   exact TV/Vela-playlist run affinity and missing-copy re-prompt, while server
   playlists remain owner-bound. Canonical local gates, every independent
   mutation proof, and the byte-identical fresh Linux real-app suite pass
-  (30/30).
+  (30/30). Slice 4 is complete at `3391986`: manual watch edits and exact clean
+  EOF fan out concurrently across every configured title backing, partial
+  success is non-destructive and credential-safe, zero success alone restores
+  local curation, and resume/progress remains selected-source-only. Integration
+  `62133b3` plus safe-error correction `c07abc8` cover the four policies,
+  overrides, Ask run lifetime, merged hierarchy, both watch paths, and offline
+  server-playlist ownership in the two-server Linux fixture. All focused runs
+  and eight independent production mutations pass. Slice 5's docs/version and
+  fresh full validation remain; the owner explicitly ended further Fable
+  reviews after the clean one-pass plan review.
   Durable evidence: `.agents/plans/multi-plex.md` and
   `.agents/plans/playback-source-policy.md`.
 
@@ -140,11 +149,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **NEXT: implement Slice 4 of the approved playback-source-policy plan.** Fan
-  manual watched/unwatched and exact clean-EOF played state out to every title
-  backing, preserve selected-source-only resume/check-ins, report partial
-  success, and roll local curation back only when every backing fails. The exact
-  approved design and remaining slices live in
+- **NEXT: finish Slice 5 of the approved playback-source-policy plan.** Bump the
+  version once, run all canonical local gates, and run a byte-identical fresh
+  Linux real-app suite. Do not run another Fable review. The exact approved
+  design and evidence live in
   `.agents/plans/playback-source-policy.md`.
 
 - **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
@@ -390,7 +398,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   plan below)
 - `.agents/plans/playback-source-policy.md` (APPROVED — one Fable max-effort
   openreview clean over `ad27cf0..13405dc`; Slice 1 complete at
-  `c7ac901`/`cadbbb0`, Slice 2 next)
+  `c7ac901`/`cadbbb0`, Slice 2 at `7d9a00e`, Slice 3 at
+  `7720d2a`/`a749974`/`b4b702b`, Slice 4 at `3391986`, and final integration
+  coverage at `62133b3`/`c07abc8`; Slice 5 validation in progress, with further
+  Fable review withdrawn by the owner)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)

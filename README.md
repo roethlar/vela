@@ -25,8 +25,9 @@ Emby currently ships as an experimental sibling of the Jellyfin integration.
   platform-aware output defaults for HDR passthrough on Linux, macOS, and
   Windows.
 - **One place to browse.** Search or browse individual sources, or use the
-  deduplicated All view to see titles across servers and choose a backing source
-  when more than one has the same media.
+  deduplicated All view to see titles across servers. When copies exist on more
+  than one server, Vela can choose by quality, display compatibility, or source
+  locality; ask each time; or honor a title's manual **Play Version** choice.
 - **Continue where you left off.** A media-first Continue Watching cover-flow
   combines server resume data with Vela's recent plays. Resume, restart, remove,
   or mark watched from the item menu.
@@ -123,6 +124,29 @@ Vela launches mpv as a separate process and tracks it through mpv's JSON IPC.
 Progress and completion are reported back through Plex timelines or
 Jellyfin/Emby playback check-ins, allowing server-side resume across sessions.
 
+When the same title exists on multiple connected servers, Settings → Player
+offers four source policies:
+
+- **Prefer Best** ranks resolution first, then HDR within that resolution, then
+  bitrate. A 4K SDR copy therefore beats a 1080p HDR copy.
+- **Prefer Compatible** favors versions at or below the playback display's
+  detected resolution and matching its current HDR state. Resolution and HDR
+  can be overridden independently when native detection is unavailable or
+  wrong.
+- **Prefer Fastest Source** chooses this machine, then the local network, then
+  the internet, using Prefer Best to break ties within a locality tier.
+- **Ask Every Time** prompts for every standalone duplicate play. During one
+  Vela playlist or TV-continuation run, the first choice is reused until that
+  server lacks an item, when Vela asks again. Server-owned playlists never move
+  to another server: if their owner goes offline, playback stops.
+
+**Play Version** in a title's menu is a persistent per-title server override in
+the three automatic modes. In Ask Every Time it applies only to that play and
+is not saved. Resume position remains specific to the copy being played, while
+manual watched/unwatched changes and natural completion update every currently
+connected copy of the title. Updates are best-effort and are not queued for an
+offline server.
+
 By default Vela uses a predictable `--no-config` mpv profile. Settings → Player
 can opt into your own `mpv.conf` or append custom mpv options; those settings can
 also override Vela's HDR defaults or prevent playback, so change them
@@ -163,11 +187,8 @@ a manual edit of `config.json`.
 
 ## Known limitations
 
-- Only one Plex machine can be connected at a time. Multiple Jellyfin and Emby
-  connections are supported.
-- Media-version selection is automatic and heuristic: Vela favors candidates
-  that look suitable for direct play, then HDR, resolution, and bitrate. There
-  is no manual version picker yet.
+- Each Plex link selects one server machine. Additional Plex, Jellyfin, and Emby
+  connections can be added as separate sources.
 - Emby remains experimental until it receives live-server integration testing.
 - HDR fidelity ultimately depends on mpv, its GPU backend, the display, and the
   operating system's color-management path.
