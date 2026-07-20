@@ -100,10 +100,12 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
   validation used checksum-verified Node 26.5.0, npm 12.0.1, and Rust 1.89 in
   task-isolated temporary locations, then the host's stable Rust for rolling
   checks.
-- With owner approval, the unsigned 0.1.62 NSIS package replaced Vela 0.1.37
-  in place. The current per-user installation is
-  `C:\Users\michael\AppData\Local\Vela\Vela.exe`; both its file metadata and
-  the uninstall registration report 0.1.62.
+- With owner approval, the checksum-verified unsigned 1.0.0 NSIS package
+  replaced Vela 0.1.62 in place on 2026-07-20. The current per-user
+  installation is `C:\Users\michael\AppData\Local\Vela\Vela.exe`; the
+  installer exited successfully, and both file metadata and the uninstall
+  registration report 1.0.0. Vela was not running before the silent upgrade,
+  so no process needed to be stopped or relaunched.
 
 ## Linux VM (E2E host)
 

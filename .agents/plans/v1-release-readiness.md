@@ -1,10 +1,11 @@
 # Plan: Vela 1.0 release readiness and publication
 
-Status: **APPROVED — the owner directed the agent on 2026-07-20 to handle all
-open release items, create the release, and publish it with `gh`.** This executes
-the already-approved 2026-07-15 release decisions: unsigned native binaries,
-an Arch artifact suitable for AUR, fail-closed artifact collection, experimental
-Emby labeling, and disclosure of the accepted queued watch-edit race.
+Status: **COMPLETE — Vela 1.0.0 was published on 2026-07-20.** The owner
+directed the agent to handle all open release items, create the release, and
+publish it with `gh`. This executed the already-approved 2026-07-15 release
+decisions: unsigned native binaries, an Arch artifact suitable for AUR,
+fail-closed artifact collection, experimental Emby labeling, and disclosure of
+the accepted queued watch-edit race.
 
 ## Goal
 
@@ -114,3 +115,81 @@ and published release URL in this plan and `.agents/state.md`. The release is
 complete only when the repository is clean, every configured remote points to
 the intended commit/tag, GitHub reports the release published, and no live
 fixture or service was left mutated.
+
+### Landed release slices
+
+- Approved plan: `88d19d1`.
+- macOS Bash 3 native-wrapper repair: `404c5ec`.
+- Fail-closed native/Arch release workflow: `056679d`; nested artifact
+  inventory repair: `bb3ba1b`; self-excluding checksum manifest: `06df681`;
+  explicit least-privilege tagged bundle permission for future tags:
+  `9f97355`.
+- Safe real-Plex completion coverage: `1dbf8da`; deterministic Plex startup
+  readiness: `954a98e`.
+- Release notes/docs: `a57a5ad` and `8f29aa0`; 1.0.0 version surfaces:
+  `d2ebb54`; safe screenshots and launch graphic: `cf0503b`.
+- Every new release/live/build guard was independently regressed and failed
+  for its intended reason before restoration: Bash 3 empty arrays, missing
+  handling, Arch removal, all seven artifact classes, nested inventory,
+  live-fixture registration/startup/restore/refresh behaviors, checksum
+  self-inclusion, and tagged bundle write permission.
+
+### Exact verification
+
+- Candidate/tag commit: `06df6812d7fe81185213778669fcaa87680ac83b`.
+  Exact GitHub CI passed in
+  `https://github.com/roethlar/vela/actions/runs/29725629732`; the successful
+  exact-commit release rehearsal, including non-root Arch and all seven native
+  artifact assertions, is
+  `https://github.com/roethlar/vela/actions/runs/29725629650`.
+- macOS canonical verification passed: exact Node/npm, clean install and zero
+  npm vulnerabilities, frontend checks/build, Rust 1.89 and stable checks,
+  warning-free clippy, 205 Rust tests, and zero Rust vulnerabilities. The local
+  universal DMG verified, reported version 1.0.0, and contained `x86_64` and
+  `arm64` binaries.
+- The exact Linux VM run passed all 31 real-app scenarios. Native ARM64 deb and
+  rpm bundles built; the deb reported package `vela`, version 1.0.0, and
+  architecture `arm64`. VM-local `cargo-audit` installation was unavailable
+  because its 1.7 GB tmpfs filled, so the exact macOS audit and exact GitHub
+  audit are the authoritative Rust vulnerability proofs.
+- The real-Plex completion run proved clean EOF, Plex watched state, automatic
+  `only-tv` continuation, recents replacement, and UI refresh without a manual
+  reload. The stopped-server edit/scan/restart leg also passed. The touched
+  movie and two episodes were restored to unwatched/zero, credentials were
+  deleted, and the Plex service/watchdog were restored. The current host had no
+  saved Jellyfin source (`source_count 0`), so no new live-Jellyfin run was
+  possible; the prior real-server proof and exact hermetic paths remain the
+  recorded coverage.
+- The exact 1.0.0 NSIS installer checksum matched on `netwatch-01`, replaced
+  0.1.62 with exit code zero, and left both executable metadata and uninstall
+  registration at 1.0.0. Windows HDR had already been owner-confirmed on that
+  native venue.
+
+### Published artifacts
+
+The uploaded draft was downloaded back through `gh`; its seven-line manifest
+verified every package, did not include itself, and the downloaded DMG passed
+`hdiutil verify`. Package metadata reported Arch `vela` 1.0.0-1 x86_64 and
+Debian `vela` 1.0.0 amd64.
+
+```text
+94ee8221ded684b3c27bfdede62e85997f8d47920315bda30b27c51a8693ba97  vela-1.0.0-1-x86_64.pkg.tar.zst
+05466f35e660d8f1a3810c2026a01906ece0b4bbe8c2de00e232db0e0a184e23  Vela_1.0.0_amd64.AppImage
+02166e9b7cbb3c02cf17280e992cb721c0130dbb0df487ebf12f52bd1e48c8ef  Vela_1.0.0_amd64.deb
+88c0a0db0d148d761b96453cf1ccb6d5254793accf94f78854c94177f97b5cc6  Vela-1.0.0-1.x86_64.rpm
+b9d6e4ec0fca1d56a0eb9424d2a16391a85c2bf8a943d1c71bb2d08ddd6da852  Vela_1.0.0_universal.dmg
+e460e7f123796290a2acce141f1a424249efc3debc0e6b349a89470d82783d0f  Vela_1.0.0_x64_en-US.msi
+79ae56fc3f57b19dd9924466e03b8d0a8f6b8b83e7fe01ca11ecd3d7a180fd0b  Vela_1.0.0_x64-setup.exe
+```
+
+Annotated tag `v1.0.0` peels to the candidate commit above. GitHub's initial
+tag push exposed that the immutable tag's bundle jobs lacked release-write
+permission; no release was published by those failed runs. The cause is fixed
+durably on `main` at `9f97355`. Publication then used `gh` with the already
+successful exact-commit rehearsal artifacts, followed by a full GitHub
+download/checksum round trip. Repository workflow defaults were restored and
+verified at `read`.
+
+GitHub reports the release non-draft, non-prerelease, Latest, targeted at the
+exact candidate, with eight uploaded assets. Published URL:
+`https://github.com/roethlar/vela/releases/tag/v1.0.0`.
