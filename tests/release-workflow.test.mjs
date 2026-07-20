@@ -12,6 +12,8 @@ const workflow = await readFile(
 
 test("release artifacts fail closed through a final inventory", () => {
   assert.doesNotMatch(workflow, /if-no-files-found:\s*ignore/);
+  assert.doesNotMatch(workflow, /find "\$root" -maxdepth 1/);
+  assert.match(workflow, /find "\$root" -type f -name "\$pattern"/);
   assert.match(workflow, /inventory:\n[\s\S]*needs: \[bundle, arch\]/);
   assert.match(workflow, /uses: actions\/download-artifact@v8/);
   assert.match(workflow, /name: vela-sha256sums\n\s+if-no-files-found: error/);
