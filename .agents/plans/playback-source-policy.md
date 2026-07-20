@@ -1,8 +1,10 @@
 # Plan: duplicate-copy playback policy and title-level watched state
 
-Status: **APPROVED FOR IMPLEMENTATION — owner settled the product behavior on
-2026-07-19 and made one clean Claude Fable `openreview` the approval gate. The
-gate passed over exact range `ad27cf0..13405dc`; implementation is authorized.**
+Status: **COMPLETE — owner settled the product behavior on 2026-07-19; one
+Claude Fable `openreview` passed over exact plan range `ad27cf0..13405dc`; all
+five implementation slices, version 0.1.61, canonical validation, fresh Linux
+real-app E2E, and Linux package builds are complete. The owner ended further
+Fable reviews after the clean plan review.**
 
 ## Plan review
 
@@ -145,7 +147,7 @@ full-item frontend IPC, neutral partial UI, immutable exact-session completion
 backings, and the required continuation/fan-out/refresh ordering. Each mutation
 failed its intended assertion, was restored to committed bytes, and reran green.
 
-### Slice 5 — integration coverage complete; release gates in progress
+### Slice 5 — complete
 
 Integration `62133b3` adds a hermetic two-server duplicate fixture with distinct
 quality/locality, provider versions, and merged hierarchy. It proves Best,
@@ -161,9 +163,21 @@ lost merged hierarchy backings, face-only manual and clean-EOF watch mutation,
 and treating server-playlist owner loss as normal sequence exhaustion. After
 exact restoration, all affected scenarios passed. The full Linux suite passed
 30 of 31 before the older page-failure expectation was corrected; that scenario
-then passed alone. A final fresh complete run remains required after the version
-bump. On 2026-07-19 the owner explicitly ended further Fable reviews after the
-clean one-pass plan review; no implementation Fable review is to be run.
+then passed alone. Documentation `f9be3da` replaces the obsolete selection
+limitations with the four exact policies, override/session semantics, title-
+level watched behavior, and offline-server boundary. Version commit `95ba4b8`
+bumps every release surface once to 0.1.61.
+
+The complete local canonical set passes: exact Node/npm, clean `npm ci`, npm
+audit, 32 frontend/static guards, zero Svelte diagnostics, production frontend
+build, Rust 1.89 and stable checks, warning-free clippy, 205 Rust tests, and
+Cargo audit with zero vulnerabilities plus the 17 accepted warning-class
+notices. Every tracked source byte was checksum-identical on Linux; its exact
+toolchain/npm audit/frontend/stable/clippy gates passed, a fresh Tauri debug
+build passed all 31 real-app E2E scenarios, and release packaging produced the
+0.1.61 arm64 deb and rpm bundles. On 2026-07-19 the owner explicitly ended
+further Fable reviews after the clean one-pass plan review; no implementation
+Fable review was run.
 
 ## Goal
 

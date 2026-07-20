@@ -10,8 +10,8 @@
   independently update every currently configured title backing, with safe
   partial-failure reporting and no offline queue. Implemented under
   `.agents/plans/playback-source-policy.md`; focused two-server production E2E
-  and independent regression mutations pass. Final release validation is the
-  plan's remaining integration gate.
+  and independent regression mutations pass. The canonical local gates, fresh
+  Linux real-app suite, and Linux release package builds pass at version 0.1.61.
 
 - Continue Watching missed a newly eligible next episode until manual Refresh
   because the automatic post-playback refresh ran before the clean-EOF server

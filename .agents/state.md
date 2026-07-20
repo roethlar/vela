@@ -9,9 +9,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **MULTI-PLEX CORE MERGED TO `main`; PLAYBACK-POLICY FOLLOW-UP PLANNED.** The four
-  listed implementation slices are committed through `5e63462`, with review
-  evidence through `3a1dd8b`.
+- **PLAYBACK-SOURCE POLICY COMPLETE ON FEATURE BRANCH.** The Multi-Plex core's
+  four listed implementation slices remain merged through `5e63462`, with
+  review evidence through `3a1dd8b`.
   Per-source credentials and machine pins, full legacy-route migration,
   repeatable identity-verified linking, exact Settings removal, and two-server
   collapse/override behavior are implemented. Slice 4's real-app TLS scenario
@@ -54,9 +54,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `62133b3` plus safe-error correction `c07abc8` cover the four policies,
   overrides, Ask run lifetime, merged hierarchy, both watch paths, and offline
   server-playlist ownership in the two-server Linux fixture. All focused runs
-  and eight independent production mutations pass. Slice 5's docs/version and
-  fresh full validation remain; the owner explicitly ended further Fable
-  reviews after the clean one-pass plan review.
+  and eight independent production mutations pass. Documentation `f9be3da` and
+  version 0.1.61 at `95ba4b8` close Slice 5. The complete local canonical set is
+  green (32 frontend/static guards, 205 Rust tests, zero known vulnerabilities,
+  17 accepted Cargo warning notices). Every tracked source byte matched on
+  Linux, where exact frontend/stable/clippy gates, a fresh-build real-app suite
+  (31/31), and 0.1.61 arm64 deb/rpm release bundles pass. The owner explicitly
+  ended further Fable reviews after the clean one-pass plan review; no
+  implementation Fable review was run.
   Durable evidence: `.agents/plans/multi-plex.md` and
   `.agents/plans/playback-source-policy.md`.
 
@@ -149,13 +154,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **NEXT: finish Slice 5 of the approved playback-source-policy plan.** Bump the
-  version once, run all canonical local gates, and run a byte-identical fresh
-  Linux real-app suite. Do not run another Fable review. The exact approved
-  design and evidence live in
-  `.agents/plans/playback-source-policy.md`.
-
-- **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
+- **NEXT: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
   older macOS `build.sh --native` failure follows them. Each code item gets its
   own durable plan, guard proof, commit, and Claude `codereview` before the
@@ -396,12 +395,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/ui-embellishments.md` (COMPLETE at 0.1.56 — v1.0.0 item 1)
 - `.agents/plans/multi-plex.md` (CORE COMPLETE — playback policy moved to the
   plan below)
-- `.agents/plans/playback-source-policy.md` (APPROVED — one Fable max-effort
-  openreview clean over `ad27cf0..13405dc`; Slice 1 complete at
+- `.agents/plans/playback-source-policy.md` (COMPLETE — one Fable max-effort
+  openreview clean over `ad27cf0..13405dc`; COMPLETE at version 0.1.61: Slice 1
+  at
   `c7ac901`/`cadbbb0`, Slice 2 at `7d9a00e`, Slice 3 at
   `7720d2a`/`a749974`/`b4b702b`, Slice 4 at `3391986`, and final integration
-  coverage at `62133b3`/`c07abc8`; Slice 5 validation in progress, with further
-  Fable review withdrawn by the owner)
+  coverage at `62133b3`/`c07abc8`; local/Linux/package validation complete,
+  with further Fable review withdrawn by the owner)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)
