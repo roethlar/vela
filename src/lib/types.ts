@@ -61,6 +61,12 @@ export type PlayCommandResult =
   | { status: "superseded" }
   | { status: "sourceChoiceRequired"; request: PlaybackSourceChoiceRequest };
 
+export type WatchStateMutation = {
+  succeededSources: number;
+  failedSources: number;
+  failedSourceNames: string[];
+};
+
 // Persisted Continue Playing policy. Missing or unknown backend values are
 // normalized to "only-tv", the product default.
 export type ContinuePlayingMode = "off" | "on" | "only-tv";

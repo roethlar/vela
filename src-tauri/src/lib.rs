@@ -49,10 +49,11 @@ pub struct AppState {
     pub reap_queue: Arc<Mutex<Vec<std::process::Child>>>,
     /// Serializes play_item so overlapping clicks can't both spawn and orphan an mpv.
     pub play_lock: AsyncMutex<()>,
-    /// Serializes set_watched so overlapping edits can't interleave their
-    /// curate-first hides and failure rollbacks (an undo token has no
-    /// generation; two in-flight edits on one item could otherwise strip a
-    /// tombstone the other's success relies on).
+    /// Serializes explicit watched edits with clean-completion fan-out so
+    /// overlapping curate-first hides, failure rollbacks, and automatic played
+    /// writes cannot interleave. An undo token has no generation; two in-flight
+    /// edits on one item could otherwise strip a tombstone the other's success
+    /// relies on.
     pub watch_edit_lock: AsyncMutex<()>,
     /// Serializes source mutations (add/remove) so they apply in order
     /// without holding the registry lock across config file I/O.
@@ -221,14 +222,17 @@ pub fn run() {
                         let _ = app_handle.emit("continue-playing", completion.clone());
                     }
 
-                    if let Err(error) =
-                        commands::mark_clean_completion_played(&state, &completion).await
-                    {
-                        eprintln!("vela: automatic played-state update failed: {error}");
+                    let watch_result =
+                        commands::mark_clean_completion_played(&state, &completion).await;
+                    if watch_result.failed_sources > 0 {
+                        eprintln!(
+                            "vela: automatic played-state update reached {} source(s); {} failed",
+                            watch_result.succeeded_sources, watch_result.failed_sources
+                        );
                     }
 
                     // Publish the authoritative post-curation refresh after the
-                    // owning server's played-state attempt settles, so newly
+                    // backing servers' played-state attempts settle, so newly
                     // eligible hub items are visible without a manual refresh.
                     // This remains unconditional on server success: local
                     // curation and any backend-owned successor are already final.

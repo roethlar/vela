@@ -2933,18 +2933,135 @@ pub async fn get_person_items(
     src.person_items(&raw, &kind).await
 }
 
-/// Mark an item watched/unwatched on its source. Routes by the namespaced key;
-/// the registry lock is released before the (network) call.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WatchStateMutationDto {
+    pub succeeded_sources: usize,
+    pub failed_sources: usize,
+    pub failed_source_names: Vec<String>,
+}
+
+struct WatchMutationTarget {
+    source: std::sync::Arc<dyn MediaSource>,
+    source_name: String,
+    raw_key: String,
+}
+
+struct PreparedWatchMutations {
+    targets: Vec<WatchMutationTarget>,
+    failed_sources: usize,
+    failed_source_names: Vec<String>,
+}
+
+/// Resolve every still-configured title backing while holding the registry
+/// lock, then release it before any provider call. Backings for sources the
+/// user removed are no longer mutation targets; malformed identities for a
+/// source that still exists count as a safe, named failure.
+async fn prepare_watch_mutations(
+    source_registry: &tokio::sync::Mutex<crate::source::SourceRegistry>,
+    backings: &[BackingRef],
+) -> PreparedWatchMutations {
+    let registry = source_registry.lock().await;
+    let mut targets = Vec::new();
+    let mut failed_source_names = Vec::new();
+    for backing in backings {
+        let Some(configured_source) = registry.get(&backing.source_id) else {
+            continue;
+        };
+        let correctly_namespaced = backing
+            .rating_key
+            .split_once(':')
+            .is_some_and(|(source_id, _)| source_id == backing.source_id);
+        if !correctly_namespaced {
+            failed_source_names.push(configured_source.name());
+            continue;
+        }
+        match registry.route(&backing.rating_key) {
+            Ok((source, raw_key)) => targets.push(WatchMutationTarget {
+                source_name: source.name(),
+                source,
+                raw_key,
+            }),
+            Err(_) => failed_source_names.push(configured_source.name()),
+        }
+    }
+    let failed_sources = failed_source_names.len();
+    PreparedWatchMutations {
+        targets,
+        failed_sources,
+        failed_source_names,
+    }
+}
+
+/// Run each provider mutation independently. Provider error text is discarded:
+/// it may contain request details or credentials and never belongs in an IPC
+/// result. Source display names and aggregate counts are the entire public
+/// failure surface.
+async fn execute_watch_mutations(
+    prepared: PreparedWatchMutations,
+    played: bool,
+) -> WatchStateMutationDto {
+    let mut jobs = tokio::task::JoinSet::new();
+    for target in prepared.targets {
+        jobs.spawn(async move {
+            let result = target.source.mark_played(&target.raw_key, played).await;
+            (target.source_name, result.is_ok())
+        });
+    }
+
+    let mut succeeded_sources = 0;
+    let mut failed_sources = prepared.failed_sources;
+    let mut failed_source_names = prepared.failed_source_names;
+    while let Some(joined) = jobs.join_next().await {
+        match joined {
+            Ok((_source_name, true)) => succeeded_sources += 1,
+            Ok((source_name, false)) => {
+                failed_sources += 1;
+                failed_source_names.push(source_name);
+            }
+            Err(_) => {
+                failed_sources += 1;
+                failed_source_names.push("Unavailable source".to_string());
+            }
+        }
+    }
+    failed_source_names.sort();
+    failed_source_names.dedup();
+    WatchStateMutationDto {
+        succeeded_sources,
+        failed_sources,
+        failed_source_names,
+    }
+}
+
+fn all_watch_mutations_failed(result: &WatchStateMutationDto) -> bool {
+    result.succeeded_sources == 0
+}
+
+fn total_watch_failure_message(result: &WatchStateMutationDto) -> String {
+    if result.failed_source_names.is_empty() {
+        return "none of this title's sources is currently configured".to_string();
+    }
+    format!(
+        "watched-state update failed on all {} configured source(s): {}",
+        result.failed_sources,
+        result.failed_source_names.join(", ")
+    )
+}
+
+/// Mark an item watched/unwatched on every currently configured backing. All
+/// routes are captured before the independent provider calls begin.
 #[tauri::command]
 pub async fn set_watched(
-    rating_key: String,
+    item: ItemDto,
     played: bool,
     state: State<'_, AppState>,
-) -> Result<(), String> {
+) -> Result<WatchStateMutationDto, String> {
     // One edit at a time: overlapping curate-first hides and failure
     // rollbacks must not interleave (undo tokens carry no generation).
     let _edit = state.watch_edit_lock.lock().await;
-    let (src, raw) = state.registry.lock().await.route(&rating_key)?;
+    let backings = watched_state_backings(&item);
+    let prepared = prepare_watch_mutations(&state.registry, &backings).await;
     // Watched-state edits curate Continue Watching in the same op (owner
     // decision 2026-07-10): watched OR reset-to-unwatched, the item is no
     // longer "recently played and not finished". Drop the recents entry AND
@@ -2960,16 +3077,21 @@ pub async fn set_watched(
     // review r4). On a failed server edit, the undo token restores the
     // exact pre-curation state; newer play activity, if any landed
     // meanwhile, wins over the restore.
-    let key = rating_key.clone();
+    let key = item
+        .watch_key
+        .clone()
+        .unwrap_or_else(|| item.rating_key.clone());
     let undo = config::update(move |cfg| Ok(crate::recents::hide_with_undo(cfg, &key)))?;
-    if let Err(e) = src.mark_played(&raw, played).await {
+    let result = execute_watch_mutations(prepared, played).await;
+    if all_watch_mutations_failed(&result) {
+        let error = total_watch_failure_message(&result);
         let _ = config::update(move |cfg| {
             crate::recents::restore_hidden(cfg, undo);
             Ok(())
         });
-        return Err(e);
+        return Err(error);
     }
-    Ok(())
+    Ok(result)
 }
 
 // ---- playback ------------------------------------------------------------
@@ -2995,6 +3117,10 @@ pub(crate) struct PlaybackCompletion {
     /// payload remains ids only.
     #[serde(skip)]
     pub started_at_ms: u64,
+    /// Immutable title identities captured when this exact playback launched.
+    /// They stay backend-only so completion events remain ids-only.
+    #[serde(skip)]
+    pub watch_backings: Vec<BackingRef>,
     pub media_type: Option<String>,
 }
 
@@ -3431,6 +3557,59 @@ fn playback_backings(item: &ItemDto) -> Vec<BackingRef> {
     backings.dedup_by(|left, right| {
         left.source_id == right.source_id && left.rating_key == right.rating_key
     });
+    backings
+}
+
+fn backing_for_namespaced_key(key: &str) -> Option<BackingRef> {
+    let (source_id, _) = key.split_once(':')?;
+    Some(BackingRef {
+        source_id: source_id.to_string(),
+        rating_key: key.to_string(),
+        parent_rating_key: None,
+        grandparent_rating_key: None,
+    })
+}
+
+fn dedup_watch_backings(backings: &mut Vec<BackingRef>) {
+    backings.sort_by(|left, right| {
+        left.source_id
+            .cmp(&right.source_id)
+            .then_with(|| left.rating_key.cmp(&right.rating_key))
+    });
+    backings.dedup_by(|left, right| {
+        left.source_id == right.source_id && left.rating_key == right.rating_key
+    });
+}
+
+/// Every title identity eligible for a watched-state mutation. Older merged
+/// snapshots may carry a distinct watch key without a complete backing list,
+/// so preserve it explicitly in addition to the face and backing set.
+fn watched_state_backings(item: &ItemDto) -> Vec<BackingRef> {
+    let mut backings = playback_backings(item);
+    if let Some(watch_backing) = item
+        .watch_key
+        .as_deref()
+        .and_then(backing_for_namespaced_key)
+    {
+        backings.push(watch_backing);
+    }
+    dedup_watch_backings(&mut backings);
+    backings
+}
+
+fn completion_watch_backings(completion: &PlaybackCompletion) -> Vec<BackingRef> {
+    let mut backings = completion.watch_backings.clone();
+    if let Some(face) = backing_for_namespaced_key(&completion.item_key) {
+        backings.push(face);
+    }
+    if let Some(watch) = completion
+        .watch_key
+        .as_deref()
+        .and_then(backing_for_namespaced_key)
+    {
+        backings.push(watch);
+    }
+    dedup_watch_backings(&mut backings);
     backings
 }
 
@@ -4004,6 +4183,7 @@ async fn play_by_key_locked(
         let source_id = src.id().to_string();
         let item_key = item.rating_key.clone();
         let watch_key = item.watch_key.clone();
+        let watch_backings = watched_state_backings(item);
         let media_type = item.media_type.clone();
         let session_id = session_id.to_string();
         let recents_ready = recents_ready.clone();
@@ -4037,6 +4217,7 @@ async fn play_by_key_locked(
                 item_key: item_key.clone(),
                 watch_key: watch_key.clone(),
                 started_at_ms: playback_started_at_ms.load(Ordering::SeqCst),
+                watch_backings: watch_backings.clone(),
                 media_type: media_type.clone(),
             });
         }) as playback::EndNotify)
@@ -4926,21 +5107,18 @@ pub(crate) fn admit_clean_completion(completion: &PlaybackCompletion) -> Result<
     })
 }
 
-/// Best-effort owning-server half of a locally admitted clean completion. A
-/// merged item may play through one source while another owns watch state, so
-/// its explicit watch key takes precedence. The caller retains
-/// `watch_edit_lock` across this await; a later user edit therefore wins.
+/// Best-effort all-backing half of a locally admitted clean completion. The
+/// immutable title identities were captured when this exact session launched.
+/// The caller retains `watch_edit_lock` across this await; a later user edit
+/// therefore wins. A proven clean EOF is never rolled back when every provider
+/// is unavailable.
 pub(crate) async fn mark_clean_completion_played(
     state: &AppState,
     completion: &PlaybackCompletion,
-) -> Result<(), String> {
-    let key = completion
-        .watch_key
-        .as_deref()
-        .unwrap_or(&completion.item_key);
-    let routed = state.registry.lock().await.route(key);
-    let (source, raw) = routed?;
-    source.mark_played(&raw, true).await
+) -> WatchStateMutationDto {
+    let backings = completion_watch_backings(completion);
+    let prepared = prepare_watch_mutations(&state.registry, &backings).await;
+    execute_watch_mutations(prepared, true).await
 }
 
 fn emit_source_choice_required(state: &AppState, request_id: &str) {
@@ -5283,6 +5461,7 @@ mod tests {
             item_key: item_key.to_string(),
             watch_key: None,
             started_at_ms: 10,
+            watch_backings: backing_for_namespaced_key(item_key).into_iter().collect(),
             media_type: Some("episode".to_string()),
         }
     }
@@ -5315,6 +5494,176 @@ mod tests {
             watch_key: None,
             detail_key: None,
         }
+    }
+
+    struct WatchTestSource {
+        id: &'static str,
+        name: &'static str,
+        fail: bool,
+        calls: std::sync::Arc<std::sync::Mutex<Vec<(String, bool)>>>,
+        in_flight: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+        max_in_flight: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for WatchTestSource {
+        fn id(&self) -> String {
+            self.id.to_string()
+        }
+        fn name(&self) -> String {
+            self.name.to_string()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _key: &str,
+            _ty: &str,
+            _sort: Option<&str>,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn search(&self, _query: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(
+            &self,
+            _key: &str,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            _key: &str,
+            _duration_ms: Option<u64>,
+        ) -> Result<crate::source::StreamResolution, String> {
+            Err("not used".to_string())
+        }
+        async fn mark_played(&self, item_key: &str, played: bool) -> Result<(), String> {
+            let active = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
+            self.max_in_flight.fetch_max(active, Ordering::SeqCst);
+            tokio::time::sleep(Duration::from_millis(20)).await;
+            self.calls
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push((item_key.to_string(), played));
+            self.in_flight.fetch_sub(1, Ordering::SeqCst);
+            if self.fail {
+                Err("provider failure https://secret.invalid/?token=do-not-leak".to_string())
+            } else {
+                Ok(())
+            }
+        }
+    }
+
+    fn watch_backing(source_id: &str, rating_key: &str) -> BackingRef {
+        BackingRef {
+            source_id: source_id.to_string(),
+            rating_key: rating_key.to_string(),
+            parent_rating_key: None,
+            grandparent_rating_key: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn watched_state_fanout_deduplicates_runs_concurrently_and_keeps_partial_success() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let in_flight = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let max_in_flight = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = crate::source::SourceRegistry::default();
+        for (id, name, fail) in [("alpha", "Alpha", false), ("beta", "Beta", true)] {
+            registry.upsert(std::sync::Arc::new(WatchTestSource {
+                id,
+                name,
+                fail,
+                calls: calls.clone(),
+                in_flight: in_flight.clone(),
+                max_in_flight: max_in_flight.clone(),
+            }));
+        }
+        let registry = tokio::sync::Mutex::new(registry);
+        let mut item = catalog_item("alpha:one", "movie", 0, false);
+        item.source_id = "alpha".to_string();
+        item.backing = Some(vec![
+            watch_backing("alpha", "alpha:one"),
+            watch_backing("alpha", "alpha:one"),
+            watch_backing("beta", "beta:two"),
+            watch_backing("removed", "removed:three"),
+        ]);
+        item.watch_key = Some("beta:two".to_string());
+
+        let backings = watched_state_backings(&item);
+        assert_eq!(
+            backings
+                .iter()
+                .map(|backing| backing.rating_key.as_str())
+                .collect::<Vec<_>>(),
+            vec!["alpha:one", "beta:two", "removed:three"]
+        );
+        let prepared = prepare_watch_mutations(&registry, &backings).await;
+        assert_eq!(prepared.targets.len(), 2, "removed sources are not targets");
+        assert_eq!(prepared.failed_sources, 0);
+
+        let result = execute_watch_mutations(prepared, true).await;
+        assert_eq!(result.succeeded_sources, 1);
+        assert_eq!(result.failed_sources, 1);
+        assert_eq!(result.failed_source_names, vec!["Beta"]);
+        assert!(!all_watch_mutations_failed(&result));
+        assert!(
+            max_in_flight.load(Ordering::SeqCst) >= 2,
+            "independent backing writes must overlap"
+        );
+        let mut calls = calls
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .clone();
+        calls.sort();
+        assert_eq!(
+            calls,
+            vec![("one".to_string(), true), ("two".to_string(), true)]
+        );
+        let public = serde_json::to_string(&result).unwrap();
+        assert!(!public.contains("secret.invalid"));
+        assert!(!public.contains("token"));
+    }
+
+    #[tokio::test]
+    async fn watched_state_total_failure_is_the_only_rollback_outcome() {
+        let calls = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let in_flight = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let max_in_flight = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let mut registry = crate::source::SourceRegistry::default();
+        registry.upsert(std::sync::Arc::new(WatchTestSource {
+            id: "down",
+            name: "Down",
+            fail: true,
+            calls,
+            in_flight,
+            max_in_flight,
+        }));
+        let registry = tokio::sync::Mutex::new(registry);
+        let prepared =
+            prepare_watch_mutations(&registry, &[watch_backing("down", "down:item")]).await;
+        let result = execute_watch_mutations(prepared, false).await;
+        assert!(all_watch_mutations_failed(&result));
+        assert_eq!(result.succeeded_sources, 0);
+        assert_eq!(result.failed_sources, 1);
+        assert_eq!(result.failed_source_names, vec!["Down"]);
+        let safe_error = total_watch_failure_message(&result);
+        assert!(safe_error.contains("Down"));
+        assert!(!safe_error.contains("secret.invalid"));
+        assert!(!safe_error.contains("token"));
     }
 
     fn pending_choice(

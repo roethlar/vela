@@ -23,6 +23,7 @@
     type PlayIntent,
     type ServerPlaylist,
     type ServerPlaylistGroup,
+    type WatchStateMutation,
   } from "$lib/types";
 
   // Tracked timers, cleared on destroy / when superseded.
@@ -2137,8 +2138,9 @@
   // 2026-07-14, "its own line"; plan .agents/plans/per-surface-status.md). It is an action
   // the user took, not a fact about the grid — and the two writers sharing one surface is
   // what produced EIGHT consecutive rounds of the same defect, each fix opening the next
-  // door (library-refresh-scan log, r17-r24). Failure only: a SUCCESS needs no
-  // announcement, because the card's ✓ is the acknowledgement.
+  // door (library-refresh-scan log, r17-r24). A complete success needs no
+  // announcement, because the card's ✓ is the acknowledgement. A partial
+  // multi-source success uses the same action-owned line as a warning.
   //
   // Like the scan's, it publishes regardless of which view is on screen — an action's
   // outcome is not view-scoped. It clears after eight seconds or immediately when the
@@ -2147,7 +2149,7 @@
   // flight so it cannot land on Welcome about a library that no longer exists (the
   // r14/r15/r16-3 rule).
   const EDIT_STATUS_TTL_MS = 8000;
-  let editStatus = $state<string | null>(null);
+  let editStatus = $state<{ text: string; failed: boolean } | null>(null);
   let editAttempt = 0;
   let editStatusTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -2159,16 +2161,20 @@
     }
   }
 
-  function publishEditFailure(attempt: number, text: string) {
+  function publishEditStatus(attempt: number, text: string, failed: boolean) {
     if (attempt !== editAttempt) return;
     clearEditStatus();
-    editStatus = text;
+    editStatus = { text, failed };
     editStatusTimer = setTimeout(() => {
       // Cancellation cannot retract a callback that is already queued. The
       // captured attempt is the final authority: an older expiry may never
       // clear a newer edit's failure.
       if (attempt === editAttempt) clearEditStatus();
     }, EDIT_STATUS_TTL_MS);
+  }
+
+  function publishEditFailure(attempt: number, text: string) {
+    publishEditStatus(attempt, text, true);
   }
 
   onDestroy(() => {
@@ -2258,14 +2264,21 @@
     const attempt = ++editAttempt;
     clearEditStatus(); // this attempt supersedes whatever the last one said
     try {
-      // Merged cards may front a local file while a server backing owns the
-      // watch state — route the action where it can actually be recorded.
-      await invoke("set_watched", { ratingKey: item.watchKey ?? item.ratingKey, played });
-      // The server accepted the edit. Reflect that confirmed backing immediately
-      // (deep-reactive $state); the authoritative buffered repaint below may still
-      // adopt a more-progressed state from another merged backing.
+      const result = await invoke<WatchStateMutation>("set_watched", { item, played });
+      // At least one source accepted the edit. Reflect that confirmed title
+      // immediately (deep-reactive $state); the authoritative buffered repaint
+      // below may still expose an offline backing's older state.
       item.played = played;
       item.viewOffsetMs = 0;
+      if (result.failedSources > 0) {
+        const total = result.succeededSources + result.failedSources;
+        const names = result.failedSourceNames.join(", ");
+        publishEditStatus(
+          attempt,
+          `Marked “${item.title}” ${played ? "watched" : "unwatched"} on ${result.succeededSources} of ${total} sources. Couldn't update: ${names}.`,
+          false,
+        );
+      }
       // Curate Home and revalidate the originating browse root without tearing
       // down its loaded pages or scroll container.
       refreshAfterWatchEdit(browseOrigin);
@@ -2445,7 +2458,11 @@
          than fighting it; a failed edit does not manufacture a listing request or view
          failure of its own. It stays readable for eight seconds, unless the next edit
          supersedes it first. -->
-    <div class="scanerror" role="alert">{friendlyError(editStatus)}</div>
+    {#if editStatus.failed}
+      <div class="scanerror" role="alert">{friendlyError(editStatus.text)}</div>
+    {:else}
+      <div class="editwarning" role="status">{editStatus.text}</div>
+    {/if}
   {/if}
 
   {#if scanStatus}
@@ -3768,6 +3785,15 @@
   .scanerror {
     background: var(--danger-bg);
     color: var(--danger-text);
+    padding: 0.6rem 1rem;
+    font-size: 0.85rem;
+    animation: vela-slide-down 0.2s var(--ease);
+  }
+
+  .editwarning {
+    background: var(--warn-bg);
+    color: var(--warn-text);
+    border-bottom: 1px solid var(--warn-border);
     padding: 0.6rem 1rem;
     font-size: 0.85rem;
     animation: vela-slide-down 0.2s var(--ease);

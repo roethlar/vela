@@ -113,6 +113,11 @@ test("successful manual watch edits enter the dedicated preserved-position path"
   );
 
   assert.equal(serverEdit.length, 1, "setWatched must make one set_watched request");
+  assert.deepEqual(
+    callArguments(serverEdit[0]),
+    ['"set_watched"', "{item,played}"],
+    "the watched command must receive the complete immutable title/backing identity",
+  );
   assert.ok(
     capture.getStart(sourceFile) < serverEdit[0].getStart(sourceFile),
     "the originating browse root must be captured before the server request awaits",
@@ -130,6 +135,18 @@ test("successful manual watch edits enter the dedicated preserved-position path"
     serverEdit[0].getStart(sourceFile) < playedAssignment[0].getStart(sourceFile) &&
       playedAssignment[0].getStart(sourceFile) < refresh.getStart(sourceFile),
     "the confirmed local badge must publish before server-authoritative revalidation",
+  );
+  const partial = descendants(
+    setWatched,
+    (node) =>
+      ts.isIfStatement(node) && compact(node.expression) === "result.failedSources>0",
+  );
+  assert.equal(partial.length, 1, "partial multi-source success must have one warning path");
+  const partialStatus = assertSingleCall(partial[0], "publishEditStatus");
+  assert.equal(
+    compact(partialStatus.arguments.at(-1)),
+    "false",
+    "a partial source failure must publish a non-destructive action-owned warning",
   );
   assert.equal(callsNamed(setWatched, "resetAndLoad").length, 0, "manual edits must not reset the grid");
   assert.equal(

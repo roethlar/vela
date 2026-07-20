@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const libSource = fs.readFileSync(path.join(repoRoot, "src-tauri", "src", "lib.rs"), "utf8");
+const commandsSource = fs.readFileSync(path.join(repoRoot, "src-tauri", "src", "commands.rs"), "utf8");
 
 function maskRustNonCode(source) {
   const masked = source.split("");
@@ -117,6 +118,19 @@ function braceDepth(masked, offset) {
   return depth;
 }
 
+function rustFunction(source, name) {
+  const masked = maskRustNonCode(source);
+  const declarations = allCodeMatches(
+    source,
+    masked,
+    new RegExp(`\\b(?:pub(?:\\(crate\\))?\\s+)?(?:async\\s+)?fn\\s+${name}\\s*\\(`, "g"),
+  );
+  assert.equal(declarations.length, 1, `commands.rs must define one ${name} function`);
+  const openBrace = masked.indexOf("{", declarations[0].index);
+  assert.notEqual(openBrace, -1, `${name} must have a body`);
+  return balancedBlock(source, masked, openBrace);
+}
+
 function joinedCompletionDispatcher(source) {
   const marker = "// Playback sequence dispatcher:";
   assert.equal(source.split(marker).length - 1, 1, "lib.rs must define one playback sequence dispatcher");
@@ -173,14 +187,20 @@ test("the joined clean-EOF dispatcher refreshes only after played state settles"
   const mark = oneCodeMatch(
     dispatcher.source,
     dispatcher.masked,
-    /if\s+let\s+Err\s*\(\s*error\s*\)\s*=\s*commands\s*::\s*mark_clean_completion_played\s*\(\s*&state\s*,\s*&completion\s*\)\s*\.\s*await/g,
-    "the dispatcher must await one played-state attempt and handle its error",
+    /let\s+watch_result\s*=\s*commands\s*::\s*mark_clean_completion_played\s*\(\s*&state\s*,\s*&completion\s*\)\s*\.\s*await/g,
+    "the dispatcher must await one all-backing played-state attempt",
   );
-  const markError = oneCodeMatch(
+  const markFailure = oneCodeMatch(
     dispatcher.source,
     dispatcher.masked,
-    /eprintln!\s*\(\s*"vela: automatic played-state update failed: \{error\}"\s*\)/g,
-    "the dispatcher must log one automatic played-state failure",
+    /if\s+watch_result\.failed_sources\s*>\s*0/g,
+    "the dispatcher must handle a partial or total backing failure",
+  );
+  const safeLog = oneCodeMatch(
+    dispatcher.source,
+    dispatcher.masked,
+    /eprintln!\s*\(\s*"vela: automatic played-state update reached \{\} source\(s\); \{\} failed"/g,
+    "the dispatcher must log only safe aggregate played-state counts",
   );
   const refreshes = allCodeMatches(
     dispatcher.source,
@@ -193,10 +213,94 @@ test("the joined clean-EOF dispatcher refreshes only after played state settles"
   assert.ok(advance.index < mark.index, "playlist advance must precede the played-state await");
   assert.ok(continuation.index < mark.index, "terminal continuation must precede the played-state await");
   assert.ok(mark.index < refresh.index, "the awaited played-state attempt must settle before playback-ended");
-  assert.ok(markError.index < refresh.index, "played-state failure logging must finish before playback-ended");
+  assert.ok(markFailure.index < refresh.index, "played-state failure handling must finish before playback-ended");
+  assert.ok(safeLog.index < refresh.index, "safe played-state logging must finish before playback-ended");
   assert.equal(
-    braceDepth(dispatcher.masked, mark.index),
+    braceDepth(dispatcher.masked, markFailure.index),
     braceDepth(dispatcher.masked, refresh.index),
-    "playback-ended must remain unconditional outside the played-state error branch",
+    "playback-ended must remain unconditional outside the played-state warning branch",
+  );
+});
+
+test("manual and clean-EOF watched mutations share the all-backing boundary", () => {
+  const manual = rustFunction(commandsSource, "set_watched");
+  const collect = oneCodeMatch(
+    manual.source,
+    manual.masked,
+    /watched_state_backings\s*\(\s*&item\s*\)/g,
+    "the manual command must derive every title backing from the submitted item",
+  );
+  const prepare = oneCodeMatch(
+    manual.source,
+    manual.masked,
+    /prepare_watch_mutations\s*\(\s*&state\.registry\s*,\s*&backings\s*\)\s*\.\s*await/g,
+    "the manual command must route every backing before provider awaits",
+  );
+  const curate = oneCodeMatch(
+    manual.source,
+    manual.masked,
+    /recents\s*::\s*hide_with_undo\s*\(/g,
+    "the manual command must retain curate-before-network undo state",
+  );
+  const execute = oneCodeMatch(
+    manual.source,
+    manual.masked,
+    /execute_watch_mutations\s*\(\s*prepared\s*,\s*played\s*\)\s*\.\s*await/g,
+    "the manual command must execute the prepared all-backing mutation",
+  );
+  assert.ok(collect.index < prepare.index && prepare.index < curate.index && curate.index < execute.index);
+
+  const failure = oneCodeMatch(
+    manual.source,
+    manual.masked,
+    /if\s+all_watch_mutations_failed\s*\(\s*&result\s*\)\s*\{/g,
+    "the manual command must distinguish zero success from partial success",
+  );
+  const failureBrace = failure.index + failure[0].lastIndexOf("{");
+  const failureBlock = balancedBlock(manual.source, manual.masked, failureBrace);
+  assert.equal(
+    allCodeMatches(failureBlock.source, failureBlock.masked, /recents\s*::\s*restore_hidden\s*\(/g).length,
+    1,
+    "only zero success may restore local curation",
+  );
+  assert.equal(
+    allCodeMatches(failureBlock.source, failureBlock.masked, /return\s+Err\s*\(/g).length,
+    1,
+    "zero success must return failure",
+  );
+  assert.equal(
+    allCodeMatches(manual.source, manual.masked, /\bOk\s*\(\s*result\s*\)/g).length,
+    1,
+    "partial or complete success must return its structured result",
+  );
+
+  const clean = rustFunction(commandsSource, "mark_clean_completion_played");
+  for (const [regex, message] of [
+    [/completion_watch_backings\s*\(\s*completion\s*\)/g, "clean EOF must use its immutable backing set"],
+    [
+      /prepare_watch_mutations\s*\(\s*&state\.registry\s*,\s*&backings\s*\)\s*\.\s*await/g,
+      "clean EOF must route every captured backing",
+    ],
+    [
+      /execute_watch_mutations\s*\(\s*prepared\s*,\s*true\s*\)\s*\.\s*await/g,
+      "clean EOF must mark every prepared backing played",
+    ],
+  ]) {
+    oneCodeMatch(clean.source, clean.masked, regex, message);
+  }
+  assert.match(
+    commandsSource,
+    /#\[serde\(skip\)\]\s*pub watch_backings: Vec<BackingRef>/,
+    "completion backing identities must remain backend-only",
+  );
+  assert.equal(
+    (commandsSource.match(/let watch_backings = watched_state_backings\(item\);/g) ?? []).length,
+    1,
+    "playback launch must capture one immutable backing set",
+  );
+  assert.equal(
+    (commandsSource.match(/watch_backings: watch_backings\.clone\(\)/g) ?? []).length,
+    1,
+    "the exact completion must carry the captured backing set",
   );
 });
