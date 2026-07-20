@@ -16,6 +16,10 @@ test("release artifacts fail closed through a final inventory", () => {
   assert.match(workflow, /find "\$root" -type f -name "\$pattern"/);
   assert.match(workflow, /inventory:\n[\s\S]*needs: \[bundle, arch\]/);
   assert.match(workflow, /uses: actions\/download-artifact@v8/);
+  assert.match(
+    workflow,
+    /find artifacts -type f ! -name SHA256SUMS -print0 \| sort -z/,
+  );
   assert.match(workflow, /name: vela-sha256sums\n\s+if-no-files-found: error/);
   assert.match(workflow, /gh release upload[\s\S]*--clobber/);
 });
