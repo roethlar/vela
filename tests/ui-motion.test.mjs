@@ -18,9 +18,13 @@ function filesBelow(dir, suffix) {
     .sort();
 }
 
+function repoPath(file) {
+  return path.relative(repoRoot, file).split(path.sep).join("/");
+}
+
 const sources = new Map(
   filesBelow(srcRoot, ".svelte").map((file) => [
-    path.relative(repoRoot, file),
+    repoPath(file),
     fs.readFileSync(file, "utf8"),
   ]),
 );
