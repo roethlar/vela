@@ -11,6 +11,36 @@ gate passed over exact range `ad27cf0..13405dc`; implementation is authorized.**
 no material issue. The schema-valid one-shot verdict returned `clean` with the
 exact base/head pair and an empty findings array on 2026-07-19.
 
+## Implementation progress
+
+### Slice 1 — complete
+
+Implementation `c7ac901` adds the persisted policy/display preferences, exact
+Player Settings choices and priority help, display diagnostics and independent
+overrides, native macOS/Windows/Linux display adapters, mpv screen placement and
+exact-session display observation, endpoint locality classification, and the
+pure deterministic selector. Compatibility fix `cadbbb0` keeps the published
+Wayland client/runtime API while vendoring the matching 0.31.10 scanner with
+upstream's quick-xml 0.41 security/compatibility changes; its provenance is in
+`src-tauri/vendor/wayland-scanner/VENDORED.md`.
+
+Local canonical Node, npm audit/check/build, Rust MSRV/stable check, clippy,
+unit, and cargo-audit gates passed. The final byte-identical Linux copy passed
+native check/clippy/unit/frontend validation and a fresh-build real-app E2E run
+(30/30). Windows native display compilation remains unverified locally because
+the macOS cross-check reaches Tauri's resource build before Vela and this host
+lacks `llvm-rc`; GitHub Windows CI remains the native proof when the owner later
+authorizes a push.
+
+Independent production mutations proved: unknown policy fails safe to Best;
+Best ranks resolution before HDR; Compatible respects display fit; Fastest
+respects host/LAN/internet; private addresses classify as LAN; HDR override is
+independent; preferences round-trip; mpv uses `--screen-name`; display events
+are complete and exact-session isolated; the UI choice text is exact; and the
+secured Wayland scanner cannot be replaced by the API-incompatible upstream
+git revision without the dependency guard failing. Every mutation was restored
+to the committed bytes and the affected guard reran green.
+
 ## Goal
 
 When the same logical video exists on more than one configured media server,

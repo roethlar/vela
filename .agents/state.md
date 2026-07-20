@@ -29,7 +29,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   watched fan-out. The implementation and verification design in
   `.agents/plans/playback-source-policy.md` is owner-approved: one owner-directed
   Claude Fable max-effort openreview returned clean over exact range
-  `ad27cf0..13405dc` with no findings.
+  `ad27cf0..13405dc` with no findings. Slice 1 is complete at implementation
+  `c7ac901` plus Wayland dependency compatibility fix `cadbbb0`: policy/config/UI,
+  display detection and overrides, mpv output observation/placement, locality,
+  and pure ranking foundations are implemented. Local canonical gates and the
+  final fresh Linux real-app suite pass; all new behaviors were independently
+  red-proven and restored. Exact evidence and the remaining Windows-native CI
+  proof live in the playback policy plan.
   Durable evidence:
   `.agents/plans/multi-plex.md`.
 
@@ -122,11 +128,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   merged to `main` at `5248fe6` on 2026-07-19; no chr-1 gate remains besides
   the deferred real-Plex smoke.
 
-- **NEXT: implement Slice 1 of the approved playback-source-policy plan.** Add
-  the persisted four-mode setting, explicit inline help, display diagnostics
-  and override foundation, native display adapters, mpv display observation,
-  locality classification, and pure ranking guards. The exact approved design
-  and remaining slices live in `.agents/plans/playback-source-policy.md`.
+- **NEXT: implement Slice 2 of the approved playback-source-policy plan.** Add
+  the provider-neutral playback-version contract, exact Plex/Jellyfin/Emby
+  resolution, shared automatic policy selection at every play boundary,
+  persistent Play Version behavior, and merged show/season/episode backings.
+  The exact approved design and remaining slices live in
+  `.agents/plans/playback-source-policy.md`.
 
 - **AFTER MULTI-PLEX MERGES: work the open issue queue one item at a time.** The
   owner reports from 2026-07-18 are code-traced at the top of `ISSUES.md`; the
@@ -370,7 +377,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/multi-plex.md` (CORE COMPLETE — playback policy moved to the
   plan below)
 - `.agents/plans/playback-source-policy.md` (APPROVED — one Fable max-effort
-  openreview clean over `ad27cf0..13405dc`; Slice 1 next)
+  openreview clean over `ad27cf0..13405dc`; Slice 1 complete at
+  `c7ac901`/`cadbbb0`, Slice 2 next)
 - `.agents/plans/library-refresh-scan.md` (COMPLETE + owner-playtested; the
   r1-r24 two-reviewer log is its `## Code review log` — the standing rules it
   produced now live in decisions.md and repo-guidance.md)
