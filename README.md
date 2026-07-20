@@ -15,9 +15,10 @@ the point: the library gets a polished app UI, while video keeps mpv's mature
 codec, GPU, tone-mapping, and HDR output path instead of being constrained by a
 webview player.
 
-Vela is approaching its first public release. Plex is the primary and most
-deeply exercised backend, Jellyfin has been tested against a real server, and
-Emby currently ships as an experimental sibling of the Jellyfin integration.
+Vela 1.0 is available from [GitHub Releases](https://github.com/roethlar/vela/releases/latest).
+Plex is the primary and most deeply exercised backend, Jellyfin has been tested
+against a real server, and Emby currently ships as an experimental sibling of
+the Jellyfin integration.
 
 ## Why Vela
 
@@ -55,9 +56,10 @@ require Plex Remote Access or joining the server's network.
 
 ## Install and run
 
-Public installers are still being prepared for the first release. Until then,
-build Vela from source. Release binaries will be unsigned: macOS Gatekeeper and
-Windows SmartScreen may require an explicit approval.
+Download the current macOS, Windows, Linux, or Arch package from
+[GitHub Releases](https://github.com/roethlar/vela/releases/latest). Release
+binaries are unsigned: macOS Gatekeeper and Windows SmartScreen may require an
+explicit approval. `SHA256SUMS` is attached to every release.
 
 ### Runtime requirements
 
@@ -193,7 +195,7 @@ a manual edit of `config.json`.
 - HDR fidelity ultimately depends on mpv, its GPU backend, the display, and the
   operating system's color-management path.
 
-Current pre-release bugs and follow-up work are tracked in
+Known issues and follow-up work are tracked in
 [ISSUES.md](ISSUES.md).
 
 ## Development

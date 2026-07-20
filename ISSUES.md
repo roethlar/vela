@@ -1,5 +1,23 @@
 # Issue Queue
 
+No known issue below blocks Vela 1.0. Historical reports remain in this file as
+implementation trace; headings marked resolved are not an active queue.
+
+## Known 1.0 edges
+
+- A rare queued watch-edit interleaving can temporarily hide an item from
+  Continue Watching or lose a sub-threshold local resume stamp. It requires a
+  slow or failing edit, a second queued edit on another item, and a play of that
+  second item before its edit acquires the serialization lock. Another play
+  repairs it. The owner accepted this bounded edge for 1.0 on 2026-07-15; the
+  exact analysis is in `.agents/plans/continue-watching-watch-state.md`.
+- The backend multi-Plex rebind path is exercised against two isolated Plex
+  mocks, but the frontend `sameSection` comparison has no full TLS Plex E2E
+  fixture. This is an inspection-only coverage gap and cannot affect a
+  single-server Plex account; it is not a known product defect.
+- A one-shot Plex-to-Jellyfin/Emby watched-state migration tool is a post-1.0
+  product idea, not an implemented feature.
+
 ## Resolved - Owner-Reported (2026-07-18)
 
 - Duplicate copies now use the explicit Player setting chosen by the user:
@@ -24,8 +42,10 @@
   proven red/restored-green, the local gates and fresh-build Linux real-app
   suite 29/29 pass, and Claude accepted with no material issues. Merged to
   `main` at `5248fe6` on 2026-07-19. Detail:
-  `.agents/review/findings/chr-1.md`. The real-Plex smoke remains deferred to
-  the owner's next live session (non-fatal; observation only).
+  `.agents/review/findings/chr-1.md`. The final real-Plex smoke passed on
+  2026-07-20: natural episode EOF updated Plex, launched the adjacent episode,
+  refreshed Continue Watching without manual Refresh, and restored every
+  touched item to unwatched with zero progress.
 
 - Automatic playlist and Continue Playing successors now retain the completed
   mpv process's actual fullscreen and maximized state. Manual starts keep their
@@ -47,14 +67,12 @@
   and Claude accepted exact reviewed head `32b0777` with an independent guard
   proof. Detail: `.agents/review/findings/wsp-1.md`.
 
-## Open - Agent-Found (2026-07-15)
+## Resolved - Agent-Found (2026-07-15)
 
-- `scripts/build.sh --native` fails on macOS's Bash 3 after the toolchain check
-  with `extra_args[@]: unbound variable`: `--native` leaves the array empty and
-  the later Tauri invocation expands it under `set -u`. The default universal
-  macOS path remains green. This pre-dates and is separate from the dependency
-  refresh's Node/npm enforcement, so it was recorded rather than silently
-  folded into that reviewed fix.
+- `scripts/build.sh --native` failed on macOS's Bash 3 after the toolchain check
+  with `extra_args[@]: unbound variable`. Fixed in `404c5ec`; the guard executes
+  the empty-native-argument path with macOS Bash 3 nounset semantics and was
+  independently proven red before restoration.
 
 ## Resolved - Owner-Reported (2026-07-04, Continue Watching curation)
 
@@ -99,7 +117,7 @@ recorded in `.agents/decisions.md`.
   Needs a plan + owner approval of ordering semantics (where next-up
   episodes rank against in-progress items in the flow).
 
-## Open - Owner-Reported (2026-07-04)
+## Resolved - Owner-Reported (2026-07-04; historical trace)
 
 Owner-observed on macOS during live smoke testing. Recorded as reported;
 untriaged, no code investigation yet.
@@ -225,7 +243,7 @@ Library navigation and the "All" view (owner direction, 2026-07-04):
   override via context menu). Unit-tested throughout (guard-proven); owner
   playtest pending.
 
-## Kimi-K2.6 Review Triage (2026-05-23)
+## Resolved Kimi-K2.6 Review Triage (2026-05-23)
 
 Review triage from the Kimi-K2.6 report against `vela-foundation` on 2026-05-23.
 Items here are verified or worth tracking. Severity is adjusted from the report
@@ -240,7 +258,7 @@ where the original claim was overstated.
 > and CI enforces it. Not-runtime-verified: the CSP needs confirming against a
 > release build (it doesn't apply to the Vite dev server).
 
-### P0 - Fix Before Merge
+### P0 - Resolved before merge
 
 - Move blocking OS/process work out of async command bodies.
   `mount_smb`, `unmount_smb`, and `play_item` call OS mount/unmount or child
@@ -274,7 +292,7 @@ where the original claim was overstated.
   XSS blast radius with stricter command validation or a narrower file-serving
   strategy.
 
-### P1 - Security and Reliability Hardening
+### P1 - Resolved security and reliability hardening
 
 - Put mpv IPC sockets in a private runtime directory.
   The Unix IPC path is predictable under `/tmp`. Use a per-app private directory
@@ -317,7 +335,7 @@ where the original claim was overstated.
   The current SVG is backend-generated, so this is low risk, but an `<img>` data
   URI or sanitized SVG keeps the UI safer if the data path changes later.
 
-### P2 - UX, Accessibility, and Maintenance
+### P2 - Resolved UX, accessibility, and maintenance
 
 - Fix Settings modal accessibility.
   Remove `role="button"` from the backdrop, move focus into the dialog on open,
