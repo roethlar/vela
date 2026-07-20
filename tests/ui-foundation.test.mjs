@@ -281,6 +281,7 @@ test("Player Settings exposes the four duplicate-source policies and exact prior
   assert.match(page, /role="dialog"/);
   assert.match(page, /aria-modal="true"/);
   assert.match(page, /handleSourceChoiceDialogKeydown/);
+  assert.match(page, /onkeydown=\{handleSourceChoiceDialogKeydown\}/);
   assert.match(page, /sourceChoicePreviousFocus = document\.activeElement/);
   assert.match(page, /previous\?\.isConnected[\s\S]{0,80}previous\.focus\(\)/);
   assert.match(page, /querySelector<HTMLButtonElement>\("button\.choice"\)\?\.focus\(\)/);
@@ -300,6 +301,11 @@ test("Player Settings exposes the four duplicate-source policies and exact prior
     page,
     /playFrom[\s\S]{0,700}set_merged_override/,
     "Ask-mode Play Version choices must go through the one-shot backend path",
+  );
+  assert.match(
+    page,
+    /async function playFrom\([\s\S]{0,500}await play\([\s\S]{0,220}b\.sourceId,\s*\);/,
+    "Play Version must send the selected backing through the explicit backend path",
   );
 });
 
