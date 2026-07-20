@@ -556,12 +556,11 @@ mod wayland_hdr {
             match event {
                 wl_output::Event::Name { name } => output.name = Some(name),
                 wl_output::Event::Mode {
-                    flags,
+                    flags: WEnum::Value(value),
                     width,
                     height,
                     ..
-                } if matches!(flags, WEnum::Value(value) if value.contains(wl_output::Mode::Current)) =>
-                {
+                } if value.contains(wl_output::Mode::Current) => {
                     output.width = width.max(0) as u32;
                     output.height = height.max(0) as u32;
                 }

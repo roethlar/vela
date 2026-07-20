@@ -47,11 +47,10 @@ wayland-client = "0.31"
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
 
 # crates.io's wayland-scanner 0.31.10 still pins vulnerable quick-xml 0.39.
-# Upstream has updated the same compatible scanner to quick-xml 0.41 but has
-# not cut a release; pin that exact upstream revision so cargo audit remains
-# fail-closed without carrying a runtime fork.
+# The vendored crate is that exact release with only its compatible quick-xml
+# requirement updated to 0.41, keeping the released client/runtime API intact.
 [patch.crates-io]
-wayland-scanner = { git = "https://github.com/Smithay/wayland-rs.git", rev = "a55c54b4e138e29181d63908ece06fd2a13550a0" }
+wayland-scanner = { path = "vendor/wayland-scanner" }
 
 # Smaller, faster release binary for a desktop app. (Debug builds, which the
 # Tauri dev workflow uses, are unaffected.)
