@@ -1,5 +1,7 @@
 # Vela 1.0.0
 
+![Vela 1.0 launch graphic](https://raw.githubusercontent.com/roethlar/vela/v1.0.0/docs/images/vela-1.0-launch.png)
+
 Vela 1.0 is the first public release of the HDR-first desktop client for Plex,
 Jellyfin, and experimental Emby. It keeps the library in a focused native app
 and hands playback to your installed mpv, preserving mpv's codec, GPU,

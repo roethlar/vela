@@ -20,6 +20,8 @@ Plex is the primary and most deeply exercised backend, Jellyfin has been tested
 against a real server, and Emby currently ships as an experimental sibling of
 the Jellyfin integration.
 
+![Vela 1.0 Home in the dark theme](docs/images/vela-1.0-home.png)
+
 ## Why Vela
 
 - **HDR-first playback.** Vela launches the system mpv with `gpu-next` and
