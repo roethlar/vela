@@ -398,12 +398,14 @@ fn windows_hdr_state(target_name: Option<&str>) -> HdrState {
         }
 
         for path in paths.into_iter().take(path_count as usize) {
-            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME::default();
-            source.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
-                r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
-                size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
-                adapterId: path.sourceInfo.adapterId,
-                id: path.sourceInfo.id,
+            let mut source = DISPLAYCONFIG_SOURCE_DEVICE_NAME {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME,
+                    size: size_of::<DISPLAYCONFIG_SOURCE_DEVICE_NAME>() as u32,
+                    adapterId: path.sourceInfo.adapterId,
+                    id: path.sourceInfo.id,
+                },
+                ..Default::default()
             };
             if DisplayConfigGetDeviceInfo(&mut source.header) != 0 {
                 continue;
@@ -418,12 +420,14 @@ fn windows_hdr_state(target_name: Option<&str>) -> HdrState {
                 continue;
             }
 
-            let mut color = DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO::default();
-            color.header = DISPLAYCONFIG_DEVICE_INFO_HEADER {
-                r#type: DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO,
-                size: size_of::<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>() as u32,
-                adapterId: path.targetInfo.adapterId,
-                id: path.targetInfo.id,
+            let mut color = DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO {
+                header: DISPLAYCONFIG_DEVICE_INFO_HEADER {
+                    r#type: DISPLAYCONFIG_DEVICE_INFO_GET_ADVANCED_COLOR_INFO,
+                    size: size_of::<DISPLAYCONFIG_GET_ADVANCED_COLOR_INFO>() as u32,
+                    adapterId: path.targetInfo.adapterId,
+                    id: path.targetInfo.id,
+                },
+                ..Default::default()
             };
             if DisplayConfigGetDeviceInfo(&mut color.header) != 0 {
                 return HdrState::Unknown;
