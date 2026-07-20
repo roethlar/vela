@@ -9,6 +9,7 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import {
   holdsFor,
   goHome,
+  logicalPlaybackInfoIds,
   makeClips,
   mockSource,
   pollUntil,
@@ -68,9 +69,7 @@ const stoppedResponses = (mock) =>
   ).length;
 
 const playbackInfoIds = (mock) =>
-  mock.state.requests
-    .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
-    .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]);
+  logicalPlaybackInfoIds(mock);
 
 async function waitForMpvProperty(mpv, property, expected, what) {
   await pollUntil(

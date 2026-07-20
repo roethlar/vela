@@ -649,6 +649,14 @@ export function startMockJellyfin({
     }
     const stream = /^\/Videos\/([^/]+)\/stream$/.exec(path);
     if (stream && findMovie(stream[1])?.mediaFile) {
+      if (query.api_key !== undefined) {
+        state.contractViolations.push({
+          path,
+          query: { streamAuth: "credential in URL" },
+        });
+        return json({ error: "stream credential must not be in the URL" }, 400);
+      }
+      if (!authed(req)) return unauthorized(path);
       return serveRange(req, res, findMovie(stream[1]).mediaFile);
     }
     const image = /^\/Items\/([^/]+)\/Images\/(Primary|Backdrop\/0)$/.exec(path);

@@ -3,7 +3,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { goHome, makeClips, mockSource, pollUntil, seedConfig } from '../helpers.mjs';
+import {
+  goHome,
+  logicalPlaybackInfoIds,
+  makeClips,
+  mockSource,
+  pollUntil,
+  seedConfig,
+} from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 
@@ -191,9 +198,7 @@ export default {
     const after = await nextPlayer('server-after');
     await after.setProp('pause', true);
     assert.deepEqual(
-      healthy.state.requests
-        .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
-        .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]),
+      logicalPlaybackInfoIds(healthy),
       ['server-one', 'server-two', 'server-after'],
       'Continue Playing must begin only after the server playlist reaches its final item',
     );

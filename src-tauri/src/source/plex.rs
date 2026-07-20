@@ -8,7 +8,7 @@ use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
     namespace_key, CastMember, DetailDto, HubDto, ItemDto, MediaSource, MediaStreamDto,
-    MediaVersionDto, PersonRef, PlaylistDto, SectionDto, StreamResolution,
+    MediaVersionDto, PersonRef, PlaybackVersion, PlaylistDto, SectionDto, StreamResolution,
 };
 use crate::playback::{ProgressTarget, TrackInfo};
 use crate::plex_library::{PlexDetail, PlexLibrary, PlexPlaylist, PlexServer, PlexVideo};
@@ -693,6 +693,121 @@ fn is_hdr_range(v: &str) -> bool {
         || v.contains("pq")
 }
 
+fn plex_media_is_hdr(media: &crate::plex_library::PlexDetailMedia) -> bool {
+    media
+        .video_dynamic_range
+        .as_deref()
+        .is_some_and(is_hdr_range)
+        || media.video_profile.as_deref().is_some_and(is_hdr_range)
+}
+
+fn plex_media_dimensions(media: &crate::plex_library::PlexDetailMedia) -> (u32, u32) {
+    let resolution_height = media.video_resolution.as_deref().and_then(|value| {
+        let lower = value.to_ascii_lowercase();
+        match lower.as_str() {
+            "sd" => Some(480),
+            "2k" => Some(1440),
+            "4k" => Some(2160),
+            "8k" => Some(4320),
+            _ => {
+                let digits = lower
+                    .chars()
+                    .filter(char::is_ascii_digit)
+                    .collect::<String>();
+                digits.parse::<u32>().ok()
+            }
+        }
+    });
+    let height = media.height.or(resolution_height).unwrap_or(0);
+    let width = media
+        .width
+        .or_else(|| (height > 0).then(|| height.saturating_mul(16) / 9))
+        .unwrap_or(0);
+    (width, height)
+}
+
+fn plex_media_version_id(
+    media: &crate::plex_library::PlexDetailMedia,
+    _index: usize,
+) -> String {
+    if !media.id.is_empty() {
+        return format!("media:{}", media.id);
+    }
+    let part_identity = media
+        .parts
+        .iter()
+        .map(|part| {
+            if part.id.is_empty() {
+                part.key.as_str()
+            } else {
+                part.id.as_str()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("|");
+    format!(
+        "parts:{part_identity}|{}x{}|{}|{}",
+        media.width.unwrap_or(0),
+        media.height.unwrap_or(0),
+        media.bitrate.unwrap_or(0),
+        plex_media_is_hdr(media)
+    )
+}
+
+fn plex_media_matches_version(
+    media: &crate::plex_library::PlexDetailMedia,
+    index: usize,
+    version_id: &str,
+) -> bool {
+    plex_media_version_id(media, index) == version_id
+}
+
+async fn preflight_plex_stream(
+    url: &str,
+    stream_headers: &[(String, String)],
+) -> Result<(), String> {
+    let part_urls: Vec<String> = if url.starts_with("edl://") {
+        edl_part_urls(url)
+    } else if url.starts_with("http") {
+        vec![url.to_string()]
+    } else {
+        Vec::new()
+    };
+    if part_urls.is_empty() {
+        return Ok(());
+    }
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(8))
+        .build()
+        .map_err(|e| format!("couldn't initialize the HTTP client: {e}"))?;
+    for part_url in &part_urls {
+        let mut request = client.head(part_url);
+        for (name, value) in stream_headers {
+            request = request.header(name.as_str(), value.as_str());
+        }
+        let response = request
+            .send()
+            .await
+            .map_err(|e| format!("couldn't reach the media server to start playback: {e}"))?;
+        let status = response.status();
+        if status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
+            continue;
+        }
+        if !status.is_success() {
+            return Err(if status == reqwest::StatusCode::NOT_FOUND {
+                "File not found on the server — it may have been moved or deleted.".into()
+            } else {
+                format!(
+                    "the media server rejected playback (HTTP {})",
+                    status.as_u16()
+                )
+            });
+        }
+    }
+    Ok(())
+}
+
 #[async_trait]
 impl MediaSource for PlexSource {
     fn id(&self) -> String {
@@ -1084,75 +1199,98 @@ impl MediaSource for PlexSource {
         item_key: &str,
         duration_ms: Option<u64>,
     ) -> Result<StreamResolution, String> {
+        let mut versions = self.playback_versions(item_key).await?;
+        versions.sort_by(|left, right| {
+            right
+                .height
+                .cmp(&left.height)
+                .then_with(|| right.width.cmp(&left.width))
+                .then_with(|| right.hdr.cmp(&left.hdr))
+                .then_with(|| right.bitrate.cmp(&left.bitrate))
+                .then_with(|| left.version_id.cmp(&right.version_id))
+        });
+        let selected = versions
+            .first()
+            .ok_or_else(|| "no playable Plex media version found".to_string())?;
+        self.resolve_stream_version(item_key, duration_ms, &selected.version_id)
+            .await
+    }
+
+    async fn playback_versions(&self, item_key: &str) -> Result<Vec<PlaybackVersion>, String> {
         validate_plex_id("item key", item_key)?;
-        let lib = self.ensure_ready().await?;
-        let resolve_url = |lib: PlexLibrary| async move {
-            let url = lib
-                .get_part_url_for_rating_key(item_key)
+        let fetch = |lib: PlexLibrary| async move {
+            let detail = lib
+                .get_item_detail(item_key)
                 .await
-                .map_err(|e| e.to_string())?
-                .ok_or("no playable part found")?;
-            Ok::<_, String>((lib, url))
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((lib, detail))
         };
-        let (lib, url) = match resolve_url(lib).await {
-            Ok(ok) => ok,
-            Err(_) => {
-                let lib = self.rediscover().await?;
-                resolve_url(lib).await?
-            }
+        let lib = self.ensure_ready().await?;
+        let (lib, detail) = match fetch(lib).await {
+            Ok(value) => value,
+            Err(_) => fetch(self.rediscover().await?).await?,
         };
+        let endpoint = url::Url::parse(
+            &lib.server_base()
+                .ok_or_else(|| "Plex server is unavailable".to_string())?,
+        )
+        .map_err(|_| "Plex server endpoint is invalid".to_string())?;
+        let verified_local = lib.server_is_local();
+        Ok(detail
+            .media
+            .iter()
+            .enumerate()
+            .filter(|(_, media)| lib.part_url_for_media(media).is_some())
+            .map(|(index, media)| {
+                let (width, height) = plex_media_dimensions(media);
+                PlaybackVersion {
+                    source_id: self.id.clone(),
+                    source_name: self.name.clone(),
+                    item_key: namespace_key(&self.id, item_key),
+                    version_id: plex_media_version_id(media, index),
+                    width,
+                    height,
+                    hdr: plex_media_is_hdr(media),
+                    bitrate: media.bitrate.unwrap_or(0),
+                    direct_play_rank: 0,
+                    endpoint: endpoint.clone(),
+                    provider_verified_local: verified_local,
+                }
+            })
+            .collect())
+    }
 
-        // The part URL is credential-free; the token travels as a header
-        // instead — on this preflight and on mpv's own requests (threaded
-        // through `StreamResolution`). See `.agents/decisions.md`, 2026-07-03.
+    async fn resolve_stream_version(
+        &self,
+        item_key: &str,
+        duration_ms: Option<u64>,
+        version_id: &str,
+    ) -> Result<StreamResolution, String> {
+        validate_plex_id("item key", item_key)?;
+        let fetch = |lib: PlexLibrary| async move {
+            let detail = lib
+                .get_item_detail(item_key)
+                .await
+                .map_err(|error| error.to_string())?;
+            Ok::<_, String>((lib, detail))
+        };
+        let lib = self.ensure_ready().await?;
+        let (lib, detail) = match fetch(lib).await {
+            Ok(value) => value,
+            Err(_) => fetch(self.rediscover().await?).await?,
+        };
+        let media = detail
+            .media
+            .iter()
+            .enumerate()
+            .find(|(index, media)| plex_media_matches_version(media, *index, version_id))
+            .map(|(_, media)| media)
+            .ok_or_else(|| "the selected Plex media version is no longer available".to_string())?;
+        let url = lib
+            .part_url_for_media(media)
+            .ok_or_else(|| "the selected Plex media version has no playable parts".to_string())?;
         let stream_headers = vec![("X-Plex-Token".to_string(), lib.auth_token_clone())];
-
-        // Preflight: a stale Plex DB entry can point at a file that no longer
-        // exists, which would otherwise launch an mpv window that silently fails.
-        // For split-file media the play URL is an `edl://` wrapper, so check each
-        // underlying part it references — a missing segment must fail here too.
-        let part_urls: Vec<String> = if url.starts_with("edl://") {
-            edl_part_urls(&url)
-        } else if url.starts_with("http") {
-            vec![url.clone()]
-        } else {
-            Vec::new()
-        };
-        if !part_urls.is_empty() {
-            // Propagate a builder failure rather than falling back to a default
-            // client with no timeout (which could hang the preflight forever).
-            let client = reqwest::Client::builder()
-                .timeout(std::time::Duration::from_secs(8))
-                .build()
-                .map_err(|e| format!("couldn't initialize the HTTP client: {e}"))?;
-            for u in &part_urls {
-                let mut req = client.head(u);
-                for (name, value) in &stream_headers {
-                    req = req.header(name.as_str(), value.as_str());
-                }
-                let resp = req.send().await.map_err(|e| {
-                    format!("couldn't reach the media server to start playback: {e}")
-                })?;
-                let status = resp.status();
-                // 405 = the server doesn't allow HEAD here; we can't preflight, so
-                // let it through (GET may still stream). Any other non-success
-                // means the part won't play — fail closed with a clear message
-                // rather than launching mpv to fail silently.
-                if status == reqwest::StatusCode::METHOD_NOT_ALLOWED {
-                    continue;
-                }
-                if !status.is_success() {
-                    return Err(if status == reqwest::StatusCode::NOT_FOUND {
-                        "File not found on the server — it may have been moved or deleted.".into()
-                    } else {
-                        format!(
-                            "the media server rejected playback (HTTP {})",
-                            status.as_u16()
-                        )
-                    });
-                }
-            }
-        }
+        preflight_plex_stream(&url, &stream_headers).await?;
 
         let resume_ms = lib
             .get_resume_offset_ms(item_key)
@@ -1165,7 +1303,7 @@ impl MediaSource for PlexSource {
             token: lib.auth_token_clone(),
             client_identifier: lib.client_identifier_clone(),
             rating_key: item_key.to_string(),
-            key: format!("/library/metadata/{}", item_key),
+            key: format!("/library/metadata/{item_key}"),
             duration_ms: duration_ms.unwrap_or(0),
         };
         Ok(StreamResolution {
@@ -1429,6 +1567,82 @@ mod tests {
         assert_eq!(dto.item_count, Some(8));
         assert_eq!(dto.source_id, "plex-a");
         assert_eq!(dto.source_name, "Plex A");
+    }
+
+    #[test]
+    fn plex_version_identity_is_exact_and_stable_without_a_media_id() {
+        let exact = PlexDetailMedia {
+            id: "42".to_string(),
+            ..Default::default()
+        };
+        assert_eq!(plex_media_version_id(&exact, 0), "media:42");
+
+        let fallback = PlexDetailMedia {
+            width: Some(3840),
+            height: Some(2160),
+            bitrate: Some(80_000),
+            parts: vec![PlexDetailPart {
+                id: "part-a".to_string(),
+                key: "/library/parts/part-a".to_string(),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+        assert_eq!(
+            plex_media_version_id(&fallback, 0),
+            plex_media_version_id(&fallback, 9),
+            "a refreshed response may reorder Media rows without changing the selected version"
+        );
+        let resolution_only = PlexDetailMedia {
+            video_resolution: Some("4k".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(plex_media_dimensions(&resolution_only), (3840, 2160));
+    }
+
+    #[test]
+    fn exact_plex_media_preserves_every_split_part_in_order() {
+        let mut library = PlexLibrary::new("token".to_string(), "client".to_string());
+        library.set_server_manual(
+            "127.0.0.1".to_string(),
+            32400,
+            false,
+            Some("Plex".to_string()),
+        );
+        let media = PlexDetailMedia {
+            id: "42".to_string(),
+            parts: vec![
+                PlexDetailPart {
+                    id: "a".to_string(),
+                    key: "/library/parts/a".to_string(),
+                    ..Default::default()
+                },
+                PlexDetailPart {
+                    id: "b".to_string(),
+                    key: "/library/parts/b".to_string(),
+                    ..Default::default()
+                },
+            ],
+            ..Default::default()
+        };
+        let edl = library.part_url_for_media(&media).unwrap();
+        let parts = edl_part_urls(&edl);
+        assert_eq!(parts.len(), 2);
+        assert!(parts[0].contains("/library/parts/a?download=1"));
+        assert!(parts[1].contains("/library/parts/b?download=1"));
+        assert!(parts.iter().all(|part| !part.contains("token")));
+
+        let incomplete = PlexDetailMedia {
+            parts: vec![
+                PlexDetailPart {
+                    key: "/library/parts/a".to_string(),
+                    ..Default::default()
+                },
+                PlexDetailPart::default(),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(library.part_url_for_media(&incomplete), None);
     }
 
     /// A minimal Plex-shaped HTTP server on 127.0.0.1, enough for `/identity`,
@@ -2229,6 +2443,7 @@ mod tests {
                         codec: Some("eac3".into()),
                         ..Default::default()
                     }],
+                    ..Default::default()
                 }],
                 ..Default::default()
             }],

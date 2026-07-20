@@ -71,6 +71,11 @@ pub struct AppState {
     /// continuation supplies the completed UUID as an expectation so delayed
     /// work can never replace a newer manual play.
     pub(crate) active_playback_session: AsyncMutex<Option<String>>,
+    /// The immutable item/backing identity installed with the active session.
+    /// Clean completion may remove its recent snapshot before TV continuation
+    /// asks for the next episode, so this in-memory copy preserves the merged
+    /// hierarchy without exposing it in the id-only completion event.
+    pub(crate) active_playback_item: AsyncMutex<Option<(String, source::ItemDto)>>,
     /// Window-state observer for the latest successfully launched mpv session.
     /// Exact automatic replacements may snapshot it; manual plays never do.
     pub(crate) playback_window_session: Mutex<Option<commands::PlaybackWindowSession>>,
@@ -81,6 +86,9 @@ pub struct AppState {
     /// listing is entered, windowed immutably by continuation pages so
     /// paging can never skip or duplicate titles (see `get_type_listing`).
     pub merged_snapshot: AsyncMutex<Option<commands::MergedSnapshot>>,
+    /// Materialized merged children for the currently-open show or season.
+    /// Continuation pages window the same source set and ordering as page 0.
+    pub merged_children_snapshot: AsyncMutex<Option<commands::MergedChildrenSnapshot>>,
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -118,9 +126,11 @@ pub fn run() {
         playback_advance: Arc::new(commands::PlaybackAdvance::default()),
         playlist_cursor: AsyncMutex::new(None),
         active_playback_session: AsyncMutex::new(None),
+        active_playback_item: AsyncMutex::new(None),
         playback_window_session: Mutex::new(None),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
+        merged_children_snapshot: AsyncMutex::new(None),
     };
 
     // Periodically reap exited mpv processes so they don't sit as zombies: the

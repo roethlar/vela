@@ -11,7 +11,10 @@ use crate::display::{self, DisplayOverrides, HdrOverride, ResolutionOverride};
 use crate::playback;
 use crate::plex_library::{PlexLibrary, PlexServer};
 use crate::source::jellyfin::{self, Flavor, JellyfinClient};
-use crate::source::{plex, DetailDto, EpisodeContext, HubDto, ItemDto, MediaSource, SectionDto};
+use crate::source::{
+    plex, BackingRef, DetailDto, EpisodeContext, HubDto, ItemDto, MediaSource, PlaybackVersion,
+    SectionDto,
+};
 use crate::AppState;
 
 const PRODUCT: &str = "Vela";
@@ -1472,6 +1475,15 @@ pub struct MergedSnapshot {
     pub items: Vec<ItemDto>,
 }
 
+/// Immutable page source for one merged show/season drill. The fingerprint
+/// includes the parent identity and every source-specific parent key, so a
+/// continuation page cannot accidentally window a different hierarchy after
+/// navigation or source availability changes.
+pub struct MergedChildrenSnapshot {
+    pub fingerprint: String,
+    pub items: Vec<ItemDto>,
+}
+
 #[tauri::command]
 pub async fn get_type_listing(
     section_type: String,
@@ -1610,10 +1622,9 @@ async fn fetch_all_merged(
     }
 }
 
-/// Default playback preference for merged titles. A policy constant, not a
-/// heuristic — the per-title override wins over all of it. (Sources are
-/// servers only since the 2026-07-08 local-family removal; the ladder kept
-/// its Plex-first order.)
+/// Stable display-face preference for merged titles. Actual playback source
+/// and version selection happens at `play_by_key` under the persisted policy;
+/// this legacy kind order only chooses an immediately routable card identity.
 fn kind_rank(kind: &str) -> u8 {
     match kind {
         "plex" => 0,
@@ -1653,9 +1664,9 @@ fn canonical_id_of(item: &ItemDto) -> String {
 }
 
 /// Order each merged entry's backing list — owner override first, then the
-/// kind ranking (registry order breaks ties via stable sort) — and point the
-/// entry's play identity (rating_key/source_id) at the winner. Display
-/// fields keep whatever the dedup pass chose as richest.
+/// stable display-face ranking — and keep its namespaced face identity valid.
+/// The play boundary probes every backing and independently applies Best,
+/// Compatible, Fastest, or Ask.
 fn rank_backings(
     mut groups: Vec<ItemDto>,
     kinds: &std::collections::HashMap<String, &'static str>,
@@ -1796,10 +1807,7 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
                 by_title.entry(tkey).or_insert(gi);
                 let group = &mut groups[gi];
                 let backing = group.backing.get_or_insert_with(Vec::new);
-                let item_ref = crate::source::BackingRef {
-                    source_id: item.source_id.clone(),
-                    rating_key: item.rating_key.clone(),
-                };
+                let item_ref = crate::source::backing_ref_of(&item);
                 if !backing.contains(&item_ref) {
                     backing.push(item_ref.clone());
                 }
@@ -1871,10 +1879,7 @@ fn dedup_across_sources(items: Vec<ItemDto>) -> Vec<ItemDto> {
                 }
                 by_title.insert(tkey, gi);
                 let mut group = item;
-                group.backing = Some(vec![crate::source::BackingRef {
-                    source_id: group.source_id.clone(),
-                    rating_key: group.rating_key.clone(),
-                }]);
+                group.backing = Some(vec![crate::source::backing_ref_of(&group)]);
                 groups.push(group);
             }
         }
@@ -2441,6 +2446,145 @@ mod merge_tests {
         let ranked = rank_backings(vec![bare], &kinds(), &Default::default());
         assert_eq!(ranked[0].detail_key, None);
     }
+
+    fn episode(source: &str, key: &str, season: Option<u32>, index: Option<u32>) -> ItemDto {
+        let mut episode = item("Episode", None, source);
+        episode.rating_key = format!("{source}:{key}");
+        episode.media_type = Some("episode".to_string());
+        episode.parent_index = season;
+        episode.index = index;
+        episode.parent_rating_key = Some(format!("{source}:season"));
+        episode.grandparent_rating_key = Some(format!("{source}:show"));
+        episode
+    }
+
+    #[test]
+    fn hierarchy_merges_episode_coordinates_only_inside_the_parent_show() {
+        let first = dedup_hierarchy_children(
+            vec![
+                episode("plex", "ep", Some(2), Some(7)),
+                episode("jf", "ep", Some(2), Some(7)),
+            ],
+            "show:one",
+            "season",
+        );
+        assert_eq!(first.len(), 1);
+        assert_eq!(first[0].backing.as_ref().map(Vec::len), Some(2));
+        assert_eq!(
+            first[0].canonical_id.as_deref(),
+            Some("show:one|season:2|episode:7")
+        );
+
+        let other_show = dedup_hierarchy_children(
+            vec![episode("plex", "ep", Some(2), Some(7))],
+            "show:two",
+            "season",
+        );
+        assert_eq!(
+            other_show[0].canonical_id.as_deref(),
+            Some("show:two|season:2|episode:7")
+        );
+    }
+
+    #[test]
+    fn hierarchy_keeps_ambiguous_or_conflicting_episode_identities_separate() {
+        let ambiguous = dedup_hierarchy_children(
+            vec![
+                episode("plex", "unknown", None, Some(7)),
+                episode("jf", "unknown", None, Some(7)),
+            ],
+            "show:one",
+            "season",
+        );
+        assert_eq!(ambiguous.len(), 2);
+
+        let mut plex = episode("plex", "ep", Some(2), Some(7));
+        plex.provider_ids = vec!["tmdb:100".to_string()];
+        let mut jellyfin = episode("jf", "ep", Some(2), Some(7));
+        jellyfin.provider_ids = vec!["tmdb:200".to_string()];
+        let conflicting =
+            dedup_hierarchy_children(vec![plex, jellyfin], "show:one", "season");
+        assert_eq!(conflicting.len(), 2);
+    }
+
+    #[test]
+    fn hierarchy_never_collapses_two_items_from_one_source() {
+        let groups = dedup_hierarchy_children(
+            vec![
+                episode("plex", "cut-a", Some(1), Some(1)),
+                episode("plex", "cut-b", Some(1), Some(1)),
+                episode("jf", "cut", Some(1), Some(1)),
+            ],
+            "show:one",
+            "season",
+        );
+        assert_eq!(groups.len(), 2);
+        assert!(groups.iter().all(|group| {
+            let backings = group.backing.as_ref().unwrap();
+            let mut sources = backings
+                .iter()
+                .map(|backing| backing.source_id.as_str())
+                .collect::<Vec<_>>();
+            sources.sort_unstable();
+            sources.dedup();
+            sources.len() == backings.len()
+        }));
+    }
+
+    #[test]
+    fn hierarchy_backings_retain_each_sources_parent_path() {
+        let groups = dedup_hierarchy_children(
+            vec![
+                episode("plex", "ep", Some(1), Some(2)),
+                episode("jf", "ep", Some(1), Some(2)),
+            ],
+            "show:one",
+            "season",
+        );
+        let backings = groups[0].backing.as_ref().unwrap();
+        assert!(backings.iter().any(|backing| {
+            backing.source_id == "plex"
+                && backing.parent_rating_key.as_deref() == Some("plex:season")
+                && backing.grandparent_rating_key.as_deref() == Some("plex:show")
+        }));
+        assert!(backings.iter().any(|backing| {
+            backing.source_id == "jf"
+                && backing.parent_rating_key.as_deref() == Some("jf:season")
+                && backing.grandparent_rating_key.as_deref() == Some("jf:show")
+        }));
+    }
+
+    #[test]
+    fn continuation_recovers_every_show_and_season_parent_copy() {
+        let mut current = dedup_hierarchy_children(
+            vec![
+                episode("plex", "ep", Some(1), Some(2)),
+                episode("jf", "ep", Some(1), Some(2)),
+            ],
+            "show:one",
+            "season",
+        )
+        .remove(0);
+        current.source_id = "jf".to_string();
+        current.rating_key = "jf:ep".to_string();
+
+        let shows = hierarchy_parent_backings(&current, true);
+        let seasons = hierarchy_parent_backings(&current, false);
+        assert_eq!(
+            shows
+                .iter()
+                .map(|backing| backing.rating_key.as_str())
+                .collect::<Vec<_>>(),
+            ["jf:show", "plex:show"]
+        );
+        assert_eq!(
+            seasons
+                .iter()
+                .map(|backing| backing.rating_key.as_str())
+                .collect::<Vec<_>>(),
+            ["jf:season", "plex:season"]
+        );
+    }
 }
 
 #[tauri::command]
@@ -2466,15 +2610,299 @@ pub async fn search(
     .await
 }
 
+fn merged_children_fingerprint(
+    canonical_id: Option<&str>,
+    media_type: Option<&str>,
+    backings: &[BackingRef],
+) -> String {
+    let mut identities = backings
+        .iter()
+        .map(|backing| format!("{}:{}", backing.source_id, backing.rating_key))
+        .collect::<Vec<_>>();
+    identities.sort();
+    format!(
+        "{}|{}|{}",
+        canonical_id.unwrap_or(""),
+        media_type.unwrap_or(""),
+        identities.join("|")
+    )
+}
+
+fn hierarchy_coordinate(item: &ItemDto, parent_media_type: &str) -> Option<(u32, u32)> {
+    match parent_media_type {
+        "show" if item.media_type.as_deref() == Some("season") => Some((item.index?, 0)),
+        "season" if item.media_type.as_deref() == Some("episode") => {
+            Some((item.parent_index?, item.index?))
+        }
+        _ => None,
+    }
+}
+
+fn hierarchy_items_match(left: &ItemDto, right: &ItemDto, parent_media_type: &str) -> bool {
+    if left.source_id == right.source_id {
+        return false;
+    }
+    if !left.provider_ids.is_empty() || !right.provider_ids.is_empty() {
+        return !left.provider_ids.is_empty()
+            && !right.provider_ids.is_empty()
+            && left
+                .provider_ids
+                .iter()
+                .any(|id| right.provider_ids.contains(id));
+    }
+    hierarchy_coordinate(left, parent_media_type).is_some_and(|coordinate| {
+        hierarchy_coordinate(right, parent_media_type) == Some(coordinate)
+    })
+}
+
+fn hierarchy_canonical_id(
+    item: &ItemDto,
+    parent_canonical_id: &str,
+    parent_media_type: &str,
+) -> String {
+    if let Some(provider_id) = item.provider_ids.iter().min() {
+        return provider_id.clone();
+    }
+    match hierarchy_coordinate(item, parent_media_type) {
+        Some((season, 0)) if parent_media_type == "show" => {
+            format!("{parent_canonical_id}|season:{season}")
+        }
+        Some((season, episode)) => {
+            format!("{parent_canonical_id}|season:{season}|episode:{episode}")
+        }
+        None => format!(
+            "{parent_canonical_id}|copy:{}:{}",
+            item.source_id, item.rating_key
+        ),
+    }
+}
+
+fn merge_hierarchy_item(group: &mut ItemDto, item: ItemDto) {
+    let item_ref = crate::source::backing_ref_of(&item);
+    let backing = group.backing.get_or_insert_with(Vec::new);
+    if !backing.contains(&item_ref) {
+        backing.push(item_ref.clone());
+    }
+
+    if watch_rank(item.played, item.view_offset_ms)
+        > watch_rank(group.played, group.view_offset_ms)
+    {
+        group.played = item.played;
+        group.view_offset_ms = item.view_offset_ms;
+    }
+    group.added_at_ms = group.added_at_ms.max(item.added_at_ms);
+    group.last_watched_at_ms = group.last_watched_at_ms.max(item.last_watched_at_ms);
+
+    let richness = |candidate: &ItemDto| {
+        candidate.summary.is_some() as u8
+            + candidate.poster.is_some() as u8
+            + candidate.year.is_some() as u8
+    };
+    if richness(&item) > richness(group) {
+        let keep_backing = group.backing.take();
+        let keep_played = group.played;
+        let keep_offset = group.view_offset_ms;
+        let keep_added = group.added_at_ms;
+        let keep_last_watched = group.last_watched_at_ms;
+        let mut provider_ids = std::mem::take(&mut group.provider_ids);
+        for provider_id in &item.provider_ids {
+            if !provider_ids.contains(provider_id) {
+                provider_ids.push(provider_id.clone());
+            }
+        }
+        *group = item;
+        group.provider_ids = provider_ids;
+        group.backing = keep_backing.map(|mut backings| {
+            backings.retain(|backing| *backing != item_ref);
+            backings.insert(0, item_ref);
+            backings
+        });
+        if watch_rank(keep_played, keep_offset)
+            > watch_rank(group.played, group.view_offset_ms)
+        {
+            group.played = keep_played;
+            group.view_offset_ms = keep_offset;
+        }
+        group.added_at_ms = keep_added;
+        group.last_watched_at_ms = keep_last_watched;
+    } else {
+        for provider_id in item.provider_ids {
+            if !group.provider_ids.contains(&provider_id) {
+                group.provider_ids.push(provider_id);
+            }
+        }
+    }
+}
+
+fn dedup_hierarchy_children(
+    items: Vec<ItemDto>,
+    parent_canonical_id: &str,
+    parent_media_type: &str,
+) -> Vec<ItemDto> {
+    let mut groups: Vec<ItemDto> = Vec::new();
+    for item in items {
+        let hit = groups.iter().position(|group| {
+            group.backing.as_ref().is_none_or(|backings| {
+                backings
+                    .iter()
+                    .all(|backing| backing.source_id != item.source_id)
+            }) && hierarchy_items_match(group, &item, parent_media_type)
+        });
+        if let Some(index) = hit {
+            merge_hierarchy_item(&mut groups[index], item);
+        } else {
+            let mut group = item;
+            group.backing = Some(vec![crate::source::backing_ref_of(&group)]);
+            groups.push(group);
+        }
+    }
+    for group in &mut groups {
+        group.canonical_id = Some(hierarchy_canonical_id(
+            group,
+            parent_canonical_id,
+            parent_media_type,
+        ));
+    }
+    groups
+}
+
+fn sort_hierarchy_children(items: &mut [ItemDto]) {
+    items.sort_by(|left, right| {
+        left.parent_index
+            .unwrap_or(u32::MAX)
+            .cmp(&right.parent_index.unwrap_or(u32::MAX))
+            .then_with(|| {
+                left.index
+                    .unwrap_or(u32::MAX)
+                    .cmp(&right.index.unwrap_or(u32::MAX))
+            })
+            .then_with(|| left.title.to_lowercase().cmp(&right.title.to_lowercase()))
+            .then_with(|| left.canonical_id.cmp(&right.canonical_id))
+            .then_with(|| left.source_id.cmp(&right.source_id))
+            .then_with(|| left.rating_key.cmp(&right.rating_key))
+    });
+}
+
+async fn fetch_merged_children(
+    state: &AppState,
+    backings: &[BackingRef],
+    parent_canonical_id: &str,
+    parent_media_type: &str,
+) -> Result<Vec<ItemDto>, String> {
+    let (routes, kinds) = {
+        let registry = state.registry.lock().await;
+        let kinds = registry
+            .all()
+            .iter()
+            .map(|source| (source.id(), source.kind()))
+            .collect::<HashMap<_, _>>();
+        let routes = backings
+            .iter()
+            .filter_map(|backing| registry.route(&backing.rating_key).ok())
+            .collect::<Vec<_>>();
+        (routes, kinds)
+    };
+    if routes.is_empty() {
+        return Err("none of this title's source copies is still configured".to_string());
+    }
+
+    let mut jobs = tokio::task::JoinSet::new();
+    for (source, raw) in routes {
+        jobs.spawn(async move {
+            tokio::time::timeout(Duration::from_secs(20), all_children(&source, &raw)).await
+        });
+    }
+    let mut children = Vec::new();
+    let mut succeeded = false;
+    while let Some(result) = jobs.join_next().await {
+        if let Ok(Ok(Ok(mut items))) = result {
+            succeeded = true;
+            children.append(&mut items);
+        }
+    }
+    if !succeeded {
+        return Err("none of this title's source copies is reachable".to_string());
+    }
+
+    let overrides = config::load_config()
+        .map(|config| config.merged_overrides)
+        .unwrap_or_default();
+    let mut merged = rank_backings(
+        dedup_hierarchy_children(children, parent_canonical_id, parent_media_type),
+        &kinds,
+        &overrides,
+    );
+    sort_hierarchy_children(&mut merged);
+    Ok(merged)
+}
+
 /// Children of a show (seasons) or season (episodes), for drill-down navigation.
 #[tauri::command]
 pub async fn get_children(
     rating_key: String,
+    backing: Option<Vec<BackingRef>>,
+    canonical_id: Option<String>,
+    media_type: Option<String>,
     start: usize,
     size: usize,
     state: State<'_, AppState>,
 ) -> Result<Vec<ItemDto>, String> {
     let size = clamp_page_size(size);
+    let mut backings = backing.unwrap_or_default();
+    backings.sort_by(|left, right| {
+        left.source_id
+            .cmp(&right.source_id)
+            .then_with(|| left.rating_key.cmp(&right.rating_key))
+    });
+    backings.dedup_by(|left, right| {
+        left.source_id == right.source_id && left.rating_key == right.rating_key
+    });
+    if backings.len() > 1 {
+        let parent_media_type = media_type.as_deref().unwrap_or("");
+        if !matches!(parent_media_type, "show" | "season") {
+            return Err("merged children require a show or season parent".to_string());
+        }
+        let fingerprint =
+            merged_children_fingerprint(canonical_id.as_deref(), media_type.as_deref(), &backings);
+        if start > 0 {
+            let snapshot = state.merged_children_snapshot.lock().await;
+            if let Some(snapshot) = snapshot
+                .as_ref()
+                .filter(|snapshot| snapshot.fingerprint == fingerprint)
+            {
+                return Ok(snapshot
+                    .items
+                    .iter()
+                    .skip(start)
+                    .take(size)
+                    .cloned()
+                    .collect());
+            }
+        }
+        let parent_canonical_id = canonical_id.unwrap_or_else(|| {
+            format!(
+                "hierarchy:{}",
+                backings
+                    .iter()
+                    .map(|backing| format!("{}:{}", backing.source_id, backing.rating_key))
+                    .collect::<Vec<_>>()
+                    .join("|")
+            )
+        });
+        let items = fetch_merged_children(
+            &state,
+            &backings,
+            &parent_canonical_id,
+            parent_media_type,
+        )
+        .await?;
+        let page = items.iter().skip(start).take(size).cloned().collect();
+        *state.merged_children_snapshot.lock().await = Some(MergedChildrenSnapshot {
+            fingerprint,
+            items,
+        });
+        return Ok(page);
+    }
     let (src, raw) = state.registry.lock().await.route(&rating_key)?;
     src.children(&raw, start, size).await
 }
@@ -2751,14 +3179,22 @@ async fn validate_playback_session(state: &AppState, expected_session: Option<&s
     expected_session_matches(active.as_deref(), expected_session)
 }
 
-async fn install_playback_session(state: &AppState, new_session: &str) {
+async fn install_playback_session(state: &AppState, new_session: &str, item: &ItemDto) {
     *state.active_playback_session.lock().await = Some(new_session.to_string());
+    *state.active_playback_item.lock().await = Some((new_session.to_string(), item.clone()));
 }
 
 async fn clear_playback_session_if(state: &AppState, expected_session: &str) {
     let mut active = state.active_playback_session.lock().await;
     if active.as_deref() == Some(expected_session) {
         *active = None;
+        let mut item = state.active_playback_item.lock().await;
+        if item
+            .as_ref()
+            .is_some_and(|(session, _)| session == expected_session)
+        {
+            *item = None;
+        }
     }
 }
 
@@ -2823,6 +3259,229 @@ pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
 
 /// Internal helper: kill any prior player, route+resolve, and launch the new mpv.
 /// All play contexts use the same lock discipline regardless of trigger.
+struct PlaybackSelection {
+    source: std::sync::Arc<dyn MediaSource>,
+    raw_item_key: String,
+    version_id: Option<String>,
+    item: ItemDto,
+}
+
+fn playback_backings(item: &ItemDto) -> Vec<BackingRef> {
+    let mut backings = item.backing.clone().unwrap_or_default();
+    let face = crate::source::backing_ref_of(item);
+    if !backings.contains(&face) {
+        backings.push(face);
+    }
+    backings.sort_by(|left, right| {
+        left.source_id
+            .cmp(&right.source_id)
+            .then_with(|| left.rating_key.cmp(&right.rating_key))
+    });
+    backings.dedup_by(|left, right| {
+        left.source_id == right.source_id && left.rating_key == right.rating_key
+    });
+    backings
+}
+
+async fn playback_compatibility_target(
+    state: &AppState,
+    replace_session: Option<&str>,
+    cfg: &config::AppConfig,
+) -> Option<crate::selection::CompatibilityTarget> {
+    let app = state.app_handle.get()?;
+    let observed = {
+        let current = state
+            .playback_window_session
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        current
+            .as_ref()
+            .filter(|session| replace_session == Some(session.session_id.as_str()))
+            .map(|session| session.observation.display_snapshot())
+    };
+    let detected = display::detect_profile(app, observed).await;
+    let effective = display::apply_overrides(&detected, playback_display_overrides(cfg));
+    Some(crate::selection::CompatibilityTarget {
+        width: effective.width_px,
+        height: effective.height_px,
+        hdr: effective.hdr,
+    })
+}
+
+async fn select_playback_version(
+    state: &AppState,
+    item: &ItemDto,
+    replace_session: Option<&str>,
+) -> Result<PlaybackSelection, PlayFailure> {
+    const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
+
+    let cfg = config::load_config().map_err(|_| {
+        PlayFailure::fatal("couldn't read the saved playback preferences".to_string())
+    })?;
+    let policy = crate::selection::PlaybackSourcePolicy::normalize(
+        cfg.playback_source_policy.as_deref(),
+    );
+    let override_source = (policy != crate::selection::PlaybackSourcePolicy::Ask)
+        .then(|| {
+            item.canonical_id
+                .as_ref()
+                .and_then(|canonical| cfg.merged_overrides.get(canonical))
+                .cloned()
+        })
+        .flatten();
+    let mut backings = playback_backings(item);
+    if let Some(source_id) = override_source.as_deref() {
+        backings.retain(|backing| backing.source_id == source_id);
+        if backings.is_empty() {
+            let source_name = state
+                .registry
+                .lock()
+                .await
+                .get(source_id)
+                .map(|source| source.name())
+                .unwrap_or_else(|| source_id.to_string());
+            return Err(PlayFailure::unavailable(format!(
+                "the preferred source “{source_name}” no longer has this title"
+            )));
+        }
+    }
+
+    let routed = {
+        let registry = state.registry.lock().await;
+        backings
+            .into_iter()
+            .filter_map(|backing| {
+                registry
+                    .route(&backing.rating_key)
+                    .ok()
+                    .map(|(source, raw)| (backing, source, raw))
+            })
+            .collect::<Vec<_>>()
+    };
+    if routed.is_empty() {
+        return Err(PlayFailure::unavailable(
+            "no configured source can play this title".to_string(),
+        ));
+    }
+
+    let mut probes = tokio::task::JoinSet::new();
+    for (backing, source, raw) in routed {
+        probes.spawn(async move {
+            let result = tokio::time::timeout(PROBE_TIMEOUT, source.playback_versions(&raw)).await;
+            (backing, source, raw, result)
+        });
+    }
+
+    let mut versions: Vec<PlaybackVersion> = Vec::new();
+    let mut legacy = Vec::new();
+    let mut probed_sources: HashMap<
+        String,
+        (std::sync::Arc<dyn MediaSource>, String),
+    > = HashMap::new();
+    while let Some(joined) = probes.join_next().await {
+        let Ok((backing, source, raw, result)) = joined else {
+            continue;
+        };
+        match result {
+            Ok(Ok(found)) if found.is_empty() => {
+                legacy.push((backing, source, raw));
+            }
+            Ok(Ok(found)) => {
+                probed_sources.insert(source.id(), (source, raw));
+                versions.extend(found);
+            }
+            Ok(Err(_)) | Err(_) => {}
+        }
+    }
+
+    if versions.is_empty() {
+        legacy.sort_by(|left, right| left.0.source_id.cmp(&right.0.source_id));
+        let Some((backing, source, raw)) = legacy.into_iter().next() else {
+            let name = if let Some(source_id) = override_source.as_deref() {
+                state
+                    .registry
+                    .lock()
+                    .await
+                    .get(source_id)
+                    .map(|source| format!(" on “{}”", source.name()))
+                    .unwrap_or_default()
+            } else {
+                String::new()
+            };
+            return Err(PlayFailure::unavailable(format!(
+                "no reachable playable copy was found{name}"
+            )));
+        };
+        let mut selected_item = item.clone();
+        selected_item.rating_key = backing.rating_key;
+        selected_item.source_id = backing.source_id;
+        return Ok(PlaybackSelection {
+            source,
+            raw_item_key: raw,
+            version_id: None,
+            item: selected_item,
+        });
+    }
+
+    let mut locality_cache: HashMap<(String, bool), crate::locality::EndpointLocality> =
+        HashMap::new();
+    let mut candidates = Vec::with_capacity(versions.len());
+    for version in &versions {
+        let key = (
+            version.endpoint.as_str().to_string(),
+            version.provider_verified_local,
+        );
+        let locality = if let Some(locality) = locality_cache.get(&key) {
+            *locality
+        } else {
+            let locality = crate::locality::classify_endpoint(
+                &version.endpoint,
+                version.provider_verified_local,
+            )
+            .await;
+            locality_cache.insert(key, locality);
+            locality
+        };
+        candidates.push(crate::selection::PlaybackCandidate {
+            source_id: version.source_id.clone(),
+            version_id: version.version_id.clone(),
+            width: version.width,
+            height: version.height,
+            hdr: version.hdr,
+            bitrate: version.bitrate,
+            direct_play_rank: version.direct_play_rank,
+            locality,
+        });
+    }
+    let target = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
+        playback_compatibility_target(state, replace_session, &cfg).await
+    } else {
+        None
+    };
+    crate::selection::rank_candidates(&mut candidates, policy, target);
+    let winner = candidates
+        .first()
+        .ok_or_else(|| PlayFailure::unavailable("no playable copy was found".to_string()))?;
+    let version = versions
+        .into_iter()
+        .find(|version| {
+            version.source_id == winner.source_id && version.version_id == winner.version_id
+        })
+        .ok_or_else(|| PlayFailure::fatal("playback selection lost its source".to_string()))?;
+    let (source, raw_item_key) = probed_sources
+        .remove(&version.source_id)
+        .ok_or_else(|| PlayFailure::fatal("playback selection lost its route".to_string()))?;
+    let mut selected_item = item.clone();
+    selected_item.rating_key = version.item_key;
+    selected_item.source_id = version.source_id;
+    Ok(PlaybackSelection {
+        source,
+        raw_item_key,
+        version_id: Some(version.version_id),
+        item: selected_item,
+    })
+}
+
 async fn play_by_key(
     state: &AppState,
     item: &ItemDto,
@@ -2837,16 +3496,19 @@ async fn play_by_key(
     if !validate_playback_session(state, replace_session).await {
         return Err(PlayFailure::superseded());
     }
-    let (src, raw) = state
-        .registry
-        .lock()
-        .await
-        .route(&item.rating_key)
-        .map_err(PlayFailure::unavailable)?;
-    let resolved = src
-        .resolve_stream(&raw, item.duration_ms)
-        .await
-        .map_err(PlayFailure::unavailable)?;
+    let selection = select_playback_version(state, item, replace_session).await?;
+    let src = selection.source;
+    let item = &selection.item;
+    let resolved = match selection.version_id.as_deref() {
+        Some(version_id) => {
+            src.resolve_stream_version(&selection.raw_item_key, item.duration_ms, version_id)
+                .await
+        }
+        None => src
+            .resolve_stream(&selection.raw_item_key, item.duration_ms)
+            .await,
+    }
+    .map_err(PlayFailure::unavailable)?;
 
     // Resolve first so the completed process can deliver its final IPC events
     // while a slow server prepares the successor. Only an exact automatic
@@ -2886,7 +3548,7 @@ async fn play_by_key(
         let mut cursor = state.playlist_cursor.lock().await;
         std::mem::replace(&mut *cursor, new_cursor)
     };
-    install_playback_session(state, session_id).await;
+    install_playback_session(state, session_id, item).await;
 
     // Cancel the prior tracker and terminate the prior mpv so we never run two
     // players. The kill is a non-blocking syscall; the reap is handed to the
@@ -3214,7 +3876,131 @@ fn current_season_position(context: &EpisodeContext, seasons: &[ItemDto]) -> Opt
         })
 }
 
+fn hierarchy_parent_backings(item: &ItemDto, show: bool) -> Vec<BackingRef> {
+    let children = playback_backings(item);
+    let mut parents = children
+        .into_iter()
+        .filter_map(|child| {
+            let rating_key = if show {
+                child.grandparent_rating_key.clone()
+            } else {
+                child.parent_rating_key.clone()
+            }?;
+            Some(BackingRef {
+                source_id: child.source_id,
+                rating_key,
+                parent_rating_key: if show {
+                    None
+                } else {
+                    child.grandparent_rating_key.clone()
+                },
+                grandparent_rating_key: None,
+            })
+        })
+        .collect::<Vec<_>>();
+    parents.sort_by(|left, right| {
+        left.source_id
+            .cmp(&right.source_id)
+            .then_with(|| left.rating_key.cmp(&right.rating_key))
+    });
+    parents.dedup_by(|left, right| {
+        left.source_id == right.source_id && left.rating_key == right.rating_key
+    });
+    parents
+}
+
+fn synthetic_hierarchy_canonical(media_type: &str, backings: &[BackingRef]) -> String {
+    format!(
+        "{media_type}:{}",
+        backings
+            .iter()
+            .map(|backing| format!("{}:{}", backing.source_id, backing.rating_key))
+            .collect::<Vec<_>>()
+            .join("|")
+    )
+}
+
+async fn next_merged_episode(
+    state: &AppState,
+    current: &ItemDto,
+) -> Result<Option<ItemDto>, String> {
+    let show_backings = hierarchy_parent_backings(current, true);
+    let season_backings = hierarchy_parent_backings(current, false);
+    if show_backings.is_empty() || season_backings.is_empty() {
+        return Ok(None);
+    }
+    let show_canonical = synthetic_hierarchy_canonical("show", &show_backings);
+    let mut seasons = fetch_merged_children(state, &show_backings, &show_canonical, "show")
+        .await?
+        .into_iter()
+        .filter(|item| item.media_type.as_deref() == Some("season"))
+        .collect::<Vec<_>>();
+    sort_hierarchy_children(&mut seasons);
+
+    let current_season = seasons
+        .iter()
+        .position(|season| {
+            season.backing.as_ref().is_some_and(|backings| {
+                backings.iter().any(|season_backing| {
+                    season_backings.iter().any(|current_backing| {
+                        season_backing.source_id == current_backing.source_id
+                            && season_backing.rating_key == current_backing.rating_key
+                    })
+                })
+            })
+        })
+        .or_else(|| {
+            current.parent_index.and_then(|index| {
+                seasons
+                    .iter()
+                    .position(|season| season.index == Some(index))
+            })
+        });
+    let Some(current_season) = current_season else {
+        return Ok(None);
+    };
+
+    let context = EpisodeContext {
+        item_key: current.rating_key.clone(),
+        season_key: current.parent_rating_key.clone(),
+        show_key: current.grandparent_rating_key.clone(),
+        episode_index: current.index,
+        season_index: current.parent_index,
+    };
+    let started_in_specials = seasons[current_season].index.or(current.parent_index) == Some(0);
+    let mut catalog = Vec::new();
+    for (position, season) in seasons.into_iter().enumerate().skip(current_season) {
+        if position > current_season && !started_in_specials && season.index == Some(0) {
+            continue;
+        }
+        let backings = playback_backings(&season);
+        let canonical = season
+            .canonical_id
+            .clone()
+            .unwrap_or_else(|| synthetic_hierarchy_canonical("season", &backings));
+        let episodes = fetch_merged_children(state, &backings, &canonical, "season").await?;
+        catalog.push((season, episodes));
+        if let Some(next) = choose_next_episode(&context, &catalog) {
+            return Ok(Some(next));
+        }
+    }
+    Ok(None)
+}
+
 async fn next_episode_impl(state: &AppState, item_key: &str) -> Result<Option<ItemDto>, String> {
+    let active_item = state
+        .active_playback_item
+        .lock()
+        .await
+        .as_ref()
+        .map(|(_, item)| item.clone());
+    if let Some(item) = active_item.filter(|item| {
+        item.rating_key == item_key
+            && item.media_type.as_deref() == Some("episode")
+            && item.backing.as_ref().is_some_and(|backings| backings.len() > 1)
+    }) {
+        return next_merged_episode(state, &item).await;
+    }
     let (source, raw_item_key) = state.registry.lock().await.route(item_key)?;
     let Some(context) = source.episode_context(&raw_item_key).await? else {
         return Ok(None);
@@ -3262,8 +4048,15 @@ async fn next_episode_impl(state: &AppState, item_key: &str) -> Result<Option<It
 #[tauri::command]
 pub async fn next_episode(
     item_key: String,
+    session_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Option<ItemDto>, String> {
+    if let Some(expected) = session_id.as_deref() {
+        let active = state.active_playback_session.lock().await;
+        if active.as_deref() != Some(expected) {
+            return Ok(None);
+        }
+    }
     next_episode_impl(&state, &item_key).await
 }
 

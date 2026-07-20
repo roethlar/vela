@@ -107,6 +107,22 @@ export const allDelivered = (mock, endsWith) => {
   return asked > 0 && answered >= asked;
 };
 
+// A successful Jellyfin play asks PlaybackInfo twice for the same item: once
+// to enumerate candidates and once to revalidate the exact selected source.
+// Keep scenario assertions expressed in logical plays, including repeated
+// plays of the same item (A,A,A,A -> A,A).
+export function logicalPlaybackInfoIds(mock) {
+  const raw = mock.state.requests
+    .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
+    .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]);
+  const logical = [];
+  for (let index = 0; index < raw.length;) {
+    logical.push(raw[index]);
+    index += raw[index + 1] === raw[index] ? 2 : 1;
+  }
+  return logical;
+}
+
 // Hold a condition open for a window, failing the MOMENT it breaks — rather than
 // sleeping and sampling once at the end, which cannot tell "it never happened" from
 // "it has not happened yet".

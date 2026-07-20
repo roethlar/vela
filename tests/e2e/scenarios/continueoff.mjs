@@ -5,7 +5,14 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { holdsFor, makeClips, mockSource, pollUntil, seedConfig } from '../helpers.mjs';
+import {
+  holdsFor,
+  logicalPlaybackInfoIds,
+  makeClips,
+  mockSource,
+  pollUntil,
+  seedConfig,
+} from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
 let mock;
@@ -50,9 +57,7 @@ async function finishNaturally(session) {
 }
 
 const playbackInfoIds = () =>
-  mock.state.requests
-    .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
-    .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]);
+  logicalPlaybackInfoIds(mock);
 
 export default {
   name: 'continueoff',

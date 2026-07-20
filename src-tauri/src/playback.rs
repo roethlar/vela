@@ -754,9 +754,9 @@ pub fn play(
 
     cmd.arg(format!("--input-ipc-server={}", ipc_path));
     // Drive mpv's window title and OSD media-title from the human title, NOT the
-    // URL. Plex direct-stream URLs carry `?X-Plex-Token=…`, and mpv's default
-    // title template derives from the URL — so without this the auth token leaks
-    // into the title bar (and the on-screen media name). Asserted here, after the
+    // URL. Authenticated media URLs have historically carried tokens, and mpv's
+    // default title template derives from the URL — so without this a regression
+    // could leak one into the title bar or on-screen media name. Asserted after the
     // user's extra args, so it can't be clobbered back into a leak. Fall back to a
     // neutral label rather than letting mpv reach for the URL when title is empty.
     let display_title = if spec.title.trim().is_empty() {

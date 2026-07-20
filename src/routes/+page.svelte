@@ -53,7 +53,13 @@
   // `Item` (the listing-card DTO mirror) lives in $lib/types, shared with the
   // detail components.
   type Hub = { title: string; hubIdentifier: string; hubType: string; items: Item[]; sourceId: string; sourceName?: string };
-  type Crumb = { title: string; ratingKey: string | null };
+  type Crumb = {
+    title: string;
+    ratingKey: string | null;
+    backing?: Item["backing"];
+    canonicalId?: string;
+    mediaType?: string;
+  };
   type Source = { id: string; name: string; kind: string };
 
   let sources = $state<Source[]>([]);
@@ -591,7 +597,10 @@
         // renders: same active-source scope, tombstones, dedup, and ordering.
         next = heroItems.find((item) => !continuationSeen.has(item.ratingKey)) ?? null;
       } else if (completed.mediaType === "episode") {
-        next = await invoke<Item | null>("next_episode", { itemKey: completed.itemKey });
+        next = await invoke<Item | null>("next_episode", {
+          itemKey: completed.itemKey,
+          sessionId: completed.sessionId,
+        });
       }
       if (attempt !== continuationAttempt || !next) return;
       if (continuationSeen.has(next.ratingKey)) return;
@@ -1233,7 +1242,13 @@
   // the identity a successful watched-state edit must still own before its
   // buffered revalidation may publish.
   type ListingRequest =
-    | { kind: "children"; ratingKey: string }
+    | {
+        kind: "children";
+        ratingKey: string;
+        backing?: Item["backing"];
+        canonicalId?: string;
+        mediaType?: string;
+      }
     | { kind: "type"; sectionType: string; sourceId: string | null; sort: string }
     | {
         kind: "section";
@@ -1246,7 +1261,15 @@
   function currentListingRequest(): ListingRequest | null {
     if (mode !== "browse") return null;
     const here = crumbs[crumbs.length - 1];
-    if (here?.ratingKey) return { kind: "children", ratingKey: here.ratingKey };
+    if (here?.ratingKey) {
+      return {
+        kind: "children",
+        ratingKey: here.ratingKey,
+        backing: here.backing,
+        canonicalId: here.canonicalId,
+        mediaType: here.mediaType,
+      };
+    }
     if (searchTerm || personView) return null;
     if (activeType) {
       return { kind: "type", sectionType: activeType, sourceId: activeSource, sort };
@@ -1266,7 +1289,12 @@
   function sameListingRequest(a: ListingRequest, b: ListingRequest | null): boolean {
     if (!b || a.kind !== b.kind) return false;
     if (a.kind === "children" && b.kind === "children") {
-      return a.ratingKey === b.ratingKey;
+      return (
+        a.ratingKey === b.ratingKey &&
+        a.canonicalId === b.canonicalId &&
+        a.mediaType === b.mediaType &&
+        JSON.stringify(a.backing ?? []) === JSON.stringify(b.backing ?? [])
+      );
     }
     if (a.kind === "type" && b.kind === "type") {
       return (
@@ -1288,7 +1316,14 @@
 
   function fetchListingPage(request: ListingRequest, start: number, size: number): Promise<Item[]> {
     if (request.kind === "children") {
-      return invoke<Item[]>("get_children", { ratingKey: request.ratingKey, start, size });
+      return invoke<Item[]>("get_children", {
+        ratingKey: request.ratingKey,
+        backing: request.backing,
+        canonicalId: request.canonicalId,
+        mediaType: request.mediaType,
+        start,
+        size,
+      });
     }
     if (request.kind === "type") {
       return invoke<Item[]>("get_type_listing", {
@@ -1463,16 +1498,27 @@
     }
     navEpoch++; // drilling into children is navigation (see navEpoch)
     detailView = null;
-    // Merged shows drill through the metadata-richest backing (idv-5) so
-    // seasons/episodes come from — and play on — the rich server source;
-    // non-merged items carry no detailKey, so nothing changes for them.
+    // The face key still supplies the immediate route, while merged hierarchy
+    // coordinates on the crumb make the backend fetch every show copy.
     const key = detailKeyOf(item);
     if (mode === "home") {
       // Drilling out of a hub: start a fresh crumb trail rooted at this item.
       active = null;
-      crumbs = [{ title: item.title, ratingKey: key }];
+      crumbs = [{
+        title: item.title,
+        ratingKey: key,
+        backing: item.backing,
+        canonicalId: item.canonicalId,
+        mediaType: item.mediaType,
+      }];
     } else {
-      crumbs = [...crumbs, { title: item.title, ratingKey: key }];
+      crumbs = [...crumbs, {
+        title: item.title,
+        ratingKey: key,
+        backing: item.backing,
+        canonicalId: item.canonicalId,
+        mediaType: item.mediaType,
+      }];
     }
     mode = "browse";
     await resetAndLoad();
@@ -1796,6 +1842,7 @@
   // Right-click context menu for per-item actions.
   let menu = $state<{ x: number; y: number; item: Item; hero: boolean } | null>(null);
   let addMenuOpen = $state(false);
+  let versionMenuOpen = $state(false);
   let addMenuLoading = $state(false);
   let addMenuPlaylists = $state<PlaylistSummary[]>([]);
   let addMenuStatus = $state<{ text: string; failed: boolean } | null>(null);
@@ -1806,6 +1853,7 @@
     sectionMenu = null; // only one context menu at a time (codex code review r1, finding 4)
     addMenuAttempt++;
     addMenuOpen = false;
+    versionMenuOpen = false;
     addMenuLoading = false;
     addMenuPlaylists = [];
     addMenuStatus = null;
@@ -1821,6 +1869,7 @@
   function closeMenu() {
     addMenuAttempt++;
     addMenuOpen = false;
+    versionMenuOpen = false;
     addMenuLoading = false;
     addMenuStatus = null;
     menu = null;
@@ -1838,6 +1887,7 @@
       closeAddMenu();
       return;
     }
+    versionMenuOpen = false;
     addMenuOpen = true;
     addMenuLoading = true;
     addMenuStatus = null;
@@ -1852,6 +1902,15 @@
     } finally {
       if (attempt === addMenuAttempt) addMenuLoading = false;
     }
+  }
+
+  function toggleVersionMenu() {
+    if (versionMenuOpen) {
+      versionMenuOpen = false;
+      return;
+    }
+    closeAddMenu();
+    versionMenuOpen = true;
   }
 
   async function addToPlaylist(saved: PlaylistSummary) {
@@ -2626,7 +2685,7 @@
           {posterSrc}
           onPlay={play}
           onMenu={openMenu}
-          onShow={(key, title) => open({ ratingKey: key, title, mediaType: "show" })}
+          onShow={(show) => open(show)}
           onSeason={(key, seed, sel) => {
             navEpoch++; // swapping the open detail surface is navigation
             detailStatus = null; // ...and it replaces the surface, so its status goes too
@@ -2753,7 +2812,8 @@
       // Menus first (topmost surfaces), then the detail —
       // Escape with the scan menu open must not close a detail underneath it
       // (codex code review r1, finding 4).
-      if (menu && addMenuOpen) closeAddMenu();
+      if (menu && versionMenuOpen) versionMenuOpen = false;
+      else if (menu && addMenuOpen) closeAddMenu();
       else if (menu) closeMenu();
       else if (sectionMenu) closeSectionMenu();
       else if (detailView) closeDetail();
@@ -2812,22 +2872,27 @@
       {/if}
     {/if}
     {#if (mi.backing?.length ?? 0) > 1 && mi.canonicalId}
-      <!-- Merged title: pick which source plays it (persists for this title).
-           Keyed by the full backing identity — sourceId alone can collide. -->
-      {#each mi.backing! as b (b.sourceId + ":" + b.ratingKey)}
-        {#if inProgress}
-          <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
-            Resume from {sourceNameOf(b.sourceId)}
-          </button>
-          <button role="menuitem" onclick={() => playFrom(mi, b, "beginning")}>
-            Play from Beginning on {sourceNameOf(b.sourceId)}
-          </button>
-        {:else}
-          <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
-            Play from {sourceNameOf(b.sourceId)}
-          </button>
-        {/if}
-      {/each}
+      <button role="menuitem" aria-expanded={versionMenuOpen} onclick={toggleVersionMenu}>Play Version <Icon name="chevron" size={13} /></button>
+      {#if versionMenuOpen}
+        <!-- A deliberate source choice persists for this logical title in the
+             three automatic modes. Ask mode changes this to one-shot in Slice 3. -->
+        <div class="addsubmenu" role="group" aria-label="Play Version">
+          {#each mi.backing! as b (b.sourceId + ":" + b.ratingKey)}
+            {#if inProgress}
+              <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
+                Resume on {sourceNameOf(b.sourceId)}
+              </button>
+              <button role="menuitem" onclick={() => playFrom(mi, b, "beginning")}>
+                Start over on {sourceNameOf(b.sourceId)}
+              </button>
+            {:else}
+              <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
+                {sourceNameOf(b.sourceId)}
+              </button>
+            {/if}
+          {/each}
+        </div>
+      {/if}
     {/if}
   </div>
 {/if}

@@ -271,6 +271,25 @@ test("Player Settings exposes the four duplicate-source policies and exact prior
   assert.match(settings, /Resolution and HDR can be overridden independently/);
   assert.match(settings, /invoke<PlaybackPreferences>\("get_playback_preferences"\)/);
   assert.match(settings, /invoke\("set_playback_preferences"/);
+
+  const page = sources.get("src/routes/+page.svelte");
+  assert.ok(page, "main page source is available");
+  assert.match(page, />Play Version <Icon name="chevron"/);
+  assert.match(page, /aria-label="Play Version"/);
+  assert.match(page, /set_merged_override/);
+});
+
+test("merged hierarchy coordinates travel through browse and season pagination", () => {
+  const page = sources.get("src/routes/+page.svelte");
+  const season = sources.get("src/lib/SeasonDetail.svelte");
+  assert.ok(page && season, "hierarchy surfaces are available");
+  assert.match(page, /backing: here\.backing/);
+  assert.match(page, /canonicalId: here\.canonicalId/);
+  assert.match(page, /mediaType: here\.mediaType/);
+  assert.match(page, /backing: request\.backing/);
+  assert.match(season, /backing: seedItem\.backing/);
+  assert.match(season, /canonicalId: seedItem\.canonicalId/);
+  assert.match(season, /mediaType: seedItem\.mediaType/);
 });
 
 test("multi-server Plex linking pauses for an explicit credential-free server choice", () => {

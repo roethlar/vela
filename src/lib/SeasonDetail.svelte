@@ -37,7 +37,7 @@
     // Heading navigation (owner playtest 2026-07-08): the show title links to
     // the show's seasons drill; the season title links to the full season
     // page when this page isn't already listing it (single-episode mode).
-    onShow?: (key: string, title: string) => void;
+    onShow?: (show: Item) => void;
     onSeason?: (key: string, seed: Item, selKey?: string) => void;
     // Person browse: episode director/writer names are clickable when the
     // backend identified the person; absent keys render plain text.
@@ -76,7 +76,14 @@
       const acc: Item[] = [];
       try {
         for (;;) {
-          const page = await invoke<Item[]>("get_children", { ratingKey: key, start: acc.length, size: PAGE });
+          const page = await invoke<Item[]>("get_children", {
+            ratingKey: key,
+            backing: seedItem.backing,
+            canonicalId: seedItem.canonicalId,
+            mediaType: seedItem.mediaType,
+            start: acc.length,
+            size: PAGE,
+          });
           if (g !== gen) return;
           if (acc.length === 0 && initSel === null && page.length > 0) {
             selKey = page[0].ratingKey;
@@ -148,24 +155,83 @@
     return seed.mediaType === "season" ? seed.title : (seed.parentTitle ?? "");
   });
 
+  function hierarchyParent(item: Item, show: boolean, title: string): Item | null {
+    const copies = item.backing ?? [{
+      sourceId: item.sourceId ?? item.ratingKey.split(":", 1)[0],
+      ratingKey: item.ratingKey,
+      parentRatingKey: item.parentRatingKey,
+      grandparentRatingKey: item.grandparentRatingKey,
+    }];
+    const backing = copies
+      .flatMap((copy) => {
+        const ratingKey = show ? copy.grandparentRatingKey : copy.parentRatingKey;
+        if (!ratingKey) return [];
+        return [{
+          sourceId: copy.sourceId,
+          ratingKey,
+          parentRatingKey: show ? undefined : copy.grandparentRatingKey,
+        }];
+      })
+      .sort((a, b) =>
+        a.sourceId.localeCompare(b.sourceId) || a.ratingKey.localeCompare(b.ratingKey)
+      );
+    if (backing.length === 0) return null;
+    const canonicalId = `${show ? "show" : "season"}:${backing
+      .map((copy) => `${copy.sourceId}:${copy.ratingKey}`)
+      .join("|")}`;
+    return {
+      ratingKey: backing[0].ratingKey,
+      sourceId: backing[0].sourceId,
+      title,
+      mediaType: show ? "show" : "season",
+      index: show ? undefined : item.parentIndex,
+      parentRatingKey: show ? undefined : backing[0].parentRatingKey,
+      backing,
+      canonicalId,
+    };
+  }
+
   // Heading-link targets, when the listing data carries container keys: the
   // show is an episode's grandparent or a season seed's parent; the season
   // link appears only when it would navigate somewhere new (single-episode /
   // degraded mode — clicking it opens the full season page).
-  let showKey = $derived(
-    selected?.grandparentRatingKey ??
-      seed.grandparentRatingKey ??
-      (seed.mediaType === "season" ? seed.parentRatingKey : undefined)
-  );
-  let seasonLinkKey = $derived.by(() => {
+  let showItem = $derived.by(() => {
+    const item = selected ?? seed;
+    if (!showTitle) return null;
+    if (item.mediaType === "season") {
+      const copies = item.backing ?? [{
+        sourceId: item.sourceId ?? item.ratingKey.split(":", 1)[0],
+        ratingKey: item.ratingKey,
+        parentRatingKey: item.parentRatingKey,
+      }];
+      const backing = copies
+        .flatMap((copy) => copy.parentRatingKey
+          ? [{ sourceId: copy.sourceId, ratingKey: copy.parentRatingKey }]
+          : [])
+        .sort((a, b) =>
+          a.sourceId.localeCompare(b.sourceId) || a.ratingKey.localeCompare(b.ratingKey)
+        );
+      if (backing.length === 0) return null;
+      return {
+        ratingKey: backing[0].ratingKey,
+        sourceId: backing[0].sourceId,
+        title: showTitle,
+        mediaType: "show",
+        backing,
+        canonicalId: `show:${backing.map((copy) => `${copy.sourceId}:${copy.ratingKey}`).join("|")}`,
+      } satisfies Item;
+    }
+    return hierarchyParent(item, true, showTitle);
+  });
+  let seasonLinkItem = $derived.by(() => {
     // Only an EPISODE's parent key names a season. A season seed's parent is
     // its SHOW (see showKey above) — linking that here would re-target this
     // page at the show and list seasons as episodes (idv-s4 review r1, the
     // idv-s2 routing guard).
-    const k =
-      selected?.parentRatingKey ??
-      (seed.mediaType === "episode" ? seed.parentRatingKey : undefined);
-    return k && k !== seasonKey ? k : undefined;
+    const item = selected ?? seed;
+    if (item.mediaType !== "episode") return null;
+    const parent = hierarchyParent(item, false, seasonTitle);
+    return parent && parent.ratingKey !== seasonKey ? parent : null;
   });
 
   function epTag(e: Item): string {
@@ -199,15 +265,15 @@
   <div class="topbar">
     <div class="heading">
       {#if showTitle}
-        {#if showKey && onShow}
-          <button class="show navlink" title="Open show" onclick={() => onShow!(showKey!, showTitle)}>{showTitle}</button>
+        {#if showItem && onShow}
+          <button class="show navlink" title="Open show" onclick={() => onShow!(showItem!)}>{showTitle}</button>
         {:else}
           <span class="show">{showTitle}</span>
         {/if}
       {/if}
       {#if seasonTitle}
-        {#if seasonLinkKey && onSeason}
-          <button class="sea navlink" title="Open season" onclick={() => onSeason!(seasonLinkKey!, seed, selected?.ratingKey)}>{seasonTitle}</button>
+        {#if seasonLinkItem && onSeason}
+          <button class="sea navlink" title="Open season" onclick={() => onSeason!(seasonLinkItem!.ratingKey, seasonLinkItem!, selected?.ratingKey)}>{seasonTitle}</button>
         {:else}
           <span class="sea">{seasonTitle}</span>
         {/if}

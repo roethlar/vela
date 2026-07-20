@@ -26,7 +26,12 @@ export type Item = {
   played?: boolean | null;
   lastWatchedAtMs?: number;
   sourceId?: string;
-  backing?: { sourceId: string; ratingKey: string }[];
+  backing?: {
+    sourceId: string;
+    ratingKey: string;
+    parentRatingKey?: string;
+    grandparentRatingKey?: string;
+  }[];
   canonicalId?: string;
   watchKey?: string;
   // Merged cards: where the detail surface / children drill should route

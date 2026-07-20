@@ -506,10 +506,14 @@ mod tests {
                 BackingRef {
                     source_id: source_id.to_string(),
                     rating_key: format!("{source_id}:1"),
+                    parent_rating_key: Some(format!("{source_id}:2")),
+                    grandparent_rating_key: Some(format!("{source_id}:3")),
                 },
                 BackingRef {
                     source_id: "jf".to_string(),
                     rating_key: "jf:other".to_string(),
+                    parent_rating_key: None,
+                    grandparent_rating_key: None,
                 },
             ]),
             canonical_id: Some("imdb:tt1".to_string()),
@@ -632,6 +636,18 @@ mod tests {
         assert_eq!(
             recent.backing.as_ref().unwrap()[0].rating_key,
             "plex-new:1"
+        );
+        assert_eq!(
+            recent.backing.as_ref().unwrap()[0]
+                .parent_rating_key
+                .as_deref(),
+            Some("plex-new:2")
+        );
+        assert_eq!(
+            recent.backing.as_ref().unwrap()[0]
+                .grandparent_rating_key
+                .as_deref(),
+            Some("plex-new:3")
         );
         assert_eq!(recent.backing.as_ref().unwrap()[1].rating_key, "jf:other");
 

@@ -8,8 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use super::{
-    namespace_key, EpisodeContext, HubDto, ItemDto, MediaSource, PlaylistDto, SectionDto,
-    StreamResolution,
+    namespace_key, EpisodeContext, HubDto, ItemDto, MediaSource, PlaybackVersion, PlaylistDto,
+    SectionDto, StreamResolution,
 };
 use crate::playback::{JellyfinTrack, ProgressTarget};
 
@@ -162,6 +162,13 @@ impl JellyfinClient {
         auth_headers(self.flavor, &self.device_id, &self.token)
     }
 
+    /// mpv's header list cannot safely encode the quoted/comma-separated
+    /// MediaBrowser identity header. Both Jellyfin and Emby accept the bearer
+    /// token alone as X-Emby-Token, which is safe in the owner-only include.
+    fn stream_auth_headers(&self) -> Vec<(String, String)> {
+        vec![("X-Emby-Token".to_string(), self.token.clone())]
+    }
+
     async fn get_json<T: DeserializeOwned>(
         &self,
         path: &str,
@@ -218,8 +225,8 @@ impl JellyfinClient {
 
     /// Direct-play stream URL (original file, no transcode) for true HDR
     /// passthrough, using the negotiated media source + play session.
-    /// NOTE: the api_key rides in the URL (and thus mpv's argv) — accepted as a
-    /// local-only exposure, consistent with the Plex path.
+    /// Authentication travels through mpv's owner-only header include, never
+    /// through argv, the window title, or the stream URL.
     fn stream_url(
         &self,
         item_id: &str,
@@ -230,7 +237,6 @@ impl JellyfinClient {
             ("static", "true"),
             ("mediaSourceId", media_source_id),
             ("deviceId", self.device_id.as_str()),
-            ("api_key", self.token.as_str()),
         ];
         if let Some(ps) = play_session_id {
             pairs.push(("PlaySessionId", ps));
@@ -241,16 +247,20 @@ impl JellyfinClient {
     /// Negotiate playback: returns the real `MediaSourceId` and a `PlaySessionId`
     /// to thread through the stream URL and check-in posts.
     async fn playback_info(&self, item_id: &str) -> Result<(String, Option<String>), String> {
-        let info: PlaybackInfoResp = self
-            .get_json(
-                &format!("/Items/{}/PlaybackInfo", item_id),
-                &[("UserId", self.user_id.clone())],
-            )
-            .await?;
+        let info = self.playback_info_response(item_id).await?;
         let media_source_id = select_media_source(&info.media_sources)
             .and_then(|m| (!m.id.is_empty()).then(|| m.id.clone()))
             .unwrap_or_else(|| item_id.to_string());
         Ok((media_source_id, info.play_session_id))
+    }
+
+    async fn playback_info_response(&self, item_id: &str) -> Result<PlaybackInfoResp, String> {
+        self
+            .get_json(
+                &format!("/Items/{}/PlaybackInfo", item_id),
+                &[("UserId", self.user_id.clone())],
+            )
+            .await
     }
 
     fn poster_url(&self, item_id: &str, tag: &str) -> String {
@@ -582,6 +592,25 @@ struct PlaybackInfoResp {
     play_session_id: Option<String>,
 }
 
+fn exact_playback_identity(
+    info: PlaybackInfoResp,
+    item_key: &str,
+    version_id: &str,
+) -> Result<(String, Option<String>), String> {
+    let media_source_id = if info.media_sources.is_empty() && version_id == item_key {
+        item_key.to_string()
+    } else {
+        info.media_sources
+            .iter()
+            .find(|source| source.id == version_id)
+            .map(|source| source.id.clone())
+            .ok_or_else(|| {
+                "the selected media-server version is no longer available".to_string()
+            })?
+    };
+    Ok((media_source_id, info.play_session_id))
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "PascalCase")]
 struct MediaSourceInfo {
@@ -589,7 +618,6 @@ struct MediaSourceInfo {
     id: String,
     supports_direct_play: Option<bool>,
     supports_direct_stream: Option<bool>,
-    is_remote: Option<bool>,
     bitrate: Option<u64>,
     size: Option<u64>,
     width: Option<u32>,
@@ -666,13 +694,12 @@ fn select_media_source(sources: &[MediaSourceInfo]) -> Option<&MediaSourceInfo> 
         })
 }
 
-fn media_source_quality_key(source: &MediaSourceInfo) -> (u8, bool, bool, u32, u32, u64, u64) {
+fn media_source_quality_key(source: &MediaSourceInfo) -> (u8, u32, u32, bool, u64, u64) {
     (
         source.direct_rank(),
-        !source.is_remote.unwrap_or(false),
-        source.is_hdr(),
         source.video_height(),
         source.video_width(),
+        source.is_hdr(),
         source.bitrate(),
         source.size.unwrap_or(0),
     )
@@ -686,6 +713,14 @@ impl MediaSourceInfo {
             1
         } else {
             0
+        }
+    }
+
+    fn candidate_direct_rank(&self) -> u8 {
+        match self.direct_rank() {
+            2 => 0,
+            1 => 1,
+            _ => 2,
         }
     }
 
@@ -1261,9 +1296,88 @@ impl MediaSource for JellyfinSource {
                 play_session_id,
                 headers: self.client.auth_headers(),
             }),
-            // Jellyfin/Emby stream URLs still carry their token; header parity
-            // is a recorded follow-up (`.agents/decisions.md`, 2026-07-03).
-            http_headers: Vec::new(),
+            http_headers: self.client.stream_auth_headers(),
+        })
+    }
+
+    async fn playback_versions(&self, item_key: &str) -> Result<Vec<PlaybackVersion>, String> {
+        let info = self.client.playback_info_response(item_key).await?;
+        let endpoint = url::Url::parse(&self.client.base_url)
+            .map_err(|_| "media server endpoint is invalid".to_string())?;
+        if info.media_sources.is_empty() {
+            return Ok(vec![PlaybackVersion {
+                source_id: self.id.clone(),
+                source_name: self.name.clone(),
+                item_key: namespace_key(&self.id, item_key),
+                version_id: item_key.to_string(),
+                width: 0,
+                height: 0,
+                hdr: false,
+                bitrate: 0,
+                direct_play_rank: 2,
+                endpoint,
+                provider_verified_local: false,
+            }]);
+        }
+        Ok(info
+            .media_sources
+            .iter()
+            .filter(|source| !source.id.is_empty())
+            .map(|source| PlaybackVersion {
+                source_id: self.id.clone(),
+                source_name: self.name.clone(),
+                item_key: namespace_key(&self.id, item_key),
+                version_id: source.id.clone(),
+                width: source.video_width(),
+                height: source.video_height(),
+                hdr: source.is_hdr(),
+                bitrate: source.bitrate(),
+                direct_play_rank: source.candidate_direct_rank(),
+                endpoint: endpoint.clone(),
+                // MediaSource.IsRemote describes the server's relationship to
+                // its storage, not Vela's network path to the server.
+                provider_verified_local: false,
+            })
+            .collect())
+    }
+
+    async fn resolve_stream_version(
+        &self,
+        item_key: &str,
+        _duration_ms: Option<u64>,
+        version_id: &str,
+    ) -> Result<StreamResolution, String> {
+        let item: BaseItem = self
+            .client
+            .get_json(
+                &format!("/Users/{}/Items/{}", self.client.user_id, item_key),
+                &[],
+            )
+            .await?;
+        let resume_ms = item
+            .user_data
+            .and_then(|data| data.playback_position_ticks)
+            .filter(|ticks| *ticks > 0)
+            .map(ticks_to_ms)
+            .unwrap_or(0);
+        let info = self.client.playback_info_response(item_key).await?;
+        let (media_source_id, play_session_id) =
+            exact_playback_identity(info, item_key, version_id)?;
+        Ok(StreamResolution {
+            url: self.client.stream_url(
+                item_key,
+                &media_source_id,
+                play_session_id.as_deref(),
+            ),
+            resume_ms,
+            progress: ProgressTarget::Jellyfin(JellyfinTrack {
+                base_url: self.client.base_url.clone(),
+                item_id: item_key.to_string(),
+                media_source_id,
+                play_session_id,
+                headers: self.client.auth_headers(),
+            }),
+            http_headers: self.client.stream_auth_headers(),
         })
     }
 
@@ -1403,6 +1517,28 @@ mod tests {
         }
     }
 
+    #[test]
+    fn stream_url_keeps_tokens_out_of_mpv_argv() {
+        for flavor in [Flavor::Jellyfin, Flavor::Emby] {
+            let client = JellyfinClient::new(
+                flavor,
+                "http://s:8096",
+                "device-1",
+                "sekrit",
+                "user-1",
+            );
+            let url = client.stream_url("item-1", "version-2", Some("session-3"));
+            assert!(!url.contains("sekrit"));
+            assert!(!url.contains("api_key"));
+            assert!(url.contains("mediaSourceId=version-2"));
+            assert!(url.contains("PlaySessionId=session-3"));
+            assert_eq!(
+                client.stream_auth_headers(),
+                vec![("X-Emby-Token".to_string(), "sekrit".to_string())]
+            );
+        }
+    }
+
     /// The scan POST carries admin-capable credentials, and the raw section key
     /// is frontend-supplied, so a hostile id must stay ONE path segment and
     /// never steer the request at another authenticated endpoint. Guard proof:
@@ -1479,7 +1615,6 @@ mod tests {
             id: id.to_string(),
             supports_direct_play: Some(direct_play),
             supports_direct_stream: Some(direct_stream),
-            is_remote: Some(false),
             bitrate: Some(bitrate),
             size: None,
             width: Some(height * 16 / 9),
@@ -1587,7 +1722,7 @@ mod tests {
     }
 
     #[test]
-    fn media_source_selection_prefers_hdr_direct_candidates() {
+    fn media_source_selection_prefers_resolution_before_hdr() {
         let sources = vec![
             media_source("sdr-4k", true, true, false, 2160, 80_000_000),
             media_source("hdr-1080", true, true, true, 1080, 20_000_000),
@@ -1595,7 +1730,7 @@ mod tests {
 
         assert_eq!(
             select_media_source(&sources).map(|s| s.id.as_str()),
-            Some("hdr-1080")
+            Some("sdr-4k")
         );
     }
 
@@ -1610,6 +1745,37 @@ mod tests {
             select_media_source(&sources).map(|s| s.id.as_str()),
             Some("direct-play-sdr")
         );
+    }
+
+    #[test]
+    fn exact_media_source_revalidation_keeps_the_fresh_tracking_session() {
+        let info = PlaybackInfoResp {
+            media_sources: vec![
+                media_source("source-a", true, true, false, 1080, 20_000_000),
+                media_source("source-b", true, true, true, 2160, 80_000_000),
+            ],
+            play_session_id: Some("fresh-session".to_string()),
+        };
+        let (media_source_id, play_session_id) =
+            exact_playback_identity(info, "item-1", "source-b").unwrap();
+        assert_eq!(media_source_id, "source-b");
+        assert_eq!(play_session_id.as_deref(), Some("fresh-session"));
+    }
+
+    #[test]
+    fn exact_media_source_revalidation_rejects_a_disappeared_version() {
+        let info = PlaybackInfoResp {
+            media_sources: vec![media_source(
+                "source-b",
+                true,
+                true,
+                true,
+                2160,
+                80_000_000,
+            )],
+            play_session_id: Some("fresh-session".to_string()),
+        };
+        assert!(exact_playback_identity(info, "item-1", "source-a").is_err());
     }
 
     #[test]

@@ -1,7 +1,7 @@
 // Merged All view across two real server sources (two mock Jellyfin
 // instances carrying the same title): the consolidated Movies listing
 // dedups to ONE card marked "2 sources", the context menu offers
-// "Play from" both backings, each backing plays from its own server's
+// "Play Version" exposes both backings, each backing plays from its own server's
 // stream, and the per-title override persists in merged_overrides.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -20,9 +20,21 @@ async function playFromMenu(driver, menuLabel) {
      const r = el.getBoundingClientRect();
      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
   );
-  const item = await driver
-    .waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu')
-    .then(() => driver.find('xpath', `//button[@role='menuitem' and normalize-space(.)='${menuLabel}']`));
+  await driver.waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu');
+  await driver.click(
+    await driver.find(
+      'xpath',
+      `//button[@role='menuitem' and normalize-space(.)='Play Version']`,
+    ),
+  );
+  await driver.waitFor(
+    `return !!document.querySelector('[role="group"][aria-label="Play Version"]')`,
+    'Play Version submenu',
+  );
+  const item = await driver.find(
+    'xpath',
+    `//*[@role='group' and @aria-label='Play Version']//button[@role='menuitem' and normalize-space(.)='${menuLabel}']`,
+  );
   await driver.click(item);
   const mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
   let loaded;
@@ -172,14 +184,14 @@ export default {
       }
     };
 
-    const streamA = await playFromMenu(driver, 'Play from Mock JF A');
+    const streamA = await playFromMenu(driver, 'Mock JF A');
     assert.ok(
       streamA.startsWith(`http://127.0.0.1:${mockA.port}/Videos/m1/stream`),
       `backing A must play server A's stream, got ${streamA}`,
     );
     await pollUntil(() => overrideValue() === 'jf-a', `the override to persist as ${CANONICAL} → jf-a`);
 
-    const streamB = await playFromMenu(driver, 'Play from Mock JF B');
+    const streamB = await playFromMenu(driver, 'Mock JF B');
     assert.ok(
       streamB.startsWith(`http://127.0.0.1:${mockB.port}/Videos/m1/stream`),
       `backing B must play server B's stream, got ${streamB}`,

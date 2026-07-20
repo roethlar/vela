@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Provider endpoint candidates consume this in Slice 2.
-
 use serde::Serialize;
 use std::net::{IpAddr, SocketAddr};
 
@@ -68,10 +66,15 @@ pub(crate) async fn classify_endpoint(
         return classify_addresses(&[], &interface_addresses, provider_verified_local);
     };
     let port = endpoint.port_or_known_default().unwrap_or(80);
-    let resolved: Vec<IpAddr> = tokio::net::lookup_host((host, port))
-        .await
-        .map(|answers| answers.map(|answer: SocketAddr| answer.ip()).collect())
-        .unwrap_or_default();
+    let resolved: Vec<IpAddr> = tokio::time::timeout(
+        std::time::Duration::from_secs(3),
+        tokio::net::lookup_host((host, port)),
+    )
+    .await
+    .ok()
+    .and_then(Result::ok)
+    .map(|answers| answers.map(|answer: SocketAddr| answer.ip()).collect())
+    .unwrap_or_default();
     classify_addresses(&resolved, &interface_addresses, provider_verified_local)
 }
 

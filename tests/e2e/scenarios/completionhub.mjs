@@ -6,6 +6,7 @@ import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import {
   holdsFor,
+  logicalPlaybackInfoIds,
   makeClips,
   mockSource,
   pollUntil,
@@ -67,9 +68,7 @@ const resumeResponses = () =>
   mock.state.served.filter((response) => response.path === RESUME_PATH).length;
 
 const playbackInfoIds = () =>
-  mock.state.requests
-    .filter((request) => /\/Items\/[^/]+\/PlaybackInfo$/.test(request.path))
-    .map((request) => request.path.match(/^\/Items\/([^/]+)\/PlaybackInfo$/)?.[1]);
+  logicalPlaybackInfoIds(mock);
 
 async function heroState(driver) {
   return driver.exec(

@@ -1,5 +1,3 @@
-#![allow(dead_code)] // Provider version candidates consume this in Slice 2.
-
 use crate::display::HdrState;
 use crate::locality::EndpointLocality;
 use serde::Serialize;
@@ -37,9 +35,8 @@ impl PlaybackSourcePolicy {
     }
 }
 
-/// Provider-neutral facts needed to rank one exact media version. Providers
-/// populate this in Slice 2; keeping the selector pure makes the settled order
-/// independently guardable now.
+/// Provider-neutral facts needed to rank one exact media version. Keeping the
+/// selector pure makes the settled order independently guardable.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct PlaybackCandidate {
     pub source_id: String,
@@ -94,6 +91,11 @@ fn compatible_quality(
     right: &PlaybackCandidate,
     target: CompatibilityTarget,
 ) -> Ordering {
+    let left_known = left.width > 0 && left.height > 0;
+    let right_known = right.width > 0 && right.height > 0;
+    if left_known != right_known {
+        return right_known.cmp(&left_known).then_with(|| stable_tie(left, right));
+    }
     let left_fits = fits(left, target);
     let right_fits = fits(right, target);
     right_fits.cmp(&left_fits).then_with(|| {
@@ -339,6 +341,56 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["host", "lan", "remote"]
         );
+    }
+
+    #[test]
+    fn direct_play_tier_is_an_eligibility_gate_before_quality() {
+        let mut direct = candidate(
+            "direct",
+            "720",
+            1280,
+            720,
+            false,
+            5,
+            EndpointLocality::Internet,
+        );
+        direct.direct_play_rank = 0;
+        let mut fallback = candidate(
+            "fallback",
+            "8k",
+            7680,
+            4320,
+            true,
+            100,
+            EndpointLocality::SameMachine,
+        );
+        fallback.direct_play_rank = 2;
+        let mut values = vec![fallback, direct];
+        rank_candidates(&mut values, PlaybackSourcePolicy::Best, None);
+        assert_eq!(values[0].version_id, "720");
+    }
+
+    #[test]
+    fn compatible_prefers_known_dimensions_to_an_unknown_candidate() {
+        let target = CompatibilityTarget {
+            width: 1920,
+            height: 1080,
+            hdr: HdrState::Disabled,
+        };
+        let mut values = vec![
+            candidate("unknown", "unknown", 0, 0, false, 0, EndpointLocality::Internet),
+            candidate(
+                "known",
+                "known",
+                3840,
+                2160,
+                false,
+                20,
+                EndpointLocality::Internet,
+            ),
+        ];
+        rank_candidates(&mut values, PlaybackSourcePolicy::Compatible, Some(target));
+        assert_eq!(values[0].version_id, "known");
     }
 
     #[test]

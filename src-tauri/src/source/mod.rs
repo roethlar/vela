@@ -134,11 +134,28 @@ pub struct ItemDto {
 }
 
 /// One source's copy of a merged title.
-#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct BackingRef {
     pub source_id: String,
     pub rating_key: String,
+    /// This copy's parent container, when the provider supplied one. Merged
+    /// hierarchy navigation uses the per-source path instead of accidentally
+    /// drilling through only the display face.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_rating_key: Option<String>,
+    /// This copy's grandparent container (an episode's show), when known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grandparent_rating_key: Option<String>,
+}
+
+pub(crate) fn backing_ref_of(item: &ItemDto) -> BackingRef {
+    BackingRef {
+        source_id: item.source_id.clone(),
+        rating_key: item.rating_key.clone(),
+        parent_rating_key: item.parent_rating_key.clone(),
+        grandparent_rating_key: item.grandparent_rating_key.clone(),
+    }
 }
 
 fn rekey_namespaced(value: &mut String, old_source_id: &str, new_source_id: &str) {
@@ -179,6 +196,15 @@ pub(crate) fn rekey_item_source(
     if let Some(backings) = &mut item.backing {
         for backing in backings {
             rekey_namespaced(&mut backing.rating_key, old_source_id, new_source_id);
+            for key in [
+                &mut backing.parent_rating_key,
+                &mut backing.grandparent_rating_key,
+            ]
+            .into_iter()
+            .flatten()
+            {
+                rekey_namespaced(key, old_source_id, new_source_id);
+            }
             if backing.source_id == old_source_id {
                 backing.source_id = new_source_id.to_string();
             }
@@ -358,9 +384,31 @@ pub struct StreamResolution {
     /// HTTP headers mpv must send when fetching `url` — e.g. `X-Plex-Token`,
     /// which travels as a header so the URL stays clean of credentials
     /// (mpv renders `${path}` in its title, stats overlay, and playlist).
-    /// Empty when the stream needs none (local files) or the backend still
-    /// carries auth in the URL (Jellyfin/Emby, pending parity).
+    /// Empty only when the stream needs no authentication.
     pub http_headers: Vec<(String, String)>,
+}
+
+/// Credential-free facts about one exact provider media version. This stays
+/// entirely behind the Rust command boundary: stream URLs, auth headers, and
+/// provider playback-session ids are resolved only after selection.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PlaybackVersion {
+    pub source_id: String,
+    pub source_name: String,
+    /// Source-namespaced item key, so the shared selector can route the exact
+    /// backing without retaining a registry guard.
+    pub item_key: String,
+    /// Opaque provider media id. It is handed back only to the same source.
+    pub version_id: String,
+    pub width: u32,
+    pub height: u32,
+    pub hdr: bool,
+    pub bitrate: u64,
+    /// Lower is more directly playable: direct play, direct stream, fallback.
+    pub direct_play_rank: u8,
+    /// Server origin only; never a token-bearing stream URL.
+    pub endpoint: url::Url,
+    pub provider_verified_local: bool,
 }
 
 /// A configured media backend. Methods that *receive* a key get the raw
@@ -398,6 +446,24 @@ pub trait MediaSource: Send + Sync {
         item_key: &str,
         duration_ms: Option<u64>,
     ) -> Result<StreamResolution, String>;
+
+    /// Enumerate exact playable media versions at the play boundary. Sources
+    /// that do not support enumeration retain the legacy `resolve_stream`
+    /// fallback; every configured server source overrides this.
+    async fn playback_versions(&self, _item_key: &str) -> Result<Vec<PlaybackVersion>, String> {
+        Ok(Vec::new())
+    }
+
+    /// Resolve a previously enumerated provider version, revalidating it with
+    /// a fresh provider response. The default preserves legacy sources.
+    async fn resolve_stream_version(
+        &self,
+        item_key: &str,
+        duration_ms: Option<u64>,
+        _version_id: &str,
+    ) -> Result<StreamResolution, String> {
+        self.resolve_stream(item_key, duration_ms).await
+    }
 
     /// Mark an item watched (`played = true`) or unwatched on its source.
     /// Defaults to a no-op error; sources that support it override this.

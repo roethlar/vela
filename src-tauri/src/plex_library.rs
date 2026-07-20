@@ -356,8 +356,12 @@ pub struct PlexRole {
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct PlexDetailMedia {
+    #[serde(rename = "@id")]
+    pub id: String,
     #[serde(rename = "@videoResolution")]
     pub video_resolution: Option<String>,
+    #[serde(rename = "@bitrate")]
+    pub bitrate: Option<u64>,
     #[serde(rename = "@width")]
     pub width: Option<u32>,
     #[serde(rename = "@height")]
@@ -370,6 +374,8 @@ pub struct PlexDetailMedia {
     pub container: Option<String>,
     #[serde(rename = "@videoDynamicRange")]
     pub video_dynamic_range: Option<String>,
+    #[serde(rename = "@videoProfile")]
+    pub video_profile: Option<String>,
     #[serde(rename = "Part", default)]
     pub parts: Vec<PlexDetailPart>,
 }
@@ -377,6 +383,10 @@ pub struct PlexDetailMedia {
 #[derive(Debug, Deserialize, Default, Clone)]
 #[serde(default)]
 pub struct PlexDetailPart {
+    #[serde(rename = "@id")]
+    pub id: String,
+    #[serde(rename = "@key")]
+    pub key: String,
     #[serde(rename = "Stream", default)]
     pub streams: Vec<PlexStream>,
 }
@@ -1073,6 +1083,40 @@ impl PlexLibrary {
             .ok_or_else(|| "item not found".into())
     }
 
+    /// Build the credential-free complete-part URL for one exact parsed Media
+    /// version. Split-file media remains one mpv EDL over every Part in order.
+    pub fn part_url_for_media(&self, media: &PlexDetailMedia) -> Option<String> {
+        let base = self.server_base()?;
+        if media.parts.is_empty() || media.parts.iter().any(|part| part.key.is_empty()) {
+            return None;
+        }
+        let parts: Vec<String> = media
+            .parts
+            .iter()
+            .map(|part| part_url(&base, &part.key))
+            .collect();
+        match parts.as_slice() {
+            [] => None,
+            [one] => Some(one.clone()),
+            _ => {
+                let mut edl = String::from("edl://");
+                for (index, part) in parts.iter().enumerate() {
+                    if index > 0 {
+                        edl.push(';');
+                    }
+                    edl.push_str(&format!("%{}%{}", part.len(), part));
+                }
+                Some(edl)
+            }
+        }
+    }
+
+    /// Plex discovery's connection-local bit is provider evidence for the LAN
+    /// locality tier. DNS/interface matching can still upgrade it to host-local.
+    pub fn server_is_local(&self) -> bool {
+        self.server.as_ref().is_some_and(|server| server.local)
+    }
+
     /// Remove an item from the server's Continue Watching hub (the same
     /// action Plex Web's "Remove from Continue Watching" performs).
     pub async fn remove_from_continue_watching(
@@ -1193,121 +1237,6 @@ impl PlexLibrary {
         self.get_items(&base_url, &params).await
     }
 
-    pub async fn get_part_url_for_rating_key(
-        &self,
-        rating_key: &str,
-    ) -> Result<Option<String>, Box<dyn std::error::Error>> {
-        let base = match self.server_base() {
-            Some(base) => base,
-            None => return Ok(None),
-        };
-        let url = format!("{base}/library/metadata/{rating_key}?includeAllLeaves=1");
-        let resp = self
-            .client
-            .get(&url)
-            .header("X-Plex-Token", &self.auth_token)
-            .header("X-Plex-Client-Identifier", &self.client_identifier)
-            .header("Accept", "application/xml")
-            .send()
-            .await?
-            .error_for_status()?;
-        let body = resp.text().await?;
-        let mut reader = quick_xml::Reader::from_str(&body);
-        let mut buf = Vec::new();
-        // Score each Media version and pick the best part: prefer HDR, then higher
-        // resolution, then higher bitrate. (height, bitrate, is_hdr) of the current Media.
-        let mut cur_hdr = false;
-        let mut cur_height: u32 = 0;
-        let mut cur_bitrate: u32 = 0;
-        // All parts of the current Media (split-file media has more than one).
-        let mut cur_parts: Vec<String> = Vec::new();
-        // (is_hdr, height, bitrate, parts) per Media version.
-        let mut candidates: Vec<(bool, u32, u32, Vec<String>)> = Vec::new();
-        loop {
-            match reader.read_event_into(&mut buf) {
-                Ok(Event::Start(e)) | Ok(Event::Empty(e)) => {
-                    let name = e.name().as_ref().to_owned();
-                    if name.as_slice() == b"Media" || name.as_slice() == b"media" {
-                        // Flush the previous Media's parts before starting a new one.
-                        if !cur_parts.is_empty() {
-                            candidates.push((
-                                cur_hdr,
-                                cur_height,
-                                cur_bitrate,
-                                std::mem::take(&mut cur_parts),
-                            ));
-                        }
-                        cur_hdr = false;
-                        cur_height = 0;
-                        cur_bitrate = 0;
-                        for a in e.attributes().flatten() {
-                            match a.key.as_ref() {
-                                b"height" => cur_height = av(&a).parse().unwrap_or(0),
-                                b"bitrate" => cur_bitrate = av(&a).parse().unwrap_or(0),
-                                b"videoDynamicRange" | b"videoProfile" => {
-                                    let v = av(&a).to_ascii_lowercase();
-                                    if v.contains("hdr")
-                                        || v.contains("dolby")
-                                        || v.contains("dovi")
-                                        || v.contains("hlg")
-                                        || v.contains("pq")
-                                    {
-                                        cur_hdr = true;
-                                    }
-                                }
-                                _ => {}
-                            }
-                        }
-                    } else if name.as_slice() == b"Part" || name.as_slice() == b"part" {
-                        for a in e.attributes().flatten() {
-                            if a.key.as_ref() == b"key" {
-                                cur_parts.push(part_url(&base, &av(&a)));
-                                break;
-                            }
-                        }
-                    }
-                }
-                Ok(Event::Eof) => {
-                    if !cur_parts.is_empty() {
-                        candidates.push((
-                            cur_hdr,
-                            cur_height,
-                            cur_bitrate,
-                            std::mem::take(&mut cur_parts),
-                        ));
-                    }
-                    break;
-                }
-                Ok(_) => {}
-                Err(e) => {
-                    eprintln!("Metadata XML parse error: {}", e);
-                    break;
-                }
-            }
-            buf.clear();
-        }
-        let best = candidates
-            .into_iter()
-            .max_by_key(|(hdr, height, bitrate, _)| (*hdr, *height, *bitrate))
-            .map(|(_, _, _, parts)| parts);
-        Ok(best.map(|parts| {
-            if parts.len() == 1 {
-                parts.into_iter().next().unwrap_or_default()
-            } else {
-                // Split-file media: concatenate the parts with an mpv EDL so the
-                // whole title plays, not just the first segment. Each URL is
-                // length-quoted (%N%) since the URLs contain ; & ? characters.
-                let mut edl = String::from("edl://");
-                for (i, p) in parts.iter().enumerate() {
-                    if i > 0 {
-                        edl.push(';');
-                    }
-                    edl.push_str(&format!("%{}%{}", p.len(), p));
-                }
-                edl
-            }
-        }))
-    }
 
     pub fn server_base(&self) -> Option<String> {
         let s = self.server.as_ref()?;

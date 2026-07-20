@@ -67,3 +67,15 @@ test("the released Wayland API uses the locally secured scanner", async () => {
   assert.doesNotMatch(scannerBlock, /^source = /m);
   assert.match(scannerBlock, / "quick-xml",/);
 });
+
+test("non-x86 Windows cannot select an x86-64-v3 mpv build", async () => {
+  const commands = await readFile(
+    path.join(repoRoot, "src-tauri", "src", "commands.rs"),
+    "utf8",
+  );
+  const fallback = commands.match(
+    /#\[cfg\(all\(target_os = "windows", not\(target_arch = "x86_64"\)\)\)\]\s*fn cpu_supports_v3\(\) -> bool \{(?<body>[\s\S]*?)\n\}/,
+  )?.groups?.body;
+  assert.ok(fallback, "the non-x86 Windows fallback must remain explicit");
+  assert.match(fallback, /^\s*false\s*$/);
+});

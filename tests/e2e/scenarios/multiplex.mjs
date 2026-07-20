@@ -36,9 +36,19 @@ async function openContextMenu(driver) {
 
 async function chooseBacking(driver, label) {
   await openContextMenu(driver);
+  await driver.click(
+    await driver.find(
+      'xpath',
+      `//button[@role='menuitem' and normalize-space(.)='Play Version']`,
+    ),
+  );
+  await driver.waitFor(
+    `return !!document.querySelector('[role="group"][aria-label="Play Version"]')`,
+    'Play Version submenu',
+  );
   const item = await driver.find(
     'xpath',
-    `//button[@role='menuitem' and normalize-space(.)='Play from ${label}']`,
+    `//*[@role='group' and @aria-label='Play Version']//button[@role='menuitem' and normalize-space(.)='${label}']`,
   );
   await driver.click(item);
 }
