@@ -210,7 +210,8 @@ and 202 Windows Rust tests. The native build produced
 product/file version 0.1.62, unsigned as expected). With explicit owner
 approval, its silent installer exited zero and replaced the host's 0.1.37
 installation in place; the uninstall registration and installed executable
-both report 0.1.62.
+both report 0.1.62. The owner then confirmed that HDR works on Windows,
+closing the Windows manual HDR smoke requirement.
 
 ## Goal
 

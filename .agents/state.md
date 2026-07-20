@@ -32,9 +32,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   hash-matched Windows archive passes frontend, Rust 1.89/stable, warning-free
   clippy, native Rust tests, and NSIS packaging. With explicit owner approval,
   the 0.1.62 installer replaced 0.1.37 on `netwatch-01` and verified the installed
-  registration/executable at 0.1.62. The owner explicitly ended further Fable
-  reviews after the clean one-pass plan review; none were run during the
-  implementation or Windows closeout.
+  registration/executable at 0.1.62; the owner subsequently confirmed Windows
+  HDR works. The owner explicitly ended further Fable reviews after the clean
+  one-pass plan review; none were run during the implementation or Windows
+  closeout.
   Durable evidence: `.agents/plans/multi-plex.md` and
   `.agents/plans/playback-source-policy.md`.
 
