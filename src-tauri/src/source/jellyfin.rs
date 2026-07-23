@@ -836,20 +836,28 @@ fn map_sort(sort: Option<&str>) -> (String, String) {
 /// Rebuild a live source from its persisted config (used at startup and right
 /// after a successful connect). Returns `None` if the config is incomplete or
 /// the kind isn't a Jellyfin/Emby flavor.
-pub fn build_source(cfg: &crate::config::SourceConfig) -> Option<std::sync::Arc<dyn MediaSource>> {
-    let flavor = Flavor::from_kind(&cfg.kind)?;
+pub fn build_source(
+    cfg: &crate::config::SourceConfig,
+) -> Result<std::sync::Arc<dyn MediaSource>, String> {
+    crate::connections::validate_source(cfg)?;
+    let flavor =
+        Flavor::from_kind(&cfg.kind).ok_or_else(|| "unknown Jellyfin/Emby kind".to_string())?;
     // Require everything requests actually need, so a corrupt/partial config
     // can't restore as a broken live source. access_token (user login) or
     // api_key (headless) — either is the bearer token.
     let nonempty = |o: &Option<String>| o.clone().filter(|s| !s.is_empty());
-    let token = nonempty(&cfg.access_token).or_else(|| nonempty(&cfg.api_key))?;
-    let user_id = nonempty(&cfg.user_id)?;
-    let device_id = nonempty(&cfg.device_id)?;
+    let token = nonempty(&cfg.access_token)
+        .or_else(|| nonempty(&cfg.api_key))
+        .ok_or_else(|| "missing Jellyfin/Emby token".to_string())?;
+    let user_id =
+        nonempty(&cfg.user_id).ok_or_else(|| "missing Jellyfin/Emby user".to_string())?;
+    let device_id =
+        nonempty(&cfg.device_id).ok_or_else(|| "missing Jellyfin/Emby device".to_string())?;
     if cfg.base_url.is_empty() {
-        return None;
+        return Err("missing Jellyfin/Emby endpoint".to_string());
     }
     let client = JellyfinClient::new(flavor, &cfg.base_url, &device_id, &token, &user_id);
-    Some(std::sync::Arc::new(JellyfinSource::new(
+    Ok(std::sync::Arc::new(JellyfinSource::new(
         cfg.id.clone(),
         cfg.name.clone(),
         client,

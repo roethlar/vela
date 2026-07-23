@@ -68,7 +68,7 @@ export type WatchStateMutation = {
 };
 
 // Persisted Continue Playing policy. Missing or unknown backend values are
-// normalized to "only-tv", the product default.
+// missing values default to "only-tv"; unknown persisted values are invalid.
 export type ContinuePlayingMode = "off" | "on" | "only-tv";
 
 export type PlaybackSourcePolicy = "best" | "compatible" | "fastest" | "ask";

@@ -583,6 +583,7 @@ impl SourceRegistry {
         &self,
         namespaced_key: &str,
     ) -> Result<(std::sync::Arc<dyn MediaSource>, String), String> {
+        crate::durable::ensure_commands_ready()?;
         let (id, raw) = split_key(namespaced_key).ok_or("malformed item key")?;
         let src = self.get(id).ok_or("unknown source for item")?;
         Ok((src, raw.to_string()))
@@ -590,11 +591,15 @@ impl SourceRegistry {
 
     /// Sources to use for a request: a specific one if `source_id` is given,
     /// else all of them (for the unified/aggregate view).
-    pub fn selected(&self, source_id: Option<&str>) -> Vec<std::sync::Arc<dyn MediaSource>> {
-        match source_id {
+    pub fn selected(
+        &self,
+        source_id: Option<&str>,
+    ) -> Result<Vec<std::sync::Arc<dyn MediaSource>>, String> {
+        crate::durable::ensure_commands_ready()?;
+        Ok(match source_id {
             Some(id) => self.get(id).into_iter().collect(),
             None => self.sources.clone(),
-        }
+        })
     }
 }
 

@@ -22,6 +22,12 @@ function readConfig(configRoot) {
   return JSON.parse(fs.readFileSync(configPath(configRoot), 'utf8'));
 }
 
+function readConnections(configRoot) {
+  return JSON.parse(
+    fs.readFileSync(path.join(configRoot, 'config', 'vela', 'connections.json'), 'utf8'),
+  );
+}
+
 async function openContextMenu(driver) {
   await driver.exec(
     `const el = document.querySelector('button.poster[aria-label^="${TITLE}"]');
@@ -170,9 +176,9 @@ export default {
     await driver.click(removeA);
 
     await pollUntil(() => {
-      const sources = readConfig(configRoot).sources ?? [];
+      const sources = readConnections(configRoot).sources ?? [];
       return sources.length === 1 && sources[0].id === 'plex-b' ? sources[0] : null;
-    }, 'only Plex B to remain in config');
+    }, 'only Plex B to remain in connections');
     await driver.waitFor(
       `const dialog = document.querySelector('[role="dialog"][aria-label="Settings"]');
        return dialog && !dialog.innerText.includes('Mock Plex A') && dialog.innerText.includes('Mock Plex B');`,
@@ -185,7 +191,7 @@ export default {
       'the surviving Plex B source to refresh after Plex A removal',
     );
 
-    const survivor = readConfig(configRoot).sources[0];
+    const survivor = readConnections(configRoot).sources[0];
     assert.equal(survivor.access_token, 'plex-token-b', 'removing Plex A preserves Plex B credentials');
     assert.equal(survivor.machine_identifier, 'machine-b', 'removing Plex A preserves Plex B pin');
     assert.deepEqual(mockA.state.contractViolations, [], 'Plex A mock contract');

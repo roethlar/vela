@@ -738,6 +738,31 @@ This slice must land as one coherent upgrade: do not persist a split file while
 startup still reads sources from `AppConfig`, and do not enable strict failure
 while startup can still substitute defaults.
 
+Implementation evidence (2026-07-23):
+
+- `config.json` and `connections.json` now cross independent strict validators;
+  source construction is all-or-nothing; ordinary source writes target only
+  `connections.json`; and normal commands remain behind the two-file gate.
+- The one-time split holds the settings lock before the connections lock,
+  creates and verifies an owner-private byte-exact backup, records its byte
+  length and SHA-256 for crash retries, reuses the Plex identity marker, refuses
+  differing connection sets, and removes active authorization from live
+  settings only after the complete connection file exists.
+- Unix mode tests cover the `0700` directory and `0600` files/locks/backups. A
+  native Windows test on `netwatch-01` proved the protected current-user/SYSTEM/
+  Administrators DACL path for directory, JSON, and lock creation.
+- Canonical local verification passed: exact Node/npm check, clean `npm ci`,
+  zero-vulnerability npm audit, 44 Node tests, Svelte check with zero
+  diagnostics, production frontend build, Rust 1.89 and stable checks, clippy
+  with warnings denied, 219 Rust tests, and Cargo audit with no vulnerabilities
+  (17 existing allowed unmaintained/unsoundness warnings).
+- The checksum-matched Linux source passed the complete real-app E2E suite
+  31/31. Existing combined-config scenarios exercised the split before source
+  removal, restart, playback, and library operations.
+- Mandatory post-commit red proofs remain the Slice 1 closeout step so every
+  regression is injected and restored against committed bytes, per repository
+  guard discipline.
+
 ### Slice 2 — independent preserved recovery
 
 - Implement targeted exact-byte no-replace rename and fresh-file installation

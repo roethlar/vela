@@ -66,9 +66,11 @@ fn library_from_config(cfg: &crate::config::SourceConfig) -> Option<PlexLibrary>
 /// clients without any process-global Plex singleton.
 pub fn build_source(
     cfg: &crate::config::SourceConfig,
-) -> Option<std::sync::Arc<dyn MediaSource>> {
-    let lib = library_from_config(cfg)?;
-    Some(std::sync::Arc::new(PlexSource::new(
+) -> Result<std::sync::Arc<dyn MediaSource>, String> {
+    crate::connections::validate_source(cfg)?;
+    let lib = library_from_config(cfg)
+        .ok_or_else(|| "could not build validated Plex connection".to_string())?;
+    Ok(std::sync::Arc::new(PlexSource::new(
         &cfg.id, &cfg.name, lib,
     )))
 }
@@ -85,7 +87,7 @@ async fn persist_source_binding(
     let base_url = base_url.to_string();
     let machine_identifier = machine_identifier.to_string();
     tokio::task::spawn_blocking(move || {
-        crate::config::update(move |cfg| {
+        crate::connections::update(move |cfg| {
             update_source_binding(
                 cfg,
                 &source_id,
@@ -100,7 +102,7 @@ async fn persist_source_binding(
 }
 
 fn update_source_binding(
-    cfg: &mut crate::config::AppConfig,
+    cfg: &mut crate::connections::ConnectionsConfig,
     source_id: &str,
     source_name: Option<&str>,
     base_url: &str,
@@ -1521,7 +1523,7 @@ mod tests {
 
     #[test]
     fn binding_persistence_updates_only_the_matching_plex_row() {
-        let mut cfg = crate::config::AppConfig {
+        let mut cfg = crate::connections::ConnectionsConfig {
             sources: vec![
                 plex_config("https://a.example", Some("machine-A")),
                 SourceConfig {
@@ -1532,7 +1534,6 @@ mod tests {
                     ..plex_config("", None)
                 },
             ],
-            ..Default::default()
         };
         update_source_binding(
             &mut cfg,

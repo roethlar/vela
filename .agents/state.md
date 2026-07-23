@@ -51,7 +51,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   redacted runtime handling, private request headers, and removal of Plex token
   URLs/query strings are the security boundary. Unknown fields invalidate only
   their whole owning file; documented legacy rollback fields and non-settings
-  media payloads remain compatible. No code has been implemented yet.
+  media payloads remain compatible. Slice 1 is implemented and canonically
+  verified at version 1.0.1: active connections now live in private
+  `connections.json`, startup and runtime fail closed behind the two-file gate,
+  a valid combined 1.0.0 config splits only after an exact verified backup, and
+  invalid combined settings are not mined. Native Windows ACL validation and
+  the checksum-matched Linux real-app suite passed. Mandatory post-commit guard
+  red proofs remain before Slice 1 closeout and Slice 2 recovery work.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
@@ -64,9 +70,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Implement and land the active app-wide config-integrity/recovery plan one
-  verified slice per commit. Afterward, explicitly activate the marker plan
-  before marker implementation.
+- Commit the verified Slice 1 implementation, inject and restore each new guard
+  against those committed bytes, record the red proofs, then implement Slice 2
+  preserved recovery. After all prerequisite slices land, explicitly activate
+  the marker plan before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -77,12 +84,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Marker-skipping implementation is intentionally gated on an approved plan for
-  the app-wide config-integrity/recovery prerequisite and explicit marker-plan
-  activation. Current code still
-  normalizes several invalid constrained values and sometimes substitutes a
-  default config after load failure; that lower-authority behavior conflicts
-  with the 2026-07-22 owner decision and must not be copied into this feature.
+- Marker-skipping implementation remains intentionally gated on completing the
+  app-wide config-integrity/recovery prerequisite and explicit marker-plan
+  activation.
 - Config-integrity/recovery has no unresolved owner or review blocker.
 
 ## Verification

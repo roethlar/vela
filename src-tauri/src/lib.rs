@@ -1,5 +1,7 @@
 mod commands;
 mod config;
+mod connections;
+mod durable;
 mod display;
 mod locality;
 mod playback;
@@ -31,6 +33,10 @@ pub fn platform_name() -> &'static str {
 pub struct AppState {
     /// All configured media sources (Plex and Jellyfin/Emby servers).
     pub registry: AsyncMutex<SourceRegistry>,
+    /// App-wide fail-closed gate for settings and connection persistence.
+    /// Normal frontend boot does not proceed until both independent files are
+    /// ready and every persisted source has been rebuilt.
+    pub(crate) durable_status: AsyncMutex<durable::DurableStateStatus>,
     /// Stop flag for the currently-tracked playback (so a new play cancels the old tracker).
     pub tracking_stop: Mutex<Option<Arc<AtomicBool>>>,
     /// The currently-running mpv process, so a new play can terminate the old one.
@@ -100,28 +106,15 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    // Build the source registry from saved config so we can serve data immediately.
-    // A parse failure starts empty but leaves the file intact (config::update
-    // refuses to overwrite an unreadable config), so nothing is wiped.
-    let cfg = config::load_config().unwrap_or_else(|e| {
-        eprintln!(
-            "vela: config unreadable ({e}); starting with no saved sources (file left intact)"
-        );
-        config::AppConfig::default()
-    });
-    let mut registry = SourceRegistry::default();
-    // Restore every configured source. Plex now uses the same per-row model as
-    // Jellyfin/Emby; `load_config` has already migrated the old singleton.
-    for src_cfg in &cfg.sources {
-        if let Some(src) = source::plex::build_source(src_cfg)
-            .or_else(|| source::jellyfin::build_source(src_cfg))
-        {
-            registry.upsert(src);
-        }
-    }
+    let (registry, durable_status) = match durable::load() {
+        Ok(ready) => (ready.registry, durable::DurableStateStatus::ready()),
+        Err(failure) => (SourceRegistry::default(), failure.status),
+    };
+    durable::set_commands_ready(durable_status.is_ready());
 
     let state = AppState {
         registry: AsyncMutex::new(registry),
+        durable_status: AsyncMutex::new(durable_status),
         tracking_stop: Mutex::new(None),
         current_child: Arc::new(Mutex::new(None)),
         shutting_down: Arc::new(AtomicBool::new(false)),
@@ -183,6 +176,7 @@ pub fn run() {
                 .state::<AppState>()
                 .app_handle
                 .set(app.handle().clone());
+            durable::register_app_handle(app.handle().clone());
 
             // Playback sequence dispatcher: only the joined clean-EOF and
             // final-tracker signal can advance a playlist or authorize Continue
@@ -254,6 +248,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            commands::get_durable_state_status,
+            commands::retry_durable_state,
+            commands::exit_vela,
             commands::get_status,
             commands::get_app_info,
             commands::get_sources,

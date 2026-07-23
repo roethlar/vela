@@ -9,11 +9,11 @@ const LEGACY_PLEX_SOURCE_ID: &str = "plex";
 /// rediscovery) can't lose each other's updates via interleaved read/writes.
 static CONFIG_LOCK: Mutex<()> = Mutex::new(());
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)] // missing fields fall back to Default rather than failing the parse
+#[derive(Clone, Serialize, Deserialize, Default)]
+#[serde(default, deny_unknown_fields)]
 pub struct AppConfig {
     /// Pre-multi-Plex singleton credentials. Read only by the one-shot
-    /// migration; new code persists Plex credentials on `sources` entries.
+    /// migration; new code persists Plex credentials in `connections.json`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_token: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -44,31 +44,29 @@ pub struct AppConfig {
     /// Black-bar cropping via mpv's bundled `autocrop.lua`, three-state:
     /// `"off"` (default; nothing injected), `"manual"` (script loaded with
     /// `autocrop-auto=no` — crops only on an explicit in-player `Shift+C`), or
-    /// `"auto"` (script's own crop-on-playback-start). Missing/unknown = off.
+    /// `"auto"` (script's own crop-on-playback-start). Missing means off;
+    /// unknown values invalidate the settings document.
     /// `"auto"` auto-fires mpv's live `video-crop`, which can hang mpv on some
     /// HDR/Wayland stacks — the Settings UI carries that warning.
     pub mpv_autocrop: Option<String>,
     /// What to do after a clean EOF once a single item or named playlist has
-    /// genuinely ended: `"off"`, `"on"`, or `"only-tv"`. Missing and unknown
-    /// values fail closed to the product default (`"only-tv"`) in the command
-    /// layer, keeping older configs compatible without baking policy into serde.
+    /// genuinely ended: `"off"`, `"on"`, or `"only-tv"`. Missing means the
+    /// product default (`"only-tv"`); unknown values invalidate the document.
     pub continue_playing: Option<String>,
-    /// How duplicate copies are selected at the shared play boundary. Kept as
-    /// a tolerant string so a future/hand-edited value cannot make the entire
-    /// credential-bearing config unreadable; the command layer normalizes it
-    /// to `best`.
+    /// How duplicate copies are selected at the shared play boundary. Missing
+    /// means `best`; unknown values invalidate the document.
     pub playback_source_policy: Option<String>,
-    /// Optional compatibility-display resolution override. Closed string
-    /// values are normalized by the command layer; missing/unknown means Auto.
+    /// Optional compatibility-display resolution override. Missing means Auto;
+    /// unknown values invalidate the document.
     pub playback_display_resolution: Option<String>,
     /// Optional compatibility-display HDR override (`enabled`/`disabled`).
-    /// Missing/unknown means Auto.
+    /// Missing means Auto; unknown values invalidate the document.
     pub playback_display_hdr: Option<String>,
-    /// Persisted media-server connections (Plex, Jellyfin, and Emby). Kept
-    /// deliberately provider-neutral so backends can diverge without a schema
-    /// change.
-    #[serde(default)]
-    pub sources: Vec<SourceConfig>,
+    /// Pre-split media-server connections. New writes live in
+    /// `connections.json`; this compatibility field is accepted only so the
+    /// exact one-time split can move a fully valid legacy document.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub(crate) sources: Vec<SourceConfig>,
     /// INERT since 2026-07-08 (local/SMB/SSH sources removed — see
     /// `.agents/decisions.md` "Vela is a multi-server client"): these three
     /// fields are parsed, ignored, and preserved on save so an older build
@@ -98,9 +96,9 @@ pub struct AppConfig {
     /// per library"): source-namespaced section key → Vela sort key. Written
     /// on every sort change in a section view; stamped onto SectionDto when
     /// sections are listed. Values are re-validated against the sort
-    /// whitelist on read (fail-closed to the default), so a stale or
-    /// hand-edited entry degrades instead of erroring. Entries for removed
-    /// sections linger harmlessly (bounded by how many libraries existed).
+    /// whitelist on read; an unknown value invalidates settings. Entries for
+    /// removed sections linger harmlessly (bounded by how many libraries
+    /// existed).
     #[serde(default)]
     pub section_sorts: std::collections::BTreeMap<String, String>,
     /// Present only while the cross-file legacy Plex re-key is incomplete.
@@ -108,12 +106,26 @@ pub struct AppConfig {
     /// retry-safe across a crash between the two atomic JSON writes.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) plex_source_migration: Option<PlexSourceMigration>,
+    /// Private migration breadcrumb identifying the exact pre-split backup. It
+    /// is present only while the connection split is incomplete and is
+    /// removed with the legacy live credential fields.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) connections_split_backup: Option<ConnectionsSplitBackup>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
 pub(crate) struct PlexSourceMigration {
-    from_id: String,
-    to_id: String,
+    pub(crate) from_id: String,
+    pub(crate) to_id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct ConnectionsSplitBackup {
+    pub(crate) file_name: String,
+    pub(crate) byte_length: u64,
+    pub(crate) sha256: String,
 }
 
 /// A configured SMB share. INERT: kept only so old configs round-trip
@@ -121,7 +133,7 @@ pub(crate) struct PlexSourceMigration {
 /// including the legacy `kind`/`local_folder_id` pair — must survive
 /// load→save (they were `skip_serializing` while a migrator handled them;
 /// with the migrator gone, dropping them on save would lose rollback data).
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[derive(Clone, Serialize, Deserialize, Default)]
 #[serde(default)] // missing fields fall back to Default rather than failing the parse
 pub struct SmbMount {
     pub id: String,
@@ -195,8 +207,8 @@ pub struct LocalFolder {
 /// selects the backend, and the optional fields cover the union of what the
 /// backends need (e.g. a user token vs. a pre-issued API key) without forcing
 /// every backend into one exact shape.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-#[serde(default)] // missing fields fall back to Default rather than failing the parse
+#[derive(Clone, Serialize, Deserialize, Default, PartialEq, Eq)]
+#[serde(default, deny_unknown_fields)]
 pub struct SourceConfig {
     pub id: String,
     pub kind: String,
@@ -217,11 +229,151 @@ pub struct SourceConfig {
     pub machine_identifier: Option<String>,
 }
 
+impl std::fmt::Debug for SourceConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("SourceConfig")
+            .field("id", &self.id)
+            .field("kind", &self.kind)
+            .field("name", &self.name)
+            .field("base_url", &"<redacted>")
+            .field(
+                "access_token",
+                &self.access_token.as_ref().map(|_| "<redacted>"),
+            )
+            .field("api_key", &self.api_key.as_ref().map(|_| "<redacted>"))
+            .field("user_id", &self.user_id.as_ref().map(|_| "<redacted>"))
+            .field("device_id", &self.device_id.as_ref().map(|_| "<redacted>"))
+            .field("machine_identifier", &self.machine_identifier)
+            .finish()
+    }
+}
+
+pub(crate) const ALLOWED_SECTION_SORTS: &[&str] = &[
+    "titleSort:asc",
+    "year:desc",
+    "addedAt:desc",
+    "episodeAddedAt:desc",
+    "originallyAvailableAt:desc",
+    "rating:desc",
+    "lastViewedAt:desc",
+];
+
 impl AppConfig {
-    /// Add or replace a source by id, then return self for chaining.
-    pub fn upsert_source(&mut self, src: SourceConfig) {
-        self.sources.retain(|s| s.id != src.id);
-        self.sources.push(src);
+    pub(crate) fn validate(&self) -> Result<(), String> {
+        if self.auth_token.is_some() != self.client_identifier.is_some() {
+            return Err("incomplete legacy Plex credentials".to_string());
+        }
+        let legacy_endpoint_fields = [
+            self.last_server_host.is_some(),
+            self.last_server_port.is_some(),
+            self.last_server_scheme.is_some(),
+        ];
+        if legacy_endpoint_fields.iter().any(|present| *present)
+            && !legacy_endpoint_fields.iter().all(|present| *present)
+        {
+            return Err("incomplete legacy Plex endpoint".to_string());
+        }
+        if self
+            .last_server_scheme
+            .as_deref()
+            .is_some_and(|scheme| !matches!(scheme, "http" | "https"))
+        {
+            return Err("invalid legacy Plex endpoint".to_string());
+        }
+        crate::connections::ConnectionsConfig {
+            sources: self.sources.clone(),
+        }
+        .validate()?;
+        if let Some(migration) = &self.plex_source_migration {
+            if migration.from_id != LEGACY_PLEX_SOURCE_ID
+                || migration.to_id.trim().is_empty()
+                || migration.to_id.contains(':')
+                || !self
+                    .sources
+                    .iter()
+                    .any(|source| source.kind == "plex" && source.id == migration.to_id)
+            {
+                return Err("invalid partial Plex source migration".to_string());
+            }
+        }
+        if self.connections_split_backup.is_some() && !has_legacy_connections(self) {
+            return Err("invalid connection-split migration state".to_string());
+        }
+        if self
+            .watched_threshold_percent
+            .is_some_and(|value| !(1..=100).contains(&value))
+        {
+            return Err("invalid watched threshold".to_string());
+        }
+        validate_optional_closed(
+            "mpv autocrop",
+            self.mpv_autocrop.as_deref(),
+            &["off", "manual", "auto"],
+        )?;
+        validate_optional_closed(
+            "Continue Playing",
+            self.continue_playing.as_deref(),
+            &["off", "on", "only-tv"],
+        )?;
+        validate_optional_closed(
+            "playback source policy",
+            self.playback_source_policy.as_deref(),
+            &["best", "compatible", "fastest", "ask"],
+        )?;
+        validate_optional_closed(
+            "display resolution",
+            self.playback_display_resolution.as_deref(),
+            &["720p", "1080p", "1440p", "2160p", "4320p"],
+        )?;
+        validate_optional_closed(
+            "display HDR",
+            self.playback_display_hdr.as_deref(),
+            &["enabled", "disabled"],
+        )?;
+        if self.recents.len() > crate::recents::MAX_RECENTS {
+            return Err("too many recent items".to_string());
+        }
+        if self.hidden_from_continue.len() > crate::recents::MAX_HIDDEN {
+            return Err("too many hidden Continue Watching items".to_string());
+        }
+        for (key, value) in &self.section_sorts {
+            if key.trim().is_empty()
+                || key.len() > 512
+                || !ALLOWED_SECTION_SORTS.contains(&value.as_str())
+            {
+                return Err("invalid saved library sort".to_string());
+            }
+        }
+        if let Some(backup) = &self.connections_split_backup {
+            if !backup
+                .file_name
+                .starts_with("config.pre-connections-split-")
+                || !backup.file_name.ends_with(".json")
+                || backup.file_name.contains('/')
+                || backup.file_name.contains('\\')
+                || backup.sha256.len() != 64
+                || !backup
+                    .sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err("invalid connection-split migration state".to_string());
+            }
+        }
+        Ok(())
+    }
+}
+
+fn validate_optional_closed(
+    label: &str,
+    value: Option<&str>,
+    allowed: &[&str],
+) -> Result<(), String> {
+    if value.is_some_and(|value| !allowed.contains(&value)) {
+        Err(format!("invalid {label}"))
+    } else {
+        Ok(())
     }
 }
 
@@ -231,7 +383,7 @@ pub fn config_dir_file(name: &str) -> io::Result<PathBuf> {
     crate::storage::config_dir_file(name)
 }
 
-fn config_path() -> io::Result<PathBuf> {
+pub(crate) fn config_path() -> io::Result<PathBuf> {
     config_dir_file("config.json")
 }
 
@@ -243,17 +395,50 @@ pub fn update<T, F>(f: F) -> Result<T, String>
 where
     F: FnOnce(&mut AppConfig) -> Result<T, String>,
 {
+    crate::durable::ensure_commands_ready()?;
+    let result = update_internal(f);
+    if result.is_err() {
+        if let Ok(path) = config_path() {
+            if let Err(error) = load_unmigrated_at(&path) {
+                crate::durable::report_settings_fault(&error);
+            }
+        }
+    }
+    result
+}
+
+pub(crate) fn update_internal<T, F>(f: F) -> Result<T, String>
+where
+    F: FnOnce(&mut AppConfig) -> Result<T, String>,
+{
     let path = config_path().map_err(|error| format!("config unavailable: {error}"))?;
     let lock_path = config_dir_file("config.lock")
         .map_err(|error| format!("config lock unavailable: {error}"))?;
     update_at(&path, &lock_path, f)
 }
 
-fn update_at<T, F>(path: &Path, lock_path: &Path, f: F) -> Result<T, String>
+pub(crate) fn update_at<T, F>(path: &Path, lock_path: &Path, f: F) -> Result<T, String>
 where
     F: FnOnce(&mut AppConfig) -> Result<T, String>,
 {
-    crate::storage::update_json("config", &CONFIG_LOCK, path, lock_path, f)
+    crate::storage::update_json(
+        "config",
+        &CONFIG_LOCK,
+        path,
+        lock_path,
+        |cfg: &mut AppConfig| {
+            cfg.validate()?;
+            let output = f(cfg)?;
+            cfg.validate()?;
+            Ok(output)
+        },
+    )
+}
+
+pub(crate) fn lock_process() -> std::sync::MutexGuard<'static, ()> {
+    CONFIG_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner())
 }
 
 fn rekey_namespaced(value: &mut String, old_source_id: &str, new_source_id: &str) {
@@ -284,7 +469,10 @@ fn rekey_config_references(cfg: &mut AppConfig, old_source_id: &str, new_source_
     let old_sort_keys = cfg
         .section_sorts
         .keys()
-        .filter(|key| key.split_once(':').is_some_and(|(source_id, _)| source_id == old_source_id))
+        .filter(|key| {
+            key.split_once(':')
+                .is_some_and(|(source_id, _)| source_id == old_source_id)
+        })
         .cloned()
         .collect::<Vec<_>>();
     for old_key in old_sort_keys {
@@ -311,7 +499,7 @@ fn legacy_server_base(cfg: &AppConfig) -> Option<String> {
     Some(format!("{scheme}://{host}:{port}"))
 }
 
-fn migration_needed(cfg: &AppConfig) -> bool {
+pub(crate) fn migration_needed(cfg: &AppConfig) -> bool {
     cfg.plex_source_migration.is_some()
         || (cfg.auth_token.is_some() && cfg.client_identifier.is_some())
         || cfg
@@ -320,15 +508,27 @@ fn migration_needed(cfg: &AppConfig) -> bool {
             .any(|source| source.kind == "plex" && source.id == LEGACY_PLEX_SOURCE_ID)
 }
 
-fn prepare_legacy_plex_migration(
+pub(crate) fn has_legacy_connections(cfg: &AppConfig) -> bool {
+    migration_needed(cfg) || !cfg.sources.is_empty()
+}
+
+pub(crate) fn load_unmigrated_at(path: &Path) -> io::Result<AppConfig> {
+    let cfg: AppConfig = crate::storage::load_json(path)?;
+    cfg.validate()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid settings document"))?;
+    Ok(cfg)
+}
+
+pub(crate) fn prepare_legacy_plex_migration(
     cfg: &mut AppConfig,
     make_id: impl FnOnce() -> String,
 ) -> Result<Option<PlexSourceMigration>, String> {
     if let Some(migration) = cfg.plex_source_migration.clone() {
         if migration.from_id != LEGACY_PLEX_SOURCE_ID
-            || !cfg.sources.iter().any(|source| {
-                source.kind == "plex" && source.id == migration.to_id
-            })
+            || !cfg
+                .sources
+                .iter()
+                .any(|source| source.kind == "plex" && source.id == migration.to_id)
         {
             return Err("invalid partial Plex source migration in config".to_string());
         }
@@ -347,8 +547,7 @@ fn prepare_legacy_plex_migration(
     if legacy_positions.len() > 1 {
         return Err("multiple persisted Plex sources use the retired `plex` id".to_string());
     }
-    if legacy_positions.is_empty()
-        && !(cfg.auth_token.is_some() && cfg.client_identifier.is_some())
+    if legacy_positions.is_empty() && !(cfg.auth_token.is_some() && cfg.client_identifier.is_some())
     {
         return Ok(None);
     }
@@ -403,7 +602,7 @@ fn prepare_legacy_plex_migration(
     Ok(Some(migration))
 }
 
-fn finish_legacy_plex_migration(
+pub(crate) fn finish_legacy_plex_migration(
     cfg: &mut AppConfig,
     migration: &PlexSourceMigration,
 ) -> Result<(), String> {
@@ -445,22 +644,27 @@ fn migrate_legacy_plex_with(
     })
 }
 
-fn load_config_with(
+pub(crate) fn load_config_with(
     path: &Path,
     lock_path: &Path,
     make_id: impl FnOnce() -> String,
     migrate_playlists: impl FnOnce(&str, &str) -> Result<(), String>,
 ) -> io::Result<AppConfig> {
     let cfg: AppConfig = crate::storage::load_json(path)?;
+    cfg.validate()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid settings document"))?;
     if !migration_needed(&cfg) {
         return Ok(cfg);
     }
     migrate_legacy_plex_with(path, lock_path, make_id, migrate_playlists)
         .map_err(io::Error::other)?;
-    crate::storage::load_json(path)
+    let cfg: AppConfig = crate::storage::load_json(path)?;
+    cfg.validate()
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid settings document"))?;
+    Ok(cfg)
 }
 
-pub fn load_config() -> io::Result<AppConfig> {
+pub(crate) fn load_config_internal() -> io::Result<AppConfig> {
     let path = config_path()?;
     let lock_path = config_dir_file("config.lock")?;
     load_config_with(
@@ -469,6 +673,15 @@ pub fn load_config() -> io::Result<AppConfig> {
         || format!("plex-{}", uuid::Uuid::new_v4()),
         crate::playlists::migrate_source_id,
     )
+}
+
+pub fn load_config() -> io::Result<AppConfig> {
+    crate::durable::ensure_commands_ready().map_err(io::Error::other)?;
+    let result = load_config_internal();
+    if let Err(error) = &result {
+        crate::durable::report_settings_fault(error);
+    }
+    result
 }
 
 #[cfg(test)]
@@ -523,10 +736,8 @@ mod tests {
     }
 
     fn temp_paths(label: &str) -> (PathBuf, PathBuf, PathBuf, PathBuf, PathBuf) {
-        let root = std::env::temp_dir().join(format!(
-            "vela-config-{label}-{}",
-            uuid::Uuid::new_v4()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("vela-config-{label}-{}", uuid::Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
         (
             root.join("config.json"),
@@ -580,8 +791,7 @@ mod tests {
 
     #[test]
     fn legacy_plex_migration_rekeys_every_persisted_route_and_is_idempotent() {
-        let (config, config_lock, playlists, playlists_lock, root) =
-            temp_paths("plex-migration");
+        let (config, config_lock, playlists, playlists_lock, root) = temp_paths("plex-migration");
         crate::storage::save_json(&config, &legacy_config()).unwrap();
         crate::storage::save_json(&playlists, &playlist_file()).unwrap();
 
@@ -590,12 +800,7 @@ mod tests {
             &config_lock,
             || "plex-new".to_string(),
             |old, new| {
-                crate::playlists::migrate_source_id_at(
-                    &playlists,
-                    &playlists_lock,
-                    old,
-                    new,
-                )
+                crate::playlists::migrate_source_id_at(&playlists, &playlists_lock, old, new)
             },
         )
         .unwrap();
@@ -614,7 +819,10 @@ mod tests {
         assert_eq!(migrated.plex_source_migration, None);
         assert_eq!(migrated.last_section_key.as_deref(), Some("plex-new:7"));
         assert_eq!(
-            migrated.merged_overrides.get("imdb:tt1").map(String::as_str),
+            migrated
+                .merged_overrides
+                .get("imdb:tt1")
+                .map(String::as_str),
             Some("plex-new")
         );
         assert_eq!(
@@ -633,10 +841,7 @@ mod tests {
         assert_eq!(recent.watch_key.as_deref(), Some("plex-new:4"));
         assert_eq!(recent.detail_key.as_deref(), Some("plex-new:5"));
         assert_eq!(recent.backing.as_ref().unwrap()[0].source_id, "plex-new");
-        assert_eq!(
-            recent.backing.as_ref().unwrap()[0].rating_key,
-            "plex-new:1"
-        );
+        assert_eq!(recent.backing.as_ref().unwrap()[0].rating_key, "plex-new:1");
         assert_eq!(
             recent.backing.as_ref().unwrap()[0]
                 .parent_rating_key
@@ -664,12 +869,7 @@ mod tests {
             &config_lock,
             || panic!("a completed migration must never mint another id"),
             |old, new| {
-                crate::playlists::migrate_source_id_at(
-                    &playlists,
-                    &playlists_lock,
-                    old,
-                    new,
-                )
+                crate::playlists::migrate_source_id_at(&playlists, &playlists_lock, old, new)
             },
         )
         .unwrap();
@@ -692,12 +892,7 @@ mod tests {
             &config_lock,
             || "plex-first".to_string(),
             |old, new| {
-                crate::playlists::migrate_source_id_at(
-                    &playlists,
-                    &playlists_lock,
-                    old,
-                    new,
-                )
+                crate::playlists::migrate_source_id_at(&playlists, &playlists_lock, old, new)
             },
         );
         assert!(first.is_err());
@@ -719,12 +914,7 @@ mod tests {
             &config_lock,
             || panic!("a retry must reuse the persisted target id"),
             |old, new| {
-                crate::playlists::migrate_source_id_at(
-                    &playlists,
-                    &playlists_lock,
-                    old,
-                    new,
-                )
+                crate::playlists::migrate_source_id_at(&playlists, &playlists_lock, old, new)
             },
         )
         .unwrap();
@@ -749,12 +939,7 @@ mod tests {
             &config_lock,
             || "plex-new".to_string(),
             |old, new| {
-                crate::playlists::migrate_source_id_at(
-                    &playlists,
-                    &playlists_lock,
-                    old,
-                    new,
-                )
+                crate::playlists::migrate_source_id_at(&playlists, &playlists_lock, old, new)
             },
         )
         .unwrap();
@@ -863,5 +1048,71 @@ mod tests {
         );
         assert_eq!(back.ssh_mounts[0].local_folder_id, "lf-ssh");
         assert_eq!(back.ssh_mounts[0].mountpoint, "/mnt/vela-ssh");
+    }
+
+    #[test]
+    fn strict_settings_reject_unknown_keys_values_and_incomplete_legacy_credentials() {
+        let root =
+            std::env::temp_dir().join(format!("vela-config-strict-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.json");
+
+        for invalid in [
+            r#"{"future_setting":true}"#,
+            r#"{"continue_playing":"future"}"#,
+            r#"{"auth_token":"synthetic-only"}"#,
+            r#"{"last_server_host":"plex.example"}"#,
+            r#"{"watched_threshold_percent":0}"#,
+            r#"{"watched_threshold_percent":101}"#,
+            r#"{"mpv_autocrop":"future"}"#,
+            r#"{"playback_source_policy":"future"}"#,
+            r#"{"playback_display_resolution":"16k"}"#,
+            r#"{"playback_display_hdr":"maybe"}"#,
+            r#"{"section_sorts":{"":"titleSort:asc"}}"#,
+            r#"{"section_sorts":{"jf:1":"future"}}"#,
+            r#"{"plex_source_migration":{"from_id":"plex","to_id":"plex-new"}}"#,
+            r#"{"connections_split_backup":{"file_name":"../outside.json","byte_length":1,"sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}}"#,
+            r#"{"continue_playing":true}"#,
+            r#"{"continue_playing":"on""#,
+        ] {
+            fs::write(&path, invalid).unwrap();
+            assert_eq!(
+                load_unmigrated_at(&path).err().unwrap().kind(),
+                io::ErrorKind::InvalidData,
+                "{invalid} must fail the whole settings document"
+            );
+        }
+
+        fs::write(&path, br#"{"continue_playing":"on"}"#).unwrap();
+        assert_eq!(
+            load_unmigrated_at(&path)
+                .unwrap()
+                .continue_playing
+                .as_deref(),
+            Some("on")
+        );
+
+        let mut settings = AppConfig {
+            hidden_from_continue: vec!["jf:item".to_string(); crate::recents::MAX_HIDDEN + 1],
+            ..Default::default()
+        };
+        assert!(settings.validate().is_err());
+        settings.hidden_from_continue.clear();
+        settings.recents = vec![
+            RecentEntry {
+                item: item("jf"),
+                session_id: None,
+                started_at_ms: 0,
+                ended_at_ms: 0,
+            };
+            crate::recents::MAX_RECENTS + 1
+        ];
+        assert!(settings.validate().is_err());
+        settings.recents.clear();
+        settings
+            .section_sorts
+            .insert("x".repeat(513), "titleSort:asc".to_string());
+        assert!(settings.validate().is_err());
+        fs::remove_dir_all(root).unwrap();
     }
 }

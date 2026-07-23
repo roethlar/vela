@@ -145,7 +145,8 @@
   let showMpvHelp = $state(false);
 
   // What a cleanly-finished single item or exhausted playlist should do next.
-  // The backend normalizes missing/unknown values to the product default.
+  // Missing values use the product default. Unknown persisted values block
+  // normal app use at the durable settings boundary.
   let continuePlaying = $state<ContinuePlayingMode>("only-tv");
   let continuePlayingBusy = $state(false);
 

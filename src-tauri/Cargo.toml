@@ -1,6 +1,6 @@
 [package]
 name = "vela"
-version = "1.0.0"
+version = "1.0.1"
 description = "mpv-backed HDR media client (Plex, Jellyfin, Emby)"
 authors = ["Michael Coelho"]
 license = "MIT"
@@ -32,6 +32,7 @@ async-trait = "0.1"
 tauri-plugin-dialog = "2"
 base64 = "0.22"
 if-addrs = "0.15"
+sha2 = "0.10"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
@@ -40,7 +41,14 @@ objc2-core-graphics = { version = "0.3", default-features = false, features = ["
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "NSArray", "NSDictionary", "NSEnumerator", "NSObject", "NSString"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]
-windows = { version = "0.61", features = ["Win32_Devices_Display", "Win32_Foundation", "Win32_Graphics_Gdi"] }
+windows = { version = "0.61", features = [
+  "Win32_Devices_Display",
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_Security",
+  "Win32_Security_Authorization",
+  "Win32_System_Threading",
+] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 wayland-client = "0.31"

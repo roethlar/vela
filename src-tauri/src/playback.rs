@@ -201,25 +201,28 @@ fn write_header_include_at(
 ///
 /// Returns the command to run (a bare name if found on `PATH`, otherwise an
 /// absolute path).
-pub fn resolve_mpv() -> Option<String> {
+pub fn resolve_mpv() -> Result<Option<String>, String> {
     // 1. Explicit override the user set in Settings → mpv player. Honored only
     //    if it actually resolves to a runnable file (validated on save too).
-    if let Some(p) = crate::config::load_config().ok().and_then(|c| c.mpv_path) {
+    if let Some(p) = crate::config::load_config()
+        .map_err(|_| "could not read Vela settings".to_string())?
+        .mpv_path
+    {
         let p = p.trim().to_string();
         if !p.is_empty() && mpv_usable(&p) {
-            return Some(p);
+            return Ok(Some(p));
         }
     }
     // 2. A bundled copy next to the app executable (zero-config "just works").
     if let Some(p) = bundled_mpv().filter(|p| mpv_usable(p)) {
-        return Some(p);
+        return Ok(Some(p));
     }
     // 3. Bare `mpv` on PATH.
     if mpv_runs("mpv") {
-        return Some("mpv".to_string());
+        return Ok(Some("mpv".to_string()));
     }
     // 4. Known install locations.
-    mpv_candidates().into_iter().find(|cand| mpv_usable(cand))
+    Ok(mpv_candidates().into_iter().find(|cand| mpv_usable(cand)))
 }
 
 /// True if `bin` (a bare name or path) is a *working* mpv: it must run
@@ -653,11 +656,12 @@ pub fn play(
     #[cfg(not(windows))]
     let ipc_path = ipc_socket_path()?;
 
-    let mpv_bin =
-        resolve_mpv().ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
+    let mpv_bin = resolve_mpv()?
+        .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
 
     // Advanced/user mpv config (Settings → Advanced mpv options), loaded once here.
-    let cfg = crate::config::load_config().unwrap_or_default();
+    let cfg = crate::config::load_config()
+        .map_err(|_| "could not read Vela settings".to_string())?;
     let use_own_config = cfg.mpv_use_own_config.unwrap_or(false);
 
     let mut cmd = Command::new(&mpv_bin);

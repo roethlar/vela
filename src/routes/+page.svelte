@@ -32,12 +32,14 @@
   let unlistenPlaybackEnded: (() => void) | undefined;
   let unlistenContinuePlaying: (() => void) | undefined;
   let unlistenSourceChoice: (() => void) | undefined;
+  let unlistenDurableFault: (() => void) | undefined;
   onDestroy(() => {
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     unlistenPlaybackEnded?.();
     unlistenContinuePlaying?.();
     unlistenSourceChoice?.();
+    unlistenDurableFault?.();
     if (sourceChoiceRequest) {
       void invoke("cancel_playback_source_choice", {
         requestId: sourceChoiceRequest.requestId,
@@ -81,6 +83,19 @@
     mediaType?: string;
   };
   type Source = { id: string; name: string; kind: string };
+  type DurableStatusKind =
+    | "ready"
+    | "recoverable_invalid"
+    | "unavailable"
+    | "migration_blocked";
+  type DurableFileStatus = {
+    status: DurableStatusKind;
+    layout: "post_split" | "legacy_combined";
+  };
+  type DurableStateStatus = {
+    settings: DurableFileStatus;
+    connections: DurableFileStatus;
+  };
 
   let sources = $state<Source[]>([]);
   let activeSource = $state<string | null>(null); // null = All sources (unified)
@@ -264,6 +279,11 @@
   let continuePlayingMode = $state<ContinuePlayingMode>("only-tv");
   let copied = $state(false);
   let installingMpv = $state(false);
+  let durableStatus = $state<DurableStateStatus | null>(null);
+  let retryingDurableState = $state(false);
+  let durableRetryError = $state<string | null>(null);
+  let normalBooted = false;
+  let durableHeading: HTMLHeadingElement | undefined = $state();
 
   // One-click mpv install. The backend chooses the concrete method for this OS.
   // On success it returns refreshed status, which clears the prompt.
@@ -345,6 +365,12 @@
   }
 
   onMount(() => {
+    listen<DurableStateStatus>("durable-state-fault", async ({ payload }) => {
+      durableStatus = payload;
+      durableRetryError = null;
+      await tick();
+      durableHeading?.focus();
+    }).then((un) => (unlistenDurableFault = un));
     listen("playback-ended", refreshWatchState).then((un) => (unlistenPlaybackEnded = un));
     listen<PlaybackContinuation>("continue-playing", handlePlaybackContinuation).then(
       (un) => (unlistenContinuePlaying = un),
@@ -354,7 +380,41 @@
     );
   });
 
+  function durableReady(status: DurableStateStatus | null): boolean {
+    return (
+      status !== null &&
+      status.settings.status === "ready" &&
+      status.connections.status === "ready"
+    );
+  }
+
+  function durableFault(status: DurableStateStatus): {
+    file: "settings" | "connections";
+    value: DurableFileStatus;
+  } {
+    return status.settings.status !== "ready"
+      ? { file: "settings", value: status.settings }
+      : { file: "connections", value: status.connections };
+  }
+
   async function boot() {
+    try {
+      durableStatus = await invoke<DurableStateStatus>("get_durable_state_status");
+    } catch {
+      durableStatus = {
+        settings: { status: "unavailable", layout: "post_split" },
+        connections: { status: "ready", layout: "post_split" },
+      };
+    }
+    await tick();
+    durableHeading?.focus();
+    if (!durableReady(durableStatus)) return;
+    await bootNormal();
+  }
+
+  async function bootNormal() {
+    if (normalBooted) return;
+    normalBooted = true;
     // Check mpv up front so we can prompt to install before the user hits play.
     invoke<MpvInfo>("check_mpv").then((m) => (mpvInfo = m)).catch(() => {});
     invoke<AppInfo>("get_app_info").then((a) => (appInfo = a)).catch(() => {});
@@ -373,12 +433,31 @@
     }
   }
 
-  async function loadSourceList() {
+  async function retryDurableState() {
+    if (retryingDurableState) return;
+    retryingDurableState = true;
+    durableRetryError = null;
     try {
-      sources = await invoke<Source[]>("get_sources");
+      durableStatus = await invoke<DurableStateStatus>("retry_durable_state");
+      if (durableReady(durableStatus)) {
+        await bootNormal();
+      } else {
+        await tick();
+        durableHeading?.focus();
+      }
     } catch {
-      /* non-fatal: switcher just won't show extra sources */
+      durableRetryError = "Vela could not safely retry the files.";
+    } finally {
+      retryingDurableState = false;
     }
+  }
+
+  function exitVela() {
+    void invoke("exit_vela");
+  }
+
+  async function loadSourceList() {
+    sources = await invoke<Source[]>("get_sources");
   }
 
   async function loadServerPlaylists(): Promise<void> {
@@ -2430,6 +2509,52 @@
 </script>
 
 <div class="app">
+  {#if durableStatus === null}
+    <main class="durable-block" aria-busy="true">
+      <p class="eyebrow">Checking files</p>
+      <h1>Opening Vela safely…</h1>
+    </main>
+  {:else if !durableReady(durableStatus)}
+    {@const fault = durableFault(durableStatus)}
+    <main class="durable-block" role="alert" aria-labelledby="durable-fault-heading">
+      <p class="eyebrow">{fault.file === "settings" ? "Settings problem" : "Connection problem"}</p>
+      <h1 id="durable-fault-heading" tabindex="-1" bind:this={durableHeading}>
+        Vela could not safely read your {fault.file}.
+      </h1>
+      {#if fault.value.status === "recoverable_invalid"}
+        <p>
+          The {fault.file === "settings" ? "settings file" : "connections file"} may be damaged
+          or may have been tampered with. Nothing from it was loaded.
+        </p>
+        {#if fault.file === "settings" && fault.value.layout === "legacy_combined"}
+          <p>
+            This older settings file may also contain your server connections. Vela will not
+            extract or guess them.
+          </p>
+        {/if}
+        <p>Exit Vela and repair the file manually, then reopen the app or try again.</p>
+      {:else if fault.value.status === "migration_blocked"}
+        <p>
+          Vela loaded no server connections because the settings migration could not finish
+          safely. The original files were left in place.
+        </p>
+      {:else}
+        <p>
+          Vela could not safely inspect the file. Check its permissions and location; the
+          original was left unchanged.
+        </p>
+      {/if}
+      {#if durableRetryError}
+        <p class="durable-error" role="alert">{durableRetryError}</p>
+      {/if}
+      <div class="durable-actions">
+        <button class="primary" disabled={retryingDurableState} onclick={retryDurableState}>
+          {retryingDurableState ? "Trying again…" : "Try again"}
+        </button>
+        <button disabled={retryingDurableState} onclick={exitVela}>Exit Vela</button>
+      </div>
+    </main>
+  {:else}
   <div class="grain" aria-hidden="true"></div>
   <header>
     <span class="brand">Ve<b>la</b></span>
@@ -2994,6 +3119,7 @@
       <button class="ghlink" onclick={() => openExternal(appInfo!.repoUrl)}>GitHub</button>
     </footer>
   {/if}
+  {/if}
 </div>
 
 <svelte:window
@@ -3148,6 +3274,35 @@
 {/if}
 
 <style>
+  .durable-block {
+    min-height: 100vh;
+    display: grid;
+    align-content: center;
+    justify-items: start;
+    gap: 0.8rem;
+    width: min(42rem, calc(100% - 3rem));
+    margin: 0 auto;
+  }
+  .durable-block h1,
+  .durable-block p {
+    margin: 0;
+  }
+  .durable-block h1:focus {
+    outline: none;
+  }
+  .durable-block p {
+    max-width: 60ch;
+    color: var(--text-muted);
+    line-height: 1.55;
+  }
+  .durable-actions {
+    display: flex;
+    gap: 0.7rem;
+    margin-top: 0.5rem;
+  }
+  .durable-error {
+    color: var(--danger, #ff7474) !important;
+  }
   .app {
     height: 100vh;
     display: flex;

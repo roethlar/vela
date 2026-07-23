@@ -3,8 +3,8 @@ use crate::locality::EndpointLocality;
 use serde::Serialize;
 use std::cmp::Ordering;
 
-/// Persisted duplicate-copy selection policy. Config keeps the raw value as a
-/// tolerant string; this closed type is the only value the rest of the app sees.
+/// Persisted duplicate-copy selection policy. The settings validator rejects
+/// unknown strings before this closed type reaches the rest of the app.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub(crate) enum PlaybackSourcePolicy {
@@ -16,12 +16,20 @@ pub(crate) enum PlaybackSourcePolicy {
 }
 
 impl PlaybackSourcePolicy {
-    pub(crate) fn normalize(value: Option<&str>) -> Self {
+    pub(crate) fn parse(value: &str) -> Result<Self, String> {
         match value {
-            Some("compatible") => Self::Compatible,
-            Some("fastest") => Self::Fastest,
-            Some("ask") => Self::Ask,
-            _ => Self::Best,
+            "best" => Ok(Self::Best),
+            "compatible" => Ok(Self::Compatible),
+            "fastest" => Ok(Self::Fastest),
+            "ask" => Ok(Self::Ask),
+            _ => Err("unknown playback source policy".to_string()),
+        }
+    }
+
+    pub(crate) fn from_config(value: Option<&str>) -> Result<Self, String> {
+        match value {
+            None => Ok(Self::Best),
+            Some(value) => Self::parse(value),
         }
     }
 
@@ -172,26 +180,23 @@ mod tests {
     }
 
     #[test]
-    fn policy_normalization_is_closed_and_best_is_fail_safe() {
+    fn policy_parser_defaults_only_missing_and_rejects_unknown_values() {
         assert_eq!(
-            PlaybackSourcePolicy::normalize(None),
-            PlaybackSourcePolicy::Best
+            PlaybackSourcePolicy::from_config(None),
+            Ok(PlaybackSourcePolicy::Best)
+        );
+        assert!(PlaybackSourcePolicy::from_config(Some("future-mode")).is_err());
+        assert_eq!(
+            PlaybackSourcePolicy::from_config(Some("compatible")),
+            Ok(PlaybackSourcePolicy::Compatible)
         );
         assert_eq!(
-            PlaybackSourcePolicy::normalize(Some("future-mode")),
-            PlaybackSourcePolicy::Best
+            PlaybackSourcePolicy::from_config(Some("fastest")),
+            Ok(PlaybackSourcePolicy::Fastest)
         );
         assert_eq!(
-            PlaybackSourcePolicy::normalize(Some("compatible")),
-            PlaybackSourcePolicy::Compatible
-        );
-        assert_eq!(
-            PlaybackSourcePolicy::normalize(Some("fastest")),
-            PlaybackSourcePolicy::Fastest
-        );
-        assert_eq!(
-            PlaybackSourcePolicy::normalize(Some("ask")),
-            PlaybackSourcePolicy::Ask
+            PlaybackSourcePolicy::from_config(Some("ask")),
+            Ok(PlaybackSourcePolicy::Ask)
         );
     }
 

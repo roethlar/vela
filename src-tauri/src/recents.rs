@@ -18,6 +18,7 @@ pub const MAX_RECENTS: usize = 20;
 const DEFAULT_WATCHED_THRESHOLD: u8 = 95;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RecentEntry {
     /// Snapshot of the item as played (artwork, titles, duration).
     pub item: ItemDto,
@@ -40,7 +41,7 @@ fn is_zero(value: &u64) -> bool {
 /// Bound on the Continue Watching tombstone list. Feeds aren't available
 /// backend-side, so retired keys can't be pruned precisely; a FIFO cap at
 /// hide time keeps the list small instead.
-const MAX_HIDDEN: usize = 200;
+pub(crate) const MAX_HIDDEN: usize = 200;
 
 /// True when `key` names this entry — by its play identity or its server
 /// watch identity. Merged items carry both (`rating_key` = ranked play

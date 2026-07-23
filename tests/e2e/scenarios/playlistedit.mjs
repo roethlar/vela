@@ -101,7 +101,7 @@ export default {
 
   async run({ driver, screenshot, configRoot, restart }) {
     const playlistFile = path.join(configRoot, 'config', 'vela', 'playlists.json');
-    const configFile = path.join(configRoot, 'config', 'vela', 'config.json');
+    const connectionsFile = path.join(configRoot, 'config', 'vela', 'connections.json');
     const readStore = () => JSON.parse(fs.readFileSync(playlistFile, 'utf8'));
 
     await driver.waitFor(
@@ -212,9 +212,9 @@ export default {
     await screenshot('01-edited-mixed-playlist');
 
     await restart(() => {
-      const config = JSON.parse(fs.readFileSync(configFile, 'utf8'));
-      config.sources = config.sources.filter((source) => source.id !== 'jf-b');
-      fs.writeFileSync(configFile, JSON.stringify(config));
+      const connections = JSON.parse(fs.readFileSync(connectionsFile, 'utf8'));
+      connections.sources = connections.sources.filter((source) => source.id !== 'jf-b');
+      fs.writeFileSync(connectionsFile, JSON.stringify(connections));
     });
     await openPlaylists(driver);
     const reopen = await driver.find(

@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use tauri::State;
 
 use crate::config::{self, SourceConfig};
+use crate::connections::{self, ConnectionsConfig};
 use crate::display::{self, DisplayOverrides, HdrOverride, ResolutionOverride};
 use crate::playback;
 use crate::plex_library::{PlexLibrary, PlexServer};
@@ -26,25 +27,13 @@ const PRODUCT: &str = "Vela";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
-const BUILD_DATE: &str = "2026-07-20";
+const BUILD_DATE: &str = "2026-07-23";
 
 /// Project home, shown (and opened) from the build-info footer.
 const REPO_URL: &str = "https://github.com/roethlar/vela";
 const MAX_PAGE_SIZE: usize = 100;
 const MAX_SEARCH_LEN: usize = 200;
-const ALLOWED_SORTS: &[&str] = &[
-    "titleSort:asc",
-    "year:desc",
-    "addedAt:desc",
-    // Show sections only (UI-gated): newest-episode recency, translated
-    // per source (Plex `episode.addedAt`, JF/Emby `DateLastContentAdded`).
-    // Not in the merged-view whitelist — no DTO field to merge-sort on
-    // (the `rating:desc` class).
-    "episodeAddedAt:desc",
-    "originallyAvailableAt:desc",
-    "rating:desc",
-    "lastViewedAt:desc",
-];
+const ALLOWED_SORTS: &[&str] = config::ALLOWED_SECTION_SORTS;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -173,10 +162,47 @@ pub struct MpvInfo {
     install_url: String,
 }
 
+#[tauri::command]
+pub async fn get_durable_state_status(
+    state: State<'_, AppState>,
+) -> Result<crate::durable::DurableStateStatus, String> {
+    Ok(state.durable_status.lock().await.clone())
+}
+
+#[tauri::command]
+pub async fn retry_durable_state(
+    state: State<'_, AppState>,
+) -> Result<crate::durable::DurableStateStatus, String> {
+    let loaded = tauri::async_runtime::spawn_blocking(crate::durable::load)
+        .await
+        .map_err(|_| "could not retry Vela's durable state".to_string())?;
+    match loaded {
+        Ok(ready) => {
+            let status = crate::durable::DurableStateStatus::ready();
+            *state.registry.lock().await = ready.registry;
+            *state.durable_status.lock().await = status.clone();
+            crate::durable::set_commands_ready(true);
+            Ok(status)
+        }
+        Err(failure) => {
+            *state.registry.lock().await = crate::source::SourceRegistry::default();
+            *state.durable_status.lock().await = failure.status.clone();
+            crate::durable::set_commands_ready(false);
+            Ok(failure.status)
+        }
+    }
+}
+
+#[tauri::command]
+pub fn exit_vela(app: tauri::AppHandle) {
+    app.exit(0);
+}
+
 // ---- status & auth -------------------------------------------------------
 
 #[tauri::command]
 pub async fn get_status(state: State<'_, AppState>) -> Result<StatusDto, String> {
+    crate::durable::ensure_commands_ready()?;
     let reg = state.registry.lock().await;
     let first = reg.all().first();
     Ok(StatusDto {
@@ -198,6 +224,7 @@ pub fn get_app_info() -> AppInfoDto {
 /// List configured sources, for the UI's switcher and per-source filtering.
 #[tauri::command]
 pub async fn get_sources(state: State<'_, AppState>) -> Result<Vec<SourceDto>, String> {
+    crate::durable::ensure_commands_ready()?;
     let reg = state.registry.lock().await;
     Ok(reg
         .all()
@@ -226,6 +253,7 @@ pub async fn connect_jellyfin(
     password: String,
     state: State<'_, AppState>,
 ) -> Result<SourceDto, String> {
+    crate::durable::ensure_commands_ready()?;
     let flavor = Flavor::from_kind(&kind).ok_or("unknown server kind")?;
     let base = normalize_base_url(&base_url)?;
     let authed = JellyfinClient::authenticate(flavor, &base, &username, &password).await?;
@@ -253,6 +281,7 @@ pub async fn connect_jellyfin_token(
     user_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<SourceDto, String> {
+    crate::durable::ensure_commands_ready()?;
     let flavor = Flavor::from_kind(&kind).ok_or("unknown server kind")?;
     let base = normalize_base_url(&base_url)?;
     let authed = JellyfinClient::from_api_key(flavor, &base, &api_key, user_id.as_deref()).await?;
@@ -277,12 +306,12 @@ pub async fn connect_jellyfin_token(
 pub async fn remove_source(id: String, state: State<'_, AppState>) -> Result<(), String> {
     let _source_guard = state.source_lock.lock().await;
     let id2 = id.clone();
-    config_store(move || config::update(move |cfg| remove_source_config(cfg, &id2))).await?;
+    config_store(move || connections::update(move |cfg| remove_source_config(cfg, &id2))).await?;
     state.registry.lock().await.remove(&id);
     Ok(())
 }
 
-fn remove_source_config(cfg: &mut config::AppConfig, source_id: &str) -> Result<(), String> {
+fn remove_source_config(cfg: &mut ConnectionsConfig, source_id: &str) -> Result<(), String> {
     if !cfg.sources.iter().any(|source| source.id == source_id) {
         return Err("no such source".to_string());
     }
@@ -296,20 +325,17 @@ async fn register_source(
     cfg: SourceConfig,
 ) -> Result<SourceDto, String> {
     let _source_guard = state.source_lock.lock().await;
-    let source = jellyfin::build_source(&cfg).ok_or("could not build source from config")?;
+    let source = jellyfin::build_source(&cfg)?;
     let dto = SourceDto {
         id: source.id(),
         name: source.name(),
         kind: source.kind().to_string(),
     };
     config_store(move || {
-        config::update(move |stored| {
-            stored.upsert_source(cfg);
-            Ok(())
-        })
+        connections::update(move |stored| stored.upsert(cfg))
     })
     .await
-    .map_err(|e| format!("connected but failed to save config: {}", e))?;
+    .map_err(|e| format!("connected but failed to save the connection: {e}"))?;
     state.registry.lock().await.upsert(source);
     Ok(dto)
 }
@@ -341,6 +367,7 @@ fn normalize_base_url(input: &str) -> Result<String, String> {
 /// Request a plex.tv device PIN; the user enters the code at plex.tv/link.
 #[tauri::command]
 pub async fn link_begin() -> Result<PinDto, String> {
+    crate::durable::ensure_commands_ready()?;
     let client_identifier = uuid::Uuid::new_v4().to_string();
     let client = plextv_client()?;
     let resp = client
@@ -428,14 +455,14 @@ impl CommandInstaller {
 /// Whether mpv is available, where it resolved, the user's override (if any),
 /// plus the install method/hint for this machine.
 #[tauri::command]
-pub fn check_mpv() -> MpvInfo {
+pub fn check_mpv() -> Result<MpvInfo, String> {
     let install = mpv_install_info();
-    let resolved = playback::resolve_mpv();
+    let resolved = playback::resolve_mpv()?;
     let configured_path = config::load_config()
-        .ok()
-        .and_then(|c| c.mpv_path)
+        .map_err(|_| "could not read Vela settings".to_string())?
+        .mpv_path
         .filter(|s| !s.trim().is_empty());
-    MpvInfo {
+    Ok(MpvInfo {
         available: resolved.is_some(),
         path: resolved,
         configured_path,
@@ -443,7 +470,7 @@ pub fn check_mpv() -> MpvInfo {
         install_command: install.install_command,
         install_description: install.install_description,
         install_url: install.install_url,
-    }
+    })
 }
 
 #[cfg(target_os = "windows")]
@@ -684,7 +711,7 @@ pub fn set_mpv_path(path: Option<String>) -> Result<MpvInfo, String> {
         cfg.mpv_path = to_store;
         Ok(())
     })?;
-    Ok(check_mpv())
+    check_mpv()
 }
 
 /// Advanced mpv configuration the user controls from Settings: free-form extra
@@ -701,24 +728,25 @@ pub struct MpvAdvanced {
 }
 
 #[tauri::command]
-pub fn get_mpv_advanced() -> MpvAdvanced {
-    let cfg = config::load_config().unwrap_or_default();
-    MpvAdvanced {
+pub fn get_mpv_advanced() -> Result<MpvAdvanced, String> {
+    let cfg =
+        config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    Ok(MpvAdvanced {
         extra_args: cfg.mpv_extra_args.unwrap_or_default(),
         use_own_config: cfg.mpv_use_own_config.unwrap_or(false),
-        autocrop: normalize_autocrop(cfg.mpv_autocrop.as_deref()),
-    }
+        autocrop: autocrop_from_config(cfg.mpv_autocrop.as_deref())?,
+    })
 }
 
 /// Clamp any stored/incoming autocrop value to the known three-state set,
 /// defaulting anything unrecognised (incl. `None`) to `"off"`.
-fn normalize_autocrop(value: Option<&str>) -> String {
+fn autocrop_from_config(value: Option<&str>) -> Result<String, String> {
     match value {
-        Some("manual") => "manual",
-        Some("auto") => "auto",
-        _ => "off",
+        None | Some("off") => Ok("off".to_string()),
+        Some("manual") => Ok("manual".to_string()),
+        Some("auto") => Ok("auto".to_string()),
+        Some(_) => Err("invalid saved autocrop mode".to_string()),
     }
-    .to_string()
 }
 
 /// Persist the advanced mpv settings. No validation of `extra_args` — these are the
@@ -742,9 +770,10 @@ pub fn set_mpv_advanced(
         cfg.mpv_use_own_config = Some(use_own_config);
         if let Some(mode) = autocrop.as_deref() {
             // Store `None` for "off" so the config stays sparse; missing = off.
-            cfg.mpv_autocrop = match normalize_autocrop(Some(mode)).as_str() {
+            cfg.mpv_autocrop = match mode {
                 "off" => None,
-                m => Some(m.to_string()),
+                "manual" | "auto" => Some(mode.to_string()),
+                _ => return Err("unknown autocrop mode".to_string()),
             };
         }
         Ok(())
@@ -754,31 +783,33 @@ pub fn set_mpv_advanced(
 /// Clamp the persisted Continue Playing mode to the three owner-approved
 /// values. Missing, empty, mixed-case, and future/hand-edited values all
 /// degrade to the safe product default instead of disabling binge playback.
-fn normalize_continue_playing(value: Option<&str>) -> String {
+fn continue_playing_from_config(value: Option<&str>) -> Result<String, String> {
     match value {
-        Some("off") => "off",
-        Some("on") => "on",
-        Some("only-tv") => "only-tv",
-        _ => "only-tv",
+        Some("off") => Ok("off".to_string()),
+        Some("on") => Ok("on".to_string()),
+        None | Some("only-tv") => Ok("only-tv".to_string()),
+        Some(_) => Err("invalid saved Continue Playing mode".to_string()),
     }
-    .to_string()
 }
 
 #[tauri::command]
-pub fn get_continue_playing() -> String {
-    let cfg = config::load_config().unwrap_or_default();
-    normalize_continue_playing(cfg.continue_playing.as_deref())
+pub fn get_continue_playing() -> Result<String, String> {
+    let cfg =
+        config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    continue_playing_from_config(cfg.continue_playing.as_deref())
 }
 
 #[tauri::command]
 pub fn set_continue_playing(mode: String) -> Result<String, String> {
-    let normalized = normalize_continue_playing(Some(&mode));
-    let stored = (normalized != "only-tv").then(|| normalized.clone());
+    if !matches!(mode.as_str(), "off" | "on" | "only-tv") {
+        return Err("unknown Continue Playing mode".to_string());
+    }
+    let stored = (mode != "only-tv").then(|| mode.clone());
     config::update(move |cfg| {
         cfg.continue_playing = stored;
         Ok(())
     })?;
-    Ok(normalized)
+    Ok(mode)
 }
 
 #[derive(Serialize)]
@@ -791,11 +822,13 @@ pub struct PlaybackPreferencesDto {
     effective_display: display::DisplayProfile,
 }
 
-fn playback_display_overrides(cfg: &config::AppConfig) -> DisplayOverrides {
-    DisplayOverrides {
-        resolution: ResolutionOverride::normalize(cfg.playback_display_resolution.as_deref()),
-        hdr: HdrOverride::normalize(cfg.playback_display_hdr.as_deref()),
-    }
+fn playback_display_overrides(cfg: &config::AppConfig) -> Result<DisplayOverrides, String> {
+    Ok(DisplayOverrides {
+        resolution: ResolutionOverride::from_config(
+            cfg.playback_display_resolution.as_deref(),
+        )?,
+        hdr: HdrOverride::from_config(cfg.playback_display_hdr.as_deref())?,
+    })
 }
 
 #[tauri::command]
@@ -803,7 +836,8 @@ pub async fn get_playback_preferences(
     app: tauri::AppHandle,
     state: State<'_, AppState>,
 ) -> Result<PlaybackPreferencesDto, String> {
-    let cfg = config::load_config().unwrap_or_default();
+    let cfg =
+        config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
     let observed = state
         .playback_window_session
         .lock()
@@ -811,11 +845,11 @@ pub async fn get_playback_preferences(
         .as_ref()
         .map(|session| session.observation.display_snapshot());
     let detected_display = display::detect_profile(&app, observed).await;
-    let overrides = playback_display_overrides(&cfg);
+    let overrides = playback_display_overrides(&cfg)?;
     Ok(PlaybackPreferencesDto {
-        policy: crate::selection::PlaybackSourcePolicy::normalize(
+        policy: crate::selection::PlaybackSourcePolicy::from_config(
             cfg.playback_source_policy.as_deref(),
-        ),
+        )?,
         resolution_override: overrides
             .resolution
             .map(|value| value.as_str().to_string()),
@@ -831,9 +865,12 @@ pub fn set_playback_preferences(
     resolution_override: Option<String>,
     hdr_override: Option<String>,
 ) -> Result<(), String> {
-    let policy = crate::selection::PlaybackSourcePolicy::normalize(Some(&policy));
-    let resolution = ResolutionOverride::normalize(resolution_override.as_deref());
-    let hdr = HdrOverride::normalize(hdr_override.as_deref());
+    let policy = crate::selection::PlaybackSourcePolicy::parse(&policy)?;
+    let resolution = resolution_override
+        .as_deref()
+        .map(ResolutionOverride::parse)
+        .transpose()?;
+    let hdr = hdr_override.as_deref().map(HdrOverride::parse).transpose()?;
     config::update(move |cfg| {
         cfg.playback_source_policy =
             (policy != crate::selection::PlaybackSourcePolicy::Best)
@@ -857,7 +894,7 @@ pub async fn install_mpv() -> Result<MpvInfo, String> {
     tauri::async_runtime::spawn_blocking(run_mpv_installer)
         .await
         .map_err(|e| format!("installer task failed: {e}"))??;
-    Ok(check_mpv())
+    check_mpv()
 }
 
 /// Community Windows mpv builds, in two microarchitecture levels:
@@ -1170,7 +1207,7 @@ async fn connect_plex_source(
     server: &PlexServer,
 ) -> Result<SourceDto, String> {
     let cfg = plex_source_config(token, client_identifier, server)?;
-    let source = plex::build_source(&cfg).ok_or("could not build linked Plex source")?;
+    let source = plex::build_source(&cfg)?;
     let dto = SourceDto {
         id: source.id(),
         name: source.name(),
@@ -1179,10 +1216,7 @@ async fn connect_plex_source(
 
     let _source_guard = state.source_lock.lock().await;
     config_store(move || {
-        config::update(move |stored| {
-            stored.upsert_source(cfg);
-            Ok(())
-        })
+        connections::update(move |stored| stored.upsert(cfg))
     })
     .await
     .map_err(|error| format!("authenticated but failed to save config: {error}"))?;
@@ -1200,6 +1234,7 @@ pub async fn link_poll(
     client_identifier: String,
     state: State<'_, AppState>,
 ) -> Result<LinkPollDto, String> {
+    crate::durable::ensure_commands_ready()?;
     {
         let mut sessions = state.plex_link_sessions.lock().await;
         prune_link_sessions(&mut sessions, Instant::now());
@@ -1304,6 +1339,7 @@ pub async fn link_select_server(
     machine_identifier: String,
     state: State<'_, AppState>,
 ) -> Result<SourceDto, String> {
+    crate::durable::ensure_commands_ready()?;
     let pending = {
         let mut sessions = state.plex_link_sessions.lock().await;
         prune_link_sessions(&mut sessions, Instant::now());
@@ -1383,7 +1419,11 @@ pub async fn get_hubs(
     source_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<HubDto>, String> {
-    let sources = state.registry.lock().await.selected(source_id.as_deref());
+    let sources = state
+        .registry
+        .lock()
+        .await
+        .selected(source_id.as_deref())?;
     aggregate(sources, true, |s| async move { s.hubs().await }).await
 }
 
@@ -1392,19 +1432,19 @@ pub async fn get_sections(
     source_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<Vec<SectionDto>, String> {
-    let sources = state.registry.lock().await.selected(source_id.as_deref());
+    let sources = state
+        .registry
+        .lock()
+        .await
+        .selected(source_id.as_deref())?;
     let mut sections = aggregate(sources, true, |s| async move { s.sections().await }).await?;
     // Stamp each library's persisted sort preference (sources construct
     // `sort: None`). Fail-closed on the value: a stale or hand-edited entry
     // that isn't in the whitelist is ignored, not surfaced.
-    if let Ok(cfg) = config::load_config() {
-        for s in &mut sections {
-            s.sort = cfg
-                .section_sorts
-                .get(&s.key)
-                .filter(|v| ALLOWED_SORTS.contains(&v.as_str()))
-                .cloned();
-        }
+    let cfg =
+        config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    for s in &mut sections {
+        s.sort = cfg.section_sorts.get(&s.key).cloned();
     }
     Ok(sections)
 }
@@ -1530,14 +1570,14 @@ pub async fn get_type_listing(
         // and rebuild — the windowed result is still correct, merely fresher.
     }
 
-    let sources = state.registry.lock().await.selected(None);
+    let sources = state.registry.lock().await.selected(None)?;
     // source id → kind, for the default playback ranking of merged backings.
     let kinds: std::collections::HashMap<String, &'static str> =
         sources.iter().map(|s| (s.id(), s.kind())).collect();
     // Owner's per-title source choices (set via the card's context menu).
     let overrides = config::load_config()
-        .map(|c| c.merged_overrides)
-        .unwrap_or_default();
+        .map_err(|_| "could not read Vela settings".to_string())?
+        .merged_overrides;
     // Collect the contributing sections once; a failing source drops out
     // rather than failing the whole view, matching aggregate()'s stance —
     // but TOTAL failure surfaces as an error, not an empty library (rev-4).
@@ -2606,7 +2646,11 @@ pub async fn search(
     if q.len() > MAX_SEARCH_LEN {
         return Err("search query is too long".into());
     }
-    let sources = state.registry.lock().await.selected(source_id.as_deref());
+    let sources = state
+        .registry
+        .lock()
+        .await
+        .selected(source_id.as_deref())?;
     // Search: an empty result is a legitimate "no matches", so don't turn it into
     // an error just because one backend hiccuped (error only if all failed).
     aggregate(sources, false, move |s| {
@@ -2795,6 +2839,7 @@ async fn fetch_merged_children(
     parent_canonical_id: &str,
     parent_media_type: &str,
 ) -> Result<Vec<ItemDto>, String> {
+    crate::durable::ensure_commands_ready()?;
     let (routes, kinds) = {
         let registry = state.registry.lock().await;
         let kinds = registry
@@ -2831,8 +2876,8 @@ async fn fetch_merged_children(
     }
 
     let overrides = config::load_config()
-        .map(|config| config.merged_overrides)
-        .unwrap_or_default();
+        .map_err(|_| "could not read Vela settings".to_string())?
+        .merged_overrides;
     let mut merged = rank_backings(
         dedup_hierarchy_children(children, parent_canonical_id, parent_media_type),
         &kinds,
@@ -3487,7 +3532,8 @@ fn filter_live_recents(items: Vec<ItemDto>, live_source_ids: &[String]) -> Vec<I
 /// at read time (see `filter_live_recents`).
 #[tauri::command]
 pub async fn get_recents(state: State<'_, AppState>) -> Result<Vec<ItemDto>, String> {
-    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    let cfg =
+        config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
     let live = state.registry.lock().await.ids();
     Ok(filter_live_recents(crate::recents::list(&cfg), &live))
 }
@@ -3521,7 +3567,8 @@ pub async fn remove_from_continue(
 /// filters these out of both feeds.
 #[tauri::command]
 pub async fn get_continue_tombstones() -> Result<Vec<String>, String> {
-    let cfg = config::load_config().map_err(|e| e.to_string())?;
+    let cfg =
+        config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
     Ok(cfg.hidden_from_continue.clone())
 }
 
@@ -3623,8 +3670,10 @@ async fn playback_compatibility_target(
     state: &AppState,
     replace_session: Option<&str>,
     cfg: &config::AppConfig,
-) -> Option<crate::selection::CompatibilityTarget> {
-    let app = state.app_handle.get()?;
+) -> Result<Option<crate::selection::CompatibilityTarget>, PlayFailure> {
+    let Some(app) = state.app_handle.get() else {
+        return Ok(None);
+    };
     let observed = {
         let current = state
             .playback_window_session
@@ -3636,12 +3685,13 @@ async fn playback_compatibility_target(
             .map(|session| session.observation.display_snapshot())
     };
     let detected = display::detect_profile(app, observed).await;
-    let effective = display::apply_overrides(&detected, playback_display_overrides(cfg));
-    Some(crate::selection::CompatibilityTarget {
+    let overrides = playback_display_overrides(cfg).map_err(PlayFailure::fatal)?;
+    let effective = display::apply_overrides(&detected, overrides);
+    Ok(Some(crate::selection::CompatibilityTarget {
         width: effective.width_px,
         height: effective.height_px,
         hdr: effective.hdr,
-    })
+    }))
 }
 
 fn playback_source_choices(
@@ -3750,9 +3800,10 @@ async fn select_playback_version(
     let cfg = config::load_config().map_err(|_| {
         PlayFailure::fatal("couldn't read the saved playback preferences".to_string())
     })?;
-    let policy = crate::selection::PlaybackSourcePolicy::normalize(
+    let policy = crate::selection::PlaybackSourcePolicy::from_config(
         cfg.playback_source_policy.as_deref(),
-    );
+    )
+    .map_err(PlayFailure::fatal)?;
     let override_source = (explicit_source_id.is_none()
         && policy != crate::selection::PlaybackSourcePolicy::Ask)
         .then(|| {
@@ -3904,7 +3955,7 @@ async fn select_playback_version(
         }
     }
     let target = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
-        playback_compatibility_target(state, replace_session, &cfg).await
+        playback_compatibility_target(state, replace_session, &cfg).await?
     } else {
         None
     };
@@ -4132,9 +4183,9 @@ async fn play_by_key_locked(
     // Watching click actually continues (2026-07-04 hero decision). A server
     // that supplies a position still wins: it is the watch-state authority.
     let local_resume_ms = if !start_from_beginning && resolved.resume_ms == 0 {
-        config::load_config()
-            .map(|cfg| crate::recents::resume_stamp_ms(&cfg, &item.rating_key))
-            .unwrap_or(0)
+        let cfg = config::load_config()
+            .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?;
+        crate::recents::resume_stamp_ms(&cfg, &item.rating_key)
     } else {
         0
     };
@@ -4752,6 +4803,7 @@ pub struct ServerPlaylistGroupDto {
 pub async fn get_server_playlists(
     state: State<'_, AppState>,
 ) -> Result<Vec<ServerPlaylistGroupDto>, String> {
+    crate::durable::ensure_commands_ready()?;
     let sources = state.registry.lock().await.all().to_vec();
     let mut groups: Vec<_> = sources
         .iter()
@@ -4825,6 +4877,7 @@ pub async fn playlist_get(
     id: String,
     state: State<'_, AppState>,
 ) -> Result<crate::playlists::PlaylistView, String> {
+    crate::durable::ensure_commands_ready()?;
     let lookup = id.clone();
     let playlist = playlist_store(move || crate::playlists::get(&lookup)).await?;
     let live_sources = state.registry.lock().await.ids().into_iter().collect();
@@ -6101,39 +6154,46 @@ mod tests {
     }
 
     #[test]
-    fn normalize_autocrop_clamps_to_known_states() {
-        assert_eq!(normalize_autocrop(Some("off")), "off");
-        assert_eq!(normalize_autocrop(Some("manual")), "manual");
-        assert_eq!(normalize_autocrop(Some("auto")), "auto");
-        // Anything unrecognised (incl. None and garbage) must fall back to off, so a
-        // corrupt/stale config value can never enable cropping unexpectedly.
-        assert_eq!(normalize_autocrop(None), "off");
-        assert_eq!(normalize_autocrop(Some("")), "off");
-        assert_eq!(normalize_autocrop(Some("AUTO")), "off");
-        assert_eq!(normalize_autocrop(Some("on")), "off");
+    fn autocrop_defaults_only_missing_and_rejects_unknown_values() {
+        assert_eq!(autocrop_from_config(Some("off")).unwrap(), "off");
+        assert_eq!(autocrop_from_config(Some("manual")).unwrap(), "manual");
+        assert_eq!(autocrop_from_config(Some("auto")).unwrap(), "auto");
+        assert_eq!(autocrop_from_config(None).unwrap(), "off");
+        assert!(autocrop_from_config(Some("")).is_err());
+        assert!(autocrop_from_config(Some("AUTO")).is_err());
+        assert!(autocrop_from_config(Some("on")).is_err());
     }
 
     #[test]
-    fn normalize_continue_playing_clamps_to_known_states() {
-        assert_eq!(normalize_continue_playing(Some("off")), "off");
-        assert_eq!(normalize_continue_playing(Some("on")), "on");
-        assert_eq!(normalize_continue_playing(Some("only-tv")), "only-tv");
-        assert_eq!(normalize_continue_playing(None), "only-tv");
-        assert_eq!(normalize_continue_playing(Some("")), "only-tv");
-        assert_eq!(normalize_continue_playing(Some("ON")), "only-tv");
-        assert_eq!(normalize_continue_playing(Some("future-mode")), "only-tv");
+    fn continue_playing_defaults_only_missing_and_rejects_unknown_values() {
+        assert_eq!(continue_playing_from_config(Some("off")).unwrap(), "off");
+        assert_eq!(continue_playing_from_config(Some("on")).unwrap(), "on");
+        assert_eq!(
+            continue_playing_from_config(Some("only-tv")).unwrap(),
+            "only-tv"
+        );
+        assert_eq!(continue_playing_from_config(None).unwrap(), "only-tv");
+        assert!(continue_playing_from_config(Some("")).is_err());
+        assert!(continue_playing_from_config(Some("ON")).is_err());
+        assert!(continue_playing_from_config(Some("future-mode")).is_err());
     }
 
     #[test]
-    fn playback_display_override_normalization_is_independent_and_fail_safe() {
+    fn playback_display_overrides_reject_invalid_saved_values() {
         let cfg = config::AppConfig {
             playback_display_resolution: Some("2160p".to_string()),
+            playback_display_hdr: None,
+            ..Default::default()
+        };
+        let normalized = playback_display_overrides(&cfg).unwrap();
+        assert_eq!(normalized.resolution, Some(ResolutionOverride::P2160));
+        assert_eq!(normalized.hdr, None);
+
+        let invalid = config::AppConfig {
             playback_display_hdr: Some("future-hdr".to_string()),
             ..Default::default()
         };
-        let normalized = playback_display_overrides(&cfg);
-        assert_eq!(normalized.resolution, Some(ResolutionOverride::P2160));
-        assert_eq!(normalized.hdr, None);
+        assert!(playback_display_overrides(&invalid).is_err());
     }
 
     #[test]
@@ -6281,7 +6341,7 @@ mod tests {
         assert_eq!(cfg.access_token.as_deref(), Some("secret-token"));
         assert_eq!(cfg.device_id.as_deref(), Some("device-a"));
         assert_eq!(cfg.machine_identifier.as_deref(), Some("machine-a"));
-        assert!(plex::build_source(&cfg).is_some());
+        assert!(plex::build_source(&cfg).is_ok());
     }
 
     #[test]
@@ -6383,9 +6443,8 @@ mod tests {
 
     #[test]
     fn removing_one_plex_source_preserves_the_other() {
-        let mut cfg = config::AppConfig {
+        let mut cfg = ConnectionsConfig {
             sources: vec![source_config("plex-a"), source_config("plex-b")],
-            ..Default::default()
         };
 
         remove_source_config(&mut cfg, "plex-a").unwrap();

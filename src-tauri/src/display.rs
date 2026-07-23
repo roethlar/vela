@@ -44,14 +44,21 @@ pub(crate) enum ResolutionOverride {
 }
 
 impl ResolutionOverride {
-    pub(crate) fn normalize(value: Option<&str>) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self, String> {
         match value {
-            Some("720p") => Some(Self::P720),
-            Some("1080p") => Some(Self::P1080),
-            Some("1440p") => Some(Self::P1440),
-            Some("2160p") => Some(Self::P2160),
-            Some("4320p") => Some(Self::P4320),
-            _ => None,
+            "720p" => Ok(Self::P720),
+            "1080p" => Ok(Self::P1080),
+            "1440p" => Ok(Self::P1440),
+            "2160p" => Ok(Self::P2160),
+            "4320p" => Ok(Self::P4320),
+            _ => Err("unknown display resolution".to_string()),
+        }
+    }
+
+    pub(crate) fn from_config(value: Option<&str>) -> Result<Option<Self>, String> {
+        match value {
+            None => Ok(None),
+            Some(value) => Self::parse(value).map(Some),
         }
     }
 
@@ -83,11 +90,18 @@ pub(crate) enum HdrOverride {
 }
 
 impl HdrOverride {
-    pub(crate) fn normalize(value: Option<&str>) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Result<Self, String> {
         match value {
-            Some("enabled") => Some(Self::Enabled),
-            Some("disabled") => Some(Self::Disabled),
-            _ => None,
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
+            _ => Err("unknown HDR override".to_string()),
+        }
+    }
+
+    pub(crate) fn from_config(value: Option<&str>) -> Result<Option<Self>, String> {
+        match value {
+            None => Ok(None),
+            Some(value) => Self::parse(value).map(Some),
         }
     }
 
@@ -696,17 +710,17 @@ mod tests {
     }
 
     #[test]
-    fn unknown_display_override_values_normalize_to_auto() {
-        assert_eq!(ResolutionOverride::normalize(None), None);
-        assert_eq!(ResolutionOverride::normalize(Some("5k")), None);
-        assert_eq!(HdrOverride::normalize(Some("maybe")), None);
+    fn display_overrides_default_only_missing_and_reject_unknown_values() {
+        assert_eq!(ResolutionOverride::from_config(None), Ok(None));
+        assert!(ResolutionOverride::from_config(Some("5k")).is_err());
+        assert!(HdrOverride::from_config(Some("maybe")).is_err());
         assert_eq!(
-            ResolutionOverride::normalize(Some("2160p")),
-            Some(ResolutionOverride::P2160)
+            ResolutionOverride::from_config(Some("2160p")),
+            Ok(Some(ResolutionOverride::P2160))
         );
         assert_eq!(
-            HdrOverride::normalize(Some("disabled")),
-            Some(HdrOverride::Disabled)
+            HdrOverride::from_config(Some("disabled")),
+            Ok(Some(HdrOverride::Disabled))
         );
     }
 
