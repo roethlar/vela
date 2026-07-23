@@ -1296,3 +1296,28 @@ Supersedes:
 The pending missing-value default introduced when commercial markers entered
 scope. It does not change explicit Off or Auto-skip choices, fail-closed invalid
 config handling, or provider-support boundaries.
+
+## 2026-07-23 - Marker data is fixed for each mpv launch
+
+Status: APPROVED (owner, 2026-07-23). Implementation plan:
+`.agents/plans/skip-credits-intros-v2.md`.
+
+Decision:
+Vela fetches and injects one marker snapshot when each video launches. It does
+not send marker additions or changes from the server into an already-running
+mpv process. Continue Playing and playlist advance start the next item through
+the normal play command, so each new video receives a fresh snapshot.
+
+The bundled Lua script has no live marker-replacement message or dormant update
+protocol. If playback architecture later changes to reuse one mpv process for
+multiple items, live replacement requires a new owner decision and plan.
+
+Reason:
+Per-launch resolution already keeps every new video current. A live update path
+would add synchronization, replacement, and failure states to the Rust/Lua IPC
+boundary without a present product need.
+
+Supersedes:
+The pending live-IPC marker choice and the optional-insurance language in
+marker-plan v2 revision 5. It does not change normal mpv playback-control IPC or
+the rule that marker retrieval failures never block playback.

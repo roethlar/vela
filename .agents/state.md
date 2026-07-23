@@ -44,10 +44,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Continue the marker plan's final owner gate: decide whether marker data needs
-  live IPC refresh after mpv launches. Before marker implementation, draft and
-  approve the app-wide config-integrity and recovery work required by the new
-  fail-closed decision, then explicitly activate the marker plan in state.
+- Every marker product choice is now settled. Next, draft and approve the
+  app-wide config-integrity and recovery work required by the fail-closed
+  decision. Once that prerequisite is landed, explicitly activate the marker
+  plan in state before implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -58,9 +58,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Marker-skipping implementation is intentionally gated on the one remaining
-  owner decision, an approved plan for the app-wide config-integrity/recovery
-  prerequisite, and explicit marker-plan activation. Current code still
+- Marker-skipping implementation is intentionally gated on an approved plan for
+  the app-wide config-integrity/recovery prerequisite and explicit marker-plan
+  activation. Current code still
   normalizes several invalid constrained values and sometimes substitutes a
   default config after load failure; that lower-authority behavior conflicts
   with the 2026-07-22 owner decision and must not be copied into this feature.

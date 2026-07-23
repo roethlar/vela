@@ -2,18 +2,21 @@
 
 ## Status
 
-**Draft v2, revision 5 — 2026-07-23.** Supersedes the removed
+**Draft v2, revision 6 — 2026-07-23.** Supersedes the removed
 `.agents/plans/skip-credits-intros.md` (v1). Incorporates both 2026-07-22 plan
 reviews. Self-contained for a cold implementer once the owner decisions below
 are recorded.
 
 Not active implementation until:
 
-1. This plan (or an explicit owner go naming it) is reflected in
-   `.agents/state.md` **Now/Next** and Active Sources, and
-2. Every product choice in **Owner decisions** below is settled in owner-facing
+1. Every product choice in **Owner decisions** below is settled in owner-facing
    chat, one decision at a time, and the ruling is recorded here and in
-   `.agents/decisions.md`.
+   `.agents/decisions.md` (complete 2026-07-23).
+2. The separately approved app-wide config-integrity/recovery prerequisite is
+   implemented, reviewed, verified, and committed.
+3. `.agents/state.md` explicitly names this plan as active implementation after
+   that prerequisite lands. Its current planning-only mention and Active Sources
+   entry do not activate it.
 
 v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 `decisions.md` entry; do not treat v1 status as authority over this file.
@@ -45,6 +48,8 @@ bundled Lua script, following the same resource/injection pattern as
 - Mid-title "Jump to credits" when playback is *outside* a credits marker.
 - Editing, creating, or writing markers back to the server.
 - Preview, recap, or other unapproved marker kinds.
+- Replacing marker data inside an already-running mpv process. Each launch uses
+  one immutable marker snapshot; later server changes apply on the next launch.
 - Changing resume, progress check-in, or watched-threshold policy.
 - Embedding or forking stock mpv scripts for this feature.
 - Blocking play when markers are missing, the script is missing, or parse fails.
@@ -58,8 +63,8 @@ bundled Lua script, following the same resource/injection pattern as
 - Marker data lives on the media server, not in Vela's recents/config.
 - Continue Playing and playlist advance typically **re-invoke** `playback::play`
   with a new process (not in-process playlist next). Per-launch marker injection
-  is therefore the primary path; live IPC marker refresh is optional insurance,
-  not required for correct multi-item play.
+  is therefore the complete path. The owner rejected live IPC marker refresh on
+  2026-07-23.
 
 ---
 
@@ -455,9 +460,10 @@ today.
 
 ### Playlist / continue
 
-No live marker IPC required for v1: each auto-advance re-enters the play
-command and rebuilds `PlaySpec`. Optional later: `script-message vela-markers-set`
-if a single mpv process ever plays multiple URLs without respawn.
+No live marker IPC: each auto-advance re-enters the play command and rebuilds
+`PlaySpec`. The Lua script has no `script-message vela-markers-set` path. If a
+future architecture plays multiple URLs in one mpv process, marker replacement
+requires a new owner decision and plan rather than dormant insurance now.
 
 ### IPC progress path
 
@@ -606,9 +612,9 @@ activation/restoration, and auto-seek.
 
 ## Owner decisions
 
-Ask and settle each row still marked Pending in owner-facing chat; record the
-ruling here and in `.agents/decisions.md`. Recommended values are not
-implementation authority until the owner approves them.
+All rows are settled as of 2026-07-23. Any future product-choice row must be
+asked in owner-facing chat and recorded here and in `.agents/decisions.md`;
+recommended values are never implementation authority on their own.
 
 | Topic | Recommended ruling | Alternatives | Status |
 |-------|--------------------|--------------|--------|
@@ -618,7 +624,7 @@ implementation authority until the owner approves them.
 | Unknown config string | reject the whole config; notify and offer explicit backup-then-fresh-config recovery | normalize to `button` or `off` | **APPROVED — owner, 2026-07-22** |
 | Commercial markers | support as a separate policy wherever the upstream server publishes ranges; synthetic tests are sufficient | ignore / unmodeled | **APPROVED — owner, 2026-07-22** |
 | Default commercial policy | `button`, matching intro/credits while requiring confirmation | `off` or `autoskip` | **APPROVED — owner, 2026-07-23** |
-| Live IPC marker updates | not required (respawn per item) | add insurance now | Pending |
+| Live IPC marker updates | none; marker snapshot is fixed per mpv launch | add insurance now | **APPROVED — owner, 2026-07-23** |
 
 Present overrides to the owner as single plain-English asks if any default is
 contested; do not batch.
@@ -670,11 +676,11 @@ contested; do not batch.
   fetch, unresolved cold-implementer choices, and missing version/docs work.
   Closed in revision 2 with the exact MediaSegments contract, selected-resolve
   marker flow, child-env payload lifecycle, behavioral real-mpv E2E, settled
-  implementation mechanics, and explicit version/docs slices. Product choices
-  remain pending owner rulings and therefore implementation is still inactive.
+  implementation mechanics, and explicit version/docs slices. At that revision,
+  product choices remained pending owner rulings.
 - **2026-07-22 — owner ruling 1:** missing `skip_intros` and `skip_credits`
-  values default to Button. The confirm key and unknown-string behavior remain
-  separate pending decisions.
+  values default to Button. The confirm key and unknown-string behavior were
+  separate decisions later settled below.
 - **2026-07-22 — owner ruling 2:** Button means a genuinely clickable mpv
   control, not a notice. Left-click is primary; Space activates the same skip
   action only while the button is displayed and resumes normal pause behavior
@@ -695,3 +701,7 @@ contested; do not batch.
   matching intro and credits. Commercial detection never auto-skips merely
   because an older config lacks the new field; the viewer must click the
   on-screen control or press Space while it is visible.
+- **2026-07-23 — owner ruling 6:** marker data is fixed for one mpv launch.
+  Vela does not push server-side marker additions or changes into the active
+  player. Every later title launch, including automatic continuation, resolves
+  a fresh snapshot through the normal play path.
