@@ -2,16 +2,18 @@
 
 ## Status
 
-**Draft v2 — 2026-07-22.** Supersedes `.agents/plans/skip-credits-intros.md`
-(v1). Incorporates the 2026-07-22 plan review. Self-contained for a cold
-implementer.
+**Draft v2, revision 2 — 2026-07-22.** Supersedes the removed
+`.agents/plans/skip-credits-intros.md` (v1). Incorporates both 2026-07-22 plan
+reviews. Self-contained for a cold implementer once the owner decisions below
+are recorded.
 
 Not active implementation until:
 
 1. This plan (or an explicit owner go naming it) is reflected in
    `.agents/state.md` **Now/Next** and Active Sources, and
-2. Any open owner decisions in **Owner decisions** below are settled or the
-   stated defaults are accepted as binding.
+2. Every product choice in **Owner decisions** below is settled in owner-facing
+   chat, one decision at a time, and the ruling is recorded here and in
+   `.agents/decisions.md`.
 
 v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 `decisions.md` entry; do not treat v1 status as authority over this file.
@@ -20,11 +22,12 @@ v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 
 ## Goal
 
-When Plex or Jellyfin/Emby metadata includes intro or credits time ranges,
+When Plex or Jellyfin metadata includes intro or credits time ranges,
 Vela offers skip during external-mpv playback:
 
-- **Button** (product default): native mpv ASS/OSD prompt inside the video
-  window ("Skip Intro" / "Skip Credits") with a keyboard confirm.
+- **Button** (recommended product default; pending owner ruling): native mpv
+  ASS/OSD prompt inside the video window ("Skip Intro" / "Skip Credits") with
+  a keyboard confirm.
 - **Auto-skip**: seek to marker end with a brief OSD toast.
 - **Off**: no script injection for that kind.
 
@@ -64,20 +67,23 @@ bundled Lua script, following the same resource/injection pattern as
 
 ```
 play command
-  → MediaSource::markers(item_key)   // empty Vec / Err → continue without skip
+  → selected source resolves stream + best-effort markers
+      Plex: markers ride the existing selected-detail response
+      Jellyfin: MediaSegments request runs alongside mandatory resolve work
+      Emby: empty until an Emby contract is fixture-proven
   → resolve bundled vela-markers.lua // same Resource resolver as autocrop
   → if policy off for all kinds OR no usable markers OR script missing:
         play as today (no script)
   → else:
         write private markers payload file (process-private runtime dir)
-        launch mpv with --script=… + script-opts (policies + payload path)
+        launch mpv with --script=… + policy script-opts + child-only payload env
   → Lua: read payload, observe time-pos, OSD / seek per policy
 ```
 
 **Degrade, never refuse play.** Missing script, unreadable payload, empty
-markers, or `markers()` error must not fail `play`. Log at warn/info; launch
-without the feature. Mirror autocrop: a missing `--script=` path would make mpv
-refuse to start, so existence-check before injecting.
+markers, or a provider marker-fetch error must not fail `play`. Log at
+warn/info; launch without the feature. Mirror autocrop: a missing `--script=`
+path would make mpv refuse to start, so existence-check before injecting.
 
 ---
 
@@ -104,26 +110,33 @@ pub struct MediaMarker {
 No `Commercial`, no `Unknown` string variant in v1 — drop unrecognized server
 types during parse. Keeps the Lua payload and policies small.
 
-### Trait
+### Selected-resolution result
 
 ```rust
-/// Intro/credits time ranges for the item, if the backend exposes them.
-/// Default: empty. Errors and empty lists both mean "no skip UI" — callers
-/// must not fail playback on Err.
-async fn markers(&self, _item_key: &str) -> Result<Vec<MediaMarker>, String> {
-    Ok(Vec::new())
+pub struct StreamResolution {
+    // existing fields ...
+    /// Best-effort intro/credits ranges for this exact selected item.
+    /// Provider marker failure is normalized to empty before construction.
+    pub markers: Vec<MediaMarker>,
 }
 ```
 
-Callers: treat `Err` like empty (log once). Prefer logging the error string
-without item URLs or tokens.
+Do **not** add a separate `MediaSource::markers()` call. The selected Plex
+resolve already fetches `/library/metadata/{id}`; a third request on every play
+would add avoidable latency and duplicate rediscovery behavior. Each provider
+collects markers while building `StreamResolution`; marker failure alone never
+fails stream resolution. Add an `include_markers: bool` argument to
+`resolve_stream` / `resolve_stream_version`; the play command passes `true`
+only when at least one normalized policy is not `off`. Constructors that cannot
+supply markers use `[]`.
 
 ### Normalize rules (shared helper, unit-tested)
 
 After parse, drop a marker if any of:
 
 - `end_ms <= start_ms`
-- range longer than a hard sanity cap (e.g. 30 minutes) — guards garbage data
+- range longer than `MAX_MARKER_MS = 30 * 60 * 1000` (30 minutes) — guards
+  garbage data
 - duplicate exact `(kind, start_ms, end_ms)` triples
 
 Sort by `start_ms` ascending. Overlapping same-kind ranges: keep both; runtime
@@ -133,42 +146,66 @@ picks the first range that contains `time-pos` (see Lua rules).
 
 ## Server parsing
 
-### Plex (`src-tauri/src/source/plex.rs` + `plex_library` as needed)
+### Plex (`src-tauri/src/source/plex.rs` + `plex_library.rs`)
 
-- **Endpoint:** same family as detail — `GET /library/metadata/{ratingKey}` with
-  marker inclusion. Use `includeMarkers=1` (and keep existing Accept headers
-  the client already uses). Do **not** require a full `item_detail` DTO mapping;
-  a focused markers fetch or an extension of the existing metadata GET is fine
-  as long as unit tests pin the query.
-- **Nodes:** `Marker` children (XML or JSON, matching whatever the Plex client
-  already parses for metadata).
+- **Endpoint:** change `PlexLibrary::get_item_detail` to accept
+  `include_markers: bool`. Item-detail UI and version enumeration pass `false`;
+  the selected `resolve_stream_version` passes the play command's value. When
+  true, extend that existing selected-detail request to
+  `GET /library/metadata/{ratingKey}?includeMarkers=1`, preserving its current
+  auth and `Accept: application/xml` headers. Use reqwest query construction,
+  not string concatenation. `resolve_stream_version` returns the parsed markers
+  on `StreamResolution`; do not issue a focused third fetch.
+- **DTO:** add `#[serde(rename = "Marker", default)] markers: Vec<PlexMarker>`
+  to `PlexDetail`. `PlexMarker` captures XML attributes `type`,
+  `startTimeOffset`, and `endTimeOffset` as strings/options and parses each
+  marker at mapping time. A malformed offset therefore drops that marker
+  instead of making the mandatory detail response unreadable. A credits
+  marker's optional `final` attribute does not change its kind.
 - **Map:**
   - `type` / `type` field `intro` → `MarkerKind::Intro`
-  - `credits` or `final_credits` → `MarkerKind::Credits`
+  - `credits` → `MarkerKind::Credits`
   - anything else → skip
   - `startTimeOffset` → `start_ms`, `endTimeOffset` → `end_ms` (Plex units are
     milliseconds; assert in fixtures)
-- **Tests:** fixture XML/JSON with intro + credits + unknown type + inverted
-  range; empty markers; missing include.
+- **Failure:** retain the current `ensure_ready` / one rediscovery retry for the
+  mandatory selected-detail request. Marker absence is empty; because the
+  fields are part of that mandatory response, there is no independent marker
+  error to propagate.
+- **Tests:** XML fixture with intro + credits + unknown type + inverted range;
+  empty markers; and an HTTP mock that fails unless `includeMarkers=1` is
+  present on the existing metadata request.
 
 ### Jellyfin / Emby (`src-tauri/src/source/jellyfin.rs` only)
 
-There is **no** `emby.rs`. Emby is `Flavor::Emby` on the same client.
+There is **no** `emby.rs`. Emby is `Flavor::Emby` on the same client, but the
+Jellyfin MediaSegments contract must not be assumed to exist on Emby.
 
-- **Endpoint:** prefer data already available from a single-item GET if chapters
-  are present; otherwise `GET /Items/{id}` / user-scoped item with chapter
-  fields, or `GET /Items/{id}/Chapters` when needed. Implement the path that
-  returns `Chapters[]` with `MarkerType` / start/end positions on current
-  Jellyfin; Emby may return sparser or differently named fields — map what is
-  present, degrade to empty when absent.
-- **Map:**
-  - `MarkerType` (or equivalent) `Intro` → Intro, `Credits` / `FinalCredits` → Credits
-  - chapter `StartPositionTicks` → ms via `/ 10_000` (JF ticks = 100ns)
-  - end: next chapter start, explicit end field if present, or skip if end cannot
-    be determined (do not invent end = duration unless a fixture proves the
-    server omits end and clients are expected to use duration)
-- **Tests:** fixture chapter JSON for Intro+Credits; ticks conversion; Emby
-  empty/missing MarkerType → empty list, not error.
+- **Jellyfin endpoint:** authenticated
+  `GET /MediaSegments/{itemId}?includeSegmentTypes=Intro&includeSegmentTypes=Outro`.
+  The response is the normal Jellyfin query envelope with `Items[]`; each item
+  has `Type`, `StartTicks`, and `EndTicks`. This is a range API — do not derive
+  ranges from `Chapters[]` or chapter names. Use a dedicated segment-response
+  DTO rather than widening the existing `BaseItem` envelope. Contract evidence:
+  Jellyfin's `MediaSegmentsController.cs`, `MediaSegmentDto.cs`, and
+  `MediaSegmentType.cs` in the upstream `jellyfin/jellyfin` repository.
+- **Map:** `Type: Intro` → Intro; `Type: Outro` → Credits; unknown segment types
+  are ignored. Convert both tick fields with the existing 100ns-ticks helper
+  (`ticks / 10_000`), then run shared normalization.
+- **Concurrency:** for `Flavor::Jellyfin`, start the segment request alongside
+  the mandatory selected resolve work (`tokio::join!` or an equivalent
+  non-detached future). Mandatory item/playback-info failures retain today's
+  error behavior; segment failure logs a credential-free warning and yields
+  `[]`.
+- **Compatibility:** a missing/unsupported MediaSegments endpoint (including
+  404) yields `[]`; playback remains supported on such Jellyfin servers.
+- **Emby:** `Flavor::Emby` makes no MediaSegments request and returns `[]`.
+  Emby marker support is a later slice only after a real or authoritative mock
+  fixture proves its endpoint and field contract.
+- **Tests:** query-envelope fixture with Intro + Outro + unknown + invalid
+  ranges; tick conversion; an HTTP mock pinning the exact endpoint and repeated
+  filter parameters; endpoint failure → successful stream resolution with
+  empty markers; Emby → empty markers and zero MediaSegments requests.
 
 ---
 
@@ -188,21 +225,27 @@ pub skip_intros: Option<String>,
 pub skip_credits: Option<String>,
 ```
 
-**Product defaults (binding unless owner overrides):**
+**Product defaults:** pending the first owner ruling below. The recommended
+value for both fields is `button`; implementation remains blocked until the
+ruling is recorded.
 
 | Field | Default when missing/unknown |
 |-------|------------------------------|
-| `skip_intros` | `button` |
-| `skip_credits` | `button` |
+| `skip_intros` | owner-ratified default (recommended: `button`) |
+| `skip_credits` | owner-ratified default (recommended: `button`) |
 
 Normalize helper (same spirit as `normalize_autocrop`):
 
 - accept only lowercase `off`, `button`, `autoskip` after trim
-- anything else → product default for that field (or `off` if the autocrop-style
-  "unknown fails closed to safest" is preferred — **v2 binds unknown → product
-  default `button`**, matching "missing means default product behavior"; document
-  in Settings that unknown stored values reset to Button on next save if the UI
-  rewrites them)
+- anything else → the owner-ratified product default for that field. The
+  recommended ruling is `button`, matching "missing means default product
+  behavior"; document in Settings that unknown stored values reset to that
+  default on next save.
+
+Put the one canonical `normalize_skip_policy` helper in `commands.rs`. The play
+command reads and normalizes both fields before source resolution and copies the
+closed values into `PlaySpec`; `playback::play` must not independently interpret
+raw config strings.
 
 Round-trip tests: old configs without these fields load; save preserves other
 fields; legacy inert local/SMB/SSH fields still untouched.
@@ -212,11 +255,12 @@ fields; legacy inert local/SMB/SSH fields still untouched.
 - **Location:** Settings → **Player** tab (beside black-bar cropping / mpv
   advanced), in `src/lib/Settings.svelte`.
 - Two selects: "Skip intros", "Skip credits" — options Off / Button / Auto-skip.
-- Wire via extending `get_mpv_advanced` / `set_mpv_advanced` **or** a small
-  dedicated pair `get_skip_policies` / `set_skip_policies`. Prefer extending the
-  existing mpv-advanced command if the payload stays cohesive; otherwise a
-  dedicated command is fine. Do not invent a third config write path that skips
-  `CONFIG_LOCK` / atomic save.
+- Extend the existing `MpvAdvanced` DTO and `get_mpv_advanced` /
+  `set_mpv_advanced` commands with `skip_intros` and `skip_credits`. Setter
+  parameters are optional for compatibility with an older frontend; when
+  present they are normalized and stored through the existing `config::update`
+  path. Do not add a second config write path or bypass `CONFIG_LOCK` / atomic
+  save.
 
 ---
 
@@ -238,49 +282,72 @@ mpv derives option prefixes from the script name; dashes vs underscores bite
 require "mp.options".read_options(options, "vela-markers")
 ```
 
-Launch args must use the same prefix, e.g.:
+Launch args must use the same prefix:
 
-- `--script-opts-append=vela-markers-payload=<path>`
 - `--script-opts-append=vela-markers-intro-policy=button`
 - `--script-opts-append=vela-markers-credits-policy=button`
 
-Do **not** put the full marker JSON on the command line.
+Do **not** put either the payload path or full marker JSON in mpv's comma-split
+script-option list. Set the path only on the child process with
+`Command::env("VELA_MARKERS_PAYLOAD", path)`; Lua reads it with
+`os.getenv("VELA_MARKERS_PAYLOAD")`. This avoids cross-platform option-list
+escaping for Windows/user paths. Policy values are a closed ASCII set and stay
+in script options so Vela can append them after user-supplied mpv arguments.
 
 ### Payload file
 
-- Written under the existing process-private runtime directory pattern used for
-  IPC sockets / auth includes (`playback.rs` private runtime dir on Unix;
-  appropriate per-user temp on Windows).
-- Owner-only permissions where the OS allows.
+- Written by a non-fatal `try_write_marker_payload` helper under the existing
+  process-private runtime directory pattern used for IPC sockets / auth
+  includes (`playback.rs` private runtime dir on Unix; per-user temp on
+  Windows).
+- Use a unique `vela-markers-{pid}-{counter}.json` name, exclusive creation, and
+  owner-only permissions where the OS allows. Before creating, best-effort
+  prune older files with that exact Vela-owned prefix from this process's
+  private directory; never scan or delete outside it.
 - Contents: compact JSON, e.g.
   `{"markers":[{"kind":"intro","start_ms":0,"end_ms":90000},...]}`
-- Path only on argv. Overwrite per launch; best-effort delete on mpv exit (same
-  discipline as other per-launch temps — document if cleanup is best-effort only).
+- The child-only environment carries the path. Lua reads the complete file,
+  then immediately calls `os.remove(path)` whether parsing succeeds or fails.
+  Rust removes it if `cmd.spawn()` fails. A crash before either cleanup can
+  leave only owner-private, non-credential marker timing data; the next launch's
+  prefix-prune removes it.
 - Size: markers lists are small; still avoid argv for the body (quoting, length,
   consistency with auth-include lesson).
 
+Any directory, create, serialize, write, or cleanup error logs a
+credential-free warning and returns `None`; marker setup must not use `?` on the
+`play()` error path. Only add `--script` and marker policy args, and only set the
+environment variable, after script existence and payload creation both succeed.
+
 ### Runtime behavior
 
-1. On load: read options; open payload path; parse JSON; on any failure, set
-   loaded marker false-equivalent and no-op (do not crash mpv).
+1. On load: read options and `VELA_MARKERS_PAYLOAD`; read the complete payload;
+   best-effort unlink it; parse with `mp.utils.parse_json`. On any failure, set
+   loaded/active properties to false-equivalent and no-op (do not crash mpv).
 2. Set `user-data/vela-markers/loaded` = true when script is active with a
-   successful parse (for E2E), even if markers array is empty.
-3. Observe `time-pos` (or equivalent).
+   successful parse. Architecture prevents injection for an empty normalized
+   marker list, so E2E must supply a real marker. Also publish
+   `user-data/vela-markers/active` as `intro`, `credits`, or empty for a
+   deterministic prompt-path assertion.
+3. Observe `time-pos`.
 4. Determine active marker: first range where
    `start_ms/1000 <= t < end_ms/1000` and the kind's policy is not `off`.
-5. **button:** show ASS/OSD bottom-right, e.g. `Skip Intro (S)` / `Skip Credits (S)`.
-   While the prompt is shown, force-bind **`s`** to seek to `end_ms/1000`
-   (absolute). **Unbind when leaving the range** so stock screenshot `s` works
-   outside skip windows. Prefer `seek … absolute+exact` if available on the
-   mpv version floor Vela already assumes; otherwise absolute and document
-   keyframe skew as accepted.
-6. **autoskip:** once per range entry, seek to end; brief OSD "Skipped Intro" /
-   "Skipped Credits"; do not loop-seek if still inside due to keyframe snap
-   (mark range as consumed for this load).
-7. Leaving range: clear OSD; clear force binding.
+5. **button:** use `mp.create_osd_overlay("ass-events")` with bottom-right ASS
+   alignment to show `Skip Intro (S)` / `Skip Credits (S)` without taking over
+   mpv's general OSD message channel. While shown, force-bind **`s`** under a
+   Vela-owned binding name to `seek <end> absolute+exact` (available on Vela's
+   documented mpv 0.38 floor). Mark this entry consumed before seeking so a
+   keyframe/clamp landing still inside the range cannot immediately re-show the
+   prompt. Unbind outside the prompt so stock screenshot `s` works elsewhere.
+6. **autoskip:** once per range entry, mark the entry consumed, seek with
+   `absolute+exact`, and show a brief ordinary OSD toast. Do not loop-seek if
+   mpv still reports a position inside the range.
+7. Leaving range: clear the ASS overlay, active user-data property, force
+   binding, and current-entry latch.
 8. Resume into a range: treat as inside → show button or autoskip immediately.
-9. User seeks back into a previously skipped range: **show button again** /
-   allow re-autoskip once per re-entry (simple; no permanent dismiss).
+9. After at least one observed position outside that marker, seeking back into
+   it is a new entry: show the button / allow one auto-skip again. Seeking
+   within a consumed marker without first leaving does not re-arm it.
 10. If `end` is past duration: seek to end-of-file / last frame safely (mpv
     clamps); do not error.
 
@@ -296,32 +363,45 @@ Do **not** put the full marker JSON on the command line.
 
 ### Resolve path
 
-Same as autocrop in `commands.rs`: `AppHandle` resource resolve
-
-`mpv-scripts/vela-markers.lua` → `PlaySpec` field(s), e.g. `markers_script: Option<String>`.
+Same as autocrop in `commands.rs`: `AppHandle` resolves
+`mpv-scripts/vela-markers.lua`. `PlaySpec` gains exactly
+`markers_script: Option<String>`, `markers: Vec<MediaMarker>`,
+`intro_policy: String`, and `credits_policy: String`; all values are already
+resolved, normalized, and policy-filtered before `playback::play`.
 
 ### When to fetch markers
 
-At play-prep for the item being launched (alongside stream resolve), on the
-async side before `spawn_blocking`/`play`:
+At play-prep for the item being launched, on the async side before
+`spawn_blocking` / `playback::play`:
 
-- `source.markers(&raw_key).await` — on `Err`, log and use `[]`.
-- If both normalized policies are `off`, skip fetch (optional optimization).
-- If markers empty after normalize, do not inject script.
+- Load and normalize both policies before selected stream resolution.
+- Pass `include_markers = intro_policy != "off" || credits_policy != "off"`
+  into the selected source's `resolve_stream` / `resolve_stream_version` call.
+- Plex includes markers in its existing selected-detail response; Jellyfin
+  starts its best-effort MediaSegments future alongside mandatory resolution;
+  Emby and unsupported constructors return `[]`.
+- Copy only markers whose kind is enabled into `PlaySpec`. If that normalized,
+  policy-filtered list is empty, do not write a payload or inject the script.
 
 ### Arg construction
 
 Pure helper (unit-tested, mirror `autocrop_args`):
 
 ```text
-markers_args(script, intro_policy, credits_policy, payload_path) -> Vec<String>
+markers_args(script, intro_policy, credits_policy, has_payload) -> Vec<String>
 ```
 
 - No script path → `[]`
 - Both policies `off` → `[]` (even if script present)
-- Else: `--script=…`, policy opts, payload path opt
+- No successfully written payload → `[]`
+- Else: `--script=…` plus the two closed policy options. The payload path is
+  supplied separately through the child environment.
 
-`play` existence-checks script path; if missing, log and inject nothing.
+`play` existence-checks the script, then best-effort writes the payload. Missing
+script or payload failure logs and injects nothing. Marker arguments are
+appended after user mpv options so user configuration cannot replace Vela's
+payload policies; IPC/title/auth invariants remain reasserted afterward as
+today.
 
 ### Playlist / continue
 
@@ -340,51 +420,93 @@ observation. A skip is a normal seek; server check-in continues as today.
 
 Each slice: one focused commit; run verification appropriate to the touch set;
 red-proof any new behavioral guard (temporarily break production code, confirm
-test fails for the right reason, restore).
+test fails for the right reason, restore from the committed pre-injection
+state). Run `scripts/bump.sh` in every slice that changes shipped Rust,
+frontend, or Lua behavior, per the active version decision. From the current
+1.0.0 base the four code slices below would land as 1.0.1 through 1.0.4; if the
+base moves first, use the next patch each time rather than these stale numbers.
+Because the bump script updates both JavaScript and Rust/bundle version
+surfaces, finish every bumped slice with the full canonical dual-side CI command
+set below even when its focused feature work touches only one side. Targeted
+tests and red proofs run before that full set; real-app E2E becomes mandatory in
+the product-flip slice where the feature is launchable.
 
-### Slice 1 — Model + server parsing
+### Slice 1 — Model + selected provider resolution
 
-- `MediaMarker` / `MarkerKind` + `MediaSource::markers` default.
-- Plex + Jellyfin/Emby implementations with fixture unit tests.
+- `MediaMarker` / `MarkerKind`, `StreamResolution.markers`, and the
+  `include_markers` resolve argument.
+- Plex existing-detail marker inclusion + Jellyfin MediaSegments / Emby no-op,
+  with exact HTTP and fixture tests.
 - Shared normalize helper + tests.
 - No UI, no mpv wiring yet.
-- **Verify:** `cargo +stable test --locked`, `cargo +stable clippy … -D warnings`
-  from `src-tauri/`.
+- Run `scripts/bump.sh` (1.0.0 → 1.0.1 on the recorded base).
+- **Focused verify before the full set:** MSRV/stable check, clippy, tests, and
+  Cargo audit from `src-tauri/`; red-prove the query/schema and
+  marker-error-degrades guards separately.
 
 ### Slice 2 — Lua script + provenance
 
 - Add `vela-markers.lua`.
 - Update `PROVENANCE.md` (Vela MIT entry).
-- Manual or scripted mpv smoke optional; unit-level not applicable to Lua beyond
-  later E2E load marker.
-- **Verify:** file present under resources; `tauri.conf.json` already maps
-  `resources/mpv-scripts/` (no conf change if directory already bundled).
+- Implement explicit overlay/binding/entry-latch behavior and child-env payload
+  read/unlink. Full behavior is guarded when launch wiring lands.
+- Run `scripts/bump.sh` (1.0.1 → 1.0.2 on the recorded base).
+- **Focused verify before the full set:** file present under resources;
+  `tauri.conf.json` already maps
+  `resources/mpv-scripts/` (no manual resource-map change); run mpv's script
+  load against a minimal valid payload if practical and record when deferred to
+  slice 4's real-app E2E.
 
-### Slice 3 — Config + Settings UI
+### Slice 3 — Config + command boundary (no visible control yet)
 
 - `skip_intros` / `skip_credits` on `AppConfig`.
-- Normalize + get/set command(s) + Settings → Player dropdowns.
+- Canonical normalize helper; extend `MpvAdvanced` get/set through the existing
+  locked atomic config path. Do not expose the controls in Settings yet, so no
+  shipped UI offers a setting that playback ignores.
 - Serde round-trip / unknown-value tests.
-- **Verify:** Rust tests + `npm run check` (+ `npm run build` if UI types change).
+- Run `scripts/bump.sh` (1.0.2 → 1.0.3 on the recorded base).
+- **Focused verify before the full set:** Rust checks/tests/audit; red-prove
+  missing and unknown config normalization plus legacy-field round-trip
+  preservation.
 
-### Slice 4 — Launch wiring
+### Slice 4 — Atomic product flip: launch + Settings + E2E + docs
 
-- Fetch markers at play; write payload file; inject args via pure helper.
-- PlaySpec + resolve_resource for `vela-markers.lua`.
+- Pass the normalized policy intent into selected resolution; policy-filter the
+  returned markers; add `PlaySpec` policy/marker/script fields.
+- Resolve `vela-markers.lua`; non-fatally create and clean the private payload;
+  inject policy args + child environment through pure/testable helpers.
+- Add both Settings → Player controls in the same commit that makes them work.
+- Extend the controlled Jellyfin mock's real route and add the behavioral E2E
+  legs below. Update README Player notes with policies and the in-range `S` key.
 - Guarantees: play succeeds with missing script, empty markers, bad policy
-  strings.
-- Unit tests for `markers_args` matrix (off/off, button+markers, no script, …).
-- **Verify:** full Rust test/clippy; dual-side if commands/UI already landed.
+  strings, marker endpoint failure, payload write failure, or payload parse
+  failure. Unit-test `markers_args` and payload-write failure matrices.
+- Run `scripts/bump.sh` (1.0.3 → 1.0.4 on the recorded base).
+- **Verify:** full canonical dual-side set plus targeted and full Linux E2E.
+  Red-prove every behavior claimed by the E2E separately.
 
-### Slice 5 — Verification & E2E
+### Behavioral E2E acceptance
 
-- E2E: assert `user-data/vela-markers/loaded` (or IPC-equivalent) when policies
-  enable injection and a synthetic/fixture path can supply markers **or** when
-  script is injected with empty markers payload if that still sets loaded.
-  Prefer: force a test payload in the harness when possible.
-- Do **not** claim E2E "skipped real Netflix-style intro" without a controlled
-  media fixture; launch + load marker is the automation bar.
-- Owner playtest: real Plex/JF title with markers, both policies.
+Use the existing generated 30-second Jellyfin clip and real mpv IPC harness;
+extend `mockjf.mjs` to serve the exact MediaSegments query envelope. Do not add
+a test-only production payload override.
+
+1. **Auto-skip:** return an Intro range whose end is far enough ahead that
+   normal playback cannot reach it before the assertion deadline. Seed
+   `autoskip`, require the script load marker, and assert `time-pos` crosses the
+   range end within that deadline.
+2. **Button:** seed `button`, require `user-data/vela-markers/active == "intro"`,
+   send lowercase `s` through mpv IPC, assert `time-pos` crosses the range end,
+   and require the active property/binding to clear outside the range.
+3. **Injection polarity:** provider HTTP tests prove `include_markers = false`
+   makes no Jellyfin MediaSegments request; launch unit tests prove off/off,
+   empty markers, absent script, and payload-write failure inject nothing.
+
+For red proofs, independently break the endpoint/schema mapping, auto-seek,
+button binding, and fail-open payload path; each claimed guard must fail for its
+own reason. After automation is green, owner playtest a real Plex and Jellyfin
+title with markers in Button and Auto-skip modes. Emby is explicitly out of this
+playtest until its contract is added.
 
 ---
 
@@ -407,24 +529,26 @@ both frontend and Rust change. Minimum relevant set:
 | Rust audit | `cargo audit --file Cargo.lock` | `src-tauri/` |
 | E2E | `npm run e2e` (or targeted scenario) | repo root; Linux venue per `.agents/machines.md` |
 
-Guard discipline: any test that claims "missing script does not break play" or
-"unknown policy normalizes" must be red-proofed once when introduced.
+Guard discipline: every new behavioral claim above is red-proofed when
+introduced, including provider query/schema, missing script, payload failure,
+unknown policy, button seek, and auto-seek.
 
 ---
 
 ## Owner decisions
 
-Defaults below are **binding for implementation** unless the owner overrides in
-chat and the override is recorded here / in `decisions.md`.
+Every row is pending. Ask and settle exactly one row at a time in owner-facing
+chat; record the ruling here and in `.agents/decisions.md`. Recommended values
+are not implementation authority until the owner approves them.
 
-| Topic | Binding default | Alternatives |
-|-------|-----------------|--------------|
-| Default policy (intros & credits) | `button` | `off` or `autoskip` |
-| Confirm key while prompt shown | `s`, force-bound only in-range | different key; never rebind `s` |
-| Mouse click on OSD | **out of v1** | stretch after keyboard ships |
-| Unknown config string | normalize to product default `button` | fail closed to `off` |
-| Commercial markers | ignore / unmodeled | separate policy later |
-| Live IPC marker updates | not required (respawn per item) | add if process reuse appears |
+| Topic | Recommended ruling | Alternatives | Status |
+|-------|--------------------|--------------|--------|
+| Default policy (intros & credits) | `button` | `off` or `autoskip` | Pending |
+| Confirm key while prompt shown | `s`, force-bound only in-range | different key; never rebind `s` | Pending |
+| Mouse click on OSD | out of v1 | include mouse hit-testing now | Pending |
+| Unknown config string | normalize to the ratified product default | always fail closed to `off` | Pending |
+| Commercial markers | ignore / unmodeled | add a separate policy now | Pending |
+| Live IPC marker updates | not required (respawn per item) | add insurance now | Pending |
 
 Present overrides to the owner as single plain-English asks if any default is
 contested; do not batch.
@@ -435,15 +559,17 @@ contested; do not batch.
 
 | Area | Paths |
 |------|--------|
-| Trait / DTO | `src-tauri/src/source/mod.rs` |
-| Plex | `src-tauri/src/source/plex.rs`, possibly `plex_library.rs` / `plex_api.rs` |
+| Resolution / DTO | `src-tauri/src/source/mod.rs` |
+| Plex | `src-tauri/src/source/plex.rs`, `src-tauri/src/plex_library.rs` |
 | JF/Emby | `src-tauri/src/source/jellyfin.rs` |
 | Config | `src-tauri/src/config.rs` |
 | Play | `src-tauri/src/playback.rs`, `src-tauri/src/commands.rs` |
 | Resources | `src-tauri/resources/mpv-scripts/vela-markers.lua`, `PROVENANCE.md` |
-| UI | `src/lib/Settings.svelte`, possibly `src/lib/types.ts` |
-| E2E | `tests/e2e/…` (scenario + harness property read) |
-| Bundle | `src-tauri/tauri.conf.json` only if resource map changes (unlikely) |
+| UI | `src/lib/Settings.svelte` |
+| E2E | `tests/e2e/mockjf.mjs`, a marker scenario, mpv IPC helper only if needed |
+| User docs | `README.md` Player/HDR notes |
+| Version | `scripts/bump.sh` (it owns the canonical version-surface set) |
+| Durable state | this plan, `.agents/decisions.md`, `.agents/state.md` |
 
 ---
 
@@ -452,7 +578,7 @@ contested; do not batch.
 | v1 | v2 |
 |----|----|
 | Hard `SkipPolicy` enum on `AppConfig` | `Option<String>` + normalize |
-| CLI JSON in script-opts | Private payload file + path in script-opts |
+| CLI JSON in script-opts | Private payload file + child-only path environment |
 | Mouse click in scope | Keyboard-only v1 |
 | Permanent `s` binding | In-range force-bind only |
 | `emby.rs` | `jellyfin.rs` + `Flavor` |
@@ -469,4 +595,10 @@ contested; do not batch.
 - **2026-07-22 — v1 review:** architecture OK; config pattern, launch polarity,
   click/keybinding, argv JSON, Plex/JF endpoint specificity, Emby path, state
   drift, verification gaps. Closed by writing this v2.
-- **v2 plan review:** not yet run.
+- **2026-07-22 — v2 review:** found the wrong Jellyfin chapters contract,
+  load-only E2E, under-specified fail-open payload lifecycle, avoidable Plex
+  fetch, unresolved cold-implementer choices, and missing version/docs work.
+  Closed in revision 2 with the exact MediaSegments contract, selected-resolve
+  marker flow, child-env payload lifecycle, behavioral real-mpv E2E, settled
+  implementation mechanics, and explicit version/docs slices. Product choices
+  remain pending owner rulings and therefore implementation is still inactive.
