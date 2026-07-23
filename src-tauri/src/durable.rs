@@ -2396,7 +2396,7 @@ mod tests {
         let config_path = root.join("config.json");
         let marker_path = root.join("durable-recovery.json");
         let valid = serde_json::to_vec_pretty(&serde_json::json!({
-            "continue_playing": "on"
+            "watched_threshold_percent": 20
         }))
         .unwrap();
         preserve_valid_history(DurableFile::Settings, &config_path, &valid).unwrap();
@@ -2405,10 +2405,14 @@ mod tests {
             .remove(0);
         let version_path = root.join(&version.file_name);
         let mut changed = fs::read(&version_path).unwrap();
-        let value = changed.iter().position(|byte| *byte == b'o').unwrap();
-        changed[value] = b'x';
+        let value = changed
+            .windows(2)
+            .position(|pair| pair == b"20")
+            .unwrap();
+        changed[value] = b'9';
         fs::write(&version_path, &changed).unwrap();
         assert_eq!(changed.len() as u64, version.byte_length);
+        assert!(validate_selected_bytes(DurableFile::Settings, &changed).is_ok());
 
         let damaged = br#"{"continue_playing":"future"}"#;
         fs::write(&config_path, damaged).unwrap();
