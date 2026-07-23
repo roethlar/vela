@@ -41,13 +41,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Commercial ranges are in scope wherever an upstream server publishes them;
   the dated provider evidence and unsupported-provider boundary are canonical
   in the plan. No code has been implemented.
+- The app-wide fail-closed settings prerequisite now has a planning-only draft
+  at `.agents/plans/config-integrity-recovery.md`. It specifies one strict
+  config boundary, all-or-nothing source restoration, blocking startup/runtime
+  fault states, and explicit byte-exact private backup before atomic fresh
+  config creation. One owner compatibility decision remains: reject unknown
+  active setting keys, or preserve them inertly through updates. No code has
+  been implemented.
 
 ## Next
 
-- Every marker product choice is now settled. Next, draft and approve the
-  app-wide config-integrity and recovery work required by the fail-closed
-  decision. Once that prerequisite is landed, explicitly activate the marker
-  plan in state before implementation.
+- Settle unknown active setting-key handling, record the ruling, externally
+  review and explicitly activate the app-wide config-integrity/recovery plan,
+  then implement and land that prerequisite. Afterward, explicitly activate
+  the marker plan in state before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -64,6 +71,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   normalizes several invalid constrained values and sometimes substitutes a
   default config after load failure; that lower-authority behavior conflicts
   with the 2026-07-22 owner decision and must not be copied into this feature.
+- Config-integrity/recovery implementation is gated on the unknown active
+  setting-key owner decision, required external plan review, and explicit
+  activation in state.
 
 ## Verification
 
@@ -79,6 +89,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md`
 - `.agents/push-policy.md`
+- `.agents/plans/config-integrity-recovery.md`
 - `.agents/plans/skip-credits-intros-v2.md`
 - `.agents/plans/v1-release-readiness.md`
 - `README.md`, `RELEASE_NOTES.md`, and `ISSUES.md`
