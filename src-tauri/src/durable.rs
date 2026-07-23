@@ -2354,6 +2354,43 @@ mod tests {
     }
 
     #[test]
+    fn retry_refuses_a_different_valid_file_for_recorded_history() {
+        let root = temp_root("history-recovery-wrong-install");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let selected = serde_json::to_vec_pretty(&serde_json::json!({
+            "continue_playing": "only-tv"
+        }))
+        .unwrap();
+        preserve_valid_history(DurableFile::Settings, &config_path, &selected).unwrap();
+        let version = valid_history_at(DurableFile::Settings, &config_path)
+            .unwrap()
+            .remove(0);
+        let damaged = br#"{"continue_playing":"future"}"#;
+        let expected = InvalidSnapshot::from_bytes(damaged);
+        let backup_name =
+            "config.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string();
+        let marker = RecoveryMarker::new_history(
+            DurableFile::Settings,
+            DurableLayout::PostSplit,
+            backup_name.clone(),
+            &expected,
+            &version,
+        )
+        .unwrap();
+        crate::storage::write_private_new(&root.join(&backup_name), damaged).unwrap();
+        let different_valid = br#"{"continue_playing":"off"}"#;
+        crate::storage::write_private_new(&config_path, different_valid).unwrap();
+        install_recovery_marker(&marker_path, &marker).unwrap();
+
+        assert!(resume_recovery_at(&marker_path, &marker).is_err());
+        assert!(marker_path.exists());
+        assert_eq!(fs::read(&config_path).unwrap(), different_valid);
+        assert_eq!(fs::read(root.join(backup_name)).unwrap(), damaged);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn changed_selected_history_is_refused_before_the_damaged_file_moves() {
         let root = temp_root("changed-history-recovery");
         let config_path = root.join("config.json");
