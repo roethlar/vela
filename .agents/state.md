@@ -52,13 +52,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   URLs/query strings are the security boundary. Unknown fields invalidate only
   their whole owning file; documented legacy rollback fields and non-settings
   media payloads remain compatible. No code has been implemented.
+- The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
+  Claude Code 2.1.218 / `claude-opus-4-8` at max and returned one MEDIUM
+  candidate. It is ADMITTED as `cir-1`: before the one-time split succeeds, an
+  invalid combined config still contains the only connection/token copy, while
+  the planned settings-recovery screen falsely promises that connections are
+  already separate and will survive. The canonical record is
+  `.agents/review/findings/cir-1.md`; no repair is authorized yet.
 
 ## Next
 
-- Externally review and explicitly activate the app-wide
-  config-integrity/recovery plan, then implement and land that prerequisite.
-  Afterward, explicitly activate the marker plan in state before marker
-  implementation.
+- Resolve `cir-1`, follow up the revised exact plan range through the required
+  external review, and explicitly activate the app-wide
+  config-integrity/recovery plan. Then implement and land that prerequisite;
+  afterward, explicitly activate the marker plan before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -76,7 +83,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   default config after load failure; that lower-authority behavior conflicts
   with the 2026-07-22 owner decision and must not be copied into this feature.
 - Config-integrity/recovery implementation is gated on required external plan
-  review and explicit activation in state.
+  review, resolution of admitted finding `cir-1`, and explicit activation in
+  state.
 
 ## Verification
 
@@ -93,6 +101,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/machines.md`
 - `.agents/push-policy.md`
 - `.agents/plans/config-integrity-recovery.md`
+- `.agents/review/index.md` and `.agents/review/findings/cir-1.md`
 - `.agents/plans/skip-credits-intros-v2.md`
 - `.agents/plans/v1-release-readiness.md`
 - `README.md`, `RELEASE_NOTES.md`, and `ISSUES.md`

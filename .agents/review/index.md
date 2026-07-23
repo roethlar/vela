@@ -20,6 +20,15 @@ no material issue. The schema-valid one-shot verdict was clean with the exact
 pins and an empty findings array. The owner's conditional approval therefore
 authorizes implementation of `.agents/plans/playback-source-policy.md`.
 
+Config-integrity/recovery PLAN review OPEN 2026-07-23: `openreview claude`
+(Claude Code 2.1.218 / `claude-opus-4-8` @ max, owner-selected inline
+competitive review) over exact range
+`7a4b5b02cb7287559944cab7246d2a4dd0c5c5d2..bf3730a14105465f6f5a7edd6e3fd326acd57132`
+returned one schema-valid MEDIUM finding. `cir-1` is ADMITTED: an invalid
+combined pre-split config reaches copy that promises connections are already
+separate, then settings recovery replaces the only live token copy. No repair
+or implementation is authorized. Detail: `.agents/review/findings/cir-1.md`.
+
 Finding `mpx-1` VERIFIED 2026-07-19: the independent multi-Plex source model,
 legacy migration, repeatable identity-pinned linking, exact-row removal, and
 two-machine collapse/override proof were accepted in substantive round 1 by
@@ -807,6 +816,7 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
+| cir-1 | MEDIUM | Pre-split recovery can promise preserved connections, then require every server to be reauthorized | `[ ]` | pending |
 | dlr-s8-4 | MEDIUM | Package collection can republish stale installers | `[x]` | `bff2905` |
 | dlr-s8-3 | MEDIUM | Live Jellyfin can fail on Home before a real library renders | `[x]` | `5532e93`, guard `8366b4f` |
 | dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[x]` | `ec7c43e` |

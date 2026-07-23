@@ -33,6 +33,23 @@ separately.
 
 ---
 
+## Plan review
+
+`openreview claude` (Claude Code 2.1.218 /
+`claude-opus-4-8` at max, owner-selected inline competitive review) over exact
+range
+`7a4b5b02cb7287559944cab7246d2a4dd0c5c5d2..bf3730a14105465f6f5a7edd6e3fd326acd57132`
+returned one schema-valid MEDIUM finding on 2026-07-23. `cir-1` is ADMITTED:
+the plan has no safe/honest recovery branch for an already-invalid combined
+pre-split config. Detail and proposed guard boundary:
+`.agents/review/findings/cir-1.md`.
+
+This review is not a clean approval. Do not activate implementation until
+`cir-1` is resolved in the plan and the revised exact range receives the
+required follow-up review.
+
+---
+
 ## Goal
 
 Give settings and active server connections independent, strict validity and
