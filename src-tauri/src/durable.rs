@@ -1,7 +1,7 @@
 use crate::config::{self, AppConfig, ConnectionsSplitBackup};
 use crate::connections::{self, ConnectionsConfig};
 use crate::source::{self, SourceRegistry};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::fs;
 use std::io;
@@ -34,42 +34,58 @@ fn publish_runtime_fault(file: DurableFile, error: &io::Error) {
     let Some(app) = APP_HANDLE.get().cloned() else {
         return;
     };
-    let status_kind = if error.kind() == io::ErrorKind::InvalidData {
-        DurableStatusKind::RecoverableInvalid
-    } else {
-        DurableStatusKind::Unavailable
-    };
+    let error_kind = error.kind();
     tauri::async_runtime::spawn(async move {
         use tauri::{Emitter, Manager};
+        let error = io::Error::from(error_kind);
         let state = app.state::<crate::AppState>();
         *state.registry.lock().await = SourceRegistry::default();
         let next = {
-            let mut status = state.durable_status.lock().await;
+            let mut gate = state.durable_gate.lock().await;
             match file {
                 DurableFile::Settings => {
+                    let path = config::config_path();
                     let layout = connections_path()
-                        .map(|path| classify_layout(&path))
+                        .map(|connections| classify_layout(&connections))
                         .unwrap_or(DurableLayout::PostSplit);
-                    status.settings = DurableFileStatus {
-                        status: status_kind,
-                        layout,
-                    };
+                    let (status, snapshot) = path
+                        .map(|path| status_and_snapshot_for_error(&error, &path, layout))
+                        .unwrap_or_else(|_| (unavailable_file(layout), None));
+                    gate.status.settings = status;
+                    gate.settings_snapshot = snapshot;
                 }
                 DurableFile::Connections => {
-                    status.connections = DurableFileStatus {
-                        status: status_kind,
-                        layout: DurableLayout::PostSplit,
-                    };
+                    let path = connections_path();
+                    let (status, snapshot) = path
+                        .map(|path| {
+                            status_and_snapshot_for_error(
+                                &error,
+                                &path,
+                                DurableLayout::PostSplit,
+                            )
+                        })
+                        .unwrap_or_else(|_| {
+                            (unavailable_file(DurableLayout::PostSplit), None)
+                        });
+                    gate.status.connections = status;
+                    gate.connections_snapshot = snapshot;
                 }
             }
-            status.clone()
+            if gate.recovery_incomplete {
+                gate.status.settings.can_recover = false;
+                gate.status.connections.can_recover = false;
+                gate.settings_snapshot = None;
+                gate.connections_snapshot = None;
+            }
+            gate.status.clone()
         };
         let _ = app.emit("durable-state-fault", next);
     });
 }
 
-#[derive(Clone, Copy)]
-enum DurableFile {
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum DurableFile {
     Settings,
     Connections,
 }
@@ -91,7 +107,7 @@ pub(crate) enum DurableStatusKind {
     MigrationBlocked,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum DurableLayout {
     PostSplit,
@@ -103,6 +119,7 @@ pub(crate) enum DurableLayout {
 pub(crate) struct DurableFileStatus {
     pub(crate) status: DurableStatusKind,
     pub(crate) layout: DurableLayout,
+    pub(crate) can_recover: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -118,10 +135,12 @@ impl DurableStateStatus {
             settings: DurableFileStatus {
                 status: DurableStatusKind::Ready,
                 layout: DurableLayout::PostSplit,
+                can_recover: false,
             },
             connections: DurableFileStatus {
                 status: DurableStatusKind::Ready,
                 layout: DurableLayout::PostSplit,
+                can_recover: false,
             },
         }
     }
@@ -132,12 +151,146 @@ impl DurableStateStatus {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct InvalidSnapshot {
+    byte_length: u64,
+    sha256: String,
+}
+
+impl InvalidSnapshot {
+    fn from_bytes(bytes: &[u8]) -> Self {
+        Self {
+            byte_length: bytes.len() as u64,
+            sha256: sha256_hex(bytes),
+        }
+    }
+
+    fn matches(&self, bytes: &[u8]) -> bool {
+        self.byte_length == bytes.len() as u64 && self.sha256 == sha256_hex(bytes)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+struct RecoveryMarker {
+    file: DurableFile,
+    layout: DurableLayout,
+    backup_file_name: String,
+    byte_length: u64,
+    sha256: String,
+}
+
+impl RecoveryMarker {
+    fn new(
+        file: DurableFile,
+        layout: DurableLayout,
+        backup_file_name: String,
+        snapshot: &InvalidSnapshot,
+    ) -> io::Result<Self> {
+        let marker = Self {
+            file,
+            layout,
+            backup_file_name,
+            byte_length: snapshot.byte_length,
+            sha256: snapshot.sha256.clone(),
+        };
+        marker.validate()?;
+        Ok(marker)
+    }
+
+    fn snapshot(&self) -> InvalidSnapshot {
+        InvalidSnapshot {
+            byte_length: self.byte_length,
+            sha256: self.sha256.clone(),
+        }
+    }
+
+    fn validate(&self) -> io::Result<()> {
+        if self.file == DurableFile::Connections && self.layout != DurableLayout::PostSplit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid recovery marker",
+            ));
+        }
+        let expected_prefix = match self.file {
+            DurableFile::Settings => "config.invalid-",
+            DurableFile::Connections => "connections.invalid-",
+        };
+        let suffixless = self
+            .backup_file_name
+            .strip_prefix(expected_prefix)
+            .and_then(|value| value.strip_suffix(".json"))
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid recovery marker"))?;
+        let (timestamp, uuid) = suffixless
+            .split_once('-')
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid recovery marker"))?;
+        timestamp
+            .parse::<u64>()
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid recovery marker"))?;
+        uuid::Uuid::parse_str(uuid)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid recovery marker"))?;
+        if self.sha256.len() != 64
+            || !self
+                .sha256
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "invalid recovery marker",
+            ));
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct DurableGate {
+    pub(crate) status: DurableStateStatus,
+    settings_snapshot: Option<InvalidSnapshot>,
+    connections_snapshot: Option<InvalidSnapshot>,
+    recovery_incomplete: bool,
+}
+
+impl DurableGate {
+    pub(crate) fn ready() -> Self {
+        Self {
+            status: DurableStateStatus::ready(),
+            settings_snapshot: None,
+            connections_snapshot: None,
+            recovery_incomplete: false,
+        }
+    }
+
+    fn snapshot(&self, file: DurableFile) -> Option<&InvalidSnapshot> {
+        match file {
+            DurableFile::Settings => self.settings_snapshot.as_ref(),
+            DurableFile::Connections => self.connections_snapshot.as_ref(),
+        }
+    }
+
+    pub(crate) fn can_recover(&self, file: DurableFile) -> bool {
+        let status = match file {
+            DurableFile::Settings => &self.status.settings,
+            DurableFile::Connections => &self.status.connections,
+        };
+        status.status == DurableStatusKind::RecoverableInvalid
+            && status.can_recover
+            && self.snapshot(file).is_some()
+            && !self.recovery_incomplete
+    }
+
+    pub(crate) fn recovery_incomplete(&self) -> bool {
+        self.recovery_incomplete
+    }
+}
+
 pub(crate) struct ReadyDurableState {
     pub(crate) registry: SourceRegistry,
 }
 
 pub(crate) struct DurableLoadFailure {
-    pub(crate) status: DurableStateStatus,
+    pub(crate) gate: DurableGate,
 }
 
 fn status_for_error(error: &io::Error, layout: DurableLayout) -> DurableFileStatus {
@@ -148,6 +301,7 @@ fn status_for_error(error: &io::Error, layout: DurableLayout) -> DurableFileStat
             DurableStatusKind::Unavailable
         },
         layout,
+        can_recover: false,
     }
 }
 
@@ -155,18 +309,138 @@ fn ready_file(layout: DurableLayout) -> DurableFileStatus {
     DurableFileStatus {
         status: DurableStatusKind::Ready,
         layout,
+        can_recover: false,
     }
 }
 
-fn connection_result_status(result: &io::Result<ConnectionsConfig>) -> DurableFileStatus {
-    match result {
-        Ok(_) => ready_file(DurableLayout::PostSplit),
-        Err(error) => status_for_error(error, DurableLayout::PostSplit),
+fn unavailable_file(layout: DurableLayout) -> DurableFileStatus {
+    DurableFileStatus {
+        status: DurableStatusKind::Unavailable,
+        layout,
+        can_recover: false,
     }
+}
+
+fn status_and_snapshot_for_error(
+    error: &io::Error,
+    path: &Path,
+    layout: DurableLayout,
+) -> (DurableFileStatus, Option<InvalidSnapshot>) {
+    if error.kind() != io::ErrorKind::InvalidData {
+        return (status_for_error(error, layout), None);
+    }
+    match crate::storage::read_regular_bytes(path) {
+        Ok(Some(bytes)) => (
+            DurableFileStatus {
+                status: DurableStatusKind::RecoverableInvalid,
+                layout,
+                can_recover: true,
+            },
+            Some(InvalidSnapshot::from_bytes(&bytes)),
+        ),
+        _ => (unavailable_file(layout), None),
+    }
+}
+
+fn connection_result_status(
+    result: &io::Result<ConnectionsConfig>,
+    path: &Path,
+) -> (DurableFileStatus, Option<InvalidSnapshot>) {
+    match result {
+        Ok(_) => (ready_file(DurableLayout::PostSplit), None),
+        Err(error) => {
+            status_and_snapshot_for_error(error, path, DurableLayout::PostSplit)
+        }
+    }
+}
+
+fn failure_gate(
+    settings: DurableFileStatus,
+    connections: DurableFileStatus,
+    settings_snapshot: Option<InvalidSnapshot>,
+    connections_snapshot: Option<InvalidSnapshot>,
+) -> DurableGate {
+    DurableGate {
+        status: DurableStateStatus {
+            settings,
+            connections,
+        },
+        settings_snapshot,
+        connections_snapshot,
+        recovery_incomplete: false,
+    }
+}
+
+fn recovery_incomplete_gate(
+    marker: Option<&RecoveryMarker>,
+    previous: Option<&DurableGate>,
+) -> DurableGate {
+    let mut gate = previous.cloned().unwrap_or_else(DurableGate::ready);
+    match marker.map(|value| value.file) {
+        Some(DurableFile::Settings) => {
+            gate.status.settings = DurableFileStatus {
+                status: DurableStatusKind::MigrationBlocked,
+                layout: marker.expect("present marker").layout,
+                can_recover: false,
+            };
+            gate.settings_snapshot = None;
+        }
+        Some(DurableFile::Connections) => {
+            gate.status.connections = DurableFileStatus {
+                status: DurableStatusKind::MigrationBlocked,
+                layout: DurableLayout::PostSplit,
+                can_recover: false,
+            };
+            gate.connections_snapshot = None;
+        }
+        None => {
+            gate.status.settings = DurableFileStatus {
+                status: DurableStatusKind::MigrationBlocked,
+                layout: DurableLayout::PostSplit,
+                can_recover: false,
+            };
+            gate.status.connections = DurableFileStatus {
+                status: DurableStatusKind::MigrationBlocked,
+                layout: DurableLayout::PostSplit,
+                can_recover: false,
+            };
+            gate.settings_snapshot = None;
+            gate.connections_snapshot = None;
+        }
+    }
+    gate.status.settings.can_recover = false;
+    gate.status.connections.can_recover = false;
+    gate.settings_snapshot = None;
+    gate.connections_snapshot = None;
+    gate.recovery_incomplete = true;
+    gate
 }
 
 fn connections_path() -> io::Result<PathBuf> {
     config::config_dir_file("connections.json")
+}
+
+fn recovery_marker_path() -> io::Result<PathBuf> {
+    config::config_dir_file("durable-recovery.json")
+}
+
+fn load_recovery_marker(path: &Path) -> io::Result<Option<RecoveryMarker>> {
+    let Some(bytes) = crate::storage::read_regular_bytes(path)? else {
+        return Ok(None);
+    };
+    let marker: RecoveryMarker = serde_json::from_slice(&bytes)
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid recovery marker"))?;
+    marker.validate()?;
+    Ok(Some(marker))
+}
+
+fn install_recovery_marker(path: &Path, marker: &RecoveryMarker) -> io::Result<()> {
+    marker.validate()?;
+    crate::storage::install_json_new(path, marker)?;
+    if load_recovery_marker(path)?.as_ref() != Some(marker) {
+        return Err(io::Error::other("recovery marker verification failed"));
+    }
+    Ok(())
 }
 
 fn classify_layout(connections_path: &Path) -> DurableLayout {
@@ -244,6 +518,623 @@ fn unix_timestamp_seconds() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs()
+}
+
+fn invalid_backup_name(file: DurableFile) -> String {
+    let stem = match file {
+        DurableFile::Settings => "config",
+        DurableFile::Connections => "connections",
+    };
+    format!(
+        "{stem}.invalid-{}-{}.json",
+        unix_timestamp_seconds(),
+        uuid::Uuid::new_v4()
+    )
+}
+
+fn validate_selected_file(file: DurableFile, path: &Path) -> io::Result<()> {
+    match file {
+        DurableFile::Settings => config::load_unmigrated_at(path).map(|_| ()),
+        DurableFile::Connections => connections::load_at(path).map(|_| ()),
+    }
+}
+
+fn install_selected_default(file: DurableFile, path: &Path) -> io::Result<()> {
+    match file {
+        DurableFile::Settings => {
+            let value = AppConfig::default();
+            value
+                .validate()
+                .map_err(|_| io::Error::other("fresh settings failed validation"))?;
+            crate::storage::install_json_new(path, &value)
+        }
+        DurableFile::Connections => {
+            let value = ConnectionsConfig::default();
+            value
+                .validate()
+                .map_err(|_| io::Error::other("fresh connections failed validation"))?;
+            crate::storage::install_json_new(path, &value)
+        }
+    }
+}
+
+#[derive(Debug)]
+enum RecoveryFileError {
+    Stale,
+    BeforeMarker,
+    BeforeRename,
+    AfterRename { backup_file_name: String },
+    Incomplete {
+        backup_file_name: Option<String>,
+    },
+}
+
+fn finish_selected_recovery(
+    file: DurableFile,
+    path: &Path,
+    backup_path: &Path,
+    current: &[u8],
+    expected: &InvalidSnapshot,
+) -> io::Result<()> {
+    crate::storage::harden_existing_regular(backup_path)?;
+    if !crate::storage::is_private_regular(backup_path) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "preserved file is not private",
+        ));
+    }
+    let preserved = crate::storage::read_regular_bytes(backup_path)?
+        .ok_or_else(|| io::Error::other("preserved file disappeared"))?;
+    if !expected.matches(&preserved) || preserved != current {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "preserved file verification failed",
+        ));
+    }
+    install_selected_default(file, path)?;
+    validate_selected_file(file, path)
+}
+
+#[cfg(test)]
+fn recover_selected_at_with(
+    file: DurableFile,
+    path: &Path,
+    expected: &InvalidSnapshot,
+    backup_file_name: String,
+    finish: impl FnOnce(
+        DurableFile,
+        &Path,
+        &Path,
+        &[u8],
+        &InvalidSnapshot,
+    ) -> io::Result<()>,
+) -> Result<String, RecoveryFileError> {
+    recover_selected_at_with_hooks(
+        file,
+        path,
+        expected,
+        backup_file_name,
+        || Ok(()),
+        finish,
+    )
+}
+
+fn recover_selected_at_with_hooks(
+    file: DurableFile,
+    path: &Path,
+    expected: &InvalidSnapshot,
+    backup_file_name: String,
+    before_rename: impl FnOnce() -> io::Result<()>,
+    finish: impl FnOnce(
+        DurableFile,
+        &Path,
+        &Path,
+        &[u8],
+        &InvalidSnapshot,
+    ) -> io::Result<()>,
+) -> Result<String, RecoveryFileError> {
+    let current = crate::storage::read_regular_bytes(path)
+        .map_err(|_| RecoveryFileError::Stale)?
+        .ok_or(RecoveryFileError::Stale)?;
+    if !expected.matches(&current) {
+        return Err(RecoveryFileError::Stale);
+    }
+    match validate_selected_file(file, path) {
+        Err(error) if error.kind() == io::ErrorKind::InvalidData => {}
+        _ => return Err(RecoveryFileError::Stale),
+    }
+
+    let parent = path.parent().ok_or(RecoveryFileError::BeforeRename)?;
+    let backup_path = parent.join(&backup_file_name);
+    before_rename().map_err(|_| RecoveryFileError::BeforeMarker)?;
+    crate::storage::rename_noreplace(path, &backup_path)
+        .map_err(|_| RecoveryFileError::BeforeRename)?;
+
+    if finish(file, path, &backup_path, &current, expected).is_err() {
+        return Err(RecoveryFileError::AfterRename { backup_file_name });
+    }
+    Ok(backup_file_name)
+}
+
+fn recover_selected_at_with_marker(
+    file: DurableFile,
+    path: &Path,
+    expected: &InvalidSnapshot,
+    layout: DurableLayout,
+    marker_path: &Path,
+) -> Result<String, RecoveryFileError> {
+    recover_selected_at_with_marker_and_finish(
+        file,
+        path,
+        expected,
+        layout,
+        marker_path,
+        finish_selected_recovery,
+    )
+}
+
+fn recover_selected_at_with_marker_and_finish(
+    file: DurableFile,
+    path: &Path,
+    expected: &InvalidSnapshot,
+    layout: DurableLayout,
+    marker_path: &Path,
+    finish: impl FnOnce(
+        DurableFile,
+        &Path,
+        &Path,
+        &[u8],
+        &InvalidSnapshot,
+    ) -> io::Result<()>,
+) -> Result<String, RecoveryFileError> {
+    let backup_file_name = invalid_backup_name(file);
+    let marker = RecoveryMarker::new(file, layout, backup_file_name.clone(), expected)
+        .map_err(|_| RecoveryFileError::BeforeMarker)?;
+    let result = recover_selected_at_with_hooks(
+        file,
+        path,
+        expected,
+        backup_file_name.clone(),
+        || install_recovery_marker(marker_path, &marker),
+        finish,
+    );
+    match result {
+        Ok(backup_file_name) => {
+            crate::storage::remove_private_regular(marker_path).map_err(|_| {
+                RecoveryFileError::Incomplete {
+                    backup_file_name: Some(backup_file_name.clone()),
+                }
+            })?;
+            Ok(backup_file_name)
+        }
+        Err(RecoveryFileError::BeforeRename) => {
+            crate::storage::remove_private_regular(marker_path)
+                .map_err(|_| RecoveryFileError::Incomplete {
+                    backup_file_name: None,
+                })?;
+            Err(RecoveryFileError::BeforeRename)
+        }
+        other => other,
+    }
+}
+
+fn selected_path(parent: &Path, file: DurableFile) -> PathBuf {
+    match file {
+        DurableFile::Settings => parent.join("config.json"),
+        DurableFile::Connections => parent.join("connections.json"),
+    }
+}
+
+fn exact_private_backup(
+    backup_path: &Path,
+    expected: &InvalidSnapshot,
+) -> io::Result<Option<Vec<u8>>> {
+    let Some(bytes) = crate::storage::read_regular_bytes(backup_path)? else {
+        return Ok(None);
+    };
+    if !crate::storage::is_private_regular(backup_path) || !expected.matches(&bytes) {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "preserved recovery file does not match its marker",
+        ));
+    }
+    Ok(Some(bytes))
+}
+
+fn resume_recovery_at(marker_path: &Path, marker: &RecoveryMarker) -> io::Result<()> {
+    marker.validate()?;
+    let parent = marker_path
+        .parent()
+        .ok_or_else(|| io::Error::other("recovery marker has no parent"))?;
+    let path = selected_path(parent, marker.file);
+    let backup_path = parent.join(&marker.backup_file_name);
+    let expected = marker.snapshot();
+    let current = crate::storage::read_regular_bytes(&path)?;
+    let backup = exact_private_backup(&backup_path, &expected)?;
+
+    match (current, backup) {
+        (Some(current), None) if expected.matches(&current) => {
+            match validate_selected_file(marker.file, &path) {
+                Err(error) if error.kind() == io::ErrorKind::InvalidData => {}
+                _ => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "recovery state is ambiguous",
+                    ));
+                }
+            }
+            crate::storage::rename_noreplace(&path, &backup_path)?;
+            finish_selected_recovery(marker.file, &path, &backup_path, &current, &expected)?;
+        }
+        (None, Some(backup)) => {
+            finish_selected_recovery(marker.file, &path, &backup_path, &backup, &expected)?;
+        }
+        (Some(_), Some(_)) if validate_selected_file(marker.file, &path).is_ok() => {}
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "recovery state is ambiguous",
+            ));
+        }
+    }
+
+    crate::storage::remove_private_regular(marker_path)
+}
+
+fn unavailable_after_recovery(
+    mut gate: DurableGate,
+    file: DurableFile,
+    recovery_incomplete: bool,
+) -> DurableGate {
+    match file {
+        DurableFile::Settings => {
+            let layout = gate.status.settings.layout;
+            gate.status.settings = unavailable_file(layout);
+            gate.settings_snapshot = None;
+        }
+        DurableFile::Connections => {
+            gate.status.connections = unavailable_file(DurableLayout::PostSplit);
+            gate.connections_snapshot = None;
+        }
+    }
+    gate.recovery_incomplete = recovery_incomplete;
+    gate
+}
+
+pub(crate) enum RecoveryTransaction {
+    Changed {
+        backup_file_name: String,
+        reconnect_required: bool,
+    },
+    Stale,
+    Failed {
+        gate: DurableGate,
+        backup_file_name: Option<String>,
+        message: &'static str,
+    },
+}
+
+pub(crate) fn recover_invalid_file(
+    file: DurableFile,
+    expected_gate: DurableGate,
+) -> RecoveryTransaction {
+    if !expected_gate.can_recover(file) {
+        return RecoveryTransaction::Stale;
+    }
+    let expected = expected_gate
+        .snapshot(file)
+        .expect("recoverable gate must retain its exact snapshot")
+        .clone();
+    let reconnect_required = file == DurableFile::Connections
+        || expected_gate.status.settings.layout == DurableLayout::LegacyCombined;
+
+    let _process_guard = DURABLE_LOAD_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let durable_lock_path = match config::config_dir_file("durable-state.lock") {
+        Ok(path) => path,
+        Err(_) => {
+            return RecoveryTransaction::Failed {
+                gate: unavailable_after_recovery(expected_gate, file, false),
+                backup_file_name: None,
+                message: "Vela could not safely open its recovery lock.",
+            };
+        }
+    };
+    let durable_lock = match crate::storage::open_private_lock(&durable_lock_path) {
+        Ok(lock) => lock,
+        Err(_) => {
+            return RecoveryTransaction::Failed {
+                gate: unavailable_after_recovery(expected_gate, file, false),
+                backup_file_name: None,
+                message: "Vela could not safely open its recovery lock.",
+            };
+        }
+    };
+    if durable_lock.lock().is_err() {
+        return RecoveryTransaction::Failed {
+            gate: unavailable_after_recovery(expected_gate, file, false),
+            backup_file_name: None,
+            message: "Vela could not safely acquire its recovery lock.",
+        };
+    }
+
+    let (path, lock_path) = match file {
+        DurableFile::Settings => (
+            config::config_path(),
+            config::config_dir_file("config.lock"),
+        ),
+        DurableFile::Connections => (
+            connections_path(),
+            config::config_dir_file("connections.lock"),
+        ),
+    };
+    let (path, lock_path) = match (path, lock_path) {
+        (Ok(path), Ok(lock_path)) => (path, lock_path),
+        _ => {
+            return RecoveryTransaction::Failed {
+                gate: unavailable_after_recovery(expected_gate, file, false),
+                backup_file_name: None,
+                message: "Vela could not safely resolve the damaged file.",
+            };
+        }
+    };
+    let marker_path = match recovery_marker_path() {
+        Ok(path) => path,
+        Err(_) => {
+            return RecoveryTransaction::Failed {
+                gate: unavailable_after_recovery(expected_gate, file, false),
+                backup_file_name: None,
+                message: "Vela could not safely resolve its recovery record.",
+            };
+        }
+    };
+    let layout = match file {
+        DurableFile::Settings => expected_gate.status.settings.layout,
+        DurableFile::Connections => DurableLayout::PostSplit,
+    };
+
+    let result = match file {
+        DurableFile::Settings => {
+            let _selected_process_guard = config::lock_process();
+            let lock = match crate::storage::open_private_lock(&lock_path) {
+                Ok(lock) => lock,
+                Err(_) => {
+                    return RecoveryTransaction::Failed {
+                        gate: unavailable_after_recovery(expected_gate, file, false),
+                        backup_file_name: None,
+                        message: "Vela could not safely open the settings lock.",
+                    };
+                }
+            };
+            if lock.lock().is_err() {
+                return RecoveryTransaction::Failed {
+                    gate: unavailable_after_recovery(expected_gate, file, false),
+                    backup_file_name: None,
+                    message: "Vela could not safely acquire the settings lock.",
+                };
+            }
+            recover_selected_at_with_marker(file, &path, &expected, layout, &marker_path)
+        }
+        DurableFile::Connections => {
+            let _selected_process_guard = connections::lock_process();
+            let lock = match crate::storage::open_private_lock(&lock_path) {
+                Ok(lock) => lock,
+                Err(_) => {
+                    return RecoveryTransaction::Failed {
+                        gate: unavailable_after_recovery(expected_gate, file, false),
+                        backup_file_name: None,
+                        message: "Vela could not safely open the connections lock.",
+                    };
+                }
+            };
+            if lock.lock().is_err() {
+                return RecoveryTransaction::Failed {
+                    gate: unavailable_after_recovery(expected_gate, file, false),
+                    backup_file_name: None,
+                    message: "Vela could not safely acquire the connections lock.",
+                };
+            }
+            recover_selected_at_with_marker(file, &path, &expected, layout, &marker_path)
+        }
+    };
+
+    match result {
+        Ok(backup_file_name) => RecoveryTransaction::Changed {
+            backup_file_name,
+            reconnect_required,
+        },
+        Err(RecoveryFileError::Stale) => RecoveryTransaction::Stale,
+        Err(RecoveryFileError::BeforeMarker) => match load_recovery_marker(&marker_path) {
+            Ok(None) => RecoveryTransaction::Failed {
+                gate: expected_gate,
+                backup_file_name: None,
+                message: "Vela could not safely record the recovery attempt.",
+            },
+            Ok(Some(marker)) => RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(Some(&marker), Some(&expected_gate)),
+                backup_file_name: None,
+                message: "Vela could not verify its recovery record. Recovery remains blocked.",
+            },
+            Err(_) => RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(None, Some(&expected_gate)),
+                backup_file_name: None,
+                message: "Vela could not verify its recovery record. Recovery remains blocked.",
+            },
+        },
+        Err(RecoveryFileError::BeforeRename) => RecoveryTransaction::Failed {
+            gate: expected_gate,
+            backup_file_name: None,
+            message: "Vela could not safely rename the damaged file.",
+        },
+        Err(RecoveryFileError::AfterRename { backup_file_name }) => {
+            let marker =
+                RecoveryMarker::new(file, layout, backup_file_name.clone(), &expected).ok();
+            RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(marker.as_ref(), Some(&expected_gate)),
+                backup_file_name: Some(backup_file_name),
+                message: "Vela preserved the damaged file but could not safely create the fresh file.",
+            }
+        }
+        Err(RecoveryFileError::Incomplete { backup_file_name }) => {
+            let marker = backup_file_name.as_ref().and_then(|backup_file_name| {
+                RecoveryMarker::new(file, layout, backup_file_name.clone(), &expected).ok()
+            });
+            RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(marker.as_ref(), Some(&expected_gate)),
+                backup_file_name,
+                message: "Vela preserved the damaged file, but recovery is not yet complete.",
+            }
+        }
+    }
+}
+
+pub(crate) fn resume_incomplete_recovery(
+    expected_gate: DurableGate,
+) -> RecoveryTransaction {
+    let _process_guard = DURABLE_LOAD_LOCK
+        .lock()
+        .unwrap_or_else(|error| error.into_inner());
+    let durable_lock_path = match config::config_dir_file("durable-state.lock") {
+        Ok(path) => path,
+        Err(_) => {
+            return RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(None, Some(&expected_gate)),
+                backup_file_name: None,
+                message: "Vela could not safely open its recovery lock.",
+            };
+        }
+    };
+    let durable_lock = match crate::storage::open_private_lock(&durable_lock_path) {
+        Ok(lock) => lock,
+        Err(_) => {
+            return RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(None, Some(&expected_gate)),
+                backup_file_name: None,
+                message: "Vela could not safely open its recovery lock.",
+            };
+        }
+    };
+    if durable_lock.lock().is_err() {
+        return RecoveryTransaction::Failed {
+            gate: recovery_incomplete_gate(None, Some(&expected_gate)),
+            backup_file_name: None,
+            message: "Vela could not safely acquire its recovery lock.",
+        };
+    }
+
+    let marker_path = match recovery_marker_path() {
+        Ok(path) => path,
+        Err(_) => {
+            return RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(None, Some(&expected_gate)),
+                backup_file_name: None,
+                message: "Vela could not safely resolve its recovery record.",
+            };
+        }
+    };
+    let marker = match load_recovery_marker(&marker_path) {
+        Ok(Some(marker)) => marker,
+        Ok(None) => {
+            return RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(None, Some(&expected_gate)),
+                backup_file_name: None,
+                message: "Vela's recovery record is missing. Recovery remains blocked.",
+            };
+        }
+        Err(_) => {
+            return RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(None, Some(&expected_gate)),
+                backup_file_name: None,
+                message: "Vela could not verify its recovery record. Recovery remains blocked.",
+            };
+        }
+    };
+
+    let (path, lock_path) = match marker.file {
+        DurableFile::Settings => (
+            config::config_path(),
+            config::config_dir_file("config.lock"),
+        ),
+        DurableFile::Connections => (
+            connections_path(),
+            config::config_dir_file("connections.lock"),
+        ),
+    };
+    if path.is_err() || lock_path.is_err() {
+        return RecoveryTransaction::Failed {
+            gate: recovery_incomplete_gate(Some(&marker), Some(&expected_gate)),
+            backup_file_name: None,
+            message: "Vela could not safely resolve the recovering file.",
+        };
+    }
+    let lock_path = lock_path.expect("checked recovery lock path");
+
+    let result = match marker.file {
+        DurableFile::Settings => {
+            let _selected_process_guard = config::lock_process();
+            let lock = match crate::storage::open_private_lock(&lock_path) {
+                Ok(lock) => lock,
+                Err(_) => {
+                    return RecoveryTransaction::Failed {
+                        gate: recovery_incomplete_gate(Some(&marker), Some(&expected_gate)),
+                        backup_file_name: None,
+                        message: "Vela could not safely open the settings lock.",
+                    };
+                }
+            };
+            if lock.lock().is_err() {
+                return RecoveryTransaction::Failed {
+                    gate: recovery_incomplete_gate(Some(&marker), Some(&expected_gate)),
+                    backup_file_name: None,
+                    message: "Vela could not safely acquire the settings lock.",
+                };
+            }
+            resume_recovery_at(&marker_path, &marker)
+        }
+        DurableFile::Connections => {
+            let _selected_process_guard = connections::lock_process();
+            let lock = match crate::storage::open_private_lock(&lock_path) {
+                Ok(lock) => lock,
+                Err(_) => {
+                    return RecoveryTransaction::Failed {
+                        gate: recovery_incomplete_gate(Some(&marker), Some(&expected_gate)),
+                        backup_file_name: None,
+                        message: "Vela could not safely open the connections lock.",
+                    };
+                }
+            };
+            if lock.lock().is_err() {
+                return RecoveryTransaction::Failed {
+                    gate: recovery_incomplete_gate(Some(&marker), Some(&expected_gate)),
+                    backup_file_name: None,
+                    message: "Vela could not safely acquire the connections lock.",
+                };
+            }
+            resume_recovery_at(&marker_path, &marker)
+        }
+    };
+
+    match result {
+        Ok(()) => RecoveryTransaction::Changed {
+            backup_file_name: marker.backup_file_name,
+            reconnect_required: marker.file == DurableFile::Connections
+                || marker.layout == DurableLayout::LegacyCombined,
+        },
+        Err(_) => {
+            let backup_file_name = marker_path.parent().and_then(|parent| {
+                exact_private_backup(&parent.join(&marker.backup_file_name), &marker.snapshot())
+                    .ok()
+                    .flatten()
+                    .map(|_| marker.backup_file_name.clone())
+            });
+            RecoveryTransaction::Failed {
+                gate: recovery_incomplete_gate(Some(&marker), Some(&expected_gate)),
+                backup_file_name,
+                message: "Vela could not safely finish the recorded recovery. Recovery remains blocked.",
+            }
+        }
+    }
 }
 
 fn split_connections(
@@ -366,10 +1257,12 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(path) => path,
         Err(error) => {
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: status_for_error(&error, DurableLayout::PostSplit),
-                    connections: status_for_error(&error, DurableLayout::PostSplit),
-                },
+                gate: failure_gate(
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    None,
+                    None,
+                ),
             });
         }
     };
@@ -377,30 +1270,57 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(file) => file,
         Err(error) => {
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: status_for_error(&error, DurableLayout::PostSplit),
-                    connections: status_for_error(&error, DurableLayout::PostSplit),
-                },
+                gate: failure_gate(
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    None,
+                    None,
+                ),
             });
         }
     };
     if let Err(error) = durable_lock.lock() {
         return Err(DurableLoadFailure {
-            status: DurableStateStatus {
-                settings: status_for_error(&error, DurableLayout::PostSplit),
-                connections: status_for_error(&error, DurableLayout::PostSplit),
-            },
+            gate: failure_gate(
+                status_for_error(&error, DurableLayout::PostSplit),
+                status_for_error(&error, DurableLayout::PostSplit),
+                None,
+                None,
+            ),
         });
+    }
+    let marker_path = match recovery_marker_path() {
+        Ok(path) => path,
+        Err(_) => {
+            return Err(DurableLoadFailure {
+                gate: recovery_incomplete_gate(None, None),
+            });
+        }
+    };
+    match load_recovery_marker(&marker_path) {
+        Ok(None) => {}
+        Ok(Some(marker)) => {
+            return Err(DurableLoadFailure {
+                gate: recovery_incomplete_gate(Some(&marker), None),
+            });
+        }
+        Err(_) => {
+            return Err(DurableLoadFailure {
+                gate: recovery_incomplete_gate(None, None),
+            });
+        }
     }
 
     let config_path = match config::config_path() {
         Ok(path) => path,
         Err(error) => {
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: status_for_error(&error, DurableLayout::PostSplit),
-                    connections: ready_file(DurableLayout::PostSplit),
-                },
+                gate: failure_gate(
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    ready_file(DurableLayout::PostSplit),
+                    None,
+                    None,
+                ),
             });
         }
     };
@@ -408,10 +1328,12 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(path) => path,
         Err(error) => {
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: ready_file(DurableLayout::PostSplit),
-                    connections: status_for_error(&error, DurableLayout::PostSplit),
-                },
+                gate: failure_gate(
+                    ready_file(DurableLayout::PostSplit),
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    None,
+                    None,
+                ),
             });
         }
     };
@@ -419,10 +1341,12 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(path) => path,
         Err(error) => {
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: status_for_error(&error, DurableLayout::PostSplit),
-                    connections: ready_file(DurableLayout::PostSplit),
-                },
+                gate: failure_gate(
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    ready_file(DurableLayout::PostSplit),
+                    None,
+                    None,
+                ),
             });
         }
     };
@@ -430,10 +1354,12 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(path) => path,
         Err(error) => {
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: ready_file(DurableLayout::PostSplit),
-                    connections: status_for_error(&error, DurableLayout::PostSplit),
-                },
+                gate: failure_gate(
+                    ready_file(DurableLayout::PostSplit),
+                    status_for_error(&error, DurableLayout::PostSplit),
+                    None,
+                    None,
+                ),
             });
         }
     };
@@ -443,22 +1369,34 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
     match crate::storage::read_regular_bytes(&config_path) {
         Ok(_) => {}
         Err(error) => {
+            let (settings, settings_snapshot) =
+                status_and_snapshot_for_error(&error, &config_path, layout);
+            let (connections, connections_snapshot) =
+                connection_result_status(&connections_result, &connections_path);
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: status_for_error(&error, layout),
-                    connections: connection_result_status(&connections_result),
-                },
+                gate: failure_gate(
+                    settings,
+                    connections,
+                    settings_snapshot,
+                    connections_snapshot,
+                ),
             });
         }
     }
     let raw_settings = match config::load_unmigrated_at(&config_path) {
         Ok(settings) => settings,
         Err(error) => {
+            let (settings, settings_snapshot) =
+                status_and_snapshot_for_error(&error, &config_path, layout);
+            let (connections, connections_snapshot) =
+                connection_result_status(&connections_result, &connections_path);
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: status_for_error(&error, layout),
-                    connections: connection_result_status(&connections_result),
-                },
+                gate: failure_gate(
+                    settings,
+                    connections,
+                    settings_snapshot,
+                    connections_snapshot,
+                ),
             });
         }
     };
@@ -470,11 +1408,15 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
     let existing_connections = match connections_result {
         Ok(connections) => connections,
         Err(error) => {
+            let (connections, connections_snapshot) =
+                status_and_snapshot_for_error(&error, &connections_path, DurableLayout::PostSplit);
             return Err(DurableLoadFailure {
-                status: DurableStateStatus {
-                    settings: ready_file(settings_layout),
-                    connections: status_for_error(&error, DurableLayout::PostSplit),
-                },
+                gate: failure_gate(
+                    ready_file(settings_layout),
+                    connections,
+                    None,
+                    connections_snapshot,
+                ),
             });
         }
     };
@@ -489,13 +1431,16 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
             crate::playlists::migrate_source_id,
         )
         .map_err(|_| DurableLoadFailure {
-            status: DurableStateStatus {
-                settings: DurableFileStatus {
+            gate: failure_gate(
+                DurableFileStatus {
                     status: DurableStatusKind::MigrationBlocked,
                     layout: DurableLayout::LegacyCombined,
+                    can_recover: false,
                 },
-                connections: ready_file(DurableLayout::PostSplit),
-            },
+                ready_file(DurableLayout::PostSplit),
+                None,
+                None,
+            ),
         })?
     } else {
         (raw_settings, existing_connections)
@@ -503,12 +1448,22 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
 
     let (_settings, connections) = loaded;
     let registry = build_registry(&connections).map_err(|_| DurableLoadFailure {
-        status: DurableStateStatus {
-            settings: ready_file(DurableLayout::PostSplit),
-            connections: DurableFileStatus {
-                status: DurableStatusKind::RecoverableInvalid,
-                layout: DurableLayout::PostSplit,
-            },
+        gate: {
+            let error = io::Error::new(
+                io::ErrorKind::InvalidData,
+                "persisted connection could not be restored",
+            );
+            let (status, snapshot) = status_and_snapshot_for_error(
+                &error,
+                &connections_path,
+                DurableLayout::PostSplit,
+            );
+            failure_gate(
+                ready_file(DurableLayout::PostSplit),
+                status,
+                None,
+                snapshot,
+            )
         },
     })?;
     Ok(ReadyDurableState { registry })
@@ -557,6 +1512,248 @@ mod tests {
         assert!(status.is_ready());
         status.connections.status = DurableStatusKind::RecoverableInvalid;
         assert!(!status.is_ready());
+    }
+
+    #[test]
+    fn recoverable_status_retains_an_exact_private_snapshot() {
+        let root = temp_root("status-snapshot");
+        let path = root.join("config.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        fs::write(&path, original).unwrap();
+        let error = io::Error::new(io::ErrorKind::InvalidData, "synthetic invalid settings");
+
+        let (status, snapshot) =
+            status_and_snapshot_for_error(&error, &path, DurableLayout::PostSplit);
+        assert_eq!(status.status, DurableStatusKind::RecoverableInvalid);
+        assert!(status.can_recover);
+        let snapshot = snapshot.unwrap();
+        assert!(snapshot.matches(original));
+        let gate = failure_gate(
+            status,
+            ready_file(DurableLayout::PostSplit),
+            Some(snapshot.clone()),
+            None,
+        );
+        assert!(gate.can_recover(DurableFile::Settings));
+        let mut unavailable = gate.clone();
+        unavailable.status.settings = unavailable_file(DurableLayout::PostSplit);
+        assert!(!unavailable.can_recover(DurableFile::Settings));
+        let mut incomplete = gate;
+        incomplete.recovery_incomplete = true;
+        assert!(!incomplete.can_recover(DurableFile::Settings));
+
+        let mut changed = original.to_vec();
+        changed[1] ^= 1;
+        assert_eq!(changed.len(), original.len());
+        assert!(!snapshot.matches(&changed));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_refuses_a_non_regular_path() {
+        let root = temp_root("recover-directory");
+        let config_path = root.join("config.json");
+        fs::create_dir(&config_path).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(b"synthetic");
+
+        assert!(matches!(
+            recover_selected_at_with(
+                DurableFile::Settings,
+                &config_path,
+                &snapshot,
+                "config.invalid-directory.json".to_string(),
+                finish_selected_recovery,
+            ),
+            Err(RecoveryFileError::Stale)
+        ));
+        assert!(fs::metadata(&config_path).unwrap().is_dir());
+        assert!(!root.join("config.invalid-directory.json").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_marker_is_strict_and_cannot_escape_its_directory() {
+        let root = temp_root("recovery-marker-invalid");
+        let marker_path = root.join("durable-recovery.json");
+        let snapshot = InvalidSnapshot::from_bytes(b"damaged");
+        let invalid = serde_json::json!({
+            "file": "settings",
+            "layout": "post_split",
+            "backupFileName": "../config.invalid-1-00000000-0000-0000-0000-000000000000.json",
+            "byteLength": snapshot.byte_length,
+            "sha256": snapshot.sha256,
+            "unexpected": true,
+        });
+        crate::storage::install_json_new(&marker_path, &invalid).unwrap();
+
+        assert!(load_recovery_marker(&marker_path).is_err());
+        assert!(!root
+            .parent()
+            .unwrap()
+            .join("config.invalid-1-00000000-0000-0000-0000-000000000000.json")
+            .exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_marker_blocks_only_its_selected_file() {
+        let snapshot = InvalidSnapshot::from_bytes(b"damaged");
+        let marker = RecoveryMarker::new(
+            DurableFile::Settings,
+            DurableLayout::LegacyCombined,
+            "config.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string(),
+            &snapshot,
+        )
+        .unwrap();
+        let gate = recovery_incomplete_gate(Some(&marker), None);
+
+        assert!(gate.recovery_incomplete());
+        assert_eq!(
+            gate.status.settings.status,
+            DurableStatusKind::MigrationBlocked
+        );
+        assert_eq!(
+            gate.status.settings.layout,
+            DurableLayout::LegacyCombined
+        );
+        assert_eq!(gate.status.connections.status, DurableStatusKind::Ready);
+        assert!(!gate.can_recover(DurableFile::Settings));
+
+        let previous = failure_gate(
+            DurableFileStatus {
+                status: DurableStatusKind::RecoverableInvalid,
+                layout: DurableLayout::PostSplit,
+                can_recover: true,
+            },
+            DurableFileStatus {
+                status: DurableStatusKind::RecoverableInvalid,
+                layout: DurableLayout::PostSplit,
+                can_recover: true,
+            },
+            Some(snapshot.clone()),
+            Some(snapshot),
+        );
+        let blocked = recovery_incomplete_gate(Some(&marker), Some(&previous));
+        assert!(!blocked.status.settings.can_recover);
+        assert!(!blocked.status.connections.can_recover);
+        assert!(!blocked.can_recover(DurableFile::Settings));
+        assert!(!blocked.can_recover(DurableFile::Connections));
+    }
+
+    #[test]
+    fn retry_resumes_before_the_recorded_rename() {
+        let root = temp_root("recovery-resume-before-rename");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        fs::write(&config_path, original).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+        let marker = RecoveryMarker::new(
+            DurableFile::Settings,
+            DurableLayout::PostSplit,
+            "config.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string(),
+            &snapshot,
+        )
+        .unwrap();
+        install_recovery_marker(&marker_path, &marker).unwrap();
+
+        resume_recovery_at(&marker_path, &marker).unwrap();
+
+        assert!(!marker_path.exists());
+        assert_eq!(
+            fs::read(root.join(&marker.backup_file_name)).unwrap(),
+            original
+        );
+        let fresh: serde_json::Value =
+            serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert_eq!(fresh, serde_json::to_value(AppConfig::default()).unwrap());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retry_resumes_after_the_recorded_rename() {
+        let root = temp_root("recovery-resume-after-rename");
+        let connections_path = root.join("connections.json");
+        let marker_path = root.join("durable-recovery.json");
+        let original = br#"{"sources":[{"kind":"future"}]}"#;
+        let snapshot = InvalidSnapshot::from_bytes(original);
+        let marker = RecoveryMarker::new(
+            DurableFile::Connections,
+            DurableLayout::PostSplit,
+            "connections.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string(),
+            &snapshot,
+        )
+        .unwrap();
+        crate::storage::write_private_new(&root.join(&marker.backup_file_name), original).unwrap();
+        install_recovery_marker(&marker_path, &marker).unwrap();
+
+        resume_recovery_at(&marker_path, &marker).unwrap();
+
+        assert!(!marker_path.exists());
+        assert_eq!(
+            connections::load_at(&connections_path).unwrap(),
+            ConnectionsConfig::default()
+        );
+        assert_eq!(
+            fs::read(root.join(&marker.backup_file_name)).unwrap(),
+            original
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retry_finishes_after_fresh_file_installation() {
+        let root = temp_root("recovery-resume-after-install");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        let valid = br#"{"continue_playing":"off"}"#;
+        let snapshot = InvalidSnapshot::from_bytes(original);
+        let marker = RecoveryMarker::new(
+            DurableFile::Settings,
+            DurableLayout::PostSplit,
+            "config.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string(),
+            &snapshot,
+        )
+        .unwrap();
+        crate::storage::write_private_new(&root.join(&marker.backup_file_name), original).unwrap();
+        fs::write(&config_path, valid).unwrap();
+        install_recovery_marker(&marker_path, &marker).unwrap();
+
+        resume_recovery_at(&marker_path, &marker).unwrap();
+
+        assert!(!marker_path.exists());
+        assert_eq!(fs::read(&config_path).unwrap(), valid);
+        assert_eq!(
+            fs::read(root.join(&marker.backup_file_name)).unwrap(),
+            original
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retry_refuses_an_ambiguous_recorded_state() {
+        let root = temp_root("recovery-resume-ambiguous");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        let changed = br#"{"continue_playing":"different"}"#;
+        let snapshot = InvalidSnapshot::from_bytes(original);
+        let marker = RecoveryMarker::new(
+            DurableFile::Settings,
+            DurableLayout::PostSplit,
+            "config.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string(),
+            &snapshot,
+        )
+        .unwrap();
+        fs::write(&config_path, changed).unwrap();
+        install_recovery_marker(&marker_path, &marker).unwrap();
+
+        assert!(resume_recovery_at(&marker_path, &marker).is_err());
+        assert!(marker_path.exists());
+        assert_eq!(fs::read(&config_path).unwrap(), changed);
+        assert!(!root.join(&marker.backup_file_name).exists());
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -832,6 +2029,272 @@ mod tests {
         assert!(settings.sources.is_empty());
         assert_eq!(connections.sources, vec![source]);
         assert_eq!(fs::read(&connections_path).unwrap(), connection_bytes);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn settings_recovery_preserves_exact_invalid_bytes_and_every_other_file() {
+        let root = temp_root("recover-settings");
+        let config_path = root.join("config.json");
+        let connections_path = root.join("connections.json");
+        let playlist_path = root.join("playlists.json");
+        let original =
+            br#"{"continue_playing":"future","synthetic_secret":"must-stay-only-in-backup"}"#;
+        let connections_bytes = br#"{"sources":[]}"#;
+        let playlist_bytes = br#"{"schema_version":1,"playlists":[]}"#;
+        fs::write(&config_path, original).unwrap();
+        fs::write(&connections_path, connections_bytes).unwrap();
+        fs::write(&playlist_path, playlist_bytes).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+
+        let backup_name = recover_selected_at_with(
+            DurableFile::Settings,
+            &config_path,
+            &snapshot,
+            "config.invalid-test.json".to_string(),
+            finish_selected_recovery,
+        )
+        .unwrap();
+
+        assert_eq!(backup_name, "config.invalid-test.json");
+        assert_eq!(fs::read(root.join(&backup_name)).unwrap(), original);
+        let fresh: serde_json::Value =
+            serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert_eq!(fresh, serde_json::to_value(AppConfig::default()).unwrap());
+        assert_eq!(fs::read(&connections_path).unwrap(), connections_bytes);
+        assert_eq!(fs::read(&playlist_path).unwrap(), playlist_bytes);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn legacy_combined_recovery_extracts_nothing_from_the_invalid_file() {
+        let root = temp_root("recover-combined");
+        let config_path = root.join("config.json");
+        let connections_path = root.join("connections.json");
+        let original = br#"{"sources":[{"id":"jf","kind":"jellyfin","name":"Test","base_url":"http://127.0.0.1:8096","access_token":"synthetic-token","user_id":"u","device_id":"d"}],"future":true}"#;
+        fs::write(&config_path, original).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+
+        recover_selected_at_with(
+            DurableFile::Settings,
+            &config_path,
+            &snapshot,
+            "config.invalid-combined.json".to_string(),
+            finish_selected_recovery,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(root.join("config.invalid-combined.json")).unwrap(),
+            original
+        );
+        let fresh: serde_json::Value =
+            serde_json::from_slice(&fs::read(&config_path).unwrap()).unwrap();
+        assert_eq!(fresh, serde_json::to_value(AppConfig::default()).unwrap());
+        assert!(!connections_path.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn connections_recovery_installs_empty_connections_and_preserves_other_files() {
+        let root = temp_root("recover-connections");
+        let config_path = root.join("config.json");
+        let connections_path = root.join("connections.json");
+        let playlist_path = root.join("playlists.json");
+        let settings_bytes = br#"{"continue_playing":"on"}"#;
+        let playlist_bytes = br#"{"schema_version":1,"playlists":[]}"#;
+        let original = br#"{"sources":[{"id":"broken","kind":"future"}]}"#;
+        fs::write(&config_path, settings_bytes).unwrap();
+        fs::write(&connections_path, original).unwrap();
+        fs::write(&playlist_path, playlist_bytes).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+
+        recover_selected_at_with(
+            DurableFile::Connections,
+            &connections_path,
+            &snapshot,
+            "connections.invalid-test.json".to_string(),
+            finish_selected_recovery,
+        )
+        .unwrap();
+
+        assert_eq!(
+            fs::read(root.join("connections.invalid-test.json")).unwrap(),
+            original
+        );
+        assert_eq!(
+            connections::load_at(&connections_path).unwrap(),
+            ConnectionsConfig::default()
+        );
+        assert_eq!(fs::read(&config_path).unwrap(), settings_bytes);
+        assert_eq!(fs::read(&playlist_path).unwrap(), playlist_bytes);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn stale_or_now_valid_snapshots_cannot_recover() {
+        let root = temp_root("recover-stale");
+        let config_path = root.join("config.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        fs::write(&config_path, original).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+        let changed = br#"{"continue_playing":"future","changed":true}"#;
+        fs::write(&config_path, changed).unwrap();
+
+        assert!(matches!(
+            recover_selected_at_with(
+                DurableFile::Settings,
+                &config_path,
+                &snapshot,
+                "config.invalid-stale.json".to_string(),
+                finish_selected_recovery,
+            ),
+            Err(RecoveryFileError::Stale)
+        ));
+        assert_eq!(fs::read(&config_path).unwrap(), changed);
+        assert!(!root.join("config.invalid-stale.json").exists());
+
+        let valid = br#"{"continue_playing":"on"}"#;
+        fs::write(&config_path, valid).unwrap();
+        let valid_snapshot = InvalidSnapshot::from_bytes(valid);
+        assert!(matches!(
+            recover_selected_at_with(
+                DurableFile::Settings,
+                &config_path,
+                &valid_snapshot,
+                "config.invalid-valid.json".to_string(),
+                finish_selected_recovery,
+            ),
+            Err(RecoveryFileError::Stale)
+        ));
+        assert_eq!(fs::read(&config_path).unwrap(), valid);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn recovery_collision_leaves_the_canonical_and_backup_byte_identical() {
+        let root = temp_root("recover-collision");
+        let config_path = root.join("config.json");
+        let backup_path = root.join("config.invalid-collision.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        let existing_backup = b"existing backup";
+        fs::write(&config_path, original).unwrap();
+        fs::write(&backup_path, existing_backup).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+
+        assert!(matches!(
+            recover_selected_at_with(
+                DurableFile::Settings,
+                &config_path,
+                &snapshot,
+                "config.invalid-collision.json".to_string(),
+                finish_selected_recovery,
+            ),
+            Err(RecoveryFileError::BeforeRename)
+        ));
+        assert_eq!(fs::read(&config_path).unwrap(), original);
+        assert_eq!(fs::read(&backup_path).unwrap(), existing_backup);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn post_rename_failure_keeps_the_exact_private_backup_and_no_partial_fresh_file() {
+        let root = temp_root("recover-after-rename");
+        let config_path = root.join("config.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        fs::write(&config_path, original).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+
+        let result = recover_selected_at_with(
+            DurableFile::Settings,
+            &config_path,
+            &snapshot,
+            "config.invalid-preserved.json".to_string(),
+            |_, _, backup, current, expected| {
+                crate::storage::harden_existing_regular(backup)?;
+                let preserved = fs::read(backup)?;
+                assert!(expected.matches(&preserved));
+                assert_eq!(preserved, current);
+                Err(io::Error::other("injected fresh-install failure"))
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(RecoveryFileError::AfterRename { backup_file_name })
+                if backup_file_name == "config.invalid-preserved.json"
+        ));
+        assert!(!config_path.exists());
+        let backup_path = root.join("config.invalid-preserved.json");
+        assert_eq!(fs::read(&backup_path).unwrap(), original);
+        assert!(crate::storage::is_private_regular(&backup_path));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn post_rename_failure_keeps_a_private_restart_marker() {
+        let root = temp_root("recover-marker-after-rename");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        fs::write(&config_path, original).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+
+        let result = recover_selected_at_with_marker_and_finish(
+            DurableFile::Settings,
+            &config_path,
+            &snapshot,
+            DurableLayout::PostSplit,
+            &marker_path,
+            |_, _, _, _, _| Err(io::Error::other("injected fresh-install failure")),
+        );
+
+        let backup_file_name = match result {
+            Err(RecoveryFileError::AfterRename { backup_file_name }) => backup_file_name,
+            _ => panic!("the injected post-rename failure must remain incomplete"),
+        };
+        assert!(!config_path.exists());
+        assert!(crate::storage::is_private_regular(&marker_path));
+        assert_eq!(
+            load_recovery_marker(&marker_path)
+                .unwrap()
+                .unwrap()
+                .backup_file_name,
+            backup_file_name
+        );
+        assert_eq!(fs::read(root.join(backup_file_name)).unwrap(), original);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_refuses_a_symlink_without_touching_its_target() {
+        use std::os::unix::fs::symlink;
+
+        let root = temp_root("recover-symlink");
+        let target = root.join("target.json");
+        let config_path = root.join("config.json");
+        let original = br#"{"continue_playing":"future"}"#;
+        fs::write(&target, original).unwrap();
+        symlink(&target, &config_path).unwrap();
+        let snapshot = InvalidSnapshot::from_bytes(original);
+
+        assert!(matches!(
+            recover_selected_at_with(
+                DurableFile::Settings,
+                &config_path,
+                &snapshot,
+                "config.invalid-symlink.json".to_string(),
+                finish_selected_recovery,
+            ),
+            Err(RecoveryFileError::Stale)
+        ));
+        assert!(fs::symlink_metadata(&config_path)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert_eq!(fs::read(&target).unwrap(), original);
+        assert!(!root.join("config.invalid-symlink.json").exists());
         fs::remove_dir_all(root).unwrap();
     }
 }

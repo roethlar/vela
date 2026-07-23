@@ -1,6 +1,6 @@
 [package]
 name = "vela"
-version = "1.0.1"
+version = "1.0.2"
 description = "mpv-backed HDR media client (Plex, Jellyfin, Emby)"
 authors = ["Michael Coelho"]
 license = "MIT"
@@ -34,6 +34,9 @@ base64 = "0.22"
 if-addrs = "0.15"
 sha2 = "0.10"
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSGraphics", "NSScreen"] }
@@ -47,6 +50,7 @@ windows = { version = "0.61", features = [
   "Win32_Graphics_Gdi",
   "Win32_Security",
   "Win32_Security_Authorization",
+  "Win32_Storage_FileSystem",
   "Win32_System_Threading",
 ] }
 

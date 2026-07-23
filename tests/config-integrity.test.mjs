@@ -5,6 +5,7 @@ import test from "node:test";
 const config = fs.readFileSync("src-tauri/src/config.rs", "utf8");
 const connections = fs.readFileSync("src-tauri/src/connections.rs", "utf8");
 const commands = fs.readFileSync("src-tauri/src/commands.rs", "utf8");
+const durable = fs.readFileSync("src-tauri/src/durable.rs", "utf8");
 const playback = fs.readFileSync("src-tauri/src/playback.rs", "utf8");
 const backend = `${commands}\n${playback}`;
 const page = fs.readFileSync("src/routes/+page.svelte", "utf8");
@@ -61,9 +62,68 @@ test("boot checks the durable gate before any normal app request", () => {
   assert.ok(normalBoot > gate);
   assert.ok(mpv > normalBoot);
   assert.ok(sources > normalBoot);
-  assert.match(page, /Vela could not safely read your \{fault\.file\}/);
+  assert.match(page, /Vela could not safely read your \{fault\.file === "settings"/);
   assert.match(page, /"Try again"/);
   assert.match(page, />Exit Vela</);
+});
+
+test("recoverable files expose explicit real recovery buttons only when allowed", () => {
+  assert.match(page, /invoke<DurableRecoveryResult>\("recover_invalid_file", \{ file \}\)/);
+  assert.match(
+    page,
+    /fault\.value\.status === "recoverable_invalid" && fault\.value\.canRecover/,
+  );
+  assert.match(
+    page,
+    /<button[\s\S]{0,220}onclick=\{\(\) => recoverInvalidFile\(fault\.file\)\}/,
+  );
+  assert.match(page, /Rename and create new settings/);
+  assert.match(page, /Rename damaged connections and reconnect/);
+  assert.match(page, /<button disabled=\{durableBusy\} onclick=\{exitVela\}>Exit Vela<\/button>/);
+  assert.match(page, /aria-busy=\{durableBusy\}/);
+  assert.match(page, /durableHeading\?\.focus\(\)/);
+  assert.match(
+    fs.readFileSync("src-tauri/src/lib.rs", "utf8"),
+    /commands::recover_invalid_file/,
+  );
+  assert.match(commands, /if !expected_gate\.can_recover\(file\)/);
+});
+
+test("recovery is snapshot-bound and preserves whole files with no-replace rename", () => {
+  assert.match(durable, /pub\(crate\) enum DurableFile \{\s*Settings,\s*Connections,/);
+  assert.match(durable, /if !expected\.matches\(&current\) \{\s*return Err\(RecoveryFileError::Stale\)/);
+  assert.match(durable, /validate_selected_file\(file, path\)/);
+  assert.match(durable, /crate::storage::rename_noreplace\(path, &backup_path\)/);
+  assert.match(durable, /!expected\.matches\(&preserved\) \|\| preserved != current/);
+  assert.match(durable, /install_selected_default\(file, path\)/);
+  const at = commands.indexOf("pub async fn recover_invalid_file(");
+  const signature = commands.slice(at, commands.indexOf(") ->", at));
+  assert.doesNotMatch(signature, /\b(?:path|name):|String/);
+});
+
+test("recorded recovery fails closed across restart and resumes only exact states", () => {
+  assert.match(
+    attributesBefore(durable, "struct RecoveryMarker"),
+    /serde\(rename_all = "camelCase", deny_unknown_fields\)/,
+  );
+  const hook = durable.indexOf("before_rename()");
+  const rename = durable.indexOf(
+    "crate::storage::rename_noreplace(path, &backup_path)",
+    hook,
+  );
+  assert.ok(hook >= 0 && rename > hook, "the private marker must precede the rename");
+  const load = durable.indexOf("pub(crate) fn load()");
+  const markerCheck = durable.indexOf("load_recovery_marker(&marker_path)", load);
+  const configLoad = durable.indexOf("config::load_unmigrated_at(&config_path)", load);
+  assert.ok(
+    load >= 0 && markerCheck > load && configLoad > markerCheck,
+    "startup must block on the recovery marker before accepting settings",
+  );
+  assert.match(commands, /crate::durable::resume_incomplete_recovery\(gate\)/);
+  assert.match(
+    durable,
+    /match \(current, backup\) \{[\s\S]*\(Some\(current\), None\) if expected\.matches\(&current\)[\s\S]*\(None, Some\(backup\)\)[\s\S]*validate_selected_file\(marker\.file, &path\)\.is_ok\(\)/,
+  );
 });
 
 test("active source writes target connections instead of settings", () => {

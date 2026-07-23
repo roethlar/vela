@@ -41,7 +41,7 @@ fn ensure_private_directory(dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn harden_existing_regular(path: &Path) -> io::Result<()> {
+pub(crate) fn harden_existing_regular(path: &Path) -> io::Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
@@ -142,6 +142,101 @@ fn private_temp(path: &Path, bytes: &[u8]) -> io::Result<PathBuf> {
     Ok(tmp)
 }
 
+/// Move one regular file without replacing any existing destination.
+///
+/// Recovery must preserve the canonical source on a destination collision, so
+/// this uses each supported platform's atomic no-replace rename primitive.
+pub(crate) fn rename_noreplace(source: &Path, destination: &Path) -> io::Result<()> {
+    require_regular_or_absent(source)?.then_some(()).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::NotFound, "rename source is absent")
+    })?;
+    match fs::symlink_metadata(destination) {
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::AlreadyExists,
+                "rename destination already exists",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let source = CString::new(source.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid source path"))?;
+        let destination = CString::new(destination.as_os_str().as_bytes()).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid destination path")
+        })?;
+        // SAFETY: both C strings are NUL-terminated and live for this call.
+        let result = unsafe {
+            libc::renameat2(
+                libc::AT_FDCWD,
+                source.as_ptr(),
+                libc::AT_FDCWD,
+                destination.as_ptr(),
+                libc::RENAME_NOREPLACE,
+            )
+        };
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        use std::ffi::CString;
+        use std::os::unix::ffi::OsStrExt;
+        let source = CString::new(source.as_os_str().as_bytes())
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "invalid source path"))?;
+        let destination = CString::new(destination.as_os_str().as_bytes()).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "invalid destination path")
+        })?;
+        // SAFETY: both C strings are NUL-terminated and live for this call.
+        let result =
+            unsafe { libc::renamex_np(source.as_ptr(), destination.as_ptr(), libc::RENAME_EXCL) };
+        if result != 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows::core::PCWSTR;
+        use windows::Win32::Storage::FileSystem::{MoveFileExW, MOVEFILE_WRITE_THROUGH};
+        let source = source
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        let destination = destination
+            .as_os_str()
+            .encode_wide()
+            .chain(std::iter::once(0))
+            .collect::<Vec<_>>();
+        // SAFETY: both UTF-16 buffers are NUL-terminated and live for this call.
+        unsafe {
+            MoveFileExW(
+                PCWSTR(source.as_ptr()),
+                PCWSTR(destination.as_ptr()),
+                MOVEFILE_WRITE_THROUGH,
+            )
+        }
+        .map_err(io::Error::other)?;
+    }
+
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
+    return Err(io::Error::new(
+        io::ErrorKind::Unsupported,
+        "no atomic no-replace rename is available",
+    ));
+
+    sync_parent(destination)
+}
+
 /// Atomically replace one JSON file. On Unix the temporary file is owner-only
 /// from its first byte; it is never written and chmodded afterward.
 pub fn save_json<T>(path: &Path, value: &T) -> io::Result<()>
@@ -176,10 +271,13 @@ where
     }
     let bytes = serialized_json(value)?;
     let tmp = private_temp(path, &bytes)?;
-    let result = fs::hard_link(&tmp, path);
-    let _ = fs::remove_file(&tmp);
-    result?;
-    sync_parent(path)
+    match rename_noreplace(&tmp, path) {
+        Ok(()) => Ok(()),
+        Err(error) => {
+            let _ = fs::remove_file(&tmp);
+            Err(error)
+        }
+    }
 }
 
 pub(crate) fn write_private_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
@@ -190,13 +288,22 @@ pub(crate) fn write_private_new(path: &Path, bytes: &[u8]) -> io::Result<()> {
         ));
     }
     let tmp = private_temp(path, bytes)?;
-    let result = fs::hard_link(&tmp, path);
-    let _ = fs::remove_file(&tmp);
-    result?;
+    if let Err(error) = rename_noreplace(&tmp, path) {
+        let _ = fs::remove_file(&tmp);
+        return Err(error);
+    }
     let verify = fs::read(path)?;
     if verify != bytes {
         return Err(io::Error::other("backup verification failed"));
     }
+    sync_parent(path)
+}
+
+pub(crate) fn remove_private_regular(path: &Path) -> io::Result<()> {
+    if !require_regular_or_absent(path)? {
+        return Ok(());
+    }
+    fs::remove_file(path)?;
     sync_parent(path)
 }
 
@@ -521,6 +628,34 @@ mod tests {
             io::ErrorKind::InvalidData
         );
         assert_eq!(fs::read(&data).unwrap(), before);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn no_replace_rename_moves_exact_bytes_and_preserves_both_paths_on_collision() {
+        let (_, _, root) = temp_paths("rename");
+        let source = root.join("source.json");
+        let destination = root.join("destination.json");
+        let original = b"{\"synthetic\":\"exact\"}";
+        fs::write(&source, original).unwrap();
+
+        rename_noreplace(&source, &destination).unwrap();
+        assert!(!source.exists());
+        assert_eq!(fs::read(&destination).unwrap(), original);
+        assert!(is_private_regular(&destination));
+
+        let collision_source = root.join("collision-source.json");
+        let collision_destination = root.join("collision-destination.json");
+        fs::write(&collision_source, b"source").unwrap();
+        fs::write(&collision_destination, b"destination").unwrap();
+        assert_eq!(
+            rename_noreplace(&collision_source, &collision_destination)
+                .unwrap_err()
+                .kind(),
+            io::ErrorKind::AlreadyExists
+        );
+        assert_eq!(fs::read(&collision_source).unwrap(), b"source");
+        assert_eq!(fs::read(&collision_destination).unwrap(), b"destination");
         fs::remove_dir_all(root).unwrap();
     }
 

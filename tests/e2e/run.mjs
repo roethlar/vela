@@ -142,7 +142,9 @@ async function runScenario(scenario, tauriDriverBin) {
       // optional `between` hook runs while the app is down — the only safe
       // window to edit the seeded config without racing its lock.
       restart: async (between) => {
-        await driver.deleteSession();
+        // Exit-path scenarios deliberately close the app from inside the
+        // webview, so the old WebDriver session may already be gone.
+        await driver.deleteSession().catch(() => {});
         if (between) await between();
         await driver.newSession(appBinary);
       },

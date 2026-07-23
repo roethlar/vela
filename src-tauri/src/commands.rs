@@ -166,29 +166,177 @@ pub struct MpvInfo {
 pub async fn get_durable_state_status(
     state: State<'_, AppState>,
 ) -> Result<crate::durable::DurableStateStatus, String> {
-    Ok(state.durable_status.lock().await.clone())
+    Ok(state.durable_gate.lock().await.status.clone())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DurableRecoveryResult {
+    status: crate::durable::DurableStateStatus,
+    recovered: bool,
+    backup_file_name: Option<String>,
+    reconnect_required: bool,
+    error: Option<String>,
 }
 
 #[tauri::command]
 pub async fn retry_durable_state(
     state: State<'_, AppState>,
 ) -> Result<crate::durable::DurableStateStatus, String> {
+    let incomplete_gate = {
+        let gate = state.durable_gate.lock().await;
+        if gate.recovery_incomplete() {
+            Some(gate.clone())
+        } else {
+            None
+        }
+    };
+    if let Some(gate) = incomplete_gate {
+        let transaction = tauri::async_runtime::spawn_blocking(move || {
+            crate::durable::resume_incomplete_recovery(gate)
+        })
+        .await
+        .map_err(|_| "could not retry Vela's recorded recovery".to_string())?;
+        if let crate::durable::RecoveryTransaction::Failed { gate, .. } = transaction {
+            let status = gate.status.clone();
+            *state.registry.lock().await = crate::source::SourceRegistry::default();
+            *state.durable_gate.lock().await = gate;
+            crate::durable::set_commands_ready(false);
+            return Ok(status);
+        }
+    }
     let loaded = tauri::async_runtime::spawn_blocking(crate::durable::load)
         .await
         .map_err(|_| "could not retry Vela's durable state".to_string())?;
     match loaded {
         Ok(ready) => {
-            let status = crate::durable::DurableStateStatus::ready();
+            let gate = crate::durable::DurableGate::ready();
+            let status = gate.status.clone();
             *state.registry.lock().await = ready.registry;
-            *state.durable_status.lock().await = status.clone();
+            *state.durable_gate.lock().await = gate;
             crate::durable::set_commands_ready(true);
             Ok(status)
         }
         Err(failure) => {
             *state.registry.lock().await = crate::source::SourceRegistry::default();
-            *state.durable_status.lock().await = failure.status.clone();
+            let status = failure.gate.status.clone();
+            *state.durable_gate.lock().await = failure.gate;
             crate::durable::set_commands_ready(false);
-            Ok(failure.status)
+            Ok(status)
+        }
+    }
+}
+
+#[tauri::command]
+pub async fn recover_invalid_file(
+    file: crate::durable::DurableFile,
+    state: State<'_, AppState>,
+) -> Result<DurableRecoveryResult, String> {
+    let expected_gate = state.durable_gate.lock().await.clone();
+    if !expected_gate.can_recover(file) {
+        return Ok(DurableRecoveryResult {
+            status: expected_gate.status.clone(),
+            recovered: false,
+            backup_file_name: None,
+            reconnect_required: false,
+            error: Some("Recovery is not available for the file's current status.".to_string()),
+        });
+    }
+    let transaction = tauri::async_runtime::spawn_blocking(move || {
+        crate::durable::recover_invalid_file(file, expected_gate)
+    })
+    .await
+    .map_err(|_| "Vela could not safely run file recovery.".to_string())?;
+
+    match transaction {
+        crate::durable::RecoveryTransaction::Changed {
+            backup_file_name,
+            reconnect_required,
+        } => {
+            let loaded = tauri::async_runtime::spawn_blocking(crate::durable::load)
+                .await
+                .map_err(|_| "Vela could not safely verify file recovery.".to_string())?;
+            match loaded {
+                Ok(ready) => {
+                    let gate = crate::durable::DurableGate::ready();
+                    let status = gate.status.clone();
+                    *state.registry.lock().await = ready.registry;
+                    *state.durable_gate.lock().await = gate;
+                    crate::durable::set_commands_ready(true);
+                    Ok(DurableRecoveryResult {
+                        status,
+                        recovered: true,
+                        backup_file_name: Some(backup_file_name),
+                        reconnect_required,
+                        error: None,
+                    })
+                }
+                Err(failure) => {
+                    let status = failure.gate.status.clone();
+                    *state.registry.lock().await = crate::source::SourceRegistry::default();
+                    *state.durable_gate.lock().await = failure.gate;
+                    crate::durable::set_commands_ready(false);
+                    Ok(DurableRecoveryResult {
+                        status,
+                        recovered: true,
+                        backup_file_name: Some(backup_file_name),
+                        reconnect_required,
+                        error: Some(
+                            "The damaged file was preserved, but another file still requires attention."
+                                .to_string(),
+                        ),
+                    })
+                }
+            }
+        }
+        crate::durable::RecoveryTransaction::Stale => {
+            let loaded = tauri::async_runtime::spawn_blocking(crate::durable::load)
+                .await
+                .map_err(|_| "Vela could not safely recheck the changed file.".to_string())?;
+            let status = match loaded {
+                Ok(ready) => {
+                    let gate = crate::durable::DurableGate::ready();
+                    let status = gate.status.clone();
+                    *state.registry.lock().await = ready.registry;
+                    *state.durable_gate.lock().await = gate;
+                    crate::durable::set_commands_ready(true);
+                    status
+                }
+                Err(failure) => {
+                    let status = failure.gate.status.clone();
+                    *state.registry.lock().await = crate::source::SourceRegistry::default();
+                    *state.durable_gate.lock().await = failure.gate;
+                    crate::durable::set_commands_ready(false);
+                    status
+                }
+            };
+            Ok(DurableRecoveryResult {
+                status,
+                recovered: false,
+                backup_file_name: None,
+                reconnect_required: false,
+                error: Some(
+                    "The file changed after Vela detected the problem. Review the new status and try again."
+                        .to_string(),
+                ),
+            })
+        }
+        crate::durable::RecoveryTransaction::Failed {
+            gate,
+            backup_file_name,
+            message,
+        } => {
+            let status = gate.status.clone();
+            *state.registry.lock().await = crate::source::SourceRegistry::default();
+            *state.durable_gate.lock().await = gate;
+            crate::durable::set_commands_ready(false);
+            Ok(DurableRecoveryResult {
+                status,
+                recovered: false,
+                backup_file_name,
+                reconnect_required: false,
+                error: Some(message.to_string()),
+            })
         }
     }
 }

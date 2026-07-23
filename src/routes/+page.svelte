@@ -91,10 +91,18 @@
   type DurableFileStatus = {
     status: DurableStatusKind;
     layout: "post_split" | "legacy_combined";
+    canRecover: boolean;
   };
   type DurableStateStatus = {
     settings: DurableFileStatus;
     connections: DurableFileStatus;
+  };
+  type DurableRecoveryResult = {
+    status: DurableStateStatus;
+    recovered: boolean;
+    backupFileName: string | null;
+    reconnectRequired: boolean;
+    error: string | null;
   };
 
   let sources = $state<Source[]>([]);
@@ -281,9 +289,14 @@
   let installingMpv = $state(false);
   let durableStatus = $state<DurableStateStatus | null>(null);
   let retryingDurableState = $state(false);
+  let recoveringInvalidFile = $state(false);
   let durableRetryError = $state<string | null>(null);
+  let durableBackupFileName = $state<string | null>(null);
+  let durableRecoveryNotice = $state<string | null>(null);
+  let durableBusy = $derived(retryingDurableState || recoveringInvalidFile);
   let normalBooted = false;
   let durableHeading: HTMLHeadingElement | undefined = $state();
+  let normalRoot: HTMLDivElement | undefined = $state();
 
   // One-click mpv install. The backend chooses the concrete method for this OS.
   // On success it returns refreshed status, which clears the prompt.
@@ -368,6 +381,7 @@
     listen<DurableStateStatus>("durable-state-fault", async ({ payload }) => {
       durableStatus = payload;
       durableRetryError = null;
+      durableBackupFileName = null;
       await tick();
       durableHeading?.focus();
     }).then((un) => (unlistenDurableFault = un));
@@ -402,8 +416,8 @@
       durableStatus = await invoke<DurableStateStatus>("get_durable_state_status");
     } catch {
       durableStatus = {
-        settings: { status: "unavailable", layout: "post_split" },
-        connections: { status: "ready", layout: "post_split" },
+        settings: { status: "unavailable", layout: "post_split", canRecover: false },
+        connections: { status: "ready", layout: "post_split", canRecover: false },
       };
     }
     await tick();
@@ -434,13 +448,14 @@
   }
 
   async function retryDurableState() {
-    if (retryingDurableState) return;
+    if (durableBusy) return;
     retryingDurableState = true;
     durableRetryError = null;
+    durableBackupFileName = null;
     try {
       durableStatus = await invoke<DurableStateStatus>("retry_durable_state");
       if (durableReady(durableStatus)) {
-        await bootNormal();
+        await resumeAfterDurableReady();
       } else {
         await tick();
         durableHeading?.focus();
@@ -449,6 +464,43 @@
       durableRetryError = "Vela could not safely retry the files.";
     } finally {
       retryingDurableState = false;
+    }
+  }
+
+  async function resumeAfterDurableReady() {
+    if (normalBooted) await onSourcesChanged();
+    else await bootNormal();
+    await tick();
+    normalRoot?.focus();
+  }
+
+  async function recoverInvalidFile(file: "settings" | "connections") {
+    if (durableBusy) return;
+    recoveringInvalidFile = true;
+    durableRetryError = null;
+    durableBackupFileName = null;
+    try {
+      const result = await invoke<DurableRecoveryResult>("recover_invalid_file", { file });
+      durableStatus = result.status;
+      durableBackupFileName = result.backupFileName;
+      durableRetryError = result.error;
+      if (result.recovered && result.backupFileName) {
+        durableRecoveryNotice = result.reconnectRequired
+          ? `The damaged file was preserved as ${result.backupFileName}. Connect your servers again to continue.`
+          : `The damaged file was preserved as ${result.backupFileName}. Your server connections were kept.`;
+      }
+      if (durableReady(durableStatus)) {
+        await resumeAfterDurableReady();
+      } else {
+        await tick();
+        durableHeading?.focus();
+      }
+    } catch {
+      durableRetryError = "Vela could not safely recover the file.";
+      await tick();
+      durableHeading?.focus();
+    } finally {
+      recoveringInvalidFile = false;
     }
   }
 
@@ -2508,7 +2560,7 @@
   }
 </script>
 
-<div class="app">
+<div class="app" tabindex="-1" bind:this={normalRoot}>
   {#if durableStatus === null}
     <main class="durable-block" aria-busy="true">
       <p class="eyebrow">Checking files</p>
@@ -2516,27 +2568,57 @@
     </main>
   {:else if !durableReady(durableStatus)}
     {@const fault = durableFault(durableStatus)}
-    <main class="durable-block" role="alert" aria-labelledby="durable-fault-heading">
+    <main
+      class="durable-block"
+      role="alert"
+      aria-busy={durableBusy}
+      aria-labelledby="durable-fault-heading"
+    >
       <p class="eyebrow">{fault.file === "settings" ? "Settings problem" : "Connection problem"}</p>
       <h1 id="durable-fault-heading" tabindex="-1" bind:this={durableHeading}>
-        Vela could not safely read your {fault.file}.
+        Vela could not safely read your {fault.file === "settings"
+          ? "settings"
+          : "server connections"}.
       </h1>
       {#if fault.value.status === "recoverable_invalid"}
-        <p>
-          The {fault.file === "settings" ? "settings file" : "connections file"} may be damaged
-          or may have been tampered with. Nothing from it was loaded.
-        </p>
-        {#if fault.file === "settings" && fault.value.layout === "legacy_combined"}
+        {#if fault.file === "settings" && fault.value.layout === "post_split"}
           <p>
-            This older settings file may also contain your server connections. Vela will not
-            extract or guess them.
+            The settings file may be damaged or may have been tampered with. Nothing from it was
+            loaded.
+          </p>
+          <p>
+            You can rename the damaged file and create new settings, or exit Vela and repair it
+            yourself. Your server connections are stored separately and will not be changed.
+          </p>
+        {:else if fault.file === "settings"}
+          <p>
+            This older settings file is damaged and may also contain your server connections.
+            Vela loaded nothing from it and will not extract or guess any connection.
+          </p>
+          <p>
+            Rename and create new settings preserves the whole old file under a private new name,
+            creates fresh settings, and then requires you to reconnect your servers. Exit Vela if
+            you want to repair the file yourself instead.
+          </p>
+        {:else}
+          <p>
+            The server-connections file may be damaged or may have been tampered with. No
+            connection or token was loaded.
+          </p>
+          <p>
+            Rename damaged connections and reconnect preserves the whole file, creates an empty
+            valid connections file, and opens the normal server-connection flow. Your settings,
+            recents, and playlists will not be reset.
           </p>
         {/if}
-        <p>Exit Vela and repair the file manually, then reopen the app or try again.</p>
       {:else if fault.value.status === "migration_blocked"}
         <p>
-          Vela loaded no server connections because the settings migration could not finish
-          safely. The original files were left in place.
+          Vela could not finish a protected settings or connection update safely. Nothing from
+          the affected files was loaded.
+        </p>
+        <p>
+          Try again to continue only from the exact recorded state. Vela will not guess, merge,
+          or overwrite a file that changed.
         </p>
       {:else}
         <p>
@@ -2547,11 +2629,32 @@
       {#if durableRetryError}
         <p class="durable-error" role="alert">{durableRetryError}</p>
       {/if}
+      {#if durableBackupFileName}
+        <p role="status">
+          The complete damaged file was preserved as <code>{durableBackupFileName}</code>.
+        </p>
+      {/if}
       <div class="durable-actions">
-        <button class="primary" disabled={retryingDurableState} onclick={retryDurableState}>
-          {retryingDurableState ? "Trying again…" : "Try again"}
-        </button>
-        <button disabled={retryingDurableState} onclick={exitVela}>Exit Vela</button>
+        {#if fault.value.status === "recoverable_invalid" && fault.value.canRecover}
+          <button
+            class="primary"
+            disabled={durableBusy}
+            onclick={() => recoverInvalidFile(fault.file)}
+          >
+            {#if recoveringInvalidFile}
+              Preserving file…
+            {:else if fault.file === "settings"}
+              Rename and create new settings
+            {:else}
+              Rename damaged connections and reconnect
+            {/if}
+          </button>
+        {:else}
+          <button class="primary" disabled={durableBusy} onclick={retryDurableState}>
+            {retryingDurableState ? "Trying again…" : "Try again"}
+          </button>
+        {/if}
+        <button disabled={durableBusy} onclick={exitVela}>Exit Vela</button>
       </div>
     </main>
   {:else}
@@ -2572,6 +2675,10 @@
       <Icon name="settings" />
     </button>
   </header>
+
+  {#if durableRecoveryNotice}
+    <div class="notice" role="status">{durableRecoveryNotice}</div>
+  {/if}
 
   {#if error}
     <div class="error" role="alert">{friendlyError(error)}</div>
@@ -3297,6 +3404,7 @@
   }
   .durable-actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 0.7rem;
     margin-top: 0.5rem;
   }
@@ -3307,6 +3415,9 @@
     height: 100vh;
     display: flex;
     flex-direction: column;
+  }
+  .app:focus {
+    outline: none;
   }
   /* Small, fixed build-info tag in the bottom-right — easy to find, out of the way. */
   .buildinfo {

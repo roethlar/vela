@@ -36,7 +36,7 @@ pub struct AppState {
     /// App-wide fail-closed gate for settings and connection persistence.
     /// Normal frontend boot does not proceed until both independent files are
     /// ready and every persisted source has been rebuilt.
-    pub(crate) durable_status: AsyncMutex<durable::DurableStateStatus>,
+    pub(crate) durable_gate: AsyncMutex<durable::DurableGate>,
     /// Stop flag for the currently-tracked playback (so a new play cancels the old tracker).
     pub tracking_stop: Mutex<Option<Arc<AtomicBool>>>,
     /// The currently-running mpv process, so a new play can terminate the old one.
@@ -106,15 +106,15 @@ pub struct AppState {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let (registry, durable_status) = match durable::load() {
-        Ok(ready) => (ready.registry, durable::DurableStateStatus::ready()),
-        Err(failure) => (SourceRegistry::default(), failure.status),
+    let (registry, durable_gate) = match durable::load() {
+        Ok(ready) => (ready.registry, durable::DurableGate::ready()),
+        Err(failure) => (SourceRegistry::default(), failure.gate),
     };
-    durable::set_commands_ready(durable_status.is_ready());
+    durable::set_commands_ready(durable_gate.status.is_ready());
 
     let state = AppState {
         registry: AsyncMutex::new(registry),
-        durable_status: AsyncMutex::new(durable_status),
+        durable_gate: AsyncMutex::new(durable_gate),
         tracking_stop: Mutex::new(None),
         current_child: Arc::new(Mutex::new(None)),
         shutting_down: Arc::new(AtomicBool::new(false)),
@@ -250,6 +250,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::get_durable_state_status,
             commands::retry_durable_state,
+            commands::recover_invalid_file,
             commands::exit_vela,
             commands::get_status,
             commands::get_app_info,
