@@ -1225,8 +1225,8 @@ pretend the invalid config loaded.
 For marker skipping specifically, `off`, `button`, and `autoskip` are the only
 valid present policy values. Missing intro and credits fields mean Button under
 the earlier default-policy decision; the commercial field's missing-value
-default is a separate pending choice. Any other present value invalidates the
-config.
+default is settled by the later decision below. Any other present value
+invalidates the config.
 
 Reason:
 A damaged or manually altered credential-bearing settings file should be
@@ -1262,7 +1262,7 @@ The owner's library has no commercial-marked content and does not need any.
 Provider parsing is guarded with deterministic synthetic responses, and a
 generated test video exercises both commercial Button and Auto-skip behavior
 through real mpv. A real commercial playtest is not a release gate. The default
-for a missing commercial policy is a separate pending product decision.
+for a missing commercial policy is settled by the later decision below.
 
 Reason:
 Vela should use marker capabilities the configured server actually supplies,
@@ -1274,3 +1274,25 @@ Supersedes:
 The commercial-marker non-goal and drop behavior in marker-plan v2 revision 3.
 It does not add Preview, Recap, or unknown marker types, and it does not relax
 the rule that missing or failed marker retrieval must never block playback.
+
+## 2026-07-23 - Button is the default commercial skip policy
+
+Status: APPROVED (owner, 2026-07-23). Implementation plan:
+`.agents/plans/skip-credits-intros-v2.md`.
+
+Decision:
+When marker skipping ships, a missing `skip_commercials` setting means
+`button`. Vela displays a genuinely clickable in-player commercial-skip control
+and never seeks merely because an older settings file lacks the new field.
+While the control is visible, Space activates the same skip; otherwise Space
+retains its normal pause behavior.
+
+Reason:
+Button matches the approved intro and credits defaults, makes upstream
+commercial ranges discoverable, and preserves viewer control when commercial
+detection is imperfect.
+
+Supersedes:
+The pending missing-value default introduced when commercial markers entered
+scope. It does not change explicit Off or Auto-skip choices, fail-closed invalid
+config handling, or provider-support boundaries.

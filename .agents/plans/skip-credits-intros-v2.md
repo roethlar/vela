@@ -2,7 +2,7 @@
 
 ## Status
 
-**Draft v2, revision 4 — 2026-07-22.** Supersedes the removed
+**Draft v2, revision 5 — 2026-07-23.** Supersedes the removed
 `.agents/plans/skip-credits-intros.md` (v1). Incorporates both 2026-07-22 plan
 reviews. Self-contained for a cold implementer once the owner decisions below
 are recorded.
@@ -25,10 +25,10 @@ v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 When a supported server publishes intro, credits, or commercial time ranges,
 Vela offers skip during external-mpv playback:
 
-- **Button** (owner-approved default for missing intro/credits settings;
-  commercial default still pending): native mpv ASS/OSD prompt inside the video
-  window ("Skip Intro" / "Skip Credits" / "Skip Commercials") activated by
-  clicking it or, while it is displayed, pressing Space.
+- **Button** (owner-approved default for all missing marker settings): native
+  mpv ASS/OSD prompt inside the video window ("Skip Intro" / "Skip Credits" /
+  "Skip Commercials") activated by clicking it or, while it is displayed,
+  pressing Space.
 - **Auto-skip**: seek to marker end with a brief OSD toast.
 - **Off**: no script injection for that kind.
 
@@ -249,23 +249,21 @@ pub skip_credits: Option<SkipPolicy>,
 pub skip_commercials: Option<SkipPolicy>,
 ```
 
-**Product defaults:** owner-approved 2026-07-22 for intro and credits. A missing
-intro or credits field is valid and means `button`. The missing-value default
-for commercials remains a separate pending owner choice. A present value
-outside the closed enum is invalid config and must fail deserialization; it is
-not equivalent to a missing value.
+**Product defaults:** owner-approved 2026-07-22 for intro and credits and
+2026-07-23 for commercials. A missing marker-policy field is valid and means
+`button`. A present value outside the closed enum is invalid config and must
+fail deserialization; it is not equivalent to a missing value.
 
 | Field | Default when missing |
 |-------|----------------------|
 | `skip_intros` | `button` |
 | `skip_credits` | `button` |
-| `skip_commercials` | Pending owner ruling |
+| `skip_commercials` | `button` |
 
 The play command resolves `None` from the documented per-kind defaults before
-source resolution and copies only the enum into `PlaySpec`; intro and credits
-currently resolve to `SkipPolicy::Button`, while commercials await the owner
-ruling below. `playback::play` does not read config or interpret strings. There
-is no `normalize_skip_policy` string helper.
+source resolution and copies only the enum into `PlaySpec`; every missing marker
+policy resolves to `SkipPolicy::Button`. `playback::play` does not read config
+or interpret strings. There is no `normalize_skip_policy` string helper.
 
 This feature depends on separate, approved app-wide config-integrity/recovery
 work. That prerequisite must remove runtime fallbacks from config load errors,
@@ -619,7 +617,7 @@ implementation authority until the owner approves them.
 | Mouse click on OSD | required primary interaction with exact hit-testing | non-clickable notice | **APPROVED — owner, 2026-07-22** |
 | Unknown config string | reject the whole config; notify and offer explicit backup-then-fresh-config recovery | normalize to `button` or `off` | **APPROVED — owner, 2026-07-22** |
 | Commercial markers | support as a separate policy wherever the upstream server publishes ranges; synthetic tests are sufficient | ignore / unmodeled | **APPROVED — owner, 2026-07-22** |
-| Default commercial policy | `button`, matching intro/credits while requiring confirmation | `off` or `autoskip` | Pending |
+| Default commercial policy | `button`, matching intro/credits while requiring confirmation | `off` or `autoskip` | **APPROVED — owner, 2026-07-23** |
 | Live IPC marker updates | not required (respawn per item) | add insurance now | Pending |
 
 Present overrides to the owner as single plain-English asks if any default is
@@ -692,5 +690,8 @@ contested; do not batch.
   test content. Current official evidence supports Plex and Jellyfin. Emby's
   published OpenAPI has no equivalent route, so Emby remains empty rather than
   guessed. Deterministic synthetic provider responses and generated-video E2E
-  own commercial coverage. The missing commercial-policy default remains a
-  separate owner choice.
+  own commercial coverage.
+- **2026-07-23 — owner ruling 5:** a missing commercial policy means Button,
+  matching intro and credits. Commercial detection never auto-skips merely
+  because an older config lacks the new field; the viewer must click the
+  on-screen control or press Space while it is visible.
