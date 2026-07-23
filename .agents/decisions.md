@@ -1164,8 +1164,8 @@ because the setting was absent; skipping requires an explicit confirmation.
 
 This ruling sets only the missing-value product default. It does not choose the
 confirmation key, add mouse behavior, or decide how an unrecognized stored
-config string is normalized. Those remain separate owner decisions in the
-implementation plan.
+config string is handled. Those are settled by the later owner decisions below,
+without changing this missing-value default.
 
 Reason:
 Button makes available server markers discoverable without taking playback
@@ -1200,3 +1200,43 @@ Supersedes:
 The marker plan's unapproved keyboard-only narrowing, its proposed `s` binding,
 and its proposal to defer mouse hit-testing beyond v1. It extends, rather than
 changes, the approved missing-setting default of Button.
+
+## 2026-07-22 - Invalid settings fail closed with explicit preserved recovery
+
+Status: APPROVED (owner, 2026-07-22). The marker-specific application is in
+`.agents/plans/skip-credits-intros-v2.md`; the app-wide implementation requires
+a separately approved config-integrity/recovery plan.
+
+Decision:
+An unrecognized value for a constrained setting makes the settings file
+invalid. Vela does not normalize it to a product default, silently substitute
+a default config at runtime, or continue using a guessed partial
+interpretation. Missing fields with documented backward-compatible defaults
+remain valid; so do explicitly supported legacy fields.
+
+When config parsing or validation fails, the app notifies the user that the
+settings file may have been tampered with or damaged and recommends creating a
+new config. Recovery is never automatic. If the user accepts, Vela first
+preserves the invalid file byte-for-byte as a uniquely named private backup,
+then atomically installs a fresh default config. If backup or replacement
+fails, Vela reports the failure, does not log config contents, and does not
+pretend the invalid config loaded.
+
+For intro/credits skipping specifically, `off`, `button`, and `autoskip` are
+the only valid present values. A missing field means Button under the earlier
+default-policy decision; any other present value invalidates the config.
+
+Reason:
+A damaged or manually altered credential-bearing settings file should be
+visible and recoverable, not silently reinterpreted into behavior the user did
+not choose. Preserving the exact original before replacement keeps credentials
+and forensic/recovery value available without weakening fail-closed loading.
+
+Supersedes:
+The pending unknown-marker-policy choice and the tolerant-string normalization
+proposed by marker-plan v2 revision 2. App-wide, it also supersedes the intent
+of existing unknown-value normalization and load-error default substitution;
+those lower-authority code paths remain in place only as explicitly recorded
+implementation debt until an approved plan replaces them. It does not
+invalidate documented missing-field defaults or the rollback-preserved legacy
+local/SMB/SSH fields.

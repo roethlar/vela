@@ -2,7 +2,7 @@
 
 ## Status
 
-**Draft v2, revision 2 — 2026-07-22.** Supersedes the removed
+**Draft v2, revision 3 — 2026-07-22.** Supersedes the removed
 `.agents/plans/skip-credits-intros.md` (v1). Incorporates both 2026-07-22 plan
 reviews. Self-contained for a cold implementer once the owner decisions below
 are recorded.
@@ -210,43 +210,55 @@ Jellyfin MediaSegments contract must not be assumed to exist on Emby.
 
 ## Config (`src-tauri/src/config.rs`)
 
-Follow the **tolerant string + command-layer normalize** pattern used by
-`mpv_autocrop`, `continue_playing`, and `playback_source_policy` so a
-hand-edited or future value cannot make the credential-bearing config
-unreadable.
+Use one closed serde enum. The owner explicitly rejected the existing
+**tolerant string + command-layer normalize** pattern for invalid settings on
+2026-07-22: Vela must not guess what an unrecognized value meant or initialize
+runtime behavior from a default config after a load/validation failure.
 
 ```rust
-// On AppConfig — NOT a hard serde enum:
-/// Intro skip policy: "off" | "button" | "autoskip". Missing/unknown → product
-/// default applied in the command layer (see normalize_skip_policy).
-pub skip_intros: Option<String>,
-/// Credits skip policy: same closed set as skip_intros.
-pub skip_credits: Option<String>,
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipPolicy {
+    Off,
+    Button,
+    Autoskip,
+}
+
+// Missing remains distinguishable from invalid for old-config compatibility.
+pub skip_intros: Option<SkipPolicy>,
+pub skip_credits: Option<SkipPolicy>,
 ```
 
 **Product defaults:** owner-approved 2026-07-22. A missing value for either
-field means `button`. The separate treatment of an unrecognized stored string
-remains pending below and still blocks implementation.
+field is valid and means `button`. A present value outside the closed enum is
+invalid config and must fail deserialization; it is not equivalent to a
+missing value.
 
 | Field | Default when missing |
 |-------|----------------------|
 | `skip_intros` | `button` |
 | `skip_credits` | `button` |
 
-Normalize helper (same spirit as `normalize_autocrop`):
+The play command maps `None` to `SkipPolicy::Button` before source resolution
+and copies only the enum into `PlaySpec`; `playback::play` does not read config
+or interpret strings. There is no `normalize_skip_policy` string helper.
 
-- accept only lowercase `off`, `button`, `autoskip` after trim
-- missing → `button`
-- unrecognized stored string → pending the separate owner ruling below; do not
-  infer its behavior from the now-settled missing-value default
+This feature depends on separate, approved app-wide config-integrity/recovery
+work. That prerequisite must remove runtime fallbacks from config load errors,
+surface a blocking notice that the settings file may be damaged or tampered
+with, and recommend creating a new config. Recovery occurs only after explicit
+user confirmation: preserve the invalid file byte-for-byte in a unique private
+backup, then atomically replace `config.json` with fresh defaults. A backup or
+replacement failure leaves the original config authoritative and reports the
+failure without logging config contents. Missing fields with documented
+defaults and the explicitly tolerated legacy local/SMB/SSH fields remain valid.
+Do not implement this global refactor opportunistically inside a marker slice.
 
-Put the one canonical `normalize_skip_policy` helper in `commands.rs`. The play
-command reads and normalizes both fields before source resolution and copies the
-closed values into `PlaySpec`; `playback::play` must not independently interpret
-raw config strings.
-
-Round-trip tests: old configs without these fields load; save preserves other
-fields; legacy inert local/SMB/SSH fields still untouched.
+Round-trip tests: old configs without the marker fields load and map to Button;
+an unknown marker value rejects the whole config; save preserves other fields;
+legacy inert local/SMB/SSH fields remain untouched. The prerequisite recovery
+plan owns its broader validation, notification, exact-backup, atomicity,
+permissions, and failure-path guards.
 
 ### Settings UI
 
@@ -256,9 +268,9 @@ fields; legacy inert local/SMB/SSH fields still untouched.
 - Extend the existing `MpvAdvanced` DTO and `get_mpv_advanced` /
   `set_mpv_advanced` commands with `skip_intros` and `skip_credits`. Setter
   parameters are optional for compatibility with an older frontend; when
-  present they are normalized and stored through the existing `config::update`
-  path. Do not add a second config write path or bypass `CONFIG_LOCK` / atomic
-  save.
+  present they deserialize as the closed enum and are stored through the
+  existing `config::update` path. Do not add a second config write path or
+  bypass `CONFIG_LOCK` / atomic save.
 
 ---
 
@@ -470,15 +482,18 @@ the product-flip slice where the feature is launchable.
 
 ### Slice 3 — Config + command boundary (no visible control yet)
 
+- **Precondition:** the separately planned app-wide config-integrity/recovery
+  prerequisite is implemented, reviewed, verified, and committed.
 - `skip_intros` / `skip_credits` on `AppConfig`.
-- Canonical normalize helper; extend `MpvAdvanced` get/set through the existing
-  locked atomic config path. Do not expose the controls in Settings yet, so no
-  shipped UI offers a setting that playback ignores.
-- Serde round-trip / unknown-value tests.
+- Closed `SkipPolicy`; map only missing fields to Button; extend `MpvAdvanced`
+  get/set through the existing locked atomic config path. Do not expose the
+  controls in Settings yet, so no shipped UI offers a setting that playback
+  ignores.
+- Serde round-trip / invalid-value rejection tests.
 - Run `scripts/bump.sh` (1.0.2 → 1.0.3 on the recorded base).
 - **Focused verify before the full set:** Rust checks/tests/audit; red-prove
-  missing and unknown config normalization plus legacy-field round-trip
-  preservation.
+  missing-field defaulting and unknown-value rejection plus legacy-field
+  round-trip preservation.
 
 ### Slice 4 — Atomic product flip: launch + Settings + E2E + docs
 
@@ -490,9 +505,10 @@ the product-flip slice where the feature is launchable.
 - Extend the controlled Jellyfin mock's real route and add the behavioral E2E
   legs below. Update README Player notes with policies, clickable-button
   behavior, and the temporary in-range Space binding.
-- Guarantees: play succeeds with missing script, empty markers, bad policy
-  strings, marker endpoint failure, payload write failure, or payload parse
-  failure. Unit-test `markers_args` and payload-write failure matrices.
+- Guarantees: play succeeds with missing script, empty markers, marker endpoint
+  failure, payload write failure, or payload parse failure. An invalid policy
+  never reaches play because config loading fails closed. Unit-test
+  `markers_args` and payload-write failure matrices.
 - Run `scripts/bump.sh` (1.0.3 → 1.0.4 on the recorded base).
 - **Verify:** full canonical dual-side set plus targeted and full Linux E2E.
   Red-prove every behavior claimed by the E2E separately.
@@ -550,8 +566,8 @@ both frontend and Rust change. Minimum relevant set:
 
 Guard discipline: every new behavioral claim above is red-proofed when
 introduced, including provider query/schema, missing script, payload failure,
-unknown policy, mouse hit-testing/seek, temporary Space activation/restoration,
-and auto-seek.
+invalid-policy config rejection, mouse hit-testing/seek, temporary Space
+activation/restoration, and auto-seek.
 
 ---
 
@@ -566,7 +582,7 @@ implementation authority until the owner approves them.
 | Default policy (intros & credits) | `button` | `off` or `autoskip` | **APPROVED — owner, 2026-07-22** |
 | Confirm key while prompt shown | `SPACE`, force-bound only while displayed | different key; no keyboard activation | **APPROVED — owner, 2026-07-22** |
 | Mouse click on OSD | required primary interaction with exact hit-testing | non-clickable notice | **APPROVED — owner, 2026-07-22** |
-| Unknown config string | normalize to the ratified product default | always fail closed to `off` | Pending |
+| Unknown config string | reject the whole config; notify and offer explicit backup-then-fresh-config recovery | normalize to `button` or `off` | **APPROVED — owner, 2026-07-22** |
 | Commercial markers | ignore / unmodeled | add a separate policy now | Pending |
 | Live IPC marker updates | not required (respawn per item) | add insurance now | Pending |
 
@@ -597,7 +613,7 @@ contested; do not batch.
 
 | v1 | v2 |
 |----|----|
-| Hard `SkipPolicy` enum on `AppConfig` | `Option<String>` + normalize |
+| Hard `SkipPolicy` enum on `AppConfig` | Restored by owner ruling; missing is valid Button, unknown rejects config |
 | CLI JSON in script-opts | Private payload file + child-only path environment |
 | Mouse click in scope | Restored as the required primary interaction |
 | Permanent `s` binding | Replaced by temporary in-button `SPACE`; pause restored outside |
@@ -629,3 +645,9 @@ contested; do not batch.
   control, not a notice. Left-click is primary; Space activates the same skip
   action only while the button is displayed and resumes normal pause behavior
   afterward. This closes both the mouse and confirmation-key rows.
+- **2026-07-22 — owner ruling 3:** an unknown marker policy invalidates the
+  settings file; it never normalizes to Button or Off. The app-wide recovery
+  contract is a user-facing damaged/tampered notice and an explicit
+  backup-then-fresh-config action. This exposes conflicting tolerant/fallback
+  behavior in current code, so a separate approved config-integrity/recovery
+  plan is now a prerequisite rather than hidden scope in this feature.

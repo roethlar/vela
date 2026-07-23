@@ -86,8 +86,11 @@ Rules the command list doesn't carry on its own:
   `.agents/decisions.md`, 2026-05-23.)
 - Keep config persistence defensive. The config may contain Plex/Jellyfin/Emby
   tokens and legacy SMB credentials (inert, next bullet); preserve owner-only
-  Unix permissions, atomic saves, parse-error fail-closed behavior, and
-  cross-process locking.
+  Unix permissions, atomic saves, fail-closed parsing and validation, and
+  cross-process locking. Never replace an unreadable or invalid config with
+  guessed/default runtime settings. Recovery is an explicit user action that
+  first preserves the invalid file as a private byte-for-byte backup, then
+  creates a fresh config (decision `.agents/decisions.md` 2026-07-22).
 - Old configs must keep loading after the local-source removal. The legacy
   `local_folders`/`smb_mounts`/`ssh_mounts` fields are tolerated serde
   fields — parsed, ignored, and preserved on save (never stripped,

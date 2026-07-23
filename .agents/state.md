@@ -35,16 +35,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/skip-credits-intros-v2.md`. Settled behavior is recorded in
   `.agents/decisions.md`: missing intro/credit settings default to Button; the
   external-mpv control is genuinely clickable; and Space activates it only
-  while visible, otherwise retaining its normal pause behavior. No code has
-  been implemented.
+  while visible, otherwise retaining its normal pause behavior. An unknown
+  marker policy does not normalize: it invalidates the settings file under the
+  owner-approved app-wide fail-closed recovery rule. No code has been
+  implemented.
 
 ## Next
 
-- Continue the marker plan's owner gates one at a time. Next, decide how an
-  unknown persisted skip-policy string normalizes (recommended: Button, matching
-  the missing-value default; alternative: Off), followed by commercial-marker
-  handling and live IPC marker refresh. After all three rulings are recorded,
-  explicitly activate the plan in state before implementation.
+- Continue the marker plan's owner gates one at a time. Next, decide
+  commercial-marker handling, followed by live IPC marker refresh. Before
+  marker implementation, draft and approve the app-wide config-integrity and
+  recovery work required by the new fail-closed decision, then explicitly
+  activate the marker plan in state.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -55,9 +57,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Marker-skipping implementation is intentionally gated on the three remaining
-  owner decisions and explicit plan activation. No technical or external
-  blocker is known.
+- Marker-skipping implementation is intentionally gated on the two remaining
+  owner decisions, an approved plan for the app-wide config-integrity/recovery
+  prerequisite, and explicit marker-plan activation. Current code still
+  normalizes several invalid constrained values and sometimes substitutes a
+  default config after load failure; that lower-authority behavior conflicts
+  with the 2026-07-22 owner decision and must not be copied into this feature.
 
 ## Verification
 
