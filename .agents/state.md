@@ -42,13 +42,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the dated provider evidence and unsupported-provider boundary are canonical
   in the plan. No code has been implemented.
 - The app-wide fail-closed settings prerequisite now has a planning-only draft
-  at `.agents/plans/config-integrity-recovery.md`. It specifies one strict
-  config boundary, all-or-nothing source restoration, blocking startup/runtime
-  fault states, and explicit byte-exact private backup before atomic fresh
-  config creation. Every product choice is settled: unknown top-level or
-  active-source setting keys invalidate the whole config; documented legacy
-  rollback fields and non-settings media payloads remain compatible. No code
-  has been implemented.
+  at `.agents/plans/config-integrity-recovery.md`. It specifies independent
+  strict boundaries and targeted byte-exact recovery for settings and active
+  server connections. Active connection records and plaintext tokens move to
+  private `connections.json`; valid connections survive a settings reset
+  without reauthorization. The owner rejected an OS credential vault and
+  app-managed pretend encryption: owner-account file/backup permissions,
+  redacted runtime handling, private request headers, and removal of Plex token
+  URLs/query strings are the security boundary. Unknown fields invalidate only
+  their whole owning file; documented legacy rollback fields and non-settings
+  media payloads remain compatible. No code has been implemented.
 
 ## Next
 

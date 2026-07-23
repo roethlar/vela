@@ -79,18 +79,25 @@ Rules the command list doesn't carry on its own:
 
 ## Earned Practices
 
-- Keep token and credential handling conservative. Plex/Jellyfin/Emby poster
-  and stream URLs may carry tokens as an accepted local-only exposure. Do not
-  add logs, errors, analytics, or copied UI text that expose token-bearing
-  URLs, auth tokens, SMB passwords, or config contents. (See
-  `.agents/decisions.md`, 2026-05-23.)
-- Keep config persistence defensive. The config may contain Plex/Jellyfin/Emby
-  tokens and legacy SMB credentials (inert, next bullet); preserve owner-only
-  Unix permissions, atomic saves, fail-closed parsing and validation, and
-  cross-process locking. Never replace an unreadable or invalid config with
-  guessed/default runtime settings. Recovery is an explicit user action that
-  first preserves the invalid file as a private byte-for-byte backup, then
-  creates a fresh config (decision `.agents/decisions.md` 2026-07-22).
+- Keep token and credential handling conservative. Current 1.0 Plex artwork and
+  Jellyfin/Emby poster/stream URLs may carry tokens as an accepted local-only
+  exposure. The approved connection split removes Plex tokens from returned
+  URLs and query parameters in favor of guarded request headers; the
+  Jellyfin/Emby boundary remains unchanged. Do not add logs, errors, analytics,
+  or copied UI text that expose token-bearing URLs, auth tokens, SMB passwords,
+  or durable-file contents. (See `.agents/decisions.md`, 2026-05-23 and
+  2026-07-23.)
+- Keep settings and connection persistence defensive. Pre-split `config.json`
+  may contain Plex/Jellyfin/Emby tokens until the approved split lands; the
+  durable target is private `connections.json` for active connection records
+  and tokens, with `config.json` retaining settings and inert legacy SMB
+  credentials (next bullet). Preserve owner-account permissions, atomic saves,
+  fail-closed parsing/validation, and cross-process locking for both files.
+  Never replace an unreadable or invalid file with guessed/default runtime
+  state. Recovery is an explicit action that first preserves only the invalid
+  file as a private byte-for-byte backup, then creates that file's fresh
+  document; healthy connections survive settings recovery without
+  reauthorization (decisions `.agents/decisions.md` 2026-07-22 and 2026-07-23).
 - Old configs must keep loading after the local-source removal. The legacy
   `local_folders`/`smb_mounts`/`ssh_mounts` fields are tolerated serde
   fields — parsed, ignored, and preserved on save (never stripped,

@@ -1349,3 +1349,49 @@ Supersedes:
 The pending reject-or-preserve choice in config-integrity plan draft v1. It
 does not narrow documented missing-field defaults, legacy rollback
 compatibility, or tolerant parsing of non-settings provider/media data.
+
+## 2026-07-23 - Connections are private file-backed state, not settings
+
+Status: APPROVED (owner, 2026-07-23). Implementation plan:
+`.agents/plans/config-integrity-recovery.md`.
+
+Decision:
+Active Plex/Jellyfin/Emby connection records and tokens live in a separately
+validated private `connections.json`, not in live `config.json`. Recovering
+invalid settings preserves the valid connections file byte-for-byte and
+restores its full source registry without reauthorization. Recovering an
+invalid connections file is a separate explicit backup-then-empty action that
+does not reset settings or playlists.
+
+The one-time split accepts only a fully valid old combined config, creates and
+verifies an exact private pre-split backup before writing, migrates every
+connection through a retry-safe fixed-lock-order transaction, and then removes
+active provider tokens from live settings. It does not retain a live credential
+mirror for old builds; the pre-split backup is the explicit rollback artifact.
+
+Tokens remain plaintext behind owner-account filesystem protection. Vela does
+not use an OS credential vault, a user passphrase, or app-managed encryption
+whose key would be stored beside the ciphertext. Connection files, locks,
+temporary files, and backups are private from their first byte; runtime secret
+representations are redacted. Plex tokens do not appear in frontend DTOs,
+returned artwork/media URLs, query parameters, process arguments, logs, or
+errors. Plex requests use guarded authentication headers, including the
+existing private mpv include path. This boundary does not claim protection from
+malware already executing as the same OS user.
+
+Reason:
+Settings corruption or an unknown preference must not force the owner to
+reauthorize Plex. A separate file gives settings and authorization independent
+validity/recovery boundaries. Owner-only access and eliminating accidental
+exposure are an honest lightweight protection; encryption without an external
+key boundary would add complexity without protecting against a same-user
+reader.
+
+Supersedes:
+The placement of active `sources` and provider tokens in `AppConfig`, and the
+config-recovery draft's empty-registry outcome after resetting settings. For
+Plex, it also narrows the 2026-05-23 accepted local-only token-URL exposure:
+Plex artwork and API paths must become credential-free/header-authenticated.
+It does not change the separately documented Jellyfin/Emby token-bearing URL
+boundary, the rollback preservation of inert legacy SMB credentials, or the
+ban on logs/errors/UI copy containing credentials.
