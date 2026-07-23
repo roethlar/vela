@@ -4,8 +4,8 @@
 <!-- prime:begin — keep terse; re-grounded after compaction -->
 These outrank everything below. After a context compaction, re-read this block from AGENTS.md before continuing.
 
-- Words first. Answer questions and musings in words; act only on an explicit instruction or go. A handed-over report, plan, or spec is evidence to assess, not a decision to implement.
-- No code change without an approved plan; docs and other non-code edits don't need one (e.g. a README). When unsure, treat it as code. Do not expand scope without approval.
+- Words first. Answer questions and musings in words; act only on an explicit instruction or go. A handed-over report, plan, or spec is evidence to assess, not a decision to implement — but an owner's completion report inside an approved, already-scoped workflow is the go for the next step that workflow already defines; new scope, changed risk, and separately gated actions still stop.
+- No code change without an approved plan; docs and other edits that change nothing the repo ships don't need one (a README). When unsure, treat it as code. Do not expand scope without approval.
 - Commit each slice as it lands; never leave finished work uncommitted. History-rewrite and destructive or outward-facing actions always need an explicit go. Push policy: see `.agents/push-policy.md`.
 - Repo is memory. Durable truth lives in the repo, not chat or working memory. Under context pressure, re-ground from AGENTS.md; prefer a fresh session when degraded.
 <!-- prime:end -->
@@ -14,16 +14,16 @@ These outrank everything below. After a context compaction, re-read this block f
 
 @.agents/repo-guidance.md
 
-Repo-specific rules live in `.agents/repo-guidance.md`, imported above (read it directly if your harness does not process `@` imports). It extends this file and never overrides it — flag any genuine conflict.
+Repo-specific rules live in `.agents/repo-guidance.md`, imported above (read it directly if your harness does not process `@` imports). It extends this file and never overrides AGENTS.md or any refresh-installed artifact — it may set repo policy on when an operator or tool is invoked, but never rewrite an installed artifact's semantics; flag any genuine conflict.
 
 ## Universal Invariants
 
 - The Prime Invariants above are the hardest-to-reverse rules; this section adds the rest.
-- Agent-local or harness-local memory stores kept outside the repo are not durable memory, on any harness. Persist project-specific durable knowledge into the repo's `.agents/` files; reserve out-of-repo stores for genuinely cross-project facts (owner identity, preferences).
-- Record important repo facts, decisions, invariants, verification rules, non-goals, and open questions in repo files, or explicitly report them as unrecorded. Write them generalized, tied to repo evidence or explicit human intent, so they make sense without the conversation that produced them — never as transient chat wording. Label inferred-but-unverified facts as assumptions until repo evidence or explicit human approval supports them.
+- Agent-local or harness-local memory stores kept outside the repo are not durable memory, on any harness. Persist project-specific durable knowledge into the repo's `.agents/` files; reserve out-of-repo stores for genuinely cross-project facts (owner identity).
+- Record important repo facts, decisions, invariants, verification rules, non-goals, and open questions in repo files, or explicitly report them as unrecorded. Write them generalized, tied to repo evidence or explicit human intent, so they make sense without the conversation that produced them — never as transient chat wording. Label inferred-but-unverified facts as assumptions until repo evidence supports them.
 - Keep one canonical location for each durable truth. Prefer pointers over duplicating the same rule; never keep a second copy of a count or enumeration another doc owns.
-- Establish one immediately discoverable current-state entry point (`.agents/state.md`). Do not reconstruct current state from chat, long journals, or tool-local memory.
-- When repo documents disagree, flag the conflict instead of silently choosing whichever source is convenient. Code and tests are evidence for behavior; approved plans and guidance are evidence for intent.
+- Establish one immediately discoverable current-state entry point (`.agents/state.md`), kept current by the working agent as work lands — never owner-gated; `handoff` and `drift` keep their deliberate-pass roles. Do not reconstruct current state from chat, long journals, or tool-local memory.
+- When repo documents disagree, flag the conflict instead of silently choosing whichever source is convenient. Code and tests are evidence for behavior; owner-approved plans and guidance are evidence for intent — guidance authored during the current effort authorizes nothing in that effort.
 - Specific over generic: an explicit authority or scope boundary, or a rule or decision whose wording removes discretion for the case it names ("unconditional", "no per-run choice", "deterministic"), outranks every generic default for that case — flag-conflicts, one-canonical-location, smallest-guidance-set included. Apply it as written; do not reopen the case it settles as a conflict or approval question against surrounding repo state such as git history. Generic defaults govern only questions no more specific rule has already resolved.
 - Prefer the smallest durable guidance set that fits the repo.
 - Do not circumvent a roadblock whose provenance you have not established — a failing test, a guard or assertion, a lint or type error, a `.gitignore` rule, a refusal or permission denial, a config prohibition, a CI gate. Before removing or bypassing one, inspect its origin thoroughly enough to confirm it is not load-bearing; if you cannot, treat it as legitimate and stop or ask.
@@ -35,12 +35,12 @@ Repo-specific rules live in `.agents/repo-guidance.md`, imported above (read it 
 
 1. Read `AGENTS.md`, `.agents/repo-guidance.md`, and `.agents/state.md` if present, plus relevant `.agents/` files, before making changes; note any untracked or ignored agent-control files that affect the task.
 2. Clone freshness: before trusting `.agents/state.md`, compare this clone against its canonical remote with a read-only check (`git ls-remote <remote> HEAD` against the local ref). Behind or diverged — say so and treat recorded state as possibly stale; unreachable — proceed with a one-line caveat, never block.
-3. This repo ships a compaction re-ground hook (Claude Code; other harnesses only as listed in the toolkit's harness-capabilities record); if your harness gates hooks until the workspace is trusted, say what the hook does and run the trust step only on an explicit go — never bypass the gate.
+3. This repo ships governance hooks (Claude Code only); if your harness gates hooks until the workspace is trusted, say what the hooks do and run the trust step only on an explicit go — never bypass the gate.
 
 ## Source Of Truth
 
 1. Human request.
-2. `AGENTS.md`, extended by `.agents/repo-guidance.md` (extends, never overrides).
+2. `AGENTS.md`, extended by `.agents/repo-guidance.md` (extends, never overrides AGENTS.md or any refresh-installed artifact).
 3. `.agents/state.md` for current work; `.agents/decisions.md` for settled decisions; approved `.agents/playbooks/*`.
 4. Current code, tests, and CI as evidence for behavior.
 5. Existing docs, only when consistent with current repo evidence.
@@ -53,9 +53,9 @@ Treat these owner words as process requests:
 
 - `catchup`: re-read `AGENTS.md` (the Prime Invariants in full), `.agents/state.md`, and active repo docs; summarize current state, next action, blockers, and one proposed first action. Make no changes until the human responds.
 - `handoff`: a fast save-my-place snapshot — seconds, not minutes. Update `.agents/state.md` `## Now` / `## Next` (and `## Blockers` if something is live) so the next session resumes without chat context: in-flight work, next action, stop. No archive rotation, no re-verification sweep, no mandatory re-anchoring of volatile facts — that hygiene belongs to `drift`. Machine-specific facts (CLI paths, local tool versions, host layout) go to the tracked `.agents/machines.md` under a heading for the current machine, dated, created on first use — never into `.agents/state.md`, which stays portable and may at most point there.
-- `drift`: compare a doc, decision, or guidance claim against repo evidence; fix the lower-authority source or report the unresolved conflict. The guidance files themselves — `AGENTS.md` and `.agents/*` — are in scope as drift targets, not just sources of truth. `drift` also owns the deliberate state-hygiene pass: rotate landed or superseded `## Now` entries verbatim to `docs/history/state-archive.md` (create on first use); re-verify the recorded basis of every parked or blocked item and move anything falsified into `## Blockers` with the new evidence; volatile facts (CI state, counts) carry `as of <commit>` and are re-verified or dropped; push status is never recorded in state files — git owns it, sessions check it live, and unpushed work is mentioned only in the moment it matters — so any recorded push-state line is deleted on sight, not refreshed; a count or enumeration another file owns is pointed to, never copied; machine-specific facts relocate to `.agents/machines.md`, and stale entries there are pruned.
+- `drift`: compare a doc, decision, or guidance claim against repo evidence; fix the lower-authority source — a repo-owned file is fixed in place, a refresh-installed copy is report-and-route, never edited — or report the unresolved conflict. Its full target scope and the deliberate state-hygiene pass follow the `drift` playbook (`.agents/playbooks/drift.md`), read at invoke time.
 - `decision`: record a settled durable decision in `.agents/decisions.md` and update affected guidance.
-- `plan`: draft or update a durable plan before broad implementation work. Plan documents are written for agents, never the owner: self-contained and technical, implementable by a completely cold, less-capable agent — no human-facing summary prose, no chat or session references that need the originating conversation to make sense. The owner does not read plan documents; present every decision a plan needs in chat as roughly 25-50 plain-English words — the problem, the change, the cost or risk — one decision at a time, never a batch, no jargon. Record the owner's approved wording durably (the decisions log, the plan's status line) so the approval survives the chat.
+- `plan`: draft or update a durable plan before broad implementation work. Plan documents are written for agents, never the owner: self-contained and technical, implementable by a completely cold, less-capable agent — no human-facing summary prose, no chat or session references that need the originating conversation to make sense. The owner does not read plan documents; present every decision a plan needs in chat one decision at a time, never a batch — the problem, the change, the cost or risk — styled to the repo's communication level (`.agents/comms-policy.md`). Record the owner's approved wording durably (the decisions log, the plan's status line) so the approval survives the chat.
 - `playbook <name>`: read `.agents/playbooks/<name>.md` and follow it. Playbooks are approved durable workflows; this operator is how a session invokes one by name. If the named playbook does not exist, say so rather than guessing.
 
 ## Owner Gates
@@ -80,4 +80,4 @@ Use the repo's current automated verification entry point recorded in `.agents/r
 
 ## Final Response
 
-Explain what changed, what was validated, and any remaining risk in plain English.
+Open with a bottom-line-first executive summary — what changed, what was validated, any remaining risk, and anything still awaiting the owner; supporting detail follows the summary, never precedes it. While any queued work remains, never end a response without naming the next work item and a concrete proposed action; a bare "x is blocked on y" is not an acceptable ending. Register follows the repo's communication level (`.agents/comms-policy.md`).

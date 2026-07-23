@@ -15,8 +15,10 @@ work, batch triage, and reviewer models that wander without a rubric. For an
 unprimed whole-change judgment — "is this the best way to achieve the goal?" —
 use the `openreview` playbook instead; the owner chooses per invocation, by name.
 
-Invoke it with `codereview <agent>` (in Claude Code: the tab-completable `/codereview
-<agent>`). This file is durable guidance; it defers to this repo's `AGENTS.md` and
+Invoke it with `codereview <harness> <nickname> <effort>` (in Claude Code: the
+tab-completable `/codereview <harness> <nickname> <effort>`; see "Model map and
+dispatch grammar" for how `<nickname>` resolves to a model). This file is durable
+guidance; it defers to this repo's `AGENTS.md` and
 `.agents/` layout wherever they overlap. Where this playbook and the repo's
 invariants disagree, the invariants win.
 
@@ -51,42 +53,15 @@ branches are this loop's INTERNAL mechanics — its atomic unit and guard-proof
 isolation — not a repository branch policy: whether the repo uses branches for other
 work stays repository policy, per `AGENTS.md` (Git Safety).
 
-## Governance alignment (read first)
-
-This playbook is reconciled with the standard `.agents/` governance so it does not
-create a parallel canon or bypass owner gates:
-
-- **Status nests under `.agents/`, it does not compete with it.** `.agents/state.md`
-  remains the single discoverable current-state entry point. The loop's status index
-  lives at `.agents/review/index.md`; `state.md` *points* to it while a loop is
-  active rather than duplicating the finding table (pointer doc points; it does not
-  keep a second copy of an enumeration another doc owns). There is no root
-  `REVIEW.md`.
-- **Merging into the main branch is owner-gated.** A reviewer "accepted" verdict
-  records that a branch passed review; it does **not** authorize the agent to merge
-  into the main branch. Default: leave the accepted branch (or hand off a
-  `merge-<id>` branch) for an owner-approved merge. Never merge, push, or rewrite
-  history without an explicit owner go (see the repo's Git Safety invariants).
-- **Disagreement is a recorded verdict, never a silent veto.** Declining a finding,
-  disputing one, or ruling a fix invalid are all logged outcomes that route to the
-  owner when the two roles cannot agree. An agent never quietly drops a finding or
-  overrides a critique without leaving the reason in the results trail. This keeps the
-  loop inside the repo's "answer with words, act only on an explicit go" invariant.
-- **Verification is the repo's observed command, not a hardcoded suite.** Run the
-  automated verification command recorded in this repo's `AGENTS.md` / `.agents/`
-  guidance before any commit. The example commands in this playbook are illustrative
-  only.
-- **Capabilities, not harness-specific tool or agent names.** Where this playbook
-  names `codex`/`agy`/`grok`, those are *examples* of reviewer harnesses, never
-  guarantees. Participation is exactly what the live probe (see below) verifies on
-  this machine today — headless launch, prompt intake, structured output; a harness
-  that fails the probe is not a reviewer here, whatever its documentation claims.
-
 ## Operator
 
-`codereview <agent>` is the harness-neutral entry. In Claude Code it is the
-tab-completable slash command `/codereview <agent>`; on another harness the owner
-speaks "codereview \<agent\>". `<agent>` names the reviewer harness to dispatch.
+`codereview <harness> <nickname> <effort>` is the harness-neutral entry. In Claude
+Code it is the tab-completable slash command `/codereview <harness> <nickname>
+<effort>`; on another harness the owner speaks it aloud. `<harness>` names the
+reviewer harness to dispatch; `<nickname>` selects the model through the map and
+`<effort>` sets the effort level (see "Model map and dispatch grammar"). The
+`<agent>` shorthand used elsewhere in this playbook is the same reviewer-harness
+token.
 
 The flow is **synchronous by construction**: the coder dispatches the reviewer and
 blocks on its verdict before acting on that finding. There is therefore **no
@@ -94,9 +69,12 @@ quick/wait toggle and no Strict/Faster WIP mode** — the prior async loop's
 parallelism knobs do not apply here. One finding is dispatched, reviewed, recorded,
 and acted on before the next is dispatched.
 
-`codereview <agent> frontier` is the only routing modifier: it forces the
-**frontier** tier for that dispatch (see "Reviewer tiers and routing") and the
-record carries `escalated: owner`. Provider choice stays in `<agent>` — no
+`frontier` is a reserved word in the `<nickname>` slot: `codereview <harness>
+frontier` forces the **frontier** tier for that dispatch (see "Reviewer tiers
+and routing") instead of resolving as a nickname, and the record carries
+`escalated: owner`. It is the only routing modifier, and the map may not define
+a `frontier` nickname — the model-map lint rejects one — so the reserved word
+can never collide with a real model. Provider choice stays in `<harness>` — no
 phrase silently re-routes to a different harness.
 
 ## Deriving the reviewer incantation (probe-and-verify)
@@ -104,8 +82,11 @@ phrase silently re-routes to a different harness.
 The only harness-specific fact the loop needs is **how to run `<agent>` headless,
 non-interactive, one-shot**. This is **not** shipped as a human-maintained table and
 **not** derived by parsing `--help` prose into a committed regex — both rot or break
-silently. Instead derive it live, per harness, per session, by probing — the same
-thing a capable agent already does when a human says "codereview this with grok":
+silently. Every command shown below is illustrative only — the verification command
+in particular is always this repo's recorded one (see its `AGENTS.md` / `.agents/`
+guidance), never a literal copied from here. Instead derive it live, per harness, per
+session, by probing — the same thing a capable agent already does when a human says
+"codereview this with grok":
 
 1. **Presence + surface.** `command -v <agent>`; then `<agent> --help` and
    `<agent> --version`. The top-level help usually reveals whether the headless entry
@@ -114,16 +95,36 @@ thing a capable agent already does when a human says "codereview this with grok"
    (`<agent> exec --help`, `<agent> chat --help`, whichever the top level lists) to
    find the non-interactive flag and how to pass a prompt. Note the harness's JSON
    output flag here too (e.g. `--output-format json`) — the verdict contract uses it.
-3. **Bounded smoke-test.** Run the candidate incantation with a trivial prompt (e.g.
-   `<agent> exec "say OK"`) under bounds: a **timeout** (a hung process is a failed
-   probe, not a wait); **non-interactive detection** (if it opens a TUI / alternate
-   screen / waits on a TTY, the incantation is wrong — try the next candidate); and
-   run it **from a real git repo** (a canned prompt in an arbitrary temp dir hides
-   launch requirements — e.g. codex refuses a non-trusted dir and needs
-   `--skip-git-repo-check`, agy must run from the real repo cwd). Treat a launch
-   refusal as a flag to adjust, not a dead end.
-4. **Use the verified incantation** to run the review. Probing is bounded to
-   `--help`/`--version`/the trivial smoke prompt — never arbitrary commands.
+3. **Capability smoke-test — through the real child path.** A probe that only
+   proves the process launches is what cost issue #6: a bare `<agent> exec "say
+   OK"` returned while the reviewer child could not read the repo or run the
+   guard, and 291 request variants chased one missing capability with no verdict.
+   So run the candidate incantation **with the same self-permissioning launch
+   grant the real review carries** (see "Self-permissioning launch") and make the
+   child prove, in that one shot, the two capabilities the review actually
+   depends on: **read a repo file** (e.g. print a line of a known committed file)
+   and **run one allowlisted command** (e.g. the verification command, or a
+   trivial `git` invocation from the grant) — then echo a token that appears only
+   if both succeeded. A probe that skips either capability, or that runs outside
+   the real grant, does not qualify the transport. Keep the usual bounds: a
+   **timeout** (a hung process is a failed probe, not a wait); **non-interactive
+   detection** (if it opens a TUI / alternate screen / waits on a TTY, the
+   incantation is wrong — try the next candidate); and run it **from the real git
+   repo** (a canned prompt in an arbitrary temp dir hides launch requirements —
+   e.g. codex refuses a non-trusted dir and needs `--skip-git-repo-check`, agy
+   must run from the real repo cwd).
+4. **Permission/tool denial is terminal.** Distinguish two failure kinds. A bare
+   incantation error — wrong flag, TUI opened, untrusted dir — is a flag to
+   adjust: try the next candidate. But a **permission or tool denial** — the
+   child reaching the repo read or the allowlisted command and being *refused*
+   it — means the capability the review needs is not available on this transport,
+   and retrying variants only burns the quota issue #6 measured. Retry **once in
+   a fresh process**; if the denial repeats, **record it, report the transport
+   unsupported, and stop** — do not search for a workaround.
+5. **Use the verified incantation** to run the review. Probing is bounded to
+   `--help`/`--version`/the capability smoke prompt (a repo read plus the
+   allowlisted verification command) — never arbitrary commands beyond that
+   grant.
 
 **Session cache (`.agents/review/harnesses.local.json`, machine-local).** Once
 verified, record the incantation in this gitignored machine-local file to skip
@@ -196,10 +197,7 @@ is bounded and strictly narrower than the coder's — read-only inspection plus 
 disposable `git worktree`, no write: reading the workspace, driving its own
 worktree, and running the verification command. On Claude Code that is
 `--allowedTools Read Grep Glob "Bash(git:*)" "Bash(<verify-cmd>)"`; every harness
-has an equivalent launch-scoped grant, recorded in the entry's `flags`. Transport
-only decides where the grant rides — `cli`: the orchestrator passes it per
-invocation; `mcp`: the same flags live in the server's registration command — so
-both self-permission and the `mcp`-preferred default is unaffected.
+has an equivalent launch-scoped grant, recorded in the entry's `flags`.
 
 ### Dispatch provenance: the `Reviewer:` line
 
@@ -228,11 +226,12 @@ and rot in an installed artifact is drift:
 
 - **standard** — the owner-confirmed best-value (model, effort) pair on the
   dispatched harness; sufficient for the tightly framed conformance verdicts
-  this playbook issues. `codereview` dispatches standard at **high** effort.
+  this playbook issues. Standard defaults to **high** effort when `<effort>`
+  is omitted.
 - **frontier** — an owner-confirmed pair strictly stronger than standard *as
-  configured*; required for escalated findings. `codereview` dispatches
-  frontier at **xhigh** effort, whether frontier was reached by escalation or
-  owner force. Where the harness does not expose the ruled level, the
+  configured*; required for escalated findings. Frontier defaults to **xhigh**
+  effort when `<effort>` is omitted, whether frontier was reached by escalation
+  or owner force. Where the harness does not expose the ruled level, the
   owner-confirmed pair is authoritative as recorded.
 
 Effort is part of tier identity: capability ordering holds only for configured
@@ -273,7 +272,12 @@ the map at invocation time.
 Dispatch grammar: `/codereview <harness> <nickname> <effort>`, with
 `/review` as a pure alias of `codereview`. A nickname unknown to the map,
 or missing an entry for the dispatched harness, blocks loud — nothing
-guesses, nothing falls back across harnesses.
+guesses, nothing falls back across harnesses. `<effort>` is optional; when
+omitted the routed tier's default applies (standard → high, frontier →
+xhigh; see "Reviewer tiers and routing"). `frontier` is a reserved word in
+the `<nickname>` slot: it forces the frontier tier rather than resolving as a
+model (see the Operator section), so the map may not define a `frontier`
+nickname — the fetch contract below rejects a map that does.
 
 **Fetch contract** — applied by the dispatching agent to the fetched
 bytes (`curl -fsS --max-time 10` into a scratch file), in order:
@@ -287,6 +291,8 @@ bytes (`curl -fsS --max-time 10` into a scratch file), in order:
    `^[a-z0-9][a-z0-9._-]{0,63}$`; exact lowercase, no case folding.
 5. **Closed harness set**: harness keys outside `codex`, `claude`,
    `gemini` are a hard failure, not ignored.
+6. **Reserved nicknames**: a `frontier` nickname is rejected — it is the
+   dispatch grammar's reserved tier-forcing word, never a model.
 
 Validation runs before any fetched byte reaches model-visible context; on
 success exactly one validated slug enters context, never the raw
@@ -354,15 +360,16 @@ routes that finding's review (or re-review) to frontier:
   session** of the same harness and records `escalated: T5 (ceiling)`.
   Switching provider requires an explicit owner dispatch.
 
-**Owner override.** The operator phrase `codereview <agent> frontier` forces
-frontier for that dispatch and is recorded as `escalated: owner` — never by
-hand-editing the cache.
+**Owner override.** The operator phrase `codereview <harness> frontier` — with
+`frontier` the reserved nickname-slot word (see "Operator") — forces frontier
+for that dispatch and is recorded as `escalated: owner`, never by hand-editing
+the cache.
 
 **Fallback-grade halt.** Where the confirmed frontier entry carries
-`"grade": "fallback"`, any trigger that would route to frontier — T1–T5
-alike — instead halts the finding as contested to the owner: escalation must
-buy a strictly stronger adjudicator, and auto-dispatching the same class at
-more effort is escalation theater. At the halt the owner either accepts the
+`"grade": "fallback"`, any trigger that would route to frontier instead halts
+the finding as contested to the owner: escalation must buy a strictly stronger
+adjudicator, and auto-dispatching the same class at more effort is escalation
+theater. At the halt the owner either accepts the
 fallback dispatch (recorded `escalated: <triggers> (fallback accepted:
 owner)`) or re-dispatches on a competitive-frontier harness via the owner
 phrase — provider switching stays owner-only.
@@ -574,26 +581,6 @@ finding record, compacted: `<harness>/<model>/<effort>/<tier>` plus
 Add one line to `.agents/state.md` while a loop is active, e.g. "Active review loop:
 see `.agents/review/index.md`." Remove it when the loop is done. `state.md` points;
 it does not copy the table.
-
-## Calibration anti-patterns
-
-These are the failure modes that make a two-role loop produce motion without signal.
-Name them when they appear; they are process defects, not code defects.
-
-- **Reviewer inflation.** Returning a finding on every pass because "no issues" feels
-  like not doing the job. Cure: an empty findings table is a valid result; every
-  admitted finding needs a predicted observable failure.
-- **Author capitulation.** Accepting every finding as valid and implementing a change
-  for each. Cure: the coder must judge each finding and route wrong ones to a contested
-  verdict instead of fixing them.
-- **Severity decoration.** Tagging findings CRITICAL/HIGH without an impact line.
-  Cure: no impact line, no high severity — downgrade or decline.
-- **Churn without evidence.** A "fix" that no test can distinguish from the original.
-  Cure: the guard proof; if reverting the fix breaks nothing, the change is churn and
-  should be reopened or declined.
-- **Convergence read as correctness.** Treating two roles agreeing as proof the code is
-  right. Cure: agreement is not the gate; the guard proof is. The recorded verdict
-  carries the proof, not the consensus.
 
 ## Anti-patterns
 

@@ -8,8 +8,10 @@
 (`.agents/model-map.json`) — the single committed home for concrete model
 slugs (see "Model map and dispatch grammar" in the `codereview`
 playbook). Dispatch never writes the map; edits land here, as normal
-commits in the toolkit repo, and reach governed repos on their next
-refresh.
+commits in the toolkit repo, and take effect fleet-wide as soon as they
+are pushed — the map is not in the refresh shipped set; downstream clones
+fetch it live from the public raw `master` link at dispatch time, so a
+governed repo never waits on a refresh to see a map edit.
 
 ## Map edits
 

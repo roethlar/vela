@@ -20,7 +20,6 @@ import sys
 PROTECTED = frozenset({
     "AGENTS.md",
     "CLAUDE.md",
-    "GEMINI.md",
     ".claude/commands/catchup.md",
     ".claude/commands/decision.md",
     ".claude/commands/drift.md",
@@ -39,6 +38,7 @@ PROTECTED = frozenset({
     ".agents/playbooks/openreview.md",
     ".agents/playbooks/harness-update.md",
     ".agents/playbooks/git.md",
+    ".agents/playbooks/drift.md",
     ".agents/skills/catchup/SKILL.md",
     ".agents/skills/handoff/SKILL.md",
     ".agents/skills/drift/SKILL.md",
