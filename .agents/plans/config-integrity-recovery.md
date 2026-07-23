@@ -29,10 +29,8 @@ versions independently for settings and connections and to show all available
 versions as explicit rollback buttons. Revision 5 adds this approved slice
 without weakening exact damaged-file preservation or fresh-file recovery.
 
-Slices 1 and 2 are implemented, verified, and committed at versions 1.0.1 and
-1.0.2. Slice 2A implementation and canonical verification are complete at
-version 1.0.3; its commit and post-commit guard proofs are next. Slice 3
-follows it.
+Slices 1, 2, and 2A are implemented, verified, committed, and independently
+red-proven at versions 1.0.1, 1.0.2, and 1.0.3. Slice 3 follows.
 
 No marker-skipping implementation may start until this plan is implemented,
 reviewed, verified, and committed, and the marker plan is then activated
@@ -954,16 +952,30 @@ Implementation evidence (2026-07-23):
 - Canonical local verification passed: exact Node/npm check, clean `npm ci`,
   zero-vulnerability npm audit, 48 Node tests, Svelte check with zero
   diagnostics, production frontend build, Rust 1.89 and stable checks, clippy
-  with warnings denied, 241 Rust tests, and Cargo audit with no vulnerabilities
+  with warnings denied, 242 Rust tests, and Cargo audit with no vulnerabilities
   (17 existing allowed unmaintained/unsoundness warnings). `bash -n` accepted
   the version-bumped Arch PKGBUILD.
 - The first native Windows history run exposed that UUID plus full-hash
   filenames exceeded the host's legacy path limit in deep temporary paths.
   Removing the redundant UUID kept the full content hash as the opaque id and
   shortened the private filename. The checksum-identical final source passed
-  all 27 durable tests and the four Windows storage/privacy tests on
+  all 28 durable tests and the four Windows storage/privacy tests on
   `netwatch-01`. The checksum-identical rebuilt Linux real app passed all 37/37
   E2E scenarios.
+- Production implementation landed as `b09b610`. Post-commit regressions
+  independently proved the literal three-version cap, identical-version
+  deduplication, filename/content hash binding, settings and connections
+  history routing, exact selected-version installation, native button/busy
+  semantics, gate-bound version ids, nested recovery-record strictness,
+  refusal of changed same-length valid history before the damaged file moves,
+  and exact post-install crash-resume matching.
+- The red-proof pass found three insufficient Rust guards: the history-ring
+  test compared against the mutable production limit, the resume test covered
+  only the post-rename state, and the selected-history tamper fixture became
+  invalid rather than remaining a different valid same-length document. They
+  were strengthened in `ee79573`, `b8d2860`, and `ac65b0f` respectively. Each
+  exact regression then failed for its intended reason and the restored source
+  reran green.
 
 ### Slice 3 — Plex token exposure hardening and closeout
 

@@ -73,15 +73,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Slice 2 landed as `0c9b48f`. Nine behavior guards were independently
   red-proven and restored. A vacuous busy-disabled button check found during
   that pass was strengthened and then failed for the intended regression.
-- Slice 2A implementation and canonical verification are complete at version
-  1.0.3. Settings and connections independently retain the three newest
-  private, distinct, strictly valid prior versions. A damaged-file screen shows
-  all available versions newest first as real dated buttons while retaining
-  fresh-file recovery and Exit. Rollback is bound to the selected whole
-  file/version, preserves the exact damaged current file first, and leaves the
-  other durable file and playlists untouched. Checksum-identical native Windows
-  tests and the rebuilt Linux real-app suite passed; the slice commit and
-  required post-commit guard red proofs are next.
+- Slice 2A is implemented, canonically verified, committed, and independently
+  red-proven at version 1.0.3. Settings and connections independently retain
+  the three newest private, distinct, strictly valid prior versions. A
+  damaged-file screen shows all available versions newest first as real dated
+  buttons while retaining fresh-file recovery and Exit. Rollback is bound to
+  the selected whole file/version, preserves the exact damaged current file
+  first, and leaves the other durable file and playlists untouched.
+  Checksum-identical native Windows tests and the rebuilt Linux real-app suite
+  passed. Production landed as `b09b610`; the guard pass found and strengthened
+  three insufficient tests in `ee79573`, `b8d2860`, and `ac65b0f`, then proved
+  their exact regressions red and restored green.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
@@ -94,8 +96,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Commit Slice 2A and independently red-prove its behavior guards. Then
-  implement Slice 3 Plex token exposure hardening and closeout.
+- Implement Slice 3 Plex token exposure hardening and closeout.
   After all prerequisite slices land, explicitly activate the marker plan
   before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
