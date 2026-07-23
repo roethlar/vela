@@ -1357,11 +1357,11 @@ Status: APPROVED (owner, 2026-07-23). Implementation plan:
 
 Decision:
 Active Plex/Jellyfin/Emby connection records and tokens live in a separately
-validated private `connections.json`, not in live `config.json`. Recovering
-invalid settings preserves the valid connections file byte-for-byte and
-restores its full source registry without reauthorization. Recovering an
-invalid connections file is a separate explicit backup-then-empty action that
-does not reset settings or playlists.
+validated private `connections.json`, not in live `config.json`. After that
+split exists, recovering invalid settings preserves the valid connections file
+byte-for-byte and restores its full source registry without reauthorization.
+Recovering an invalid connections file is a separate explicit action that does
+not reset settings or playlists.
 
 The one-time split accepts only a fully valid old combined config, creates and
 verifies an exact private pre-split backup before writing, migrates every
@@ -1395,3 +1395,37 @@ Plex artwork and API paths must become credential-free/header-authenticated.
 It does not change the separately documented Jellyfin/Emby token-bearing URL
 boundary, the rollback preservation of inert legacy SMB credentials, or the
 ban on logs/errors/UI copy containing credentials.
+
+## 2026-07-23 - Damaged files are renamed whole, never partially salvaged
+
+Status: APPROVED (owner, 2026-07-23). Implementation plan:
+`.agents/plans/config-integrity-recovery.md`.
+
+Decision:
+When `config.json` is damaged, Vela tells the user and offers exactly two
+paths: **Rename and create new settings**, or **Exit Vela** so the user can
+repair the file manually. When `connections.json` is damaged, Vela tells the
+user and offers **Rename damaged connections and reconnect**, or **Exit Vela**.
+Exit writes nothing.
+
+Recovery renames the complete damaged file to a unique private sibling before
+creating its fresh replacement. Vela does not parse, extract, or salvage
+selected records from an invalid file.
+
+During the one-time upgrade from the old combined `config.json`, a damaged file
+still contains the only connection records. Vela treats that whole file as
+damaged settings: it warns that choosing fresh settings requires reconnecting
+servers, renames the whole file, creates fresh settings, and extracts no
+connection data. The guarantee that settings recovery preserves connections
+applies only after a separate valid `connections.json` exists.
+
+Reason:
+The recovery boundary should match the files the product owns: settings and
+connections are independently valid after the split, while a damaged legacy
+combined file is one untrusted document. Renaming or exiting is predictable;
+partial extraction would reintroduce the guessing the fail-closed rule forbids.
+
+Supersedes:
+The proposed `cir-1` salvage branch and the recovery plan's copy-then-replace
+mechanic. It clarifies, without reversing, the separate-connections decision:
+valid post-split connections still survive settings recovery unchanged.

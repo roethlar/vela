@@ -53,17 +53,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   their whole owning file; documented legacy rollback fields and non-settings
   media payloads remain compatible. No code has been implemented.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
-  Claude Code 2.1.218 / `claude-opus-4-8` at max and returned one MEDIUM
-  candidate. It is ADMITTED as `cir-1`: before the one-time split succeeds, an
-  invalid combined config still contains the only connection/token copy, while
-  the planned settings-recovery screen falsely promises that connections are
-  already separate and will survive. The canonical record is
-  `.agents/review/findings/cir-1.md`; no repair is authorized yet.
+  Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
+  `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
+  whole and replaced or Vela exits; damaged connections are renamed and enter
+  reconnection or Vela exits; a damaged legacy combined config is not mined for
+  connection records and therefore also requires reconnection. Plan revision 4
+  records the repair. The canonical finding remains open pending required
+  follow-up external review.
 
 ## Next
 
-- Resolve `cir-1`, follow up the revised exact plan range through the required
-  external review, and explicitly activate the app-wide
+- Send the `cir-1` plan repair through required follow-up external review. If
+  accepted, close the finding and explicitly activate the app-wide
   config-integrity/recovery plan. Then implement and land that prerequisite;
   afterward, explicitly activate the marker plan before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
@@ -82,8 +83,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   normalizes several invalid constrained values and sometimes substitutes a
   default config after load failure; that lower-authority behavior conflicts
   with the 2026-07-22 owner decision and must not be copied into this feature.
-- Config-integrity/recovery implementation is gated on required external plan
-  review, resolution of admitted finding `cir-1`, and explicit activation in
+- Config-integrity/recovery implementation is gated on required follow-up
+  external acceptance of the `cir-1` plan repair and explicit activation in
   state.
 
 ## Verification

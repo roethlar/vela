@@ -2,14 +2,14 @@
 
 ## Status
 
-**Draft v1, revision 3 — 2026-07-23.** Planning-only prerequisite for
+**Draft v1, revision 4 — 2026-07-23.** Planning-only prerequisite for
 `.agents/plans/skip-credits-intros-v2.md`.
 
 The owner approved the core product contract on 2026-07-22: an invalid settings
 file never loads through normalization, default substitution, or partial source
 restoration; Vela blocks normal use, explains that the file may be damaged or
-may have been tampered with, and recommends an explicit backup-then-fresh-config
-recovery.
+may have been tampered with, and offers either a private rename plus fresh file
+or Exit so the user can repair it manually.
 
 On 2026-07-23 the owner approved separating active server connections and
 tokens into a private `connections.json`, with no OS credential vault and no
@@ -44,9 +44,12 @@ the plan has no safe/honest recovery branch for an already-invalid combined
 pre-split config. Detail and proposed guard boundary:
 `.agents/review/findings/cir-1.md`.
 
-This review is not a clean approval. Do not activate implementation until
-`cir-1` is resolved in the plan and the revised exact range receives the
-required follow-up review.
+The owner resolved the product question on 2026-07-23: do not mine or salvage
+connections from a damaged old combined config. Treat it as the damaged
+settings file, offer **Rename and create new settings** or **Exit**, and require
+server reconnection afterward. Revision 4 applies that ruling. This review is
+not yet a clean approval; do not activate implementation until the revised
+exact range receives the required follow-up review.
 
 ---
 
@@ -64,13 +67,17 @@ recovery boundaries:
 - a readable but invalid file loads nothing from that file;
 - a file Vela cannot safely inspect loads nothing from that file;
 - recovery is a deliberate user action, never startup fallback;
-- recovery first preserves the invalid bytes in a unique private backup, then
-  atomically installs a validated fresh document for only the faulted file.
+- recovery privately renames the complete invalid file, then creates a
+  validated fresh document at the canonical path;
+- Exit writes nothing and lets the user repair the original file manually.
 
 An invalid settings file cannot erase, rewrite, or require reauthorization of a
-valid connections file. An invalid connections file cannot erase or reset
-settings. There is no runtime state in which part of either invalid file is
-combined with defaults or partially restored records.
+valid post-split connections file. An invalid connections file cannot erase or
+reset settings. A damaged pre-split combined config is one invalid settings
+file, not a source from which Vela salvages connection rows; after the exact
+rename and fresh settings creation, the user reconnects servers. There is no
+runtime state in which part of any invalid file is combined with defaults or
+partially restored records.
 
 ---
 
@@ -79,8 +86,9 @@ combined with defaults or partially restored records.
 The durable owner rulings are
 `.agents/decisions.md` **2026-07-22 — Invalid settings fail closed with explicit
 preserved recovery**, **2026-07-23 — Unknown active setting names invalidate
-the config**, and **2026-07-23 — Connections are private file-backed state,
-not settings**. The legacy local-source rollback contract in
+the config**, **2026-07-23 — Connections are private file-backed state, not
+settings**, and **2026-07-23 — Damaged files are renamed, not salvaged**. The
+legacy local-source rollback contract in
 `.agents/repo-guidance.md` remains equally binding.
 
 These are valid compatibility cases, not corruption:
@@ -133,6 +141,7 @@ enum DurableFault {
     Invalid {
         file: DurableFile,
         kind: InvalidDocumentKind,
+        layout: DurableLayout,
     },
     Unavailable {
         file: DurableFile,
@@ -145,7 +154,9 @@ enum DurableFault {
 ```
 
 Exact names may follow local Rust conventions, but the distinctions are
-required:
+required. `DurableLayout` distinguishes a normal post-split file from the
+legacy combined pre-split `config.json`; it never authorizes partial parsing or
+salvage:
 
 | Result | Meaning | Normal app loads? | Fresh-config action? |
 |---|---|---:|---:|
@@ -157,11 +168,14 @@ required:
 
 An invalid migration *shape* is `Invalid`; a valid migration whose separate
 atomic work fails is `MigrationBlocked`. A settings fault does not change a
-valid connections result, and a connections fault does not change a valid
-settings result. Normal server-backed use still waits until every required
-file is ready. Unavailable and migration-blocked screens provide **Try again**
-and safe manual guidance, but cannot offer reset: Vela has not proved that it
-can preserve the authoritative bytes first.
+valid post-split connections result, and a connections fault does not change a
+valid settings result. An invalid legacy combined config has no independently
+valid connection result: its connection bytes remain only in the renamed
+backup, and recovery proceeds to reconnection. Normal server-backed use still
+waits until every required file is ready. Unavailable and migration-blocked
+screens provide **Try again**, **Exit**, and safe manual guidance, but cannot
+offer reset: Vela has not proved that it can rename the authoritative file
+safely.
 
 User-facing errors carry only a stable category and generic explanation. Raw
 JSON, auth values, URLs containing tokens, serde value excerpts, and config
@@ -275,6 +289,15 @@ Crash recovery is deterministic:
   and retry without minting a second identity or discarding either complete
   copy.
 
+If the old combined `config.json` is invalid before the split starts, do not
+parse its connection block separately, validate selected rows, or create
+`connections.json` from any part of it. Classify the whole file as a damaged
+pre-split settings file. The blocking UI offers **Rename and create new
+settings** or **Exit** and explicitly says that creating fresh settings will
+require reconnecting every server. Recovery renames the complete original file,
+creates fresh settings, leaves the absent connections file in its valid empty
+state, and routes the user to reconnect. Exit performs no write.
+
 After a successful split, the compatibility fields remain recognized only for
 pre-split input and are skipped on save. The private pre-split backup may still
 contain tokens and receives the same protection as `connections.json`.
@@ -330,8 +353,9 @@ recover_invalid_file { file: settings | connections }
 
 `get_durable_state_status` returns credential-free settings and connections
 statuses, each tagged `ready`, `recoverable_invalid`, `unavailable`, or
-`migration_blocked`. It includes only safe display text and whether recovery is
-allowed for that file.
+`migration_blocked`, plus the pre-split/post-split layout needed to render
+truthful recovery copy. It includes only safe display text and whether recovery
+is allowed for that file.
 
 `retry_durable_state` rereads, migrates, validates, and rebuilds the complete
 registry. Success atomically replaces the fault state with ready state; failure
@@ -376,41 +400,46 @@ Under the selected file's process mutex and cross-process lock:
 2. Reopen and reread the current bytes. Re-run parse and validation. If the
    file is now valid, absent, unavailable, or differs from the invalid snapshot
    represented by the gate, abort the stale recovery and return the new status.
-3. Create a unique sibling named
-   `<stem>.invalid-<UTC timestamp>-<uuid>.json` with create-new semantics. Never
-   overwrite an existing backup.
-4. Apply the same private storage protection as the selected source file:
-   owner-only `0600` on Unix before writing and a per-user AppData ACL on
-   Windows with no ordinary cross-user read access.
-5. Write the exact invalid byte sequence, flush it, and sync the file. Confirm
-   its length and content hash against the just-read source bytes. Never parse,
-   redact, pretty-print, or reserialize the backup.
-6. Serialize the selected document's default (`AppConfig::default()` or
+3. Choose a unique sibling named
+   `<stem>.invalid-<UTC timestamp>-<uuid>.json`. Move the complete source file
+   to that path with a platform no-replace rename primitive; never copy selected
+   fields, reserialize, or overwrite an existing backup.
+4. Apply and verify the same private storage protection on the renamed file:
+   owner-only `0600` on Unix and a per-user AppData ACL on Windows with no
+   ordinary cross-user read access. Reread it and confirm its length and content
+   hash against the bytes from step 2.
+5. Serialize the selected document's default (`AppConfig::default()` or
    `ConnectionsConfig::default()`), parse/validate it through the same strict
-   boundary, and write it using the private atomic-temp-plus-rename primitive.
-   Sync the containing directory where supported.
-7. Reload both independent files. A settings reset rebuilds the registry from
-   the untouched valid connections and therefore does not require Plex,
-   Jellyfin, or Emby authorization. A connections reset installs an empty
-   registry and requires reconnecting servers, while preserving settings,
-   recents, and playlists.
-8. Only then mark the gate ready and return the safe backup filename.
+   boundary, and install it at the now-absent canonical path using a private
+   atomic temporary file and no-replace rename. Sync the containing directory
+   where supported.
+6. Reload both independent files. Post-split settings recovery rebuilds from the
+   untouched valid connections and does not require reauthorization. A damaged
+   legacy combined config has no separate connection file; after fresh settings
+   are installed, route to server reconnection without inspecting the renamed
+   file. Connections recovery installs an empty valid connections file and
+   routes to reconnection while preserving settings, recents, and playlists.
+7. Only then mark the gate ready and return the safe renamed filename plus
+   whether reconnection is required.
 
-If backup creation or verification fails, leave the selected source file
-untouched and report failure. If the final atomic replacement fails, the
-original remains authoritative; the verified backup may remain and the UI
-reports that no fresh document was installed. Never delete a material backup
-automatically.
+If the no-replace rename fails, the canonical source remains untouched and
+recovery fails. If permission hardening, renamed-file verification, or fresh
+document installation fails after the rename, keep the complete renamed file,
+leave the app blocked, report the safe backup filename when available, and
+offer Exit; never delete or partially restore it automatically. The user can
+rename it back or repair it manually while Vela is closed.
 
-Recovery changes only the explicitly selected invalid file. Vela playlists and
-the healthy durable file remain byte-identical.
+Post-split recovery changes only the explicitly selected invalid file. Vela
+playlists and the other healthy durable file remain byte-identical. Pre-split
+combined recovery intentionally renames that whole legacy file and creates no
+connection data from it.
 
 The storage layer needs focused helpers for:
 
 - distinguishing absent from unreadable/non-regular;
 - bounded exact-byte reads of either durable file;
-- unique private create-new backup writes;
-- validated atomic replacement;
+- unique private no-replace renames;
+- validated private fresh-document installation;
 - fault-injection tests around every failure point.
 
 If the implementation introduces a file-size limit, an oversized file must
@@ -426,41 +455,51 @@ truncate a backup.
 requests. Until status is ready it renders a non-dismissible full-page state,
 not the Welcome screen and not the ordinary transient error banner.
 
-Recoverable-invalid settings copy:
+Post-split recoverable-invalid settings copy:
 
 > Vela could not safely read your settings. The file may be damaged or may
 > have been tampered with. Nothing from it was loaded.
 
-> We recommend starting with a new settings file. Vela will preserve the
-> current file as a private backup first. Your server connections are stored
-> separately and will not be changed.
+> You can rename the damaged file and create new settings, or exit Vela and
+> repair it yourself. Your server connections are stored separately and will
+> not be changed.
 
 Controls:
 
-- primary real HTML button: **Back up and create new settings**;
-- secondary real HTML button: **Try again**.
+- primary real HTML button: **Rename and create new settings**;
+- secondary real HTML button: **Exit Vela**.
+
+Pre-split recoverable-invalid settings copy explains that this older damaged
+file also contains the server connections and Vela will not extract or guess
+them. It says that **Rename and create new settings** preserves the whole old
+file under a new private name, creates fresh settings, and then requires the
+user to reconnect servers. The alternative is **Exit Vela** and repair the file
+manually. It must not claim that connections are already separate.
 
 Recoverable-invalid connections copy names the server-connections file,
-explains that no connection or token was loaded, and warns that creating a new
-connections file requires reconnecting servers. Its primary real HTML button
-is **Back up and remove invalid connections**. It never implies that settings,
-recents, or playlists will be reset.
+explains that no connection or token was loaded, and offers **Rename damaged
+connections and reconnect** or **Exit Vela**. The rename action preserves the
+whole damaged file, creates an empty valid connections file, and opens the
+normal server-connection flow. It never implies that settings, recents, or
+playlists will be reset.
 
 Disable both controls while their request is in flight. On failure, keep the
 blocking screen, show a credential-free error, and re-enable the actions
 allowed by the returned status. On successful recovery, show the safe backup
-filename. A settings recovery continues with the preserved connections; a
-connections recovery enters the genuine no-sources Welcome state.
+filename. Post-split settings recovery continues with preserved connections;
+pre-split combined recovery and connections recovery enter the genuine
+no-sources reconnect flow.
 
 Unavailable or migration-blocked copy explains that Vela loaded nothing and
-that the file could not safely be backed up or migration could not finish.
-Show **Try again** and manual location/help text, but do not render a reset
-action for that file.
+that the file could not safely be renamed or migration could not finish. Show
+**Try again**, **Exit Vela**, and manual location/help text, but do not render a
+fresh-file action for that file.
 
 The screen must have an alert/status relationship suitable for assistive
 technology, move focus to its heading on fault transition, keep normal app
-content inert/unrendered, and return focus to the normal root after successful
-retry or recovery.
+content inert/unrendered, and return focus to the normal root or reconnect flow
+after successful recovery. **Exit Vela** closes the application without writing
+either durable file.
 
 `loadSourceList()` and boot no longer suppress source/durable-state errors into
 `[]`.
@@ -594,15 +633,20 @@ restore from committed bytes, and rerun green.
 - startup faults never install a partial registry or expose default settings;
 - runtime invalidation moves the gate to fault and emits one safe event;
 - retry moves to ready only after complete validation and registry rebuild;
-- settings recovery creates a unique byte-identical private backup and a valid
-  fresh config while connections/playlists remain byte-identical and every
-  source restores without reauthorization;
-- connections recovery creates its own unique byte-identical private backup and
+- post-split settings recovery privately renames the exact invalid file and
+  installs a valid fresh config while connections/playlists remain
+  byte-identical and every source restores without reauthorization;
+- pre-split combined recovery privately renames the complete invalid file,
+  installs fresh settings, extracts no connection row, and requires server
+  reconnection;
+- connections recovery privately renames the complete invalid file and installs
   an empty valid connections file while settings/playlists remain
-  byte-identical;
-- backup create/write/sync/verify failures and replacement failures preserve
-  the original; a stale snapshot, symlink, non-regular file, permission error,
-  and migration-blocked state cannot recover;
+  byte-identical, then requires server reconnection;
+- Exit from every fault screen performs no durable write;
+- no-replace rename failures preserve the canonical original; permission,
+  verification, and fresh-install failures after rename preserve the renamed
+  original and remain blocked; a stale snapshot, symlink, non-regular file,
+  unavailable state, and migration-blocked state cannot recover;
 - Unix directory/file/lock/temp/backup modes and Windows per-user ACL behavior
   are natively verified;
 - connection `Debug`, errors, events, logs, DTOs, argv, Plex artwork URLs, and
@@ -620,10 +664,12 @@ legacy rollback payloads and non-settings media snapshots remain tolerant.
 
 - boot requests durable-state status first and issues no normal boot invoke while
   blocked;
-- invalid settings and invalid connections render their distinct exact copy and
-  correct real buttons;
+- post-split invalid settings, pre-split combined invalid settings, and invalid
+  connections render distinct exact copy and the correct real Rename/Reconnect
+  and Exit buttons;
 - unavailable/migration-blocked status omits that file's reset button;
-- recovery and retry have correct disabled, failure, and success states;
+- recovery, retry, and Exit have correct disabled, failure, success, and
+  no-write states;
 - a runtime `durable-state-fault` event replaces normal content and moves focus;
 - durable-state/source errors cannot become `[]`, Welcome, or a normal transient
   banner;
@@ -642,22 +688,25 @@ For settings recovery:
    `config.json`, and a separate Vela playlist.
 2. Launch the real app and assert the blocking screen appears before any normal
    app/home/settings content.
-3. Assert **Try again** keeps the screen while the file remains invalid.
-4. Click **Back up and create new settings**.
-5. Assert exactly one private backup exists and is byte-identical to the seeded
-   file, `config.json` is a valid serialized default, the playlist is
+3. Click **Rename and create new settings**.
+4. Assert the original moved to exactly one private byte-identical sibling,
+   `config.json` is a valid serialized default, the playlist is
    byte-identical, `connections.json` is byte-identical, no token is visible,
    and the existing Plex source loads without relinking.
-6. Restart and assert the fresh settings and preserved connection load normally
+5. Restart and assert the fresh settings and preserved connection load normally
    without showing recovery.
 
 For connection recovery, seed a valid settings file and an invalid source row;
-assert the connection-specific warning/reset, exact connection backup, empty
-fresh connections file, untouched settings/playlist bytes, and Welcome after
-recovery. For split migration, seed a valid combined 1.0.0 config; assert the
-exact private pre-split backup, token-free live settings file, private
-connections file, restored source, credential-free UI artwork URL, and
-header-authenticated mock artwork/playback/progress requests.
+assert the connection-specific warning, **Rename damaged connections and
+reconnect**, exact private rename, empty fresh connections file, untouched
+settings/playlist bytes, and reconnect flow after recovery. Add a pre-split
+damaged combined-file scenario: assert the copy discloses reconnection, the
+whole file is renamed byte-for-byte, no connection is extracted, fresh settings
+load, and reconnect is required. In each fault state, **Exit Vela** must close
+without changing either file. For valid split migration, seed a valid combined
+1.0.0 config; assert the exact private pre-split backup, token-free live
+settings file, private connections file, restored source, credential-free UI
+artwork URL, and header-authenticated mock artwork/playback/progress requests.
 
 Add focused cases for an unknown constrained setting, unknown top-level setting
 key, unknown connection key, and malformed JSON so E2E proves this is strict
@@ -694,11 +743,14 @@ while startup can still substitute defaults.
 
 ### Slice 2 — independent preserved recovery
 
-- Implement targeted exact-byte backup and atomic reset for settings and
-  connections.
-- Add the distinct recoverable-invalid copy and real buttons.
-- Prove settings recovery retains every connection without reauthorization and
-  connections recovery preserves settings/playlists.
+- Implement targeted exact-byte no-replace rename and fresh-file installation
+  for settings and connections.
+- Add distinct post-split settings, pre-split combined, and connections copy
+  with real Rename/Reconnect and Exit buttons.
+- Prove post-split settings recovery retains every connection without
+  reauthorization; pre-split combined recovery salvages nothing and requires
+  reconnection; connections recovery preserves settings/playlists and requires
+  reconnection; Exit writes nothing.
 - Add failure-injection, privacy, accessibility, static fallback guards, and
   real-app recovery coverage.
 - Bump all version surfaces from `1.0.1` to `1.0.2`.
@@ -755,10 +807,11 @@ Do not edit generated `build/`, `.svelte-kit/`, `node_modules/`,
 ### Settled — separate private connections, no credential vault or pretend encryption
 
 Owner-approved 2026-07-23: active Plex/Jellyfin/Emby connection records and
-tokens live in `connections.json`, independently of `config.json`. Resetting
-invalid settings leaves valid connections byte-identical and does not require
-Plex reauthorization. Resetting invalid connections is a separate explicit
-action and does not reset settings or playlists.
+tokens live in `connections.json`, independently of `config.json`. Once that
+split exists, resetting invalid settings leaves valid connections
+byte-identical and does not require Plex reauthorization. Resetting invalid
+connections is a separate explicit action and does not reset settings or
+playlists.
 
 Tokens remain plaintext behind owner-account filesystem protection; Vela does
 not use an OS credential vault, user passphrase, or an app-managed encryption
@@ -789,8 +842,20 @@ Owner-approved 2026-07-22 and canonical in `.agents/decisions.md`: invalid
 settings fail closed; the app loads no guessed/default/partial interpretation;
 the user is warned the file may be damaged or may have been tampered with; a new
 config is recommended; and explicit recovery preserves a unique private
-byte-for-byte backup before atomically installing validated defaults. Under the
-later split decision, this recovery targets only the invalid owning file.
+byte-for-byte renamed original before installing validated defaults. Under the
+later split decision, post-split recovery targets only the invalid owning file.
+
+### Settled — damaged files are renamed whole or left for manual repair
+
+Owner-approved 2026-07-23: a damaged settings file offers **Rename and create
+new settings** or **Exit Vela**. A damaged connections file offers **Rename
+damaged connections and reconnect** or **Exit Vela**. Exit writes nothing.
+
+An invalid old combined config is treated as one damaged settings file. Vela
+does not extract or validate a connection subsection from it. Renaming and
+creating fresh settings therefore requires reconnecting servers; the UI says so
+before the action. The no-reauthorization guarantee applies only when a separate
+valid `connections.json` already exists.
 
 ---
 
@@ -808,10 +873,12 @@ later split decision, this recovery targets only the invalid owning file.
 - The blocking UI distinguishes the owning file and invalid, unavailable, and
   migration-blocked state.
 - Recovery is explicit, targets only a safely reread invalid regular file,
-  proves exact private backup before replacement, and leaves the healthy file
-  and playlists untouched.
-- Settings recovery restores the unchanged connections without
-  reauthorization; only connections recovery empties the registry.
+  privately renames the complete original before fresh-file installation, and
+  leaves any separate healthy file and playlists untouched.
+- Post-split settings recovery restores unchanged connections without
+  reauthorization. Pre-split combined recovery and connections recovery
+  salvage no connection data and route to reconnection.
+- Exit from every durable fault screen writes nothing.
 - Plex tokens are private-file-backed and redacted, never appear in frontend
   DTOs, returned URLs, query strings, argv, logs, or errors, and use the guarded
   request/mpv header paths.

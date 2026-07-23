@@ -3,9 +3,9 @@
 **Severity**: MEDIUM — a user can be promised preserved server authorization,
 then lose every live connection and need to reauthorize after settings
 recovery.
-**Status**: Open
+**Status**: Plan repaired; follow-up review pending
 **Branch**: not started
-**Commit**: pending
+**Commit**: pending follow-up review
 
 ## Evidence
 
@@ -43,38 +43,38 @@ upgrade window.
 
 ## Approach
 
-No repair is authorized yet. The recommended root fix is to add an explicit
-pre-split invalid state. After the user requests recovery and Vela creates the
-exact private combined-file backup, syntactically parseable input can validate
-the complete legacy connection block independently from settings. If every
-connection is strictly valid, atomically create `connections.json` from that
-whole block before installing fresh settings; do not load the invalid settings
-or salvage individual source rows.
+Owner ruling 2026-07-23 rejects partial salvage. Revision 4 adds an explicit
+pre-split invalid state, but never parses or validates a connection subsection
+from the damaged combined file. Its blocking copy says that creating fresh
+settings requires reconnecting servers and offers **Rename and create new
+settings** or **Exit Vela**.
 
-Malformed JSON or any invalid/unknown connection row cannot be separated
-without guessing. That branch must warn before confirmation that connections
-cannot be preserved and reauthorization will be required. The alternative is
-to use that warning for every pre-split invalid file, as the reviewer proposed,
-but that gives up the owner's stated no-reauthorization goal even when the
-connection block is independently valid.
+Recovery privately renames the entire legacy file, installs fresh settings,
+leaves connections empty/absent, and routes to reconnection. Exit writes
+nothing. The promise that settings recovery preserves connections is rendered
+only when a separate valid `connections.json` already exists.
 
 ## Files changed
 
-- None; review intake only.
+- `.agents/plans/config-integrity-recovery.md`
+- `.agents/decisions.md`
+- `.agents/state.md`
+- this finding record
 
 ## Guard proof
 
 Required with the eventual plan repair:
 
 - seed a pre-split combined config with one unknown settings key and a complete
-  valid source set; explicit recovery must create the exact combined backup,
-  create private valid `connections.json`, reset only settings, and restore all
-  sources without relinking;
-- seed the same state with malformed JSON and separately with an invalid source
-  row; the UI must make no preservation promise and must disclose
-  reauthorization before the recovery action;
-- reverting the production branch discriminator or independent connection-block
-  validation must fail the corresponding guard.
+  valid source set; the UI must disclose reconnection, rename the complete file,
+  install fresh settings, extract no source row, and route to reconnect;
+- repeat with malformed JSON and with an invalid source row; both take the same
+  whole-file path without a preservation promise;
+- seed post-split invalid settings beside valid connections; only that branch
+  promises and proves byte-identical connection preservation;
+- activate Exit in each fault state and prove neither durable file changes;
+- reverting the pre-/post-split discriminator or adding connection extraction
+  from invalid input must fail the corresponding guard.
 
 ## Coder dispute
 
@@ -84,9 +84,9 @@ MEDIUM severity is justified by recoverable-but-disruptive credential loss.
 
 ## Known gaps
 
-The review request authorized assessment and recording, not a plan repair.
-Whether independently valid connections may be moved from an otherwise invalid
-combined file during explicit recovery remains an owner ruling.
+The product ruling and plan repair are complete. The required follow-up
+external review has not yet accepted the revised exact range, so the finding
+remains open and implementation remains unauthorized.
 
 The reviewer launch denied one optional `git diff --stat` Bash call despite the
 launch-scoped grant. The reviewer still completed a 25-turn read-only inspection
