@@ -73,6 +73,7 @@ test("active source writes target connections instead of settings", () => {
     fs.readFileSync("src-tauri/src/source/plex.rs", "utf8"),
     /crate::connections::update/,
   );
+  assert.doesNotMatch(commands, /config::update\([\s\S]{0,240}\.upsert\(/);
   assert.doesNotMatch(commands, /config::update\([\s\S]{0,240}\.sources/);
   assert.match(
     fs.readFileSync("src-tauri/src/source/plex.rs", "utf8"),

@@ -56,8 +56,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `connections.json`, startup and runtime fail closed behind the two-file gate,
   a valid combined 1.0.0 config splits only after an exact verified backup, and
   invalid combined settings are not mined. Native Windows ACL validation and
-  the checksum-matched Linux real-app suite passed. Mandatory post-commit guard
-  red proofs remain before Slice 1 closeout and Slice 2 recovery work.
+  the checksum-matched Linux real-app suite passed. Slice 1 landed as `016a958`;
+  its mandatory post-commit guard regressions were injected, failed for their
+  intended reasons, restored, and rerun green. A vacuous source-write static
+  guard found during that pass was strengthened and independently red-proven.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
@@ -70,10 +72,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Commit the verified Slice 1 implementation, inject and restore each new guard
-  against those committed bytes, record the red proofs, then implement Slice 2
-  preserved recovery. After all prerequisite slices land, explicitly activate
-  the marker plan before marker implementation.
+- Implement and commit Slice 2 preserved recovery with real Rename/Reconnect
+  and Exit buttons. After all prerequisite slices land, explicitly activate the
+  marker plan before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or

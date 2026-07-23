@@ -738,8 +738,8 @@ pub fn get_mpv_advanced() -> Result<MpvAdvanced, String> {
     })
 }
 
-/// Clamp any stored/incoming autocrop value to the known three-state set,
-/// defaulting anything unrecognised (incl. `None`) to `"off"`.
+/// Decode the persisted autocrop value. A missing value means `"off"`;
+/// an unrecognised stored value is invalid instead of being normalised.
 fn autocrop_from_config(value: Option<&str>) -> Result<String, String> {
     match value {
         None | Some("off") => Ok("off".to_string()),
@@ -753,7 +753,7 @@ fn autocrop_from_config(value: Option<&str>) -> Result<String, String> {
 /// user's own machine and their own call; a bad option just makes mpv refuse to
 /// launch, which surfaces as a normal playback error. An empty `extra_args` clears
 /// the override. `autocrop` is optional so older frontends that don't send it leave
-/// the mode unchanged; when present it is clamped to the known three states.
+/// the mode unchanged; when present it must be one of the known three states.
 #[tauri::command]
 pub fn set_mpv_advanced(
     extra_args: String,
@@ -780,9 +780,8 @@ pub fn set_mpv_advanced(
     })
 }
 
-/// Clamp the persisted Continue Playing mode to the three owner-approved
-/// values. Missing, empty, mixed-case, and future/hand-edited values all
-/// degrade to the safe product default instead of disabling binge playback.
+/// Decode the persisted Continue Playing mode. A missing value keeps the
+/// documented `"only-tv"` default; any other unknown stored value is invalid.
 fn continue_playing_from_config(value: Option<&str>) -> Result<String, String> {
     match value {
         Some("off") => Ok("off".to_string()),

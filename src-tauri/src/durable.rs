@@ -747,7 +747,9 @@ mod tests {
                     .starts_with("config.pre-connections-split-")
             })
             .unwrap();
-        fs::write(backup.path(), b"changed").unwrap();
+        let mut changed = fs::read(backup.path()).unwrap();
+        changed[0] ^= 1;
+        fs::write(backup.path(), changed).unwrap();
 
         assert!(split_connections(
             &config_path,

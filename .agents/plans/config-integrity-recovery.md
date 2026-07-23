@@ -759,9 +759,17 @@ Implementation evidence (2026-07-23):
 - The checksum-matched Linux source passed the complete real-app E2E suite
   31/31. Existing combined-config scenarios exercised the split before source
   removal, restart, playback, and library operations.
-- Mandatory post-commit red proofs remain the Slice 1 closeout step so every
-  regression is injected and restored against committed bytes, per repository
-  guard discipline.
+- Slice 1 landed as `016a958`. Post-commit red proofs independently caught and
+  then restored regressions in unknown-field rejection for both settings and
+  sources; invalid-combined no-salvage behavior; strict autocrop and Continue
+  Playing values; load/default fallbacks; boot gate ordering; byte-exact backup
+  creation plus same-length SHA-256 tampering; stable Plex retry identity;
+  differing split-set refusal; Unix directory, JSON, lock, and backup modes;
+  native Windows ACL privacy; connection-store routing; secret redaction; the
+  provider validation matrix; and genuinely-absent-only defaults. The
+  connection-store static guard was initially vacuous when one of two upserts
+  was redirected; it now globally rejects settings-store upserts, and that
+  exact regression fails the strengthened guard before restoration.
 
 ### Slice 2 — independent preserved recovery
 
