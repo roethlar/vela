@@ -37,16 +37,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   external-mpv control is genuinely clickable; and Space activates it only
   while visible, otherwise retaining its normal pause behavior. An unknown
   marker policy does not normalize: it invalidates the settings file under the
-  owner-approved app-wide fail-closed recovery rule. No code has been
-  implemented.
+  owner-approved app-wide fail-closed recovery rule. Commercial ranges are in
+  scope wherever an upstream server publishes them; the dated provider evidence
+  and unsupported-provider boundary are canonical in the plan. No code has
+  been implemented.
 
 ## Next
 
 - Continue the marker plan's owner gates one at a time. Next, decide
-  commercial-marker handling, followed by live IPC marker refresh. Before
-  marker implementation, draft and approve the app-wide config-integrity and
-  recovery work required by the new fail-closed decision, then explicitly
-  activate the marker plan in state.
+  the missing-value default for the new commercial-skip setting, followed by
+  live IPC marker refresh. Before marker implementation, draft and approve the
+  app-wide config-integrity and recovery work required by the new fail-closed
+  decision, then explicitly activate the marker plan in state.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or

@@ -1,8 +1,8 @@
-# Plan: Intro & credit marker skipping via mpv OSD (v2)
+# Plan: Intro, credit & commercial marker skipping via mpv OSD (v2)
 
 ## Status
 
-**Draft v2, revision 3 — 2026-07-22.** Supersedes the removed
+**Draft v2, revision 4 — 2026-07-22.** Supersedes the removed
 `.agents/plans/skip-credits-intros.md` (v1). Incorporates both 2026-07-22 plan
 reviews. Self-contained for a cold implementer once the owner decisions below
 are recorded.
@@ -22,12 +22,13 @@ v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 
 ## Goal
 
-When Plex or Jellyfin metadata includes intro or credits time ranges,
+When a supported server publishes intro, credits, or commercial time ranges,
 Vela offers skip during external-mpv playback:
 
-- **Button** (owner-approved default for missing settings, 2026-07-22): native
-  mpv ASS/OSD prompt inside the video window ("Skip Intro" / "Skip Credits")
-  activated by clicking it or, while it is displayed, pressing Space.
+- **Button** (owner-approved default for missing intro/credits settings;
+  commercial default still pending): native mpv ASS/OSD prompt inside the video
+  window ("Skip Intro" / "Skip Credits" / "Skip Commercials") activated by
+  clicking it or, while it is displayed, pressing Space.
 - **Auto-skip**: seek to marker end with a brief OSD toast.
 - **Off**: no script injection for that kind.
 
@@ -43,7 +44,7 @@ bundled Lua script, following the same resource/injection pattern as
 - Webview or Tauri overlays on the video frame.
 - Mid-title "Jump to credits" when playback is *outside* a credits marker.
 - Editing, creating, or writing markers back to the server.
-- Commercial / ad markers (ignored if present; not modeled).
+- Preview, recap, or other unapproved marker kinds.
 - Changing resume, progress check-in, or watched-threshold policy.
 - Embedding or forking stock mpv scripts for this feature.
 - Blocking play when markers are missing, the script is missing, or parse fails.
@@ -69,7 +70,7 @@ play command
   → selected source resolves stream + best-effort markers
       Plex: markers ride the existing selected-detail response
       Jellyfin: MediaSegments request runs alongside mandatory resolve work
-      Emby: empty until an Emby contract is fixture-proven
+      Emby: empty until upstream publishes an equivalent marker-range API
   → resolve bundled vela-markers.lua // same Resource resolver as autocrop
   → if policy off for all kinds OR no usable markers OR script missing:
         play as today (no script)
@@ -94,6 +95,7 @@ path would make mpv refuse to start, so existence-check before injecting.
 pub enum MarkerKind {
     Intro,
     Credits,
+    Commercial,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -106,15 +108,16 @@ pub struct MediaMarker {
 }
 ```
 
-No `Commercial`, no `Unknown` string variant in v1 — drop unrecognized server
-types during parse. Keeps the Lua payload and policies small.
+No `Unknown` string variant — drop unrecognized server types during parse.
+Commercial is modeled because both Plex and Jellyfin publish commercial ranges;
+Preview and Recap are not silently treated as ads.
 
 ### Selected-resolution result
 
 ```rust
 pub struct StreamResolution {
     // existing fields ...
-    /// Best-effort intro/credits ranges for this exact selected item.
+    /// Best-effort intro/credits/commercial ranges for this exact selected item.
     /// Provider marker failure is normalized to empty before construction.
     pub markers: Vec<MediaMarker>,
 }
@@ -126,7 +129,7 @@ would add avoidable latency and duplicate rediscovery behavior. Each provider
 collects markers while building `StreamResolution`; marker failure alone never
 fails stream resolution. Add an `include_markers: bool` argument to
 `resolve_stream` / `resolve_stream_version`; the play command passes `true`
-only when at least one normalized policy is not `off`. Constructors that cannot
+only when at least one resolved policy is not `off`. Constructors that cannot
 supply markers use `[]`.
 
 ### Normalize rules (shared helper, unit-tested)
@@ -164,6 +167,7 @@ picks the first range that contains `time-pos` (see Lua rules).
 - **Map:**
   - `type` / `type` field `intro` → `MarkerKind::Intro`
   - `credits` → `MarkerKind::Credits`
+  - `commercial` → `MarkerKind::Commercial`
   - anything else → skip
   - `startTimeOffset` → `start_ms`, `endTimeOffset` → `end_ms` (Plex units are
     milliseconds; assert in fixtures)
@@ -171,26 +175,39 @@ picks the first range that contains `time-pos` (see Lua rules).
   mandatory selected-detail request. Marker absence is empty; because the
   fields are part of that mandatory response, there is no independent marker
   error to propagate.
-- **Tests:** XML fixture with intro + credits + unknown type + inverted range;
-  empty markers; and an HTTP mock that fails unless `includeMarkers=1` is
-  present on the existing metadata request.
+- **Tests:** XML fixture with intro + credits + commercial + unknown type +
+  inverted range; empty markers; and an HTTP mock that fails unless
+  `includeMarkers=1` is present on the existing metadata request. A synthetic
+  commercial record guards Vela's parser; the owner has no commercial-marked
+  Plex item. Plex's official support documentation confirms that current
+  servers detect, mark, and expose commercial ranges to supported players.
+  Server-generated XML captured on Plex's official forum confirms the existing
+  marker shape and exact `type="commercial"` value:
+  `https://support.plex.tv/articles/115003944134-removing-commercials/` and
+  `https://forums.plex.tv/t/commercial-ad-skipping-on-recordings-not-working/762904`.
 
 ### Jellyfin / Emby (`src-tauri/src/source/jellyfin.rs` only)
 
 There is **no** `emby.rs`. Emby is `Flavor::Emby` on the same client, but the
 Jellyfin MediaSegments contract must not be assumed to exist on Emby.
 
-- **Jellyfin endpoint:** authenticated
-  `GET /MediaSegments/{itemId}?includeSegmentTypes=Intro&includeSegmentTypes=Outro`.
+- **Jellyfin endpoint:** authenticated `GET /MediaSegments/{itemId}` with
+  repeated `includeSegmentTypes=Intro`, `includeSegmentTypes=Outro`, and
+  `includeSegmentTypes=Commercial` query parameters.
   The response is the normal Jellyfin query envelope with `Items[]`; each item
   has `Type`, `StartTicks`, and `EndTicks`. This is a range API — do not derive
   ranges from `Chapters[]` or chapter names. Use a dedicated segment-response
   DTO rather than widening the existing `BaseItem` envelope. Contract evidence:
   Jellyfin's `MediaSegmentsController.cs`, `MediaSegmentDto.cs`, and
   `MediaSegmentType.cs` in the upstream `jellyfin/jellyfin` repository.
-- **Map:** `Type: Intro` → Intro; `Type: Outro` → Credits; unknown segment types
-  are ignored. Convert both tick fields with the existing 100ns-ticks helper
-  (`ticks / 10_000`), then run shared normalization.
+- **Map:** `Type: Intro` → Intro; `Type: Outro` → Credits;
+  `Type: Commercial` → Commercial; unknown segment types are ignored. Convert
+  both tick fields with the existing 100ns-ticks helper (`ticks / 10_000`),
+  then run shared normalization. Jellyfin's current official SDK enumerates
+  Commercial, Intro, and Outro, and the server controller owns this endpoint:
+  `https://typescript-sdk.jellyfin.org/variables/generated-client.MediaSegmentType.html`
+  and
+  `https://github.com/jellyfin/jellyfin/blob/master/Jellyfin.Api/Controllers/MediaSegmentsController.cs`.
 - **Concurrency:** for `Flavor::Jellyfin`, start the segment request alongside
   the mandatory selected resolve work (`tokio::join!` or an equivalent
   non-detached future). Mandatory item/playback-info failures retain today's
@@ -199,12 +216,14 @@ Jellyfin MediaSegments contract must not be assumed to exist on Emby.
 - **Compatibility:** a missing/unsupported MediaSegments endpoint (including
   404) yields `[]`; playback remains supported on such Jellyfin servers.
 - **Emby:** `Flavor::Emby` makes no MediaSegments request and returns `[]`.
-  Emby marker support is a later slice only after a real or authoritative mock
-  fixture proves its endpoint and field contract.
-- **Tests:** query-envelope fixture with Intro + Outro + unknown + invalid
-  ranges; tick conversion; an HTTP mock pinning the exact endpoint and repeated
-  filter parameters; endpoint failure → successful stream resolution with
-  empty markers; Emby → empty markers and zero MediaSegments requests.
+  Emby's current official static OpenAPI (`https://swagger.emby.media/openapi.json`,
+  checked 2026-07-22) publishes no MediaSegments route or schema. Add Emby
+  marker support only when its upstream API publishes an equivalent range
+  contract; do not reuse Jellyfin's route by ancestry or guesswork.
+- **Tests:** query-envelope fixture with Intro + Outro + Commercial + unknown +
+  invalid ranges; tick conversion; an HTTP mock pinning the exact endpoint and
+  repeated filter parameters; endpoint failure → successful stream resolution
+  with empty markers; Emby → empty markers and zero MediaSegments requests.
 
 ---
 
@@ -227,21 +246,26 @@ pub enum SkipPolicy {
 // Missing remains distinguishable from invalid for old-config compatibility.
 pub skip_intros: Option<SkipPolicy>,
 pub skip_credits: Option<SkipPolicy>,
+pub skip_commercials: Option<SkipPolicy>,
 ```
 
-**Product defaults:** owner-approved 2026-07-22. A missing value for either
-field is valid and means `button`. A present value outside the closed enum is
-invalid config and must fail deserialization; it is not equivalent to a
-missing value.
+**Product defaults:** owner-approved 2026-07-22 for intro and credits. A missing
+intro or credits field is valid and means `button`. The missing-value default
+for commercials remains a separate pending owner choice. A present value
+outside the closed enum is invalid config and must fail deserialization; it is
+not equivalent to a missing value.
 
 | Field | Default when missing |
 |-------|----------------------|
 | `skip_intros` | `button` |
 | `skip_credits` | `button` |
+| `skip_commercials` | Pending owner ruling |
 
-The play command maps `None` to `SkipPolicy::Button` before source resolution
-and copies only the enum into `PlaySpec`; `playback::play` does not read config
-or interpret strings. There is no `normalize_skip_policy` string helper.
+The play command resolves `None` from the documented per-kind defaults before
+source resolution and copies only the enum into `PlaySpec`; intro and credits
+currently resolve to `SkipPolicy::Button`, while commercials await the owner
+ruling below. `playback::play` does not read config or interpret strings. There
+is no `normalize_skip_policy` string helper.
 
 This feature depends on separate, approved app-wide config-integrity/recovery
 work. That prerequisite must remove runtime fallbacks from config load errors,
@@ -254,23 +278,24 @@ failure without logging config contents. Missing fields with documented
 defaults and the explicitly tolerated legacy local/SMB/SSH fields remain valid.
 Do not implement this global refactor opportunistically inside a marker slice.
 
-Round-trip tests: old configs without the marker fields load and map to Button;
-an unknown marker value rejects the whole config; save preserves other fields;
-legacy inert local/SMB/SSH fields remain untouched. The prerequisite recovery
-plan owns its broader validation, notification, exact-backup, atomicity,
-permissions, and failure-path guards.
+Round-trip tests: old configs without the marker fields load and map each kind
+to its approved default; an unknown marker value rejects the whole config; save
+preserves other fields; legacy inert local/SMB/SSH fields remain untouched. The
+prerequisite recovery plan owns its broader validation, notification,
+exact-backup, atomicity, permissions, and failure-path guards.
 
 ### Settings UI
 
 - **Location:** Settings → **Player** tab (beside black-bar cropping / mpv
   advanced), in `src/lib/Settings.svelte`.
-- Two selects: "Skip intros", "Skip credits" — options Off / Button / Auto-skip.
+- Three selects: "Skip intros", "Skip credits", "Skip commercials" — options
+  Off / Button / Auto-skip.
 - Extend the existing `MpvAdvanced` DTO and `get_mpv_advanced` /
-  `set_mpv_advanced` commands with `skip_intros` and `skip_credits`. Setter
-  parameters are optional for compatibility with an older frontend; when
-  present they deserialize as the closed enum and are stored through the
-  existing `config::update` path. Do not add a second config write path or
-  bypass `CONFIG_LOCK` / atomic save.
+  `set_mpv_advanced` commands with all three fields. Setter parameters are
+  optional for compatibility with an older frontend; when present they
+  deserialize as the closed enum and are stored through the existing
+  `config::update` path. Do not add a second config write path or bypass
+  `CONFIG_LOCK` / atomic save.
 
 ---
 
@@ -296,6 +321,7 @@ Launch args must use the same prefix:
 
 - `--script-opts-append=vela-markers-intro-policy=button`
 - `--script-opts-append=vela-markers-credits-policy=button`
+- `--script-opts-append=vela-markers-commercial-policy=button`
 
 Do **not** put either the payload path or full marker JSON in mpv's comma-split
 script-option list. Set the path only on the child process with
@@ -337,14 +363,15 @@ environment variable, after script existence and payload creation both succeed.
 2. Set `user-data/vela-markers/loaded` = true when script is active with a
    successful parse. Architecture prevents injection for an empty normalized
    marker list, so E2E must supply a real marker. Also publish
-   `user-data/vela-markers/active` as `intro`, `credits`, or empty for a
-   deterministic prompt-path assertion.
+   `user-data/vela-markers/active` as `intro`, `credits`, `commercial`, or empty
+   for a deterministic prompt-path assertion.
 3. Observe `time-pos`.
 4. Determine active marker: first range where
    `start_ms/1000 <= t < end_ms/1000` and the kind's policy is not `off`.
 5. **button:** use `mp.create_osd_overlay("ass-events")` to render an interactive
-   on-screen button `[ Skip Intro ]` / `[ Skip Credits ]` with a `(Space)`
-   keyboard hint in the bottom-right corner of the video window.
+   on-screen button `[ Skip Intro ]` / `[ Skip Credits ]` /
+   `[ Skip Commercials ]` with a `(Space)` keyboard hint in the bottom-right
+   corner of the video window.
    While shown:
    - Observe `osd-dimensions` and recompute the visible button rectangle whenever
      the mpv window/OSD size changes; publish the same coordinates through
@@ -373,8 +400,9 @@ environment variable, after script existence and payload creation both succeed.
 
 ### Mouse & Keyboard Interaction (v1)
 
-- **Primary:** left-clicking the visible `[ Skip Intro ]` / `[ Skip Credits ]`
-  button executes the skip; its hit area must match the rendered rectangle.
+- **Primary:** left-clicking the visible `[ Skip Intro ]` / `[ Skip Credits ]` /
+  `[ Skip Commercials ]` button executes the skip; its hit area must match the
+  rendered rectangle.
 - **Secondary:** pressing **Space** while the button is visible executes the
   same action. Space pauses normally whenever no skip button is visible.
 - Document in Settings help text: "Click the on-screen skip button or press
@@ -389,17 +417,18 @@ environment variable, after script existence and payload creation both succeed.
 Same as autocrop in `commands.rs`: `AppHandle` resolves
 `mpv-scripts/vela-markers.lua`. `PlaySpec` gains exactly
 `markers_script: Option<String>`, `markers: Vec<MediaMarker>`,
-`intro_policy: String`, and `credits_policy: String`; all values are already
-resolved, normalized, and policy-filtered before `playback::play`.
+`intro_policy: SkipPolicy`, `credits_policy: SkipPolicy`, and
+`commercial_policy: SkipPolicy`; all values are already resolved and
+policy-filtered before `playback::play`.
 
 ### When to fetch markers
 
 At play-prep for the item being launched, on the async side before
 `spawn_blocking` / `playback::play`:
 
-- Load and normalize both policies before selected stream resolution.
-- Pass `include_markers = intro_policy != "off" || credits_policy != "off"`
-  into the selected source's `resolve_stream` / `resolve_stream_version` call.
+- Resolve all three policies before selected stream resolution.
+- Pass `include_markers = true` when any of the three policies is not Off into
+  the selected source's `resolve_stream` / `resolve_stream_version` call.
 - Plex includes markers in its existing selected-detail response; Jellyfin
   starts its best-effort MediaSegments future alongside mandatory resolution;
   Emby and unsupported constructors return `[]`.
@@ -411,13 +440,13 @@ At play-prep for the item being launched, on the async side before
 Pure helper (unit-tested, mirror `autocrop_args`):
 
 ```text
-markers_args(script, intro_policy, credits_policy, has_payload) -> Vec<String>
+markers_args(script, intro_policy, credits_policy, commercial_policy, has_payload) -> Vec<String>
 ```
 
 - No script path → `[]`
-- Both policies `off` → `[]` (even if script present)
+- All three policies Off → `[]` (even if script present)
 - No successfully written payload → `[]`
-- Else: `--script=…` plus the two closed policy options. The payload path is
+- Else: `--script=…` plus the three closed policy options. The payload path is
   supplied separately through the child environment.
 
 `play` existence-checks the script, then best-effort writes the payload. Missing
@@ -484,11 +513,11 @@ the product-flip slice where the feature is launchable.
 
 - **Precondition:** the separately planned app-wide config-integrity/recovery
   prerequisite is implemented, reviewed, verified, and committed.
-- `skip_intros` / `skip_credits` on `AppConfig`.
-- Closed `SkipPolicy`; map only missing fields to Button; extend `MpvAdvanced`
-  get/set through the existing locked atomic config path. Do not expose the
-  controls in Settings yet, so no shipped UI offers a setting that playback
-  ignores.
+- `skip_intros` / `skip_credits` / `skip_commercials` on `AppConfig`.
+- Closed `SkipPolicy`; map missing fields to their approved per-kind defaults;
+  extend `MpvAdvanced` get/set through the existing locked atomic config path.
+  Do not expose the controls in Settings yet, so no shipped UI offers a setting
+  that playback ignores.
 - Serde round-trip / invalid-value rejection tests.
 - Run `scripts/bump.sh` (1.0.2 → 1.0.3 on the recorded base).
 - **Focused verify before the full set:** Rust checks/tests/audit; red-prove
@@ -497,11 +526,12 @@ the product-flip slice where the feature is launchable.
 
 ### Slice 4 — Atomic product flip: launch + Settings + E2E + docs
 
-- Pass the normalized policy intent into selected resolution; policy-filter the
+- Pass the resolved policy intent into selected resolution; policy-filter the
   returned markers; add `PlaySpec` policy/marker/script fields.
 - Resolve `vela-markers.lua`; non-fatally create and clean the private payload;
   inject policy args + child environment through pure/testable helpers.
-- Add both Settings → Player controls in the same commit that makes them work.
+- Add all three Settings → Player controls in the same commit that makes them
+  work.
 - Extend the controlled Jellyfin mock's real route and add the behavioral E2E
   legs below. Update README Player notes with policies, clickable-button
   behavior, and the temporary in-range Space binding.
@@ -533,15 +563,20 @@ a test-only production payload override.
    mode, send `SPACE` through mpv IPC, assert the same seek/clear behavior, then
    prove a later Space outside any marker toggles pause normally.
 4. **Injection polarity:** provider HTTP tests prove `include_markers = false`
-   makes no Jellyfin MediaSegments request; launch unit tests prove off/off,
+   makes no Jellyfin MediaSegments request; launch unit tests prove all-Off,
    empty markers, absent script, and payload-write failure inject nothing.
+5. **Commercial path:** the controlled Jellyfin response supplies a Commercial
+   range on the generated clip; assert the configured policy uses the same real
+   clickable-button and autoskip paths as intro/credits. No owner library item
+   is required.
 
-For red proofs, independently break the endpoint/schema mapping, auto-seek,
-mouse hitbox/click handler, Space binding/restoration, and fail-open payload
-path; each claimed guard must fail for its own reason. After automation is
-green, owner playtest a real Plex and Jellyfin title with markers in Button and
-Auto-skip modes. Emby is explicitly out of this playtest until its contract is
-added.
+For red proofs, independently break the endpoint/schema mapping, commercial
+kind mapping, auto-seek, mouse hitbox/click handler, Space binding/restoration,
+and fail-open payload path; each claimed guard must fail for its own reason.
+After automation is green, owner playtest a real Plex and Jellyfin title with
+available intro/credits markers in Button and Auto-skip modes. Commercial
+acceptance is automated because the owner has no commercial-marked item. Emby
+is explicitly out of this playtest until its upstream contract exists.
 
 ---
 
@@ -583,7 +618,8 @@ implementation authority until the owner approves them.
 | Confirm key while prompt shown | `SPACE`, force-bound only while displayed | different key; no keyboard activation | **APPROVED — owner, 2026-07-22** |
 | Mouse click on OSD | required primary interaction with exact hit-testing | non-clickable notice | **APPROVED — owner, 2026-07-22** |
 | Unknown config string | reject the whole config; notify and offer explicit backup-then-fresh-config recovery | normalize to `button` or `off` | **APPROVED — owner, 2026-07-22** |
-| Commercial markers | ignore / unmodeled | add a separate policy now | Pending |
+| Commercial markers | support as a separate policy wherever the upstream server publishes ranges; synthetic tests are sufficient | ignore / unmodeled | **APPROVED — owner, 2026-07-22** |
+| Default commercial policy | `button`, matching intro/credits while requiring confirmation | `off` or `autoskip` | Pending |
 | Live IPC marker updates | not required (respawn per item) | add insurance now | Pending |
 
 Present overrides to the owner as single plain-English asks if any default is
@@ -618,7 +654,7 @@ contested; do not batch.
 | Mouse click in scope | Restored as the required primary interaction |
 | Permanent `s` binding | Replaced by temporary in-button `SPACE`; pause restored outside |
 | `emby.rs` | `jellyfin.rs` + `Flavor` |
-| Commercial / Unknown kinds | Dropped |
+| Commercial / Unknown kinds | Commercial restored by owner ruling; unknown kinds still dropped |
 | Fail-closed launch wording | Degrade; never block play |
 | Partial verification list | Full repo verification entry point |
 | "Implementing" without state.md | Draft until state/decisions catch up |
@@ -651,3 +687,10 @@ contested; do not batch.
   backup-then-fresh-config action. This exposes conflicting tolerant/fallback
   behavior in current code, so a separate approved config-integrity/recovery
   plan is now a prerequisite rather than hidden scope in this feature.
+- **2026-07-22 — owner ruling 4:** support commercial ranges wherever an
+  upstream server publishes them; the owner's library does not need suitable
+  test content. Current official evidence supports Plex and Jellyfin. Emby's
+  published OpenAPI has no equivalent route, so Emby remains empty rather than
+  guessed. Deterministic synthetic provider responses and generated-video E2E
+  own commercial coverage. The missing commercial-policy default remains a
+  separate owner choice.

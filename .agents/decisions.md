@@ -1222,9 +1222,11 @@ then atomically installs a fresh default config. If backup or replacement
 fails, Vela reports the failure, does not log config contents, and does not
 pretend the invalid config loaded.
 
-For intro/credits skipping specifically, `off`, `button`, and `autoskip` are
-the only valid present values. A missing field means Button under the earlier
-default-policy decision; any other present value invalidates the config.
+For marker skipping specifically, `off`, `button`, and `autoskip` are the only
+valid present policy values. Missing intro and credits fields mean Button under
+the earlier default-policy decision; the commercial field's missing-value
+default is a separate pending choice. Any other present value invalidates the
+config.
 
 Reason:
 A damaged or manually altered credential-bearing settings file should be
@@ -1240,3 +1242,35 @@ those lower-authority code paths remain in place only as explicitly recorded
 implementation debt until an approved plan replaces them. It does not
 invalidate documented missing-field defaults or the rollback-preserved legacy
 local/SMB/SSH fields.
+
+## 2026-07-22 - Support upstream commercial markers without requiring owner media
+
+Status: APPROVED (owner, 2026-07-22). Implementation plan:
+`.agents/plans/skip-credits-intros-v2.md`.
+
+Decision:
+Commercial ranges are a first-class marker kind and have a separate Off /
+Button / Auto-skip policy wherever an upstream server publishes the range.
+Plex and Jellyfin are in scope: Plex officially supports detecting and marking
+commercials for player-side skipping, and Jellyfin's published MediaSegments
+API enumerates Commercial alongside Intro and Outro. Emby remains unsupported
+because its current published OpenAPI has no equivalent marker-range endpoint;
+Vela does not infer Jellyfin compatibility merely because the providers share
+ancestry.
+
+The owner's library has no commercial-marked content and does not need any.
+Provider parsing is guarded with deterministic synthetic responses, and a
+generated test video exercises both commercial Button and Auto-skip behavior
+through real mpv. A real commercial playtest is not a release gate. The default
+for a missing commercial policy is a separate pending product decision.
+
+Reason:
+Vela should use marker capabilities the configured server actually supplies,
+without narrowing the product to the owner's current library or inventing an
+unsupported server contract. Controlled responses make the behavior testable
+and repeatable even when no live title carries the marker.
+
+Supersedes:
+The commercial-marker non-goal and drop behavior in marker-plan v2 revision 3.
+It does not add Preview, Recap, or unknown marker types, and it does not relax
+the rule that missing or failed marker retrieval must never block playback.
