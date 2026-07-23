@@ -41,7 +41,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Commercial ranges are in scope wherever an upstream server publishes them;
   the dated provider evidence and unsupported-provider boundary are canonical
   in the plan. No code has been implemented.
-- The app-wide fail-closed settings prerequisite now has a planning-only draft
+- The app-wide fail-closed settings prerequisite is the active implementation
   at `.agents/plans/config-integrity-recovery.md`. It specifies independent
   strict boundaries and targeted byte-exact recovery for settings and active
   server connections. Active connection records and plaintext tokens move to
@@ -51,22 +51,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   redacted runtime handling, private request headers, and removal of Plex token
   URLs/query strings are the security boundary. Unknown fields invalidate only
   their whole owning file; documented legacy rollback fields and non-settings
-  media payloads remain compatible. No code has been implemented.
+  media payloads remain compatible. No code has been implemented yet.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
   whole and replaced or Vela exits; damaged connections are renamed and enter
   reconnection or Vela exits; a damaged legacy combined config is not mined for
   connection records and therefore also requires reconnection. Plan revision 4
-  records the repair. The canonical finding remains open pending required
-  follow-up external review.
+  records the repair. The owner declined a follow-up Claude review and
+  explicitly activated implementation on 2026-07-23; no clean follow-up verdict
+  is claimed.
 
 ## Next
 
-- Send the `cir-1` plan repair through required follow-up external review. If
-  accepted, close the finding and explicitly activate the app-wide
-  config-integrity/recovery plan. Then implement and land that prerequisite;
-  afterward, explicitly activate the marker plan before marker implementation.
+- Implement and land the active app-wide config-integrity/recovery plan one
+  verified slice per commit. Afterward, explicitly activate the marker plan
+  before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -83,9 +83,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   normalizes several invalid constrained values and sometimes substitutes a
   default config after load failure; that lower-authority behavior conflicts
   with the 2026-07-22 owner decision and must not be copied into this feature.
-- Config-integrity/recovery implementation is gated on required follow-up
-  external acceptance of the `cir-1` plan repair and explicit activation in
-  state.
+- Config-integrity/recovery has no unresolved owner or review blocker.
 
 ## Verification
 

@@ -3,9 +3,9 @@
 **Severity**: MEDIUM — a user can be promised preserved server authorization,
 then lose every live connection and need to reauthorize after settings
 recovery.
-**Status**: Plan repaired; follow-up review pending
+**Status**: Resolved by owner; follow-up review waived
 **Branch**: not started
-**Commit**: pending follow-up review
+**Commit**: `e08ce44`
 
 ## Evidence
 
@@ -84,9 +84,9 @@ MEDIUM severity is justified by recoverable-but-disruptive credential loss.
 
 ## Known gaps
 
-The product ruling and plan repair are complete. The required follow-up
-external review has not yet accepted the revised exact range, so the finding
-remains open and implementation remains unauthorized.
+The product ruling and plan repair are complete. On 2026-07-23 the owner
+declined the proposed follow-up external review and then explicitly directed
+implementation to proceed. No clean follow-up verdict is claimed.
 
 The reviewer launch denied one optional `git diff --stat` Bash call despite the
 launch-scoped grant. The reviewer still completed a 25-turn read-only inspection
@@ -110,3 +110,8 @@ loses every connection while the UI promises the opposite. The reviewer
 recommended distinguishing absence of `connections.json`, warning that
 reauthorization is required, and limiting the preserved-connections guarantee
 to post-split state.
+
+Owner disposition, 2026-07-23: revision 4 resolves the finding by renaming the
+whole invalid combined file and requiring reconnection, with no partial
+salvage. The owner declined a follow-up Claude review and explicitly activated
+implementation.

@@ -2,8 +2,8 @@
 
 ## Status
 
-**Draft v1, revision 4 — 2026-07-23.** Planning-only prerequisite for
-`.agents/plans/skip-credits-intros-v2.md`.
+**Active v1, revision 4 — 2026-07-23.** Approved implementation prerequisite
+for `.agents/plans/skip-credits-intros-v2.md`.
 
 The owner approved the core product contract on 2026-07-22: an invalid settings
 file never loads through normalization, default substitution, or partial source
@@ -20,12 +20,9 @@ security boundary.
 All product choices in **Owner decisions** are settled and recorded in
 `.agents/decisions.md`.
 
-Not active implementation until:
-
-1. The required external plan review is complete and every accepted finding is
-   resolved.
-2. `.agents/state.md` explicitly names this plan as active implementation. Its
-   planning-only mention and Active Sources entry do not activate it.
+The owner resolved the review finding, declined the follow-up external review,
+and explicitly activated implementation on 2026-07-23. `.agents/state.md`
+names this plan as the active implementation.
 
 No marker-skipping implementation may start until this plan is implemented,
 reviewed, verified, and committed, and the marker plan is then activated
@@ -47,9 +44,9 @@ pre-split config. Detail and proposed guard boundary:
 The owner resolved the product question on 2026-07-23: do not mine or salvage
 connections from a damaged old combined config. Treat it as the damaged
 settings file, offer **Rename and create new settings** or **Exit**, and require
-server reconnection afterward. Revision 4 applies that ruling. This review is
-not yet a clean approval; do not activate implementation until the revised
-exact range receives the required follow-up review.
+server reconnection afterward. Revision 4 applies that ruling. The owner
+declined a follow-up external review and explicitly activated this repaired
+plan on 2026-07-23; no clean follow-up verdict is claimed.
 
 ---
 
@@ -886,6 +883,7 @@ valid `connections.json` already exists.
   query callsites are removed and statically guarded.
 - Unit, frontend, privacy, fault-injection, red-proof, canonical, and real-app
   E2E evidence is recorded in this plan.
-- The required external review is clean or every accepted finding is closed.
+- Every accepted review finding is resolved; any owner-waived follow-up is
+  recorded without claiming a clean external verdict.
 - The work is committed, `.agents/state.md` records it landed, and only then may
   the marker plan be explicitly activated.
