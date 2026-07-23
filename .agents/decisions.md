@@ -1321,3 +1321,31 @@ Supersedes:
 The pending live-IPC marker choice and the optional-insurance language in
 marker-plan v2 revision 5. It does not change normal mpv playback-control IPC or
 the rule that marker retrieval failures never block playback.
+
+## 2026-07-23 - Unknown active setting names invalidate the config
+
+Status: APPROVED (owner, 2026-07-23). Implementation plan:
+`.agents/plans/config-integrity-recovery.md`.
+
+Decision:
+An otherwise valid `config.json` is invalid when it contains an unrecognized
+top-level or active-source setting key. Vela does not guess at, ignore, or
+silently delete active settings this build cannot understand. The normal
+fail-closed recovery contract applies, including preserving the exact invalid
+file as a private backup before installing fresh settings.
+
+Documented legacy local/SMB/SSH fields remain known and valid for rollback.
+Provider media-response extras and embedded cached-media snapshot extras are
+not active settings and retain their existing forward-compatible tolerance.
+Known-field wrong types and unknown constrained values remain invalid.
+
+Reason:
+Rejecting unknown active setting names matches the owner's no-guessing rule and
+makes misspellings or unsupported future settings visible. A downgrade from a
+future Vela may require recovery, but the exact newer file is preserved before
+replacement rather than silently damaged.
+
+Supersedes:
+The pending reject-or-preserve choice in config-integrity plan draft v1. It
+does not narrow documented missing-field defaults, legacy rollback
+compatibility, or tolerant parsing of non-settings provider/media data.

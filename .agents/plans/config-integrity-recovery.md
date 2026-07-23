@@ -2,7 +2,7 @@
 
 ## Status
 
-**Draft v1 — 2026-07-23.** Planning-only prerequisite for
+**Draft v1, revision 2 — 2026-07-23.** Planning-only prerequisite for
 `.agents/plans/skip-credits-intros-v2.md`.
 
 The owner approved the core product contract on 2026-07-22: an invalid settings
@@ -11,14 +11,14 @@ restoration; Vela blocks normal use, explains that the file may be damaged or
 may have been tampered with, and recommends an explicit backup-then-fresh-config
 recovery.
 
+All product choices in **Owner decisions** are settled and recorded in
+`.agents/decisions.md`.
+
 Not active implementation until:
 
-1. The unknown-setting-field compatibility choice in **Owner decisions** is
-   settled in owner-facing chat and recorded here and in
-   `.agents/decisions.md`.
-2. The required external plan review is complete and every accepted finding is
+1. The required external plan review is complete and every accepted finding is
    resolved.
-3. `.agents/state.md` explicitly names this plan as active implementation. Its
+2. `.agents/state.md` explicitly names this plan as active implementation. Its
    planning-only mention and Active Sources entry do not activate it.
 
 No marker-skipping implementation may start until this plan is implemented,
@@ -77,8 +77,7 @@ These are invalid:
 - an invalid in-progress legacy Plex migration record;
 - active collection data outside its enforced persistence bounds;
 - a per-section sort value outside Vela's sort whitelist;
-- an unknown active setting field if the owner selects strict unknown-field
-  rejection.
+- an unknown top-level or active-source setting field.
 
 Validation is local and deterministic. It never contacts a media server,
 probes `mpv`, guesses a source, or changes the file.
@@ -198,19 +197,15 @@ retry data and never replace it with defaults.
 
 ### Unknown fields
 
-The owner decision below controls only active settings objects. Embedded media
-snapshots and provider response DTOs are not settings schemas and retain their
-existing forward-compatible tolerance.
-
-If strict rejection is selected, apply `deny_unknown_fields` (or equivalent
+Owner-approved 2026-07-23: an unknown top-level or active-source setting name
+invalidates the whole config. Apply `deny_unknown_fields` (or equivalent
 explicit key validation) to `AppConfig`, `SourceConfig`, and other active
-settings records. The legacy local/SMB/SSH field names stay known and valid;
-their nested rollback payload remains tolerant enough to preserve the
-documented old shape.
+settings records. Never ignore or silently delete an unknown active key.
 
-If preservation is selected, unknown active keys must be captured and
-round-tripped as unchanged JSON values through updates. Silently ignoring and
-then deleting them is not an allowed implementation.
+The legacy local/SMB/SSH field names stay known and valid; their nested rollback
+payload remains tolerant enough to preserve the documented old shape. Embedded
+media snapshots and provider response DTOs are not settings schemas and retain
+their existing forward-compatible tolerance.
 
 ---
 
@@ -444,8 +439,8 @@ restore from committed bytes, and rerun green.
   and migration-blocked state cannot recover;
 - no error/event/log assertion contains the synthetic secret.
 
-Apply the settled unknown-field choice to top-level, source, and legacy
-round-trip fixtures.
+Guard unknown top-level and active-source fields as invalid, while proving
+legacy rollback payloads and non-settings media snapshots remain tolerant.
 
 ### Frontend/static tests
 
@@ -555,22 +550,19 @@ Do not edit generated `build/`, `.svelte-kit/`, `node_modules/`,
 
 ## Owner decisions
 
-### Pending — unknown active setting fields
+### Settled — reject unknown active setting fields
 
-Should an otherwise valid `config.json` fail when it contains an unrecognized
-top-level or active-source setting key?
+Owner-approved 2026-07-23: an otherwise valid `config.json` fails when it
+contains an unrecognized top-level or active-source setting key. Vela does not
+guess at, ignore, or silently delete active settings this build cannot
+understand. The exact invalid file remains eligible for the approved private
+backup recovery, so a file from a future Vela is preserved even if a downgrade
+cannot load it.
 
-- **Reject (recommended):** the whole config is invalid and recovery preserves
-  the exact newer/hand-edited file. This best matches “no guessing” and catches
-  misspelled setting names, but downgrading from a future Vela may require
-  recovery.
-- **Preserve:** Vela keeps unknown key/value pairs inertly and writes them back
-  unchanged through later updates. This improves downgrade compatibility but
-  accepts settings whose meaning this build cannot verify.
-
-Known-field wrong types and unknown constrained *values* fail under either
-choice. Provider media-response extras and embedded cached-media snapshot
-extras are outside this decision.
+Known-field wrong types and unknown constrained values also fail. Documented
+legacy local/SMB/SSH fields remain valid, and provider media-response extras and
+embedded cached-media snapshot extras remain outside the active settings
+schema.
 
 ### Settled — invalid settings and recovery
 

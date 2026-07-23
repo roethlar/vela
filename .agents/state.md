@@ -45,16 +45,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   at `.agents/plans/config-integrity-recovery.md`. It specifies one strict
   config boundary, all-or-nothing source restoration, blocking startup/runtime
   fault states, and explicit byte-exact private backup before atomic fresh
-  config creation. One owner compatibility decision remains: reject unknown
-  active setting keys, or preserve them inertly through updates. No code has
-  been implemented.
+  config creation. Every product choice is settled: unknown top-level or
+  active-source setting keys invalidate the whole config; documented legacy
+  rollback fields and non-settings media payloads remain compatible. No code
+  has been implemented.
 
 ## Next
 
-- Settle unknown active setting-key handling, record the ruling, externally
-  review and explicitly activate the app-wide config-integrity/recovery plan,
-  then implement and land that prerequisite. Afterward, explicitly activate
-  the marker plan in state before marker implementation.
+- Externally review and explicitly activate the app-wide
+  config-integrity/recovery plan, then implement and land that prerequisite.
+  Afterward, explicitly activate the marker plan in state before marker
+  implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -71,9 +72,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   normalizes several invalid constrained values and sometimes substitutes a
   default config after load failure; that lower-authority behavior conflicts
   with the 2026-07-22 owner decision and must not be copied into this feature.
-- Config-integrity/recovery implementation is gated on the unknown active
-  setting-key owner decision, required external plan review, and explicit
-  activation in state.
+- Config-integrity/recovery implementation is gated on required external plan
+  review and explicit activation in state.
 
 ## Verification
 
