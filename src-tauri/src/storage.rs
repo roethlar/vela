@@ -343,7 +343,7 @@ pub(crate) fn is_private_regular(path: &Path) -> bool {
         }
         #[cfg(windows)]
         {
-            windows_private::harden(path, false).is_ok()
+            windows_private::verify(path).is_ok()
         }
         #[cfg(not(any(unix, windows)))]
         {
@@ -375,6 +375,24 @@ where
     T: DeserializeOwned + Serialize + Default,
     F: FnOnce(&mut T) -> Result<R, String>,
 {
+    update_json_before_save(label, process_lock, path, lock_path, mutate, |_| Ok(()))
+}
+
+/// The strict settings and connections stores preserve their exact valid
+/// pre-write bytes while the owning locks are still held.
+pub(crate) fn update_json_before_save<T, R, F, B>(
+    label: &str,
+    process_lock: &Mutex<()>,
+    path: &Path,
+    lock_path: &Path,
+    mutate: F,
+    before_save: B,
+) -> Result<R, String>
+where
+    T: DeserializeOwned + Serialize + Default,
+    F: FnOnce(&mut T) -> Result<R, String>,
+    B: FnOnce(Option<&[u8]>) -> Result<(), String>,
+{
     let _guard = process_lock
         .lock()
         .unwrap_or_else(|error| error.into_inner());
@@ -384,8 +402,15 @@ where
         .lock()
         .map_err(|error| format!("could not acquire {label} lock: {error}"))?;
 
-    let mut value = load_json(path).map_err(|error| format!("could not read {label}: {error}"))?;
+    let original =
+        read_regular_bytes(path).map_err(|error| format!("could not read {label}: {error}"))?;
+    let mut value = match original.as_deref() {
+        Some(bytes) => serde_json::from_slice(bytes)
+            .map_err(|error| format!("could not read {label}: {error}"))?,
+        None => T::default(),
+    };
     let output = mutate(&mut value)?;
+    before_save(original.as_deref())?;
     save_json(path, &value).map_err(|error| format!("could not save {label}: {error}"))?;
     Ok(output)
 }
@@ -575,6 +600,11 @@ mod windows_private {
         applied
             .map_err(|error| io_error("could not protect Vela's private Windows file", error))?;
 
+        verify(path)
+    }
+
+    pub(super) fn verify(path: &Path) -> io::Result<()> {
+        let sid = current_user_sid()?;
         let actual = read_dacl_sddl(path)?;
         let current_user_ace = format!(";;;{sid})");
         let has_system = actual.contains(";;;SY)") || actual.contains(";;;S-1-5-18)");

@@ -69,6 +69,7 @@ test("boot checks the durable gate before any normal app request", () => {
 
 test("recoverable files expose explicit real recovery buttons only when allowed", () => {
   assert.match(page, /invoke<DurableRecoveryResult>\("recover_invalid_file", \{ file \}\)/);
+  assert.match(page, /invoke<DurableRecoveryResult>\("rollback_invalid_file", \{/);
   assert.match(
     page,
     /fault\.value\.status === "recoverable_invalid" && fault\.value\.canRecover/,
@@ -79,6 +80,12 @@ test("recoverable files expose explicit real recovery buttons only when allowed"
   );
   assert.match(page, /Rename and create new settings/);
   assert.match(page, /Rename damaged connections and reconnect/);
+  assert.match(page, /\{#each fault\.value\.rollbackVersions as version \(version\.id\)\}/);
+  assert.match(page, /`Restore \$\{formatRollbackDate\(version\.createdAtUnixMs\)\}`/);
+  assert.match(
+    page,
+    /<button[\s\S]{0,100}disabled=\{durableBusy\}[\s\S]{0,120}onclick=\{\(\) => rollbackInvalidFile\(fault\.file, version\)\}/,
+  );
   assert.match(page, /<button disabled=\{durableBusy\} onclick=\{exitVela\}>Exit Vela<\/button>/);
   assert.match(page, /aria-busy=\{durableBusy\}/);
   assert.match(page, /durableHeading\?\.focus\(\)/);
@@ -86,7 +93,15 @@ test("recoverable files expose explicit real recovery buttons only when allowed"
     fs.readFileSync("src-tauri/src/lib.rs", "utf8"),
     /commands::recover_invalid_file/,
   );
-  assert.match(commands, /if !expected_gate\.can_recover\(file\)/);
+  assert.match(
+    fs.readFileSync("src-tauri/src/lib.rs", "utf8"),
+    /commands::rollback_invalid_file/,
+  );
+  assert.match(
+    commands,
+    /let eligible = match version_id\.as_deref\(\)[\s\S]{0,180}None => expected_gate\.can_recover\(file\)/,
+  );
+  assert.match(commands, /expected_gate\.can_rollback\(file, version_id\)/);
 });
 
 test("recovery is snapshot-bound and preserves whole files with no-replace rename", () => {
@@ -99,6 +114,38 @@ test("recovery is snapshot-bound and preserves whole files with no-replace renam
   const at = commands.indexOf("pub async fn recover_invalid_file(");
   const signature = commands.slice(at, commands.indexOf(") ->", at));
   assert.doesNotMatch(signature, /\b(?:path|name):|String/);
+});
+
+test("rollback history is private, bounded, hash-bound, and backend-selected", () => {
+  assert.match(
+    config,
+    /update_json_before_save[\s\S]{0,700}preserve_valid_history\([\s\S]{0,100}DurableFile::Settings/,
+  );
+  assert.match(
+    connections,
+    /update_json_before_save[\s\S]{0,700}preserve_valid_history\([\s\S]{0,100}DurableFile::Connections/,
+  );
+  assert.match(durable, /const HISTORY_LIMIT: usize = 3/);
+  assert.match(
+    durable,
+    /"\{\}\.valid-\{\}-\{\}\.json"[\s\S]{0,180}sha256_hex\(bytes\)/,
+  );
+  assert.match(durable, /versions\.iter\(\)\.skip\(HISTORY_LIMIT\)/);
+  assert.match(durable, /validate_selected_bytes\(file, bytes\)/);
+  assert.match(durable, /crate::storage::write_private_new\(&path, bytes\)/);
+  assert.match(durable, /sha256_hex\(&bytes\) != parsed\.sha256/);
+  assert.match(
+    durable,
+    /exact_history_bytes\(file, path, version\)\.map_err\(\|_\| RecoveryFileError::Stale\)/,
+  );
+  assert.match(durable, /finish_selected_recovery_with_replacement/);
+  assert.doesNotMatch(
+    commands.slice(
+      commands.indexOf("pub async fn rollback_invalid_file("),
+      commands.indexOf(") ->", commands.indexOf("pub async fn rollback_invalid_file(")),
+    ),
+    /\bpath:/,
+  );
 });
 
 test("recorded recovery fails closed across restart and resumes only exact states", () => {
@@ -122,8 +169,10 @@ test("recorded recovery fails closed across restart and resumes only exact state
   assert.match(commands, /crate::durable::resume_incomplete_recovery\(gate\)/);
   assert.match(
     durable,
-    /match \(current, backup\) \{[\s\S]*\(Some\(current\), None\) if expected\.matches\(&current\)[\s\S]*\(None, Some\(backup\)\)[\s\S]*validate_selected_file\(marker\.file, &path\)\.is_ok\(\)/,
+    /match \(current, backup\) \{[\s\S]*\(Some\(current\), None\) if expected\.matches\(&current\)[\s\S]*\(None, Some\(backup\)\)[\s\S]*installed_replacement_matches\(marker\.file, &path, &marker\.replacement\)/,
   );
+  assert.match(durable, /replacement: RecoveryReplacement/);
+  assert.match(durable, /RecoveryMarker::new_history/);
 });
 
 test("active source writes target connections instead of settings", () => {

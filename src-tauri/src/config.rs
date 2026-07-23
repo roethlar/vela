@@ -421,7 +421,7 @@ pub(crate) fn update_at<T, F>(path: &Path, lock_path: &Path, f: F) -> Result<T, 
 where
     F: FnOnce(&mut AppConfig) -> Result<T, String>,
 {
-    crate::storage::update_json(
+    crate::storage::update_json_before_save(
         "config",
         &CONFIG_LOCK,
         path,
@@ -431,6 +431,14 @@ where
             let output = f(cfg)?;
             cfg.validate()?;
             Ok(output)
+        },
+        |original| match original {
+            Some(bytes) => crate::durable::preserve_valid_history(
+                crate::durable::DurableFile::Settings,
+                path,
+                bytes,
+            ),
+            None => Ok(()),
         },
     )
 }

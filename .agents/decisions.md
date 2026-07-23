@@ -1429,3 +1429,41 @@ Supersedes:
 The proposed `cir-1` salvage branch and the recovery plan's copy-then-replace
 mechanic. It clarifies, without reversing, the separate-connections decision:
 valid post-split connections still survive settings recovery unchanged.
+
+## 2026-07-23 - Keep three dated rollback versions for each durable file
+
+Status: APPROVED (owner, 2026-07-23). Implementation plan:
+`.agents/plans/config-integrity-recovery.md`.
+
+Decision:
+Vela keeps independent private history for `config.json` and
+`connections.json`. Before an ordinary validated write replaces an existing
+valid document, Vela preserves that complete document as an immutable,
+timestamped version. It retains the three newest distinct valid versions for
+each file. Invalid, unavailable, partially parsed, or migration-intermediate
+documents never enter history.
+
+When settings or connections are damaged, the blocking recovery screen shows
+up to three dated validated versions as real buttons. The user may choose one
+of those versions, choose the existing fresh-file recovery, or exit and repair
+the file manually. The frontend receives an opaque version id, never a path or
+caller-controlled filename.
+
+Rollback revalidates the selected version and the exact damaged-current
+snapshot under the same locks as fresh recovery. It first renames and verifies
+the complete damaged current file as the private invalid backup, then
+atomically installs the chosen version for that file only. The other durable
+file and playlists remain untouched. A version that changed, disappeared,
+became non-private/non-regular, or no longer validates is refused; Vela never
+guesses or falls through to a different version.
+
+Reason:
+Fresh defaults are safe but can discard useful settings or require reconnecting
+servers. Three explicit dated choices provide bounded, understandable rollback
+without weakening the whole-file fail-closed boundary or silently selecting an
+older state for the user.
+
+Supersedes:
+The earlier recovery decision's “exactly two paths” wording. It does not change
+the requirement to preserve the damaged whole file before replacement, the
+fresh-file option, Exit's no-write behavior, or the ban on partial salvage.

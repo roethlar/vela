@@ -251,6 +251,7 @@ pub fn run() {
             commands::get_durable_state_status,
             commands::retry_durable_state,
             commands::recover_invalid_file,
+            commands::rollback_invalid_file,
             commands::exit_vela,
             commands::get_status,
             commands::get_app_info,

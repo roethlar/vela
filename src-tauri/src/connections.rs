@@ -134,7 +134,7 @@ pub(crate) fn update_at<T, F>(path: &Path, lock_path: &Path, mutate: F) -> Resul
 where
     F: FnOnce(&mut ConnectionsConfig) -> Result<T, String>,
 {
-    crate::storage::update_json(
+    crate::storage::update_json_before_save(
         "connections",
         &CONNECTIONS_LOCK,
         path,
@@ -144,6 +144,14 @@ where
             let output = mutate(connections)?;
             connections.validate()?;
             Ok(output)
+        },
+        |original| match original {
+            Some(bytes) => crate::durable::preserve_valid_history(
+                crate::durable::DurableFile::Connections,
+                path,
+                bytes,
+            ),
+            None => Ok(()),
         },
     )
 }

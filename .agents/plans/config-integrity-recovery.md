@@ -2,7 +2,7 @@
 
 ## Status
 
-**Active v1, revision 4 — 2026-07-23.** Approved implementation prerequisite
+**Active v1, revision 5 — 2026-07-23.** Approved implementation prerequisite
 for `.agents/plans/skip-credits-intros-v2.md`.
 
 The owner approved the core product contract on 2026-07-22: an invalid settings
@@ -24,8 +24,15 @@ The owner resolved the review finding, declined the follow-up external review,
 and explicitly activated implementation on 2026-07-23. `.agents/state.md`
 names this plan as the active implementation.
 
+On 2026-07-23 the owner expanded recovery to retain three private dated valid
+versions independently for settings and connections and to show all available
+versions as explicit rollback buttons. Revision 5 adds this approved slice
+without weakening exact damaged-file preservation or fresh-file recovery.
+
 Slices 1 and 2 are implemented, verified, and committed at versions 1.0.1 and
-1.0.2. Slice 3 is next.
+1.0.2. Slice 2A implementation and canonical verification are complete at
+version 1.0.3; its commit and post-commit guard proofs are next. Slice 3
+follows it.
 
 No marker-skipping implementation may start until this plan is implemented,
 reviewed, verified, and committed, and the marker plan is then activated
@@ -67,8 +74,12 @@ recovery boundaries:
 - a readable but invalid file loads nothing from that file;
 - a file Vela cannot safely inspect loads nothing from that file;
 - recovery is a deliberate user action, never startup fallback;
-- recovery privately renames the complete invalid file, then creates a
-  validated fresh document at the canonical path;
+- before an ordinary validated write replaces an existing valid file, Vela
+  saves that whole prior version in the file's independent private
+  three-generation history;
+- recovery privately renames the complete invalid file, then installs either
+  an explicitly selected validated history version or a validated fresh
+  document at the canonical path;
 - Exit writes nothing and lets the user repair the original file manually.
 
 An invalid settings file cannot erase, rewrite, or require reauthorization of a
@@ -87,7 +98,8 @@ The durable owner rulings are
 `.agents/decisions.md` **2026-07-22 — Invalid settings fail closed with explicit
 preserved recovery**, **2026-07-23 — Unknown active setting names invalidate
 the config**, **2026-07-23 — Connections are private file-backed state, not
-settings**, and **2026-07-23 — Damaged files are renamed, not salvaged**. The
+settings**, **2026-07-23 — Damaged files are renamed, not salvaged**, and
+**2026-07-23 — Keep three dated rollback versions for each durable file**. The
 legacy local-source rollback contract in
 `.agents/repo-guidance.md` remains equally binding.
 
@@ -393,6 +405,37 @@ the confirmation; do not add automatic recovery or a second
 destructive-looking prompt. The target is a closed backend enum, never an
 arbitrary frontend path.
 
+### Valid-version history
+
+Settings and connections have separate bounded histories. Before an ordinary
+validated update replaces an existing valid canonical document, preserve its
+exact bytes as
+`<stem>.valid-<UTC Unix milliseconds>-<sha256>.json`. Verify private
+permissions, byte length, the filename-bound SHA-256, and the file's strict
+validator before exposing it.
+Deduplicate identical bytes and retain only the three newest distinct valid
+versions for that stem. History maintenance runs under the same process and
+cross-process lock as the owning file. It never snapshots an absent, invalid,
+unavailable, partially parsed, or migration-intermediate document.
+
+History discovery accepts only the exact backend-owned filename grammar,
+regular private files, and documents that still pass the current strict
+validator. The durable gate captures each offered version's opaque SHA-256 id,
+timestamp, byte length, and SHA-256 when it captures the invalid current file.
+The frontend receives only the opaque id and UTC timestamp. A malformed,
+changed, non-private, non-regular, missing, or now-invalid version is omitted
+or refused; it never blocks selection onto another version and is never
+silently repaired.
+
+`rollback_invalid_file { file, version_id }` shares the fresh recovery
+transaction below. Under all locks it proves that the current damaged bytes
+still match the gate and that the selected history version still matches its
+captured length/hash and validates in full. It then preserves the damaged
+current file through the same exact private no-replace rename and installs the
+selected version's exact bytes at the canonical path. The recovery marker
+records whether the replacement is a strict default or one exact history
+version so crash resume cannot change the user's choice.
+
 Under the selected file's process mutex and cross-process lock:
 
 1. Resolve `config.json` or `connections.json` through the same storage boundary
@@ -408,10 +451,13 @@ Under the selected file's process mutex and cross-process lock:
    owner-only `0600` on Unix and a per-user AppData ACL on Windows with no
    ordinary cross-user read access. Reread it and confirm its length and content
    hash against the bytes from step 2.
-5. Serialize the selected document's default (`AppConfig::default()` or
-   `ConnectionsConfig::default()`), parse/validate it through the same strict
-   boundary, and install it at the now-absent canonical path using a private
-   atomic temporary file and no-replace rename. Sync the containing directory
+5. For fresh-file recovery, serialize the selected document's default
+   (`AppConfig::default()` or `ConnectionsConfig::default()`). For rollback,
+   reread the selected history version and require the captured length, SHA-256,
+   privacy, regular-file, filename, and full-validator checks to still match.
+   Install only that selected replacement at the now-absent canonical path
+   using a private atomic temporary file and no-replace rename. Parse and
+   validate the installed canonical file, and sync the containing directory
    where supported.
 6. Reload both independent files. Post-split settings recovery rebuilds from the
    untouched valid connections and does not require reauthorization. A damaged
@@ -466,6 +512,8 @@ Post-split recoverable-invalid settings copy:
 
 Controls:
 
+- up to three real HTML buttons, newest first, each labeled with its dated
+  valid version and restoring only that exact version;
 - primary real HTML button: **Rename and create new settings**;
 - secondary real HTML button: **Exit Vela**.
 
@@ -477,11 +525,13 @@ user to reconnect servers. The alternative is **Exit Vela** and repair the file
 manually. It must not claim that connections are already separate.
 
 Recoverable-invalid connections copy names the server-connections file,
-explains that no connection or token was loaded, and offers **Rename damaged
-connections and reconnect** or **Exit Vela**. The rename action preserves the
-whole damaged file, creates an empty valid connections file, and opens the
-normal server-connection flow. It never implies that settings, recents, or
-playlists will be reset.
+explains that no connection or token was loaded, and offers each available
+dated valid version, **Rename damaged connections and reconnect**, or **Exit
+Vela**. A version rollback preserves the whole damaged file and restores that
+exact connection document. The fresh action preserves the whole damaged file,
+creates an empty valid connections file, and opens the normal server-connection
+flow. Neither action implies that settings, recents, or playlists will be
+reset.
 
 Disable both controls while their request is in flight. On failure, keep the
 blocking screen, show a credential-free error, and re-enable the actions
@@ -642,6 +692,19 @@ restore from committed bytes, and rerun green.
 - connections recovery privately renames the complete invalid file and installs
   an empty valid connections file while settings/playlists remain
   byte-identical, then requires server reconnection;
+- ordinary settings and connection writes preserve only complete strictly valid
+  prior documents, deduplicate identical bytes, retain the three newest
+  versions independently, and keep every version private on Unix and Windows;
+- invalid-file status exposes at most the three newest still-private,
+  still-valid versions as opaque ids plus UTC timestamps, never paths,
+  filenames, contents, tokens, or a guessed fallback;
+- settings and connections rollback each preserve the exact damaged current
+  file, install only the explicitly selected exact validated version, leave the
+  other durable file and playlists byte-identical, and restore the resulting
+  source registry without partial rows;
+- changed, removed, malformed, non-private, non-regular, hash-mismatched, or
+  now-invalid versions are refused, and crash resume remains bound to the exact
+  selected replacement;
 - Exit from every fault screen performs no durable write;
 - no-replace rename failures preserve the canonical original; permission,
   verification, and fresh-install failures after rename preserve the renamed
@@ -667,6 +730,9 @@ legacy rollback payloads and non-settings media snapshots remain tolerant.
 - post-split invalid settings, pre-split combined invalid settings, and invalid
   connections render distinct exact copy and the correct real Rename/Reconnect
   and Exit buttons;
+- each invalid-file surface renders its available dated versions newest first
+  as real disabled-while-busy buttons, invokes rollback with only the owning
+  enum and opaque version id, and never renders more than three;
 - unavailable/migration-blocked status omits that file's reset button;
 - recovery, retry, and Exit have correct disabled, failure, success, and
   no-write states;
@@ -712,6 +778,13 @@ Add focused cases for an unknown constrained setting, unknown top-level setting
 key, unknown connection key, and malformed JSON so E2E proves this is strict
 validation, not only one syntax path. The owner's media library needs no
 damaged real config fixture.
+
+Add one settings-history and one connections-history path. Drive four distinct
+valid writes so the oldest is pruned, damage the canonical file, assert the
+three remaining UTC-dated choices appear newest first, select the middle
+version, and prove the damaged current file is preserved while only the owning
+canonical file becomes byte-identical to the selected version. Tamper with a
+same-length history version and prove it is not offered and cannot be selected.
 
 Run the full canonical cross-side verification from
 `.agents/repo-guidance.md`, including the real-app E2E suite. This work changes
@@ -832,6 +905,66 @@ Implementation evidence (2026-07-23):
   passed, exposing a vacuous static check; the check was strengthened, the
   exact regression then failed, and the committed button was restored.
 
+### Slice 2A — three-version validated rollback
+
+- Preserve complete prior validated settings and connection documents in
+  independent private three-generation histories under their existing locks.
+- Expose only the three newest still-private, still-valid versions as opaque
+  ids and UTC timestamps on a recoverable-invalid gate.
+- Add real dated rollback buttons and an exact-selection backend command.
+- Reuse the damaged-file rename, verification, recovery marker, crash-resume,
+  gate reload, and healthy-file preservation boundary for selected rollback.
+- Add unit, static/frontend, Unix/Windows privacy, failure-injection, and real
+  app settings/connections rollback coverage, including pruning and
+  same-length history tampering.
+- Bump all version surfaces from `1.0.2` to `1.0.3`.
+
+Implementation evidence (2026-07-23):
+
+- Ordinary validated settings and connection updates preserve the exact prior
+  bytes under the owning process and cross-process locks. History creation
+  rejects invalid input, deduplicates identical bytes, verifies private
+  regular files after creation, and prunes each file's inventory to its three
+  newest distinct valid versions.
+- History discovery accepts only the owning file's exact timestamp/hash
+  filename grammar, private regular files whose bytes match that filename's
+  full SHA-256, and documents that still pass the current strict validator.
+  The frontend receives only that opaque hash id and Unix-millisecond date,
+  never a path, filename, document, or credential.
+- A recoverable-invalid gate snapshots the exact eligible history inventory.
+  Rollback requires an id from that gate, then rechecks both the unchanged
+  damaged current file and exact selected history under the recovery and file
+  locks before moving anything. It privately renames and verifies the damaged
+  whole file, installs and validates only the chosen bytes, reloads the
+  two-file gate, and never substitutes a different version.
+- The strict recovery record now carries either a backward-compatible fresh
+  replacement or the exact selected history filename, id, date, byte length,
+  and hash. Restart resumes only that recorded replacement. An implementation
+  audit found and closed nested unknown-field tolerance in the new replacement
+  object; a behavioral test now rejects that altered journal shape.
+- The blocking surface renders every offered version newest first as a real
+  disabled-while-busy HTML button with a localized date/time. Native button
+  semantics make Space activate the focused rollback choice. Fresh-file
+  recovery and Exit remain available.
+- Settings and connections real-app scenarios each seed three versions, choose
+  the middle button, verify the exact damaged backup and exact selected
+  canonical bytes, prove the other durable file and playlists unchanged, and
+  restart successfully. The connections case restores the existing Plex
+  source without reconnecting or exposing its token.
+- Canonical local verification passed: exact Node/npm check, clean `npm ci`,
+  zero-vulnerability npm audit, 48 Node tests, Svelte check with zero
+  diagnostics, production frontend build, Rust 1.89 and stable checks, clippy
+  with warnings denied, 241 Rust tests, and Cargo audit with no vulnerabilities
+  (17 existing allowed unmaintained/unsoundness warnings). `bash -n` accepted
+  the version-bumped Arch PKGBUILD.
+- The first native Windows history run exposed that UUID plus full-hash
+  filenames exceeded the host's legacy path limit in deep temporary paths.
+  Removing the redundant UUID kept the full content hash as the opaque id and
+  shortened the private filename. The checksum-identical final source passed
+  all 27 durable tests and the four Windows storage/privacy tests on
+  `netwatch-01`. The checksum-identical rebuilt Linux real app passed all 37/37
+  E2E scenarios.
+
 ### Slice 3 — Plex token exposure hardening and closeout
 
 - Move progress/timeline tokens from query parameters to headers.
@@ -841,7 +974,7 @@ Implementation evidence (2026-07-23):
 - Update README configuration, backup, rollback, and honest threat-boundary
   documentation.
 - Run full canonical verification and independent code review.
-- Bump all version surfaces from `1.0.2` to `1.0.3`.
+- Bump all version surfaces from `1.0.3` to `1.0.4`.
 
 If slices are combined during implementation, version only the landed coherent
 commits and update the numeric sequence in this plan before proceeding. After
@@ -926,13 +1059,27 @@ later split decision, post-split recovery targets only the invalid owning file.
 
 Owner-approved 2026-07-23: a damaged settings file offers **Rename and create
 new settings** or **Exit Vela**. A damaged connections file offers **Rename
-damaged connections and reconnect** or **Exit Vela**. Exit writes nothing.
+damaged connections and reconnect** or **Exit Vela**. The later dated-history
+decision adds explicit rollback choices to both surfaces. Exit writes nothing.
 
 An invalid old combined config is treated as one damaged settings file. Vela
 does not extract or validate a connection subsection from it. Renaming and
 creating fresh settings therefore requires reconnecting servers; the UI says so
 before the action. The no-reauthorization guarantee applies only when a separate
 valid `connections.json` already exists.
+
+### Settled — three dated valid rollback versions per file
+
+Owner-approved 2026-07-23: settings and connections independently retain the
+three newest complete, distinct, private prior versions that passed their
+strict validators. A damaged-file screen shows all available versions newest
+first as dated real buttons. The user chooses one exact version; Vela never
+automatically selects the newest.
+
+Rollback uses an opaque backend id, revalidates the exact selected version,
+preserves the complete damaged current file first, and restores only the owning
+file. Fresh-file recovery and Exit remain available. Invalid or changed history
+is never offered or substituted with another version.
 
 ---
 
@@ -950,8 +1097,11 @@ valid `connections.json` already exists.
 - The blocking UI distinguishes the owning file and invalid, unavailable, and
   migration-blocked state.
 - Recovery is explicit, targets only a safely reread invalid regular file,
-  privately renames the complete original before fresh-file installation, and
-  leaves any separate healthy file and playlists untouched.
+  privately renames the complete original before selected-version or fresh-file
+  installation, and leaves any separate healthy file and playlists untouched.
+- Settings and connections independently retain and display at most the three
+  newest private, distinct, strictly valid rollback versions with no path or
+  credential exposure.
 - Post-split settings recovery restores unchanged connections without
   reauthorization. Pre-split combined recovery and connections recovery
   salvage no connection data and route to reconnection.

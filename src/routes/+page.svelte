@@ -92,7 +92,9 @@
     status: DurableStatusKind;
     layout: "post_split" | "legacy_combined";
     canRecover: boolean;
+    rollbackVersions: DurableRollbackVersion[];
   };
+  type DurableRollbackVersion = { id: string; createdAtUnixMs: number };
   type DurableStateStatus = {
     settings: DurableFileStatus;
     connections: DurableFileStatus;
@@ -102,6 +104,7 @@
     recovered: boolean;
     backupFileName: string | null;
     reconnectRequired: boolean;
+    restoredVersion: DurableRollbackVersion | null;
     error: string | null;
   };
 
@@ -290,6 +293,7 @@
   let durableStatus = $state<DurableStateStatus | null>(null);
   let retryingDurableState = $state(false);
   let recoveringInvalidFile = $state(false);
+  let rollingBackVersionId = $state<string | null>(null);
   let durableRetryError = $state<string | null>(null);
   let durableBackupFileName = $state<string | null>(null);
   let durableRecoveryNotice = $state<string | null>(null);
@@ -416,8 +420,18 @@
       durableStatus = await invoke<DurableStateStatus>("get_durable_state_status");
     } catch {
       durableStatus = {
-        settings: { status: "unavailable", layout: "post_split", canRecover: false },
-        connections: { status: "ready", layout: "post_split", canRecover: false },
+        settings: {
+          status: "unavailable",
+          layout: "post_split",
+          canRecover: false,
+          rollbackVersions: [],
+        },
+        connections: {
+          status: "ready",
+          layout: "post_split",
+          canRecover: false,
+          rollbackVersions: [],
+        },
       };
     }
     await tick();
@@ -500,6 +514,51 @@
       await tick();
       durableHeading?.focus();
     } finally {
+      recoveringInvalidFile = false;
+    }
+  }
+
+  function formatRollbackDate(createdAtUnixMs: number): string {
+    return new Date(createdAtUnixMs).toLocaleString([], {
+      dateStyle: "medium",
+      timeStyle: "short",
+    });
+  }
+
+  async function rollbackInvalidFile(
+    file: "settings" | "connections",
+    version: DurableRollbackVersion,
+  ) {
+    if (durableBusy) return;
+    recoveringInvalidFile = true;
+    rollingBackVersionId = version.id;
+    durableRetryError = null;
+    durableBackupFileName = null;
+    try {
+      const result = await invoke<DurableRecoveryResult>("rollback_invalid_file", {
+        file,
+        versionId: version.id,
+      });
+      durableStatus = result.status;
+      durableBackupFileName = result.backupFileName;
+      durableRetryError = result.error;
+      if (result.recovered && result.backupFileName && result.restoredVersion) {
+        durableRecoveryNotice = `Restored the ${file} version from ${formatRollbackDate(
+          result.restoredVersion.createdAtUnixMs,
+        )}. The damaged file was preserved as ${result.backupFileName}.`;
+      }
+      if (durableReady(durableStatus)) {
+        await resumeAfterDurableReady();
+      } else {
+        await tick();
+        durableHeading?.focus();
+      }
+    } catch {
+      durableRetryError = "Vela could not safely restore that version.";
+      await tick();
+      durableHeading?.focus();
+    } finally {
+      rollingBackVersionId = null;
       recoveringInvalidFile = false;
     }
   }
@@ -2587,8 +2646,9 @@
             loaded.
           </p>
           <p>
-            You can rename the damaged file and create new settings, or exit Vela and repair it
-            yourself. Your server connections are stored separately and will not be changed.
+            Choose a dated valid version below, rename the damaged file and create new settings,
+            or exit Vela and repair it yourself. Your server connections are stored separately
+            and will not be changed.
           </p>
         {:else if fault.file === "settings"}
           <p>
@@ -2606,9 +2666,10 @@
             connection or token was loaded.
           </p>
           <p>
-            Rename damaged connections and reconnect preserves the whole file, creates an empty
-            valid connections file, and opens the normal server-connection flow. Your settings,
-            recents, and playlists will not be reset.
+            Choose a dated valid version below to restore those connections. Rename damaged
+            connections and reconnect instead preserves the whole file, creates an empty valid
+            connections file, and opens the normal server-connection flow. Your settings, recents,
+            and playlists will not be reset.
           </p>
         {/if}
       {:else if fault.value.status === "migration_blocked"}
@@ -2636,6 +2697,17 @@
       {/if}
       <div class="durable-actions">
         {#if fault.value.status === "recoverable_invalid" && fault.value.canRecover}
+          {#each fault.value.rollbackVersions as version (version.id)}
+            <button
+              data-rollback-version={version.id}
+              disabled={durableBusy}
+              onclick={() => rollbackInvalidFile(fault.file, version)}
+            >
+              {rollingBackVersionId === version.id
+                ? "Restoring version…"
+                : `Restore ${formatRollbackDate(version.createdAtUnixMs)}`}
+            </button>
+          {/each}
           <button
             class="primary"
             disabled={durableBusy}

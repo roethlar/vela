@@ -176,6 +176,7 @@ pub struct DurableRecoveryResult {
     recovered: bool,
     backup_file_name: Option<String>,
     reconnect_required: bool,
+    restored_version: Option<crate::durable::DurableRollbackVersion>,
     error: Option<String>,
 }
 
@@ -232,18 +233,43 @@ pub async fn recover_invalid_file(
     file: crate::durable::DurableFile,
     state: State<'_, AppState>,
 ) -> Result<DurableRecoveryResult, String> {
+    run_file_recovery(file, None, state).await
+}
+
+#[tauri::command]
+pub async fn rollback_invalid_file(
+    file: crate::durable::DurableFile,
+    version_id: String,
+    state: State<'_, AppState>,
+) -> Result<DurableRecoveryResult, String> {
+    run_file_recovery(file, Some(version_id), state).await
+}
+
+async fn run_file_recovery(
+    file: crate::durable::DurableFile,
+    version_id: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<DurableRecoveryResult, String> {
     let expected_gate = state.durable_gate.lock().await.clone();
-    if !expected_gate.can_recover(file) {
+    let eligible = match version_id.as_deref() {
+        Some(version_id) => expected_gate.can_rollback(file, version_id),
+        None => expected_gate.can_recover(file),
+    };
+    if !eligible {
         return Ok(DurableRecoveryResult {
             status: expected_gate.status.clone(),
             recovered: false,
             backup_file_name: None,
             reconnect_required: false,
+            restored_version: None,
             error: Some("Recovery is not available for the file's current status.".to_string()),
         });
     }
-    let transaction = tauri::async_runtime::spawn_blocking(move || {
-        crate::durable::recover_invalid_file(file, expected_gate)
+    let transaction = tauri::async_runtime::spawn_blocking(move || match version_id {
+        Some(version_id) => {
+            crate::durable::rollback_invalid_file(file, &version_id, expected_gate)
+        }
+        None => crate::durable::recover_invalid_file(file, expected_gate),
     })
     .await
     .map_err(|_| "Vela could not safely run file recovery.".to_string())?;
@@ -252,6 +278,7 @@ pub async fn recover_invalid_file(
         crate::durable::RecoveryTransaction::Changed {
             backup_file_name,
             reconnect_required,
+            restored_version,
         } => {
             let loaded = tauri::async_runtime::spawn_blocking(crate::durable::load)
                 .await
@@ -268,6 +295,7 @@ pub async fn recover_invalid_file(
                         recovered: true,
                         backup_file_name: Some(backup_file_name),
                         reconnect_required,
+                        restored_version,
                         error: None,
                     })
                 }
@@ -281,6 +309,7 @@ pub async fn recover_invalid_file(
                         recovered: true,
                         backup_file_name: Some(backup_file_name),
                         reconnect_required,
+                        restored_version,
                         error: Some(
                             "The damaged file was preserved, but another file still requires attention."
                                 .to_string(),
@@ -315,6 +344,7 @@ pub async fn recover_invalid_file(
                 recovered: false,
                 backup_file_name: None,
                 reconnect_required: false,
+                restored_version: None,
                 error: Some(
                     "The file changed after Vela detected the problem. Review the new status and try again."
                         .to_string(),
@@ -335,6 +365,7 @@ pub async fn recover_invalid_file(
                 recovered: false,
                 backup_file_name,
                 reconnect_required: false,
+                restored_version: None,
                 error: Some(message.to_string()),
             })
         }

@@ -49,16 +49,24 @@ fn publish_runtime_fault(file: DurableFile, error: &io::Error) {
                         .map(|connections| classify_layout(&connections))
                         .unwrap_or(DurableLayout::PostSplit);
                     let (status, snapshot) = path
-                        .map(|path| status_and_snapshot_for_error(&error, &path, layout))
+                        .map(|path| {
+                            status_and_snapshot_for_error(
+                                DurableFile::Settings,
+                                &error,
+                                &path,
+                                layout,
+                            )
+                        })
                         .unwrap_or_else(|_| (unavailable_file(layout), None));
                     gate.status.settings = status;
-                    gate.settings_snapshot = snapshot;
+                    gate.settings_snapshot = snapshot.map(Box::new);
                 }
                 DurableFile::Connections => {
                     let path = connections_path();
                     let (status, snapshot) = path
                         .map(|path| {
                             status_and_snapshot_for_error(
+                                DurableFile::Connections,
                                 &error,
                                 &path,
                                 DurableLayout::PostSplit,
@@ -68,12 +76,14 @@ fn publish_runtime_fault(file: DurableFile, error: &io::Error) {
                             (unavailable_file(DurableLayout::PostSplit), None)
                         });
                     gate.status.connections = status;
-                    gate.connections_snapshot = snapshot;
+                    gate.connections_snapshot = snapshot.map(Box::new);
                 }
             }
             if gate.recovery_incomplete {
                 gate.status.settings.can_recover = false;
                 gate.status.connections.can_recover = false;
+                gate.status.settings.rollback_versions.clear();
+                gate.status.connections.rollback_versions.clear();
                 gate.settings_snapshot = None;
                 gate.connections_snapshot = None;
             }
@@ -120,6 +130,14 @@ pub(crate) struct DurableFileStatus {
     pub(crate) status: DurableStatusKind,
     pub(crate) layout: DurableLayout,
     pub(crate) can_recover: bool,
+    pub(crate) rollback_versions: Vec<DurableRollbackVersion>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct DurableRollbackVersion {
+    pub(crate) id: String,
+    pub(crate) created_at_unix_ms: u64,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -136,11 +154,13 @@ impl DurableStateStatus {
                 status: DurableStatusKind::Ready,
                 layout: DurableLayout::PostSplit,
                 can_recover: false,
+                rollback_versions: Vec::new(),
             },
             connections: DurableFileStatus {
                 status: DurableStatusKind::Ready,
                 layout: DurableLayout::PostSplit,
                 can_recover: false,
+                rollback_versions: Vec::new(),
             },
         }
     }
@@ -155,6 +175,7 @@ impl DurableStateStatus {
 struct InvalidSnapshot {
     byte_length: u64,
     sha256: String,
+    rollback_versions: Vec<ValidHistorySnapshot>,
 }
 
 impl InvalidSnapshot {
@@ -162,9 +183,30 @@ impl InvalidSnapshot {
         Self {
             byte_length: bytes.len() as u64,
             sha256: sha256_hex(bytes),
+            rollback_versions: Vec::new(),
         }
     }
 
+    fn matches(&self, bytes: &[u8]) -> bool {
+        self.byte_length == bytes.len() as u64 && self.sha256 == sha256_hex(bytes)
+    }
+
+    fn rollback(&self, id: &str) -> Option<&ValidHistorySnapshot> {
+        self.rollback_versions
+            .iter()
+            .find(|version| version.public.id == id)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidHistorySnapshot {
+    public: DurableRollbackVersion,
+    file_name: String,
+    byte_length: u64,
+    sha256: String,
+}
+
+impl ValidHistorySnapshot {
     fn matches(&self, bytes: &[u8]) -> bool {
         self.byte_length == bytes.len() as u64 && self.sha256 == sha256_hex(bytes)
     }
@@ -178,6 +220,46 @@ struct RecoveryMarker {
     backup_file_name: String,
     byte_length: u64,
     sha256: String,
+    #[serde(default)]
+    replacement: RecoveryReplacement,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum RecoveryReplacement {
+    #[default]
+    Default,
+    History {
+        #[serde(rename = "versionId")]
+        version_id: String,
+        #[serde(rename = "fileName")]
+        file_name: String,
+        #[serde(rename = "createdAtUnixMs")]
+        created_at_unix_ms: u64,
+        #[serde(rename = "byteLength")]
+        byte_length: u64,
+        sha256: String,
+    },
+}
+
+impl RecoveryReplacement {
+    fn is_default(&self) -> bool {
+        matches!(self, Self::Default)
+    }
+
+    fn public_version(&self) -> Option<DurableRollbackVersion> {
+        match self {
+            Self::Default => None,
+            Self::History {
+                version_id,
+                created_at_unix_ms,
+                ..
+            } => Some(DurableRollbackVersion {
+                id: version_id.clone(),
+                created_at_unix_ms: *created_at_unix_ms,
+            }),
+        }
+    }
 }
 
 impl RecoveryMarker {
@@ -193,6 +275,32 @@ impl RecoveryMarker {
             backup_file_name,
             byte_length: snapshot.byte_length,
             sha256: snapshot.sha256.clone(),
+            replacement: RecoveryReplacement::Default,
+        };
+        marker.validate()?;
+        Ok(marker)
+    }
+
+    fn new_history(
+        file: DurableFile,
+        layout: DurableLayout,
+        backup_file_name: String,
+        snapshot: &InvalidSnapshot,
+        version: &ValidHistorySnapshot,
+    ) -> io::Result<Self> {
+        let marker = Self {
+            file,
+            layout,
+            backup_file_name,
+            byte_length: snapshot.byte_length,
+            sha256: snapshot.sha256.clone(),
+            replacement: RecoveryReplacement::History {
+                version_id: version.public.id.clone(),
+                file_name: version.file_name.clone(),
+                created_at_unix_ms: version.public.created_at_unix_ms,
+                byte_length: version.byte_length,
+                sha256: version.sha256.clone(),
+            },
         };
         marker.validate()?;
         Ok(marker)
@@ -202,6 +310,7 @@ impl RecoveryMarker {
         InvalidSnapshot {
             byte_length: self.byte_length,
             sha256: self.sha256.clone(),
+            rollback_versions: Vec::new(),
         }
     }
 
@@ -240,6 +349,31 @@ impl RecoveryMarker {
                 "invalid recovery marker",
             ));
         }
+        if let RecoveryReplacement::History {
+            version_id,
+            file_name,
+            created_at_unix_ms,
+            byte_length: _,
+            sha256,
+        } = &self.replacement
+        {
+            let parsed = parse_history_file_name(self.file, file_name).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid recovery marker")
+            })?;
+            if parsed.public.id != *version_id
+                || parsed.public.created_at_unix_ms != *created_at_unix_ms
+                || parsed.sha256 != *sha256
+                || sha256.len() != 64
+                || !sha256
+                    .bytes()
+                    .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+            {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "invalid recovery marker",
+                ));
+            }
+        }
         Ok(())
     }
 }
@@ -247,8 +381,8 @@ impl RecoveryMarker {
 #[derive(Debug, Clone)]
 pub(crate) struct DurableGate {
     pub(crate) status: DurableStateStatus,
-    settings_snapshot: Option<InvalidSnapshot>,
-    connections_snapshot: Option<InvalidSnapshot>,
+    settings_snapshot: Option<Box<InvalidSnapshot>>,
+    connections_snapshot: Option<Box<InvalidSnapshot>>,
     recovery_incomplete: bool,
 }
 
@@ -264,8 +398,8 @@ impl DurableGate {
 
     fn snapshot(&self, file: DurableFile) -> Option<&InvalidSnapshot> {
         match file {
-            DurableFile::Settings => self.settings_snapshot.as_ref(),
-            DurableFile::Connections => self.connections_snapshot.as_ref(),
+            DurableFile::Settings => self.settings_snapshot.as_deref(),
+            DurableFile::Connections => self.connections_snapshot.as_deref(),
         }
     }
 
@@ -282,6 +416,14 @@ impl DurableGate {
 
     pub(crate) fn recovery_incomplete(&self) -> bool {
         self.recovery_incomplete
+    }
+
+    pub(crate) fn can_rollback(&self, file: DurableFile, version_id: &str) -> bool {
+        self.can_recover(file)
+            && self
+                .snapshot(file)
+                .and_then(|snapshot| snapshot.rollback(version_id))
+                .is_some()
     }
 }
 
@@ -302,6 +444,7 @@ fn status_for_error(error: &io::Error, layout: DurableLayout) -> DurableFileStat
         },
         layout,
         can_recover: false,
+        rollback_versions: Vec::new(),
     }
 }
 
@@ -310,6 +453,7 @@ fn ready_file(layout: DurableLayout) -> DurableFileStatus {
         status: DurableStatusKind::Ready,
         layout,
         can_recover: false,
+        rollback_versions: Vec::new(),
     }
 }
 
@@ -318,10 +462,12 @@ fn unavailable_file(layout: DurableLayout) -> DurableFileStatus {
         status: DurableStatusKind::Unavailable,
         layout,
         can_recover: false,
+        rollback_versions: Vec::new(),
     }
 }
 
 fn status_and_snapshot_for_error(
+    file: DurableFile,
     error: &io::Error,
     path: &Path,
     layout: DurableLayout,
@@ -330,14 +476,25 @@ fn status_and_snapshot_for_error(
         return (status_for_error(error, layout), None);
     }
     match crate::storage::read_regular_bytes(path) {
-        Ok(Some(bytes)) => (
-            DurableFileStatus {
+        Ok(Some(bytes)) => {
+            let rollback_versions = valid_history_at(file, path).unwrap_or_default();
+            let public_versions = rollback_versions
+                .iter()
+                .map(|version| version.public.clone())
+                .collect();
+            (
+                DurableFileStatus {
                 status: DurableStatusKind::RecoverableInvalid,
                 layout,
                 can_recover: true,
-            },
-            Some(InvalidSnapshot::from_bytes(&bytes)),
-        ),
+                    rollback_versions: public_versions,
+                },
+                Some(InvalidSnapshot {
+                    rollback_versions,
+                    ..InvalidSnapshot::from_bytes(&bytes)
+                }),
+            )
+        }
         _ => (unavailable_file(layout), None),
     }
 }
@@ -348,9 +505,12 @@ fn connection_result_status(
 ) -> (DurableFileStatus, Option<InvalidSnapshot>) {
     match result {
         Ok(_) => (ready_file(DurableLayout::PostSplit), None),
-        Err(error) => {
-            status_and_snapshot_for_error(error, path, DurableLayout::PostSplit)
-        }
+        Err(error) => status_and_snapshot_for_error(
+            DurableFile::Connections,
+            error,
+            path,
+            DurableLayout::PostSplit,
+        ),
     }
 }
 
@@ -365,8 +525,8 @@ fn failure_gate(
             settings,
             connections,
         },
-        settings_snapshot,
-        connections_snapshot,
+        settings_snapshot: settings_snapshot.map(Box::new),
+        connections_snapshot: connections_snapshot.map(Box::new),
         recovery_incomplete: false,
     }
 }
@@ -382,6 +542,7 @@ fn recovery_incomplete_gate(
                 status: DurableStatusKind::MigrationBlocked,
                 layout: marker.expect("present marker").layout,
                 can_recover: false,
+                rollback_versions: Vec::new(),
             };
             gate.settings_snapshot = None;
         }
@@ -390,6 +551,7 @@ fn recovery_incomplete_gate(
                 status: DurableStatusKind::MigrationBlocked,
                 layout: DurableLayout::PostSplit,
                 can_recover: false,
+                rollback_versions: Vec::new(),
             };
             gate.connections_snapshot = None;
         }
@@ -398,11 +560,13 @@ fn recovery_incomplete_gate(
                 status: DurableStatusKind::MigrationBlocked,
                 layout: DurableLayout::PostSplit,
                 can_recover: false,
+                rollback_versions: Vec::new(),
             };
             gate.status.connections = DurableFileStatus {
                 status: DurableStatusKind::MigrationBlocked,
                 layout: DurableLayout::PostSplit,
                 can_recover: false,
+                rollback_versions: Vec::new(),
             };
             gate.settings_snapshot = None;
             gate.connections_snapshot = None;
@@ -410,6 +574,8 @@ fn recovery_incomplete_gate(
     }
     gate.status.settings.can_recover = false;
     gate.status.connections.can_recover = false;
+    gate.status.settings.rollback_versions.clear();
+    gate.status.connections.rollback_versions.clear();
     gate.settings_snapshot = None;
     gate.connections_snapshot = None;
     gate.recovery_incomplete = true;
@@ -520,11 +686,178 @@ fn unix_timestamp_seconds() -> u64 {
         .as_secs()
 }
 
-fn invalid_backup_name(file: DurableFile) -> String {
-    let stem = match file {
+const HISTORY_LIMIT: usize = 3;
+
+fn unix_timestamp_millis() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+        .try_into()
+        .unwrap_or(u64::MAX)
+}
+
+fn history_stem(file: DurableFile) -> &'static str {
+    match file {
         DurableFile::Settings => "config",
         DurableFile::Connections => "connections",
-    };
+    }
+}
+
+struct ParsedHistoryName {
+    public: DurableRollbackVersion,
+    sha256: String,
+}
+
+fn parse_history_file_name(file: DurableFile, file_name: &str) -> Option<ParsedHistoryName> {
+    let body = file_name
+        .strip_prefix(&format!("{}.valid-", history_stem(file)))?
+        .strip_suffix(".json")?;
+    let (timestamp, sha256) = body.split_once('-')?;
+    let created_at_unix_ms = timestamp.parse::<u64>().ok()?;
+    if sha256.len() != 64
+        || !sha256
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        return None;
+    }
+    Some(ParsedHistoryName {
+        public: DurableRollbackVersion {
+            id: sha256.to_string(),
+            created_at_unix_ms,
+        },
+        sha256: sha256.to_string(),
+    })
+}
+
+fn validate_selected_bytes(file: DurableFile, bytes: &[u8]) -> io::Result<()> {
+    match file {
+        DurableFile::Settings => {
+            let value: AppConfig = serde_json::from_slice(bytes)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid settings"))?;
+            value
+                .validate()
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid settings"))
+        }
+        DurableFile::Connections => {
+            let value: ConnectionsConfig = serde_json::from_slice(bytes)
+                .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "invalid connections"))?;
+            value.validate().map_err(|_| {
+                io::Error::new(io::ErrorKind::InvalidData, "invalid connections")
+            })
+        }
+    }
+}
+
+fn all_valid_history_at(
+    file: DurableFile,
+    canonical_path: &Path,
+) -> io::Result<Vec<ValidHistorySnapshot>> {
+    let parent = canonical_path
+        .parent()
+        .ok_or_else(|| io::Error::other("durable file has no parent"))?;
+    let mut versions = Vec::new();
+    for entry in fs::read_dir(parent)? {
+        let Ok(entry) = entry else {
+            continue;
+        };
+        let file_name = entry.file_name();
+        let Some(file_name) = file_name.to_str() else {
+            continue;
+        };
+        let Some(parsed) = parse_history_file_name(file, file_name) else {
+            continue;
+        };
+        let path = entry.path();
+        if !crate::storage::is_private_regular(&path) {
+            continue;
+        }
+        let Some(bytes) = crate::storage::read_regular_bytes(&path)? else {
+            continue;
+        };
+        if sha256_hex(&bytes) != parsed.sha256 || validate_selected_bytes(file, &bytes).is_err() {
+            continue;
+        }
+        versions.push(ValidHistorySnapshot {
+            public: parsed.public,
+            file_name: file_name.to_string(),
+            byte_length: bytes.len() as u64,
+            sha256: parsed.sha256,
+        });
+    }
+    versions.sort_by(|left, right| {
+        right
+            .public
+            .created_at_unix_ms
+            .cmp(&left.public.created_at_unix_ms)
+            .then_with(|| right.public.id.cmp(&left.public.id))
+    });
+    Ok(versions)
+}
+
+fn valid_history_at(
+    file: DurableFile,
+    canonical_path: &Path,
+) -> io::Result<Vec<ValidHistorySnapshot>> {
+    let mut versions = all_valid_history_at(file, canonical_path)?;
+    versions.truncate(HISTORY_LIMIT);
+    Ok(versions)
+}
+
+pub(crate) fn preserve_valid_history(
+    file: DurableFile,
+    canonical_path: &Path,
+    bytes: &[u8],
+) -> Result<(), String> {
+    validate_selected_bytes(file, bytes)
+        .map_err(|_| "could not validate the prior durable version".to_string())?;
+    let parent = canonical_path
+        .parent()
+        .ok_or_else(|| "durable file has no parent".to_string())?;
+    let mut versions = all_valid_history_at(file, canonical_path)
+        .map_err(|_| "could not inspect durable version history".to_string())?;
+    let duplicate = versions.iter().any(|version| {
+        version.matches(bytes)
+            && crate::storage::read_regular_bytes(&parent.join(&version.file_name))
+                .is_ok_and(|candidate| candidate.as_deref() == Some(bytes))
+    });
+    if !duplicate {
+        let next_timestamp = versions
+            .first()
+            .map(|version| version.public.created_at_unix_ms.saturating_add(1))
+            .unwrap_or_default()
+            .max(unix_timestamp_millis());
+        let file_name = format!(
+            "{}.valid-{}-{}.json",
+            history_stem(file),
+            next_timestamp,
+            sha256_hex(bytes)
+        );
+        let path = parent.join(&file_name);
+        crate::storage::write_private_new(&path, bytes)
+            .map_err(|_| "could not preserve durable version history".to_string())?;
+        let verify = crate::storage::read_regular_bytes(&path)
+            .map_err(|_| "could not verify durable version history".to_string())?
+            .ok_or_else(|| "durable version history disappeared".to_string())?;
+        if verify != bytes
+            || !crate::storage::is_private_regular(&path)
+            || validate_selected_bytes(file, &verify).is_err()
+        {
+            return Err("could not verify durable version history".to_string());
+        }
+        versions = all_valid_history_at(file, canonical_path)
+            .map_err(|_| "could not verify durable version history".to_string())?;
+    }
+    for version in versions.iter().skip(HISTORY_LIMIT) {
+        crate::storage::remove_private_regular(&parent.join(&version.file_name))
+            .map_err(|_| "could not prune durable version history".to_string())?;
+    }
+    Ok(())
+}
+
+fn invalid_backup_name(file: DurableFile) -> String {
+    let stem = history_stem(file);
     format!(
         "{stem}.invalid-{}-{}.json",
         unix_timestamp_seconds(),
@@ -591,7 +924,118 @@ fn finish_selected_recovery(
             "preserved file verification failed",
         ));
     }
-    install_selected_default(file, path)?;
+    install_selected_replacement(file, path, &RecoveryReplacement::Default)?;
+    validate_selected_file(file, path)
+}
+
+fn install_selected_replacement(
+    file: DurableFile,
+    path: &Path,
+    replacement: &RecoveryReplacement,
+) -> io::Result<()> {
+    match replacement {
+        RecoveryReplacement::Default => install_selected_default(file, path),
+        RecoveryReplacement::History {
+            version_id,
+            file_name,
+            created_at_unix_ms,
+            byte_length,
+            sha256,
+        } => {
+            let version = ValidHistorySnapshot {
+                public: DurableRollbackVersion {
+                    id: version_id.clone(),
+                    created_at_unix_ms: *created_at_unix_ms,
+                },
+                file_name: file_name.clone(),
+                byte_length: *byte_length,
+                sha256: sha256.clone(),
+            };
+            let bytes = exact_history_bytes(file, path, &version)?;
+            crate::storage::write_private_new(path, &bytes)
+        }
+    }
+}
+
+fn exact_history_bytes(
+    file: DurableFile,
+    canonical_path: &Path,
+    version: &ValidHistorySnapshot,
+) -> io::Result<Vec<u8>> {
+    let parsed = parse_history_file_name(file, &version.file_name)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid history"))?;
+    if parsed.public != version.public || parsed.sha256 != version.sha256 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "history selection changed",
+        ));
+    }
+    let parent = canonical_path
+        .parent()
+        .ok_or_else(|| io::Error::other("durable file has no parent"))?;
+    let history_path = parent.join(&version.file_name);
+    if !crate::storage::is_private_regular(&history_path) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "history version is not private",
+        ));
+    }
+    let bytes = crate::storage::read_regular_bytes(&history_path)?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "history is absent"))?;
+    if !version.matches(&bytes) || validate_selected_bytes(file, &bytes).is_err() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "history version changed",
+        ));
+    }
+    Ok(bytes)
+}
+
+fn installed_replacement_matches(
+    file: DurableFile,
+    path: &Path,
+    replacement: &RecoveryReplacement,
+) -> bool {
+    let Ok(Some(bytes)) = crate::storage::read_regular_bytes(path) else {
+        return false;
+    };
+    if validate_selected_bytes(file, &bytes).is_err() {
+        return false;
+    }
+    match replacement {
+        RecoveryReplacement::Default => true,
+        RecoveryReplacement::History {
+            byte_length,
+            sha256,
+            ..
+        } => bytes.len() as u64 == *byte_length && sha256_hex(&bytes) == *sha256,
+    }
+}
+
+fn finish_selected_recovery_with_replacement(
+    file: DurableFile,
+    path: &Path,
+    backup_path: &Path,
+    current: &[u8],
+    expected: &InvalidSnapshot,
+    replacement: &RecoveryReplacement,
+) -> io::Result<()> {
+    crate::storage::harden_existing_regular(backup_path)?;
+    if !crate::storage::is_private_regular(backup_path) {
+        return Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            "preserved file is not private",
+        ));
+    }
+    let preserved = crate::storage::read_regular_bytes(backup_path)?
+        .ok_or_else(|| io::Error::other("preserved file disappeared"))?;
+    if !expected.matches(&preserved) || preserved != current {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "preserved file verification failed",
+        ));
+    }
+    install_selected_replacement(file, path, replacement)?;
     validate_selected_file(file, path)
 }
 
@@ -671,6 +1115,62 @@ fn recover_selected_at_with_marker(
         marker_path,
         finish_selected_recovery,
     )
+}
+
+fn recover_selected_history_at_with_marker(
+    file: DurableFile,
+    path: &Path,
+    expected: &InvalidSnapshot,
+    layout: DurableLayout,
+    marker_path: &Path,
+    version: &ValidHistorySnapshot,
+) -> Result<String, RecoveryFileError> {
+    exact_history_bytes(file, path, version).map_err(|_| RecoveryFileError::Stale)?;
+    let backup_file_name = invalid_backup_name(file);
+    let marker = RecoveryMarker::new_history(
+        file,
+        layout,
+        backup_file_name.clone(),
+        expected,
+        version,
+    )
+    .map_err(|_| RecoveryFileError::BeforeMarker)?;
+    let replacement = marker.replacement.clone();
+    let result = recover_selected_at_with_hooks(
+        file,
+        path,
+        expected,
+        backup_file_name.clone(),
+        || install_recovery_marker(marker_path, &marker),
+        |file, path, backup_path, current, expected| {
+            finish_selected_recovery_with_replacement(
+                file,
+                path,
+                backup_path,
+                current,
+                expected,
+                &replacement,
+            )
+        },
+    );
+    match result {
+        Ok(backup_file_name) => {
+            crate::storage::remove_private_regular(marker_path).map_err(|_| {
+                RecoveryFileError::Incomplete {
+                    backup_file_name: Some(backup_file_name.clone()),
+                }
+            })?;
+            Ok(backup_file_name)
+        }
+        Err(RecoveryFileError::BeforeRename) => {
+            crate::storage::remove_private_regular(marker_path)
+                .map_err(|_| RecoveryFileError::Incomplete {
+                    backup_file_name: None,
+                })?;
+            Err(RecoveryFileError::BeforeRename)
+        }
+        other => other,
+    }
 }
 
 fn recover_selected_at_with_marker_and_finish(
@@ -764,12 +1264,27 @@ fn resume_recovery_at(marker_path: &Path, marker: &RecoveryMarker) -> io::Result
                 }
             }
             crate::storage::rename_noreplace(&path, &backup_path)?;
-            finish_selected_recovery(marker.file, &path, &backup_path, &current, &expected)?;
+            finish_selected_recovery_with_replacement(
+                marker.file,
+                &path,
+                &backup_path,
+                &current,
+                &expected,
+                &marker.replacement,
+            )?;
         }
         (None, Some(backup)) => {
-            finish_selected_recovery(marker.file, &path, &backup_path, &backup, &expected)?;
+            finish_selected_recovery_with_replacement(
+                marker.file,
+                &path,
+                &backup_path,
+                &backup,
+                &expected,
+                &marker.replacement,
+            )?;
         }
-        (Some(_), Some(_)) if validate_selected_file(marker.file, &path).is_ok() => {}
+        (Some(_), Some(_))
+            if installed_replacement_matches(marker.file, &path, &marker.replacement) => {}
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
@@ -805,6 +1320,7 @@ pub(crate) enum RecoveryTransaction {
     Changed {
         backup_file_name: String,
         reconnect_required: bool,
+        restored_version: Option<DurableRollbackVersion>,
     },
     Stale,
     Failed {
@@ -818,6 +1334,30 @@ pub(crate) fn recover_invalid_file(
     file: DurableFile,
     expected_gate: DurableGate,
 ) -> RecoveryTransaction {
+    recover_invalid_file_with_version(file, expected_gate, None)
+}
+
+pub(crate) fn rollback_invalid_file(
+    file: DurableFile,
+    version_id: &str,
+    expected_gate: DurableGate,
+) -> RecoveryTransaction {
+    if !expected_gate.can_rollback(file, version_id) {
+        return RecoveryTransaction::Stale;
+    }
+    let version = expected_gate
+        .snapshot(file)
+        .and_then(|snapshot| snapshot.rollback(version_id))
+        .expect("eligible rollback must retain its exact history version")
+        .clone();
+    recover_invalid_file_with_version(file, expected_gate, Some(version))
+}
+
+fn recover_invalid_file_with_version(
+    file: DurableFile,
+    expected_gate: DurableGate,
+    selected_version: Option<ValidHistorySnapshot>,
+) -> RecoveryTransaction {
     if !expected_gate.can_recover(file) {
         return RecoveryTransaction::Stale;
     }
@@ -825,8 +1365,8 @@ pub(crate) fn recover_invalid_file(
         .snapshot(file)
         .expect("recoverable gate must retain its exact snapshot")
         .clone();
-    let reconnect_required = file == DurableFile::Connections
-        || expected_gate.status.settings.layout == DurableLayout::LegacyCombined;
+    let reconnect_required = expected_gate.status.settings.layout == DurableLayout::LegacyCombined
+        || (file == DurableFile::Connections && selected_version.is_none());
 
     let _process_guard = DURABLE_LOAD_LOCK
         .lock()
@@ -914,7 +1454,19 @@ pub(crate) fn recover_invalid_file(
                     message: "Vela could not safely acquire the settings lock.",
                 };
             }
-            recover_selected_at_with_marker(file, &path, &expected, layout, &marker_path)
+            match selected_version.as_ref() {
+                Some(version) => recover_selected_history_at_with_marker(
+                    file,
+                    &path,
+                    &expected,
+                    layout,
+                    &marker_path,
+                    version,
+                ),
+                None => {
+                    recover_selected_at_with_marker(file, &path, &expected, layout, &marker_path)
+                }
+            }
         }
         DurableFile::Connections => {
             let _selected_process_guard = connections::lock_process();
@@ -935,7 +1487,19 @@ pub(crate) fn recover_invalid_file(
                     message: "Vela could not safely acquire the connections lock.",
                 };
             }
-            recover_selected_at_with_marker(file, &path, &expected, layout, &marker_path)
+            match selected_version.as_ref() {
+                Some(version) => recover_selected_history_at_with_marker(
+                    file,
+                    &path,
+                    &expected,
+                    layout,
+                    &marker_path,
+                    version,
+                ),
+                None => {
+                    recover_selected_at_with_marker(file, &path, &expected, layout, &marker_path)
+                }
+            }
         }
     };
 
@@ -943,6 +1507,7 @@ pub(crate) fn recover_invalid_file(
         Ok(backup_file_name) => RecoveryTransaction::Changed {
             backup_file_name,
             reconnect_required,
+            restored_version: selected_version.map(|version| version.public),
         },
         Err(RecoveryFileError::Stale) => RecoveryTransaction::Stale,
         Err(RecoveryFileError::BeforeMarker) => match load_recovery_marker(&marker_path) {
@@ -968,8 +1533,19 @@ pub(crate) fn recover_invalid_file(
             message: "Vela could not safely rename the damaged file.",
         },
         Err(RecoveryFileError::AfterRename { backup_file_name }) => {
-            let marker =
-                RecoveryMarker::new(file, layout, backup_file_name.clone(), &expected).ok();
+            let marker = match selected_version.as_ref() {
+                Some(version) => RecoveryMarker::new_history(
+                    file,
+                    layout,
+                    backup_file_name.clone(),
+                    &expected,
+                    version,
+                )
+                .ok(),
+                None => {
+                    RecoveryMarker::new(file, layout, backup_file_name.clone(), &expected).ok()
+                }
+            };
             RecoveryTransaction::Failed {
                 gate: recovery_incomplete_gate(marker.as_ref(), Some(&expected_gate)),
                 backup_file_name: Some(backup_file_name),
@@ -978,7 +1554,19 @@ pub(crate) fn recover_invalid_file(
         }
         Err(RecoveryFileError::Incomplete { backup_file_name }) => {
             let marker = backup_file_name.as_ref().and_then(|backup_file_name| {
-                RecoveryMarker::new(file, layout, backup_file_name.clone(), &expected).ok()
+                match selected_version.as_ref() {
+                    Some(version) => RecoveryMarker::new_history(
+                        file,
+                        layout,
+                        backup_file_name.clone(),
+                        &expected,
+                        version,
+                    )
+                    .ok(),
+                    None => {
+                        RecoveryMarker::new(file, layout, backup_file_name.clone(), &expected).ok()
+                    }
+                }
             });
             RecoveryTransaction::Failed {
                 gate: recovery_incomplete_gate(marker.as_ref(), Some(&expected_gate)),
@@ -1118,8 +1706,9 @@ pub(crate) fn resume_incomplete_recovery(
     match result {
         Ok(()) => RecoveryTransaction::Changed {
             backup_file_name: marker.backup_file_name,
-            reconnect_required: marker.file == DurableFile::Connections
-                || marker.layout == DurableLayout::LegacyCombined,
+            reconnect_required: marker.layout == DurableLayout::LegacyCombined
+                || (marker.file == DurableFile::Connections && marker.replacement.is_default()),
+            restored_version: marker.replacement.public_version(),
         },
         Err(_) => {
             let backup_file_name = marker_path.parent().and_then(|parent| {
@@ -1370,7 +1959,12 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(_) => {}
         Err(error) => {
             let (settings, settings_snapshot) =
-                status_and_snapshot_for_error(&error, &config_path, layout);
+                status_and_snapshot_for_error(
+                    DurableFile::Settings,
+                    &error,
+                    &config_path,
+                    layout,
+                );
             let (connections, connections_snapshot) =
                 connection_result_status(&connections_result, &connections_path);
             return Err(DurableLoadFailure {
@@ -1387,7 +1981,12 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(settings) => settings,
         Err(error) => {
             let (settings, settings_snapshot) =
-                status_and_snapshot_for_error(&error, &config_path, layout);
+                status_and_snapshot_for_error(
+                    DurableFile::Settings,
+                    &error,
+                    &config_path,
+                    layout,
+                );
             let (connections, connections_snapshot) =
                 connection_result_status(&connections_result, &connections_path);
             return Err(DurableLoadFailure {
@@ -1409,7 +2008,12 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         Ok(connections) => connections,
         Err(error) => {
             let (connections, connections_snapshot) =
-                status_and_snapshot_for_error(&error, &connections_path, DurableLayout::PostSplit);
+                status_and_snapshot_for_error(
+                    DurableFile::Connections,
+                    &error,
+                    &connections_path,
+                    DurableLayout::PostSplit,
+                );
             return Err(DurableLoadFailure {
                 gate: failure_gate(
                     ready_file(settings_layout),
@@ -1436,6 +2040,7 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
                     status: DurableStatusKind::MigrationBlocked,
                     layout: DurableLayout::LegacyCombined,
                     can_recover: false,
+                    rollback_versions: Vec::new(),
                 },
                 ready_file(DurableLayout::PostSplit),
                 None,
@@ -1454,6 +2059,7 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
                 "persisted connection could not be restored",
             );
             let (status, snapshot) = status_and_snapshot_for_error(
+                DurableFile::Connections,
                 &error,
                 &connections_path,
                 DurableLayout::PostSplit,
@@ -1522,8 +2128,12 @@ mod tests {
         fs::write(&path, original).unwrap();
         let error = io::Error::new(io::ErrorKind::InvalidData, "synthetic invalid settings");
 
-        let (status, snapshot) =
-            status_and_snapshot_for_error(&error, &path, DurableLayout::PostSplit);
+        let (status, snapshot) = status_and_snapshot_for_error(
+            DurableFile::Settings,
+            &error,
+            &path,
+            DurableLayout::PostSplit,
+        );
         assert_eq!(status.status, DurableStatusKind::RecoverableInvalid);
         assert!(status.can_recover);
         let snapshot = snapshot.unwrap();
@@ -1546,6 +2156,250 @@ mod tests {
         changed[1] ^= 1;
         assert_eq!(changed.len(), original.len());
         assert!(!snapshot.matches(&changed));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn settings_and_connections_keep_only_three_distinct_private_valid_versions() {
+        let root = temp_root("valid-history-ring");
+        let config_path = root.join("config.json");
+        let connections_path = root.join("connections.json");
+
+        let settings_versions = (10..14)
+            .map(|threshold| {
+                serde_json::to_vec_pretty(&serde_json::json!({
+                    "watched_threshold_percent": threshold
+                }))
+                .unwrap()
+            })
+            .collect::<Vec<_>>();
+        for bytes in &settings_versions {
+            preserve_valid_history(DurableFile::Settings, &config_path, bytes).unwrap();
+        }
+        let before_duplicate = valid_history_at(DurableFile::Settings, &config_path).unwrap();
+        preserve_valid_history(
+            DurableFile::Settings,
+            &config_path,
+            settings_versions.last().unwrap(),
+        )
+        .unwrap();
+        let settings_history = valid_history_at(DurableFile::Settings, &config_path).unwrap();
+        assert_eq!(settings_history.len(), HISTORY_LIMIT);
+        assert_eq!(
+            settings_history
+                .iter()
+                .map(|version| &version.public.id)
+                .collect::<Vec<_>>(),
+            before_duplicate
+                .iter()
+                .map(|version| &version.public.id)
+                .collect::<Vec<_>>()
+        );
+        for (version, expected) in settings_history
+            .iter()
+            .zip(settings_versions.iter().rev().take(HISTORY_LIMIT))
+        {
+            let path = root.join(&version.file_name);
+            assert_eq!(fs::read(&path).unwrap(), *expected);
+            assert!(crate::storage::is_private_regular(&path));
+        }
+
+        for id in ["one", "two", "three", "four"] {
+            let value = ConnectionsConfig {
+                sources: vec![jellyfin_source(id)],
+            };
+            let bytes = serde_json::to_vec_pretty(&value).unwrap();
+            preserve_valid_history(DurableFile::Connections, &connections_path, &bytes).unwrap();
+        }
+        let connection_history =
+            valid_history_at(DurableFile::Connections, &connections_path).unwrap();
+        assert_eq!(connection_history.len(), HISTORY_LIMIT);
+        assert!(connection_history
+            .windows(2)
+            .all(|pair| pair[0].public.created_at_unix_ms > pair[1].public.created_at_unix_ms));
+        assert_eq!(
+            fs::read_dir(&root)
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("connections.valid-"))
+                .count(),
+            HISTORY_LIMIT
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_status_offers_newest_valid_versions_and_omits_tampering() {
+        let root = temp_root("valid-history-status");
+        let config_path = root.join("config.json");
+        for threshold in 20..24 {
+            let bytes = serde_json::to_vec_pretty(&serde_json::json!({
+                "watched_threshold_percent": threshold
+            }))
+            .unwrap();
+            preserve_valid_history(DurableFile::Settings, &config_path, &bytes).unwrap();
+        }
+        let newest = valid_history_at(DurableFile::Settings, &config_path)
+            .unwrap()
+            .remove(0);
+        let newest_path = root.join(&newest.file_name);
+        let mut changed = fs::read(&newest_path).unwrap();
+        let digit = changed.iter().position(|byte| *byte == b'3').unwrap();
+        changed[digit] = b'9';
+        fs::write(&newest_path, &changed).unwrap();
+        assert_eq!(changed.len() as u64, newest.byte_length);
+
+        let invalid = br#"{"continue_playing":"future"}"#;
+        fs::write(&config_path, invalid).unwrap();
+        let error = io::Error::new(io::ErrorKind::InvalidData, "invalid settings");
+        let (status, snapshot) = status_and_snapshot_for_error(
+            DurableFile::Settings,
+            &error,
+            &config_path,
+            DurableLayout::PostSplit,
+        );
+
+        assert!(status.can_recover);
+        assert_eq!(status.rollback_versions.len(), HISTORY_LIMIT - 1);
+        assert!(!status
+            .rollback_versions
+            .iter()
+            .any(|version| version.id == newest.public.id));
+        assert_eq!(
+            snapshot.unwrap().rollback_versions.len(),
+            HISTORY_LIMIT - 1
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn selected_history_rollback_preserves_damage_and_installs_only_that_version() {
+        let root = temp_root("selected-history-recovery");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let connections_path = root.join("connections.json");
+        let playlists_path = root.join("playlists.json");
+        let selected = serde_json::to_vec_pretty(&serde_json::json!({
+            "continue_playing": "on"
+        }))
+        .unwrap();
+        preserve_valid_history(DurableFile::Settings, &config_path, &selected).unwrap();
+        let version = valid_history_at(DurableFile::Settings, &config_path)
+            .unwrap()
+            .remove(0);
+        let damaged = br#"{"continue_playing":"future","secret":"preserve"}"#;
+        let connections = br#"{"sources":[]}"#;
+        let playlists = br#"{"schemaVersion":1,"playlists":[]}"#;
+        fs::write(&config_path, damaged).unwrap();
+        fs::write(&connections_path, connections).unwrap();
+        fs::write(&playlists_path, playlists).unwrap();
+        let expected = InvalidSnapshot::from_bytes(damaged);
+
+        let backup = recover_selected_history_at_with_marker(
+            DurableFile::Settings,
+            &config_path,
+            &expected,
+            DurableLayout::PostSplit,
+            &marker_path,
+            &version,
+        )
+        .unwrap();
+
+        assert_eq!(fs::read(&config_path).unwrap(), selected);
+        assert_eq!(fs::read(root.join(backup)).unwrap(), damaged);
+        assert_eq!(fs::read(&connections_path).unwrap(), connections);
+        assert_eq!(fs::read(&playlists_path).unwrap(), playlists);
+        assert!(!marker_path.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn retry_resumes_the_exact_recorded_history_choice_after_rename() {
+        let root = temp_root("history-recovery-resume");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let selected = serde_json::to_vec_pretty(&serde_json::json!({
+            "continue_playing": "only-tv"
+        }))
+        .unwrap();
+        preserve_valid_history(DurableFile::Settings, &config_path, &selected).unwrap();
+        let version = valid_history_at(DurableFile::Settings, &config_path)
+            .unwrap()
+            .remove(0);
+        let damaged = br#"{"continue_playing":"future"}"#;
+        fs::write(&config_path, damaged).unwrap();
+        let expected = InvalidSnapshot::from_bytes(damaged);
+        let backup_name =
+            "config.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string();
+        let marker = RecoveryMarker::new_history(
+            DurableFile::Settings,
+            DurableLayout::PostSplit,
+            backup_name.clone(),
+            &expected,
+            &version,
+        )
+        .unwrap();
+        install_recovery_marker(&marker_path, &marker).unwrap();
+        crate::storage::rename_noreplace(&config_path, &root.join(&backup_name)).unwrap();
+
+        resume_recovery_at(&marker_path, &marker).unwrap();
+
+        assert_eq!(fs::read(&config_path).unwrap(), selected);
+        assert_eq!(fs::read(root.join(backup_name)).unwrap(), damaged);
+        assert!(!marker_path.exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn changed_selected_history_is_refused_before_the_damaged_file_moves() {
+        let root = temp_root("changed-history-recovery");
+        let config_path = root.join("config.json");
+        let marker_path = root.join("durable-recovery.json");
+        let valid = serde_json::to_vec_pretty(&serde_json::json!({
+            "continue_playing": "on"
+        }))
+        .unwrap();
+        preserve_valid_history(DurableFile::Settings, &config_path, &valid).unwrap();
+        let version = valid_history_at(DurableFile::Settings, &config_path)
+            .unwrap()
+            .remove(0);
+        let version_path = root.join(&version.file_name);
+        let mut changed = fs::read(&version_path).unwrap();
+        let value = changed.iter().position(|byte| *byte == b'o').unwrap();
+        changed[value] = b'x';
+        fs::write(&version_path, &changed).unwrap();
+        assert_eq!(changed.len() as u64, version.byte_length);
+
+        let damaged = br#"{"continue_playing":"future"}"#;
+        fs::write(&config_path, damaged).unwrap();
+        let expected = InvalidSnapshot::from_bytes(damaged);
+        assert!(matches!(
+            recover_selected_history_at_with_marker(
+                DurableFile::Settings,
+                &config_path,
+                &expected,
+                DurableLayout::PostSplit,
+                &marker_path,
+                &version,
+            ),
+            Err(RecoveryFileError::Stale)
+        ));
+        assert_eq!(fs::read(&config_path).unwrap(), damaged);
+        assert!(!marker_path.exists());
+        assert_eq!(
+            fs::read_dir(&root)
+                .unwrap()
+                .filter_map(Result::ok)
+                .filter(|entry| entry
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("config.invalid-"))
+                .count(),
+            0
+        );
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1592,6 +2446,31 @@ mod tests {
             .unwrap()
             .join("config.invalid-1-00000000-0000-0000-0000-000000000000.json")
             .exists());
+        crate::storage::remove_private_regular(&marker_path).unwrap();
+
+        let history_sha256 = "a".repeat(64);
+        let history = ValidHistorySnapshot {
+            public: DurableRollbackVersion {
+                id: history_sha256.clone(),
+                created_at_unix_ms: 1,
+            },
+            file_name: format!("config.valid-1-{history_sha256}.json"),
+            byte_length: 2,
+            sha256: history_sha256,
+        };
+        let marker = RecoveryMarker::new_history(
+            DurableFile::Settings,
+            DurableLayout::PostSplit,
+            "config.invalid-1-00000000-0000-0000-0000-000000000000.json".to_string(),
+            &snapshot,
+            &history,
+        )
+        .unwrap();
+        let mut nested_unknown = serde_json::to_value(marker).unwrap();
+        nested_unknown["replacement"]["unexpected"] = serde_json::Value::Bool(true);
+        crate::storage::install_json_new(&marker_path, &nested_unknown).unwrap();
+
+        assert!(load_recovery_marker(&marker_path).is_err());
         fs::remove_dir_all(root).unwrap();
     }
 
@@ -1624,11 +2503,13 @@ mod tests {
                 status: DurableStatusKind::RecoverableInvalid,
                 layout: DurableLayout::PostSplit,
                 can_recover: true,
+                rollback_versions: Vec::new(),
             },
             DurableFileStatus {
                 status: DurableStatusKind::RecoverableInvalid,
                 layout: DurableLayout::PostSplit,
                 can_recover: true,
+                rollback_versions: Vec::new(),
             },
             Some(snapshot.clone()),
             Some(snapshot),
