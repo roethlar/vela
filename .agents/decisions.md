@@ -1174,3 +1174,29 @@ invisibility of an off-by-default feature.
 
 Supersedes:
 Nothing. This settles the first open product choice in the marker-skipping plan.
+
+## 2026-07-22 - Marker skip Button is clickable and temporarily owns Space
+
+Status: APPROVED (owner, 2026-07-22). Implementation plan:
+`.agents/plans/skip-credits-intros-v2.md`.
+
+Decision:
+Button mode renders a genuinely clickable control inside the external mpv
+window, not a passive notice that merely advertises a key. Left-clicking inside
+the rendered button activates the skip. While that button is displayed, Space
+activates the same skip action; when it is absent, Space retains mpv's normal
+pause behavior.
+
+The mouse binding is restricted to the button's current hitbox so clicks
+elsewhere remain mpv's. Both pointer and Space bindings are installed only for
+the visible button and removed when it clears or the marker is consumed.
+
+Reason:
+The owner requested a button as the primary interaction. Temporary Space gives
+the same control from a couch/keyboard without turning the requested button
+into a keyboard-only notification or permanently taking over an mpv control.
+
+Supersedes:
+The marker plan's unapproved keyboard-only narrowing, its proposed `s` binding,
+and its proposal to defer mouse hit-testing beyond v1. It extends, rather than
+changes, the approved missing-setting default of Button.

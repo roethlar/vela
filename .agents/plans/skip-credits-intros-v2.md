@@ -27,7 +27,7 @@ Vela offers skip during external-mpv playback:
 
 - **Button** (owner-approved default for missing settings, 2026-07-22): native
   mpv ASS/OSD prompt inside the video window ("Skip Intro" / "Skip Credits")
-  with an explicit confirm.
+  activated by clicking it or, while it is displayed, pressing Space.
 - **Auto-skip**: seek to marker end with a brief OSD toast.
 - **Off**: no script injection for that kind.
 
@@ -41,7 +41,6 @@ bundled Lua script, following the same resource/injection pattern as
 ## Non-goals (v1 of the feature)
 
 - Webview or Tauri overlays on the video frame.
-- Mouse-click hit-testing on the ASS "button" (stretch only; keyboard is v1).
 - Mid-title "Jump to credits" when playback is *outside* a credits marker.
 - Editing, creating, or writing markers back to the server.
 - Commercial / ad markers (ignored if present; not modeled).
@@ -331,18 +330,28 @@ environment variable, after script existence and payload creation both succeed.
 3. Observe `time-pos`.
 4. Determine active marker: first range where
    `start_ms/1000 <= t < end_ms/1000` and the kind's policy is not `off`.
-5. **button:** use `mp.create_osd_overlay("ass-events")` with bottom-right ASS
-   alignment to show `Skip Intro (S)` / `Skip Credits (S)` without taking over
-   mpv's general OSD message channel. While shown, force-bind **`s`** under a
-   Vela-owned binding name to `seek <end> absolute+exact` (available on Vela's
-   documented mpv 0.38 floor). Mark this entry consumed before seeking so a
-   keyframe/clamp landing still inside the range cannot immediately re-show the
-   prompt. Unbind outside the prompt so stock screenshot `s` works elsewhere.
+5. **button:** use `mp.create_osd_overlay("ass-events")` to render an interactive
+   on-screen button `[ Skip Intro ]` / `[ Skip Credits ]` with a `(Space)`
+   keyboard hint in the bottom-right corner of the video window.
+   While shown:
+   - Observe `osd-dimensions` and recompute the visible button rectangle whenever
+     the mpv window/OSD size changes; publish the same coordinates through
+     `user-data/vela-markers/button-bounds` for deterministic E2E inspection.
+   - Register a Vela-owned mouse input section and constrain it with
+     `mp.set_mouse_area` to that exact rectangle; bind `MBTN_LEFT` inside the
+     area only, so clicks elsewhere retain normal mpv behavior.
+   - Force-bind **`SPACE`** under a Vela-owned binding name only while the button
+     is displayed. Normal mpv Space-to-pause behavior resumes immediately when
+     the button clears.
+   - Mouse click and Space call the same `activate_skip` function. It marks the
+     entry consumed, clears the overlay/mouse area/bindings, then executes
+     `seek <end> absolute+exact`, so a clamped landing still inside the range
+     cannot reactivate the button immediately.
 6. **autoskip:** once per range entry, mark the entry consumed, seek with
    `absolute+exact`, and show a brief ordinary OSD toast. Do not loop-seek if
    mpv still reports a position inside the range.
 7. Leaving range: clear the ASS overlay, active user-data property, force
-   binding, and current-entry latch.
+   bindings, and current-entry latch.
 8. Resume into a range: treat as inside → show button or autoskip immediately.
 9. After at least one observed position outside that marker, seeking back into
    it is a new entry: show the button / allow one auto-skip again. Seeking
@@ -350,11 +359,14 @@ environment variable, after script existence and payload creation both succeed.
 10. If `end` is past duration: seek to end-of-file / last frame safely (mpv
     clamps); do not error.
 
-### Keyboard (v1)
+### Mouse & Keyboard Interaction (v1)
 
-- Confirm key while prompt visible: **`s`** (force-bound only in-range).
-- No mouse hit-test in v1.
-- Document in Settings help text: "While the skip prompt is visible, press S."
+- **Primary:** left-clicking the visible `[ Skip Intro ]` / `[ Skip Credits ]`
+  button executes the skip; its hit area must match the rendered rectangle.
+- **Secondary:** pressing **Space** while the button is visible executes the
+  same action. Space pauses normally whenever no skip button is visible.
+- Document in Settings help text: "Click the on-screen skip button or press
+  Space while it is visible."
 
 ---
 
@@ -476,7 +488,8 @@ the product-flip slice where the feature is launchable.
   inject policy args + child environment through pure/testable helpers.
 - Add both Settings → Player controls in the same commit that makes them work.
 - Extend the controlled Jellyfin mock's real route and add the behavioral E2E
-  legs below. Update README Player notes with policies and the in-range `S` key.
+  legs below. Update README Player notes with policies, clickable-button
+  behavior, and the temporary in-range Space binding.
 - Guarantees: play succeeds with missing script, empty markers, bad policy
   strings, marker endpoint failure, payload write failure, or payload parse
   failure. Unit-test `markers_args` and payload-write failure matrices.
@@ -494,18 +507,25 @@ a test-only production payload override.
    normal playback cannot reach it before the assertion deadline. Seed
    `autoskip`, require the script load marker, and assert `time-pos` crosses the
    range end within that deadline.
-2. **Button:** seed `button`, require `user-data/vela-markers/active == "intro"`,
-   send lowercase `s` through mpv IPC, assert `time-pos` crosses the range end,
-   and require the active property/binding to clear outside the range.
-3. **Injection polarity:** provider HTTP tests prove `include_markers = false`
+2. **Button mouse activation:** seed `button`, require
+   `user-data/vela-markers/active == "intro"`, and publish the rendered hitbox
+   through `user-data/vela-markers/button-bounds`. On the Linux Xvfb venue,
+   target the mpv window and inject a real pointer click at the hitbox center
+   with `xdotool`; assert `time-pos` crosses the range end and the active
+   property clears. Add `xdotool` to the E2E prerequisite documentation.
+3. **Button Space activation:** relaunch the same controlled marker in Button
+   mode, send `SPACE` through mpv IPC, assert the same seek/clear behavior, then
+   prove a later Space outside any marker toggles pause normally.
+4. **Injection polarity:** provider HTTP tests prove `include_markers = false`
    makes no Jellyfin MediaSegments request; launch unit tests prove off/off,
    empty markers, absent script, and payload-write failure inject nothing.
 
 For red proofs, independently break the endpoint/schema mapping, auto-seek,
-button binding, and fail-open payload path; each claimed guard must fail for its
-own reason. After automation is green, owner playtest a real Plex and Jellyfin
-title with markers in Button and Auto-skip modes. Emby is explicitly out of this
-playtest until its contract is added.
+mouse hitbox/click handler, Space binding/restoration, and fail-open payload
+path; each claimed guard must fail for its own reason. After automation is
+green, owner playtest a real Plex and Jellyfin title with markers in Button and
+Auto-skip modes. Emby is explicitly out of this playtest until its contract is
+added.
 
 ---
 
@@ -530,21 +550,22 @@ both frontend and Rust change. Minimum relevant set:
 
 Guard discipline: every new behavioral claim above is red-proofed when
 introduced, including provider query/schema, missing script, payload failure,
-unknown policy, button seek, and auto-seek.
+unknown policy, mouse hit-testing/seek, temporary Space activation/restoration,
+and auto-seek.
 
 ---
 
 ## Owner decisions
 
-Every row is pending. Ask and settle exactly one row at a time in owner-facing
-chat; record the ruling here and in `.agents/decisions.md`. Recommended values
-are not implementation authority until the owner approves them.
+Ask and settle each row still marked Pending in owner-facing chat; record the
+ruling here and in `.agents/decisions.md`. Recommended values are not
+implementation authority until the owner approves them.
 
 | Topic | Recommended ruling | Alternatives | Status |
 |-------|--------------------|--------------|--------|
 | Default policy (intros & credits) | `button` | `off` or `autoskip` | **APPROVED — owner, 2026-07-22** |
-| Confirm key while prompt shown | `s`, force-bound only in-range | different key; never rebind `s` | Pending |
-| Mouse click on OSD | out of v1 | include mouse hit-testing now | Pending |
+| Confirm key while prompt shown | `SPACE`, force-bound only while displayed | different key; no keyboard activation | **APPROVED — owner, 2026-07-22** |
+| Mouse click on OSD | required primary interaction with exact hit-testing | non-clickable notice | **APPROVED — owner, 2026-07-22** |
 | Unknown config string | normalize to the ratified product default | always fail closed to `off` | Pending |
 | Commercial markers | ignore / unmodeled | add a separate policy now | Pending |
 | Live IPC marker updates | not required (respawn per item) | add insurance now | Pending |
@@ -565,7 +586,7 @@ contested; do not batch.
 | Play | `src-tauri/src/playback.rs`, `src-tauri/src/commands.rs` |
 | Resources | `src-tauri/resources/mpv-scripts/vela-markers.lua`, `PROVENANCE.md` |
 | UI | `src/lib/Settings.svelte` |
-| E2E | `tests/e2e/mockjf.mjs`, a marker scenario, mpv IPC helper only if needed |
+| E2E | `tests/e2e/mockjf.mjs`, marker scenario, mpv IPC helper, `tests/e2e/README.md` |
 | User docs | `README.md` Player/HDR notes |
 | Version | `scripts/bump.sh` (it owns the canonical version-surface set) |
 | Durable state | this plan, `.agents/decisions.md`, `.agents/state.md` |
@@ -578,8 +599,8 @@ contested; do not batch.
 |----|----|
 | Hard `SkipPolicy` enum on `AppConfig` | `Option<String>` + normalize |
 | CLI JSON in script-opts | Private payload file + child-only path environment |
-| Mouse click in scope | Keyboard-only v1 |
-| Permanent `s` binding | In-range force-bind only |
+| Mouse click in scope | Restored as the required primary interaction |
+| Permanent `s` binding | Replaced by temporary in-button `SPACE`; pause restored outside |
 | `emby.rs` | `jellyfin.rs` + `Flavor` |
 | Commercial / Unknown kinds | Dropped |
 | Fail-closed launch wording | Degrade; never block play |
@@ -604,3 +625,7 @@ contested; do not batch.
 - **2026-07-22 — owner ruling 1:** missing `skip_intros` and `skip_credits`
   values default to Button. The confirm key and unknown-string behavior remain
   separate pending decisions.
+- **2026-07-22 — owner ruling 2:** Button means a genuinely clickable mpv
+  control, not a notice. Left-click is primary; Space activates the same skip
+  action only while the button is displayed and resumes normal pause behavior
+  afterward. This closes both the mouse and confirmation-key rows.
