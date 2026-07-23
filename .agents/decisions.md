@@ -1151,3 +1151,26 @@ The rejected automatic best-copy and prompt choices in
 `.agents/plans/multi-plex.md`. It does not change the decisions that video stays
 in external mpv, server playlists are read-only, or partial resume position is
 owned by the selected server.
+
+## 2026-07-22 - Button is the default intro and credits skip policy
+
+Status: APPROVED (owner, 2026-07-22). Implementation plan:
+`.agents/plans/skip-credits-intros-v2.md`.
+
+Decision:
+When marker skipping ships, a missing `skip_intros` or `skip_credits` setting
+means `button`. Vela presents an in-player skip prompt and never seeks merely
+because the setting was absent; skipping requires an explicit confirmation.
+
+This ruling sets only the missing-value product default. It does not choose the
+confirmation key, add mouse behavior, or decide how an unrecognized stored
+config string is normalized. Those remain separate owner decisions in the
+implementation plan.
+
+Reason:
+Button makes available server markers discoverable without taking playback
+control away from the viewer, unlike automatic skipping, while avoiding the
+invisibility of an off-by-default feature.
+
+Supersedes:
+Nothing. This settles the first open product choice in the marker-skipping plan.

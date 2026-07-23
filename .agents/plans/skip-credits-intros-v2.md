@@ -25,9 +25,9 @@ v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 When Plex or Jellyfin metadata includes intro or credits time ranges,
 Vela offers skip during external-mpv playback:
 
-- **Button** (recommended product default; pending owner ruling): native mpv
-  ASS/OSD prompt inside the video window ("Skip Intro" / "Skip Credits") with
-  a keyboard confirm.
+- **Button** (owner-approved default for missing settings, 2026-07-22): native
+  mpv ASS/OSD prompt inside the video window ("Skip Intro" / "Skip Credits")
+  with an explicit confirm.
 - **Auto-skip**: seek to marker end with a brief OSD toast.
 - **Off**: no script injection for that kind.
 
@@ -225,22 +225,21 @@ pub skip_intros: Option<String>,
 pub skip_credits: Option<String>,
 ```
 
-**Product defaults:** pending the first owner ruling below. The recommended
-value for both fields is `button`; implementation remains blocked until the
-ruling is recorded.
+**Product defaults:** owner-approved 2026-07-22. A missing value for either
+field means `button`. The separate treatment of an unrecognized stored string
+remains pending below and still blocks implementation.
 
-| Field | Default when missing/unknown |
-|-------|------------------------------|
-| `skip_intros` | owner-ratified default (recommended: `button`) |
-| `skip_credits` | owner-ratified default (recommended: `button`) |
+| Field | Default when missing |
+|-------|----------------------|
+| `skip_intros` | `button` |
+| `skip_credits` | `button` |
 
 Normalize helper (same spirit as `normalize_autocrop`):
 
 - accept only lowercase `off`, `button`, `autoskip` after trim
-- anything else → the owner-ratified product default for that field. The
-  recommended ruling is `button`, matching "missing means default product
-  behavior"; document in Settings that unknown stored values reset to that
-  default on next save.
+- missing → `button`
+- unrecognized stored string → pending the separate owner ruling below; do not
+  infer its behavior from the now-settled missing-value default
 
 Put the one canonical `normalize_skip_policy` helper in `commands.rs`. The play
 command reads and normalizes both fields before source resolution and copies the
@@ -543,7 +542,7 @@ are not implementation authority until the owner approves them.
 
 | Topic | Recommended ruling | Alternatives | Status |
 |-------|--------------------|--------------|--------|
-| Default policy (intros & credits) | `button` | `off` or `autoskip` | Pending |
+| Default policy (intros & credits) | `button` | `off` or `autoskip` | **APPROVED — owner, 2026-07-22** |
 | Confirm key while prompt shown | `s`, force-bound only in-range | different key; never rebind `s` | Pending |
 | Mouse click on OSD | out of v1 | include mouse hit-testing now | Pending |
 | Unknown config string | normalize to the ratified product default | always fail closed to `off` | Pending |
@@ -602,3 +601,6 @@ contested; do not batch.
   marker flow, child-env payload lifecycle, behavioral real-mpv E2E, settled
   implementation mechanics, and explicit version/docs slices. Product choices
   remain pending owner rulings and therefore implementation is still inactive.
+- **2026-07-22 — owner ruling 1:** missing `skip_intros` and `skip_credits`
+  values default to Button. The confirm key and unknown-string behavior remain
+  separate pending decisions.
