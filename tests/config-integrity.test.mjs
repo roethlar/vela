@@ -75,7 +75,7 @@ test("recoverable files expose explicit real recovery buttons only when allowed"
   );
   assert.match(
     page,
-    /<button[\s\S]{0,220}onclick=\{\(\) => recoverInvalidFile\(fault\.file\)\}/,
+    /<button[\s\S]{0,220}disabled=\{durableBusy\}[\s\S]{0,120}onclick=\{\(\) => recoverInvalidFile\(fault\.file\)\}/,
   );
   assert.match(page, /Rename and create new settings/);
   assert.match(page, /Rename damaged connections and reconnect/);

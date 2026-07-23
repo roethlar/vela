@@ -60,6 +60,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   its mandatory post-commit guard regressions were injected, failed for their
   intended reasons, restored, and rerun green. A vacuous source-write static
   guard found during that pass was strengthened and independently red-proven.
+- Slice 2 is implemented and canonically verified at version 1.0.2. Invalid
+  settings and connections now offer real Rename/Reconnect and Exit buttons;
+  recovery uses an exact private no-replace rename and targeted validated
+  default while leaving the other file and playlists unchanged. Damaged legacy
+  combined settings yield no connection data and require reconnection. A
+  private strict recovery record keeps crashes after the user's click blocked
+  across restart and resumes only an exact unambiguous transaction state.
+  Checksum-matched Linux real-app coverage passed 35/35, including click, Space,
+  Exit no-write, restart, preserved-connection, reconnect, and crash-resume
+  cases; native Windows no-replace, ACL, recovery, and resume tests passed.
+  Slice 2 landed as `0c9b48f`. Nine behavior guards were independently
+  red-proven and restored. A vacuous busy-disabled button check found during
+  that pass was strengthened and then failed for the intended regression.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
@@ -72,9 +85,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Implement and commit Slice 2 preserved recovery with real Rename/Reconnect
-  and Exit buttons. After all prerequisite slices land, explicitly activate the
-  marker plan before marker implementation.
+- Implement and commit Slice 3 Plex token exposure hardening and closeout.
+  After all prerequisite slices land, explicitly activate the marker plan
+  before marker implementation.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or

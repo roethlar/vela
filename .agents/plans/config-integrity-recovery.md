@@ -24,6 +24,9 @@ The owner resolved the review finding, declined the follow-up external review,
 and explicitly activated implementation on 2026-07-23. `.agents/state.md`
 names this plan as the active implementation.
 
+Slices 1 and 2 are implemented, verified, and committed at versions 1.0.1 and
+1.0.2. Slice 3 is next.
+
 No marker-skipping implementation may start until this plan is implemented,
 reviewed, verified, and committed, and the marker plan is then activated
 separately.
@@ -784,6 +787,50 @@ Implementation evidence (2026-07-23):
 - Add failure-injection, privacy, accessibility, static fallback guards, and
   real-app recovery coverage.
 - Bump all version surfaces from `1.0.1` to `1.0.2`.
+
+Implementation evidence (2026-07-23):
+
+- The backend accepts only the closed settings/connections enum and only while
+  that file's gate retains a readable regular invalid file's exact byte length
+  and SHA-256. It rereads and revalidates under the file locks before using the
+  platform's atomic no-replace rename, verifies the private byte-identical
+  backup, installs and validates the selected default, then reloads both files.
+- A strict private `durable-recovery.json` record closes the crash window
+  between rename and fresh-file installation. Startup blocks on the record;
+  Retry resumes only the exact pre-rename, post-rename, or post-install state.
+  A missing, malformed, changed, symlinked, non-regular, or otherwise ambiguous
+  state remains blocked without merge, overwrite, or guessed defaults.
+- The blocking surface has real disabled-while-busy HTML buttons for **Rename
+  and create new settings**, **Rename damaged connections and reconnect**, and
+  **Exit Vela**. Distinct copy describes post-split settings preservation,
+  legacy combined-file reconnection, and connection-only recovery. Native
+  button semantics make Space activate the focused recovery action.
+- Post-split settings recovery preserves the complete connections and playlist
+  bytes and restores the existing source without reauthorization. Legacy
+  combined recovery creates no connection file or row. Connections recovery
+  preserves settings/playlists and installs an empty connection document. Exit
+  leaves every seeded durable byte unchanged.
+- Canonical local verification passed on the committed production behavior:
+  exact Node/npm check, clean `npm ci`, zero-vulnerability npm audit, 47 Node
+  tests, Svelte check with zero diagnostics, production frontend build, Rust
+  1.89 and stable checks, clippy with warnings denied, 236 Rust tests, and Cargo
+  audit with no vulnerabilities (17 existing allowed unmaintained/unsoundness
+  warnings). `bash -n` accepted the version-bumped Arch PKGBUILD; a complete
+  Arch package was not built because the standing Ubuntu venue has no
+  `makepkg`.
+- Checksum-identical source passed native Windows no-replace rename, private
+  ACL, settings/connections/legacy recovery, restart-record, crash-resume, and
+  ambiguous-state refusal tests on `netwatch-01`. The checksum-identical Linux
+  real app passed all 35/35 E2E scenarios, including click recovery, Exit
+  no-write checks, Space activation, restart, and recorded crash resume.
+- Slice 2 landed as `0c9b48f`. Post-commit regressions independently proved the
+  guards for same-length SHA-256 tampering, no-replace collision, backup
+  rewriting, recovery without an eligible gate, a non-button recovery control,
+  legacy connection-file creation, startup record bypass, ambiguous-state
+  acceptance, and exposing another recovery button while recovery is
+  incomplete. Removing the recovery button's busy-disabled state initially
+  passed, exposing a vacuous static check; the check was strengthened, the
+  exact regression then failed, and the committed button was restored.
 
 ### Slice 3 — Plex token exposure hardening and closeout
 
