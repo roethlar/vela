@@ -2184,7 +2184,7 @@ mod tests {
         )
         .unwrap();
         let settings_history = valid_history_at(DurableFile::Settings, &config_path).unwrap();
-        assert_eq!(settings_history.len(), HISTORY_LIMIT);
+        assert_eq!(settings_history.len(), 3);
         assert_eq!(
             settings_history
                 .iter()
@@ -2197,7 +2197,7 @@ mod tests {
         );
         for (version, expected) in settings_history
             .iter()
-            .zip(settings_versions.iter().rev().take(HISTORY_LIMIT))
+            .zip(settings_versions.iter().rev().take(3))
         {
             let path = root.join(&version.file_name);
             assert_eq!(fs::read(&path).unwrap(), *expected);
@@ -2213,7 +2213,7 @@ mod tests {
         }
         let connection_history =
             valid_history_at(DurableFile::Connections, &connections_path).unwrap();
-        assert_eq!(connection_history.len(), HISTORY_LIMIT);
+        assert_eq!(connection_history.len(), 3);
         assert!(connection_history
             .windows(2)
             .all(|pair| pair[0].public.created_at_unix_ms > pair[1].public.created_at_unix_ms));
@@ -2226,7 +2226,7 @@ mod tests {
                     .to_string_lossy()
                     .starts_with("connections.valid-"))
                 .count(),
-            HISTORY_LIMIT
+            3
         );
         fs::remove_dir_all(root).unwrap();
     }
