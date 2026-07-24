@@ -362,8 +362,22 @@ mod tests {
 
     #[test]
     fn protocol_parser_rejects_query_and_unknown_shape() {
+        let marker = plex_artwork_url("plex-a", "/library/metadata/1/thumb/2", 300, 450)
+            .expect("valid artwork marker");
+        let payload = marker.strip_prefix(ARTWORK_MARKER_PREFIX).unwrap();
+        let query_request = Request::builder()
+            .method(Method::GET)
+            .uri(format!(
+                "vela-artwork://localhost/{payload}?token=synthetic"
+            ))
+            .body(Vec::new())
+            .unwrap();
+        assert_eq!(
+            parse_request(&query_request),
+            Err(ArtworkError::InvalidRequest)
+        );
+
         for uri in [
-            "vela-artwork://localhost/a.b.1.1?token=synthetic",
             "vela-artwork://localhost/a.b.1",
             "vela-artwork://localhost/a.b.1.1.extra",
         ] {
