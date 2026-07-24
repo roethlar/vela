@@ -113,7 +113,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Closeout verification passed with the exact Node/npm toolchain, 51 Node
   tests, 259 Rust tests, and the rebuilt Linux real app at 37/37 E2E
   scenarios. The full evidence paragraph is canonical in
-  `.agents/plans/config-integrity-recovery.md`.
+  `.agents/plans/config-integrity-recovery.md`; the docs-only closeout
+  (evidence plus this state entry) landed as `8b550d6`. Local `main` is
+  ahead of `origin` and has not been pushed — push policy is ASK.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
