@@ -51,9 +51,14 @@
   // The scrollable browse grid, so we can keep loading until it actually scrolls.
   let gridEl: HTMLElement | undefined = $state();
 
-  // Posters are either an https URL (server/online art) or a local file path
-  // (local sidecar art) — the latter needs the Tauri asset protocol to load.
+  // Plex art arrives as a credential-free opaque marker. Let Tauri spell the
+  // custom-protocol URL for this platform (Windows uses an http localhost
+  // origin; Unix/macOS use vela-artwork://). Other server art is already
+  // http(s), and local sidecars need Tauri's asset protocol.
   function posterSrc(p: string): string {
+    if (p.startsWith("vela-artwork:")) {
+      return convertFileSrc(p.slice("vela-artwork:".length), "vela-artwork");
+    }
     return /^https?:\/\//.test(p) ? p : convertFileSrc(p);
   }
 

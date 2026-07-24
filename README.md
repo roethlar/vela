@@ -165,24 +165,42 @@ On NVIDIA + Wayland, Vela disables WebKitGTK's DMABUF renderer at startup to
 avoid a known webview crash. This affects the library UI renderer, not mpv's
 video output, and has no effect on macOS or Windows.
 
-## Configuration and privacy
+## Configuration, recovery, and privacy
 
-Vela stores `config.json` and `playlists.json` in the platform configuration
-directory:
+Vela stores three independent files in the platform configuration directory:
+
+- `config.json` contains settings, recent-play state, and source preferences.
+- `connections.json` contains active server connections and their credentials.
+- `playlists.json` contains Vela playlists.
+
+The location is:
 
 - Linux: `~/.config/vela/`
 - macOS: `~/Library/Application Support/com.vela.vela/`
 - Windows: `%APPDATA%\vela\vela\config\`
 
-Back up both files to preserve connected servers, preferences, recents, and
-Vela playlists. On Unix, Vela writes its configuration with owner-only
-permissions.
+Back up the whole directory to preserve connected servers, preferences,
+recents, playlists, and Vela's rollback history. Before replacing a valid
+settings or connections file, Vela retains its three newest distinct valid
+versions. If either current file is damaged or has been tampered with, startup
+fails closed: Vela loads none of that file, shows the three dated valid versions
+available for explicit rollback, and also offers to rename the damaged file and
+create a fresh one or exit without writing anything. Settings recovery leaves a
+separate valid connections file unchanged; connections recovery requires
+reconnecting servers.
 
-Plex stream credentials are sent as an HTTP header through an owner-only mpv
-include file rather than being placed in the media URL or process arguments.
-Jellyfin/Emby stream URLs and server image URLs can contain access tokens, so
-those tokens remain visible locally to the Vela webview or mpv process. Vela
-does not send analytics or proxy credentials through a third party.
+On Unix, Vela creates its configuration directory and sensitive files with
+owner-only permissions. Active credentials remain plaintext within that
+owner-account boundary; Vela does not claim to protect them from malware
+already running as the same OS user.
+
+Plex API, artwork, progress, and stream credentials are sent as HTTP headers.
+The webview receives only credential-free Vela artwork URLs, and mpv receives
+stream headers through a unique owner-only include file that is removed when
+its exact child exits rather than through the media URL or process arguments.
+Jellyfin/Emby stream and server-image URLs can contain access tokens, so those
+tokens remain visible locally to the Vela webview or mpv process. Vela does not
+send analytics or proxy credentials through a third party.
 
 Configs written by older Vela builds may still contain removed local-folder,
 SMB, or SSH fields, including old SMB credentials. Current builds preserve but

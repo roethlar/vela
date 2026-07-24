@@ -346,6 +346,7 @@ pub fn list(cfg: &AppConfig) -> Vec<ItemDto> {
         .iter()
         .map(|r| {
             let mut item = r.item.clone();
+            crate::artwork::sanitize_item_artwork(&mut item);
             item.last_watched_at_ms = if r.ended_at_ms > 0 {
                 Some(r.ended_at_ms)
             } else {

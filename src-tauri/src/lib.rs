@@ -1,3 +1,4 @@
+mod artwork;
 mod commands;
 mod config;
 mod connections;
@@ -42,7 +43,7 @@ pub struct AppState {
     /// The currently-running mpv process, so a new play can terminate the old one.
     /// `Arc` so a background reaper can also try_wait() it (non-blocking) and clear
     /// the slot once it exits on its own, instead of leaving a zombie.
-    pub current_child: Arc<Mutex<Option<std::process::Child>>>,
+    pub(crate) current_child: Arc<Mutex<Option<playback::ManagedChild>>>,
     /// Set as the app exits. Checked under `current_child`'s lock before launching
     /// mpv, so a play that races shutdown either sees this (and doesn't launch) or
     /// has already registered its child for the exit sweep to kill — no orphan.
@@ -52,7 +53,7 @@ pub struct AppState {
     /// spawn a per-child waiter thread (which could fail under thread exhaustion
     /// and drop the child unreaped) nor block on wait() (which could hang on a
     /// wedged player).
-    pub reap_queue: Arc<Mutex<Vec<std::process::Child>>>,
+    pub(crate) reap_queue: Arc<Mutex<Vec<playback::ManagedChild>>>,
     /// Serializes play_item so overlapping clicks can't both spawn and orphan an mpv.
     pub play_lock: AsyncMutex<()>,
     /// Serializes explicit watched edits with clean-completion fan-out so
@@ -152,16 +153,30 @@ pub fn run() {
                 }
             }
         }
-        // Keep only the ones still running; try_wait() reaps any that exited, and
-        // we drop handles we can't query rather than retaining them forever.
+        // Keep running children and transient process-query failures. Only a
+        // confirmed exit may drop the child and its credential include.
         reap_queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .retain_mut(|c| matches!(c.try_wait(), Ok(None)));
+            .retain_mut(|child| {
+                playback::retain_child_after_try_wait(&child.try_wait())
+            });
     });
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .register_asynchronous_uri_scheme_protocol(
+            "vela-artwork",
+            |context, request, responder| {
+                let app_handle = context.app_handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    use tauri::Manager;
+                    let state = app_handle.state::<AppState>();
+                    let response = artwork::handle_protocol_request(&state, request).await;
+                    responder.respond(response);
+                });
+            },
+        )
         .manage(state);
 
     builder
@@ -329,8 +344,23 @@ pub fn run() {
                         .unwrap_or_else(|e| e.into_inner());
                     state.shutting_down.store(true, Ordering::SeqCst);
                     if let Some(mut child) = slot.take() {
+                        let _ = child.remove_consumed_header_include();
                         let _ = child.kill();
                     }
+                }
+                // Replaced players are not in `current_child`. Drain them too:
+                // the periodic reaper ends with this process, so app exit is
+                // the final opportunity to remove their consumed includes.
+                {
+                    let mut queue = state
+                        .reap_queue
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner());
+                    for child in queue.iter_mut() {
+                        let _ = child.remove_consumed_header_include();
+                        let _ = child.kill();
+                    }
+                    queue.clear();
                 }
                 let stop = state
                     .tracking_stop

@@ -5,7 +5,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { pollUntil, seedConfig } from '../helpers.mjs';
+import { makeClips, playAndQuit, pollUntil, seedConfig } from '../helpers.mjs';
 import { createMockPlexTls, mockPlexSource, startMockPlex } from '../mockplex.mjs';
 
 const TITLE = 'Shared Plex Movie';
@@ -64,11 +64,13 @@ export default {
 
   async seed({ configRoot }) {
     tls = createMockPlexTls(configRoot);
+    const mediaDir = makeClips(configRoot, ['plex-a.mp4']);
     mockA = await startMockPlex({
       tls,
       name: 'Mock Plex A',
       machineIdentifier: 'machine-a',
       token: 'plex-token-a',
+      mediaFile: path.join(mediaDir, 'plex-a.mp4'),
     });
     mockB = await startMockPlex({
       tls,
@@ -113,20 +115,48 @@ export default {
     );
     assert.equal(merged.count, 1, 'the same movie on two Plex machines must collapse to one card');
     assert.equal(merged.twoSources, true, 'the collapsed Plex card must expose both backings');
+    await driver.waitFor(
+      `const img = document.querySelector('button.poster[aria-label^="${TITLE}"] img');
+       return !!img && img.complete && img.naturalWidth > 0;`,
+      'credential-free Plex artwork',
+    );
+    const artworkSrc = await driver.exec(
+      `return document.querySelector('button.poster[aria-label^="${TITLE}"] img')?.getAttribute('src')`,
+    );
+    assert.match(
+      artworkSrc,
+      /^vela-artwork:\/\/localhost\//,
+      'the webview receives only Vela artwork protocol identity',
+    );
+    assert.ok(!/[?&]X-Plex-Token=/i.test(artworkSrc), 'the artwork URL must not contain a token');
 
-    for (const [mock, expectedToken] of [[mockA, 'plex-token-a'], [mockB, 'plex-token-b']]) {
+    for (const mock of [mockA, mockB]) {
       assert.ok(
         mock.state.requests.some((request) => request.path === '/library/sections/1/all'),
         `${mock.name} must serve its own movie listing`,
       );
       assert.ok(
-        mock.state.requests.every((request) => request.token === expectedToken),
+        mock.state.requests.every(
+          (request) => request.tokenPresent && request.tokenMatches,
+        ),
         `${mock.name} must receive only its own source-row token`,
       );
+      assert.ok(
+        mock.state.requests.every(
+          (request) => !Object.keys(request.query).some((key) => /token/i.test(key)),
+        ),
+        `${mock.name} must never receive a token in a request query`,
+      );
     }
+    assert.ok(
+      [...mockA.state.requests, ...mockB.state.requests].some(
+        (request) => request.path === '/photo/:/transcode' && request.tokenMatches,
+      ),
+      'Plex artwork must reach the mock with header authentication',
+    );
     await screenshot('01-collapsed');
 
-    await chooseBacking(driver, 'Mock Plex A');
+    await playAndQuit(driver, () => chooseBacking(driver, 'Mock Plex A'));
     await pollUntil(
       () => readConfig(configRoot).merged_overrides?.[CANONICAL] === 'plex-a',
       `${CANONICAL} to prefer plex-a`,
@@ -134,6 +164,20 @@ export default {
     await pollUntil(
       () => mockA.state.requests.some((request) => request.path === '/library/metadata/1'),
       'the Plex A backing to resolve on Plex A',
+    );
+    await pollUntil(
+      () => mockA.state.requests.some((request) => request.path === '/:/timeline'),
+      'Plex timeline authentication to reach Plex A',
+    );
+    await pollUntil(
+      () => mockA.state.requests.some((request) => request.path === '/:/progress'),
+      'Plex final progress authentication to reach Plex A',
+    );
+    assert.ok(
+      mockA.state.requests
+        .filter((request) => request.path === '/:/timeline' || request.path === '/:/progress')
+        .every((request) => request.tokenPresent && request.tokenMatches),
+      'Plex playback reporting must use the source token header',
     );
 
     await chooseBacking(driver, 'Mock Plex B');
@@ -194,6 +238,9 @@ export default {
     const survivor = readConnections(configRoot).sources[0];
     assert.equal(survivor.access_token, 'plex-token-b', 'removing Plex A preserves Plex B credentials');
     assert.equal(survivor.machine_identifier, 'machine-b', 'removing Plex A preserves Plex B pin');
+    const requestLog = JSON.stringify([mockA.state.requests, mockB.state.requests]);
+    assert.ok(!requestLog.includes('plex-token-a'), 'Plex A token must not enter mock request logs');
+    assert.ok(!requestLog.includes('plex-token-b'), 'Plex B token must not enter mock request logs');
     assert.deepEqual(mockA.state.contractViolations, [], 'Plex A mock contract');
     assert.deepEqual(mockB.state.contractViolations, [], 'Plex B mock contract');
     await screenshot('02-independent-remove');

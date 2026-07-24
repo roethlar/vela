@@ -447,6 +447,15 @@ pub trait MediaSource: Send + Sync {
         duration_ms: Option<u64>,
     ) -> Result<StreamResolution, String>;
 
+    /// Fetch provider artwork without exposing its credentials to the
+    /// frontend. Only Plex currently uses the app-local artwork protocol.
+    async fn fetch_artwork(
+        &self,
+        _request: crate::artwork::ArtworkRequest,
+    ) -> Result<crate::artwork::ArtworkResponse, crate::artwork::ArtworkError> {
+        Err(crate::artwork::ArtworkError::Unsupported)
+    }
+
     /// Enumerate exact playable media versions at the play boundary. Sources
     /// that do not support enumeration retain the legacy `resolve_stream`
     /// fallback; every configured server source overrides this.

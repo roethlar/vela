@@ -491,17 +491,17 @@ impl PlexSource {
         ))
     }
 
-    fn to_item(&self, lib: &PlexLibrary, v: PlexVideo) -> ItemDto {
+    fn to_item(&self, _lib: &PlexLibrary, v: PlexVideo) -> ItemDto {
         ItemDto {
             // Request a grid-sized thumbnail, not the full-resolution poster.
             poster: v
                 .thumb
                 .as_deref()
-                .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+                .and_then(|t| crate::artwork::plex_artwork_url(&self.id, t, 300, 450)),
             series_poster: v
                 .grandparent_thumb
                 .as_deref()
-                .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+                .and_then(|t| crate::artwork::plex_artwork_url(&self.id, t, 300, 450)),
             // Hero art renders at window width, so request it big. Episodes
             // use their own scene still (thumb) there; other types use the
             // backdrop/fanart.
@@ -510,7 +510,7 @@ impl PlexSource {
             } else {
                 v.art.as_deref()
             }
-            .and_then(|t| lib.poster_transcode_url(t, 1920, 1080)),
+            .and_then(|t| crate::artwork::plex_artwork_url(&self.id, t, 1920, 1080)),
             rating_key: namespace_key(&self.id, &v.rating_key),
             title: v.title,
             year: v.year,
@@ -576,7 +576,7 @@ impl PlexSource {
             .map(|s| namespace_key(&self.id, s))
     }
 
-    fn to_detail(&self, lib: &PlexLibrary, d: PlexDetail) -> DetailDto {
+    fn to_detail(&self, _lib: &PlexLibrary, d: PlexDetail) -> DetailDto {
         let tags = |v: Vec<crate::plex_library::PlexTag>| -> Vec<String> {
             v.into_iter()
                 .map(|t| t.tag)
@@ -597,14 +597,14 @@ impl PlexSource {
             poster: d
                 .thumb
                 .as_deref()
-                .and_then(|t| lib.poster_transcode_url(t, 300, 450)),
+                .and_then(|t| crate::artwork::plex_artwork_url(&self.id, t, 300, 450)),
             // Episodes use their scene still as the backdrop; other types use art.
             backdrop: if d.media_type.as_deref() == Some("episode") {
                 d.thumb.as_deref()
             } else {
                 d.art.as_deref()
             }
-            .and_then(|t| lib.poster_transcode_url(t, 1920, 1080)),
+            .and_then(|t| crate::artwork::plex_artwork_url(&self.id, t, 1920, 1080)),
             cast: d
                 .roles
                 .into_iter()
@@ -616,7 +616,7 @@ impl PlexSource {
                     thumb: r
                         .thumb
                         .as_deref()
-                        .and_then(|t| lib.poster_transcode_url(t, 300, 300)),
+                        .and_then(|t| crate::artwork::plex_artwork_url(&self.id, t, 300, 300)),
                 })
                 .collect(),
             genres: tags(d.genres),
@@ -820,6 +820,17 @@ impl MediaSource for PlexSource {
     }
     fn kind(&self) -> &'static str {
         "plex"
+    }
+
+    async fn fetch_artwork(
+        &self,
+        request: crate::artwork::ArtworkRequest,
+    ) -> Result<crate::artwork::ArtworkResponse, crate::artwork::ArtworkError> {
+        let lib = self
+            .ensure_ready()
+            .await
+            .map_err(|_| crate::artwork::ArtworkError::Unavailable)?;
+        lib.fetch_artwork(&request).await
     }
 
     /// Ask the server to rescan one section for new files. The request path
@@ -2379,8 +2390,8 @@ mod tests {
 
     #[test]
     fn to_detail_maps_and_namespaces() {
-        // A server-less library builds no image URLs (poster_transcode_url -> None),
-        // which lets us assert the non-URL mapping deterministically.
+        // Artwork URLs name only the source and validated image parameters;
+        // they do not need or expose the selected server or its token.
         let src = PlexSource::new(
             "plexA",
             "Plex",
@@ -2462,9 +2473,12 @@ mod tests {
         assert_eq!(dto.cast.len(), 1); // nameless filtered
         assert_eq!(dto.cast[0].name, "Actor One");
         assert_eq!(dto.cast[0].role.as_deref(), Some("Hero"));
-        assert_eq!(dto.cast[0].thumb, None); // no server -> no URL
-                                             // Person-browse keys: namespaced when the tag id is numeric; absent
-                                             // (plain text) when the id is missing or malformed.
+        assert!(dto.cast[0]
+            .thumb
+            .as_deref()
+            .is_some_and(|url| url.starts_with(crate::artwork::ARTWORK_MARKER_PREFIX)));
+        // Person-browse keys: namespaced when the tag id is numeric; absent
+        // (plain text) when the id is missing or malformed.
         assert_eq!(dto.cast[0].person_key.as_deref(), Some("plexA:123"));
         assert_eq!(dto.directors.len(), 3);
         assert_eq!(dto.directors[0].name, "Dir One");
@@ -2472,7 +2486,10 @@ mod tests {
         assert_eq!(dto.directors[1].person_key, None);
         assert_eq!(dto.directors[2].person_key, None); // "abc" never becomes a key
         assert_eq!(dto.writers[0].person_key.as_deref(), Some("plexA:789"));
-        assert_eq!(dto.poster, None); // no server -> no URL
+        assert!(dto
+            .poster
+            .as_deref()
+            .is_some_and(|url| url.starts_with(crate::artwork::ARTWORK_MARKER_PREFIX)));
         assert_eq!(dto.played, Some(false)); // viewCount 0
                                              // Episode parent keys are namespaced like every other key — they let
                                              // an episode opened without season context (stale hero snapshot)

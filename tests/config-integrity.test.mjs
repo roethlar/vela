@@ -6,9 +6,17 @@ const config = fs.readFileSync("src-tauri/src/config.rs", "utf8");
 const connections = fs.readFileSync("src-tauri/src/connections.rs", "utf8");
 const commands = fs.readFileSync("src-tauri/src/commands.rs", "utf8");
 const durable = fs.readFileSync("src-tauri/src/durable.rs", "utf8");
+const lib = fs.readFileSync("src-tauri/src/lib.rs", "utf8");
 const playback = fs.readFileSync("src-tauri/src/playback.rs", "utf8");
+const playlists = fs.readFileSync("src-tauri/src/playlists.rs", "utf8");
+const plexApi = fs.readFileSync("src-tauri/src/plex_api.rs", "utf8");
+const plexLibrary = fs.readFileSync("src-tauri/src/plex_library.rs", "utf8");
+const plexSource = fs.readFileSync("src-tauri/src/source/plex.rs", "utf8");
+const artwork = fs.readFileSync("src-tauri/src/artwork.rs", "utf8");
+const tauriConfig = fs.readFileSync("src-tauri/tauri.conf.json", "utf8");
 const backend = `${commands}\n${playback}`;
 const page = fs.readFileSync("src/routes/+page.svelte", "utf8");
+const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
 
 function attributesBefore(source, declaration) {
   const at = source.indexOf(declaration);
@@ -192,4 +200,84 @@ test("active source writes target connections instead of settings", () => {
     fs.readFileSync("src-tauri/src/source/jellyfin.rs", "utf8"),
     /pub fn build_source\([\s\S]{0,160}-> Result</,
   );
+});
+
+test("Plex credentials never enter query strings or frontend artwork URLs", () => {
+  const plexRequests = `${plexApi}\n${plexLibrary}`;
+  assert.doesNotMatch(
+    plexRequests,
+    /(?:insert|append_pair)\(\s*["']X-Plex-Token["']/i,
+  );
+  assert.doesNotMatch(
+    plexRequests,
+    /\.query\(\s*&?\s*\[\s*\(\s*["']X-Plex-Token["']/i,
+  );
+  assert.doesNotMatch(plexLibrary, /poster_transcode_url|X-Plex-Token=\{/i);
+  assert.match(plexApi, /\.header\("X-Plex-Token", auth_token\)/);
+  assert.match(plexLibrary, /\.header\("X-Plex-Token", &self\.auth_token\)/);
+  assert.match(plexSource, /crate::artwork::plex_artwork_url/);
+  assert.match(artwork, /ARTWORK_MARKER_PREFIX: &str = "vela-artwork:"/);
+  assert.match(artwork, /sanitize_item_artwork/);
+  assert.match(config, /sanitize_legacy_artwork\(cfg\)/);
+  assert.match(playlists, /sanitize_legacy_artwork_in/);
+  assert.match(artwork, /request\.uri\(\)\.query\(\)\.is_some\(\)/);
+  assert.match(artwork, /MAX_ARTWORK_BYTES/);
+  assert.match(artwork, /accepted_image_mime/);
+  assert.match(plexLibrary, /redirect\(reqwest::redirect::Policy::none\(\)\)/);
+  assert.match(
+    page,
+    /convertFileSrc\(p\.slice\("vela-artwork:"\.length\), "vela-artwork"\)/,
+  );
+  assert.match(tauriConfig, /img-src[^"]*http:\/\/vela-artwork\.localhost/);
+  assert.match(plexLibrary, /fn part_url\([^)]*auth_token: &str/);
+  assert.match(plexLibrary, /key\.eq_ignore_ascii_case\("X-Plex-Token"\)/);
+  assert.match(plexLibrary, /provider_part_keys_with_credentials_fail_closed/);
+  assert.doesNotMatch(plexLibrary, /Plex API error:[^\\n]*Body:/);
+  assert.doesNotMatch(mockPlex, /\btoken:\s*req\.headers/);
+  assert.match(mockPlex, /tokenMatches: receivedToken === token/);
+  assert.match(mockPlex, /String\(value\)\.includes\(token\)/);
+});
+
+test("Tauri emits a Windows-compatible artwork protocol origin", async () => {
+  globalThis.window = {};
+  const { clearMocks, mockConvertFileSrc } = await import("@tauri-apps/api/mocks");
+  const { convertFileSrc } = await import("@tauri-apps/api/core");
+  try {
+    mockConvertFileSrc("windows");
+    assert.equal(
+      convertFileSrc("opaque.payload.300.450", "vela-artwork"),
+      "http://vela-artwork.localhost/opaque.payload.300.450",
+    );
+  } finally {
+    clearMocks();
+    delete globalThis.window;
+  }
+});
+
+test("mpv authentication stays in a private include until its exact child is reaped", () => {
+  assert.match(playback, /struct HeaderInclude[\s\S]{0,800}impl Drop for HeaderInclude/);
+  assert.match(playback, /struct ManagedChild[\s\S]{0,180}_header_include: Option<HeaderInclude>/);
+  assert.match(playback, /mpv-headers-\{\}-\{nonce\}\.conf/);
+  assert.match(playback, /opts\.mode\(0o600\)/);
+  assert.match(
+    playback,
+    /harden_existing_regular\(path\)[\s\S]{0,500}write_content\(&mut f, content\.as_bytes\(\)\)/,
+  );
+  assert.match(
+    lib,
+    /retain_mut\(\|child\|[\s\S]{0,120}retain_child_after_try_wait\(&child\.try_wait\(\)\)/,
+  );
+  assert.match(playback, /partial_header_include_write_removes_the_credential_file/);
+  assert.match(playback, /process_query_result_reaps_only_a_confirmed_exit/);
+  assert.match(
+    commands,
+    /remove_consumed_header_include\(\)[\s\S]{0,180}child\.kill\(\)/,
+  );
+  assert.match(
+    lib,
+    /reap_queue[\s\S]{0,500}remove_consumed_header_include\(\)[\s\S]{0,200}queue\.clear\(\)/,
+  );
+  assert.match(playback, /cmd\.arg\(format!\("--include=\{\}"/);
+  assert.doesNotMatch(playback, /--http-header-fields=/);
+  assert.doesNotMatch(plexSource, /X-Plex-Token=.*auth_token/);
 });

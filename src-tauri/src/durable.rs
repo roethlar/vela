@@ -2051,7 +2051,31 @@ pub(crate) fn load() -> Result<ReadyDurableState, DurableLoadFailure> {
         (raw_settings, existing_connections)
     };
 
-    let (_settings, connections) = loaded;
+    let (mut settings, connections) = loaded;
+    if config::sanitize_legacy_artwork(&mut settings) {
+        config::update_at(&config_path, &config_lock_path, |_| Ok(())).map_err(|_| {
+            DurableLoadFailure {
+                gate: failure_gate(
+                    DurableFileStatus {
+                        status: DurableStatusKind::MigrationBlocked,
+                        layout: DurableLayout::PostSplit,
+                        can_recover: false,
+                        rollback_versions: Vec::new(),
+                    },
+                    ready_file(DurableLayout::PostSplit),
+                    None,
+                    None,
+                ),
+            }
+        })?;
+    }
+    // Playlists are an independent optional store. A corrupt playlist already
+    // fails closed when opened, while every read sanitizes its returned item
+    // snapshots; inability to persist this upgrade must not masquerade as a
+    // settings/connections integrity fault.
+    if crate::playlists::sanitize_legacy_artwork().is_err() {
+        eprintln!("vela: could not migrate saved playlist artwork references");
+    }
     let registry = build_registry(&connections).map_err(|_| DurableLoadFailure {
         gate: {
             let error = io::Error::new(

@@ -4347,7 +4347,11 @@ async fn play_by_key_locked(
         .lock()
         .unwrap_or_else(|e| e.into_inner())
         .take();
+    let mut prior_include_error = None;
     if let Some(mut child) = prev_child {
+        if let Err(error) = child.remove_consumed_header_include() {
+            prior_include_error = Some(error);
+        }
         let _ = child.kill();
         state
             .reap_queue
@@ -4462,20 +4466,24 @@ async fn play_by_key_locked(
     let shutting_down = state.shutting_down.clone();
     let advance = state.playback_advance.clone();
     let playback_session = session_id.to_string();
-    let played = tauri::async_runtime::spawn_blocking(move || {
-        playback::play(
-            &spec,
-            progress,
-            &child_slot,
-            &shutting_down,
-            &advance,
-            playback_session,
-            on_end,
-        )
-    })
-    .await
-    .map_err(|e| format!("playback task failed: {e}"))
-    .and_then(|r| r);
+    let played = if let Some(error) = prior_include_error {
+        Err(error)
+    } else {
+        tauri::async_runtime::spawn_blocking(move || {
+            playback::play(
+                &spec,
+                progress,
+                &child_slot,
+                &shutting_down,
+                &advance,
+                playback_session,
+                on_end,
+            )
+        })
+        .await
+        .map_err(|e| format!("playback task failed: {e}"))
+        .and_then(|r| r)
+    };
     let recent = item.clone();
     let recent_session = session_id.to_string();
     let completion_started_at_ms = playback_started_at_ms.clone();

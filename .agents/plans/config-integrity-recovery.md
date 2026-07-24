@@ -2,7 +2,7 @@
 
 ## Status
 
-**Active v1, revision 5 — 2026-07-23.** Approved implementation prerequisite
+**Active v1, revision 6 — 2026-07-23.** Approved implementation prerequisite
 for `.agents/plans/skip-credits-intros-v2.md`.
 
 The owner approved the core product contract on 2026-07-22: an invalid settings
@@ -30,7 +30,9 @@ versions as explicit rollback buttons. Revision 5 adds this approved slice
 without weakening exact damaged-file preservation or fresh-file recovery.
 
 Slices 1, 2, and 2A are implemented, verified, committed, and independently
-red-proven at versions 1.0.1, 1.0.2, and 1.0.3. Slice 3 follows.
+red-proven at versions 1.0.1, 1.0.2, and 1.0.3. Slice 3 is implemented and
+canonically verified at version 1.0.4; its post-commit guard proofs and plan
+closeout follow its production commit.
 
 No marker-skipping implementation may start until this plan is implemented,
 reviewed, verified, and committed, and the marker plan is then activated
@@ -987,6 +989,57 @@ Implementation evidence (2026-07-23):
   documentation.
 - Run full canonical verification and independent code review.
 - Bump all version surfaces from `1.0.3` to `1.0.4`.
+
+Implementation evidence (2026-07-23):
+
+- Plex progress and timeline requests now authenticate only through the
+  `X-Plex-Token` header. Provider-supplied media-part URLs are rebuilt on the
+  selected server, keep only credential-free query data, and fail closed when
+  their decoded path, key, or value contains the active credential, including
+  embedded and renamed forms.
+- Plex item DTOs contain an opaque `vela-artwork` marker rather than a server
+  URL. The frontend passes that marker through Tauri's platform-aware
+  `convertFileSrc`; a bounded custom protocol validates the source, path,
+  dimensions, redirects, response size, and image MIME before making a
+  header-authenticated server request. Both Unix custom-scheme and Windows
+  WebView2 HTTP protocol origins are admitted by CSP.
+- Existing token-bearing Plex artwork persisted by 1.0.0 through 1.0.3 is
+  converted to the credential-free marker when its legacy transcode shape is
+  safe, otherwise removed. Settings recents and playlists sanitize at both
+  read and ordinary write boundaries, and startup persists the safe form where
+  the owning durable file can be updated.
+- Each Plex mpv launch owns a unique header include inside Vela's private
+  configuration directory. Windows applies and verifies the private ACL before
+  token bytes are written; partial writes remove the file; replacement removes
+  the consumed predecessor include before creating a successor; uncertain
+  process status retains cleanup ownership; confirmed exit, app exit, and the
+  queued-child drain all retry cleanup.
+- Errors and mock-server records carry only credential-free categories,
+  status, paths, and token-presence/match booleans. Authenticated discovery no
+  longer reflects provider response bodies, names, or URIs through logs or the
+  frontend.
+- Independent `gpt-5.6-sol` review at xhigh first returned two HIGH, three
+  MEDIUM, and two LOW findings: legacy persisted artwork, provider Part
+  queries, Windows protocol conversion, Windows include privacy, include
+  lifecycle cleanup, mock-log credentials, and missing real-app
+  progress/timeline coverage. A follow-up review returned two MEDIUM and three
+  LOW findings: embedded provider credentials, queued cleanup at exit,
+  embedded mock-log credentials, discovery body reflection, and an unguarded
+  confirmed-exit branch. Every finding was admitted and resolved; both review
+  passes returned findings, so no clean independent verdict is claimed.
+- Canonical local verification passed: exact Node/npm check, clean `npm ci`,
+  zero-vulnerability npm audit, 51 Node tests, Svelte check with zero
+  diagnostics, production frontend build, Rust 1.89 and stable checks, clippy
+  with warnings denied, 259 Rust tests, and Cargo audit with no vulnerabilities
+  (17 existing allowed unmaintained/unsoundness warnings). `bash -n` accepted
+  the version-bumped Arch PKGBUILD.
+- Checksum-identical final source passed all 255 native Windows library tests
+  on `netwatch-01`, including ACL and header-include lifecycle coverage. One
+  history test failed transiently on the first parallel run, then passed alone
+  and in the complete rerun. The checksum-identical rebuilt Linux real app
+  passed all 37/37 E2E scenarios; multiplex exercised credential-free artwork,
+  playable Plex media, progress, and timeline while asserting that no token
+  entered a URL query or captured mock record.
 
 If slices are combined during implementation, version only the landed coherent
 commits and update the numeric sequence in this plan before proceeding. After

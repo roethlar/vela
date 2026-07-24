@@ -6,6 +6,11 @@ import fs from 'node:fs';
 import https from 'node:https';
 import path from 'node:path';
 
+const PIXEL_PNG = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
+  'base64',
+);
+
 function runOpenSsl(args) {
   const result = spawnSync('openssl', args, { encoding: 'utf8' });
   if (result.status !== 0) {
@@ -64,6 +69,7 @@ export async function startMockPlex({
   movieTitle = 'Shared Plex Movie',
   year = 2020,
   guid = 'imdb://tt7654321',
+  mediaFile = null,
 }) {
   const state = {
     requests: [],
@@ -73,11 +79,21 @@ export async function startMockPlex({
 
   const server = https.createServer({ key: tls.key, cert: tls.cert }, (req, res) => {
     const url = new URL(req.url, 'https://mock');
+    const receivedToken = req.headers['x-plex-token'];
+    const redact = (value) =>
+      token && String(value).includes(token) ? '[redacted]' : value;
+    const query = Object.fromEntries(
+      [...url.searchParams].map(([key, value]) => [
+        /token/i.test(key) || (token && key.includes(token)) ? '[redacted-key]' : key,
+        /token/i.test(key) ? '[redacted]' : redact(value),
+      ]),
+    );
     const request = {
       method: req.method,
-      path: url.pathname,
-      query: Object.fromEntries(url.searchParams),
-      token: req.headers['x-plex-token'] ?? null,
+      path: redact(url.pathname),
+      query,
+      tokenPresent: typeof receivedToken === 'string',
+      tokenMatches: receivedToken === token,
       clientIdentifier: req.headers['x-plex-client-identifier'] ?? null,
     };
     state.requests.push(request);
@@ -91,8 +107,58 @@ export async function startMockPlex({
       res.end(req.method === 'HEAD' ? undefined : body);
       state.served.push({ ...request, status });
     };
+    const sendImage = () => {
+      res.writeHead(200, {
+        'content-type': 'image/png',
+        'content-length': PIXEL_PNG.length,
+      });
+      res.end(req.method === 'HEAD' ? undefined : PIXEL_PNG);
+      state.served.push({ ...request, status: 200 });
+    };
+    const sendMedia = () => {
+      const size = fs.statSync(mediaFile).size;
+      const match = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
+      let start = 0;
+      let end = size - 1;
+      if (match && (match[1] !== '' || match[2] !== '')) {
+        if (match[1] === '') {
+          start = Math.max(0, size - Number(match[2]));
+        } else {
+          start = Number(match[1]);
+          if (match[2] !== '') end = Math.min(Number(match[2]), size - 1);
+        }
+        if (start >= size || start > end) {
+          res.writeHead(416, { 'content-range': `bytes */${size}` });
+          res.end();
+          state.served.push({ ...request, status: 416 });
+          return;
+        }
+        res.writeHead(206, {
+          'content-type': 'video/mp4',
+          'accept-ranges': 'bytes',
+          'content-length': end - start + 1,
+          'content-range': `bytes ${start}-${end}/${size}`,
+        });
+      } else {
+        res.writeHead(200, {
+          'content-type': 'video/mp4',
+          'accept-ranges': 'bytes',
+          'content-length': size,
+        });
+      }
+      if (req.method === 'HEAD') {
+        res.end();
+      } else {
+        fs.createReadStream(mediaFile, { start, end }).pipe(res);
+      }
+      state.served.push({ ...request, status: match ? 206 : 200 });
+    };
 
-    if (request.token !== token) {
+    if ([...url.searchParams.keys()].some((key) => /token/i.test(key))) {
+      state.contractViolations.push(`token query for ${request.method} ${request.path}`);
+    }
+
+    if (!request.tokenMatches) {
       state.contractViolations.push(`wrong token for ${request.method} ${request.path}`);
       send('<Response code="401" />', 401);
       return;
@@ -120,7 +186,8 @@ export async function startMockPlex({
       }
       send(
         `<MediaContainer size="1"><Video ratingKey="1" key="/library/metadata/1" ` +
-        `title="${xmlEscape(movieTitle)}" type="movie" year="${year}" duration="10000">` +
+        `title="${xmlEscape(movieTitle)}" type="movie" year="${year}" duration="10000" ` +
+        `thumb="/library/metadata/1/thumb/100">` +
         `<Guid id="${xmlEscape(guid)}" /></Video></MediaContainer>`,
       );
       return;
@@ -128,7 +195,8 @@ export async function startMockPlex({
     if (request.path === '/library/metadata/1') {
       send(
         `<MediaContainer size="1"><Video ratingKey="1" key="/library/metadata/1" ` +
-        `title="${xmlEscape(movieTitle)}" type="movie" year="${year}" duration="10000">` +
+        `title="${xmlEscape(movieTitle)}" type="movie" year="${year}" duration="10000" ` +
+        `thumb="/library/metadata/1/thumb/100">` +
         `<Guid id="${xmlEscape(guid)}" /><Media id="1" duration="10000" bitrate="1000" ` +
         `width="1920" height="1080" videoCodec="h264" audioCodec="aac" container="mp4">` +
         `<Part id="1" key="/library/parts/${xmlEscape(machineIdentifier)}/movie.mp4" ` +
@@ -137,7 +205,26 @@ export async function startMockPlex({
       );
       return;
     }
+    if (request.path === '/photo/:/transcode') {
+      if (
+        request.query.url !== '/library/metadata/1/thumb/100' ||
+        request.query.width !== '300' ||
+        request.query.height !== '450'
+      ) {
+        state.contractViolations.push(`invalid artwork parameters on ${name}`);
+      }
+      sendImage();
+      return;
+    }
+    if (request.path === '/:/timeline' || request.path === '/:/progress') {
+      send('<Response code="200" />');
+      return;
+    }
     if (request.path.startsWith('/library/parts/')) {
+      if (mediaFile) {
+        sendMedia();
+        return;
+      }
       send('<Response code="404" />', 404);
       return;
     }

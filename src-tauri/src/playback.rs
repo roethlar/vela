@@ -108,20 +108,100 @@ fn ipc_socket_path() -> Result<String, String> {
         .into_owned())
 }
 
-/// Where the per-launch mpv auth include lives. Unix: inside the same
-/// process-private 0700 runtime dir as the IPC socket. Windows: the per-user
-/// temp dir, which sits inside the user profile (private by default ACLs) —
-/// the same protection class as Vela's config file, which stores this token
-/// durably anyway.
+/// Where the per-launch mpv auth include lives. Unix uses the same
+/// process-private 0700 runtime dir as the IPC socket. Windows uses Vela's
+/// protected per-user config directory so its verified DACL can be established
+/// before credential bytes are written.
 fn header_conf_path() -> Result<std::path::PathBuf, String> {
+    let nonce = uuid::Uuid::new_v4().simple();
     #[cfg(not(windows))]
     {
-        Ok(private_runtime_dir()?.join(format!("mpv-headers-{}.conf", std::process::id())))
+        Ok(private_runtime_dir()?.join(format!("mpv-headers-{}-{nonce}.conf", std::process::id())))
     }
     #[cfg(windows)]
     {
-        Ok(std::env::temp_dir().join(format!("vela-mpv-headers-{}.conf", std::process::id())))
+        crate::storage::config_dir_file(&format!("mpv-headers-{}-{nonce}.conf", std::process::id()))
+            .map_err(|_| "couldn't prepare the mpv auth config".to_string())
     }
+}
+
+/// Deletes one launch's credential include when its owning child is reaped.
+/// The path is unique per launch, so a delayed old-child cleanup can never
+/// remove a newer player's credentials.
+#[derive(Debug)]
+struct HeaderInclude {
+    path: std::path::PathBuf,
+}
+
+impl HeaderInclude {
+    fn remove_now(&mut self) -> std::io::Result<()> {
+        // A transient sharing violation must not be the only cleanup attempt.
+        // Never print the path: it is credential-adjacent runtime state.
+        for attempt in 0..3 {
+            match std::fs::remove_file(&self.path) {
+                Ok(()) => return Ok(()),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+                Err(_) if attempt < 2 => std::thread::yield_now(),
+                Err(error) => return Err(error),
+            }
+        }
+        unreachable!("the bounded removal loop always returns")
+    }
+}
+
+impl Drop for HeaderInclude {
+    fn drop(&mut self) {
+        if self.remove_now().is_err() {
+            eprintln!("vela: could not remove an mpv authentication include");
+        }
+    }
+}
+
+/// A child process and the private credential file it consumed. The reaper
+/// drops this wrapper only after `try_wait` reports exit. Query failures retain
+/// the wrapper so a transient OS error cannot orphan the credential include.
+pub(crate) struct ManagedChild {
+    child: std::process::Child,
+    _header_include: Option<HeaderInclude>,
+}
+
+impl ManagedChild {
+    fn new(child: std::process::Child, header_include: Option<HeaderInclude>) -> Self {
+        Self {
+            child,
+            _header_include: header_include,
+        }
+    }
+
+    pub(crate) fn kill(&mut self) -> std::io::Result<()> {
+        self.child.kill()
+    }
+
+    pub(crate) fn try_wait(&mut self) -> std::io::Result<Option<std::process::ExitStatus>> {
+        self.child.try_wait()
+    }
+
+    /// A player that has been running has already consumed its startup config.
+    /// Remove that include before a replacement launch writes another one. A
+    /// failed removal leaves ownership attached to this child and fails the
+    /// replacement closed.
+    pub(crate) fn remove_consumed_header_include(&mut self) -> Result<(), String> {
+        let Some(mut include) = self._header_include.take() else {
+            return Ok(());
+        };
+        if include.remove_now().is_ok() {
+            Ok(())
+        } else {
+            self._header_include = Some(include);
+            Err("could not remove the prior mpv authentication include".to_string())
+        }
+    }
+}
+
+pub(crate) fn retain_child_after_try_wait(
+    result: &std::io::Result<Option<std::process::ExitStatus>>,
+) -> bool {
+    !matches!(result, Ok(Some(_)))
 }
 
 /// Write the mpv include file that carries stream auth headers
@@ -131,13 +211,11 @@ fn header_conf_path() -> Result<std::path::PathBuf, String> {
 /// stats overlay (Shift+I), and playlist. mpv honors `--include` even under
 /// `--no-config`, and an include asserted after the user's extra args
 /// overrides any `--http-header-fields` they set — both verified against
-/// mpv 0.41 (the header reaches the wire exactly once). One file per Vela
-/// process, overwritten on each launch; the previous mpv (killed before a new
-/// play starts) has long finished reading its config by then.
-fn write_header_include(headers: &[(String, String)]) -> Result<String, String> {
+/// mpv 0.41 (the header reaches the wire exactly once). Each launch gets a
+/// unique file, held by [`ManagedChild`] until that exact child is reaped.
+fn write_header_include(headers: &[(String, String)]) -> Result<HeaderInclude, String> {
     let path = header_conf_path()?;
-    write_header_include_at(&path, headers)?;
-    Ok(path.to_string_lossy().into_owned())
+    write_header_include_at(&path, headers)
 }
 
 /// The testable core of [`write_header_include`]: validates and writes to an
@@ -148,7 +226,15 @@ fn write_header_include(headers: &[(String, String)]) -> Result<String, String> 
 fn write_header_include_at(
     path: &std::path::Path,
     headers: &[(String, String)],
-) -> Result<(), String> {
+) -> Result<HeaderInclude, String> {
+    write_header_include_at_with(path, headers, |file, content| file.write_all(content))
+}
+
+fn write_header_include_at_with(
+    path: &std::path::Path,
+    headers: &[(String, String)],
+    write_content: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+) -> Result<HeaderInclude, String> {
     for (name, value) in headers {
         if name.is_empty()
             || !name
@@ -173,8 +259,9 @@ fn write_header_include_at(
         .collect::<Vec<_>>()
         .join(",");
     let content = format!("http-header-fields=\"{joined}\"\n");
-    // Remove the previous launch's file, then create exclusively with
-    // owner-only permissions from the first byte (never chmod-after-write).
+    // Replace only this explicit target (used by tests), then create exclusively
+    // with owner-only permissions from the first byte (never chmod-after-write).
+    // Production targets are unique per launch.
     let _ = std::fs::remove_file(path);
     let mut opts = std::fs::OpenOptions::new();
     opts.write(true).create_new(true);
@@ -186,9 +273,28 @@ fn write_header_include_at(
     let mut f = opts
         .open(path)
         .map_err(|e| format!("couldn't write the mpv auth config: {e}"))?;
-    f.write_all(content.as_bytes())
-        .map_err(|e| format!("couldn't write the mpv auth config: {e}"))?;
-    Ok(())
+    let guard = HeaderInclude {
+        path: path.to_path_buf(),
+    };
+    // On Windows this installs and verifies the protected current-user/SYSTEM/
+    // Administrators DACL. It must happen after empty-file creation but before
+    // the first credential byte. Unix re-verifies the already-0600 file.
+    if crate::storage::harden_existing_regular(path).is_err() {
+        drop(f);
+        drop(guard);
+        return Err("couldn't protect the mpv auth config".to_string());
+    }
+    if let Err(error) = write_content(&mut f, content.as_bytes()) {
+        drop(f);
+        drop(guard);
+        return Err(format!("couldn't write the mpv auth config: {error}"));
+    }
+    if let Err(error) = f.sync_all() {
+        drop(f);
+        drop(guard);
+        return Err(format!("couldn't write the mpv auth config: {error}"));
+    }
+    Ok(guard)
 }
 
 /// Locate the mpv executable. We can't rely on bare `mpv` resolving via `PATH`:
@@ -637,7 +743,7 @@ pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
 pub fn play(
     spec: &PlaySpec,
     progress: ProgressTarget,
-    child_slot: &Arc<Mutex<Option<std::process::Child>>>,
+    child_slot: &Arc<Mutex<Option<ManagedChild>>>,
     shutting_down: &Arc<AtomicBool>,
     advance: &Arc<crate::commands::PlaybackAdvance>,
     session_id: String,
@@ -774,12 +880,13 @@ pub fn play(
     // file — see write_header_include for why neither argv nor the URL may
     // carry it. Asserted after the user's extra args so a user-set
     // --http-header-fields can't silently drop the auth the stream needs.
-    if !spec.http_headers.is_empty() {
-        cmd.arg(format!(
-            "--include={}",
-            write_header_include(&spec.http_headers)?
-        ));
-    }
+    let header_include = if spec.http_headers.is_empty() {
+        None
+    } else {
+        let include = write_header_include(&spec.http_headers)?;
+        cmd.arg(format!("--include={}", include.path.to_string_lossy()));
+        Some(include)
+    };
     if spec.start_seconds > 0.0 {
         cmd.arg(format!("--start={}", spec.start_seconds));
     }
@@ -809,7 +916,7 @@ pub fn play(
                 format!("failed to launch mpv: {}", e)
             }
         })?;
-        *slot = Some(child);
+        *slot = Some(ManagedChild::new(child, header_include));
     }
 
     // Seed the tracked position with the resume point, so if mpv exits before
@@ -1549,7 +1656,7 @@ mod tests {
     fn header_include_writes_quoted_fields_owner_only() {
         let path = tmp("headers-ok.conf");
         let headers = vec![("X-Plex-Token".to_string(), "abc123".to_string())];
-        write_header_include_at(&path, &headers).expect("write include");
+        let first_guard = write_header_include_at(&path, &headers).expect("write include");
         let content = std::fs::read_to_string(&path).expect("read back");
         assert_eq!(content, "http-header-fields=\"X-Plex-Token: abc123\"\n");
         #[cfg(unix)]
@@ -1561,12 +1668,99 @@ mod tests {
                 .mode();
             assert_eq!(mode & 0o777, 0o600, "auth include must be owner-only");
         }
-        // A later launch replaces the previous launch's file in place.
+        drop(first_guard);
+        assert!(
+            !path.exists(),
+            "the first include is removed with its guard"
+        );
+        // The explicit-path test helper can reuse a path after its prior guard
+        // has been dropped. Production paths are always unique per launch.
         let headers = vec![("X-Plex-Token".to_string(), "second".to_string())];
-        write_header_include_at(&path, &headers).expect("overwrite include");
+        let second_guard = write_header_include_at(&path, &headers).expect("rewrite include");
         let content = std::fs::read_to_string(&path).expect("read back after overwrite");
         assert_eq!(content, "http-header-fields=\"X-Plex-Token: second\"\n");
-        let _ = std::fs::remove_file(&path);
+        drop(second_guard);
+        assert!(
+            !path.exists(),
+            "the second include is removed with its guard"
+        );
+    }
+
+    #[test]
+    fn header_include_guard_removes_only_its_exact_file() {
+        let first = tmp("headers-cleanup-first.conf");
+        let second = tmp("headers-cleanup-second.conf");
+        let headers = vec![("X-Plex-Token".to_string(), "synthetic".to_string())];
+        let first_guard = write_header_include_at(&first, &headers).unwrap();
+        let second_guard = write_header_include_at(&second, &headers).unwrap();
+        drop(first_guard);
+        assert!(!first.exists(), "reaped launch include must be removed");
+        assert!(
+            second.exists(),
+            "one launch must not remove another's include"
+        );
+        drop(second_guard);
+    }
+
+    #[test]
+    fn partial_header_include_write_removes_the_credential_file() {
+        let path = tmp("headers-partial.conf");
+        let token = "synthetic-partial-token";
+        let headers = vec![("X-Plex-Token".to_string(), token.to_string())];
+        let error = write_header_include_at_with(&path, &headers, |file, content| {
+            file.write_all(&content[..content.len() / 2])?;
+            Err(std::io::Error::other("synthetic interrupted write"))
+        })
+        .expect_err("partial writes must fail");
+        assert!(
+            !error.contains(token),
+            "the error must not expose the token"
+        );
+        assert!(
+            !path.exists(),
+            "a failed partial write must not leave credential bytes behind"
+        );
+    }
+
+    #[test]
+    fn consumed_include_is_removed_before_a_replacement_launch() {
+        let path = tmp("headers-replaced.conf");
+        let headers = vec![("X-Plex-Token".to_string(), "synthetic".to_string())];
+        let include = write_header_include_at(&path, &headers).unwrap();
+        let child = Command::new(std::env::current_exe().unwrap())
+            .arg("--help")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .unwrap();
+        let mut managed = ManagedChild::new(child, Some(include));
+
+        managed.remove_consumed_header_include().unwrap();
+        assert!(
+            !path.exists(),
+            "the old include must be gone before replacement playback"
+        );
+        let _ = managed.kill();
+        let _ = managed.child.wait();
+    }
+
+    #[test]
+    fn process_query_result_reaps_only_a_confirmed_exit() {
+        assert!(retain_child_after_try_wait(&Ok(None)));
+        assert!(retain_child_after_try_wait(&Err(std::io::Error::other(
+            "synthetic process-query error"
+        ))));
+        #[cfg(unix)]
+        let exited = {
+            use std::os::unix::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(0)
+        };
+        #[cfg(windows)]
+        let exited = {
+            use std::os::windows::process::ExitStatusExt;
+            std::process::ExitStatus::from_raw(0)
+        };
+        assert!(!retain_child_after_try_wait(&Ok(Some(exited))));
     }
 
     #[test]

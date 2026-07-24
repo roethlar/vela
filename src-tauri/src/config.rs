@@ -428,7 +428,9 @@ where
         lock_path,
         |cfg: &mut AppConfig| {
             cfg.validate()?;
+            sanitize_legacy_artwork(cfg);
             let output = f(cfg)?;
+            sanitize_legacy_artwork(cfg);
             cfg.validate()?;
             Ok(output)
         },
@@ -441,6 +443,14 @@ where
             None => Ok(()),
         },
     )
+}
+
+pub(crate) fn sanitize_legacy_artwork(cfg: &mut AppConfig) -> bool {
+    let mut changed = false;
+    for recent in &mut cfg.recents {
+        changed |= crate::artwork::sanitize_item_artwork(&mut recent.item);
+    }
+    changed
 }
 
 pub(crate) fn lock_process() -> std::sync::MutexGuard<'static, ()> {
@@ -778,6 +788,36 @@ mod tests {
         cfg.section_sorts
             .insert("plex:7".to_string(), "titleSort:asc".to_string());
         cfg
+    }
+
+    #[test]
+    fn ordinary_settings_write_removes_legacy_plex_artwork_tokens() {
+        let (config, config_lock, _, _, root) = temp_paths("artwork-sanitize");
+        let token = "synthetic-legacy-artwork-token";
+        let mut recent_item = item("plex-a");
+        recent_item.poster = Some(format!(
+            "https://plex.example/photo/:/transcode?width=300&height=450&\
+             url=%2Flibrary%2Fmetadata%2F1%2Fthumb%2F2&X-Plex-Token={token}"
+        ));
+        crate::storage::save_json(
+            &config,
+            &AppConfig {
+                recents: vec![RecentEntry {
+                    item: recent_item,
+                    session_id: None,
+                    started_at_ms: 1,
+                    ended_at_ms: 2,
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        update_at(&config, &config_lock, |_| Ok(())).unwrap();
+        let saved = fs::read_to_string(&config).unwrap();
+        assert!(!saved.contains(token));
+        assert!(saved.contains(crate::artwork::ARTWORK_MARKER_PREFIX));
+        fs::remove_dir_all(root).unwrap();
     }
 
     fn playlist_file() -> PlaylistFile {

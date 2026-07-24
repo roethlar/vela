@@ -5,6 +5,8 @@ use serde::Deserialize;
 use std::time::Duration;
 use url::Url;
 
+const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct PlexServer {
@@ -409,6 +411,7 @@ pub struct PlexStream {
 #[derive(Clone)]
 pub struct PlexLibrary {
     client: Client,
+    artwork_client: Client,
     server: Option<PlexServer>,
     auth_token: String,
     client_identifier: String,
@@ -420,8 +423,14 @@ impl PlexLibrary {
             .timeout(std::time::Duration::from_secs(15))
             .build()
             .expect("failed to build reqwest client");
+        let artwork_client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(15))
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("failed to build bounded artwork client");
         Self {
             client,
+            artwork_client,
             server: None,
             auth_token,
             client_identifier,
@@ -442,7 +451,7 @@ impl PlexLibrary {
             .header("X-Plex-Token", &self.auth_token)
             .header("X-Plex-Client-Identifier", &self.client_identifier)
             .header("X-Plex-Product", "Vela")
-            .header("X-Plex-Version", "1.0.0")
+            .header("X-Plex-Version", VERSION)
             .header("X-Plex-Platform", crate::platform_name())
             .header("X-Plex-Device", crate::platform_name())
             .header("X-Plex-Device-Name", "Vela")
@@ -451,23 +460,17 @@ impl PlexLibrary {
             .await?;
 
         let status = response.status();
-        let body = response.text().await?;
-
         println!("Server discovery response - Status: {}", status);
         if !status.is_success() {
-            return Err(format!("Plex API error: Status {} - Body: {}", status, body).into());
+            return Err(format!("Plex API error: Status {status}").into());
         }
+        let body = response.text().await?;
 
-        let servers: Vec<PlexServer> = self.parse_resources_stream(&body)?;
+        let servers: Vec<PlexServer> = self
+            .parse_resources_stream(&body)
+            .map_err(|_| "could not parse Plex server discovery response")?;
 
         println!("Found {} servers", servers.len());
-        for server in &servers {
-            println!(
-                "Server: {} at {} (local={}, relay={})",
-                server.name, server.uri, server.local, server.relay
-            );
-        }
-
         Ok(servers)
     }
 
@@ -1011,25 +1014,66 @@ impl PlexLibrary {
         Ok(out)
     }
 
-    pub fn poster_transcode_url(
+    pub async fn fetch_artwork(
         &self,
-        thumb_path: &str,
-        width: u32,
-        height: u32,
-    ) -> Option<String> {
-        let base = self.server_base()?;
-        // Pass the thumb to the transcoder as the SERVER-RELATIVE path (don't
-        // prepend the external origin). Plex then resolves it against itself
-        // locally. Prepending the public origin (plex.direct / IPv6 / HTTPS) made
-        // the server try to fetch its own public URL through the transcoder, which
-        // 500s; the relative form is what the official clients use and returns a
-        // properly sized image. A thumb that's already absolute is passed as-is.
-        let encoded: String = url::form_urlencoded::byte_serialize(thumb_path.as_bytes()).collect();
-        let url = format!(
-            "{}/photo/:/transcode?width={}&height={}&minSize=1&upscale=1&url={}&X-Plex-Token={}",
-            base, width, height, encoded, self.auth_token
+        request: &crate::artwork::ArtworkRequest,
+    ) -> Result<crate::artwork::ArtworkResponse, crate::artwork::ArtworkError> {
+        use crate::artwork::{ArtworkError, ArtworkResponse, MAX_ARTWORK_BYTES};
+
+        crate::artwork::validate_artwork_request(request)?;
+        let base = self.server_base().ok_or(ArtworkError::Unavailable)?;
+        let mut url = Url::parse(&format!("{base}/photo/:/transcode"))
+            .map_err(|_| ArtworkError::Unavailable)?;
+        url.query_pairs_mut()
+            .append_pair("width", &request.width.to_string())
+            .append_pair("height", &request.height.to_string())
+            .append_pair("minSize", "1")
+            .append_pair("upscale", "1")
+            .append_pair("url", &request.path);
+        let mut response = self
+            .artwork_client
+            .get(url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("X-Plex-Product", "Vela")
+            .send()
+            .await
+            .map_err(|_| ArtworkError::Unavailable)?;
+        if !response.status().is_success() {
+            return Err(ArtworkError::InvalidResponse);
+        }
+        let content_type = response
+            .headers()
+            .get(reqwest::header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(crate::artwork::accepted_image_mime)
+            .ok_or(ArtworkError::InvalidResponse)?;
+        if response
+            .content_length()
+            .is_some_and(|length| length > MAX_ARTWORK_BYTES as u64)
+        {
+            return Err(ArtworkError::TooLarge);
+        }
+        let mut body = Vec::with_capacity(
+            response
+                .content_length()
+                .unwrap_or_default()
+                .min(MAX_ARTWORK_BYTES as u64) as usize,
         );
-        Some(url)
+        while let Some(chunk) = response
+            .chunk()
+            .await
+            .map_err(|_| ArtworkError::Unavailable)?
+        {
+            if body.len().saturating_add(chunk.len()) > MAX_ARTWORK_BYTES {
+                return Err(ArtworkError::TooLarge);
+            }
+            body.extend_from_slice(&chunk);
+        }
+        if body.is_empty() {
+            return Err(ArtworkError::InvalidResponse);
+        }
+        Ok(ArtworkResponse { content_type, body })
     }
 
     /// Mark an item watched (`scrobble`) or unwatched (`unscrobble`) on the server.
@@ -1093,8 +1137,8 @@ impl PlexLibrary {
         let parts: Vec<String> = media
             .parts
             .iter()
-            .map(|part| part_url(&base, &part.key))
-            .collect();
+            .map(|part| part_url(&base, &part.key, &self.auth_token))
+            .collect::<Option<Vec<_>>>()?;
         match parts.as_slice() {
             [] => None,
             [one] => Some(one.clone()),
@@ -1236,7 +1280,6 @@ impl PlexLibrary {
 
         self.get_items(&base_url, &params).await
     }
-
 
     pub fn server_base(&self) -> Option<String> {
         let s = self.server.as_ref()?;
@@ -1676,32 +1719,162 @@ fn person_filter_query(
 /// the playback layer — never as a query parameter: mpv renders `${path}` in
 /// its title bar, stats overlay, and playlist, so a token-bearing URL would
 /// surface the credential there. (See `.agents/decisions.md`, 2026-07-03.)
-fn part_url(base: &str, part_key: &str) -> String {
-    let mut rel_path = part_key.to_string();
-    if let Ok(u) = url::Url::parse(part_key) {
-        rel_path = u.path().to_string();
-        if let Some(q) = u.query() {
-            rel_path.push('?');
-            rel_path.push_str(q);
+fn part_url(base: &str, part_key: &str, auth_token: &str) -> Option<String> {
+    let base_url = url::Url::parse(base).ok()?;
+    let supplied = url::Url::parse(part_key)
+        .or_else(|_| base_url.join(part_key))
+        .ok()?;
+    if !auth_token.is_empty() && supplied.path().contains(auth_token) {
+        return None;
+    }
+    let query = supplied.query_pairs().collect::<Vec<_>>();
+    if query.iter().any(|(key, value)| {
+        key.eq_ignore_ascii_case("X-Plex-Token")
+            || (!auth_token.is_empty() && (key.contains(auth_token) || value.contains(auth_token)))
+    }) {
+        return None;
+    }
+
+    // Re-root even an absolute provider key onto the selected/pinned Plex
+    // connection. Preserve only credential-free provider query parameters.
+    let mut output = base_url;
+    output.set_path(supplied.path());
+    output.set_query(None);
+    output.set_fragment(None);
+    {
+        let mut pairs = output.query_pairs_mut();
+        for (key, value) in query {
+            pairs.append_pair(&key, &value);
         }
+        pairs.append_pair("download", "1");
     }
-    let mut full = if rel_path.starts_with('/') {
-        format!("{base}{rel_path}")
-    } else {
-        format!("{base}/{rel_path}")
-    };
-    if full.contains('?') {
-        full.push('&');
-    } else {
-        full.push('?');
-    }
-    full.push_str("download=1");
-    full
+    Some(output.into())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+    async fn artwork_server(response: Vec<u8>) -> (u16, tokio::task::JoinHandle<String>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0_u8; 2048];
+            loop {
+                let count = stream.read(&mut chunk).await.unwrap();
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+                if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream.write_all(&response).await.unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        (port, task)
+    }
+
+    fn artwork_library(port: u16) -> PlexLibrary {
+        let mut library = PlexLibrary::new(
+            "synthetic-artwork-token".to_string(),
+            "art-client".to_string(),
+        );
+        library.set_server_manual(
+            "127.0.0.1".to_string(),
+            port,
+            false,
+            Some("test".to_string()),
+        );
+        library
+    }
+
+    fn artwork_request() -> crate::artwork::ArtworkRequest {
+        crate::artwork::ArtworkRequest {
+            path: "/library/metadata/42/thumb/7".to_string(),
+            width: 300,
+            height: 450,
+        }
+    }
+
+    #[tokio::test]
+    async fn artwork_fetch_is_bounded_header_authenticated_and_token_free_on_wire_url() {
+        let response =
+            b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: 5\r\n\r\nimage"
+                .to_vec();
+        let (port, captured) = artwork_server(response).await;
+        let fetched = artwork_library(port)
+            .fetch_artwork(&artwork_request())
+            .await
+            .unwrap();
+        assert_eq!(fetched.content_type, "image/png");
+        assert_eq!(fetched.body, b"image");
+        let request = captured.await.unwrap();
+        let request_line = request.lines().next().unwrap_or_default();
+        assert!(request_line.starts_with("GET /photo/:/transcode?"));
+        assert!(request_line.contains("url=%2Flibrary%2Fmetadata%2F42%2Fthumb%2F7"));
+        assert!(!request_line.to_ascii_lowercase().contains("token"));
+        assert!(request
+            .to_ascii_lowercase()
+            .contains("\r\nx-plex-token: synthetic-artwork-token\r\n"));
+    }
+
+    #[tokio::test]
+    async fn artwork_fetch_rejects_redirect_non_image_and_declared_oversize() {
+        let responses = [
+            (
+                b"HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:9/elsewhere\r\nContent-Length: 0\r\n\r\n"
+                    .to_vec(),
+                crate::artwork::ArtworkError::InvalidResponse,
+            ),
+            (
+                b"HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: 4\r\n\r\nnope"
+                    .to_vec(),
+                crate::artwork::ArtworkError::InvalidResponse,
+            ),
+            (
+                format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\n\r\n",
+                    crate::artwork::MAX_ARTWORK_BYTES + 1
+                )
+                .into_bytes(),
+                crate::artwork::ArtworkError::TooLarge,
+            ),
+        ];
+        for (response, expected) in responses {
+            let (port, captured) = artwork_server(response).await;
+            let error = artwork_library(port)
+                .fetch_artwork(&artwork_request())
+                .await
+                .expect_err("unsafe artwork response must fail");
+            assert_eq!(error, expected);
+            captured.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn artwork_fetch_rejects_chunked_body_that_crosses_runtime_bound() {
+        let body = vec![b'x'; crate::artwork::MAX_ARTWORK_BYTES + 1];
+        let mut response =
+            b"HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nTransfer-Encoding: chunked\r\n\r\n"
+                .to_vec();
+        response.extend_from_slice(format!("{:x}\r\n", body.len()).as_bytes());
+        response.extend_from_slice(&body);
+        response.extend_from_slice(b"\r\n0\r\n\r\n");
+        let (port, captured) = artwork_server(response).await;
+        assert_eq!(
+            artwork_library(port)
+                .fetch_artwork(&artwork_request())
+                .await
+                .unwrap_err(),
+            crate::artwork::ArtworkError::TooLarge
+        );
+        captured.await.unwrap();
+    }
 
     #[test]
     fn library_sections_parse_scalar_attributes() {
@@ -1893,30 +2066,61 @@ mod tests {
 
     #[test]
     fn part_urls_carry_no_token_and_keep_download_flag() {
+        const TOKEN: &str = "synthetic-active-token";
         // Server-relative part key, no existing query.
         assert_eq!(
-            part_url("https://plex.example:32400", "/library/parts/42/file.mkv"),
-            "https://plex.example:32400/library/parts/42/file.mkv?download=1"
+            part_url(
+                "https://plex.example:32400",
+                "/library/parts/42/file.mkv",
+                TOKEN
+            )
+            .as_deref(),
+            Some("https://plex.example:32400/library/parts/42/file.mkv?download=1")
         );
         // A part key that already has a query keeps it and appends with '&'.
         assert_eq!(
             part_url(
                 "https://plex.example:32400",
-                "/library/parts/42/file.mkv?x=1"
-            ),
-            "https://plex.example:32400/library/parts/42/file.mkv?x=1&download=1"
+                "/library/parts/42/file.mkv?x=1",
+                TOKEN
+            )
+            .as_deref(),
+            Some("https://plex.example:32400/library/parts/42/file.mkv?x=1&download=1")
         );
         // An absolute part URL is re-rooted onto our chosen server origin.
         let u = part_url(
             "https://plex.example:32400",
             "https://other.host:12345/library/parts/7/file.mkv?y=2",
-        );
+            TOKEN,
+        )
+        .unwrap();
         assert_eq!(
             u,
             "https://plex.example:32400/library/parts/7/file.mkv?y=2&download=1"
         );
         // The credential must never ride in the URL; it travels as a header.
         assert!(!u.contains("X-Plex-Token"));
+    }
+
+    #[test]
+    fn provider_part_keys_with_credentials_fail_closed() {
+        const TOKEN: &str = "synthetic-active-token";
+        for key in [
+            "/library/parts/1/file.mkv?X-Plex-Token=other-token",
+            "/library/parts/1/file.mkv?x%2dplex%2dtoken=other-token",
+            "/library/parts/1/file.mkv?authorization=synthetic-active-token",
+            "/library/parts/1/file.mkv?authorization=Bearer%20synthetic-active-token",
+            "/library/parts/1/file.mkv?note=prefix-synthetic-active-token-suffix",
+            "/library/parts/1/file.mkv?synthetic-active-token=value",
+            "/library/parts/synthetic-active-token/file.mkv",
+            "https://other.test/library/parts/1/file.mkv?X-Plex-Token=other-token",
+        ] {
+            assert_eq!(
+                part_url("https://plex.example:32400", key, TOKEN),
+                None,
+                "{key:?} must not produce a playable URL"
+            );
+        }
     }
 
     #[test]

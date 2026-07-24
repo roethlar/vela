@@ -101,10 +101,21 @@ fn validate_file(file: &PlaylistFile) -> Result<(), String> {
     Ok(())
 }
 
+fn sanitize_legacy_artwork_in(file: &mut PlaylistFile) -> bool {
+    let mut changed = false;
+    for playlist in &mut file.playlists {
+        for entry in &mut playlist.items {
+            changed |= crate::artwork::sanitize_item_artwork(&mut entry.item);
+        }
+    }
+    changed
+}
+
 fn load_at(path: &Path) -> Result<PlaylistFile, String> {
-    let file: PlaylistFile = crate::storage::load_json(path)
+    let mut file: PlaylistFile = crate::storage::load_json(path)
         .map_err(|error| format!("could not read playlists: {error}"))?;
     validate_file(&file)?;
+    sanitize_legacy_artwork_in(&mut file);
     Ok(file)
 }
 
@@ -120,7 +131,10 @@ fn update_at<R>(
         lock_path,
         |file: &mut PlaylistFile| {
             validate_file(file)?;
-            mutate(file)
+            sanitize_legacy_artwork_in(file);
+            let output = mutate(file)?;
+            sanitize_legacy_artwork_in(file);
+            Ok(output)
         },
     )
 }
@@ -163,6 +177,27 @@ pub(crate) fn migrate_source_id(
 ) -> Result<(), String> {
     let (data, lock) = paths()?;
     migrate_source_id_at(&data, &lock, old_source_id, new_source_id)
+}
+
+/// Rewrite valid legacy playlist artwork snapshots without exposing a corrupt
+/// playlist file as an app-wide settings fault. Reads remain sanitized even if
+/// this best-effort upgrade write cannot complete.
+pub(crate) fn sanitize_legacy_artwork() -> Result<(), String> {
+    let (data, lock) = paths()?;
+    match std::fs::symlink_metadata(&data) {
+        Ok(metadata) if metadata.file_type().is_file() => {
+            let mut current: PlaylistFile = crate::storage::load_json(&data)
+                .map_err(|error| format!("could not read playlists: {error}"))?;
+            validate_file(&current)?;
+            if sanitize_legacy_artwork_in(&mut current) {
+                update_at(&data, &lock, |_| Ok(()))?;
+            }
+            Ok(())
+        }
+        Ok(_) => Err("playlist store is not a regular file".to_string()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(format!("could not inspect playlists: {error}")),
+    }
 }
 
 pub fn load() -> Result<PlaylistFile, String> {
@@ -450,6 +485,37 @@ mod tests {
             item: item(source, key, title),
             source_name: Some(source.to_uppercase()),
         }
+    }
+
+    #[test]
+    fn ordinary_playlist_write_removes_legacy_plex_artwork_tokens() {
+        let (data, lock, root) = temp_paths("artwork-sanitize");
+        let token = "synthetic-playlist-artwork-token";
+        let mut saved_entry = entry("one", "plex-a", "1", "Legacy");
+        saved_entry.item.poster = Some(format!(
+            "https://plex.example/photo/:/transcode?width=300&height=450&\
+             url=%2Flibrary%2Fmetadata%2F1%2Fthumb%2F2&X-Plex-Token={token}"
+        ));
+        crate::storage::save_json(
+            &data,
+            &PlaylistFile {
+                playlists: vec![Playlist {
+                    id: "p1".to_string(),
+                    name: "Legacy".to_string(),
+                    items: vec![saved_entry],
+                    created_ms: 1,
+                    updated_ms: 1,
+                }],
+                ..Default::default()
+            },
+        )
+        .unwrap();
+
+        update_at(&data, &lock, |_| Ok(())).unwrap();
+        let saved = fs::read_to_string(&data).unwrap();
+        assert!(!saved.contains(token));
+        assert!(saved.contains(crate::artwork::ARTWORK_MARKER_PREFIX));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
