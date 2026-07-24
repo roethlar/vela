@@ -30,9 +30,9 @@ versions as explicit rollback buttons. Revision 5 adds this approved slice
 without weakening exact damaged-file preservation or fresh-file recovery.
 
 Slices 1, 2, and 2A are implemented, verified, committed, and independently
-red-proven at versions 1.0.1, 1.0.2, and 1.0.3. Slice 3 is implemented and
-canonically verified at version 1.0.4; its post-commit guard proofs and plan
-closeout follow its production commit.
+red-proven at versions 1.0.1, 1.0.2, and 1.0.3. Slice 3 is implemented,
+canonically verified, and independently red-proven at version 1.0.4; its
+guard-pass closeout is recorded in the Slice 3 evidence below.
 
 No marker-skipping implementation may start until this plan is implemented,
 reviewed, verified, and committed, and the marker plan is then activated
@@ -1040,6 +1040,25 @@ Implementation evidence (2026-07-23):
   passed all 37/37 E2E scenarios; multiplex exercised credential-free artwork,
   playable Plex media, progress, and timeline while asserting that no token
   entered a URL query or captured mock record.
+- The post-commit guard pass closed on 2026-07-24. Restored production
+  regressions independently red-proved progress and timeline header auth;
+  settings and playlist legacy-artwork sanitation; embedded provider-Part
+  credential refusal; frontend protocol conversion and Windows CSP; artwork
+  dimension, MIME, traversal, query, header-auth, redirect, declared-size, and
+  streamed size bounds; mpv ACL-before-write, partial-write cleanup,
+  process-query retention/reaping, replacement ordering, and exit-queue
+  cleanup; discovery body nonreflection; and exact/embedded mock-log
+  redaction. The original artwork-query test was vacuous because its fixture
+  failed earlier validation; the strengthened otherwise-valid query fixture
+  was red-proven and committed as `ad98b09`. The three real-app multiplex
+  behaviors were then red-proven separately on the Linux E2E venue: a
+  transcode query token failed the Plex mock contract, and query-token
+  progress and query-token timeline each failed the source-token-header
+  assertion. Every regression was restored from its committed state and
+  reran green; one restored-green run hit a transient Settings-dialog timeout
+  that passed on immediate rerun of the identical binary. Closeout
+  verification passed with the exact Node/npm toolchain, 51 Node tests, 259
+  Rust tests, and the rebuilt Linux real app at 37/37 E2E scenarios.
 
 If slices are combined during implementation, version only the landed coherent
 commits and update the numeric sequence in this plan before proceeding. After

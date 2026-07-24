@@ -96,18 +96,24 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   tests and 259 Rust tests; checksum-identical native Windows passed 255/255
   after one nonreproducible transient history-test failure, and the rebuilt
   Linux real app passed 37/37 E2E scenarios.
-- Slice 3's mandatory post-commit guard pass is in progress. Separate restored
-  regressions have already proved progress and timeline header auth; settings
+- Slice 3's post-commit guard pass is complete (2026-07-24). Beyond the
+  restored regressions that proved progress and timeline header auth; settings
   and playlist legacy-artwork sanitation; embedded provider-Part credential
   refusal; frontend protocol conversion and Windows CSP; artwork dimension,
   MIME, traversal, query, header-auth, redirect, declared-size, and streamed
   size bounds; mpv ACL-before-write, partial-write cleanup, process-query
   retention/reaping, replacement ordering, and exit-queue cleanup; discovery
-  body nonreflection; and exact/embedded mock-log redaction. The original
-  artwork-query test was vacuous because its fixture failed earlier validation;
-  the strengthened otherwise-valid query fixture was red-proven and committed
-  as `ad98b09`. Every deliberate production regression is restored and the
-  worktree was clean before this handoff snapshot.
+  body nonreflection; and exact/embedded mock-log redaction, the three
+  real-app multiplex behaviors were red-proven separately on the Linux E2E
+  venue: a transcode query token failed the Plex mock contract, and
+  query-token progress and query-token timeline each failed the
+  source-token-header assertion. Every regression was restored from its
+  committed state and reran green; one restored-green run needed an immediate
+  rerun after a transient Settings-dialog timeout on the identical binary.
+  Closeout verification passed with the exact Node/npm toolchain, 51 Node
+  tests, 259 Rust tests, and the rebuilt Linux real app at 37/37 E2E
+  scenarios. The full evidence paragraph is canonical in
+  `.agents/plans/config-integrity-recovery.md`.
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
@@ -120,14 +126,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Resume Slice 3's post-commit guard pass. Red-prove the real-app multiplex
-  coverage separately for credential-free artwork, progress header auth, and
-  timeline header auth on the Linux E2E venue; restore and rerun each scenario
-  green. Then run the final focused/full guard set, update the Slice 3 evidence
-  and this state entry, and commit the docs-only closeout.
-- After Slice 3 guard closeout lands, explicitly activate the marker plan
-  before any marker implementation. Rebase its example version sequence from
-  the actual 1.0.4 prerequisite; do not begin marker code from this handoff.
+- Explicitly activate the marker plan before any marker implementation.
+  Rebase its example version sequence from the actual 1.0.4 prerequisite; do
+  not begin marker code from this handoff.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -138,10 +139,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Marker-skipping implementation remains intentionally gated on completing the
-  Slice 3 post-commit guard closeout and explicit marker-plan activation.
-- Config-integrity/recovery has no unresolved owner or review blocker; only its
-  already-scoped guard proof and documentation closeout remain.
+- Marker-skipping implementation remains intentionally gated on explicit
+  marker-plan activation; the Slice 3 post-commit guard closeout it waited on
+  is complete.
+- Config-integrity/recovery has no unresolved owner or review blocker; the
+  plan is fully landed, verified, and guard-proven.
 
 ## Verification
 
