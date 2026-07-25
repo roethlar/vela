@@ -3,10 +3,9 @@
 // per-kind policy — auto-skip seeking on its own, Button offering a control
 // that Space activates while it is visible and only while it is visible.
 //
-// Scope honesty: the real POINTER click on the button's published hitbox is
-// leg 2 of the plan's acceptance list and needs `xdotool`, which is not
-// installed on the venue. It is deliberately absent here rather than faked
-// with a synthetic key press, which would prove nothing about the hitbox.
+// The pointer leg injects a REAL click at the centre of the hitbox the script
+// publishes, targeted at mpv's own window. A synthetic key press would prove
+// nothing about the hitbox, which is the whole point of that leg.
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
@@ -74,6 +73,21 @@ async function launch(driver) {
   await gridPlay(driver);
   const socketPath = await waitForNewMpvSocket(before);
   return MpvIpc.connect(socketPath);
+}
+
+// Click at (x, y) inside mpv's own window. Coordinates are window-relative:
+// the script publishes its hitbox in OSD space, which is mpv's window pixels.
+function clickMpvWindow(x, y) {
+  const search = spawnSync('xdotool', ['search', '--class', 'mpv'], { encoding: 'utf8' });
+  const ids = (search.stdout || '').trim().split('\n').filter(Boolean);
+  assert.ok(ids.length > 0, 'xdotool must find an mpv window to click');
+  const windowId = ids[ids.length - 1];
+  const click = spawnSync(
+    'xdotool',
+    ['mousemove', '--window', windowId, String(x), String(y), 'click', '--window', windowId, '1'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(click.status, 0, `xdotool click failed: ${click.stderr}`);
 }
 
 async function endSession(mpv) {
@@ -193,6 +207,39 @@ export default {
         'button: Space pauses normally once the button is gone',
         { timeoutMs: 6000 },
       );
+    } finally {
+      await endSession(mpv);
+    }
+
+    // Leg 2 — the button is genuinely clickable at the hitbox it publishes.
+    // A real pointer event, not a key press: this is the only leg that proves
+    // the drawn rectangle and the clickable area are the same rectangle.
+    mock.state.setMediaSegments('m1', [segment('Intro', 2_000, 12_000)]);
+    mpv = await launch(driver);
+    try {
+      await pollUntil(
+        () => mpv.getProp('user-data/vela-markers/active').catch(() => null)
+          .then((v) => (v === 'intro' ? v : null)),
+        'click: the active marker property',
+        { timeoutMs: 14000 },
+      );
+      const box = await mpv.getProp('user-data/vela-markers/button-bounds');
+      clickMpvWindow(
+        Math.round((box.x1 + box.x2) / 2),
+        Math.round((box.y1 + box.y2) / 2),
+      );
+      await pollUntil(
+        () => mpv.getProp('time-pos').catch(() => null).then((t) => (t != null && t >= 12 ? t : null)),
+        'click: the pointer click activated the skip',
+        { timeoutMs: 8000 },
+      );
+      await pollUntil(
+        () => mpv.getProp('user-data/vela-markers/active').catch(() => null)
+          .then((v) => (v === '' ? 'cleared' : null)),
+        'click: the active property clears after the skip',
+        { timeoutMs: 6000 },
+      );
+      await screenshot('04-clicked');
     } finally {
       await endSession(mpv);
     }

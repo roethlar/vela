@@ -126,6 +126,19 @@ Established that day:
 - Not obviously GL: the run emits `libEGL ... DRI3/DRI2 failed to create
   screen` warnings, and forcing `WEBKIT_DISABLE_COMPOSITING_MODE=1` plus
   `LIBGL_ALWAYS_SOFTWARE=1` does not change the outcome.
+- Not the driver stack: launched by hand exactly as `run.mjs` does,
+  `tauri-driver` listens on 4444 and its spawned vendored `WebKitWebDriver`
+  listens on 4445. The driver binary also runs and binds standalone. The lone
+  `Error serving connection ... Connection refused` line in the artifacts log
+  is a startup-race artifact, not the failure.
+
+So the session is established and the app launches; what never happens is the
+render the harness waits for. The next step is to determine whether the webview
+paints at all under this Xvfb display (launch the app on the harness's display
+and capture the window), and whether the last known-good 37/37 run of
+2026-07-24 is reproducible by reverting the tree — this has NOT been done.
+`xdotool` was installed by the owner on 2026-07-25, so the marker E2E's pointer
+leg is no longer blocked on tooling.
 
 The VM also has a `stash@{0}` (`codex-linux-validation-1a2bef5`) and its clone
 sits at `95312fc` on `main`; the 2026-07-25 sync overwrote working-tree files
