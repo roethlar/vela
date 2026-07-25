@@ -683,6 +683,32 @@ message, but for its own reason).
 - **Verify:** full canonical dual-side set plus targeted and full Linux E2E.
   Red-prove every behavior claimed by the E2E separately.
 
+**Slice 4 status (2026-07-25): production landed, BEHAVIOURAL VERIFICATION NOT
+DONE.** The flip is committed as `5dd3e35` at version 1.0.10: `PlaySpec` carries
+`markers_script`, `markers`, and the three resolved policies; `commands.rs`
+resolves policies before stream resolution, passes `include_markers` only when a
+policy is enabled, filters returned markers to enabled kinds, and resolves
+`vela-markers.lua` through the same resolver as autocrop; `playback::play`
+existence-checks the script, best-effort writes an owner-only payload, appends
+the marker args after user options, and sets `VELA_MARKERS_PAYLOAD` on the child
+only; a spawn failure or shutdown removes the payload. All three Settings →
+Player controls and the README Player notes landed in the same commit, and
+`mockjf.mjs` serves the real `/MediaSegments/{id}` route, recording a contract
+violation when a required `includeSegmentTypes` filter is missing.
+
+Verified: full canonical dual-side set at 1.0.10 with 278 Rust tests (275
+before), covering the `markers_args` injection-polarity matrix and owner-only
+payload creation.
+
+NOT verified, and NOT to be treated as working: the five behavioural E2E legs in
+**Behavioral E2E acceptance** above are neither written nor run. No skip button
+has ever been rendered, clicked, or activated by Space; no auto-skip seek has
+been observed; the commercial path is unexercised end to end. The macOS dev host
+cannot run the suite (`.agents/machines.md`), and the Linux venue's clone was 16
+commits behind at `95312fc` with local modifications, so it needs a checksum-
+verified `scp` sync and a debug rebuild before any leg can run. Until those legs
+pass, this slice is incomplete and the feature is unproven in a real player.
+
 ### Behavioral E2E acceptance
 
 Use the existing generated 30-second Jellyfin clip and real mpv IPC harness;

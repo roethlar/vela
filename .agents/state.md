@@ -158,7 +158,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Implement marker-skipping Slice 4 per
+- **Finish marker Slice 4's behavioural verification — the slice is NOT done.**
+  Its production flip landed as `5dd3e35` at 1.0.10 (PlaySpec fields, policy
+  resolution and marker filtering, payload write/cleanup, arg injection,
+  Settings controls, README, and the mock MediaSegments route), verified only by
+  the canonical set and 278 Rust tests. The five behavioural E2E legs are
+  neither written nor run: no skip button has ever rendered, been clicked, or
+  been activated by Space, and no auto-skip seek has been observed. Write them
+  per the plan's **Behavioral E2E acceptance**, then run them on the Linux venue
+  and red-prove each claim separately. The venue needs work first: its clone was
+  16 commits behind at `95312fc` with local modifications, and syncing is a
+  checksum-verified `scp` plus a debug rebuild — never a push and never
+  `git checkout -- .` (`.agents/machines.md`).
+- Original Slice 4 scope, retained for reference:
   `.agents/plans/skip-credits-intros-v2.md` — the atomic product flip, and the
   first slice where any of this is user-visible. Pass the resolved policy into
   selected resolution, policy-filter the returned markers, add the `PlaySpec`
