@@ -6568,6 +6568,58 @@ mod tests {
         );
     }
 
+    // The play path hands the player only the ranges the user enabled. Without
+    // this filter the script would receive a credits range while credits are
+    // Off and skip something the user chose to watch.
+    #[test]
+    fn only_enabled_marker_kinds_reach_the_player() {
+        use crate::config::SkipPolicy;
+        use crate::source::{MarkerKind, MediaMarker};
+
+        let range = |kind, start_ms| MediaMarker {
+            kind,
+            start_ms,
+            end_ms: start_ms + 1_000,
+        };
+        let all = [
+            range(MarkerKind::Intro, 1_000),
+            range(MarkerKind::Credits, 2_000),
+            range(MarkerKind::Commercial, 3_000),
+        ];
+
+        let policies = SkipPolicies {
+            intro: SkipPolicy::Button,
+            credits: SkipPolicy::Off,
+            commercial: SkipPolicy::Autoskip,
+        };
+        assert!(policies.any_enabled(), "markers are requested at all");
+        let kept: Vec<MarkerKind> = all
+            .iter()
+            .filter(|marker| !skip_policy_for(marker.kind, &policies).is_off())
+            .map(|marker| marker.kind)
+            .collect();
+        assert_eq!(
+            kept,
+            vec![MarkerKind::Intro, MarkerKind::Commercial],
+            "the disabled kind must not reach the player"
+        );
+
+        let none = SkipPolicies {
+            intro: SkipPolicy::Off,
+            credits: SkipPolicy::Off,
+            commercial: SkipPolicy::Off,
+        };
+        assert!(
+            !none.any_enabled(),
+            "with every kind off the server is never asked for markers"
+        );
+        assert!(
+            all.iter()
+                .all(|marker| skip_policy_for(marker.kind, &none).is_off()),
+            "with every kind off nothing survives the filter"
+        );
+    }
+
     #[test]
     fn validate_sort_rejects_unknown_values() {
         assert!(validate_sort(Some("titleSort:asc".to_string())).is_ok());
