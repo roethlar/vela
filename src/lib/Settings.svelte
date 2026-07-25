@@ -24,6 +24,13 @@
 
   type AutocropMode = "off" | "manual" | "auto";
   type SkipPolicy = "off" | "button" | "autoskip";
+  type QualityTier = {
+    id: string;
+    label: string;
+    bitrateKbps: number;
+    width: number;
+    height: number;
+  };
   type MpvAdvanced = {
     extraArgs: string;
     useOwnConfig: boolean;
@@ -31,6 +38,8 @@
     skipIntros: SkipPolicy;
     skipCredits: SkipPolicy;
     skipCommercials: SkipPolicy;
+    playbackQuality: string;
+    qualityTiers: QualityTier[];
   };
 
   let {
@@ -147,6 +156,10 @@
   let mpvAutocrop = $state<AutocropMode>("off");
   // Button matches the backend's missing-field default, so a load failure
   // cannot present a stronger setting than the user actually has.
+  // Original matches the backend's missing-field default, so a failed load can
+  // never present a converted setting the user never chose.
+  let playbackQuality = $state("original");
+  let qualityTiers = $state<QualityTier[]>([]);
   let skipIntros = $state<SkipPolicy>("button");
   let skipCredits = $state<SkipPolicy>("button");
   let skipCommercials = $state<SkipPolicy>("button");
@@ -179,7 +192,8 @@
     {
       value: "compatible",
       label: "Prefer Compatible",
-      summary: "Match this machine's playback display resolution and HDR state.",
+      summary:
+        "Pick the copy that best matches this machine's display resolution and HDR state.",
     },
     {
       value: "fastest",
@@ -246,6 +260,8 @@
       mpvExtraArgs = adv.extraArgs;
       mpvUseOwnConfig = adv.useOwnConfig;
       mpvAutocrop = adv.autocrop;
+      playbackQuality = adv.playbackQuality;
+      qualityTiers = adv.qualityTiers;
       skipIntros = adv.skipIntros;
       skipCredits = adv.skipCredits;
       skipCommercials = adv.skipCommercials;
@@ -366,6 +382,7 @@
         skipIntros,
         skipCredits,
         skipCommercials,
+        playbackQuality,
       });
     } catch (e) {
       err = String(e);
@@ -502,6 +519,11 @@
     <section>
       <h3>Duplicate playback source</h3>
       <div class="form">
+        <p class="muted small">
+          This chooses <b>which copy</b> plays, not how it is delivered — that's
+          Playback quality, further down. It does nothing when a title exists in
+          only one place.
+        </p>
         <fieldset class="policygrid">
           <legend>When the same title exists on more than one server</legend>
           {#each playbackPolicies as policy}
@@ -699,6 +721,33 @@
               Off or Manual.
             </p>
           {/if}
+        </div>
+
+        <div class="field">
+          <label for="playback-quality">Playback quality</label>
+          <select id="playback-quality" bind:value={playbackQuality}>
+            <option value="original">Original — play the file as it is</option>
+            {#each qualityTiers as tier (tier.id)}
+              <!-- Two tiers share the label "Convert to 1080p HD" and differ
+                   only by bitrate, so the bitrate is not decoration. -->
+              <option value={tier.id}>
+                {tier.label} — {tier.bitrateKbps >= 1000
+                  ? `${tier.bitrateKbps / 1000} Mbps`
+                  : `${tier.bitrateKbps} kbps`}
+              </option>
+            {/each}
+            <option value="automatic">Automatic</option>
+          </select>
+          <p class="muted small">
+            How the copy you play is <b>delivered</b>. Original streams the file
+            untouched and is the only setting that keeps HDR. Anything else asks
+            your server to convert it, which costs HDR and container chapters.
+            Automatic starts at Original and steps down only if playback can't
+            keep up. Set this to suit where you are — a slow connection now, a
+            fast one later — and change it whenever that changes; it isn't
+            remembered per title. A title's own right-click menu can override it
+            for one play.
+          </p>
         </div>
 
         <div class="field">

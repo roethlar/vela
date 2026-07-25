@@ -66,6 +66,16 @@ pub struct AppConfig {
     /// means the approved [`SkipPolicy::MISSING`] default; a present value
     /// outside the closed enum fails deserialization and invalidates the whole
     /// document. Missing and invalid are deliberately not the same thing.
+    /// Current playback quality: `"original"`, `"automatic"`, or one of the
+    /// quality-ladder tier ids. Missing means `"original"`, so every existing
+    /// install keeps direct play and HDR passthrough untouched. Unknown values
+    /// invalidate the document.
+    ///
+    /// This tracks the user's SITUATION, not a title and not the machine's
+    /// fixed capability — the same laptop is on a cafe link one day and wired
+    /// the next — so it is a plain setting the user flips, never derived and
+    /// never remembered per file.
+    pub playback_quality: Option<String>,
     pub skip_intros: Option<SkipPolicy>,
     pub skip_credits: Option<SkipPolicy>,
     pub skip_commercials: Option<SkipPolicy>,
@@ -118,6 +128,22 @@ pub struct AppConfig {
     /// removed with the legacy live credential fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) connections_split_backup: Option<ConnectionsSplitBackup>,
+}
+
+/// Play the file as it is — no conversion, and the only value that preserves
+/// HDR passthrough. The default when the setting is absent.
+pub const PLAYBACK_QUALITY_ORIGINAL: &str = "original";
+/// Let mpv's own playback reporting decide, per the 2026-07-25 ruling. Opt-in,
+/// never a default, because stepping down forfeits HDR.
+pub const PLAYBACK_QUALITY_AUTOMATIC: &str = "automatic";
+
+/// Resolve the stored playback quality, applying the documented default. The
+/// only place that default is applied.
+pub fn playback_quality(stored: Option<&str>) -> String {
+    stored
+        .filter(|value| !value.is_empty())
+        .unwrap_or(PLAYBACK_QUALITY_ORIGINAL)
+        .to_string()
 }
 
 /// What Vela does when playback enters a marker range of one kind: nothing,
@@ -370,6 +396,15 @@ impl AppConfig {
             "playback source policy",
             self.playback_source_policy.as_deref(),
             &["best", "compatible", "fastest", "ask"],
+        )?;
+        // The allowed set is the ladder itself plus the two non-tier values, so
+        // a tier that leaves the ladder can never linger as a valid setting.
+        let mut quality_values = vec![PLAYBACK_QUALITY_ORIGINAL, PLAYBACK_QUALITY_AUTOMATIC];
+        quality_values.extend(crate::source::QUALITY_TIERS.iter().map(|tier| tier.id));
+        validate_optional_closed(
+            "playback quality",
+            self.playback_quality.as_deref(),
+            &quality_values,
         )?;
         validate_optional_closed(
             "display resolution",
@@ -1064,6 +1099,42 @@ mod tests {
         );
     }
 
+    // An install that predates transcoding keeps direct play, which is also the
+    // only value that preserves HDR passthrough. Defaulting any other way would
+    // silently convert video for people who never asked.
+    #[test]
+    fn missing_playback_quality_means_original() {
+        let old: AppConfig = serde_json::from_str(r#"{"auth_token":"tok"}"#).expect("parses");
+        assert_eq!(old.playback_quality, None, "absence stays absence");
+        assert_eq!(playback_quality(old.playback_quality.as_deref()), "original");
+        assert_eq!(playback_quality(None), "original");
+        assert_eq!(playback_quality(Some("")), "original", "empty is not a tier");
+        assert_eq!(playback_quality(Some("automatic")), "automatic");
+    }
+
+    // The setting's valid set is the ladder itself, so a tier that ever leaves
+    // the ladder cannot linger in a config as a value nothing can honour.
+    #[test]
+    fn playback_quality_accepts_only_ladder_values() {
+        for valid in ["original", "automatic", "1080p-8000", "328p-700"] {
+            let cfg = AppConfig {
+                playback_quality: Some(valid.to_string()),
+                ..Default::default()
+            };
+            assert!(cfg.validate().is_ok(), "{valid} should be accepted");
+        }
+        for invalid in ["1080p", "8000", "Original", "best", "1080p-9999"] {
+            let cfg = AppConfig {
+                playback_quality: Some(invalid.to_string()),
+                ..Default::default()
+            };
+            assert!(
+                cfg.validate().is_err(),
+                "{invalid} must be rejected, not normalized"
+            );
+        }
+    }
+
     // A settings file written before marker skipping existed is valid, and
     // every kind resolves to the owner-approved Button prompt — never to an
     // automatic seek the user never asked for.
@@ -1113,6 +1184,7 @@ mod tests {
     fn marker_policies_leave_the_legacy_rollback_fields_untouched() {
         let legacy = r#"{
             "skip_intros": "autoskip",
+            "playback_quality": "720p-2000",
             "local_folders": [
                 {"id": "legacy-folder", "name": "Movies", "path": "/Volumes/media", "kind": "movie"}
             ],
@@ -1132,6 +1204,7 @@ mod tests {
         let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
 
         assert_eq!(back.skip_intros, Some(SkipPolicy::Autoskip));
+        assert_eq!(back.playback_quality.as_deref(), Some("720p-2000"));
         assert_eq!(back.local_folders[0].path, "/Volumes/media");
         assert_eq!(back.smb_mounts[0].local_folder_id, "legacy-folder");
         assert_eq!(

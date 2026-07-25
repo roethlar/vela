@@ -911,6 +911,14 @@ pub struct MpvAdvanced {
     pub skip_intros: config::SkipPolicy,
     pub skip_credits: config::SkipPolicy,
     pub skip_commercials: config::SkipPolicy,
+    /// Current playback quality, already resolved through its default so the UI
+    /// always has a concrete value to bind: `"original"`, `"automatic"`, or a
+    /// tier id.
+    pub playback_quality: String,
+    /// The full ladder, so Settings can render labels and bitrates without
+    /// duplicating the table in TypeScript. Per-file filtering happens at play
+    /// time, not here — this is the global ceiling the user is choosing.
+    pub quality_tiers: Vec<crate::source::QualityTier>,
 }
 
 #[tauri::command]
@@ -924,6 +932,8 @@ pub fn get_mpv_advanced() -> Result<MpvAdvanced, String> {
         skip_intros: config::SkipPolicy::resolve(cfg.skip_intros),
         skip_credits: config::SkipPolicy::resolve(cfg.skip_credits),
         skip_commercials: config::SkipPolicy::resolve(cfg.skip_commercials),
+        playback_quality: config::playback_quality(cfg.playback_quality.as_deref()),
+        quality_tiers: crate::source::QUALITY_TIERS.to_vec(),
     })
 }
 
@@ -993,6 +1003,7 @@ pub fn set_mpv_advanced(
     skip_intros: Option<config::SkipPolicy>,
     skip_credits: Option<config::SkipPolicy>,
     skip_commercials: Option<config::SkipPolicy>,
+    playback_quality: Option<String>,
 ) -> Result<(), String> {
     let trimmed = extra_args.trim().to_string();
     config::update(move |cfg| {
@@ -1018,6 +1029,19 @@ pub fn set_mpv_advanced(
         }
         if let Some(policy) = skip_commercials {
             cfg.skip_commercials = Some(policy);
+        }
+        if let Some(quality) = &playback_quality {
+            // Reject here rather than writing a value the loader would later
+            // refuse: an invalid setting must never reach the file.
+            let known = quality == config::PLAYBACK_QUALITY_ORIGINAL
+                || quality == config::PLAYBACK_QUALITY_AUTOMATIC
+                || crate::source::QUALITY_TIERS
+                    .iter()
+                    .any(|tier| tier.id == quality);
+            if !known {
+                return Err("unknown playback quality".to_string());
+            }
+            cfg.playback_quality = Some(quality.clone());
         }
         Ok(())
     })
