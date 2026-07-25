@@ -52,7 +52,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   canonical dual-side set passed at 1.0.7 with 271 Rust tests; no follow-up
   review ran, so no clean verdict is claimed. The full evidence is canonical in
   the plan and in `.agents/review/findings/mk-1.md` and `mk-2.md`. Settled
-  behavior is recorded in
+  Slice 2 is committed as `42ab254` at version 1.0.8: the Vela-authored MIT
+  `vela-markers.lua` plus its `PROVENANCE.md` entry. It was verified against
+  real mpv 0.41.0 (payload read, parse, `loaded` property, self-unlink, and both
+  inert degrade paths) because no automated harness covers Lua; button
+  rendering, the hitbox, the Space binding, seek, and the entry latch are
+  deferred to Slice 4's real-app E2E as that slice specifies, and no repo test
+  guards this file yet. Settled behavior is recorded in
   `.agents/decisions.md`: missing intro, credit, and commercial settings default
   to Button; the external-mpv control is genuinely clickable; and Space
   activates it only while visible, otherwise retaining its normal pause
@@ -148,13 +154,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Implement marker-skipping Slice 2 per
-  `.agents/plans/skip-credits-intros-v2.md`: add
-  `src-tauri/resources/mpv-scripts/vela-markers.lua` with its explicit
-  overlay/binding/entry-latch behavior and child-env payload read/unlink, update
-  `PROVENANCE.md` with the Vela MIT entry, and bump to 1.0.8. Full Lua behavior
-  is guarded when launch wiring lands in Slice 4; record it if the mpv
-  script-load check is deferred to that slice's real-app E2E.
+- Implement marker-skipping Slice 3 per
+  `.agents/plans/skip-credits-intros-v2.md`: `skip_intros` / `skip_credits` /
+  `skip_commercials` on `AppConfig` behind a closed `SkipPolicy`, mapping missing
+  fields to their approved per-kind Button defaults, extended through the
+  existing locked atomic config path via `MpvAdvanced` get/set. No Settings
+  controls in this slice, so no shipped UI offers a setting playback ignores.
+  Bump to 1.0.9, and red-prove missing-field defaulting, unknown-value
+  rejection, and legacy-field round-trip preservation separately.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or

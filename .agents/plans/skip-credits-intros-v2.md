@@ -582,6 +582,46 @@ verdict is claimed for the repaired code.
   load against a minimal valid payload if practical and record when deferred to
   slice 4's real-app E2E.
 
+**Slice 2 evidence (2026-07-25, version 1.0.8, commit `42ab254`).**
+`src-tauri/resources/mpv-scripts/vela-markers.lua` is added and
+`PROVENANCE.md` records it as Vela-authored MIT with no upstream ancestor,
+stating that `LICENSE.GPL` covers stock `autocrop.lua` only. `tauri.conf.json`
+already maps the whole `resources/mpv-scripts/` directory, so the new file
+bundles with no resource-map change — confirmed by reading the existing mapping,
+not assumed.
+
+The script reads its payload path from `VELA_MARKERS_PAYLOAD` on the child
+environment, never from the comma-split script-opts list; policies use the
+explicit `vela-markers` identifier with dashed keys. Policy defaults are `off`
+rather than the product's Button default: Vela always passes all three
+explicitly, so the defaults are unreachable in a real launch, and `off` is the
+only value that cannot make the player seek when it was never told to. An
+unrecognized policy is treated the same way — the settings layer has already
+rejected anything invalid before launch, so the player is the wrong place to
+guess.
+
+The button's hitbox is computed first and the box drawn to it, because ASS
+exposes no text metrics and a control whose clickable area disagrees with its
+pixels is worse than none. OSD space is window pixels, so the published
+`button-bounds` rectangle is directly what the Slice 4 E2E clicks. `draw_button`
+returns whether it actually reached the screen and the caller latches `armed`
+only on success, so a tick arriving before the video output has published its
+dimensions retries on the next tick instead of latching an invisible button.
+
+Verified against real mpv 0.41.0 on the dev machine, since no automated harness
+covers Lua: `luac -p` parses clean; loading the script with a two-marker payload
+publishes `user-data/vela-markers/loaded = true` and the script removes the
+payload file itself; a missing payload and an unparseable payload both yield
+`loaded = false` with no mpv diagnostics, and the unparseable payload is still
+removed — proving the unlink happens regardless of parse outcome. The full
+canonical dual-side set passed at 1.0.8 with 271 Rust tests.
+
+NOT verified here and deferred to Slice 4's real-app E2E, exactly as this slice
+specifies: button rendering, the mouse hitbox, the temporary Space binding, seek
+behavior, and the entry latch. The headless `--vo=null` venue publishes no OSD
+dimensions, so no button can be drawn to assert against; `active` stayed empty
+for that reason. No guard in the repo's automated suite covers this file yet.
+
 ### Slice 3 — Config + command boundary (no visible control yet)
 
 - **Precondition (SATISFIED 2026-07-24):** the separately planned app-wide
