@@ -1123,7 +1123,33 @@ impl PlexLibrary {
     /// `include_markers` adds `includeMarkers=1`, which makes the server attach
     /// its `<Marker>` skip ranges to this same response — the reason Vela never
     /// needs a third request at play time.
+    ///
+    /// Because that rides the mandatory request, asking for markers introduces a
+    /// failure mode the plain request does not have. Markers are optional, so a
+    /// marker-bearing request that fails is retried once without the parameter:
+    /// wanting skip ranges must never be the reason a play fails on a server
+    /// that would have answered without them.
     pub async fn get_item_detail(
+        &self,
+        rating_key: &str,
+        include_markers: bool,
+    ) -> Result<PlexDetail, Box<dyn std::error::Error>> {
+        // Keep only the message: the boxed error itself is not `Send`, and the
+        // retry below is an await point inside a future that must be.
+        let original = match self.fetch_item_detail(rating_key, include_markers).await {
+            Ok(detail) => return Ok(detail),
+            Err(error) if include_markers => error.to_string(),
+            Err(error) => return Err(error),
+        };
+        eprintln!("plex: detail request with markers failed, retrying without them");
+        self.fetch_item_detail(rating_key, false)
+            .await
+            // If the plain request fails too, report the original failure —
+            // the marker retry is not the interesting error.
+            .map_err(|_| original.into())
+    }
+
+    async fn fetch_item_detail(
         &self,
         rating_key: &str,
         include_markers: bool,
@@ -1846,6 +1872,76 @@ mod tests {
             body
         )
         .into_bytes()
+    }
+
+    /// Serve `responses` in order, one connection each, returning every request
+    /// line received.
+    async fn detail_server_sequence(
+        responses: Vec<Vec<u8>>,
+    ) -> (u16, tokio::task::JoinHandle<Vec<String>>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let mut request_lines = Vec::new();
+            for response in responses {
+                let (mut stream, _) = listener.accept().await.unwrap();
+                let mut bytes = Vec::new();
+                let mut chunk = [0_u8; 2048];
+                loop {
+                    let count = stream.read(&mut chunk).await.unwrap();
+                    if count == 0 {
+                        break;
+                    }
+                    bytes.extend_from_slice(&chunk[..count]);
+                    if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                stream.write_all(&response).await.unwrap();
+                let text = String::from_utf8_lossy(&bytes).to_string();
+                request_lines.push(text.lines().next().unwrap_or_default().to_string());
+            }
+            request_lines
+        });
+        (port, task)
+    }
+
+    // Markers are optional; playback is not. A server that rejects the
+    // marker-bearing request must cost the user their skip ranges, never their
+    // ability to play the item.
+    #[tokio::test]
+    async fn item_detail_falls_back_when_the_marker_request_is_rejected() {
+        let rejected =
+            b"HTTP/1.1 500 Internal Server Error\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                .to_vec();
+        let plain_body =
+            r#"<MediaContainer><Video ratingKey="42" key="/library/metadata/42" title="Episode"/></MediaContainer>"#;
+        let plain = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            plain_body.len(),
+            plain_body
+        )
+        .into_bytes();
+        let (port, captured) = detail_server_sequence(vec![rejected, plain]).await;
+
+        let detail = artwork_library(port)
+            .get_item_detail("42", true)
+            .await
+            .expect("a rejected marker request must not fail the detail fetch");
+        assert_eq!(detail.rating_key, "42");
+        assert!(detail.markers.is_empty(), "the fallback carries no markers");
+
+        let requests = captured.await.unwrap();
+        assert_eq!(requests.len(), 2, "exactly one markerless retry");
+        assert!(
+            requests[0].contains("includeMarkers=1"),
+            "the first attempt asked for markers: {}",
+            requests[0]
+        );
+        assert_eq!(
+            requests[1], "GET /library/metadata/42 HTTP/1.1",
+            "the retry must drop the marker parameter entirely"
+        );
     }
 
     // Plex attaches its skip ranges to this existing response only when the
