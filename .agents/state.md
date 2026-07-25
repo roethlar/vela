@@ -158,6 +158,35 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
+- **Close the four open transcoding findings before anything else in that
+  feature.** Detail in `.agents/review/findings/tr-3.md`; all four came from the
+  2026-07-25 codex review of slice 3 and are admitted, not disputed.
+  1. `tr-4` (HIGH) — teardown is a detached `tauri::async_runtime::spawn` from
+     the playback-end callback in `commands.rs`, and app exit kills mpv and
+     returns, so the DELETE can be lost and a transcode left running on the
+     user's server. Needs an owned active-session record and an awaited
+     shutdown path.
+  2. `tr-6` (MEDIUM) — both providers' teardown checks only transport errors,
+     never `error_for_status`, so 401/429/5xx reads as success with no log and
+     no retry.
+  3. `tr-8` (MEDIUM) — `Automatic` is selectable in Settings but nothing
+     observes mpv or steps down. Same defect class as `tr-1`. Either withhold
+     the value or land slice 5 first; do not ship it selectable and inert.
+  4. `tr-9` (MEDIUM) — every Plex transcode URL hardcodes `partIndex=0`, so a
+     split-file version transcodes only its first part and ends there. The plan
+     records multi-part transcoding as an open question; silent truncation is
+     worse than refusing, so this needs a decision.
+- **Then build transcoding slice 4's UI.** The backend command
+  `quality_options` exists (`de80b8a`); the menu does not. Shape is settled in
+  `.agents/decisions.md` (2026-07-25): `Play Version >` with servers expanding
+  to that server's deliverable qualities when a title has two or more copies,
+  `Play at Quality >` listing qualities directly when it has one, never both,
+  absent entirely when the only copy cannot be converted. Every entry shows its
+  bitrate — two ladder tiers share a label. Resolve options LAZILY when the
+  submenu opens: for Plex it is a decision round trip per version. The choice
+  applies to the play it starts and persists nothing.
+- Slices 5 (Automatic) and 6 (Emby labelling, README) follow, per
+  `.agents/plans/server-transcoding.md`.
 - **Finish marker Slice 4's behavioural verification — the slice is NOT done.**
   Its production flip landed as `5dd3e35` at 1.0.10 (PlaySpec fields, policy
   resolution and marker filtering, payload write/cleanup, arg injection,
