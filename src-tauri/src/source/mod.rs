@@ -375,6 +375,53 @@ fn episode_context_from_detail(detail: DetailDto) -> Option<EpisodeContext> {
     })
 }
 
+/// A kind of skippable range a media server publishes for one item. Server
+/// types Vela does not model (Preview, Recap) are dropped at parse time rather
+/// than folded into one of these — a recap is not an advert.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum MarkerKind {
+    Intro,
+    Credits,
+    Commercial,
+}
+
+/// One skippable range on the exact item being played, in provider-neutral
+/// form. Providers publish these in their own units; each backend converts
+/// before construction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MediaMarker {
+    pub kind: MarkerKind,
+    /// Inclusive start of the skippable range, milliseconds from media start.
+    pub start_ms: u64,
+    /// Seek target / range end, milliseconds. Always greater than `start_ms`
+    /// once [`normalize_markers`] has run.
+    pub end_ms: u64,
+}
+
+/// Longest range Vela will accept as a real marker. A half-hour skip is far
+/// outside any real intro or credit sequence, so anything longer is garbage
+/// data rather than something to seek across.
+pub const MAX_MARKER_MS: u64 = 30 * 60 * 1000;
+
+/// Shared post-parse cleanup every provider runs before markers reach the
+/// playback layer: drop inverted, empty and implausibly long ranges, drop exact
+/// duplicate `(kind, start, end)` triples, and order by start.
+///
+/// Overlapping ranges of the same kind are deliberately kept — the runtime
+/// picks the first range containing the current position, which is only
+/// well-defined if the list stays sorted by start.
+pub fn normalize_markers(mut markers: Vec<MediaMarker>) -> Vec<MediaMarker> {
+    let mut seen = std::collections::HashSet::new();
+    markers.retain(|marker| {
+        marker.end_ms > marker.start_ms
+            && marker.end_ms - marker.start_ms <= MAX_MARKER_MS
+            && seen.insert((marker.kind, marker.start_ms, marker.end_ms))
+    });
+    markers.sort_by_key(|marker| marker.start_ms);
+    markers
+}
+
 /// What `resolve_stream` hands back to the playback layer: the media URL, where
 /// to resume from, and how (if at all) to report progress.
 pub struct StreamResolution {
@@ -386,6 +433,10 @@ pub struct StreamResolution {
     /// (mpv renders `${path}` in its title, stats overlay, and playlist).
     /// Empty only when the stream needs no authentication.
     pub http_headers: Vec<(String, String)>,
+    /// Best-effort intro/credits/commercial ranges for this exact selected
+    /// item, already normalized. A provider marker failure is normalized to
+    /// empty before construction: markers never fail a play.
+    pub markers: Vec<MediaMarker>,
 }
 
 /// Credential-free facts about one exact provider media version. This stays
@@ -441,10 +492,15 @@ pub trait MediaSource: Send + Sync {
         start: usize,
         size: usize,
     ) -> Result<Vec<ItemDto>, String>;
+    /// `include_markers` asks the backend to collect skip ranges while it does
+    /// the resolve work it must do anyway. The play command passes `true` only
+    /// when a marker policy is actually enabled, so servers see no extra
+    /// request for a feature the user turned off.
     async fn resolve_stream(
         &self,
         item_key: &str,
         duration_ms: Option<u64>,
+        include_markers: bool,
     ) -> Result<StreamResolution, String>;
 
     /// Fetch provider artwork without exposing its credentials to the
@@ -470,8 +526,10 @@ pub trait MediaSource: Send + Sync {
         item_key: &str,
         duration_ms: Option<u64>,
         _version_id: &str,
+        include_markers: bool,
     ) -> Result<StreamResolution, String> {
-        self.resolve_stream(item_key, duration_ms).await
+        self.resolve_stream(item_key, duration_ms, include_markers)
+            .await
     }
 
     /// Mark an item watched (`played = true`) or unwatched on its source.
@@ -658,9 +716,79 @@ mod tests {
             &self,
             _: &str,
             _: Option<u64>,
+            _: bool,
         ) -> Result<StreamResolution, String> {
             Err("fake source".into())
         }
+    }
+
+    fn marker(kind: MarkerKind, start_ms: u64, end_ms: u64) -> MediaMarker {
+        MediaMarker {
+            kind,
+            start_ms,
+            end_ms,
+        }
+    }
+
+    // A range that ends at or before it starts is not skippable, and a
+    // half-hour "intro" is corrupt data — seeking across either would throw the
+    // viewer somewhere they never asked to be.
+    #[test]
+    fn normalize_drops_empty_inverted_and_implausibly_long_ranges() {
+        let kept = normalize_markers(vec![
+            marker(MarkerKind::Intro, 5_000, 4_000),
+            marker(MarkerKind::Intro, 5_000, 5_000),
+            marker(MarkerKind::Credits, 0, MAX_MARKER_MS + 1),
+            marker(MarkerKind::Commercial, 10_000, 10_000 + MAX_MARKER_MS),
+        ]);
+        assert_eq!(
+            kept,
+            vec![marker(
+                MarkerKind::Commercial,
+                10_000,
+                10_000 + MAX_MARKER_MS
+            )],
+            "only the plausible range survives, and the boundary length is kept"
+        );
+    }
+
+    // Duplicates must go by the whole triple: the same span published as two
+    // different kinds is two real markers, not one repeated.
+    #[test]
+    fn normalize_drops_exact_duplicate_triples_but_keeps_distinct_kinds() {
+        let kept = normalize_markers(vec![
+            marker(MarkerKind::Intro, 1_000, 2_000),
+            marker(MarkerKind::Credits, 1_000, 2_000),
+            marker(MarkerKind::Intro, 1_000, 2_000),
+        ]);
+        assert_eq!(
+            kept,
+            vec![
+                marker(MarkerKind::Intro, 1_000, 2_000),
+                marker(MarkerKind::Credits, 1_000, 2_000),
+            ],
+            "the repeated Intro is dropped; the same-span Credits is not"
+        );
+    }
+
+    // The runtime picks the first range containing the current position, which
+    // is only correct if the list is ordered by start.
+    #[test]
+    fn normalize_sorts_by_start_and_keeps_same_kind_overlaps() {
+        let kept = normalize_markers(vec![
+            marker(MarkerKind::Credits, 90_000, 120_000),
+            marker(MarkerKind::Intro, 30_000, 60_000),
+            marker(MarkerKind::Intro, 10_000, 45_000),
+        ]);
+        assert_eq!(
+            kept,
+            vec![
+                marker(MarkerKind::Intro, 10_000, 45_000),
+                marker(MarkerKind::Intro, 30_000, 60_000),
+                marker(MarkerKind::Credits, 90_000, 120_000),
+            ],
+            "overlapping same-kind ranges are both kept, in start order"
+        );
     }
 
     // The frontend reads these camelCase names; a serde rename regression

@@ -325,6 +325,25 @@ pub struct PlexDetail {
     pub roles: Vec<PlexRole>,
     #[serde(rename = "Media", default)]
     pub media: Vec<PlexDetailMedia>,
+    /// Skip ranges, present only when the request asked for them with
+    /// `includeMarkers=1`.
+    #[serde(rename = "Marker", default)]
+    pub markers: Vec<PlexMarker>,
+}
+
+/// A `<Marker>` child of a detail record: Plex's intro/credits/commercial
+/// ranges. The offsets stay strings here and are parsed at mapping time, so one
+/// malformed attribute drops its own marker instead of making the mandatory
+/// detail response unreadable.
+#[derive(Debug, Deserialize, Default, Clone)]
+#[serde(default)]
+pub struct PlexMarker {
+    #[serde(rename = "@type")]
+    pub marker_type: Option<String>,
+    #[serde(rename = "@startTimeOffset")]
+    pub start_time_offset: Option<String>,
+    #[serde(rename = "@endTimeOffset")]
+    pub end_time_offset: Option<String>,
 }
 
 /// A simple `tag=`-bearing child (`<Genre>`, `<Director>`, `<Writer>`, `<Country>`).
@@ -1100,18 +1119,27 @@ impl PlexLibrary {
     /// Fetch the full metadata record for one item (the detail / info surface):
     /// `/library/metadata/{rk}`, which carries cast/crew/genre/media-streams that
     /// the section listing omits. Parsed with serde into [`PlexDetail`].
+    ///
+    /// `include_markers` adds `includeMarkers=1`, which makes the server attach
+    /// its `<Marker>` skip ranges to this same response — the reason Vela never
+    /// needs a third request at play time.
     pub async fn get_item_detail(
         &self,
         rating_key: &str,
+        include_markers: bool,
     ) -> Result<PlexDetail, Box<dyn std::error::Error>> {
         let base = self.server_base().ok_or("No server selected")?;
         let url = format!("{base}/library/metadata/{rating_key}");
-        let body = self
+        let mut request = self
             .client
             .get(&url)
             .header("X-Plex-Token", &self.auth_token)
             .header("X-Plex-Client-Identifier", &self.client_identifier)
-            .header("Accept", "application/xml")
+            .header("Accept", "application/xml");
+        if include_markers {
+            request = request.query(&[("includeMarkers", "1")]);
+        }
+        let body = request
             .send()
             .await?
             .error_for_status()?
@@ -1799,6 +1827,55 @@ mod tests {
             width: 300,
             height: 450,
         }
+    }
+
+    /// The one-shot responder above, reused for the metadata endpoint.
+    async fn detail_server(response: Vec<u8>) -> (u16, tokio::task::JoinHandle<String>) {
+        artwork_server(response).await
+    }
+
+    fn detail_response() -> Vec<u8> {
+        let body = concat!(
+            r#"<MediaContainer><Video ratingKey="42" key="/library/metadata/42" title="Episode">"#,
+            r#"<Marker type="intro" startTimeOffset="7000" endTimeOffset="67000"/>"#,
+            r#"</Video></MediaContainer>"#,
+        );
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes()
+    }
+
+    // Plex attaches its skip ranges to this existing response only when the
+    // request asks for them, which is why play needs no third round trip.
+    #[tokio::test]
+    async fn item_detail_asks_for_markers_only_when_requested() {
+        let (port, captured) = detail_server(detail_response()).await;
+        let detail = artwork_library(port)
+            .get_item_detail("42", true)
+            .await
+            .unwrap();
+        assert_eq!(detail.markers.len(), 1, "the Marker child was parsed");
+        let request_line = captured.await.unwrap();
+        let request_line = request_line.lines().next().unwrap_or_default().to_string();
+        assert!(
+            request_line.starts_with("GET /library/metadata/42?includeMarkers=1 "),
+            "markers must be requested through query construction: {request_line}"
+        );
+
+        let (port, captured) = detail_server(detail_response()).await;
+        artwork_library(port)
+            .get_item_detail("42", false)
+            .await
+            .unwrap();
+        let request_line = captured.await.unwrap();
+        let request_line = request_line.lines().next().unwrap_or_default().to_string();
+        assert_eq!(
+            request_line, "GET /library/metadata/42 HTTP/1.1",
+            "browsing surfaces must not make the server compute markers"
+        );
     }
 
     #[tokio::test]

@@ -8,8 +8,8 @@ use serde::de::DeserializeOwned;
 use serde::Deserialize;
 
 use super::{
-    namespace_key, EpisodeContext, HubDto, ItemDto, MediaSource, PlaybackVersion, PlaylistDto,
-    SectionDto, StreamResolution,
+    namespace_key, normalize_markers, EpisodeContext, HubDto, ItemDto, MarkerKind, MediaMarker,
+    MediaSource, PlaybackVersion, PlaylistDto, SectionDto, StreamResolution,
 };
 use crate::playback::{JellyfinTrack, ProgressTarget};
 
@@ -201,6 +201,41 @@ impl JellyfinClient {
         }
         let resp = resp.error_for_status().map_err(|e| e.to_string())?;
         resp.json::<T>().await.map_err(|e| e.to_string())
+    }
+
+    /// Best-effort skip ranges for one item.
+    ///
+    /// Jellyfin owns the MediaSegments route; Emby's current published OpenAPI
+    /// has no equivalent, so an Emby server is never asked — shared ancestry is
+    /// not evidence of a shared contract. Every failure (unsupported route on an
+    /// older Jellyfin, transport error, unreadable body) yields no markers and
+    /// never fails the play.
+    async fn media_segments(&self, item_id: &str) -> Vec<MediaMarker> {
+        if self.flavor != Flavor::Jellyfin {
+            return Vec::new();
+        }
+        // Repeated `includeSegmentTypes` pairs are the route's own filter form.
+        let query = [
+            ("includeSegmentTypes", "Intro".to_string()),
+            ("includeSegmentTypes", "Outro".to_string()),
+            ("includeSegmentTypes", "Commercial".to_string()),
+        ];
+        let path = format!("/MediaSegments/{item_id}");
+        match self.get_json::<MediaSegmentsEnvelope>(&path, &query).await {
+            Ok(envelope) => normalize_markers(
+                envelope
+                    .items
+                    .iter()
+                    .filter_map(media_segment_to_marker)
+                    .collect(),
+            ),
+            Err(error) => {
+                // The client's own message: server-address detail at worst,
+                // never the token, which travels as a header.
+                eprintln!("jellyfin: marker lookup failed, playing without markers: {error}");
+                Vec::new()
+            }
+        }
     }
 
     /// Mark an item played (POST) or unplayed (DELETE) for the current user.
@@ -678,6 +713,45 @@ struct ImageTags {
 }
 
 /// 100ns ticks → milliseconds.
+/// The MediaSegments response: the normal Jellyfin query envelope. It gets its
+/// own DTO rather than widening `BaseItem`, because segments are a different
+/// resource that happens to share an envelope shape.
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct MediaSegmentsEnvelope {
+    #[serde(default)]
+    items: Vec<MediaSegmentDto>,
+}
+
+/// One segment. This is a range API: `StartTicks`/`EndTicks` are authoritative,
+/// and chapter data is never used to infer a range.
+#[derive(Deserialize)]
+#[serde(rename_all = "PascalCase")]
+struct MediaSegmentDto {
+    #[serde(rename = "Type", default)]
+    segment_type: String,
+    #[serde(default)]
+    start_ticks: i64,
+    #[serde(default)]
+    end_ticks: i64,
+}
+
+/// Map one Jellyfin segment onto a Vela range. Jellyfin's `Outro` is what Vela
+/// calls Credits; segment types Vela does not model are ignored.
+fn media_segment_to_marker(segment: &MediaSegmentDto) -> Option<MediaMarker> {
+    let kind = match segment.segment_type.trim() {
+        "Intro" => MarkerKind::Intro,
+        "Outro" => MarkerKind::Credits,
+        "Commercial" => MarkerKind::Commercial,
+        _ => return None,
+    };
+    Some(MediaMarker {
+        kind,
+        start_ms: ticks_to_ms(segment.start_ticks),
+        end_ms: ticks_to_ms(segment.end_ticks),
+    })
+}
+
 fn ticks_to_ms(ticks: i64) -> u64 {
     (ticks / 10_000).max(0) as u64
 }
@@ -871,6 +945,15 @@ pub struct JellyfinSource {
 }
 
 impl JellyfinSource {
+    /// Marker lookup, but only when a policy actually asked for it: a disabled
+    /// feature must cost the server no request at all.
+    async fn markers_if_enabled(&self, item_key: &str, include_markers: bool) -> Vec<MediaMarker> {
+        if !include_markers {
+            return Vec::new();
+        }
+        self.client.media_segments(item_key).await
+    }
+
     pub fn new(id: impl Into<String>, name: impl Into<String>, client: JellyfinClient) -> Self {
         Self {
             id: id.into(),
@@ -1272,15 +1355,16 @@ impl MediaSource for JellyfinSource {
         &self,
         item_key: &str,
         _duration_ms: Option<u64>,
+        include_markers: bool,
     ) -> Result<StreamResolution, String> {
-        // Fetch the item to read its server-side resume position.
-        let item: BaseItem = self
-            .client
-            .get_json(
-                &format!("/Users/{}/Items/{}", self.client.user_id, item_key),
-                &[],
-            )
-            .await?;
+        // Fetch the item to read its server-side resume position, with the
+        // optional marker lookup riding alongside rather than after it.
+        let item_path = format!("/Users/{}/Items/{}", self.client.user_id, item_key);
+        let (item, markers) = tokio::join!(
+            self.client.get_json::<BaseItem>(&item_path, &[]),
+            self.markers_if_enabled(item_key, include_markers),
+        );
+        let item: BaseItem = item?;
         let resume_ms = item
             .user_data
             .and_then(|u| u.playback_position_ticks)
@@ -1305,6 +1389,7 @@ impl MediaSource for JellyfinSource {
                 headers: self.client.auth_headers(),
             }),
             http_headers: self.client.stream_auth_headers(),
+            markers,
         })
     }
 
@@ -1354,14 +1439,14 @@ impl MediaSource for JellyfinSource {
         item_key: &str,
         _duration_ms: Option<u64>,
         version_id: &str,
+        include_markers: bool,
     ) -> Result<StreamResolution, String> {
-        let item: BaseItem = self
-            .client
-            .get_json(
-                &format!("/Users/{}/Items/{}", self.client.user_id, item_key),
-                &[],
-            )
-            .await?;
+        let item_path = format!("/Users/{}/Items/{}", self.client.user_id, item_key);
+        let (item, markers) = tokio::join!(
+            self.client.get_json::<BaseItem>(&item_path, &[]),
+            self.markers_if_enabled(item_key, include_markers),
+        );
+        let item: BaseItem = item?;
         let resume_ms = item
             .user_data
             .and_then(|data| data.playback_position_ticks)
@@ -1386,6 +1471,7 @@ impl MediaSource for JellyfinSource {
                 headers: self.client.auth_headers(),
             }),
             http_headers: self.client.stream_auth_headers(),
+            markers,
         })
     }
 
@@ -1406,6 +1492,130 @@ mod tests {
         // The series-level date-added sort stays distinct from the leaf one.
         let (by, _) = map_sort(Some("addedAt:desc"));
         assert_eq!(by, "DateCreated");
+    }
+
+    /// One-shot HTTP responder that hands back `response` and returns whatever
+    /// request it received, so tests can pin the exact wire form.
+    async fn segment_server(response: Vec<u8>) -> (u16, tokio::task::JoinHandle<String>) {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let task = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.unwrap();
+            let mut bytes = Vec::new();
+            let mut chunk = [0_u8; 2048];
+            loop {
+                let count = stream.read(&mut chunk).await.unwrap();
+                if count == 0 {
+                    break;
+                }
+                bytes.extend_from_slice(&chunk[..count]);
+                if bytes.windows(4).any(|window| window == b"\r\n\r\n") {
+                    break;
+                }
+            }
+            stream.write_all(&response).await.unwrap();
+            String::from_utf8(bytes).unwrap()
+        });
+        (port, task)
+    }
+
+    fn segment_client(flavor: Flavor, port: u16) -> JellyfinClient {
+        JellyfinClient::new(
+            flavor,
+            &format!("http://127.0.0.1:{port}"),
+            "test-device",
+            "synthetic-token",
+            "user-1",
+        )
+    }
+
+    fn json_response(status: &str, body: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
+    }
+
+    // Jellyfin's Outro is Vela's Credits, ticks are 100ns, and segment kinds
+    // Vela does not model must not be skipped past.
+    #[tokio::test]
+    async fn media_segments_map_kinds_and_ticks_over_the_pinned_route() {
+        let body = r#"{"Items":[
+            {"Type":"Outro","StartTicks":13800000000,"EndTicks":14400000000},
+            {"Type":"Intro","StartTicks":70000000,"EndTicks":670000000},
+            {"Type":"Commercial","StartTicks":3000000000,"EndTicks":3300000000},
+            {"Type":"Preview","StartTicks":0,"EndTicks":50000000},
+            {"Type":"Intro","StartTicks":900000000,"EndTicks":800000000}
+        ],"TotalRecordCount":5}"#;
+        let (port, captured) = segment_server(json_response("200 OK", body)).await;
+        let markers = segment_client(Flavor::Jellyfin, port)
+            .media_segments("item-7")
+            .await;
+        assert_eq!(
+            markers,
+            vec![
+                MediaMarker {
+                    kind: MarkerKind::Intro,
+                    start_ms: 7_000,
+                    end_ms: 67_000
+                },
+                MediaMarker {
+                    kind: MarkerKind::Commercial,
+                    start_ms: 300_000,
+                    end_ms: 330_000
+                },
+                MediaMarker {
+                    kind: MarkerKind::Credits,
+                    start_ms: 1_380_000,
+                    end_ms: 1_440_000
+                },
+            ],
+            "Preview is dropped and the inverted Intro does not survive normalize"
+        );
+        let request = captured.await.unwrap();
+        let request_line = request.lines().next().unwrap_or_default();
+        assert!(
+            request_line.starts_with("GET /MediaSegments/item-7?"),
+            "the segments route is a range API of its own: {request_line}"
+        );
+        for kind in ["Intro", "Outro", "Commercial"] {
+            assert!(
+                request_line.contains(&format!("includeSegmentTypes={kind}")),
+                "the repeated filter must ask for {kind}: {request_line}"
+            );
+        }
+    }
+
+    // An older Jellyfin without the route must still play; markers are always
+    // best-effort. The signature carries no error channel at all, so a marker
+    // failure structurally cannot fail a resolve.
+    #[tokio::test]
+    async fn media_segments_yield_nothing_when_the_route_is_unsupported() {
+        let (port, _captured) = segment_server(json_response("404 Not Found", "{}")).await;
+        let markers = segment_client(Flavor::Jellyfin, port)
+            .media_segments("item-7")
+            .await;
+        assert!(markers.is_empty());
+    }
+
+    // Emby publishes no MediaSegments contract. Shared ancestry is not evidence
+    // of a shared route, so Vela must not probe for it at all.
+    #[tokio::test]
+    async fn emby_never_requests_media_segments() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let markers = segment_client(Flavor::Emby, port)
+            .media_segments("item-7")
+            .await;
+        assert!(markers.is_empty());
+        let accepted =
+            tokio::time::timeout(std::time::Duration::from_millis(250), listener.accept()).await;
+        assert!(
+            accepted.is_err(),
+            "an Emby server must receive no MediaSegments request"
+        );
     }
 
     #[test]

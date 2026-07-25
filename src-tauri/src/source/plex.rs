@@ -7,8 +7,9 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex as AsyncMutex;
 
 use super::{
-    namespace_key, CastMember, DetailDto, HubDto, ItemDto, MediaSource, MediaStreamDto,
-    MediaVersionDto, PersonRef, PlaybackVersion, PlaylistDto, SectionDto, StreamResolution,
+    namespace_key, normalize_markers, CastMember, DetailDto, HubDto, ItemDto, MarkerKind,
+    MediaMarker, MediaSource, MediaStreamDto, MediaVersionDto, PersonRef, PlaybackVersion,
+    PlaylistDto, SectionDto, StreamResolution,
 };
 use crate::playback::{ProgressTarget, TrackInfo};
 use crate::plex_library::{PlexDetail, PlexLibrary, PlexPlaylist, PlexServer, PlexVideo};
@@ -703,6 +704,32 @@ fn plex_media_is_hdr(media: &crate::plex_library::PlexDetailMedia) -> bool {
         || media.video_profile.as_deref().is_some_and(is_hdr_range)
 }
 
+/// Map Plex's `<Marker>` records onto Vela's provider-neutral ranges. Plex
+/// publishes offsets already in milliseconds. An unrecognized `type` (Plex also
+/// emits marker kinds Vela does not model) or a malformed offset drops that one
+/// marker; it never fails the mandatory detail response it rode in on. A
+/// credits marker's optional `final` attribute does not change its kind.
+fn plex_markers(detail: &PlexDetail) -> Vec<MediaMarker> {
+    let parsed = detail
+        .markers
+        .iter()
+        .filter_map(|marker| {
+            let kind = match marker.marker_type.as_deref()?.trim() {
+                "intro" => MarkerKind::Intro,
+                "credits" => MarkerKind::Credits,
+                "commercial" => MarkerKind::Commercial,
+                _ => return None,
+            };
+            Some(MediaMarker {
+                kind,
+                start_ms: marker.start_time_offset.as_deref()?.trim().parse().ok()?,
+                end_ms: marker.end_time_offset.as_deref()?.trim().parse().ok()?,
+            })
+        })
+        .collect();
+    normalize_markers(parsed)
+}
+
 fn plex_media_dimensions(media: &crate::plex_library::PlexDetailMedia) -> (u32, u32) {
     let resolution_height = media.video_resolution.as_deref().and_then(|value| {
         let lower = value.to_ascii_lowercase();
@@ -1134,7 +1161,9 @@ impl MediaSource for PlexSource {
         validate_plex_id("item key", item_key)?;
         let lib = self.ensure_ready().await?;
         let fetch = |lib: PlexLibrary| async move {
-            lib.get_item_detail(item_key)
+            // The info surface renders no skip controls, so it never asks the
+            // server for markers.
+            lib.get_item_detail(item_key, false)
                 .await
                 .map(|d| (lib, d))
                 .map_err(|e| e.to_string())
@@ -1211,6 +1240,7 @@ impl MediaSource for PlexSource {
         &self,
         item_key: &str,
         duration_ms: Option<u64>,
+        include_markers: bool,
     ) -> Result<StreamResolution, String> {
         let mut versions = self.playback_versions(item_key).await?;
         versions.sort_by(|left, right| {
@@ -1225,15 +1255,17 @@ impl MediaSource for PlexSource {
         let selected = versions
             .first()
             .ok_or_else(|| "no playable Plex media version found".to_string())?;
-        self.resolve_stream_version(item_key, duration_ms, &selected.version_id)
+        self.resolve_stream_version(item_key, duration_ms, &selected.version_id, include_markers)
             .await
     }
 
     async fn playback_versions(&self, item_key: &str) -> Result<Vec<PlaybackVersion>, String> {
         validate_plex_id("item key", item_key)?;
         let fetch = |lib: PlexLibrary| async move {
+            // Version enumeration precedes selection; markers belong to the
+            // one version that actually plays.
             let detail = lib
-                .get_item_detail(item_key)
+                .get_item_detail(item_key, false)
                 .await
                 .map_err(|error| error.to_string())?;
             Ok::<_, String>((lib, detail))
@@ -1278,11 +1310,12 @@ impl MediaSource for PlexSource {
         item_key: &str,
         duration_ms: Option<u64>,
         version_id: &str,
+        include_markers: bool,
     ) -> Result<StreamResolution, String> {
         validate_plex_id("item key", item_key)?;
         let fetch = |lib: PlexLibrary| async move {
             let detail = lib
-                .get_item_detail(item_key)
+                .get_item_detail(item_key, include_markers)
                 .await
                 .map_err(|error| error.to_string())?;
             Ok::<_, String>((lib, detail))
@@ -1324,6 +1357,7 @@ impl MediaSource for PlexSource {
             resume_ms,
             progress: ProgressTarget::Plex(info),
             http_headers: stream_headers,
+            markers: plex_markers(&detail),
         })
     }
 
@@ -1493,6 +1527,83 @@ mod tests {
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
+
+    /// Parse a `<Video>` detail record exactly as `get_item_detail` does, so
+    /// these assertions pin the real serde attribute names rather than a
+    /// hand-built struct that cannot drift.
+    fn detail_from_xml(xml: &str) -> PlexDetail {
+        serde_xml_rs::from_str(xml).expect("detail fixture parses")
+    }
+
+    // Plex publishes marker offsets in milliseconds, and emits kinds Vela does
+    // not model. Mapping the wrong unit would seek a thousandfold past the
+    // range; treating an unknown kind as a skip would cut real content.
+    #[test]
+    fn plex_markers_map_known_kinds_in_milliseconds_and_drop_the_rest() {
+        let detail = detail_from_xml(
+            r#"<Video ratingKey="42" key="/library/metadata/42" title="Episode">
+                 <Marker type="intro" startTimeOffset="7000" endTimeOffset="67000"/>
+                 <Marker type="credits" startTimeOffset="1380000" endTimeOffset="1440000" final="1"/>
+                 <Marker type="commercial" startTimeOffset="300000" endTimeOffset="330000"/>
+                 <Marker type="recap" startTimeOffset="1000" endTimeOffset="5000"/>
+                 <Marker type="intro" startTimeOffset="90000" endTimeOffset="80000"/>
+               </Video>"#,
+        );
+        assert_eq!(
+            plex_markers(&detail),
+            vec![
+                MediaMarker {
+                    kind: MarkerKind::Intro,
+                    start_ms: 7_000,
+                    end_ms: 67_000
+                },
+                MediaMarker {
+                    kind: MarkerKind::Commercial,
+                    start_ms: 300_000,
+                    end_ms: 330_000
+                },
+                MediaMarker {
+                    kind: MarkerKind::Credits,
+                    start_ms: 1_380_000,
+                    end_ms: 1_440_000
+                },
+            ],
+            "recap is not an advert, the inverted intro is dropped, and `final` \
+             does not change the credits kind"
+        );
+    }
+
+    // A malformed offset must cost its own marker, never the mandatory detail
+    // response it arrived on — that response is what playback needs.
+    #[test]
+    fn plex_markers_drop_malformed_offsets_without_failing_the_detail() {
+        let detail = detail_from_xml(
+            r#"<Video ratingKey="42" key="/library/metadata/42" title="Episode">
+                 <Marker type="intro" startTimeOffset="not-a-number" endTimeOffset="67000"/>
+                 <Marker type="credits" endTimeOffset="1440000"/>
+                 <Marker type="commercial" startTimeOffset="300000" endTimeOffset="330000"/>
+               </Video>"#,
+        );
+        assert_eq!(detail.rating_key, "42", "the detail itself still parsed");
+        assert_eq!(
+            plex_markers(&detail),
+            vec![MediaMarker {
+                kind: MarkerKind::Commercial,
+                start_ms: 300_000,
+                end_ms: 330_000
+            }],
+        );
+    }
+
+    // A response with no Marker children is the normal case on servers that
+    // were never asked for markers.
+    #[test]
+    fn plex_markers_are_empty_when_the_response_carries_none() {
+        let detail = detail_from_xml(
+            r#"<Video ratingKey="42" key="/library/metadata/42" title="Movie"/>"#,
+        );
+        assert!(plex_markers(&detail).is_empty());
+    }
     use std::sync::mpsc::{channel, Receiver, Sender};
     use std::sync::{Arc, Mutex};
     use std::time::Duration;

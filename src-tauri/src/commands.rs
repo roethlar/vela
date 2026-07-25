@@ -27,7 +27,7 @@ const PRODUCT: &str = "Vela";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
-const BUILD_DATE: &str = "2026-07-23";
+const BUILD_DATE: &str = "2026-07-25";
 
 /// Project home, shown (and opened) from the build-info footer.
 const REPO_URL: &str = "https://github.com/roethlar/vela";
@@ -2302,6 +2302,7 @@ mod merge_tests {
             &self,
             _k: &str,
             _d: Option<u64>,
+            _m: bool,
         ) -> Result<crate::source::StreamResolution, String> {
             Err("fake source".into())
         }
@@ -2346,6 +2347,7 @@ mod merge_tests {
             &self,
             _k: &str,
             _d: Option<u64>,
+            _m: bool,
         ) -> Result<crate::source::StreamResolution, String> {
             Err("server offline".into())
         }
@@ -4280,13 +4282,21 @@ async fn play_by_key_locked(
         .get(&selection.source_id)
         .ok_or_else(|| PlayFailure::unavailable("the selected source was removed".to_string()))?;
     let item = &selection.item;
+    // Markers stay off until the skip policies exist in config and the player
+    // can act on them; asking for them now would fetch ranges nothing reads.
+    let include_markers = false;
     let resolved = match selection.version_id.as_deref() {
         Some(version_id) => {
-            src.resolve_stream_version(&selection.raw_item_key, item.duration_ms, version_id)
-                .await
+            src.resolve_stream_version(
+                &selection.raw_item_key,
+                item.duration_ms,
+                version_id,
+                include_markers,
+            )
+            .await
         }
         None => src
-            .resolve_stream(&selection.raw_item_key, item.duration_ms)
+            .resolve_stream(&selection.raw_item_key, item.duration_ms, include_markers)
             .await,
     }
     .map_err(PlayFailure::unavailable)?;
@@ -5792,6 +5802,7 @@ mod tests {
             &self,
             _key: &str,
             _duration_ms: Option<u64>,
+            _include_markers: bool,
         ) -> Result<crate::source::StreamResolution, String> {
             Err("not used".to_string())
         }
