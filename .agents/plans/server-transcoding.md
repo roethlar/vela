@@ -313,6 +313,14 @@ unconverted; and an unreadable decision treated as permission.
 - Settings > Player control, with help text that distinguishes it from the
   duplicate-copy mode per the 2026-07-25 ruling: that mode chooses WHICH COPY,
   this one chooses HOW IT IS DELIVERED. Neither may imply it governs the other.
+- **CORRECTED (finding `tr-1`, 2026-07-25): the control does not SHIP in this
+  slice.** As first written this slice put a working-looking selector in front
+  of a play path that ignored it, which is exactly what
+  `.agents/plans/skip-credits-intros-v2.md` slice 3 forbids — "no shipped UI
+  offers a setting playback ignores". The control is authored here but withheld
+  behind `QUALITY_CONTROL_READY` in `Settings.svelte`; slice 3 flips that flag
+  and deletes the guard. Apply the same rule to any future slice: a control
+  ships in the slice that makes it work, never before.
 - Every entry displays its bitrate — two ladder tiers share a label.
 - No playback behaviour changes in this slice.
 - **Guards, proven separately:** missing field resolves to `Original`; an
@@ -359,6 +367,11 @@ stripped on save.
   `maxWidth`/`maxHeight`, the required `mediaSourceId`, and `playSessionId`.
 - `StreamResolution` carries the quality actually used, so the layer above knows
   whether this play is transcoded.
+- **Remove `QUALITY_CONTROL_READY`** from `Settings.svelte` (flag, the `{#if}`
+  guard, and the now-redundant assertions in `tests/transcoding-ui.test.mjs`) —
+  this is the slice that earns the control (finding `tr-1`).
+- **Remove every `#[allow(dead_code)]` marked `TEMPORARY`** across
+  `source/mod.rs`, `plex_library.rs` and `source/jellyfin.rs`.
 - **Teardown is mandatory:** `DELETE /transcode/sessions/<uuid>` when the child
   exits, when launch fails, and on shutdown. Model it on `HeaderInclude`'s Drop
   guard in `playback.rs`, which already solves exactly this lifetime problem.
