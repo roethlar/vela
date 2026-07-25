@@ -5,8 +5,7 @@ description: Fast save-my-place snapshot of .agents/state.md so the next session
 ---
 
 Run the `handoff` operator defined in this repo's `AGENTS.md` (Operator
-Requests): a fast save-my-place snapshot — update `.agents/state.md` so the
-next session resumes without chat context; machine-specific facts go to the
-tracked `.agents/machines.md`, keyed by machine and dated. The slow
-document-hygiene pass belongs to the `drift` operator, not here.
-`AGENTS.md` is the authoritative definition; this skill is only a pointer.
+Requests): read `.agents/playbooks/handoff.md` and follow it — a fast
+save-my-place snapshot, seconds not minutes, ending with a bookkeeping
+commit of what it wrote. The playbook is the authoritative definition;
+this skill is only a pointer.

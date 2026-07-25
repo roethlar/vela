@@ -15,9 +15,9 @@ work, batch triage, and reviewer models that wander without a rubric. For an
 unprimed whole-change judgment — "is this the best way to achieve the goal?" —
 use the `openreview` playbook instead; the owner chooses per invocation, by name.
 
-Invoke it with `codereview <harness> <nickname> <effort>` (in Claude Code: the
-tab-completable `/codereview <harness> <nickname> <effort>`; see "Model map and
-dispatch grammar" for how `<nickname>` resolves to a model). This file is durable
+Invoke it with `codereview <harness> <model> <effort>` (in Claude Code: the
+tab-completable `/codereview <harness> <model> <effort>`; see "Dispatch
+grammar" for how `<model>` is handled). This file is durable
 guidance; it defers to this repo's `AGENTS.md` and
 `.agents/` layout wherever they overlap. Where this playbook and the repo's
 invariants disagree, the invariants win.
@@ -55,11 +55,12 @@ work stays repository policy, per `AGENTS.md` (Git Safety).
 
 ## Operator
 
-`codereview <harness> <nickname> <effort>` is the harness-neutral entry. In Claude
-Code it is the tab-completable slash command `/codereview <harness> <nickname>
+`codereview <harness> <model> <effort>` is the harness-neutral entry. In Claude
+Code it is the tab-completable slash command `/codereview <harness> <model>
 <effort>`; on another harness the owner speaks it aloud. `<harness>` names the
-reviewer harness to dispatch; `<nickname>` selects the model through the map and
-`<effort>` sets the effort level (see "Model map and dispatch grammar"). The
+reviewer harness to dispatch; `<model>` is the owner's literal word, used
+verbatim and checked against no list (see "Dispatch grammar"); `<effort>`
+sets the effort level. The
 `<agent>` shorthand used elsewhere in this playbook is the same reviewer-harness
 token.
 
@@ -69,12 +70,11 @@ quick/wait toggle and no Strict/Faster WIP mode** — the prior async loop's
 parallelism knobs do not apply here. One finding is dispatched, reviewed, recorded,
 and acted on before the next is dispatched.
 
-`frontier` is a reserved word in the `<nickname>` slot: `codereview <harness>
+`frontier` is a reserved word in the `<model>` slot: `codereview <harness>
 frontier` forces the **frontier** tier for that dispatch (see "Reviewer tiers
-and routing") instead of resolving as a nickname, and the record carries
-`escalated: owner`. It is the only routing modifier, and the map may not define
-a `frontier` nickname — the model-map lint rejects one — so the reserved word
-can never collide with a real model. Provider choice stays in `<harness>` — no
+and routing") instead of naming a model, and the record carries
+`escalated: owner`. It is the only routing modifier. Provider choice stays in
+`<harness>` — no
 phrase silently re-routes to a different harness.
 
 ## Deriving the reviewer incantation (probe-and-verify)
@@ -95,18 +95,21 @@ session, by probing — the same thing a capable agent already does when a human
    (`<agent> exec --help`, `<agent> chat --help`, whichever the top level lists) to
    find the non-interactive flag and how to pass a prompt. Note the harness's JSON
    output flag here too (e.g. `--output-format json`) — the verdict contract uses it.
-3. **Capability smoke-test — through the real child path.** A probe that only
-   proves the process launches is what cost issue #6: a bare `<agent> exec "say
-   OK"` returned while the reviewer child could not read the repo or run the
-   guard, and 291 request variants chased one missing capability with no verdict.
-   So run the candidate incantation **with the same self-permissioning launch
-   grant the real review carries** (see "Self-permissioning launch") and make the
-   child prove, in that one shot, the two capabilities the review actually
-   depends on: **read a repo file** (e.g. print a line of a known committed file)
-   and **run one allowlisted command** (e.g. the verification command, or a
-   trivial `git` invocation from the grant) — then echo a token that appears only
-   if both succeeded. A probe that skips either capability, or that runs outside
-   the real grant, does not qualify the transport. Keep the usual bounds: a
+3. **Capability proof — carried by the real dispatch, not a separate round.**
+   A probe that only proves the process launches is what cost issue #6: a bare
+   `<agent> exec "say OK"` returned while the reviewer child could not read the
+   repo or run the guard, and 291 request variants chased one missing
+   capability with no verdict. The proof required is therefore that the child
+   demonstrates, in one shot and under the real self-permissioning grant (see
+   "Self-permissioning launch"), the two capabilities the review depends on:
+   **read a repo file** and **run one allowlisted command**. Fold that proof
+   into the review dispatch itself — the reviewer echoes a `capability_ok`
+   token in its verdict envelope, absent unless both succeeded — rather than
+   paying a separate round-trip for it. A real review exercises those
+   capabilities by definition, so a missing token means the transport failed
+   and the run is not a clean pass (see the verdict contract). Dispatch a
+   standalone smoke prompt only when qualifying a transport with no review to
+   run. Keep the usual bounds: a
    **timeout** (a hung process is a failed probe, not a wait); **non-interactive
    detection** (if it opens a TUI / alternate screen / waits on a TTY, the
    incantation is wrong — try the next candidate); and run it **from the real git
@@ -137,34 +140,43 @@ hand-maintained. The source of truth for incantations is "re-derive by
 probing," so a stale cache self-corrects on the next smoke test.
 
 For **tier routing** the cache is load-bearing, not optional: it is the only
-place tier→(model, effort) resolution exists — committed text stays
-model-free. Each harness entry is keyed by harness version and additionally
-carries:
+place tier→(model, effort) defaults live — committed text pins no models.
+
+**Two halves, keyed differently — this is load-bearing.** The *incantation*
+(transport, headless entry, flags) is version-sensitive: flags move between
+releases, so it is keyed by harness version and re-probed automatically when
+the version changes. Nobody is asked. The *tier→pair mapping* is an owner
+judgment about models, which live server-side and do not change because a CLI
+released a point version; it carries **no version key** and survives upgrades
+untouched. Conflating the two turns every routine harness upgrade into an
+interrogation, which is the failure this split exists to prevent.
 
 ```json
 "transport": "mcp | cli",
+"probed": "<harness version>",
 "tiers": {
-  "standard": {"model": "<id>", "effort": "<level>", "flags": ["..."],
-               "confirmed": "<harness version>"},
+  "standard": {"model": "<id>", "effort": "<level>", "flags": ["..."]},
   "frontier": {"model": "<id>", "effort": "<level>", "flags": ["..."],
-               "confirmed": "<harness version>",
-               "grade": "competitive | fallback",
-               "openreview_confirmed": "<harness version | null>"}
+               "grade": "competitive | fallback"}
 }
 ```
 
 The probe additionally discovers the model-selection and effort flags and
-verifies the pinned model resolves, then **proposes** this mapping; the
-**owner confirms it once per harness version**, and the confirmation is
-recorded in the entry (`grade` is owner-declared, frontier-only).
-`openreview_confirmed` records that the same owner confirmation covers
-the pair's use by the `openreview` playbook at its ruled effort (OR3,
-owner-adjudicated 2026-07-18): a frontier pair the owner declared
-fallback-grade is fallback for **both** playbooks — the confirmation is
-per pair, not per playbook — so the field is set at the same
-confirmation moment, never inferred later. `null` means the owner has
-not confirmed the pair for openreview and that cell blocks fail-closed
-there. A
+verifies the named model resolves. Tier pairs are **recorded when the owner
+names or accepts them** — there is no confirmation ritual: a tier with no
+recorded pair at all asks the owner once, and the answer is recorded
+(`grade` is owner-declared, frontier-only). An owner's dispatch-time
+`<model>` word always overrides the recorded pair for that dispatch, without
+rewriting it.
+
+**A recorded pair never blocks a dispatch.** Where the recorded pair is
+usable, it is used: a harness-version change, a re-probed incantation, or any
+other environment shift is a **note on the dispatch record**, never a gate —
+the same rule the "Dispatch grammar" section already applies to hooks,
+wrappers, and proxies. Review validity comes from the review; a confirmation
+ritual standing between the owner and a verdict buys nothing the provenance
+line does not already carry. Only a genuinely absent pair, or a harness that
+rejects the model at dispatch, stops and asks. A
 single-model harness may still differentiate tiers by effort; only when both
 pairs are genuinely identical does it record the same pair under both tiers,
 explicitly. `transport` is `mcp` where a verified MCP registration exists for
@@ -211,28 +223,34 @@ Reviewer: <harness> / <resolved model id> / <effort> / <tier>
 `escalated:` lists **every** matched trigger in order (e.g.
 `escalated: T1,T2,T5`), never one arbitrarily chosen ID; an owner force is
 recorded as `escalated: owner`; a frontier-ceiling reopen records
-`T5 (ceiling)`. The line is copied from the **invocation transcript** — the
+`T5 (ceiling)`. The line is copied from the **invocation transcript** where
+the harness yields one — the
 MCP result envelope or the CLI JSON stream — never from the reviewer's
-prose. **A review with no transcript is not a review**: an unreachable
-server, a failed call, or absent transcript metadata means the dispatch
-failed, whatever text came back. Dispatch is a direct tool call — no model
+prose. An unreachable server or a failed call still means the dispatch
+failed, whatever text came back. But environment quirks that rewrite or
+absorb the invocation — hooks redirecting commands to other tools,
+wrappers, proxies — are **recorded as a note on the record, not an
+invalidation** (owner ruling 2026-07-23): where no transcript exists for an
+environment reason, the line records what was dispatched plus the note, and
+validity rests on the review record itself. Dispatch is a direct tool call — no model
 sits in the router seat to improvise around a dead server.
 
 ## Reviewer tiers and routing
 
 Review dispatch is routed, not ambient. The playbooks own the *meaning* of two
-reviewer tiers; committed text never names a concrete model — model names rot,
-and rot in an installed artifact is drift:
+reviewer tiers; committed text pins no concrete models — model names rot,
+and rot in an installed artifact is drift, so the owner names models at
+dispatch:
 
-- **standard** — the owner-confirmed best-value (model, effort) pair on the
+- **standard** — the owner-named best-value (model, effort) pair on the
   dispatched harness; sufficient for the tightly framed conformance verdicts
   this playbook issues. Standard defaults to **high** effort when `<effort>`
   is omitted.
-- **frontier** — an owner-confirmed pair strictly stronger than standard *as
+- **frontier** — an owner-named pair strictly stronger than standard *as
   configured*; required for escalated findings. Frontier defaults to **xhigh**
   effort when `<effort>` is omitted, whether frontier was reached by escalation
   or owner force. Where the harness does not expose the ruled level, the
-  owner-confirmed pair is authoritative as recorded.
+  owner-named pair is authoritative as recorded.
 
 Effort is part of tier identity: capability ordering holds only for configured
 (model, effort) pairs, never bare model names — a flagship name may
@@ -242,76 +260,48 @@ review depth. There are exactly two tiers, only tiers issue verdicts, and
 there is no third role: no economy/cheap-model role exists for any review
 work — cheapness comes from routing, not from a weaker tier.
 
-A tier resolves to today's (model ID, effort flags) pair only at invocation
-time, from the version-keyed machine-local cache (see "Deriving the reviewer
-incantation"); the owner confirms each tier→pair mapping once per harness
-version, and the confirmation is recorded in the cache entry. **Fail closed:**
-a dispatch whose tier has no owner-confirmed cache entry blocks and asks the
-owner — nothing guesses. Tier strength is an owner judgment, not a probe
+A tier resolves to its (model ID, effort flags) pair at invocation time,
+from the machine-local cache (see "Deriving the reviewer
+incantation"); each tier→pair mapping is recorded when the owner names or
+accepts it. A dispatch whose tier has no recorded pair asks the owner once and
+records the answer — nothing guesses, and nothing else blocks: an explicit
+`<model>` in the dispatch line is used as given, whatever the cache holds.
+Tier strength is an owner judgment, not a probe
 inference: neither "stronger" nor "best value" is resolvable from `--help`
 output.
 
-A frontier entry is owner-graded `competitive` or `fallback` at confirmation.
+A frontier entry is owner-graded `competitive` or `fallback` when named.
 A fallback-grade frontier is the same class at more effort, not a strictly
 stronger adjudicator — the grade drives the halt rule under "Escalation
 triggers" below.
 
-## Model map and dispatch grammar
+## Dispatch grammar
 
-Concrete model slugs have exactly one committed home fleet-wide:
-`.agents/model-map.json`, a strict versioned nickname→slug map in the
-toolkit repo, fetched by downstream clones from the public raw `master`
-link. No playbook, command, skill, or shim ever names a slug — the
-model-denylist lint enforces that boundary, and the map file is its sole
-deliberate exemption. Nicknames select models only: never tier, effort,
-or eligibility. Where the tier section above resolves a pair from the
-machine-local cache, the cache keeps flags, transport, capability grades,
-and the owner's tier confirmation; the slug text itself now reads from
-the map at invocation time.
+`/codereview <harness> <model> <effort>`, with `/review` as a pure alias of
+`codereview`. **The owner's dispatch word is final** (owner ruling
+2026-07-23): `<model>` is the owner's literal word — a model slug, a family
+name, plain words — used verbatim. Nothing checks it against a map, a
+denylist, a cache, or any other list: no committed list of models exists
+anywhere in this toolkit, and none may be created. A name the agent does not
+recognize is still used as given — it may be newer than the agent's
+knowledge; if the harness rejects it at dispatch, that failure is reported,
+never pre-empted. `<effort>` is optional; when omitted the routed tier's
+default applies (standard → high, frontier → xhigh; see "Reviewer tiers and
+routing"). `frontier` is a reserved word in the `<model>` slot: it forces the
+frontier tier rather than naming a model (see the Operator section).
 
-Dispatch grammar: `/codereview <harness> <nickname> <effort>`, with
-`/review` as a pure alias of `codereview`. A nickname unknown to the map,
-or missing an entry for the dispatched harness, blocks loud — nothing
-guesses, nothing falls back across harnesses. `<effort>` is optional; when
-omitted the routed tier's default applies (standard → high, frontier →
-xhigh; see "Reviewer tiers and routing"). `frontier` is a reserved word in
-the `<nickname>` slot: it forces the frontier tier rather than resolving as a
-model (see the Operator section), so the map may not define a `frontier`
-nickname — the fetch contract below rejects a map that does.
+When the owner omits `<model>`, the machine-local cache supplies the recorded
+default pair for the routed tier if one exists; otherwise the agent asks the
+owner once and records the answer. The cache is a convenience, never a gate.
+An inline model named for one dispatch is used verbatim and is **not**
+written into the cache unless the owner says to keep it; the dispatch record
+carries `(inline, session-only)` provenance so no artifact can launder an
+override into a default.
 
-**Fetch contract** — applied by the dispatching agent to the fetched
-bytes (`curl -fsS --max-time 10` into a scratch file), in order:
-
-1. **Size cap**: reject files over 16 KiB.
-2. **Strict parse**: `json.loads` with an `object_pairs_hook` that
-   rejects duplicate keys anywhere in the document.
-3. **Shape**: top level is an object; `"version"` equals `1`;
-   `"nicknames"` is an object of objects.
-4. **Charset**: every nickname, harness key, and slug matches
-   `^[a-z0-9][a-z0-9._-]{0,63}$`; exact lowercase, no case folding.
-5. **Closed harness set**: harness keys outside `codex`, `claude`,
-   `gemini` are a hard failure, not ignored.
-6. **Reserved nicknames**: a `frontier` nickname is rejected — it is the
-   dispatch grammar's reserved tier-forcing word, never a model.
-
-Validation runs before any fetched byte reaches model-visible context; on
-success exactly one validated slug enters context, never the raw
-document. **Loud stop:** any failed step stops the dispatch and names the
-failed constraint only — no cached fallback, no last-known-good, no
-default model, and never an echo of fetched content. The executable form
-of this contract is `tests/test_model_map.py` in the toolkit repo; there
-is no standalone runtime resolver (owner sizing, 2026-07-19).
-
-**Session-only override.** The owner may name a slug inline for one
-session. It is used verbatim, never written to the map, a template, or
-the harness cache, and the dispatch record carries
-`(inline, session-only)` provenance so no artifact can launder an
-override into a pin. `/harness-update` is the sole write path to the map
-— normal commit flow, never a dispatch-time write.
-
-The map supplies the model id and nothing else: launch-scoped grants
-(self-permissioning, 2026-07-18) and `openreview_confirmed` eligibility
-are untouched by resolution.
+Review validity comes from the review itself, never from conformance to an
+expected invocation shape: environment quirks — hooks that redirect commands
+to other tools, wrappers, proxies, an unfamiliar harness — are recorded as
+notes on the dispatch record, not treated as invalidating the review.
 
 ## Escalation triggers (standard → frontier)
 
@@ -361,11 +351,11 @@ routes that finding's review (or re-review) to frontier:
   Switching provider requires an explicit owner dispatch.
 
 **Owner override.** The operator phrase `codereview <harness> frontier` — with
-`frontier` the reserved nickname-slot word (see "Operator") — forces frontier
+`frontier` the reserved model-slot word (see "Operator") — forces frontier
 for that dispatch and is recorded as `escalated: owner`, never by hand-editing
 the cache.
 
-**Fallback-grade halt.** Where the confirmed frontier entry carries
+**Fallback-grade halt.** Where the frontier entry carries
 `"grade": "fallback"`, any trigger that would route to frontier instead halts
 the finding as contested to the owner: escalation must buy a strictly stronger
 adjudicator, and auto-dispatching the same class at more effort is escalation
@@ -387,7 +377,7 @@ see the gate below):
 1. **Finish the fix** on a per-finding branch `fix/<id>-<slug>`, smallest coherent
    slice, touching only the files the finding doc declares.
 2. **Dispatch the reviewer** headless and one-shot, in the harness's **JSON output
-   mode** (the flag found while probing), at the routed tier's owner-confirmed
+   mode** (the flag found while probing), at the routed tier's owner-named
    (model, effort) pair — **standard at high** unless an escalation trigger or
    the owner phrase routes **frontier at xhigh** (see "Reviewer tiers and
    routing"). Pass an **explicit base**: the reviewed
@@ -403,6 +393,7 @@ see the gate below):
    the JSON envelope. Its result payload must match:
    ```json
    {"verdict":"accepted|reopened|invalid","guard_confirmed":true,
+    "capability_ok":true,
     "reviewed_sha":"<head-sha>","base_sha":"<base-sha>","comments":["file:line — …"]}
    ```
    Parse the envelope's result field against this schema. **The orchestrator — never
@@ -410,7 +401,12 @@ see the gate below):
    checks, not the decision. **Fail closed:** any of {non-zero exit, missing/!valid
    JSON envelope, payload not matching the schema, `verdict` not in the enum,
    `reviewed_sha` ≠ the dispatched head SHA, `base_sha` ≠ the dispatched base SHA,
-   `guard_confirmed` not literally `true`} → the outcome is **not accepted**.
+   `guard_confirmed` not literally `true`, `capability_ok` not literally `true`}
+   → the outcome is **not accepted**. `capability_ok` is the folded-in transport
+   proof (see "Capability proof"): the reviewer sets it only after reading a repo
+   file and running one allowlisted command in the same shot, so its absence means
+   the child never had the capabilities the review depends on — exactly the issue
+   #6 failure mode, which the standalone smoke round used to catch.
    **Extraction before rejection:** a prose-wrapped payload is not a parse miss —
    scan it for candidate JSON objects, and when exactly one matches the schema, use
    it; the review already happened, and surrounding prose is never an input to

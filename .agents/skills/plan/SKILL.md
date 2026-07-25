@@ -5,8 +5,7 @@ description: Draft or update a durable plan before broad implementation work. Us
 ---
 
 Run the `plan` operator defined in this repo's `AGENTS.md` (Operator
-Requests): draft or update a durable plan before broad implementation work.
-Plan documents are agent-facing and self-contained; owner decisions are
-presented in chat as short plain-English asks, one at a time, and the
-approved wording is recorded durably. `AGENTS.md` is the authoritative
-definition; this skill is only a pointer.
+Requests): read `.agents/playbooks/plan.md` and follow it — plans are
+agent-facing and cold-implementable; owner decisions are presented in
+chat one at a time and recorded durably. The playbook is the
+authoritative definition; this skill is only a pointer.
