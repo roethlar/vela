@@ -1467,3 +1467,24 @@ Supersedes:
 The earlier recovery decision's “exactly two paths” wording. It does not change
 the requirement to preserve the damaged whole file before replacement, the
 fresh-file option, Exit's no-write behavior, or the ban on partial salvage.
+
+## 2026-07-25 - Emby transcoding ships limited and user-reported
+
+Status: APPROVED (owner, 2026-07-25). Implementation plan:
+`.agents/plans/server-transcoding.md`.
+
+Decision:
+Emby support for server-side transcoding is written best-effort and labelled
+limited. The owner has no Emby server, so the path cannot be exercised before
+release; Vela says so in the UI and README and invites users to file issues
+rather than implying verified support. Emby never blocks the transcoding
+feature, and no verdict claiming Emby works may be recorded without a real
+server behind it.
+
+Reason:
+Emby is already experimental (2026-07-15) and its transcode contract is
+unverified. Shipping an honest best-effort path with a visible caveat is more
+useful than either omitting Emby or overstating it.
+
+Supersedes:
+Nothing. It extends the 2026-07-15 experimental-Emby posture to this feature.

@@ -179,8 +179,12 @@ Each must be ruled in owner-facing chat, one at a time, and recorded here and in
    home.
 5. **Persistence of the current selection** across app restarts.
 6. **Prefer Compatible's fate** now its premise is void.
-7. **Emby scope** — supported at launch or explicitly out, per its unverified
-   contract.
+7. ~~**Emby scope**~~ — RULED 2026-07-25: Emby transcoding is implemented
+   best-effort and labelled limited, consistent with Emby's existing
+   experimental status (`.agents/decisions.md` 2026-07-15). The owner has no
+   Emby server, so it cannot be exercised; the UI and README say so and invite
+   users to report issues rather than implying verified support. Do not block
+   the feature on Emby, and do not claim Emby works.
 
 ---
 
