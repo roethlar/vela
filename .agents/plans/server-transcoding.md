@@ -13,13 +13,15 @@ choices:
 2. ~~Plex's ladder tier values~~ — CONFIRMED 2026-07-25 from a live client; the
    table is in `.agents/decisions.md`. Tiers are resolution+bitrate pairs, and
    two share a label, so bitrate must always be displayed.
-3. The plan still needs its implementation slices written, with the verification
-   and guard proof each one owes.
+3. ~~Implementation slices~~ — WRITTEN 2026-07-25; see **Implementation
+   slices**. Six slices, 1.0.12 through 1.0.17.
 4. Emby's transcode contract remains unverified and stays best-effort per the
    2026-07-25 ruling.
 
-The owner has not said "implement". Do not start code on the strength of the
-rulings alone.
+Nothing now blocks implementation on evidence or on product choices. **The owner
+has not said "implement".** Do not start code on the strength of the rulings
+alone; this plan becomes active only when `.agents/state.md` names it as the
+active implementation, the same gate the marker plan used.
 
 The requirement is owner-stated (2026-07-25): Vela is direct-play only today and
 must be able to ask the server to transcode. Two concrete drivers, both real for
@@ -239,6 +241,105 @@ are canonical and this list points at them.
    the feature on Emby, and do not claim Emby works.
 
 ---
+
+## Implementation slices
+
+Base version at planning time is 1.0.11, so these land 1.0.12 through 1.0.17;
+if the base moves first, use the next patch each time rather than these numbers.
+Every slice runs the full canonical dual-side set because `scripts/bump.sh`
+touches both version surfaces, and every slice red-proves each behaviour it
+claims SEPARATELY, from a committed state, per `.agents/repo-guidance.md`
+(Guard discipline).
+
+### Slice 1 — capability model and the tier ladder (no UI, no playback change)
+
+- Add a provider-neutral `PlaybackOptions` to `src-tauri/src/source/mod.rs`:
+  `can_direct_play: bool`, `can_transcode: bool`, `source_width/height`,
+  `source_bitrate_kbps`, and `tiers: Vec<QualityTier>`.
+- `QualityTier` is a closed set carrying label, bitrate and resolution, seeded
+  from the confirmed Plex ladder in `.agents/decisions.md`. Ship the table as
+  data, not scattered constants.
+- Implement the filter: a tier is offered when its resolution is **at or below**
+  the source's. **No bitrate filter** — see the plan section above.
+- Plex: call `/video/:/transcode/universal/decision` and read
+  `generalDecisionCode` plus `Metadata[0].Media[0]`.
+- Jellyfin/Emby: extend `MediaSourceInfo` with `SupportsTranscoding`,
+  `TranscodingUrl`, `TranscodeReasons` — currently unparsed.
+- Nothing calls this from the play path yet.
+- **Guards, proven separately:** the three live samples become fixtures — 2160p
+  offers all ten tiers, 1080p/10 Mbps offers all ten INCLUDING the 20 and
+  12 Mbps entries, 384p/1.5 Mbps offers only 328p and specifically drops the
+  equal-bitrate 480p tier. Plus decision-response parsing against an HTTP mock,
+  and Jellyfin capability parsing.
+
+### Slice 2 — the quality setting (config + Settings, still inert)
+
+- `playback_quality` on `AppConfig` as a closed enum: `Original`, a tier
+  identifier, or `Automatic`. **Missing means `Original`**, preserving today's
+  direct-play behaviour and HDR passthrough for every existing install.
+- Extend the existing `MpvAdvanced` get/set pair rather than adding a command.
+- Settings > Player control, with help text that distinguishes it from the
+  duplicate-copy mode per the 2026-07-25 ruling: that mode chooses WHICH COPY,
+  this one chooses HOW IT IS DELIVERED. Neither may imply it governs the other.
+- Every entry displays its bitrate — two ladder tiers share a label.
+- No playback behaviour changes in this slice.
+- **Guards, proven separately:** missing field resolves to `Original`; an
+  unknown stored value invalidates the document; round-trip of every value;
+  legacy rollback fields untouched.
+
+### Slice 3 — transcoded playback and session teardown
+
+- Build the transcode URL per provider: Plex
+  `/video/:/transcode/universal/start.m3u8` with a **client-generated session
+  uuid**, `maxVideoBitrate`, `videoResolution`, `protocol=hls`, `offset`,
+  `copyts`, `fastSeek`; Jellyfin `Videos/{id}/master.m3u8` with `videoBitRate`,
+  `maxWidth`/`maxHeight`, the required `mediaSourceId`, and `playSessionId`.
+- `StreamResolution` carries the quality actually used, so the layer above knows
+  whether this play is transcoded.
+- **Teardown is mandatory:** `DELETE /transcode/sessions/<uuid>` when the child
+  exits, when launch fails, and on shutdown. Model it on `HeaderInclude`'s Drop
+  guard in `playback.rs`, which already solves exactly this lifetime problem.
+  There is no keep-alive ping; an abandoned session's expiry is unknown, which
+  is why this cannot be best-effort.
+- The Settings value now takes effect.
+- **Guards, proven separately:** URL construction per provider; a unique session
+  id per launch; teardown fires on normal exit; teardown fires on spawn failure.
+
+### Slice 4 — the per-title one-off menu
+
+- Context menu per the 2026-07-25 ruling: `Play Version >` with servers
+  expanding to qualities when there are two or more versions, `Play at Quality >`
+  listing qualities directly when there is one, never both, and absent entirely
+  when the only version cannot be transcoded.
+- Resolve options **lazily when the submenu opens**, not when the context menu
+  opens — the Plex decision call is a network round trip per version and must
+  not be paid on every right-click.
+- The choice applies to the play it starts and persists nothing.
+- **Guards, proven separately:** single-version menu shape; multi-version
+  nesting; no persistence after a one-off play; no decision request until the
+  submenu is opened.
+
+### Slice 5 — Automatic
+
+- Only active when the setting is `Automatic`. The play starts at `Original`.
+- Watch mpv over the existing IPC connection for the two signals ruled on
+  2026-07-25: sustained decoder frame drops (`decoder-frame-drop-count`) and a
+  repeatedly starving demuxer cache (`demuxer-cache-duration`, `cache-speed`).
+  Specify the window and thresholds here when implementing; they are
+  implementation detail, not owner decisions.
+- On either signal, step down one tier and resume at the current position.
+- **Persist nothing.** The next play starts at `Original` again.
+- **Guards, proven separately:** a drop-storm triggers a step down; a starving
+  cache triggers a step down; a healthy play triggers neither; nothing is
+  written to config afterwards.
+
+### Slice 6 — Emby labelling and documentation
+
+- Emby transcoding is implemented best-effort and labelled limited in the UI and
+  README, inviting issue reports, per the 2026-07-25 ruling. Do not claim it
+  works; no verdict may assert Emby support without a real server behind it.
+- README Player notes gain the quality setting, the one-off menu, and the plain
+  statement that transcoding forfeits HDR and drops container chapters.
 
 ## Verification
 
