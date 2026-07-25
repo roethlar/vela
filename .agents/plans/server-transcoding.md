@@ -319,6 +319,37 @@ unconverted; and an unreadable decision treated as permission.
   unknown stored value invalidates the document; round-trip of every value;
   legacy rollback fields untouched.
 
+**Slice 2 evidence (2026-07-25, version 1.0.13, commit `9f87475`).**
+`playback_quality: Option<String>` on `AppConfig`, following the repo's existing
+validated-string pattern rather than a new enum, so it reuses
+`validate_optional_closed`. Its valid set is BUILT FROM `QUALITY_TIERS` plus
+`original` and `automatic`, so a tier that ever leaves the ladder cannot linger
+in a config as a value nothing can honour. `config::playback_quality()` is the
+single place the missing-field default is applied, and it treats an empty string
+as absent. `set_mpv_advanced` rejects an unknown value rather than writing one
+the loader would later refuse.
+
+`MpvAdvanced` carries the resolved value plus the whole ladder, so Settings
+renders labels and bitrates without duplicating the table in TypeScript. The
+control shows the bitrate on every entry — mandatory, since two tiers share a
+label.
+
+Both halves of the 2026-07-25 Prefer Compatible ruling are implemented: the
+duplicate-source section now opens with "This chooses **which copy** plays, not
+how it is delivered", notes it does nothing for single-copy libraries, and
+Prefer Compatible's summary reads "Pick the copy that best matches…"; the
+quality control's help says it governs how the copy is **delivered**, names the
+HDR and chapter cost, and says it is situational rather than per-title.
+
+Nothing reads the setting at play time yet — playback is unchanged.
+
+Canonical dual-side set passed at 1.0.13 with 287 Rust tests (285 before). Five
+regressions were injected separately from the committed state, each compiling,
+each restored clean: the missing-field default changed to a tier; an empty
+string accepted as a value; the closed validation removed; the valid set
+hand-listed instead of derived from the ladder; and the legacy rollback fields
+stripped on save.
+
 ### Slice 3 — transcoded playback and session teardown
 
 - Build the transcode URL per provider: Plex

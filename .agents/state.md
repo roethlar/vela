@@ -211,7 +211,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   quality ladder, `PlaybackOptions`, Jellyfin capability parsing, and the Plex
   decision call, with seven guards each red-proven separately. Nothing calls it
   yet by design, so the play path is unchanged; the scoped
-  `#[allow(dead_code)]` markers must be removed in slice 3. Two facts worth not
+  `#[allow(dead_code)]` markers must be removed in slice 3. Slice 2 is committed
+  as `9f87475` at 1.0.13: `playback_quality` on `AppConfig` (missing means
+  `original`, valid set derived from the ladder), the `MpvAdvanced` boundary,
+  and the Settings > Player control, with five guards each red-proven
+  separately. Both settings now state which question they answer, per the
+  Prefer Compatible ruling. Still inert at play time. Two facts worth not
   rediscovering: Plex's
   `/video/:/transcode/universal/ping` and `/stop` DO NOT EXIST (both 404) and
   teardown is `DELETE /transcode/sessions/<uuid>`; and Plex filters its quality
