@@ -1564,3 +1564,34 @@ different scales depending on which server holds it.
 
 Supersedes:
 Nothing.
+
+## 2026-07-25 - Automatic quality is mpv-observed and never remembered
+
+Status: APPROVED (owner, 2026-07-25). Implementation plan:
+`.agents/plans/server-transcoding.md`.
+
+Decision:
+Automatic is one selectable value of the quality setting, never the default.
+When it is selected, a play starts at Original and mpv's own reporting decides
+whether that holds: sustained decoder frame drops mean this machine cannot
+decode the file, and a repeatedly starving demuxer cache means the link cannot
+carry it. Either signal steps the play down the ladder and resumes at the
+current position.
+
+Nothing is remembered. The next play of the same title starts at Original again
+and is judged afresh, because the constraint belongs to the situation - the
+network and the machine at that moment - and not to the file.
+
+Rejected alternatives, recorded so they are not re-proposed: predicting the
+client's decode capability, which is brittle; and caching the observed verdict
+per file, which goes stale the moment the same laptop moves between a cafe link
+and a wired network.
+
+Reason:
+Measuring what actually happened is evidence rather than prediction, and it
+needs no capability database, no probe, and no prompt. Automatic stays opt-in
+because stepping down forfeits HDR passthrough, and that must never happen
+without the user having asked for it.
+
+Supersedes:
+Nothing.
