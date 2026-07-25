@@ -2391,6 +2391,7 @@ mod merge_tests {
             _k: &str,
             _d: Option<u64>,
             _m: bool,
+            _q: &str,
         ) -> Result<crate::source::StreamResolution, String> {
             Err("fake source".into())
         }
@@ -2436,6 +2437,7 @@ mod merge_tests {
             _k: &str,
             _d: Option<u64>,
             _m: bool,
+            _q: &str,
         ) -> Result<crate::source::StreamResolution, String> {
             Err("server offline".into())
         }
@@ -4374,6 +4376,11 @@ async fn play_by_key_locked(
     // the server is never asked for markers at all.
     let skip_policies = SkipPolicies::load()?;
     let include_markers = skip_policies.any_enabled();
+    // The user's current quality setting, resolved once here so the sources
+    // never read config themselves.
+    let quality = config::load_config()
+        .map(|cfg| config::playback_quality(cfg.playback_quality.as_deref()))
+        .unwrap_or_else(|_| config::PLAYBACK_QUALITY_ORIGINAL.to_string());
     let resolved = match selection.version_id.as_deref() {
         Some(version_id) => {
             src.resolve_stream_version(
@@ -4381,11 +4388,17 @@ async fn play_by_key_locked(
                 item.duration_ms,
                 version_id,
                 include_markers,
+                &quality,
             )
             .await
         }
         None => src
-            .resolve_stream(&selection.raw_item_key, item.duration_ms, include_markers)
+            .resolve_stream(
+                &selection.raw_item_key,
+                item.duration_ms,
+                include_markers,
+                &quality,
+            )
             .await,
     }
     .map_err(PlayFailure::unavailable)?;
@@ -4492,6 +4505,10 @@ async fn play_by_key_locked(
     // the stock trigger and lets the shim fire detection after a settle
     // delay — the stock trigger breaks on --start resumes; see the shim).
     let autocrop_shim = resolve_resource("vela-autocrop.lua");
+    // Grab the teardown handle before `resolved` is consumed below. Whatever
+    // started a transcode is obliged to stop it: neither server has a
+    // keep-alive, and how an abandoned session expires is unknown.
+    let transcode_session = resolved.transcode_session.clone();
     let markers_script = resolve_resource("vela-markers.lua");
     // Keep only the kinds the user actually enabled: the script must never be
     // handed a range it is not allowed to act on.
@@ -4540,7 +4557,21 @@ async fn play_by_key_locked(
         let recents_ready = recents_ready.clone();
         let playback_started_at_ms = playback_started_at_ms.clone();
         let advance = state.playback_advance.clone();
+        // Hold the source itself rather than reaching back through the
+        // registry: the play must be stoppable even if the user disconnects
+        // that server while it is still running.
+        let stopping_source = src.clone();
+        let transcode_session = transcode_session.clone();
         Some(std::sync::Arc::new(move |position_ms: u64| {
+            // Stop the server-side transcode first: it costs the user's server
+            // real work, and the recents/event bookkeeping below must not be
+            // able to skip it by returning early.
+            if let Some(session) = transcode_session.clone() {
+                let source = stopping_source.clone();
+                tauri::async_runtime::spawn(async move {
+                    source.stop_transcode(&session).await;
+                });
+            }
             if !recents_ready.wait_succeeded() {
                 return;
             }
@@ -5905,6 +5936,7 @@ mod tests {
             _key: &str,
             _duration_ms: Option<u64>,
             _include_markers: bool,
+            _quality: &str,
         ) -> Result<crate::source::StreamResolution, String> {
             Err("not used".to_string())
         }

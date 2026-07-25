@@ -1241,6 +1241,7 @@ impl MediaSource for PlexSource {
         item_key: &str,
         duration_ms: Option<u64>,
         include_markers: bool,
+        quality: &str,
     ) -> Result<StreamResolution, String> {
         let mut versions = self.playback_versions(item_key).await?;
         versions.sort_by(|left, right| {
@@ -1255,8 +1256,23 @@ impl MediaSource for PlexSource {
         let selected = versions
             .first()
             .ok_or_else(|| "no playable Plex media version found".to_string())?;
-        self.resolve_stream_version(item_key, duration_ms, &selected.version_id, include_markers)
+        self.resolve_stream_version(
+            item_key,
+            duration_ms,
+            &selected.version_id,
+            include_markers,
+            quality,
+        )
             .await
+    }
+
+    /// Stop a transcode this source started. Plex keys the session by the id
+    /// the client invented at start; losing it orphans a transcode on the
+    /// user's server, so this must be called for every session that began.
+    async fn stop_transcode(&self, session: &str) {
+        if let Ok(lib) = self.ensure_ready().await {
+            lib.stop_transcode_session(session).await;
+        }
     }
 
     async fn playback_versions(&self, item_key: &str) -> Result<Vec<PlaybackVersion>, String> {
@@ -1311,6 +1327,7 @@ impl MediaSource for PlexSource {
         duration_ms: Option<u64>,
         version_id: &str,
         include_markers: bool,
+        quality: &str,
     ) -> Result<StreamResolution, String> {
         validate_plex_id("item key", item_key)?;
         let fetch = |lib: PlexLibrary| async move {
@@ -1325,18 +1342,12 @@ impl MediaSource for PlexSource {
             Ok(value) => value,
             Err(_) => fetch(self.rediscover().await?).await?,
         };
-        let media = detail
+        let (media_index, media) = detail
             .media
             .iter()
             .enumerate()
             .find(|(index, media)| plex_media_matches_version(media, *index, version_id))
-            .map(|(_, media)| media)
             .ok_or_else(|| "the selected Plex media version is no longer available".to_string())?;
-        let url = lib
-            .part_url_for_media(media)
-            .ok_or_else(|| "the selected Plex media version has no playable parts".to_string())?;
-        let stream_headers = vec![("X-Plex-Token".to_string(), lib.auth_token_clone())];
-        preflight_plex_stream(&url, &stream_headers).await?;
 
         let resume_ms = lib
             .get_resume_offset_ms(item_key)
@@ -1344,6 +1355,56 @@ impl MediaSource for PlexSource {
             .ok()
             .flatten()
             .unwrap_or(0);
+
+        // Delivery. The Original path below is byte-for-byte what it always
+        // was: no decision request, no extra round trip, and the same
+        // header-authenticated part URL. Only a real tier request diverges.
+        let (width, height) = plex_media_dimensions(media);
+        let options = crate::source::PlaybackOptions::new(
+            true,
+            true,
+            width,
+            height,
+            media.bitrate.unwrap_or(0) as u32,
+        );
+        let mut delivery = options.resolve(quality);
+        let mut transcode_session = None;
+        let mut url = String::new();
+        let mut stream_headers = Vec::new();
+
+        if let Some(tier) = delivery.tier() {
+            let session = uuid::Uuid::new_v4().simple().to_string();
+            // Ask before converting: a server that will not convert this copy
+            // must not be handed a transcode URL that then fails the play.
+            let permitted = lib
+                .transcode_decision(item_key, media_index, Some(tier), &session)
+                .await
+                .map(|decision| decision.conversion_ok())
+                .unwrap_or(false);
+            match permitted
+                .then(|| lib.transcode_url(item_key, media_index, tier, resume_ms / 1000))
+                .flatten()
+            {
+                Some((transcode_url, session)) => {
+                    url = transcode_url;
+                    transcode_session = Some(session);
+                }
+                None => {
+                    // Degrade to the original rather than refuse to play.
+                    eprintln!("plex: conversion unavailable for this copy; playing the original");
+                    delivery = crate::source::Delivery::Original;
+                }
+            }
+        }
+
+        if url.is_empty() {
+            url = lib
+                .part_url_for_media(media)
+                .ok_or_else(|| "the selected Plex media version has no playable parts".to_string())?;
+            stream_headers = vec![("X-Plex-Token".to_string(), lib.auth_token_clone())];
+            preflight_plex_stream(&url, &stream_headers).await?;
+        }
+
         let info = TrackInfo {
             server_base: lib.server_base().unwrap_or_default(),
             token: lib.auth_token_clone(),
@@ -1357,6 +1418,8 @@ impl MediaSource for PlexSource {
             resume_ms,
             progress: ProgressTarget::Plex(info),
             http_headers: stream_headers,
+            delivery,
+            transcode_session,
             markers: plex_markers(&detail),
         })
     }

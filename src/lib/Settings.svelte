@@ -156,10 +156,6 @@
   let mpvAutocrop = $state<AutocropMode>("off");
   // Button matches the backend's missing-field default, so a load failure
   // cannot present a stronger setting than the user actually has.
-  // Does the play path honour the quality setting yet? While false the control
-  // is withheld rather than offered inertly (finding tr-1). The slice that
-  // wires playback flips this and deletes the guard around the field.
-  const QUALITY_CONTROL_READY = false;
   // Original matches the backend's missing-field default, so a failed load can
   // never present a converted setting the user never chose.
   let playbackQuality = $state("original");
@@ -727,12 +723,6 @@
           {/if}
         </div>
 
-        <!-- Withheld until the play path honours it. A control that promises
-             server conversion while playback ignores it tells the user they
-             have fixed a stall they have not (finding tr-1). The setting, its
-             validation and the command boundary all exist already; only this
-             control waits. Flip to true in the slice that wires playback. -->
-        {#if QUALITY_CONTROL_READY}
         <div class="field">
           <label for="playback-quality">Playback quality</label>
           <select id="playback-quality" bind:value={playbackQuality}>
@@ -759,7 +749,6 @@
             for one play.
           </p>
         </div>
-        {/if}
 
         <div class="field">
           <label for="skip-intros">Skip intros</label>

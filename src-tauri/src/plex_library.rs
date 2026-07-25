@@ -256,7 +256,6 @@ pub struct PlexPart {
 /// the stream that would be produced.
 #[derive(Debug, Deserialize, Default)]
 #[serde(default)]
-#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
 pub struct DecisionContainer {
     #[serde(rename = "@generalDecisionCode")]
     pub general_decision_code: Option<u32>,
@@ -266,11 +265,11 @@ pub struct DecisionContainer {
     pub direct_play_decision_code: Option<u32>,
     #[serde(rename = "@transcodeDecisionCode")]
     pub transcode_decision_code: Option<u32>,
+    #[allow(dead_code)] // consumed by slice 4's per-title quality menu
     #[serde(rename = "Video", default)]
     pub videos: Vec<PlexDetail>,
 }
 
-#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
 impl DecisionContainer {
     /// Plex's 1xxx codes are the success family; 2xxx and above report a
     /// refusal. Absent a code we assume NO rather than guessing yes, so an
@@ -1189,7 +1188,6 @@ impl PlexLibrary {
     /// later tears the session down via `DELETE /transcode/sessions/<id>`
     /// (verified 2026-07-25 — `/transcode/universal/ping` and `/stop` do not
     /// exist).
-    #[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
     pub async fn transcode_decision(
         &self,
         rating_key: &str,
@@ -1290,7 +1288,6 @@ impl PlexLibrary {
     /// which moved to a header: mpv follows the HLS playlist's own segment URLs,
     /// which the server writes, so a header set on the first request would not
     /// travel with them.
-    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
     pub fn transcode_url(
         &self,
         rating_key: &str,
@@ -1338,7 +1335,6 @@ impl PlexLibrary {
     /// Tear down one transcode session. Best-effort by return type but
     /// MANDATORY to call: there is no keep-alive ping, and how an abandoned
     /// session expires is unknown, so anything Vela starts it must also stop.
-    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
     pub async fn stop_transcode_session(&self, session: &str) {
         let Some(base) = self.server_base() else {
             return;

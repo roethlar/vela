@@ -1,6 +1,8 @@
-// A Settings control that promises server conversion while playback ignores it
-// tells the user they have addressed a stall they have not (finding tr-1). The
-// quality control must not reach the UI before the play path honours it.
+// Finding tr-1: a Settings control that promises server conversion while the
+// play path ignores it tells the user they have addressed a stall they have
+// not. The gate that finding introduced is gone now that playback honours the
+// setting, so what is guarded here is the invariant underneath it — the control
+// may exist only while the play path actually reads the setting.
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import fs from 'node:fs';
@@ -8,30 +10,44 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const settings = fs.readFileSync(path.join(repoRoot, 'src/lib/Settings.svelte'), 'utf8');
+const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 
-test('the quality control is not offered before playback honours it', () => {
-  const readyMatch = /const QUALITY_CONTROL_READY = (true|false);/.exec(settings);
-  assert.ok(readyMatch, 'the readiness gate must exist while the wiring is pending');
+const settings = read('src/lib/Settings.svelte');
+const commands = read('src-tauri/src/commands.rs');
 
-  const field = settings.indexOf('id="playback-quality"');
-  assert.ok(field > 0, 'the quality field should still be authored, only withheld');
+test('the quality control ships only while playback reads the setting', () => {
+  const offered = settings.includes('id="playback-quality"');
+  if (!offered) return; // Withheld is always safe.
 
-  if (readyMatch[1] === 'false') {
-    // The field must sit inside the gate, not merely near it.
-    const gate = settings.indexOf('{#if QUALITY_CONTROL_READY}');
-    const endGate = settings.indexOf('{/if}', gate);
-    assert.ok(gate > 0 && gate < field && field < endGate,
-      'the quality field must be inside the readiness gate');
-  }
+  assert.match(
+    commands,
+    /config::playback_quality\(cfg\.playback_quality\.as_deref\(\)\)/,
+    'the play path must resolve the stored quality setting',
+  );
+  // Resolution has to receive it, or the value is read and then dropped.
+  assert.match(
+    commands,
+    /resolve_stream\([\s\S]{0,200}&quality,/,
+    'resolve_stream must be given the resolved quality',
+  );
+  assert.match(
+    commands,
+    /resolve_stream_version\([\s\S]{0,200}&quality,/,
+    'resolve_stream_version must be given the resolved quality',
+  );
 });
 
-// The other half of the same defect: the help text names a behaviour, so it may
-// only ship when that behaviour exists.
-test('the quality help text ships only with the control', () => {
-  const promises = settings.includes('asks\n            your server to convert it');
-  const gated = settings.includes('{#if QUALITY_CONTROL_READY}');
-  const ready = /const QUALITY_CONTROL_READY = true;/.test(settings);
-  assert.ok(!promises || gated || ready,
-    'copy promising server conversion must be gated until the feature works');
+// A transcode the user starts costs their server real work, and neither
+// provider has a keep-alive that would expire it on its own.
+test('a started transcode is always stopped', () => {
+  assert.match(
+    commands,
+    /stop_transcode\(&session\)/,
+    'the play-end path must stop the transcode session it started',
+  );
+  assert.match(
+    commands,
+    /let transcode_session = resolved\.transcode_session\.clone\(\)/,
+    'the teardown handle must be captured before the resolution is consumed',
+  );
 });

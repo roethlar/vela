@@ -258,7 +258,6 @@ impl JellyfinClient {
     ///
     /// `deviceProfileId` is deliberately absent: Jellyfin marks it obsolete and
     /// never reads it, so capabilities travel as the explicit parameters below.
-    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
     fn transcode_url(
         &self,
         item_id: &str,
@@ -293,7 +292,6 @@ impl JellyfinClient {
     /// Stop one active encoding. Best-effort by return type but MANDATORY to
     /// call: an abandoned Jellyfin encoding keeps a transcoder busy on the
     /// user's server.
-    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
     async fn stop_transcode(&self, play_session_id: &str) {
         let url = self.build_url(
             &["Videos", "ActiveEncodings"],
@@ -739,7 +737,7 @@ struct MediaSourceInfo {
     /// comma-joined flags string, and a wrong concrete type here would fail the
     /// whole PlaybackInfo parse and break playback for a field nothing depends
     /// on.
-    #[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+#[allow(dead_code)] // diagnostic; parsed so the tolerant shape is exercised
     transcode_reasons: Option<serde_json::Value>,
     bitrate: Option<u64>,
     size: Option<u64>,
@@ -885,7 +883,6 @@ impl MediaSourceInfo {
     /// Transcoding availability is taken from `SupportsTranscoding`, falling
     /// back to the presence of a server-built `TranscodingUrl`. Absent both, we
     /// assume NO — never offer a conversion the server has not said it can do.
-    #[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
     fn playback_options(&self) -> crate::source::PlaybackOptions {
         let can_transcode = self
             .supports_transcoding
@@ -1055,6 +1052,65 @@ pub struct JellyfinSource {
 }
 
 impl JellyfinSource {
+    /// What this server can do with one exact copy. A PlaybackInfo lookup that
+    /// fails leaves the copy direct-play-only, so a transient error can never
+    /// silently start converting.
+    async fn playback_options_for(
+        &self,
+        item_key: &str,
+        media_source_id: &str,
+    ) -> crate::source::PlaybackOptions {
+        match self.client.playback_info_response(item_key).await {
+            Ok(info) => info
+                .media_sources
+                .iter()
+                .find(|source| source.id == media_source_id)
+                .or_else(|| info.media_sources.first())
+                .map(|source| source.playback_options())
+                .unwrap_or_else(|| crate::source::PlaybackOptions::new(true, false, 0, 0, 0)),
+            Err(_) => crate::source::PlaybackOptions::new(true, false, 0, 0, 0),
+        }
+    }
+
+    /// Choose how this play is delivered, and build the matching URL.
+    ///
+    /// The Original path is exactly the previous behaviour: the same
+    /// `static=true` direct-stream URL, no capability request, no extra round
+    /// trip. Only an actual tier request diverges, and a copy the server will
+    /// not convert degrades back to the original rather than failing the play.
+    fn deliver(
+        &self,
+        item_key: &str,
+        media_source_id: &str,
+        play_session_id: Option<&str>,
+        quality: &str,
+        start_ticks: i64,
+        options: crate::source::PlaybackOptions,
+    ) -> (String, crate::source::Delivery, Option<String>) {
+        let delivery = options.resolve(quality);
+        match delivery.tier() {
+            Some(tier) => {
+                let url = self.client.transcode_url(
+                    item_key,
+                    media_source_id,
+                    play_session_id,
+                    tier,
+                    start_ticks,
+                );
+                // Jellyfin keys an encoding by device + play session, so that
+                // pair IS the teardown handle. Without a session id there is
+                // nothing to stop later, which is why one is required here.
+                (url, delivery, play_session_id.map(str::to_string))
+            }
+            None => (
+                self.client
+                    .stream_url(item_key, media_source_id, play_session_id),
+                crate::source::Delivery::Original,
+                None,
+            ),
+        }
+    }
+
     /// Marker lookup, but only when a policy actually asked for it: a disabled
     /// feature must cost the server no request at all.
     async fn markers_if_enabled(&self, item_key: &str, include_markers: bool) -> Vec<MediaMarker> {
@@ -1466,6 +1522,7 @@ impl MediaSource for JellyfinSource {
         item_key: &str,
         _duration_ms: Option<u64>,
         include_markers: bool,
+        quality: &str,
     ) -> Result<StreamResolution, String> {
         // The optional marker lookup rides alongside ALL of the mandatory
         // resolve work, not just its first request, so in the normal case it
@@ -1489,10 +1546,16 @@ impl MediaSource for JellyfinSource {
             .map(ticks_to_ms)
             .unwrap_or(0);
 
+        let (url, delivery, transcode_session) = self.deliver(
+            item_key,
+            &media_source_id,
+            play_session_id.as_deref(),
+            quality,
+            (resume_ms * 10_000) as i64,
+            self.playback_options_for(item_key, &media_source_id).await,
+        );
         Ok(StreamResolution {
-            url: self
-                .client
-                .stream_url(item_key, &media_source_id, play_session_id.as_deref()),
+            url,
             resume_ms,
             progress: ProgressTarget::Jellyfin(JellyfinTrack {
                 base_url: self.client.base_url.clone(),
@@ -1502,8 +1565,17 @@ impl MediaSource for JellyfinSource {
                 headers: self.client.auth_headers(),
             }),
             http_headers: self.client.stream_auth_headers(),
+            delivery,
+            transcode_session,
             markers,
         })
+    }
+
+    /// Stop an encoding this source started. Jellyfin keys it by device plus
+    /// play session, so the session id carried out of `resolve_stream` is the
+    /// handle.
+    async fn stop_transcode(&self, session: &str) {
+        self.client.stop_transcode(session).await;
     }
 
     async fn playback_versions(&self, item_key: &str) -> Result<Vec<PlaybackVersion>, String> {
@@ -1553,6 +1625,7 @@ impl MediaSource for JellyfinSource {
         _duration_ms: Option<u64>,
         version_id: &str,
         include_markers: bool,
+        quality: &str,
     ) -> Result<StreamResolution, String> {
         // As in `resolve_stream`: the optional marker lookup overlaps every
         // mandatory request, never sits in front of one.
@@ -1573,12 +1646,16 @@ impl MediaSource for JellyfinSource {
             .unwrap_or(0);
         let (media_source_id, play_session_id) =
             exact_playback_identity(info, item_key, version_id)?;
+        let (url, delivery, transcode_session) = self.deliver(
+            item_key,
+            &media_source_id,
+            play_session_id.as_deref(),
+            quality,
+            (resume_ms * 10_000) as i64,
+            self.playback_options_for(item_key, &media_source_id).await,
+        );
         Ok(StreamResolution {
-            url: self.client.stream_url(
-                item_key,
-                &media_source_id,
-                play_session_id.as_deref(),
-            ),
+            url,
             resume_ms,
             progress: ProgressTarget::Jellyfin(JellyfinTrack {
                 base_url: self.client.base_url.clone(),
@@ -1588,6 +1665,8 @@ impl MediaSource for JellyfinSource {
                 headers: self.client.auth_headers(),
             }),
             http_headers: self.client.stream_auth_headers(),
+            delivery,
+            transcode_session,
             markers,
         })
     }

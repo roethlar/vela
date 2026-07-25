@@ -384,10 +384,6 @@ fn episode_context_from_detail(detail: DetailDto) -> Option<EpisodeContext> {
 /// binding constraint. Probed against a live Plex server 2026-07-25 — a 2.35:1
 /// source asked for `1920x1080` came back `1920x1038`, and `1280x720` at
 /// 2000 kbps came back `720x388`.
-// TEMPORARY, remove in slice 3: this slice deliberately lands the capability
-// model with no caller, so the play path keeps behaving exactly as it does
-// today. Slice 3 wires it and this exemption must go with it. It is scoped to
-// these items on purpose — never widen it to a module or crate allow.
 #[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -481,7 +477,6 @@ pub const QUALITY_TIERS: &[QualityTier] = &[
 /// still offers the 20 Mbps and 12 Mbps tiers, and a 1.5 Mbps 384p source drops
 /// the 480p tier even though that tier's bitrate matches the source exactly.
 /// Do not add a bitrate filter here.
-#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
 pub fn tiers_for_source(source_height: u32) -> Vec<QualityTier> {
     QUALITY_TIERS
         .iter()
@@ -493,7 +488,6 @@ pub fn tiers_for_source(source_height: u32) -> Vec<QualityTier> {
 /// What a given server can actually do with one exact copy, and therefore what
 /// Vela is allowed to offer for it. Never offer an option not represented here.
 #[derive(Debug, Clone, PartialEq, Eq)]
-#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
 pub struct PlaybackOptions {
     /// Whether the original file can be played untouched. When false, there is
     /// no Original entry.
@@ -508,7 +502,6 @@ pub struct PlaybackOptions {
     pub tiers: Vec<QualityTier>,
 }
 
-#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
 impl PlaybackOptions {
     pub fn new(
         can_direct_play: bool,
@@ -533,6 +526,8 @@ impl PlaybackOptions {
 
     /// True when the user has a real choice. A single-option item shows no
     /// quality menu at all.
+#[allow(dead_code)] // consumed by slice 4's per-title quality menu
+#[allow(dead_code)] // consumed by slice 4's per-title quality menu
     pub fn has_choice(&self) -> bool {
         usize::from(self.can_direct_play) + self.tiers.len() > 1
     }
@@ -596,7 +591,6 @@ pub enum Delivery {
 }
 
 impl Delivery {
-    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
     pub fn tier(self) -> Option<QualityTier> {
         match self {
             Delivery::Original => None,
@@ -663,6 +657,13 @@ pub struct StreamResolution {
     /// (mpv renders `${path}` in its title, stats overlay, and playlist).
     /// Empty only when the stream needs no authentication.
     pub http_headers: Vec<(String, String)>,
+    /// How this play is being delivered. `Original` means the untouched file,
+    /// which is the only delivery that preserves HDR.
+    pub delivery: Delivery,
+    /// The handle that must later stop a server-side transcode. `None` for a
+    /// direct play. Whatever starts a transcode is obliged to stop it: neither
+    /// server has a keep-alive, and how an abandoned session expires is unknown.
+    pub transcode_session: Option<String>,
     /// Best-effort intro/credits/commercial ranges for this exact selected
     /// item, already normalized. A provider marker failure is normalized to
     /// empty before construction: markers never fail a play.
@@ -726,12 +727,20 @@ pub trait MediaSource: Send + Sync {
     /// the resolve work it must do anyway. The play command passes `true` only
     /// when a marker policy is actually enabled, so servers see no extra
     /// request for a feature the user turned off.
+    /// `quality` is the user's current playback-quality setting, resolved
+    /// against what this copy can actually do. `"original"` must leave the
+    /// direct-play path exactly as it was.
     async fn resolve_stream(
         &self,
         item_key: &str,
         duration_ms: Option<u64>,
         include_markers: bool,
+        quality: &str,
     ) -> Result<StreamResolution, String>;
+
+    /// Stop a transcode this source started. No-op for sources that never
+    /// start one.
+    async fn stop_transcode(&self, _session: &str) {}
 
     /// Fetch provider artwork without exposing its credentials to the
     /// frontend. Only Plex currently uses the app-local artwork protocol.
@@ -757,8 +766,9 @@ pub trait MediaSource: Send + Sync {
         duration_ms: Option<u64>,
         _version_id: &str,
         include_markers: bool,
+        quality: &str,
     ) -> Result<StreamResolution, String> {
-        self.resolve_stream(item_key, duration_ms, include_markers)
+        self.resolve_stream(item_key, duration_ms, include_markers, quality)
             .await
     }
 
@@ -947,6 +957,7 @@ mod tests {
             _: &str,
             _: Option<u64>,
             _: bool,
+            _: &str,
         ) -> Result<StreamResolution, String> {
             Err("fake source".into())
         }
@@ -1018,6 +1029,32 @@ mod tests {
         // Transcode-only: no Original entry, but still a choice among tiers.
         let no_direct = PlaybackOptions::new(false, true, 1920, 1080, 10_000);
         assert!(no_direct.has_choice());
+    }
+
+    // The whole risk of wiring transcoding is breaking ordinary playback for
+    // the people who never asked for it. Original must reach the untouched
+    // file, and it must do so without any capability request at all.
+    #[test]
+    fn original_is_the_untouched_file_for_every_shape_of_copy() {
+        for (direct, transcode, height) in [
+            (true, true, 2160),
+            (true, true, 384),
+            (true, false, 1080),
+        ] {
+            let options = PlaybackOptions::new(direct, transcode, 1920, height, 10_000);
+            assert_eq!(
+                options.resolve(crate::config::PLAYBACK_QUALITY_ORIGINAL),
+                Delivery::Original,
+                "direct={direct} transcode={transcode} height={height}"
+            );
+            assert!(
+                options
+                    .resolve(crate::config::PLAYBACK_QUALITY_ORIGINAL)
+                    .tier()
+                    .is_none(),
+                "Original must never carry a tier, or the play path builds a transcode URL"
+            );
+        }
     }
 
     // The setting is a ceiling for the user's situation, not a promise every
