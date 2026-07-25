@@ -544,18 +544,26 @@ impl PlaybackOptions {
     /// they asked for, which is exactly wrong on the constrained link that made
     /// them choose.
     pub fn resolve(&self, setting: &str) -> Delivery {
-        if setting == crate::config::PLAYBACK_QUALITY_ORIGINAL || self.tiers.is_empty() {
-            return self.direct_or_best_available();
+        // UNCONDITIONAL. Original means the untouched file, full stop — never a
+        // conversion chosen on the user's behalf because a capability flag was
+        // absent or false. Conversion costs HDR and container chapters, so it
+        // may only ever happen because the user asked for it. An earlier
+        // revision fell back to "the gentlest available conversion" when a
+        // server reported no direct-play support; on Jellyfin, whose capability
+        // fields are optional, that silently transcoded for people still on the
+        // default (review finding tr-3).
+        if setting == crate::config::PLAYBACK_QUALITY_ORIGINAL
+            || setting == crate::config::PLAYBACK_QUALITY_AUTOMATIC
+        {
+            return Delivery::Original;
         }
-        // Automatic starts at Original; stepping down is the player's job once
-        // it has evidence, not a decision made before anything has played.
-        if setting == crate::config::PLAYBACK_QUALITY_AUTOMATIC {
-            return self.direct_or_best_available();
+        if self.tiers.is_empty() {
+            return Delivery::Original;
         }
         let Some(requested) = QUALITY_TIERS.iter().find(|tier| tier.id == setting) else {
             // An unrecognised setting must not silently convert; config
             // validation should have rejected it long before here.
-            return self.direct_or_best_available();
+            return Delivery::Original;
         };
         let chosen = self
             .tiers
@@ -564,20 +572,7 @@ impl PlaybackOptions {
             .copied();
         match chosen {
             Some(tier) => Delivery::Transcode(tier),
-            None => self.direct_or_best_available(),
-        }
-    }
-
-    /// Original when the server allows it; otherwise the gentlest conversion it
-    /// does allow, because refusing to play at all is the worst outcome.
-    fn direct_or_best_available(&self) -> Delivery {
-        if self.can_direct_play {
-            Delivery::Original
-        } else {
-            match self.tiers.first() {
-                Some(tier) => Delivery::Transcode(*tier),
-                None => Delivery::Original,
-            }
+            None => Delivery::Original,
         }
     }
 }
@@ -1051,6 +1046,7 @@ mod tests {
             (true, true, 2160),
             (true, true, 384),
             (true, false, 1080),
+            (false, true, 1080),
         ] {
             let options = PlaybackOptions::new(direct, transcode, 1920, height, 10_000);
             assert_eq!(
@@ -1113,18 +1109,20 @@ mod tests {
         );
     }
 
-    // Refusing to play is worse than converting, so a copy the server will not
-    // direct-play falls to the gentlest conversion it will do.
+    // Original is unconditional. A server that reports no direct-play support
+    // must NOT cause a conversion for a user who never asked for one: on
+    // Jellyfin those capability fields are optional, so an absent flag would
+    // otherwise transcode silently and cost HDR (finding tr-3).
     #[test]
-    fn a_copy_that_cannot_direct_play_falls_to_a_conversion() {
+    fn original_never_converts_even_without_reported_direct_play() {
         let no_direct = PlaybackOptions::new(false, true, 1920, 1080, 10_000);
         assert_eq!(
-            no_direct.resolve("original").tier().map(|tier| tier.id),
-            Some("1080p-20000"),
-            "Original is impossible here, so the best offered tier is used"
+            no_direct.resolve("original"),
+            Delivery::Original,
+            "a missing capability flag must not convert on the user's behalf"
         );
+        assert_eq!(no_direct.resolve("automatic"), Delivery::Original);
 
-        // Nothing available at all: still Original rather than an invented tier.
         let nothing = PlaybackOptions::new(false, false, 1920, 1080, 10_000);
         assert_eq!(nothing.resolve("720p-2000"), Delivery::Original);
     }

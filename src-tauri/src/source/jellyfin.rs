@@ -1078,36 +1078,52 @@ impl JellyfinSource {
     /// `static=true` direct-stream URL, no capability request, no extra round
     /// trip. Only an actual tier request diverges, and a copy the server will
     /// not convert degrades back to the original rather than failing the play.
-    fn deliver(
+    async fn deliver(
         &self,
         item_key: &str,
         media_source_id: &str,
         play_session_id: Option<&str>,
         quality: &str,
         start_ticks: i64,
-        options: crate::source::PlaybackOptions,
     ) -> (String, crate::source::Delivery, Option<String>) {
-        let delivery = options.resolve(quality);
-        match delivery.tier() {
-            Some(tier) => {
-                let url = self.client.transcode_url(
-                    item_key,
-                    media_source_id,
-                    play_session_id,
-                    tier,
-                    start_ticks,
-                );
-                // Jellyfin keys an encoding by device + play session, so that
-                // pair IS the teardown handle. Without a session id there is
-                // nothing to stop later, which is why one is required here.
-                (url, delivery, play_session_id.map(str::to_string))
-            }
-            None => (
+        let direct = || {
+            (
                 self.client
                     .stream_url(item_key, media_source_id, play_session_id),
                 crate::source::Delivery::Original,
                 None,
+            )
+        };
+
+        // Jellyfin keys an encoding by device + play session, so that pair IS
+        // the only teardown handle. Without a session id a transcode could be
+        // started and never stopped, so refuse to start one at all (tr-5).
+        let Some(session) = play_session_id else {
+            return direct();
+        };
+
+        // Only a real tier request costs a capability lookup. Original must not
+        // pay a second PlaybackInfo round trip on every play (tr-7).
+        if quality == crate::config::PLAYBACK_QUALITY_ORIGINAL
+            || quality == crate::config::PLAYBACK_QUALITY_AUTOMATIC
+        {
+            return direct();
+        }
+
+        let options = self.playback_options_for(item_key, media_source_id).await;
+        match options.resolve(quality).tier() {
+            Some(tier) => (
+                self.client.transcode_url(
+                    item_key,
+                    media_source_id,
+                    Some(session),
+                    tier,
+                    start_ticks,
+                ),
+                crate::source::Delivery::Transcode(tier),
+                Some(session.to_string()),
             ),
+            None => direct(),
         }
     }
 
@@ -1552,8 +1568,8 @@ impl MediaSource for JellyfinSource {
             play_session_id.as_deref(),
             quality,
             (resume_ms * 10_000) as i64,
-            self.playback_options_for(item_key, &media_source_id).await,
-        );
+        )
+        .await;
         Ok(StreamResolution {
             url,
             resume_ms,
@@ -1666,8 +1682,8 @@ impl MediaSource for JellyfinSource {
             play_session_id.as_deref(),
             quality,
             (resume_ms * 10_000) as i64,
-            self.playback_options_for(item_key, &media_source_id).await,
-        );
+        )
+        .await;
         Ok(StreamResolution {
             url,
             resume_ms,
