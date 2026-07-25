@@ -217,7 +217,24 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   and the Settings > Player control, with five guards each red-proven
   separately. Both settings now state which question they answer, per the
   Prefer Compatible ruling. Still inert at play time. Two facts worth not
-  rediscovering: Plex's
+  rediscovering:
+
+  **Slices 3 and 4 (partial) are landed but NOT clean.** Slice 3 (`e0e5fc7`,
+  1.0.18) wired the play path, both transcode URL builders and teardown; slice
+  4's backend (`de80b8a`, 1.0.19) added the `quality_options` command. A codex
+  review of slice 3 returned SEVEN findings, all admitted
+  (`.agents/review/findings/tr-3.md`). Three are fixed in `049ed78` (1.0.20):
+  Original could silently transcode on a server that omits Jellyfin's optional
+  direct-play flags (tr-3), Original paid a redundant PlaybackInfo round trip
+  (tr-7), and a Jellyfin transcode could start with no session id and so never
+  be stoppable (tr-5). FOUR REMAIN OPEN and block calling this feature done:
+  tr-4 (teardown is a detached task the exit path can lose, leaving an encoder
+  running), tr-6 (teardown ignores the HTTP response, so a 401/429/5xx reads as
+  success), tr-8 (Automatic is selectable but nothing implements it — the same
+  defect class as tr-1), and tr-9 (Plex multi-part media transcodes only its
+  first part). Slice 4's UI — the `Play Version > server > quality` nesting and
+  the collapsed single-version form — is NOT built.
+ Plex's
   `/video/:/transcode/universal/ping` and `/stop` DO NOT EXIST (both 404) and
   teardown is `DELETE /transcode/sessions/<uuid>`; and Plex filters its quality
   ladder by resolution only, never by bitrate. The 2026-07-19 Prefer Compatible
