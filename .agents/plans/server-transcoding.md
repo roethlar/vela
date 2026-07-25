@@ -9,7 +9,9 @@ choices:
 
 1. Plex's decision endpoint and transcode-session lifecycle (ping/stop) are
    unverified — confirm against a live server.
-2. Plex's ladder tier values are unconfirmed — read them off a current client.
+2. ~~Plex's ladder tier values~~ — CONFIRMED 2026-07-25 from a live client; the
+   table is in `.agents/decisions.md`. Tiers are resolution+bitrate pairs, and
+   two share a label, so bitrate must always be displayed.
 3. The plan still needs its implementation slices written, with the verification
    and guard proof each one owes.
 

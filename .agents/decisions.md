@@ -1552,10 +1552,33 @@ strictly below a given file's source bitrate are shown, and only when that
 server reports it can transcode the file, so the list stays per-file even though
 the ladder is fixed.
 
-The exact tier values are NOT yet confirmed: Plex does not publish the ladder
-through its API, and the support article documenting it refused an automated
-fetch. Read the values off a current Plex client and record them here before
-implementing; do not ship remembered values.
+Plex does not publish the ladder through its API, so it was read off a live Plex
+client (owner screenshot, 2026-07-25) rather than recalled. A tier is a
+RESOLUTION AND BITRATE PAIR, not a bitrate alone, so Vela sends both
+`videoResolution` and `maxVideoBitrate`. The confirmed ladder, top down:
+
+| Label                        | Bitrate  | Resolution |
+|------------------------------|----------|------------|
+| Play Original Quality        | source   | source     |
+| Convert to 1080p HD (High)   | 20 Mbps  | 1080p      |
+| Convert to 1080p HD (Medium) | 12 Mbps  | 1080p      |
+| Convert to 1080p HD          | 10 Mbps  | 1080p      |
+| Convert to 1080p HD          | 8 Mbps   | 1080p      |
+| Convert to 720p HD (High)    | 4 Mbps   | 720p       |
+| Convert to 720p HD (Medium)  | 3 Mbps   | 720p       |
+| Convert to 720p HD           | 2 Mbps   | 720p       |
+| Convert to 480p              | 1.5 Mbps | 480p       |
+| Convert to 328p              | 0.7 Mbps | 328p       |
+
+Two tiers share the label "Convert to 1080p HD" and are distinguished only by
+bitrate; Vela must show the bitrate alongside every entry, as Plex does, or
+those two become indistinguishable. The Original entry shows the source bitrate
+and resolution.
+
+ASSUMPTION, unverified: the sample was a 76 Mbps 2160p source, where every tier
+sits below it. That Plex truncates tiers at or above a lower-bitrate source's
+own rate is inferred from the design, not observed. Confirm against a
+low-bitrate title before relying on it.
 
 Reason:
 Mirroring Plex means the owner sees the quality names already familiar from
