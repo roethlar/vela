@@ -3,9 +3,9 @@
 **Severity**: MEDIUM — capability and conversion are asked about the wrong copy
 whenever a title has more than one Plex Media entry, which is exactly the case
 the per-title quality menu is built around.
-**Status**: In progress
+**Status**: Verified
 **Branch**: none — repo policy is direct commits on `main`
-**Commit**: `<filled in after commit>`
+**Commit**: `c08d27d` (version 1.0.15)
 
 ## Evidence
 
@@ -47,7 +47,9 @@ open question recorded in the plan rather than guessed at here.
 
 - `plex_library::tests::transcode_requests_target_the_selected_version` — builds
   URLs for index 0 and index 1 and asserts `mediaIndex` differs and matches.
-  Hardcoding either back to `0` makes it FAIL; restoring makes it PASS.
+  Red-proven 2026-07-25 from the committed state: hardcoding both request sites
+  back to `0` failed on "the selected version must reach the server"; restoring
+  passed. The injection compiled and the restore was verified clean.
 
 ## Coder dispute (if any)
 

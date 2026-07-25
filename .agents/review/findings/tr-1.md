@@ -2,9 +2,9 @@
 
 **Severity**: HIGH — a shipped control promises server conversion and silently
 does nothing, so the user believes they have addressed a stall they have not.
-**Status**: In progress
+**Status**: Verified
 **Branch**: none — repo policy is direct commits on `main`
-**Commit**: `<filled in after commit>`
+**Commit**: `cdaa147` (version 1.0.16)
 
 ## Evidence
 
@@ -47,9 +47,15 @@ the marker plan's rule.
 
 ## Guard proof
 
-- `tests/transcoding-ui.test.mjs::quality control is not offered before playback honours it`
-  — asserts the control is not rendered while the gate is off. Removing the gate
-  makes it FAIL; restoring makes it PASS.
+- `tests/transcoding-ui.test.mjs` — asserts the control sits inside the
+  readiness gate while that gate is off, and that copy promising server
+  conversion cannot ship ungated. Red-proven 2026-07-25 from the committed
+  state: deleting the `{#if QUALITY_CONTROL_READY}` line failed the assertion
+  "the quality field must be inside the readiness gate"; restoring passed.
+
+  The test file also had to be ADDED to `package.json`'s `check` script, which
+  names its test files explicitly — a new file under `tests/` is not picked up
+  and would have gated nothing.
 
 ## Coder dispute (if any)
 

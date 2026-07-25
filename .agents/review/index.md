@@ -891,5 +891,11 @@ Schema-valid verdict, both pins echoed. 2 candidates, 2 admitted, 0 declined.
 
 | ID   | Severity | Impact (one line)                                                    | Status | Commit | Reviewer |
 |------|----------|----------------------------------------------------------------------|--------|--------|----------|
-| tr-1 | HIGH     | Settings offers a quality control that playback silently ignores     | `[~]`  |        | codex/default |
-| tr-2 | MEDIUM   | Plex transcode requests ask about copy zero, not the selected version | `[~]`  |        | codex/default |
+| tr-1 | HIGH     | Settings offers a quality control that playback silently ignores     | `[x]`  | `cdaa147` | codex/default |
+| tr-2 | MEDIUM   | Plex transcode requests ask about copy zero, not the selected version | `[x]`  | `c08d27d` | codex/default |
+
+Both fixes are independently red-proven and the canonical dual-side set passed
+at 1.0.16 with 292 Rust tests and 53 Node tests. No follow-up review ran, so no
+clean verdict is claimed for the repaired code. tr-1 also exposed that
+`package.json`'s `check` script names its test files explicitly, so a new file
+under `tests/` gates nothing until it is added there.
