@@ -202,12 +202,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   must still succeed with a missing script, empty markers, a marker endpoint
   failure, a payload write failure, or a payload parse failure. Red-prove every
   behavior the E2E claims separately; this slice needs the Linux E2E venue.
-- Server-side transcoding is planned and NOT active. `.agents/plans/
-  server-transcoding.md` is Draft v2 with all seven owner decisions ruled
+- **Server-side transcoding is the ACTIVE implementation** (owner activated it
+  2026-07-25). `.agents/plans/server-transcoding.md` has all seven owner
+  decisions ruled
   (recorded 2026-07-25 in `.agents/decisions.md`), the Plex contract verified
   against the owner's live server, and six implementation slices written
-  (1.0.12-1.0.17). It waits on an explicit owner activation naming it here, the
-  same gate the marker plan used. Two facts worth not rediscovering: Plex's
+  (1.0.12-1.0.17). Two facts worth not rediscovering: Plex's
   `/video/:/transcode/universal/ping` and `/stop` DO NOT EXIST (both 404) and
   teardown is `DELETE /transcode/sessions/<uuid>`; and Plex filters its quality
   ladder by resolution only, never by bitrate. The 2026-07-19 Prefer Compatible

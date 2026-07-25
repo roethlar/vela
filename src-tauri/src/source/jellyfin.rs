@@ -663,6 +663,20 @@ struct MediaSourceInfo {
     id: String,
     supports_direct_play: Option<bool>,
     supports_direct_stream: Option<bool>,
+    /// Whether this server will transcode this source at all.
+    supports_transcoding: Option<bool>,
+    /// Server-built transcode URL, when it offers one. Vela builds its own from
+    /// the chosen tier rather than using this, but its presence is corroborating
+    /// evidence that transcoding is available.
+    transcoding_url: Option<String>,
+    /// Diagnostic only, and nothing reads it yet — it exists so the tolerant
+    /// parse below is exercised now rather than discovered later. Deliberately
+    /// untyped: Jellyfin has shipped this as both an array of strings and a
+    /// comma-joined flags string, and a wrong concrete type here would fail the
+    /// whole PlaybackInfo parse and break playback for a field nothing depends
+    /// on.
+    #[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+    transcode_reasons: Option<serde_json::Value>,
     bitrate: Option<u64>,
     size: Option<u64>,
     width: Option<u32>,
@@ -798,6 +812,28 @@ impl MediaSourceInfo {
         } else {
             0
         }
+    }
+
+    /// What Vela may offer for this exact copy. Direct play covers both
+    /// direct-play and direct-stream: either delivers the original video
+    /// untouched, which is what "Original" means to the user.
+    ///
+    /// Transcoding availability is taken from `SupportsTranscoding`, falling
+    /// back to the presence of a server-built `TranscodingUrl`. Absent both, we
+    /// assume NO — never offer a conversion the server has not said it can do.
+    #[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+    fn playback_options(&self) -> crate::source::PlaybackOptions {
+        let can_transcode = self
+            .supports_transcoding
+            .unwrap_or_else(|| self.transcoding_url.is_some());
+        crate::source::PlaybackOptions::new(
+            self.direct_rank() > 0,
+            can_transcode,
+            self.video_width(),
+            self.video_height(),
+            // Jellyfin reports bits per second; the ladder is in kbps.
+            (self.bitrate() / 1000) as u32,
+        )
     }
 
     fn candidate_direct_rank(&self) -> u8 {
@@ -1661,6 +1697,53 @@ mod tests {
         );
     }
 
+    // A server that has not said it can transcode must never have a conversion
+    // offered on its behalf — the menu would list something that then fails.
+    #[test]
+    fn transcoding_is_offered_only_when_the_server_says_so() {
+        let mut source = media_source("m1", true, false, false, 1080, 10_000_000);
+
+        source.supports_transcoding = None;
+        source.transcoding_url = None;
+        assert!(
+            source.playback_options().tiers.is_empty(),
+            "silence is not consent: no flag and no URL means no transcoding"
+        );
+
+        source.supports_transcoding = Some(false);
+        assert!(source.playback_options().tiers.is_empty());
+
+        source.supports_transcoding = Some(true);
+        let options = source.playback_options();
+        assert_eq!(options.tiers.len(), 9);
+        assert!(options.can_direct_play);
+        assert_eq!(
+            options.source_bitrate_kbps, 10_000,
+            "Jellyfin reports bits per second; the ladder is kbps"
+        );
+
+        // Older servers omit the flag but still hand back a transcoding URL.
+        source.supports_transcoding = None;
+        source.transcoding_url = Some("/videos/m1/master.m3u8".to_string());
+        assert_eq!(source.playback_options().tiers.len(), 9);
+    }
+
+    // TranscodeReasons has shipped as both an array and a joined string. Either
+    // must parse, because failing here would break playback for a field nothing
+    // reads.
+    #[test]
+    fn transcode_reasons_parses_in_both_wire_shapes() {
+        for body in [
+            r#"{"Id":"m1","SupportsTranscoding":true,"TranscodeReasons":["ContainerNotSupported"]}"#,
+            r#"{"Id":"m1","SupportsTranscoding":true,"TranscodeReasons":"ContainerNotSupported,VideoCodecNotSupported"}"#,
+            r#"{"Id":"m1","SupportsTranscoding":true}"#,
+        ] {
+            let parsed: MediaSourceInfo =
+                serde_json::from_str(body).unwrap_or_else(|e| panic!("{body} failed: {e}"));
+            assert_eq!(parsed.supports_transcoding, Some(true));
+        }
+    }
+
     #[test]
     fn vf_route_is_flavor_specific() {
         // Branch-flip guard: each flavor must map to ITS documented route —
@@ -1876,6 +1959,9 @@ mod tests {
             id: id.to_string(),
             supports_direct_play: Some(direct_play),
             supports_direct_stream: Some(direct_stream),
+            supports_transcoding: None,
+            transcoding_url: None,
+            transcode_reasons: None,
             bitrate: Some(bitrate),
             size: None,
             width: Some(height * 16 / 9),

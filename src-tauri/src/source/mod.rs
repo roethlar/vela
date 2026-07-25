@@ -375,6 +375,169 @@ fn episode_context_from_detail(detail: DetailDto) -> Option<EpisodeContext> {
     })
 }
 
+/// One rung of the playback quality ladder. Vela mirrors Plex's own ladder so
+/// the choices read exactly as they do in Plex's clients
+/// (`.agents/decisions.md`, 2026-07-25).
+///
+/// `width`/`height` are a bounding BOX, not the output size: the server refits
+/// to the source's aspect ratio and may go smaller still when the bitrate is the
+/// binding constraint. Probed against a live Plex server 2026-07-25 — a 2.35:1
+/// source asked for `1920x1080` came back `1920x1038`, and `1280x720` at
+/// 2000 kbps came back `720x388`.
+// TEMPORARY, remove in slice 3: this slice deliberately lands the capability
+// model with no caller, so the play path keeps behaving exactly as it does
+// today. Slice 3 wires it and this exemption must go with it. It is scoped to
+// these items on purpose — never widen it to a module or crate allow.
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityTier {
+    /// Stable identifier for config and the command boundary. It carries the
+    /// bitrate because two tiers share a label and would otherwise collide.
+    pub id: &'static str,
+    /// Shown to the user exactly as Plex words it.
+    pub label: &'static str,
+    pub bitrate_kbps: u32,
+    pub width: u32,
+    pub height: u32,
+}
+
+/// Plex's ladder, read off a live client 2026-07-25. Order is highest quality
+/// first, matching the order Plex presents.
+///
+/// Two entries are labelled "Convert to 1080p HD" and differ only by bitrate,
+/// so any UI showing these MUST show the bitrate too or they are
+/// indistinguishable.
+pub const QUALITY_TIERS: &[QualityTier] = &[
+    QualityTier {
+        id: "1080p-20000",
+        label: "Convert to 1080p HD (High)",
+        bitrate_kbps: 20_000,
+        width: 1920,
+        height: 1080,
+    },
+    QualityTier {
+        id: "1080p-12000",
+        label: "Convert to 1080p HD (Medium)",
+        bitrate_kbps: 12_000,
+        width: 1920,
+        height: 1080,
+    },
+    QualityTier {
+        id: "1080p-10000",
+        label: "Convert to 1080p HD",
+        bitrate_kbps: 10_000,
+        width: 1920,
+        height: 1080,
+    },
+    QualityTier {
+        id: "1080p-8000",
+        label: "Convert to 1080p HD",
+        bitrate_kbps: 8_000,
+        width: 1920,
+        height: 1080,
+    },
+    QualityTier {
+        id: "720p-4000",
+        label: "Convert to 720p HD (High)",
+        bitrate_kbps: 4_000,
+        width: 1280,
+        height: 720,
+    },
+    QualityTier {
+        id: "720p-3000",
+        label: "Convert to 720p HD (Medium)",
+        bitrate_kbps: 3_000,
+        width: 1280,
+        height: 720,
+    },
+    QualityTier {
+        id: "720p-2000",
+        label: "Convert to 720p HD",
+        bitrate_kbps: 2_000,
+        width: 1280,
+        height: 720,
+    },
+    QualityTier {
+        id: "480p-1500",
+        label: "Convert to 480p",
+        bitrate_kbps: 1_500,
+        width: 848,
+        height: 480,
+    },
+    QualityTier {
+        id: "328p-700",
+        label: "Convert to 328p",
+        bitrate_kbps: 700,
+        width: 584,
+        height: 328,
+    },
+];
+
+/// Which tiers may be offered for a source of this height.
+///
+/// Plex filters its ladder by RESOLUTION ONLY and never by bitrate — confirmed
+/// against three live samples (`.agents/decisions.md`). A 10 Mbps 1080p source
+/// still offers the 20 Mbps and 12 Mbps tiers, and a 1.5 Mbps 384p source drops
+/// the 480p tier even though that tier's bitrate matches the source exactly.
+/// Do not add a bitrate filter here.
+#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+pub fn tiers_for_source(source_height: u32) -> Vec<QualityTier> {
+    QUALITY_TIERS
+        .iter()
+        .copied()
+        .filter(|tier| tier.height <= source_height)
+        .collect()
+}
+
+/// What a given server can actually do with one exact copy, and therefore what
+/// Vela is allowed to offer for it. Never offer an option not represented here.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+pub struct PlaybackOptions {
+    /// Whether the original file can be played untouched. When false, there is
+    /// no Original entry.
+    pub can_direct_play: bool,
+    /// Whether this server will transcode this copy at all. When false, the
+    /// tier list is empty regardless of resolution.
+    pub can_transcode: bool,
+    pub source_width: u32,
+    pub source_height: u32,
+    pub source_bitrate_kbps: u32,
+    /// Already filtered for this source; empty when transcoding is unavailable.
+    pub tiers: Vec<QualityTier>,
+}
+
+#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+impl PlaybackOptions {
+    pub fn new(
+        can_direct_play: bool,
+        can_transcode: bool,
+        source_width: u32,
+        source_height: u32,
+        source_bitrate_kbps: u32,
+    ) -> Self {
+        Self {
+            can_direct_play,
+            can_transcode,
+            source_width,
+            source_height,
+            source_bitrate_kbps,
+            tiers: if can_transcode {
+                tiers_for_source(source_height)
+            } else {
+                Vec::new()
+            },
+        }
+    }
+
+    /// True when the user has a real choice. A single-option item shows no
+    /// quality menu at all.
+    pub fn has_choice(&self) -> bool {
+        usize::from(self.can_direct_play) + self.tiers.len() > 1
+    }
+}
+
 /// A kind of skippable range a media server publishes for one item. Server
 /// types Vela does not model (Preview, Recap) are dropped at parse time rather
 /// than folded into one of these — a recap is not an advert.
@@ -720,6 +883,74 @@ mod tests {
         ) -> Result<StreamResolution, String> {
             Err("fake source".into())
         }
+    }
+
+    // The three live Plex samples this ladder was derived from
+    // (`.agents/decisions.md`, 2026-07-25). They are the whole reason the filter
+    // is resolution-only.
+    #[test]
+    fn tier_filtering_reproduces_every_observed_plex_sample() {
+        assert_eq!(
+            tiers_for_source(2160).len(),
+            9,
+            "a 4K source offers the whole ladder"
+        );
+
+        // Decisive: the source is 10 Mbps, and Plex still offers 20 and 12.
+        // A bitrate filter would wrongly drop them.
+        let hd = tiers_for_source(1080);
+        assert_eq!(hd.len(), 9, "a 1080p source offers the whole ladder");
+        assert!(
+            hd.iter().any(|tier| tier.bitrate_kbps == 20_000)
+                && hd.iter().any(|tier| tier.bitrate_kbps == 12_000),
+            "tiers above the source bitrate are still offered"
+        );
+
+        // Decisive the other way: 480p is 1.5 Mbps, exactly this source's
+        // bitrate, and Plex drops it because 480 > 384.
+        let low = tiers_for_source(384);
+        assert_eq!(
+            low.iter().map(|tier| tier.id).collect::<Vec<_>>(),
+            vec!["328p-700"],
+            "only tiers at or below the source height survive"
+        );
+    }
+
+    // Two tiers are labelled "Convert to 1080p HD"; ids must still be unique or
+    // config and the command boundary cannot tell them apart.
+    #[test]
+    fn tier_ids_are_unique_even_where_labels_collide() {
+        let mut ids: Vec<&str> = QUALITY_TIERS.iter().map(|tier| tier.id).collect();
+        let total = ids.len();
+        ids.sort_unstable();
+        ids.dedup();
+        assert_eq!(ids.len(), total, "tier ids must be unique");
+
+        let duplicated_label = QUALITY_TIERS
+            .iter()
+            .filter(|tier| tier.label == "Convert to 1080p HD")
+            .count();
+        assert_eq!(
+            duplicated_label, 2,
+            "the two same-labelled tiers are expected; the UI must show bitrate"
+        );
+    }
+
+    // A server that will not transcode offers nothing to transcode to, however
+    // large the file is.
+    #[test]
+    fn options_offer_no_tiers_when_the_server_cannot_transcode() {
+        let refused = PlaybackOptions::new(true, false, 3840, 2160, 76_000);
+        assert!(refused.tiers.is_empty());
+        assert!(!refused.has_choice(), "direct play alone is not a choice");
+
+        let offered = PlaybackOptions::new(true, true, 3840, 2160, 76_000);
+        assert_eq!(offered.tiers.len(), 9);
+        assert!(offered.has_choice());
+
+        // Transcode-only: no Original entry, but still a choice among tiers.
+        let no_direct = PlaybackOptions::new(false, true, 1920, 1080, 10_000);
+        assert!(no_direct.has_choice());
     }
 
     fn marker(kind: MarkerKind, start_ms: u64, end_ms: u64) -> MediaMarker {

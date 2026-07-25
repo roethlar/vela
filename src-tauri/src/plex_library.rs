@@ -248,6 +248,38 @@ pub struct PlexPart {
 // isn't widened; serde_xml_rs maps explicitly named attributes and repeated child
 // elements to fields (the same mechanism `PlexVideo.media`/`.guids` already use).
 
+/// `/video/:/transcode/universal/decision` — what the server WOULD do with this
+/// copy under the requested constraints, without starting anything.
+///
+/// Verified against a live server 2026-07-25: `generalDecisionCode` 1001 means
+/// "Direct play not available; Conversion OK", and the nested `Media` describes
+/// the stream that would be produced.
+#[derive(Debug, Deserialize, Default)]
+#[serde(default)]
+#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+pub struct DecisionContainer {
+    #[serde(rename = "@generalDecisionCode")]
+    pub general_decision_code: Option<u32>,
+    #[serde(rename = "@generalDecisionText")]
+    pub general_decision_text: Option<String>,
+    #[serde(rename = "@directPlayDecisionCode")]
+    pub direct_play_decision_code: Option<u32>,
+    #[serde(rename = "@transcodeDecisionCode")]
+    pub transcode_decision_code: Option<u32>,
+    #[serde(rename = "Video", default)]
+    pub videos: Vec<PlexDetail>,
+}
+
+#[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+impl DecisionContainer {
+    /// Plex's 1xxx codes are the success family; 2xxx and above report a
+    /// refusal. Absent a code we assume NO rather than guessing yes, so an
+    /// unparseable answer can never make Vela offer something that then fails.
+    pub fn conversion_ok(&self) -> bool {
+        matches!(self.general_decision_code, Some(code) if (1000..2000).contains(&code))
+    }
+}
+
 /// Root wrapper: the metadata endpoint returns the item as a `Video` (movie/
 /// episode) or a `Directory` (show/season) under `MediaContainer`.
 #[derive(Debug, Deserialize, Default)]
@@ -1149,6 +1181,60 @@ impl PlexLibrary {
             .map_err(|_| original.into())
     }
 
+    /// Ask what this server would do with `rating_key` under a candidate tier,
+    /// without starting a transcode. `tier` of `None` asks about direct play.
+    ///
+    /// The session id is caller-supplied because Plex has no server-issued
+    /// session concept here: the client invents the id, and the same id is what
+    /// later tears the session down via `DELETE /transcode/sessions/<id>`
+    /// (verified 2026-07-25 — `/transcode/universal/ping` and `/stop` do not
+    /// exist).
+    #[allow(dead_code)] // TEMPORARY, remove in slice 3 (see QualityTier)
+    pub async fn transcode_decision(
+        &self,
+        rating_key: &str,
+        tier: Option<crate::source::QualityTier>,
+        session: &str,
+    ) -> Result<DecisionContainer, Box<dyn std::error::Error>> {
+        let base = self.server_base().ok_or("No server selected")?;
+        let url = format!("{base}/video/:/transcode/universal/decision");
+        let direct_play = if tier.is_some() { "0" } else { "1" };
+        let mut query: Vec<(&str, String)> = vec![
+            ("path", format!("/library/metadata/{rating_key}")),
+            ("mediaIndex", "0".to_string()),
+            ("partIndex", "0".to_string()),
+            ("protocol", "hls".to_string()),
+            ("directPlay", direct_play.to_string()),
+            ("directStream", "1".to_string()),
+            ("fastSeek", "1".to_string()),
+            ("copyts", "1".to_string()),
+            ("offset", "0".to_string()),
+            ("session", session.to_string()),
+        ];
+        if let Some(tier) = tier {
+            query.push(("maxVideoBitrate", tier.bitrate_kbps.to_string()));
+            // A bounding box, not the output size: the server refits to the
+            // source aspect and may go smaller when bitrate binds.
+            query.push((
+                "videoResolution",
+                format!("{}x{}", tier.width, tier.height),
+            ));
+        }
+        let body = self
+            .client
+            .get(&url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .header("Accept", "application/xml")
+            .query(&query)
+            .send()
+            .await?
+            .error_for_status()?
+            .text()
+            .await?;
+        Ok(serde_xml_rs::from_str(&body)?)
+    }
+
     async fn fetch_item_detail(
         &self,
         rating_key: &str,
@@ -1853,6 +1939,39 @@ mod tests {
             width: 300,
             height: 450,
         }
+    }
+
+    // The decision response is how Vela learns whether a copy can be converted
+    // at all. Shape taken from a live server, 2026-07-25.
+    #[test]
+    fn decision_response_reports_conversion_availability() {
+        let ok: DecisionContainer = serde_xml_rs::from_str(
+            r#"<MediaContainer generalDecisionCode="1001"
+                 generalDecisionText="Direct play not available; Conversion OK."
+                 directPlayDecisionCode="3000" transcodeDecisionCode="1001">
+                 <Video ratingKey="381215" key="/library/metadata/381215" title="The 'Burbs"/>
+               </MediaContainer>"#,
+        )
+        .expect("parses");
+        assert!(ok.conversion_ok());
+        assert_eq!(ok.direct_play_decision_code, Some(3000));
+        assert_eq!(ok.videos.len(), 1);
+
+        // A refusal must read as a refusal, not as silence.
+        let refused: DecisionContainer = serde_xml_rs::from_str(
+            r#"<MediaContainer generalDecisionCode="2000"
+                 generalDecisionText="Conversion unavailable."/>"#,
+        )
+        .expect("parses");
+        assert!(!refused.conversion_ok());
+
+        // Fail closed: no code at all is never treated as permission.
+        let silent: DecisionContainer =
+            serde_xml_rs::from_str(r#"<MediaContainer/>"#).expect("parses");
+        assert!(
+            !silent.conversion_ok(),
+            "an answer we cannot read must not offer a conversion"
+        );
     }
 
     /// The one-shot responder above, reused for the metadata endpoint.
