@@ -2,21 +2,25 @@
 
 ## Status
 
-**Draft v2, revision 6 — 2026-07-23.** Supersedes the removed
+**ACTIVE v2, revision 7 — 2026-07-25.** Supersedes the removed
 `.agents/plans/skip-credits-intros.md` (v1). Incorporates both 2026-07-22 plan
-reviews. Self-contained for a cold implementer once the owner decisions below
-are recorded.
+reviews. Self-contained for a cold implementer.
 
-Not active implementation until:
+The owner activated this plan for implementation on 2026-07-25 ("yes, activate
+the marker plan"). All three activation conditions are satisfied:
 
 1. Every product choice in **Owner decisions** below is settled in owner-facing
    chat, one decision at a time, and the ruling is recorded here and in
    `.agents/decisions.md` (complete 2026-07-23).
-2. The separately approved app-wide config-integrity/recovery prerequisite is
-   implemented, reviewed, verified, and committed.
-3. `.agents/state.md` explicitly names this plan as active implementation after
-   that prerequisite lands. Its current planning-only mention and Active Sources
-   entry do not activate it.
+2. The separately approved app-wide config-integrity/recovery prerequisite
+   (`.agents/plans/config-integrity-recovery.md`) is implemented, reviewed,
+   verified, committed, and guard-proven through its Slice 3 closeout
+   (2026-07-24, version 1.0.4, `21ecbe8` production and `8b550d6` closeout).
+3. `.agents/state.md` names this plan as the active implementation.
+
+Revision 7 changes only the status above and rebases the slice version sequence
+onto the actual 1.0.4 prerequisite base; no product behavior in this plan
+changed at activation.
 
 v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 `decisions.md` entry; do not treat v1 status as authority over this file.
@@ -478,9 +482,10 @@ Each slice: one focused commit; run verification appropriate to the touch set;
 red-proof any new behavioral guard (temporarily break production code, confirm
 test fails for the right reason, restore from the committed pre-injection
 state). Run `scripts/bump.sh` in every slice that changes shipped Rust,
-frontend, or Lua behavior, per the active version decision. From the current
-1.0.0 base the four code slices below would land as 1.0.1 through 1.0.4; if the
-base moves first, use the next patch each time rather than these stale numbers.
+frontend, or Lua behavior, per the active version decision. From the activation
+base of 1.0.4 (the config-integrity prerequisite closeout) the four code slices
+below land as 1.0.5 through 1.0.8; if the base moves again before a slice
+starts, use the next patch each time rather than these numbers.
 Because the bump script updates both JavaScript and Rust/bundle version
 surfaces, finish every bumped slice with the full canonical dual-side CI command
 set below even when its focused feature work touches only one side. Targeted
@@ -495,7 +500,7 @@ the product-flip slice where the feature is launchable.
   with exact HTTP and fixture tests.
 - Shared normalize helper + tests.
 - No UI, no mpv wiring yet.
-- Run `scripts/bump.sh` (1.0.0 → 1.0.1 on the recorded base).
+- Run `scripts/bump.sh` (1.0.4 → 1.0.5 on the activation base).
 - **Focused verify before the full set:** MSRV/stable check, clippy, tests, and
   Cargo audit from `src-tauri/`; red-prove the query/schema and
   marker-error-degrades guards separately.
@@ -506,7 +511,7 @@ the product-flip slice where the feature is launchable.
 - Update `PROVENANCE.md` (Vela MIT entry).
 - Implement explicit overlay/binding/entry-latch behavior and child-env payload
   read/unlink. Full behavior is guarded when launch wiring lands.
-- Run `scripts/bump.sh` (1.0.1 → 1.0.2 on the recorded base).
+- Run `scripts/bump.sh` (1.0.5 → 1.0.6 on the activation base).
 - **Focused verify before the full set:** file present under resources;
   `tauri.conf.json` already maps
   `resources/mpv-scripts/` (no manual resource-map change); run mpv's script
@@ -515,15 +520,16 @@ the product-flip slice where the feature is launchable.
 
 ### Slice 3 — Config + command boundary (no visible control yet)
 
-- **Precondition:** the separately planned app-wide config-integrity/recovery
-  prerequisite is implemented, reviewed, verified, and committed.
+- **Precondition (SATISFIED 2026-07-24):** the separately planned app-wide
+  config-integrity/recovery prerequisite is implemented, reviewed, verified, and
+  committed — `.agents/plans/config-integrity-recovery.md`, version 1.0.4.
 - `skip_intros` / `skip_credits` / `skip_commercials` on `AppConfig`.
 - Closed `SkipPolicy`; map missing fields to their approved per-kind defaults;
   extend `MpvAdvanced` get/set through the existing locked atomic config path.
   Do not expose the controls in Settings yet, so no shipped UI offers a setting
   that playback ignores.
 - Serde round-trip / invalid-value rejection tests.
-- Run `scripts/bump.sh` (1.0.2 → 1.0.3 on the recorded base).
+- Run `scripts/bump.sh` (1.0.6 → 1.0.7 on the activation base).
 - **Focused verify before the full set:** Rust checks/tests/audit; red-prove
   missing-field defaulting and unknown-value rejection plus legacy-field
   round-trip preservation.
@@ -543,7 +549,7 @@ the product-flip slice where the feature is launchable.
   failure, payload write failure, or payload parse failure. An invalid policy
   never reaches play because config loading fails closed. Unit-test
   `markers_args` and payload-write failure matrices.
-- Run `scripts/bump.sh` (1.0.3 → 1.0.4 on the recorded base).
+- Run `scripts/bump.sh` (1.0.7 → 1.0.8 on the activation base).
 - **Verify:** full canonical dual-side set plus targeted and full Linux E2E.
   Red-prove every behavior claimed by the E2E separately.
 

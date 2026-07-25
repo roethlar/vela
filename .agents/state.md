@@ -30,9 +30,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   to external mpv, uses title-level watched state across duplicate copies, and
   offers Prefer Best, Prefer Compatible, Prefer Fastest Source, Ask Every Time,
   and per-title Play Version.
-- Intro/credits marker skipping is the candidate next product goal, but remains
-  planning-only. The hardened draft is
-  `.agents/plans/skip-credits-intros-v2.md`. Settled behavior is recorded in
+- **Intro/credits/commercial marker skipping is the ACTIVE implementation**
+  (owner activated it 2026-07-25). The plan is
+  `.agents/plans/skip-credits-intros-v2.md`, now Active v2 revision 7 with its
+  slice version sequence rebased onto the 1.0.4 prerequisite base: the four code
+  slices land as 1.0.5 through 1.0.8. Its config-integrity prerequisite is
+  satisfied. No marker code has been written yet; Slice 1 (marker model plus
+  selected provider resolution, no UI and no mpv wiring) is the next work.
+  Settled behavior is recorded in
   `.agents/decisions.md`: missing intro, credit, and commercial settings default
   to Button; the external-mpv control is genuinely clickable; and Space
   activates it only while visible, otherwise retaining its normal pause
@@ -40,9 +45,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   settings file under the owner-approved app-wide fail-closed recovery rule.
   Commercial ranges are in scope wherever an upstream server publishes them;
   the dated provider evidence and unsupported-provider boundary are canonical
-  in the plan. No code has been implemented.
-- The app-wide fail-closed settings prerequisite is the active implementation
-  at `.agents/plans/config-integrity-recovery.md`. It specifies independent
+  in the plan.
+- The app-wide fail-closed settings prerequisite is COMPLETE at
+  `.agents/plans/config-integrity-recovery.md`. It specifies independent
   strict boundaries and targeted byte-exact recovery for settings and active
   server connections. Active connection records and plaintext tokens move to
   private `connections.json`; valid connections survive a settings reset
@@ -114,8 +119,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   tests, 259 Rust tests, and the rebuilt Linux real app at 37/37 E2E
   scenarios. The full evidence paragraph is canonical in
   `.agents/plans/config-integrity-recovery.md`; the docs-only closeout
-  (evidence plus this state entry) landed as `8b550d6`. Local `main` is
-  ahead of `origin` and has not been pushed — push policy is ASK.
+  (evidence plus this state entry) landed as `8b550d6`. That work has since
+  reached `origin`; push policy remains ASK (`.agents/push-policy.md`).
 - The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
   Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
   `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
@@ -128,9 +133,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Explicitly activate the marker plan before any marker implementation.
-  Rebase its example version sequence from the actual 1.0.4 prerequisite; do
-  not begin marker code from this handoff.
+- Implement marker-skipping Slice 1 per
+  `.agents/plans/skip-credits-intros-v2.md`: the `MediaMarker` / `MarkerKind`
+  model, `StreamResolution.markers`, the `include_markers` resolve argument,
+  Plex detail marker inclusion, Jellyfin MediaSegments, the Emby no-op, and the
+  shared normalize helper — with exact HTTP and fixture tests, no UI and no mpv
+  wiring, and `scripts/bump.sh` to 1.0.5. Red-prove the query/schema and
+  marker-error-degrades guards separately before the full canonical set.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -141,10 +150,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Marker-skipping implementation remains intentionally gated on explicit
-  marker-plan activation; the Slice 3 post-commit guard closeout it waited on
-  is complete.
-- Config-integrity/recovery has no unresolved owner or review blocker; the
+- None. The marker-plan activation gate cleared on 2026-07-25, and
+  config-integrity/recovery has no unresolved owner or review blocker — that
   plan is fully landed, verified, and guard-proven.
 
 ## Verification
