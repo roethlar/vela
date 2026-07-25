@@ -1519,3 +1519,23 @@ produce.
 Supersedes:
 Nothing. It extends the existing `Play Version` per-title override rather than
 replacing it.
+
+## 2026-07-25 - The global quality setting lives in Settings, Player tab
+
+Status: APPROVED (owner, 2026-07-25). Implementation plan:
+`.agents/plans/server-transcoding.md`.
+
+Decision:
+The current playback quality setting is a Settings > Player control, beside the
+other playback options. Being a normal setting, it persists across restarts and
+stays in effect until the user changes it. Spontaneous, one-off choices are
+served by the per-title context menu instead.
+
+Reason:
+The setting tracks the user's situation, not the title, and a situation changes
+rarely - moving between a cafe link and a wired network - so an occasional
+Settings visit is the right cost. The frictionless requirement is met by the
+one-off per-title menu, which needs no Settings excursion.
+
+Supersedes:
+Nothing.
