@@ -1539,3 +1539,28 @@ one-off per-title menu, which needs no Settings excursion.
 
 Supersedes:
 Nothing.
+
+## 2026-07-25 - Quality steps use Plex's ladder for every source
+
+Status: APPROVED (owner, 2026-07-25). Implementation plan:
+`.agents/plans/server-transcoding.md`.
+
+Decision:
+Vela offers Plex's own bitrate ladder as its quality steps, and the same list
+for every source kind rather than a different scale per backend. Only the steps
+strictly below a given file's source bitrate are shown, and only when that
+server reports it can transcode the file, so the list stays per-file even though
+the ladder is fixed.
+
+The exact tier values are NOT yet confirmed: Plex does not publish the ladder
+through its API, and the support article documenting it refused an automated
+fetch. Read the values off a current Plex client and record them here before
+implementing; do not ship remembered values.
+
+Reason:
+Mirroring Plex means the owner sees the quality names already familiar from
+Plex's own clients, and one shared list avoids the same content offering
+different scales depending on which server holds it.
+
+Supersedes:
+Nothing.
