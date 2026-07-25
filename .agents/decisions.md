@@ -1488,3 +1488,34 @@ useful than either omitting Emby or overstating it.
 
 Supersedes:
 Nothing. It extends the 2026-07-15 experimental-Emby posture to this feature.
+
+## 2026-07-25 - Per-title quality is a one-off, nested under version
+
+Status: APPROVED (owner, 2026-07-25). Implementation plan:
+`.agents/plans/server-transcoding.md`.
+
+Decision:
+A title's context menu offers a one-off quality choice that applies to the play
+it starts and nothing else. It saves no state: the next play of that title
+follows the user's current quality setting again. Per-title quality is never
+persisted, because the situation changes rather than the file.
+
+Quality nests under version rather than sitting beside it, since the deliverable
+qualities are a property of the exact copy on the exact server. With two or more
+versions the item is `Play Version >`, listing servers, each expanding to the
+qualities that server can deliver for that file. With a single version the
+version level is absent and the item is `Play at Quality >`, listing qualities
+directly. The two labels never appear together. When the only version cannot be
+transcoded at all, the item does not appear.
+
+Reason:
+The owner wants transcoding available without friction and without per-file
+state. A one-off menu entry gives an immediate escape hatch from the current
+setting while leaving nothing behind to go stale when the same laptop moves from
+a cafe link to 10GbE. Nesting under version avoids two sibling menus that both
+start a play and prevents offering a bitrate the chosen copy's server cannot
+produce.
+
+Supersedes:
+Nothing. It extends the existing `Play Version` per-title override rather than
+replacing it.
