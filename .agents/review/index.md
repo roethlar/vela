@@ -881,3 +881,15 @@ playback critical path; neither disputes the marker model or the parsing.
 Both fixes are independently red-proven and the full canonical dual-side set
 passed at version 1.0.7 with 271 Rust tests. No follow-up review was
 dispatched, so no clean verdict is claimed for the repaired code.
+
+Transcoding slices 1-2 CODE review 2026-07-25: `codex` at its own default model
+and effort (the owner dispatched "codereview with codex, no model or effort
+specified", so no override was sent), MCP transport, read-only sandbox, over
+exact range
+`72e0f48f6c7ddeda603cea253951c4a93932e709..b94fcd13ae2a6596937b57e6acdc622560e848e0`.
+Schema-valid verdict, both pins echoed. 2 candidates, 2 admitted, 0 declined.
+
+| ID   | Severity | Impact (one line)                                                    | Status | Commit | Reviewer |
+|------|----------|----------------------------------------------------------------------|--------|--------|----------|
+| tr-1 | HIGH     | Settings offers a quality control that playback silently ignores     | `[~]`  |        | codex/default |
+| tr-2 | MEDIUM   | Plex transcode requests ask about copy zero, not the selected version | `[~]`  |        | codex/default |
