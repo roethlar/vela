@@ -2,9 +2,19 @@
 
 ## Status
 
-**Draft v1, 2026-07-25. NOT approved for implementation.** Several product
-choices in **Owner decisions** are unsettled; do not write code until each is
-ruled and recorded here and in `.agents/decisions.md`.
+**Draft v2, 2026-07-25. NOT yet approved for implementation.** Every product
+choice in **Owner decisions** is now ruled and recorded in
+`.agents/decisions.md`. What still blocks implementation is evidence, not
+choices:
+
+1. Plex's decision endpoint and transcode-session lifecycle (ping/stop) are
+   unverified — confirm against a live server.
+2. Plex's ladder tier values are unconfirmed — read them off a current client.
+3. The plan still needs its implementation slices written, with the verification
+   and guard proof each one owes.
+
+The owner has not said "implement". Do not start code on the strength of the
+rulings alone.
 
 The requirement is owner-stated (2026-07-25): Vela is direct-play only today and
 must be able to ask the server to transcode. Two concrete drivers, both real for
@@ -162,23 +172,33 @@ a Vela list, or something derived — see Owner decisions.
 
 ## Owner decisions
 
-Each must be ruled in owner-facing chat, one at a time, and recorded here and in
-`.agents/decisions.md` before implementation.
+All settled 2026-07-25 and recorded in `.agents/decisions.md`; the entries there
+are canonical and this list points at them.
 
-1. **Per-title override.** Does a "play this one direct / transcoded" control
-   exist at all, and if so does it apply to that play only or persist? The owner
-   asked for a per-file escape hatch and separately ruled that nothing should be
-   stored per file; this was raised three times without a settled answer and is
-   NOT to be guessed.
-2. **What "Automatic" does.** The opt-in automatic value needs a defined signal.
-   Client-capability detection and mpv-playback-health-with-per-file-cache are
-   both already rejected; server verdict alone remains a candidate.
-3. **Step values.** Whether the sub-source-bitrate steps mirror Plex's client
-   ladder exactly, and what Jellyfin/Emby sources use.
-4. **Where the control lives**, given "frictionless" rules out a Settings-only
-   home.
-5. **Persistence of the current selection** across app restarts.
-6. **Prefer Compatible's fate** now its premise is void.
+1. **Per-title override — RULED.** A one-off context-menu choice that applies to
+   the play it starts and saves nothing. Quality nests under version: two or more
+   versions give `Play Version >` (servers, each expanding to that server's
+   deliverable qualities); a single version gives `Play at Quality >` directly.
+   The two labels never appear together, and the item is absent when the only
+   version cannot be transcoded.
+2. **Automatic — RULED.** An opt-in value of the quality setting, never the
+   default. A play starts at Original; sustained decoder frame drops or a
+   repeatedly starving demuxer cache step it down the ladder and resume at the
+   current position. Nothing is remembered between plays. Thresholds, the
+   observation window, and how many steps a single play may take are
+   implementation detail for this plan to specify, not further owner decisions.
+3. **Step values — RULED.** Plex's own ladder, the same list for every source
+   kind, filtered per file to steps below the source bitrate and only when that
+   server can transcode it. **The exact tier values are still unconfirmed and
+   must be read off a current Plex client before implementation** — Plex does not
+   publish them through its API.
+4. **Placement — RULED.** Settings > Player. Being a normal setting it persists
+   across restarts, which also settles the former open question 5.
+5. *(folded into 4)*
+6. **Prefer Compatible — RULED.** Unchanged behaviour; it is inert rather than
+   broken for single-copy libraries. The UI must make the two controls
+   non-competing: the duplicate-copy mode chooses WHICH COPY plays, the quality
+   setting chooses HOW it is delivered, and label and help text say so.
 7. ~~**Emby scope**~~ — RULED 2026-07-25: Emby transcoding is implemented
    best-effort and labelled limited, consistent with Emby's existing
    experimental status (`.agents/decisions.md` 2026-07-15). The owner has no
