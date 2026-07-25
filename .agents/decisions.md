@@ -1595,3 +1595,30 @@ without the user having asked for it.
 
 Supersedes:
 Nothing.
+
+## 2026-07-25 - Prefer Compatible stays, scoped to copy choice only
+
+Status: APPROVED (owner, 2026-07-25). Implementation plan:
+`.agents/plans/server-transcoding.md`.
+
+Decision:
+The duplicate-copy modes keep their existing behaviour, Prefer Compatible
+included. It selects among copies and is inert for a library holding one copy
+per title; that is acceptable and not a defect.
+
+Transcoding must not make the two settings read as competing. They answer
+different questions and the UI must say so: the duplicate-copy mode chooses
+WHICH COPY plays and does nothing when there is only one, while the quality
+setting chooses HOW that copy is delivered - direct or transcoded, and at what
+bitrate. Label and help text carry that distinction explicitly, and neither
+control's copy may imply it governs the other's job.
+
+Reason:
+The mode remains correct for libraries that do keep duplicates, so removing it
+would cost those users a working feature. The real risk transcoding introduces
+is two nearby settings that both sound like they answer "what quality do I get",
+which is a wording problem and is fixed with wording.
+
+Supersedes:
+Nothing. It preserves the 2026-07-19 duplicate-copy decision and records that
+its Prefer Compatible mode is inert, not broken, for single-copy libraries.
