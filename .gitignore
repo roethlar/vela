@@ -54,3 +54,10 @@ $RECYCLE.BIN/
 
 # live-e2e credentials (extracted at run time; never committed)
 vela-live-creds*.json
+
+# Harness-local agent tooling state. Not durable repo memory (AGENTS.md:
+# out-of-repo agent stores are never the source of truth) and not project
+# source — these are per-machine databases belonging to the tools, not to Vela.
+.headroom/
+.tokensave/
+.claude/.headroom_wrap_marker.json
