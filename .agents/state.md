@@ -58,7 +58,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   inert degrade paths) because no automated harness covers Lua; button
   rendering, the hitbox, the Space binding, seek, and the entry latch are
   deferred to Slice 4's real-app E2E as that slice specifies, and no repo test
-  guards this file yet. Settled behavior is recorded in
+  guards this file yet. Slice 3 is committed as `f62345d` at version 1.0.9: the
+  closed `SkipPolicy` enum, the three `AppConfig` fields, and the `MpvAdvanced`
+  get/set boundary, with missing-field defaulting, unknown-value rejection, and
+  legacy-field preservation each red-proven separately. No Settings control
+  renders the policies yet, by design. Settled behavior is recorded in
   `.agents/decisions.md`: missing intro, credit, and commercial settings default
   to Button; the external-mpv control is genuinely clickable; and Space
   activates it only while visible, otherwise retaining its normal pause
@@ -154,14 +158,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Implement marker-skipping Slice 3 per
-  `.agents/plans/skip-credits-intros-v2.md`: `skip_intros` / `skip_credits` /
-  `skip_commercials` on `AppConfig` behind a closed `SkipPolicy`, mapping missing
-  fields to their approved per-kind Button defaults, extended through the
-  existing locked atomic config path via `MpvAdvanced` get/set. No Settings
-  controls in this slice, so no shipped UI offers a setting playback ignores.
-  Bump to 1.0.9, and red-prove missing-field defaulting, unknown-value
-  rejection, and legacy-field round-trip preservation separately.
+- Implement marker-skipping Slice 4 per
+  `.agents/plans/skip-credits-intros-v2.md` — the atomic product flip, and the
+  first slice where any of this is user-visible. Pass the resolved policy into
+  selected resolution, policy-filter the returned markers, add the `PlaySpec`
+  policy/marker/script fields, resolve `vela-markers.lua` through the same
+  Resource resolver autocrop uses, write and clean the private per-launch
+  payload non-fatally, inject policy args plus the child-only environment, and
+  add all three Settings → Player controls in the same commit that makes them
+  work. Extend the Jellyfin mock with the real MediaSegments route, add the five
+  behavioral E2E legs, update the README Player notes, and bump to 1.0.10. Play
+  must still succeed with a missing script, empty markers, a marker endpoint
+  failure, a payload write failure, or a payload parse failure. Red-prove every
+  behavior the E2E claims separately; this slice needs the Linux E2E venue.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or

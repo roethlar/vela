@@ -638,6 +638,32 @@ for that reason. No guard in the repo's automated suite covers this file yet.
   missing-field defaulting and unknown-value rejection plus legacy-field
   round-trip preservation.
 
+**Slice 3 evidence (2026-07-25, version 1.0.9, commit `f62345d`).**
+`SkipPolicy` is a closed serde enum in `config.rs` with `SkipPolicy::MISSING`
+(Button) as the single place the approved missing-field default is applied, and
+`skip_intros` / `skip_credits` / `skip_commercials` are `Option<SkipPolicy>` on
+`AppConfig` so absence stays distinguishable from an invalid value. `AppConfig`
+already carries `deny_unknown_fields`, and the closed enum makes an
+out-of-enum value fail deserialization, so no entry in `validate` was needed —
+rejection happens before validation runs.
+
+`MpvAdvanced` echoes all three already resolved, so the UI has a concrete value
+to bind; `set_mpv_advanced` takes them as optional parameters for an older
+frontend and writes through the existing `config::update` path under
+`CONFIG_LOCK`. No second write path. No Settings control renders them yet, so
+nothing shipped offers a setting playback ignores. Each policy is stored
+explicitly rather than collapsed to `None` for the default, so a future change
+to the product default cannot silently move a user who deliberately chose
+today's.
+
+Full canonical dual-side set passed at 1.0.9 with 275 Rust tests (271 before).
+The three claimed behaviors were red-proven separately from the committed state,
+each compiling and each restored clean: resolving the missing default to `Off`
+failed the default guard; a tolerant deserializer for `skip_intros` failed the
+unknown-value guard; and `skip_serializing` on `smb_mounts` failed the legacy
+rollback guard (by index-out-of-bounds on the stripped vector rather than a
+message, but for its own reason).
+
 ### Slice 4 — Atomic product flip: launch + Settings + E2E + docs
 
 - Pass the resolved policy intent into selected resolution; policy-filter the
