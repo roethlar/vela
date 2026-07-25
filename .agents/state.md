@@ -158,15 +158,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Marker Slice 1 external review is blocked on reviewer routing, and the
-  block is owner-only to clear. `.agents/review/harnesses.local.json` has no
-  `tiers` block for the `codex` harness (its entry predates the tier schema:
-  codex-cli 0.142.5, verified 2026-07-04), so no owner-confirmed
-  (model, effort) pair exists for a codex dispatch and the `codereview`
-  playbook fails closed rather than guessing. Separately,
-  `.agents/model-map.json` is absent from this clone, so a nickname cannot be
-  resolved to a slug under the playbook's fetch contract. Code work may
-  continue; the slice claims no review verdict until this clears.
+- Marker Slice 1 external review is dispatched and its verdict is pending; no
+  verdict is claimed until it lands. Routing note: the `codex` entry in
+  `.agents/review/harnesses.local.json` has no `tiers` block (it predates the
+  tier schema — codex-cli 0.142.5, verified 2026-07-04) and this clone has no
+  `.agents/model-map.json`, so tier resolution failed closed. The owner cleared
+  it on 2026-07-25 by naming `gpt-5.6-sol` at xhigh as a literal slug requiring
+  no mapping. Per the playbook that is a session-only inline pin: it was NOT
+  written to the harness cache or any map, and any later dispatch needs the
+  owner to name it again or to confirm a durable codex tier entry.
 - Config-integrity/recovery has no unresolved owner or review blocker — that
   plan is fully landed, verified, and guard-proven.
 
