@@ -1269,6 +1269,86 @@ impl PlexLibrary {
 
     /// Build the credential-free complete-part URL for one exact parsed Media
     /// version. Split-file media remains one mpv EDL over every Part in order.
+    /// HLS transcode URL for one item at one tier, plus the session id that
+    /// must later tear it down.
+    ///
+    /// The session id is generated HERE and is the only handle that exists:
+    /// Plex issues nothing, `/video/:/transcode/universal/ping` and `/stop` do
+    /// not exist (verified 2026-07-25, both 404), and the sole teardown is
+    /// `DELETE /transcode/sessions/<id>`. Losing this id means an orphaned
+    /// transcode on the user's server.
+    ///
+    /// The token stays in the query string here, unlike the direct part URL
+    /// which moved to a header: mpv follows the HLS playlist's own segment URLs,
+    /// which the server writes, so a header set on the first request would not
+    /// travel with them.
+    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
+    pub fn transcode_url(
+        &self,
+        rating_key: &str,
+        tier: crate::source::QualityTier,
+        offset_seconds: u64,
+    ) -> Option<(String, String)> {
+        let base = self.server_base()?;
+        let session = uuid::Uuid::new_v4().simple().to_string();
+        let query = [
+            ("path", format!("/library/metadata/{rating_key}")),
+            ("mediaIndex", "0".to_string()),
+            ("partIndex", "0".to_string()),
+            ("protocol", "hls".to_string()),
+            ("directPlay", "0".to_string()),
+            ("directStream", "0".to_string()),
+            ("fastSeek", "1".to_string()),
+            ("copyts", "1".to_string()),
+            ("offset", offset_seconds.to_string()),
+            ("maxVideoBitrate", tier.bitrate_kbps.to_string()),
+            // A bounding box: the server refits to the source aspect and may go
+            // smaller still when the bitrate binds first.
+            ("videoResolution", format!("{}x{}", tier.width, tier.height)),
+            ("session", session.clone()),
+            ("X-Plex-Client-Identifier", self.client_identifier.clone()),
+            ("X-Plex-Token", self.auth_token.clone()),
+        ];
+        let encoded = query
+            .iter()
+            .map(|(key, value)| {
+                format!(
+                    "{}={}",
+                    key,
+                    url::form_urlencoded::byte_serialize(value.as_bytes()).collect::<String>()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("&");
+        Some((
+            format!("{base}/video/:/transcode/universal/start.m3u8?{encoded}"),
+            session,
+        ))
+    }
+
+    /// Tear down one transcode session. Best-effort by return type but
+    /// MANDATORY to call: there is no keep-alive ping, and how an abandoned
+    /// session expires is unknown, so anything Vela starts it must also stop.
+    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
+    pub async fn stop_transcode_session(&self, session: &str) {
+        let Some(base) = self.server_base() else {
+            return;
+        };
+        let url = format!("{base}/transcode/sessions/{session}");
+        let result = self
+            .client
+            .delete(&url)
+            .header("X-Plex-Token", &self.auth_token)
+            .header("X-Plex-Client-Identifier", &self.client_identifier)
+            .send()
+            .await;
+        if let Err(error) = result {
+            // Never print the URL: it is server-address detail and the session
+            // handle. The failure itself is what matters.
+            eprintln!("plex: could not stop a transcode session: {error}");
+        }
+    }
+
     pub fn part_url_for_media(&self, media: &PlexDetailMedia) -> Option<String> {
         let base = self.server_base()?;
         if media.parts.is_empty() || media.parts.iter().any(|part| part.key.is_empty()) {
@@ -1939,6 +2019,42 @@ mod tests {
             width: 300,
             height: 450,
         }
+    }
+
+    // Every transcode Vela starts must be stoppable, and the session id is the
+    // only handle that exists. A URL missing it, or two launches sharing one,
+    // means an orphaned transcode on the user's server.
+    #[tokio::test]
+    async fn transcode_urls_carry_a_unique_session_and_the_tier() {
+        let lib = artwork_library(1234);
+        let tier = crate::source::QUALITY_TIERS
+            .iter()
+            .find(|tier| tier.id == "720p-2000")
+            .copied()
+            .expect("tier exists");
+
+        let (first_url, first_session) = lib.transcode_url("42", tier, 0).expect("builds");
+        let (_, second_session) = lib.transcode_url("42", tier, 0).expect("builds");
+        assert_ne!(
+            first_session, second_session,
+            "each launch needs its own session or one teardown kills another play"
+        );
+        assert!(
+            first_url.contains(&format!("session={first_session}")),
+            "the session must be in the URL that creates it: {first_url}"
+        );
+        assert!(first_url.contains("/video/:/transcode/universal/start.m3u8?"));
+        assert!(first_url.contains("maxVideoBitrate=2000"));
+        assert!(
+            first_url.contains("videoResolution=1280x720"),
+            "resolution is sent as a WxH box: {first_url}"
+        );
+        assert!(first_url.contains("directPlay=0"));
+
+        // Resume must reach the transcoder: without it the server starts at zero
+        // and mpv's own seek would be into a stream that begins elsewhere.
+        let (resumed, _) = lib.transcode_url("42", tier, 930).expect("builds");
+        assert!(resumed.contains("offset=930"), "{resumed}");
     }
 
     // The decision response is how Vela learns whether a copy can be converted

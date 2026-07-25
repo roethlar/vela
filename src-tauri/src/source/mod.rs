@@ -536,6 +536,73 @@ impl PlaybackOptions {
     pub fn has_choice(&self) -> bool {
         usize::from(self.can_direct_play) + self.tiers.len() > 1
     }
+
+    /// What a stored quality setting means for THIS copy.
+    ///
+    /// The setting is a ceiling chosen for the user's situation, not a promise
+    /// that every file offers that exact rung: a 1080p choice cannot be honoured
+    /// literally by a 480p source. The rule is therefore "at most what you
+    /// asked for" — take the requested tier when it is offered, else the best
+    /// offered tier below it, else fall back to playing the file untouched.
+    ///
+    /// Falling back UP to a higher tier would hand the user more bitrate than
+    /// they asked for, which is exactly wrong on the constrained link that made
+    /// them choose.
+    pub fn resolve(&self, setting: &str) -> Delivery {
+        if setting == crate::config::PLAYBACK_QUALITY_ORIGINAL || self.tiers.is_empty() {
+            return self.direct_or_best_available();
+        }
+        // Automatic starts at Original; stepping down is the player's job once
+        // it has evidence, not a decision made before anything has played.
+        if setting == crate::config::PLAYBACK_QUALITY_AUTOMATIC {
+            return self.direct_or_best_available();
+        }
+        let Some(requested) = QUALITY_TIERS.iter().find(|tier| tier.id == setting) else {
+            // An unrecognised setting must not silently convert; config
+            // validation should have rejected it long before here.
+            return self.direct_or_best_available();
+        };
+        let chosen = self
+            .tiers
+            .iter()
+            .find(|tier| tier.bitrate_kbps <= requested.bitrate_kbps)
+            .copied();
+        match chosen {
+            Some(tier) => Delivery::Transcode(tier),
+            None => self.direct_or_best_available(),
+        }
+    }
+
+    /// Original when the server allows it; otherwise the gentlest conversion it
+    /// does allow, because refusing to play at all is the worst outcome.
+    fn direct_or_best_available(&self) -> Delivery {
+        if self.can_direct_play {
+            Delivery::Original
+        } else {
+            match self.tiers.first() {
+                Some(tier) => Delivery::Transcode(*tier),
+                None => Delivery::Original,
+            }
+        }
+    }
+}
+
+/// How one play will actually be delivered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Delivery {
+    /// The original file, untouched. The only delivery that preserves HDR.
+    Original,
+    Transcode(QualityTier),
+}
+
+impl Delivery {
+    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
+    pub fn tier(self) -> Option<QualityTier> {
+        match self {
+            Delivery::Original => None,
+            Delivery::Transcode(tier) => Some(tier),
+        }
+    }
 }
 
 /// A kind of skippable range a media server publishes for one item. Server
@@ -951,6 +1018,67 @@ mod tests {
         // Transcode-only: no Original entry, but still a choice among tiers.
         let no_direct = PlaybackOptions::new(false, true, 1920, 1080, 10_000);
         assert!(no_direct.has_choice());
+    }
+
+    // The setting is a ceiling for the user's situation, not a promise every
+    // file carries that rung. Resolving UPWARD would hand a constrained link
+    // more bitrate than the user asked for.
+    #[test]
+    fn a_requested_tier_resolves_down_never_up() {
+        let hd = PlaybackOptions::new(true, true, 1920, 1080, 10_000);
+        assert_eq!(
+            hd.resolve("720p-2000").tier().map(|tier| tier.id),
+            Some("720p-2000"),
+            "an offered tier is used as asked"
+        );
+
+        // 480p source: the only tier at or below it is 328p/700, which is also
+        // below the requested 8000, so that is what a 1080p request becomes.
+        let sd = PlaybackOptions::new(true, true, 854, 480, 2_000);
+        assert_eq!(
+            sd.resolve("1080p-8000").tier().map(|tier| tier.id),
+            Some("480p-1500"),
+            "an unavailable tier steps down to the best offered below it"
+        );
+
+        // 384p source offers only 328p/700. A 700-and-below request is fine.
+        let tiny = PlaybackOptions::new(true, true, 640, 384, 1_500);
+        assert_eq!(
+            tiny.resolve("328p-700").tier().map(|tier| tier.id),
+            Some("328p-700")
+        );
+    }
+
+    #[test]
+    fn original_and_automatic_never_convert_up_front() {
+        let options = PlaybackOptions::new(true, true, 1920, 1080, 10_000);
+        assert_eq!(options.resolve("original"), Delivery::Original);
+        assert_eq!(
+            options.resolve("automatic"),
+            Delivery::Original,
+            "Automatic starts at Original; stepping down needs evidence first"
+        );
+        assert_eq!(
+            options.resolve("not-a-real-setting"),
+            Delivery::Original,
+            "an unrecognised setting must not silently convert"
+        );
+    }
+
+    // Refusing to play is worse than converting, so a copy the server will not
+    // direct-play falls to the gentlest conversion it will do.
+    #[test]
+    fn a_copy_that_cannot_direct_play_falls_to_a_conversion() {
+        let no_direct = PlaybackOptions::new(false, true, 1920, 1080, 10_000);
+        assert_eq!(
+            no_direct.resolve("original").tier().map(|tier| tier.id),
+            Some("1080p-20000"),
+            "Original is impossible here, so the best offered tier is used"
+        );
+
+        // Nothing available at all: still Original rather than an invented tier.
+        let nothing = PlaybackOptions::new(false, false, 1920, 1080, 10_000);
+        assert_eq!(nothing.resolve("720p-2000"), Delivery::Original);
     }
 
     fn marker(kind: MarkerKind, start_ms: u64, end_ms: u64) -> MediaMarker {
