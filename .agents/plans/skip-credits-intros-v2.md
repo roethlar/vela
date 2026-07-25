@@ -728,12 +728,25 @@ tested (`markers_args` polarity matrix, owner-only payload write, policy
 resolution, provider parsing against HTTP mocks) but the assembled chain has not
 been exercised by running the app.
 
-`tests/e2e/scenarios/markers.mjs` exists and covers all five acceptance legs
-including the `xdotool` pointer click (the owner installed `xdotool` on
-2026-07-25). **It has never been executed**: the Linux venue could not render
-the app under WebKitWebDriver at all on 2026-07-25 — `smoke` fails identically,
-so the suite currently gates nothing. Diagnosis in `.agents/machines.md`. That
-scenario remains the regression net for the untested glue once the venue works.
+**The acceptance list above is superseded on one point (owner, 2026-07-25): the
+E2E venue never runs mpv with a real video output.** Without one mpv publishes
+no `osd-dimensions`, so no skip button can be drawn there — the button, its
+hitbox, the pointer click and the temporary Space binding are not testable in
+that suite at any effort, and the `xdotool` leg the list mandates is
+unreachable. Those behaviours are instead verified directly against real mpv on
+a desktop host, as recorded above; that check is the durable home for them, and
+it is stronger than the planned pointer leg because it also proves a click
+OUTSIDE the hitbox does nothing.
+
+`tests/e2e/scenarios/markers.mjs` is accordingly scoped to what the venue can
+prove — the glue: the app requests the ranges with all three
+`includeSegmentTypes` filters, writes the payload, injects the script, and the
+script seeks (auto-skip needs no OSD); a commercial range travels the same path;
+a failing marker endpoint costs markers and not playback; and with every policy
+Off the server is never asked and the script is never injected. **It has never
+been executed** — the Linux venue could not render the app under
+WebKitWebDriver at all on 2026-07-25, `smoke` fails identically, and the suite
+currently gates nothing. Diagnosis in `.agents/machines.md`.
 
 ### Behavioral E2E acceptance
 

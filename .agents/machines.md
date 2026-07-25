@@ -137,8 +137,16 @@ render the harness waits for. The next step is to determine whether the webview
 paints at all under this Xvfb display (launch the app on the harness's display
 and capture the window), and whether the last known-good 37/37 run of
 2026-07-24 is reproducible by reverting the tree — this has NOT been done.
-`xdotool` was installed by the owner on 2026-07-25, so the marker E2E's pointer
-leg is no longer blocked on tooling.
+`xdotool` was installed by the owner on 2026-07-25, but the marker pointer leg
+is dead for a different reason (below).
+
+**This venue never runs mpv with a real video output** (owner, 2026-07-25).
+Scenarios drive mpv with `--vo=null`, so mpv publishes no `osd-dimensions` and
+nothing that renders on the video surface can be asserted here — the marker skip
+button, its hitbox, a pointer click on it, and its temporary Space binding are
+all untestable in this suite at any effort. Behaviour that needs a real video
+output is verified against real mpv on a desktop host instead; do not write a
+scenario here that depends on an OSD overlay being drawn.
 
 The VM also has a `stash@{0}` (`codex-linux-validation-1a2bef5`) and its clone
 sits at `95312fc` on `main`; the 2026-07-25 sync overwrote working-tree files
