@@ -1575,10 +1575,26 @@ bitrate; Vela must show the bitrate alongside every entry, as Plex does, or
 those two become indistinguishable. The Original entry shows the source bitrate
 and resolution.
 
-ASSUMPTION, unverified: the sample was a 76 Mbps 2160p source, where every tier
-sits below it. That Plex truncates tiers at or above a lower-bitrate source's
-own rate is inferred from the design, not observed. Confirm against a
-low-bitrate title before relying on it.
+CONFIRMED filtering rule (three live samples, owner screenshots 2026-07-25):
+**Plex filters the ladder by RESOLUTION, never by bitrate.** A tier is offered
+when its resolution is at or below the source's resolution; its bitrate is
+irrelevant to whether it appears.
+
+| Source            | Tiers offered                                  |
+|-------------------|------------------------------------------------|
+| 2160p, 76 Mbps    | all ten                                        |
+| 1080p, 10 Mbps    | all ten, INCLUDING 20 Mbps and 12 Mbps         |
+| 384p, 1.5 Mbps    | only 328p / 0.7 Mbps                           |
+
+The 1080p sample is decisive: a 10 Mbps source still offers the 20 Mbps and
+12 Mbps tiers, so there is no bitrate ceiling. The 384p sample confirms the
+resolution rule and rules out a bitrate rule on its own - the 480p tier is
+1.5 Mbps, exactly the source bitrate, and is still dropped because 480p exceeds
+384p.
+
+This supersedes an earlier assumption in this repo that only tiers strictly
+below the source bitrate should be offered. That was inferred from a single 4K
+sample and is wrong; do not reintroduce a bitrate filter.
 
 Reason:
 Mirroring Plex means the owner sees the quality names already familiar from

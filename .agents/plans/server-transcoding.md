@@ -139,17 +139,25 @@ Explicitly REJECTED by the owner, with reasons; do not re-propose:
 Per play, before offering anything:
 
 1. Ask the server what it can do with this exact media source — direct play,
-   direct stream, transcode — and read the source bitrate.
-2. Offer **Original** only when direct play/stream is actually available.
+   direct stream, transcode — and read the source resolution and bitrate.
+2. Offer **Original** only when direct play/stream is actually available, and
+   label it with the source bitrate and resolution the way Plex does.
 3. Offer transcode steps only when the server reports transcoding is available
-   AND permitted for the account, and only steps strictly below the source
-   bitrate. A 3 Mbps file offers no 20 Mbps entry.
+   AND permitted for the account, filtered **by resolution**: a tier appears
+   when its resolution is at or below the source's.
 4. When the server can only direct-play, Original is the sole entry; when it can
    only transcode, Original is absent. The menu never contains an entry that
    would fail.
 
-Open: whether the step values below the source bitrate are Plex's client ladder,
-a Vela list, or something derived — see Owner decisions.
+**Do not add a bitrate filter.** Confirmed against three live Plex samples
+(`.agents/decisions.md`): a 10 Mbps 1080p source still offers the 20 Mbps and
+12 Mbps tiers, and a 1.5 Mbps 384p source drops the 1.5 Mbps 480p tier despite
+the identical bitrate. Resolution is the only axis Plex filters on. An earlier
+revision of this plan said "only steps strictly below the source bitrate" — that
+was inferred from one 4K sample and is wrong.
+
+Every entry must show its bitrate, since two tiers share the label
+"Convert to 1080p HD" and are otherwise indistinguishable.
 
 ---
 
