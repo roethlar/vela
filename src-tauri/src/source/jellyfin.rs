@@ -248,6 +248,70 @@ impl JellyfinClient {
         }
     }
 
+    /// HLS transcode URL for one item at one tier.
+    ///
+    /// Unlike Plex there is no client-invented session id: Jellyfin keys an
+    /// encoding by `deviceId` + `playSessionId`, and those two are what later
+    /// stop it. `mediaSourceId` is REQUIRED on this route — omitting it makes
+    /// the server pick a source, which for a multi-version title is not
+    /// necessarily the copy the user chose.
+    ///
+    /// `deviceProfileId` is deliberately absent: Jellyfin marks it obsolete and
+    /// never reads it, so capabilities travel as the explicit parameters below.
+    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
+    fn transcode_url(
+        &self,
+        item_id: &str,
+        media_source_id: &str,
+        play_session_id: Option<&str>,
+        tier: crate::source::QualityTier,
+        start_ticks: i64,
+    ) -> String {
+        let bitrate = (tier.bitrate_kbps as u64 * 1000).to_string();
+        let width = tier.width.to_string();
+        let height = tier.height.to_string();
+        let start = start_ticks.max(0).to_string();
+        let mut pairs: Vec<(&str, &str)> = vec![
+            ("mediaSourceId", media_source_id),
+            ("deviceId", self.device_id.as_str()),
+            ("videoBitRate", bitrate.as_str()),
+            ("maxWidth", width.as_str()),
+            ("maxHeight", height.as_str()),
+            ("startTimeTicks", start.as_str()),
+            // Let the server copy a stream it does not need to touch: a file
+            // whose audio already fits should not be re-encoded just because
+            // the video is.
+            ("enableAutoStreamCopy", "true"),
+            ("api_key", self.token.as_str()),
+        ];
+        if let Some(ps) = play_session_id {
+            pairs.push(("PlaySessionId", ps));
+        }
+        self.build_url(&["Videos", item_id, "master.m3u8"], &pairs)
+    }
+
+    /// Stop one active encoding. Best-effort by return type but MANDATORY to
+    /// call: an abandoned Jellyfin encoding keeps a transcoder busy on the
+    /// user's server.
+    #[allow(dead_code)] // TEMPORARY, remove when the play path wires this up
+    async fn stop_transcode(&self, play_session_id: &str) {
+        let url = self.build_url(
+            &["Videos", "ActiveEncodings"],
+            &[
+                ("deviceId", self.device_id.as_str()),
+                ("PlaySessionId", play_session_id),
+            ],
+        );
+        let mut request = self.http.delete(&url);
+        for (name, value) in self.auth_headers() {
+            request = request.header(name, value);
+        }
+        if let Err(error) = request.send().await {
+            // Never print the URL: it carries the api_key.
+            eprintln!("jellyfin: could not stop an active encoding: {error}");
+        }
+    }
+
     /// Mark an item played (POST) or unplayed (DELETE) for the current user.
     async fn set_played(&self, item_id: &str, played: bool) -> Result<(), String> {
         let url = self.build_url(&["Users", &self.user_id, "PlayedItems", item_id], &[]);
@@ -1694,6 +1758,38 @@ mod tests {
         assert!(
             accepted.is_err(),
             "an Emby server must receive no MediaSegments request"
+        );
+    }
+
+    // The transcode URL must name the copy the user chose and carry the tier's
+    // ceiling. Omitting mediaSourceId lets the server pick a source, which for
+    // a multi-version title is not necessarily the one that was selected.
+    #[test]
+    fn jellyfin_transcode_url_pins_the_source_and_the_tier() {
+        let client = segment_client(Flavor::Jellyfin, 8096);
+        let tier = crate::source::QUALITY_TIERS
+            .iter()
+            .find(|tier| tier.id == "720p-2000")
+            .copied()
+            .expect("tier exists");
+
+        let url = client.transcode_url("item-7", "source-2", Some("ps-9"), tier, 0);
+        assert!(url.contains("/Videos/item-7/master.m3u8"), "{url}");
+        assert!(url.contains("mediaSourceId=source-2"), "{url}");
+        assert!(url.contains("PlaySessionId=ps-9"), "{url}");
+        assert!(
+            url.contains("videoBitRate=2000000"),
+            "the ladder is kbps; Jellyfin wants bits per second: {url}"
+        );
+        assert!(url.contains("maxWidth=1280") && url.contains("maxHeight=720"), "{url}");
+
+        // Resume must reach the transcoder, or the server starts at zero and
+        // mpv seeks into a stream that begins somewhere else.
+        let resumed = client.transcode_url("item-7", "source-2", None, tier, 9_300_000_000);
+        assert!(resumed.contains("startTimeTicks=9300000000"), "{resumed}");
+        assert!(
+            !resumed.contains("PlaySessionId"),
+            "an absent session id must not appear as an empty parameter: {resumed}"
         );
     }
 
