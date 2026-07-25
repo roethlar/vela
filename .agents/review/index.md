@@ -864,3 +864,16 @@ Review pass 2026-07-05 (codex, read-only, base `23f6857` head `34d3412`,
 loop e2e-1): 2 candidates, 2 admitted, 0 declined; plus 2 coder-filed
 findings admitted during the loop (eh-3, eh-4). All 4 verdicts: accepted,
 guard_confirmed (codex, manual-check mode — no JS unit runner in repo).
+
+Marker Slice 1 CODE review 2026-07-25: `codex` at literal slug `gpt-5.6-sol` /
+xhigh (owner-named inline, session-only — no map resolution, and not written to
+the harness cache), MCP transport, read-only sandbox, over exact range
+`e7ea7dca8ee7ed730bbc22efd9df5fff8e2785f3..c7aa9637c34b75350c20b41c29415fa8be06526c`.
+Schema-valid verdict with both pins echoed back and matched. 2 candidates, 2
+admitted, 0 declined. Both concern best-effort marker I/O sitting on the
+playback critical path; neither disputes the marker model or the parsing.
+
+| ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
+|------|----------|-----------------------------------------------------------------------|--------|--------|----------|
+| mk-1 | MEDIUM   | Stalled Jellyfin marker endpoint delays mpv launch by the 15s timeout  | `[~]`  |        | codex/gpt-5.6-sol/xhigh/inline |
+| mk-2 | MEDIUM   | A Plex server rejecting `includeMarkers=1` loses playback, not markers | `[~]`  |        | codex/gpt-5.6-sol/xhigh/inline |
