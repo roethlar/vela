@@ -146,6 +146,21 @@ impl SkipPolicy {
     pub fn resolve(stored: Option<SkipPolicy>) -> SkipPolicy {
         stored.unwrap_or(Self::MISSING)
     }
+
+    /// The literal the bundled Lua script reads from mpv's script options. It
+    /// matches the serde representation, and the closed set means no caller can
+    /// put an arbitrary string into an mpv argument.
+    pub fn as_option_value(self) -> &'static str {
+        match self {
+            SkipPolicy::Off => "off",
+            SkipPolicy::Button => "button",
+            SkipPolicy::Autoskip => "autoskip",
+        }
+    }
+
+    pub fn is_off(self) -> bool {
+        matches!(self, SkipPolicy::Off)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

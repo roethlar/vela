@@ -23,10 +23,14 @@
   };
 
   type AutocropMode = "off" | "manual" | "auto";
+  type SkipPolicy = "off" | "button" | "autoskip";
   type MpvAdvanced = {
     extraArgs: string;
     useOwnConfig: boolean;
     autocrop: AutocropMode;
+    skipIntros: SkipPolicy;
+    skipCredits: SkipPolicy;
+    skipCommercials: SkipPolicy;
   };
 
   let {
@@ -141,6 +145,11 @@
   let mpvExtraArgs = $state("");
   let mpvUseOwnConfig = $state(false);
   let mpvAutocrop = $state<AutocropMode>("off");
+  // Button matches the backend's missing-field default, so a load failure
+  // cannot present a stronger setting than the user actually has.
+  let skipIntros = $state<SkipPolicy>("button");
+  let skipCredits = $state<SkipPolicy>("button");
+  let skipCommercials = $state<SkipPolicy>("button");
   let mpvAdvBusy = $state(false);
   let showMpvHelp = $state(false);
 
@@ -237,6 +246,9 @@
       mpvExtraArgs = adv.extraArgs;
       mpvUseOwnConfig = adv.useOwnConfig;
       mpvAutocrop = adv.autocrop;
+      skipIntros = adv.skipIntros;
+      skipCredits = adv.skipCredits;
+      skipCommercials = adv.skipCommercials;
       continuePlaying = continueMode;
       applyPlaybackPreferences(playbackPrefs);
     } catch (e) {
@@ -351,6 +363,9 @@
         extraArgs: mpvExtraArgs,
         useOwnConfig: mpvUseOwnConfig,
         autocrop: mpvAutocrop,
+        skipIntros,
+        skipCredits,
+        skipCommercials,
       });
     } catch (e) {
       err = String(e);
@@ -684,6 +699,40 @@
               Off or Manual.
             </p>
           {/if}
+        </div>
+
+        <div class="field">
+          <label for="skip-intros">Skip intros</label>
+          <select id="skip-intros" bind:value={skipIntros}>
+            <option value="off">Off</option>
+            <option value="button">Button — ask on screen</option>
+            <option value="autoskip">Auto-skip</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="skip-credits">Skip credits</label>
+          <select id="skip-credits" bind:value={skipCredits}>
+            <option value="off">Off</option>
+            <option value="button">Button — ask on screen</option>
+            <option value="autoskip">Auto-skip</option>
+          </select>
+        </div>
+
+        <div class="field">
+          <label for="skip-commercials">Skip commercials</label>
+          <select id="skip-commercials" bind:value={skipCommercials}>
+            <option value="off">Off</option>
+            <option value="button">Button — ask on screen</option>
+            <option value="autoskip">Auto-skip</option>
+          </select>
+          <p class="muted small">
+            Uses the intro, credits and commercial markers your media server
+            publishes — Vela never guesses where they are, so titles without
+            markers are unaffected. <b>Button</b> shows a skip button on the
+            video: click it, or press <code>Space</code> while it is visible.
+            <b>Auto-skip</b> jumps past the range on its own.
+          </p>
         </div>
 
         <div class="btnrow">

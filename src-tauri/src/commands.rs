@@ -927,6 +927,43 @@ pub fn get_mpv_advanced() -> Result<MpvAdvanced, String> {
     })
 }
 
+/// The three resolved marker policies for one play. Resolved once, before
+/// stream resolution, so `playback::play` never reads config to decide what
+/// skipping should do.
+#[derive(Debug, Clone, Copy)]
+pub struct SkipPolicies {
+    pub intro: config::SkipPolicy,
+    pub credits: config::SkipPolicy,
+    pub commercial: config::SkipPolicy,
+}
+
+impl SkipPolicies {
+    fn load() -> Result<Self, PlayFailure> {
+        let cfg = config::load_config()
+            .map_err(|_| PlayFailure::unavailable("could not read Vela settings".to_string()))?;
+        Ok(Self {
+            intro: config::SkipPolicy::resolve(cfg.skip_intros),
+            credits: config::SkipPolicy::resolve(cfg.skip_credits),
+            commercial: config::SkipPolicy::resolve(cfg.skip_commercials),
+        })
+    }
+
+    fn any_enabled(&self) -> bool {
+        !(self.intro.is_off() && self.credits.is_off() && self.commercial.is_off())
+    }
+}
+
+fn skip_policy_for(
+    kind: crate::source::MarkerKind,
+    policies: &SkipPolicies,
+) -> config::SkipPolicy {
+    match kind {
+        crate::source::MarkerKind::Intro => policies.intro,
+        crate::source::MarkerKind::Credits => policies.credits,
+        crate::source::MarkerKind::Commercial => policies.commercial,
+    }
+}
+
 /// Decode the persisted autocrop value. A missing value means `"off"`;
 /// an unrecognised stored value is invalid instead of being normalised.
 fn autocrop_from_config(value: Option<&str>) -> Result<String, String> {
@@ -4309,9 +4346,10 @@ async fn play_by_key_locked(
         .get(&selection.source_id)
         .ok_or_else(|| PlayFailure::unavailable("the selected source was removed".to_string()))?;
     let item = &selection.item;
-    // Markers stay off until the skip policies exist in config and the player
-    // can act on them; asking for them now would fetch ranges nothing reads.
-    let include_markers = false;
+    // Resolve the skip policies before stream resolution: with every kind Off
+    // the server is never asked for markers at all.
+    let skip_policies = SkipPolicies::load()?;
+    let include_markers = skip_policies.any_enabled();
     let resolved = match selection.version_id.as_deref() {
         Some(version_id) => {
             src.resolve_stream_version(
@@ -4430,6 +4468,14 @@ async fn play_by_key_locked(
     // the stock trigger and lets the shim fire detection after a settle
     // delay — the stock trigger breaks on --start resumes; see the shim).
     let autocrop_shim = resolve_resource("vela-autocrop.lua");
+    let markers_script = resolve_resource("vela-markers.lua");
+    // Keep only the kinds the user actually enabled: the script must never be
+    // handed a range it is not allowed to act on.
+    let markers: Vec<crate::source::MediaMarker> = resolved
+        .markers
+        .into_iter()
+        .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
+        .collect();
     let spec = playback::PlaySpec {
         url: resolved.url,
         title: item.title.clone(),
@@ -4440,6 +4486,11 @@ async fn play_by_key_locked(
         inherited_window_state,
         screen_name,
         window_observation: window_observation.clone(),
+        markers_script,
+        markers,
+        intro_policy: skip_policies.intro,
+        credits_policy: skip_policies.credits,
+        commercial_policy: skip_policies.commercial,
     };
     // The tracker can observe a very fast mpv exit before this async command
     // resumes from spawn_blocking. Hold its final recents stamp until the

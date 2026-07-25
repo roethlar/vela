@@ -161,6 +161,15 @@ mode attempts every video. Automatic crop detection can be unreliable with HDR
 on some GPU/Wayland combinations and may occasionally hang mpv, so Manual is
 the safer option when that occurs.
 
+Intro, credits and commercial skipping uses only the marker ranges your media
+server publishes for a title — Vela never detects or guesses them, so titles
+without markers are unaffected. Each kind has its own Off / Button / Auto-skip
+setting, and Button is the default. In Button mode a skip button appears on the
+video while the range is playing: click it, or press `Space` while it is
+visible. `Space` keeps its normal pause behaviour at every other moment. Plex
+and Jellyfin publish these ranges; Emby currently has no equivalent API, so
+skipping is unavailable there.
+
 On NVIDIA + Wayland, Vela disables WebKitGTK's DMABUF renderer at startup to
 avoid a known webview crash. This affects the library UI renderer, not mpv's
 video output, and has no effect on macOS or Windows.

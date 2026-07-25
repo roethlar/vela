@@ -77,6 +77,16 @@ export function startMockJellyfin({
     ),
     requests: [], // { method, path, query } in arrival order
     served: [], // { method, path, status } in RESPONSE order (see json())
+    // Marker ranges per item id, served from the real MediaSegments route.
+    // Empty by default so existing scenarios see a server that publishes none;
+    // a scenario opts in with setMediaSegments().
+    mediaSegments: new Map(),
+    // Set to a status code to make the route fail, so a scenario can prove that
+    // a marker-endpoint failure still plays.
+    mediaSegmentsStatus: null,
+    setMediaSegments(itemId, segments) {
+      state.mediaSegments.set(itemId, segments);
+    },
     // Dedicated watch-edit witnesses. Generic requests/served remain the
     // authoritative whole-server logs, while these make it explicit whether a
     // delayed PlayedItems mutation has merely arrived or has actually replied.
@@ -314,6 +324,28 @@ export function startMockJellyfin({
       state.contractViolations.push({ path: p, query: { auth: "missing" } });
       return json({ error: "unauthenticated" }, 401);
     };
+
+    // Jellyfin's real MediaSegments route. The filter parameters are part of
+    // the contract Vela must send: a client that stopped requesting a kind, or
+    // that guessed a different route, must fail here rather than silently lose
+    // markers (the same reason the mock pins every other query envelope).
+    if (path.startsWith("/MediaSegments/")) {
+      const itemId = decodeURIComponent(path.slice("/MediaSegments/".length));
+      const kinds = url.searchParams.getAll("includeSegmentTypes");
+      for (const required of ["Intro", "Outro", "Commercial"]) {
+        if (!kinds.includes(required)) {
+          state.contractViolations.push({
+            path,
+            query: { missingSegmentType: required },
+          });
+        }
+      }
+      if (state.mediaSegmentsStatus) {
+        return json({ error: "unavailable" }, state.mediaSegmentsStatus);
+      }
+      const items = state.mediaSegments.get(itemId) ?? [];
+      return json({ Items: items, TotalRecordCount: items.length });
+    }
 
     if (path === `/Users/${userId}/Views`) {
       const respond = () => {

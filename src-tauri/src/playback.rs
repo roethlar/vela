@@ -694,6 +694,19 @@ pub struct PlaySpec {
     /// Fresh handle populated by this launch's IPC reader and published by the
     /// command layer only after the full launch succeeds.
     pub window_observation: WindowStateObservation,
+    /// Absolute path to Vela's bundled `vela-markers.lua`, resolved by the
+    /// caller through the same resource resolver as autocrop. `None` when it
+    /// could not be resolved — skipping is then simply absent, never an error.
+    pub markers_script: Option<String>,
+    /// Marker ranges for this exact launch, already normalized AND already
+    /// filtered to the kinds whose policy is enabled. Empty means nothing is
+    /// injected at all.
+    pub markers: Vec<crate::source::MediaMarker>,
+    /// Resolved per-kind policies. `play` passes these to the script; it never
+    /// reads config to derive them and never interprets a policy string.
+    pub intro_policy: crate::config::SkipPolicy,
+    pub credits_policy: crate::config::SkipPolicy,
+    pub commercial_policy: crate::config::SkipPolicy,
 }
 
 /// mpv launch args for the autocrop feature, given the config `mode`
@@ -725,6 +738,119 @@ fn autocrop_args(mode: &str, script: Option<&str>, shim: Option<&str>) -> Vec<St
         ("auto", None) => vec![format!("--script={path}")],
         _ => Vec::new(),
     }
+}
+
+/// mpv launch args for marker skipping. Pure, so the injection is testable
+/// without spawning mpv. Every "don't act" condition collapses to no args:
+/// no resolved script, every policy Off, or no payload successfully written —
+/// the script is useless without its ranges, and injecting a `--script=` whose
+/// file is missing would make mpv refuse to start outright.
+///
+/// The payload PATH is deliberately absent here: it travels on the child's
+/// environment, because mpv's script-opts list is comma-split and would mangle
+/// Windows and user paths.
+fn markers_args(
+    script: Option<&str>,
+    intro: crate::config::SkipPolicy,
+    credits: crate::config::SkipPolicy,
+    commercial: crate::config::SkipPolicy,
+    has_payload: bool,
+) -> Vec<String> {
+    let Some(path) = script else {
+        return Vec::new();
+    };
+    if !has_payload || (intro.is_off() && credits.is_off() && commercial.is_off()) {
+        return Vec::new();
+    }
+    vec![
+        format!("--script={path}"),
+        format!(
+            "--script-opts-append=vela-markers-intro-policy={}",
+            intro.as_option_value()
+        ),
+        format!(
+            "--script-opts-append=vela-markers-credits-policy={}",
+            credits.as_option_value()
+        ),
+        format!(
+            "--script-opts-append=vela-markers-commercial-policy={}",
+            commercial.as_option_value()
+        ),
+    ]
+}
+
+/// Unique per-launch payload name in this process's private directory. Mirrors
+/// [`header_conf_path`]: the caller never reuses a path, so a stale cleanup can
+/// never delete a newer launch's file.
+fn marker_payload_path() -> Result<std::path::PathBuf, String> {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    let name = format!(
+        "vela-markers-{}-{}.json",
+        std::process::id(),
+        COUNTER.fetch_add(1, Ordering::SeqCst)
+    );
+    #[cfg(not(windows))]
+    {
+        Ok(private_runtime_dir()?.join(name))
+    }
+    #[cfg(windows)]
+    {
+        crate::storage::config_dir_file(&name)
+            .map_err(|_| "couldn't prepare the marker payload".to_string())
+    }
+}
+
+/// Best-effort sweep of payloads this process left behind — normally the Lua
+/// script unlinks its own, so anything here is the residue of a crash. Only
+/// Vela's own prefix, only inside the directory we created ourselves.
+fn prune_marker_payloads(dir: &std::path::Path) {
+    let prefix = format!("vela-markers-{}-", std::process::id());
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        if name.starts_with(&prefix) && name.ends_with(".json") {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// Write the marker payload for one launch. Non-fatal by construction: every
+/// failure returns `None` and playback proceeds without skipping. Never `?` this
+/// into the play path.
+fn try_write_marker_payload(markers: &[crate::source::MediaMarker]) -> Option<std::path::PathBuf> {
+    if markers.is_empty() {
+        return None;
+    }
+    #[derive(serde::Serialize)]
+    struct Payload<'a> {
+        markers: &'a [crate::source::MediaMarker],
+    }
+    let body = serde_json::to_vec(&Payload { markers }).ok()?;
+    let path = marker_payload_path().ok()?;
+    if let Some(dir) = path.parent() {
+        prune_marker_payloads(dir);
+    }
+    // Exclusive creation, owner-only from the first byte — same rule as the
+    // auth include, even though marker timings are not credentials.
+    let mut opts = std::fs::OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    let mut file = opts.open(&path).ok()?;
+    if file.write_all(&body).is_err() {
+        // A partial file must not be handed to the script.
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+    Some(path)
 }
 
 /// Fired exactly once when a playback session ends — after the final server
@@ -853,6 +979,45 @@ pub fn play(
         }
     }
 
+    // Marker skipping. Like autocrop this lands after the user's own options so
+    // user configuration cannot replace Vela's policies, and every failure here
+    // degrades to a normal play rather than refusing one.
+    let marker_payload = {
+        let script = spec
+            .markers_script
+            .as_deref()
+            .filter(|path| std::path::Path::new(path).is_file());
+        let wanted = !(spec.intro_policy.is_off()
+            && spec.credits_policy.is_off()
+            && spec.commercial_policy.is_off());
+        if script.is_none() && wanted && !spec.markers.is_empty() {
+            eprintln!(
+                "vela: marker script (vela-markers.lua) did not resolve; \
+                 playing without skip controls"
+            );
+        }
+        let payload = if script.is_some() && wanted {
+            try_write_marker_payload(&spec.markers)
+        } else {
+            None
+        };
+        for arg in markers_args(
+            script,
+            spec.intro_policy,
+            spec.credits_policy,
+            spec.commercial_policy,
+            payload.is_some(),
+        ) {
+            cmd.arg(arg);
+        }
+        if let Some(path) = &payload {
+            // Child-only, and never on the command line: the payload path must
+            // not appear in the process argument list.
+            cmd.env("VELA_MARKERS_PAYLOAD", path);
+        }
+        payload
+    };
+
     for arg in window_state_args(spec.inherited_window_state) {
         cmd.arg(arg);
     }
@@ -907,9 +1072,16 @@ pub fn play(
         // the lock) closes the race where a play starting during exit would
         // register an mpv the sweep had already passed.
         if shutting_down.load(Ordering::SeqCst) {
+            // Nothing will read the payload now; the Lua unlink never happens.
+            if let Some(path) = &marker_payload {
+                let _ = std::fs::remove_file(path);
+            }
             return Err("Vela is shutting down.".to_string());
         }
         let child = cmd.spawn().map_err(|e| {
+            if let Some(path) = &marker_payload {
+                let _ = std::fs::remove_file(path);
+            }
             if e.kind() == std::io::ErrorKind::NotFound {
                 "mpv was not found. Install mpv to play video.".to_string()
             } else {
@@ -1650,6 +1822,78 @@ mod tests {
         // is useless — it triggers a script that isn't loaded.
         assert!(autocrop_args("manual", None, None).is_empty());
         assert!(autocrop_args("auto", None, Some("/x/vela-autocrop.lua")).is_empty());
+    }
+
+    fn marker(kind: crate::source::MarkerKind) -> crate::source::MediaMarker {
+        crate::source::MediaMarker {
+            kind,
+            start_ms: 1_000,
+            end_ms: 2_000,
+        }
+    }
+
+    // Injection polarity. Each of these alone must produce nothing: injecting a
+    // `--script=` for a missing file makes mpv refuse to start, and a script
+    // with no payload or no enabled policy has nothing to act on.
+    #[test]
+    fn marker_args_inject_nothing_without_script_payload_or_an_enabled_policy() {
+        use crate::config::SkipPolicy::{Autoskip, Button, Off};
+        assert!(
+            markers_args(None, Button, Button, Button, true).is_empty(),
+            "no resolved script"
+        );
+        assert!(
+            markers_args(Some("/x/vela-markers.lua"), Button, Autoskip, Button, false).is_empty(),
+            "no payload was written"
+        );
+        assert!(
+            markers_args(Some("/x/vela-markers.lua"), Off, Off, Off, true).is_empty(),
+            "every policy is off"
+        );
+    }
+
+    // The script reads these exact dashed option names; mpv would otherwise
+    // derive an underscored prefix and silently ignore them.
+    #[test]
+    fn marker_args_carry_the_script_and_all_three_policies() {
+        use crate::config::SkipPolicy::{Autoskip, Button, Off};
+        let args = markers_args(Some("/x/vela-markers.lua"), Button, Autoskip, Off, true);
+        assert_eq!(
+            args,
+            vec![
+                "--script=/x/vela-markers.lua".to_string(),
+                "--script-opts-append=vela-markers-intro-policy=button".to_string(),
+                "--script-opts-append=vela-markers-credits-policy=autoskip".to_string(),
+                "--script-opts-append=vela-markers-commercial-policy=off".to_string(),
+            ]
+        );
+        assert!(
+            !args.iter().any(|arg| arg.contains("PAYLOAD") || arg.contains(".json")),
+            "the payload path must never reach the argument list"
+        );
+    }
+
+    // A payload is written owner-only, and its absence is a normal outcome the
+    // caller degrades on rather than an error it propagates.
+    #[test]
+    fn marker_payload_is_written_owner_only_and_absent_for_no_markers() {
+        use crate::source::MarkerKind;
+        assert!(
+            try_write_marker_payload(&[]).is_none(),
+            "no markers means no payload at all"
+        );
+        let path = try_write_marker_payload(&[marker(MarkerKind::Intro)])
+            .expect("a payload is written for real markers");
+        let body = std::fs::read_to_string(&path).expect("payload is readable");
+        assert!(body.contains("\"kind\":\"intro\""), "body: {body}");
+        assert!(body.contains("\"start_ms\":1000"), "body: {body}");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600, "payload must be owner-only from creation");
+        }
+        let _ = std::fs::remove_file(&path);
     }
 
     #[test]
