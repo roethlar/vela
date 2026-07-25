@@ -7,13 +7,16 @@ choice in **Owner decisions** is now ruled and recorded in
 `.agents/decisions.md`. What still blocks implementation is evidence, not
 choices:
 
-1. Plex's decision endpoint and transcode-session lifecycle (ping/stop) are
-   unverified — confirm against a live server.
+1. ~~Plex's decision endpoint and session lifecycle~~ — VERIFIED 2026-07-25
+   against the owner's live server; see **Provider contracts**. `ping`/`stop` do
+   not exist; teardown is `DELETE /transcode/sessions/<uuid>`.
 2. ~~Plex's ladder tier values~~ — CONFIRMED 2026-07-25 from a live client; the
    table is in `.agents/decisions.md`. Tiers are resolution+bitrate pairs, and
    two share a label, so bitrate must always be displayed.
 3. The plan still needs its implementation slices written, with the verification
    and guard proof each one owes.
+4. Emby's transcode contract remains unverified and stays best-effort per the
+   2026-07-25 ruling.
 
 The owner has not said "implement". Do not start code on the strength of the
 rulings alone.
@@ -83,15 +86,34 @@ Explicitly REJECTED by the owner, with reasons; do not re-propose:
   helper, not passed in the parameter map. `directPlay`, `directStream`,
   `session`, `subtitleSize` and `audioBoost` are NOT named in that helper and
   reach the URL only through its `**kwargs` passthrough.
-- **UNVERIFIED:** the decision endpoint
-  (`/video/:/transcode/universal/decision`) and the session lifecycle
-  (`.../ping`, `.../stop`). These are widely used by real clients but were not
-  confirmed this session — the community OpenAPI path 404'd and Plex's support
-  article returned 403. **Verify against a live server before implementing.**
-- **UNVERIFIED:** Plex's quality ladder appears to be a client-side list rather
-  than something the server publishes; nothing in the API code read this session
-  exposed one, and `maxVideoBitrate`/`videoResolution` are free parameters.
-  Confirm against a Plex client before relying on it.
+- **Decision endpoint — VERIFIED against the owner's live server 2026-07-25.**
+  `GET /video/:/transcode/universal/decision` with the same parameter set as
+  `start` returns 200 and a `MediaContainer` carrying
+  `generalDecisionCode`/`generalDecisionText`,
+  `directPlayDecisionCode`/`directPlayDecisionText`, and
+  `transcodeDecisionCode`/`transcodeDecisionText` (observed: general 1001
+  "Direct play not available; Conversion OK", directPlay 3000 "Direct play is
+  disabled" when the request sets `directPlay=0`). Its `Metadata[0].Media[0]`
+  describes the stream the server WOULD produce — `videoResolution`, `bitrate`,
+  `protocol`, `container`, plus codec and dimension fields. This is how Vela
+  learns whether a file can be direct-played and what a given tier would
+  actually yield, without starting anything.
+- **Session lifecycle — VERIFIED, and the common lore is wrong for this server.**
+  `/video/:/transcode/universal/ping` and `.../stop` **do not exist — both 404.**
+  The real shape:
+  1. The CLIENT generates the session id and passes it as `session=<uuid>`.
+  2. `GET /video/:/transcode/universal/start.m3u8?...&session=<uuid>` returns
+     200 with an `#EXTM3U` playlist and creates the session.
+  3. `GET /transcode/sessions` lists active sessions, keyed by that same uuid.
+  4. **`DELETE /transcode/sessions/<uuid>` returns 204 and tears it down.**
+  Observed session count across the probe: 0 → 1 → 0. Vela MUST issue that
+  DELETE when playback ends or fails, or it orphans transcodes on the server.
+  No keep-alive ping was found; segment fetches appear to be what keeps a
+  session live, so an abandoned session's expiry behaviour is still unknown and
+  is the reason the explicit DELETE is mandatory rather than optional.
+- **Quality ladder — CONFIRMED client-side.** Plex does not publish it through
+  the API; the values were read off a live client and are recorded in
+  `.agents/decisions.md`, along with the resolution-only filtering rule.
 
 ### Jellyfin / Emby
 
