@@ -721,12 +721,26 @@ and a real video output:
   rectangle and the clickable area are the same rectangle — a pointer injected
   at the button alone could pass while the mouse area was unconstrained.
 
-Still unproven: the glue between the command layer and the player — that a real
-play resolves policies, requests markers from a live/mock server, filters them,
-writes the payload, and launches mpv with those arguments. Its parts are unit
-tested (`markers_args` polarity matrix, owner-only payload write, policy
-resolution, provider parsing against HTTP mocks) but the assembled chain has not
-been exercised by running the app.
+The kind filter that decides what may reach the player is guarded at 1.0.11 by
+`commands::tests::only_enabled_marker_kinds_reach_the_player` (`e58d978`),
+red-proven twice from the committed state: routing Credits to the intro policy
+leaks a disabled kind, and making `any_enabled` unconditional asks the server
+with everything Off. Both failed for their own reason and were restored.
+
+Still unproven: the assembled chain — that a real play resolves policies,
+requests markers from a server, writes the payload, and launches mpv with those
+arguments in that order. Every part is unit tested (`markers_args` polarity
+matrix, owner-only payload write, policy resolution, kind filtering, provider
+parsing against HTTP mocks) and the player half is verified against real mpv,
+but nothing has run the app end to end.
+
+Why not, as of 2026-07-25: the Linux venue cannot render the app (see
+`.agents/machines.md`), and the macOS host cannot substitute — Tauri's
+WebDriver support is Linux/Windows only, and `ProjectDirs` puts config in
+`~/Library/Application Support` with no XDG override, so running the app here
+would drive the owner's real settings and connections rather than a seeded
+fixture. Closing this seam needs either a working venue or an explicit
+owner-supervised playtest.
 
 **The acceptance list above is superseded on one point (owner, 2026-07-25): the
 E2E venue never runs mpv with a real video output.** Without one mpv publishes

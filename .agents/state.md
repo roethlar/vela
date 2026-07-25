@@ -171,7 +171,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   click inside the hitbox skips while a click outside does not). Linux is needed
   only for the webview harness, not for mpv. What remains unproven is the glue:
   a real play resolving policies, fetching markers, writing the payload, and
-  launching mpv with those arguments. `tests/e2e/scenarios/markers.mjs` is
+  launching mpv with those arguments — though the kind filter itself is now
+  guarded and red-proven at 1.0.11 (`e58d978`). The macOS host cannot substitute
+  for the venue: Tauri WebDriver is Linux/Windows only, and config resolves to
+  `~/Library/Application Support` with no XDG override, so an app run here would
+  drive the owner's real settings rather than a fixture.
+  `tests/e2e/scenarios/markers.mjs` is
   scoped to exactly that glue and has NEVER run. The venue never runs mpv with a
   real video output (owner, 2026-07-25), so the button, hitbox, pointer click
   and Space binding are permanently untestable there and live in the desktop mpv
