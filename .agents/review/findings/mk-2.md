@@ -6,7 +6,7 @@ than losing markers.
 **Status**: In progress
 **Branch**: none — repo policy is direct commits on `main` (AGENTS.md Git
 Safety leaves branch policy to the repo)
-**Commit**: `<filled after commit>`
+**Commit**: `2971672` (version 1.0.7)
 
 ## Evidence
 
@@ -57,8 +57,14 @@ on a failure that previously ended the play.
   — a server that answers the `includeMarkers=1` request with 500 and the plain
   request with a valid detail body. Asserts the call succeeds, returns no
   markers, and that the second request line carries no `includeMarkers`.
-  Removing the fallback makes it FAIL (the call returns `Err`); restoring it
-  makes it PASS.
+  Red-proven from the committed state on 2026-07-25: disabling the fallback
+  guard made the call fail with `reqwest::Error { kind: Status(500, ..) }` and
+  the assertion FAIL; restoring it made it PASS. The injection compiled and the
+  restore was verified clean.
+
+One implementation note worth carrying: the retry cannot hold the original
+`Box<dyn StdError>` across its await, because that type is not `Send` and the
+enclosing futures must be. Only the error's message survives the retry.
 
 ## Coder dispute (if any)
 

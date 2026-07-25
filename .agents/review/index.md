@@ -875,5 +875,9 @@ playback critical path; neither disputes the marker model or the parsing.
 
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
-| mk-1 | MEDIUM   | Stalled Jellyfin marker endpoint delays mpv launch by the 15s timeout  | `[~]`  |        | codex/gpt-5.6-sol/xhigh/inline |
-| mk-2 | MEDIUM   | A Plex server rejecting `includeMarkers=1` loses playback, not markers | `[~]`  |        | codex/gpt-5.6-sol/xhigh/inline |
+| mk-1 | MEDIUM   | Stalled Jellyfin marker endpoint delays mpv launch by the 15s timeout  | `[x]`  | `be32bde` | codex/gpt-5.6-sol/xhigh/inline |
+| mk-2 | MEDIUM   | A Plex server rejecting `includeMarkers=1` loses playback, not markers | `[x]`  | `2971672` | codex/gpt-5.6-sol/xhigh/inline |
+
+Both fixes are independently red-proven and the full canonical dual-side set
+passed at version 1.0.7 with 271 Rust tests. No follow-up review was
+dispatched, so no clean verdict is claimed for the repaired code.

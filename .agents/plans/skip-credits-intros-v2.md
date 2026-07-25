@@ -181,9 +181,13 @@ picks the first range that contains `time-pos` (see Lua rules).
   - `startTimeOffset` → `start_ms`, `endTimeOffset` → `end_ms` (Plex units are
     milliseconds; assert in fixtures)
 - **Failure:** retain the current `ensure_ready` / one rediscovery retry for the
-  mandatory selected-detail request. Marker absence is empty; because the
-  fields are part of that mandatory response, there is no independent marker
-  error to propagate.
+  mandatory selected-detail request. Marker absence is empty. There is no
+  independent marker *parse* error to propagate, because the fields ride the
+  mandatory response — but adding the query parameter does create a request
+  failure mode the plain request lacks, so a failed marker-bearing request
+  retries once without the parameter rather than failing the play (finding
+  `mk-2`, 2026-07-25; an earlier revision of this bullet wrongly claimed there
+  was no independent marker error at all).
 - **Tests:** XML fixture with intro + credits + commercial + unknown type +
   inverted range; empty markers; and an HTTP mock that fails unless
   `includeMarkers=1` is present on the existing metadata request. A synthetic
@@ -538,7 +542,32 @@ degrading; and the Emby flavor gate removed. The five whose assertions carry
 custom messages were re-run individually to confirm each compiled and panicked
 on its intended assertion rather than on a build error. No guard was vacuous.
 
-External review is NOT yet run for this slice; no clean verdict is claimed.
+**Slice 1 review and repair (2026-07-25).** `codex` at the literal slug
+`gpt-5.6-sol` / xhigh (owner-named inline, session-only) reviewed exact range
+`e7ea7dc..c7aa963` over MCP in a read-only sandbox and returned a schema-valid
+verdict with both pins echoed: two MEDIUM findings, both admitted, none
+declined. Both concerned best-effort marker I/O sitting on the playback critical
+path — neither disputed the marker model or the parsing.
+
+`mk-1` (`be32bde`, 1.0.6): the Jellyfin marker lookup inherited the general
+15-second request timeout and the mandatory playback-info call did not start
+until it finished, so a stalled marker endpoint delayed mpv launch. The lookup
+now has its own 4-second bound, and both resolve paths join markers against the
+full mandatory async block instead of the item fetch alone.
+
+`mk-2` (`2971672`, 1.0.7): a Plex server that errored on
+`/library/metadata/{id}?includeMarkers=1` while still answering the plain
+request lost playback rather than markers. `PlexLibrary::get_item_detail` now
+retries once without the parameter on failure, which covers every caller and
+leaves the rediscovery structure untouched. This corrects the Plex **Failure**
+bullet above, which had claimed no independent marker error existed.
+
+Both fixes are independently red-proven from the committed state — removing
+mk-1's bound made the stalled lookup take 16.16s and fail its assertion,
+confirming the reviewer's mechanism exactly; disabling mk-2's fallback made the
+detail fetch fail with the 500. The full canonical dual-side set passed at
+1.0.7 with 271 Rust tests. No follow-up review was dispatched, so no clean
+verdict is claimed for the repaired code.
 
 ### Slice 2 — Lua script + provenance
 

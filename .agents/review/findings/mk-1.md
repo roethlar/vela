@@ -2,10 +2,10 @@
 
 **Severity**: MEDIUM — an optional best-effort feature can hold a play back by
 the full 15-second HTTP timeout, which the user experiences as Vela hanging.
-**Status**: In progress
+**Status**: Verified
 **Branch**: none — repo policy is direct commits on `main` (AGENTS.md Git
 Safety leaves branch policy to the repo)
-**Commit**: `<filled in after commit>`
+**Commit**: `be32bde` (version 1.0.6)
 
 ## Evidence
 
@@ -65,9 +65,12 @@ is still awaited within the resolve, just bounded.
 - `src-tauri/src/source/jellyfin.rs::media_segments_are_bounded_when_the_endpoint_stalls`
   — points the client at a server that accepts the connection and never
   responds, asserts the call returns empty markers in well under the general
-  15-second timeout. Removing the `tokio::time::timeout` wrapper makes it FAIL
-  (the call hangs to the general timeout and blows the assertion); restoring it
-  makes it PASS.
+  15-second timeout. Red-proven from the committed state on 2026-07-25:
+  widening the wrapper's bound to 60 seconds made the call take **16.16s** and
+  the assertion FAIL — which also confirms the reviewer's mechanism, since the
+  unbounded path really does run to the general request timeout. Restoring the
+  bound made it PASS. The injection compiled and the restore was verified
+  clean.
 
 Only the bounded-latency behavior is claimed and guarded. The join widening is
 a latency optimization with no separate behavioral claim: it changes when the

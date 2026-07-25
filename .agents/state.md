@@ -43,9 +43,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   issuing no request. The play command still passes `include_markers = false`;
   nothing reads markers until the Slice 3 config boundary and the Slice 4
   product flip land. Fifteen injected regressions each failed for their own
-  reason and were restored from the committed state; the full evidence
-  paragraph is canonical in the plan. External review has NOT run for this
-  slice — see Blockers. Settled behavior is recorded in
+  reason and were restored from the committed state. External review then ran
+  and returned two admitted MEDIUM findings, both about best-effort marker I/O
+  on the playback critical path: `mk-1` bounded the Jellyfin marker lookup and
+  overlapped it with all mandatory work (`be32bde`, 1.0.6), and `mk-2` made a
+  failed Plex marker-bearing detail request retry once without the parameter
+  (`2971672`, 1.0.7). Both repairs are independently red-proven and the full
+  canonical dual-side set passed at 1.0.7 with 271 Rust tests; no follow-up
+  review ran, so no clean verdict is claimed. The full evidence is canonical in
+  the plan and in `.agents/review/findings/mk-1.md` and `mk-2.md`. Settled
+  behavior is recorded in
   `.agents/decisions.md`: missing intro, credit, and commercial settings default
   to Button; the external-mpv control is genuinely clickable; and Space
   activates it only while visible, otherwise retaining its normal pause
@@ -145,7 +152,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/skip-credits-intros-v2.md`: add
   `src-tauri/resources/mpv-scripts/vela-markers.lua` with its explicit
   overlay/binding/entry-latch behavior and child-env payload read/unlink, update
-  `PROVENANCE.md` with the Vela MIT entry, and bump to 1.0.6. Full Lua behavior
+  `PROVENANCE.md` with the Vela MIT entry, and bump to 1.0.8. Full Lua behavior
   is guarded when launch wiring lands in Slice 4; record it if the mpv
   script-load check is deferred to that slice's real-app E2E.
 - Parked future directions, not current blockers: the migration-time one-shot
@@ -158,8 +165,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Marker Slice 1 external review is dispatched and its verdict is pending; no
-  verdict is claimed until it lands. Routing note: the `codex` entry in
+- No blocker. Marker Slice 1's external review is complete and both findings are
+  closed. Routing note for the next dispatch: the `codex` entry in
   `.agents/review/harnesses.local.json` has no `tiers` block (it predates the
   tier schema — codex-cli 0.142.5, verified 2026-07-04) and this clone has no
   `.agents/model-map.json`, so tier resolution failed closed. The owner cleared
