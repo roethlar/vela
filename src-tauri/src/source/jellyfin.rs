@@ -210,6 +210,11 @@ impl JellyfinClient {
     /// not evidence of a shared contract. Every failure (unsupported route on an
     /// older Jellyfin, transport error, unreadable body) yields no markers and
     /// never fails the play.
+    /// Its own bound, far below the general per-request timeout: markers are
+    /// optional, and a server that cannot answer this quickly must not be able
+    /// to hold up a launch the user is waiting on.
+    const MARKER_LOOKUP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(4);
+
     async fn media_segments(&self, item_id: &str) -> Vec<MediaMarker> {
         if self.flavor != Flavor::Jellyfin {
             return Vec::new();
@@ -221,18 +226,23 @@ impl JellyfinClient {
             ("includeSegmentTypes", "Commercial".to_string()),
         ];
         let path = format!("/MediaSegments/{item_id}");
-        match self.get_json::<MediaSegmentsEnvelope>(&path, &query).await {
-            Ok(envelope) => normalize_markers(
+        let lookup = self.get_json::<MediaSegmentsEnvelope>(&path, &query);
+        match tokio::time::timeout(Self::MARKER_LOOKUP_TIMEOUT, lookup).await {
+            Ok(Ok(envelope)) => normalize_markers(
                 envelope
                     .items
                     .iter()
                     .filter_map(media_segment_to_marker)
                     .collect(),
             ),
-            Err(error) => {
+            Ok(Err(error)) => {
                 // The client's own message: server-address detail at worst,
                 // never the token, which travels as a header.
                 eprintln!("jellyfin: marker lookup failed, playing without markers: {error}");
+                Vec::new()
+            }
+            Err(_) => {
+                eprintln!("jellyfin: marker lookup timed out, playing without markers");
                 Vec::new()
             }
         }
@@ -1357,24 +1367,27 @@ impl MediaSource for JellyfinSource {
         _duration_ms: Option<u64>,
         include_markers: bool,
     ) -> Result<StreamResolution, String> {
-        // Fetch the item to read its server-side resume position, with the
-        // optional marker lookup riding alongside rather than after it.
+        // The optional marker lookup rides alongside ALL of the mandatory
+        // resolve work, not just its first request, so in the normal case it
+        // costs no extra wall-clock before mpv launches.
         let item_path = format!("/Users/{}/Items/{}", self.client.user_id, item_key);
-        let (item, markers) = tokio::join!(
-            self.client.get_json::<BaseItem>(&item_path, &[]),
-            self.markers_if_enabled(item_key, include_markers),
-        );
-        let item: BaseItem = item?;
+        let mandatory = async {
+            // Fetch the item to read its server-side resume position.
+            let item: BaseItem = self.client.get_json(&item_path, &[]).await?;
+            // Negotiate the real media source + play session for the stream and
+            // check-ins (multi-version items, history/dashboard correctness).
+            let identity = self.client.playback_info(item_key).await?;
+            Ok::<_, String>((item, identity))
+        };
+        let (mandatory, markers) =
+            tokio::join!(mandatory, self.markers_if_enabled(item_key, include_markers));
+        let (item, (media_source_id, play_session_id)) = mandatory?;
         let resume_ms = item
             .user_data
             .and_then(|u| u.playback_position_ticks)
             .filter(|t| *t > 0)
             .map(ticks_to_ms)
             .unwrap_or(0);
-
-        // Negotiate the real media source + play session for the stream and
-        // check-ins (multi-version items, history/dashboard correctness).
-        let (media_source_id, play_session_id) = self.client.playback_info(item_key).await?;
 
         Ok(StreamResolution {
             url: self
@@ -1441,19 +1454,23 @@ impl MediaSource for JellyfinSource {
         version_id: &str,
         include_markers: bool,
     ) -> Result<StreamResolution, String> {
+        // As in `resolve_stream`: the optional marker lookup overlaps every
+        // mandatory request, never sits in front of one.
         let item_path = format!("/Users/{}/Items/{}", self.client.user_id, item_key);
-        let (item, markers) = tokio::join!(
-            self.client.get_json::<BaseItem>(&item_path, &[]),
-            self.markers_if_enabled(item_key, include_markers),
-        );
-        let item: BaseItem = item?;
+        let mandatory = async {
+            let item: BaseItem = self.client.get_json(&item_path, &[]).await?;
+            let info = self.client.playback_info_response(item_key).await?;
+            Ok::<_, String>((item, info))
+        };
+        let (mandatory, markers) =
+            tokio::join!(mandatory, self.markers_if_enabled(item_key, include_markers));
+        let (item, info) = mandatory?;
         let resume_ms = item
             .user_data
             .and_then(|data| data.playback_position_ticks)
             .filter(|ticks| *ticks > 0)
             .map(ticks_to_ms)
             .unwrap_or(0);
-        let info = self.client.playback_info_response(item_key).await?;
         let (media_source_id, play_session_id) =
             exact_playback_identity(info, item_key, version_id)?;
         Ok(StreamResolution {
@@ -1598,6 +1615,32 @@ mod tests {
             .media_segments("item-7")
             .await;
         assert!(markers.is_empty());
+    }
+
+    // A marker endpoint that accepts the connection and then goes silent must
+    // not be able to hold a launch for the general 15-second request timeout.
+    // The user is waiting on mpv; markers are optional.
+    #[tokio::test]
+    async fn media_segments_are_bounded_when_the_endpoint_stalls() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = listener.local_addr().unwrap().port();
+        // Accept the connection, then never answer.
+        let _silent = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            std::future::pending::<()>().await;
+            drop(stream);
+        });
+        let started = std::time::Instant::now();
+        let markers = segment_client(Flavor::Jellyfin, port)
+            .media_segments("item-7")
+            .await;
+        let elapsed = started.elapsed();
+        assert!(markers.is_empty(), "a stalled lookup yields no markers");
+        assert!(
+            elapsed < std::time::Duration::from_secs(10),
+            "the marker lookup must be bounded well below the 15s general \
+             request timeout, took {elapsed:?}"
+        );
     }
 
     // Emby publishes no MediaSegments contract. Shared ancestry is not evidence
