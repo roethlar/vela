@@ -164,10 +164,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Settings controls, README, and the mock MediaSegments route), verified only by
   the canonical set and 278 Rust tests. The five behavioural E2E legs are
   neither written nor run: no skip button has ever rendered, been clicked, or
-  been activated by Space, and no auto-skip seek has been observed.
-  `tests/e2e/scenarios/markers.mjs` is written (acceptance legs 1, 3, 4, 5) but
-  has NEVER been executed; leg 2's pointer click is unwritten because the venue
-  lacks `xdotool`.
+  been activated by Space, and no auto-skip seek has been observed **through the
+  app**. The PLAYER behaviour itself is now verified: 15/15 legs in real mpv on
+  the macOS host (button appears with a real hitbox, Space skips then returns to
+  pausing, auto-skip seeks for intro and commercial, Off does nothing, and a
+  click inside the hitbox skips while a click outside does not). Linux is needed
+  only for the webview harness, not for mpv. What remains unproven is the glue:
+  a real play resolving policies, fetching markers, writing the payload, and
+  launching mpv with those arguments. `tests/e2e/scenarios/markers.mjs` covers
+  all five acceptance legs including the pointer click, but has NEVER run.
 - **The Linux E2E venue is broken and blocks that verification.** On 2026-07-25
   it was synced (103 files checksum-verified), rebuilt, and found unable to
   render the app under WebKitWebDriver — `smoke` fails the same way as

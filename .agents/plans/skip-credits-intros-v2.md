@@ -700,22 +700,40 @@ Verified: full canonical dual-side set at 1.0.10 with 278 Rust tests (275
 before), covering the `markers_args` injection-polarity matrix and owner-only
 payload creation.
 
-NOT verified, and NOT to be treated as working: no skip button has ever been
-rendered, clicked, or activated by Space, and no auto-skip seek has been
-observed. `tests/e2e/scenarios/markers.mjs` now exists and covers acceptance
-legs 1, 3, 4 and 5 (auto-skip, Button + Space with the Space-returns-to-mpv
-check, injection polarity with an all-Off launch making no MediaSegments
-request, and the commercial path). **It has never been executed.** Leg 2, the
-real pointer click on the published hitbox, is deliberately not written: it
-requires `xdotool`, which the venue does not have, and faking it with a
-synthetic key press would prove nothing about the hitbox.
+**Player behaviour verified in real mpv on the macOS dev host, 2026-07-25 —
+15/15 legs.** The owner's point settles a wrong assumption recorded earlier
+here: the Linux venue is required for `npm run e2e` because that harness drives
+the app's WEBVIEW through WebKitWebDriver, which has nothing to do with mpv.
+Every marker behaviour is mpv-side and runs identically on any platform, so it
+was checked directly with mpv 0.41.0, the real bundled script, a real payload,
+and a real video output:
 
-The blocker is the venue itself, not this slice: on 2026-07-25 the Linux host
-was synced (103 files checksum-verified), rebuilt, and found unable to render
-the app under WebKitWebDriver at all — `smoke` fails identically to `markers`,
-so the suite currently gates nothing. Diagnosis and ruled-out causes are in
-`.agents/machines.md`. Until the venue is repaired and these legs pass, this
-slice is incomplete and marker skipping is unproven in a real player.
+- The script loads with a payload and publishes its load marker.
+- In Button mode the control appears on entering the range, publishing a real
+  hitbox (a 200x40 rectangle at the bottom right of a 640x360 window).
+- Space activates the skip while the button is shown, `active` clears, and the
+  player is NOT left paused — so Space was consumed as a skip, not a pause.
+- After the button clears, Space pauses normally again.
+- Auto-skip seeks past the range unaided, for an intro and for a commercial.
+- With every policy Off no button appears and no seek happens.
+- **A click at the hitbox centre skips; a click outside the hitbox does NOT,
+  and leaves the button up.** That pair is the real proof that the drawn
+  rectangle and the clickable area are the same rectangle — a pointer injected
+  at the button alone could pass while the mouse area was unconstrained.
+
+Still unproven: the glue between the command layer and the player — that a real
+play resolves policies, requests markers from a live/mock server, filters them,
+writes the payload, and launches mpv with those arguments. Its parts are unit
+tested (`markers_args` polarity matrix, owner-only payload write, policy
+resolution, provider parsing against HTTP mocks) but the assembled chain has not
+been exercised by running the app.
+
+`tests/e2e/scenarios/markers.mjs` exists and covers all five acceptance legs
+including the `xdotool` pointer click (the owner installed `xdotool` on
+2026-07-25). **It has never been executed**: the Linux venue could not render
+the app under WebKitWebDriver at all on 2026-07-25 — `smoke` fails identically,
+so the suite currently gates nothing. Diagnosis in `.agents/machines.md`. That
+scenario remains the regression net for the untested glue once the venue works.
 
 ### Behavioral E2E acceptance
 
