@@ -164,12 +164,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Settings controls, README, and the mock MediaSegments route), verified only by
   the canonical set and 278 Rust tests. The five behavioural E2E legs are
   neither written nor run: no skip button has ever rendered, been clicked, or
-  been activated by Space, and no auto-skip seek has been observed. Write them
-  per the plan's **Behavioral E2E acceptance**, then run them on the Linux venue
-  and red-prove each claim separately. The venue needs work first: its clone was
-  16 commits behind at `95312fc` with local modifications, and syncing is a
-  checksum-verified `scp` plus a debug rebuild — never a push and never
-  `git checkout -- .` (`.agents/machines.md`).
+  been activated by Space, and no auto-skip seek has been observed.
+  `tests/e2e/scenarios/markers.mjs` is written (acceptance legs 1, 3, 4, 5) but
+  has NEVER been executed; leg 2's pointer click is unwritten because the venue
+  lacks `xdotool`.
+- **The Linux E2E venue is broken and blocks that verification.** On 2026-07-25
+  it was synced (103 files checksum-verified), rebuilt, and found unable to
+  render the app under WebKitWebDriver — `smoke` fails the same way as
+  `markers`, so the suite gates nothing at present. Ruled out: stale tree,
+  driver/WebKit version mismatch, app crash, and forced software GL. Full
+  diagnosis in `.agents/machines.md`. Repairing the venue is the prerequisite
+  for finishing Slice 4; it needs an owner decision, and installing `xdotool`
+  there is a separate owner call.
 - Original Slice 4 scope, retained for reference:
   `.agents/plans/skip-credits-intros-v2.md` — the atomic product flip, and the
   first slice where any of this is user-visible. Pass the resolved policy into

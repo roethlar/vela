@@ -109,6 +109,30 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
 
 ## Linux VM (E2E host)
 
+**BROKEN for E2E as of 2026-07-25 — the app never renders under
+WebKitWebDriver.** `npm run e2e -- --skip-build smoke` fails with "timed out
+after 15000ms waiting for app render" on a clean build of current `main`, so
+this is not specific to any one scenario and the suite currently gates nothing.
+Established that day:
+
+- Not a stale tree: the source was synced and 103 files verified
+  checksum-identical, `npm ci` / `npm run check` / `cargo build` all succeed,
+  and `cargo +stable test` passes 277 tests here.
+- Not the driver version: the vendored `WebKitWebDriver` is
+  `2.52.3-0ubuntu0.26.04.2`, exactly matching the system
+  `libwebkit2gtk-4.1-0`.
+- Not a crash: running the debug binary directly under `xvfb-run` starts
+  cleanly with no panic.
+- Not obviously GL: the run emits `libEGL ... DRI3/DRI2 failed to create
+  screen` warnings, and forcing `WEBKIT_DISABLE_COMPOSITING_MODE=1` plus
+  `LIBGL_ALWAYS_SOFTWARE=1` does not change the outcome.
+
+The VM also has a `stash@{0}` (`codex-linux-validation-1a2bef5`) and its clone
+sits at `95312fc` on `main`; the 2026-07-25 sync overwrote working-tree files
+only after confirming every one of them matched a blob already in the mac
+repo, so nothing original was lost. `xdotool` is NOT installed, which the
+marker E2E's pointer-click leg requires.
+
 Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
 
 - Current observed baseline after the owner-approved Slice 1 alignment

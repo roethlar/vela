@@ -700,14 +700,22 @@ Verified: full canonical dual-side set at 1.0.10 with 278 Rust tests (275
 before), covering the `markers_args` injection-polarity matrix and owner-only
 payload creation.
 
-NOT verified, and NOT to be treated as working: the five behavioural E2E legs in
-**Behavioral E2E acceptance** above are neither written nor run. No skip button
-has ever been rendered, clicked, or activated by Space; no auto-skip seek has
-been observed; the commercial path is unexercised end to end. The macOS dev host
-cannot run the suite (`.agents/machines.md`), and the Linux venue's clone was 16
-commits behind at `95312fc` with local modifications, so it needs a checksum-
-verified `scp` sync and a debug rebuild before any leg can run. Until those legs
-pass, this slice is incomplete and the feature is unproven in a real player.
+NOT verified, and NOT to be treated as working: no skip button has ever been
+rendered, clicked, or activated by Space, and no auto-skip seek has been
+observed. `tests/e2e/scenarios/markers.mjs` now exists and covers acceptance
+legs 1, 3, 4 and 5 (auto-skip, Button + Space with the Space-returns-to-mpv
+check, injection polarity with an all-Off launch making no MediaSegments
+request, and the commercial path). **It has never been executed.** Leg 2, the
+real pointer click on the published hitbox, is deliberately not written: it
+requires `xdotool`, which the venue does not have, and faking it with a
+synthetic key press would prove nothing about the hitbox.
+
+The blocker is the venue itself, not this slice: on 2026-07-25 the Linux host
+was synced (103 files checksum-verified), rebuilt, and found unable to render
+the app under WebKitWebDriver at all — `smoke` fails identically to `markers`,
+so the suite currently gates nothing. Diagnosis and ruled-out causes are in
+`.agents/machines.md`. Until the venue is repaired and these legs pass, this
+slice is incomplete and marker skipping is unproven in a real player.
 
 ### Behavioral E2E acceptance
 
