@@ -1193,6 +1193,7 @@ impl PlexLibrary {
     pub async fn transcode_decision(
         &self,
         rating_key: &str,
+        media_index: usize,
         tier: Option<crate::source::QualityTier>,
         session: &str,
     ) -> Result<DecisionContainer, Box<dyn std::error::Error>> {
@@ -1201,7 +1202,7 @@ impl PlexLibrary {
         let direct_play = if tier.is_some() { "0" } else { "1" };
         let mut query: Vec<(&str, String)> = vec![
             ("path", format!("/library/metadata/{rating_key}")),
-            ("mediaIndex", "0".to_string()),
+            ("mediaIndex", media_index.to_string()),
             ("partIndex", "0".to_string()),
             ("protocol", "hls".to_string()),
             ("directPlay", direct_play.to_string()),
@@ -1272,6 +1273,13 @@ impl PlexLibrary {
     /// HLS transcode URL for one item at one tier, plus the session id that
     /// must later tear it down.
     ///
+    /// `media_index` is the position of the SELECTED version within the item's
+    /// `Media` list — Plex addresses a copy positionally, so omitting it
+    /// silently means "the first one" and a user who picked the second copy
+    /// would watch the first. `partIndex` stays 0: multi-part versions are an
+    /// open question recorded in the transcoding plan, not something to guess
+    /// at here.
+    ///
     /// The session id is generated HERE and is the only handle that exists:
     /// Plex issues nothing, `/video/:/transcode/universal/ping` and `/stop` do
     /// not exist (verified 2026-07-25, both 404), and the sole teardown is
@@ -1286,6 +1294,7 @@ impl PlexLibrary {
     pub fn transcode_url(
         &self,
         rating_key: &str,
+        media_index: usize,
         tier: crate::source::QualityTier,
         offset_seconds: u64,
     ) -> Option<(String, String)> {
@@ -1293,7 +1302,7 @@ impl PlexLibrary {
         let session = uuid::Uuid::new_v4().simple().to_string();
         let query = [
             ("path", format!("/library/metadata/{rating_key}")),
-            ("mediaIndex", "0".to_string()),
+            ("mediaIndex", media_index.to_string()),
             ("partIndex", "0".to_string()),
             ("protocol", "hls".to_string()),
             ("directPlay", "0".to_string()),
@@ -2033,8 +2042,8 @@ mod tests {
             .copied()
             .expect("tier exists");
 
-        let (first_url, first_session) = lib.transcode_url("42", tier, 0).expect("builds");
-        let (_, second_session) = lib.transcode_url("42", tier, 0).expect("builds");
+        let (first_url, first_session) = lib.transcode_url("42", 0, tier, 0).expect("builds");
+        let (_, second_session) = lib.transcode_url("42", 0, tier, 0).expect("builds");
         assert_ne!(
             first_session, second_session,
             "each launch needs its own session or one teardown kills another play"
@@ -2053,8 +2062,29 @@ mod tests {
 
         // Resume must reach the transcoder: without it the server starts at zero
         // and mpv's own seek would be into a stream that begins elsewhere.
-        let (resumed, _) = lib.transcode_url("42", tier, 930).expect("builds");
+        let (resumed, _) = lib.transcode_url("42", 0, tier, 930).expect("builds");
         assert!(resumed.contains("offset=930"), "{resumed}");
+    }
+
+    // Plex addresses a copy positionally. A request that ignores the selected
+    // version transcodes and plays a different file than the user picked.
+    #[tokio::test]
+    async fn transcode_requests_target_the_selected_version() {
+        let lib = artwork_library(1234);
+        let tier = crate::source::QUALITY_TIERS[0];
+
+        let (first, _) = lib.transcode_url("42", 0, tier, 0).expect("builds");
+        let (second, _) = lib.transcode_url("42", 1, tier, 0).expect("builds");
+        assert!(first.contains("mediaIndex=0"), "{first}");
+        assert!(
+            second.contains("mediaIndex=1"),
+            "the selected version must reach the server: {second}"
+        );
+        assert_ne!(
+            first.contains("mediaIndex=1"),
+            second.contains("mediaIndex=1"),
+            "the index must vary with the selection, not be fixed"
+        );
     }
 
     // The decision response is how Vela learns whether a copy can be converted
