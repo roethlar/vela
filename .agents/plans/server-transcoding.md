@@ -267,10 +267,42 @@ claims SEPARATELY, from a committed state, per `.agents/repo-guidance.md`
   `TranscodingUrl`, `TranscodeReasons` — currently unparsed.
 - Nothing calls this from the play path yet.
 - **Guards, proven separately:** the three live samples become fixtures — 2160p
-  offers all ten tiers, 1080p/10 Mbps offers all ten INCLUDING the 20 and
-  12 Mbps entries, 384p/1.5 Mbps offers only 328p and specifically drops the
-  equal-bitrate 480p tier. Plus decision-response parsing against an HTTP mock,
-  and Jellyfin capability parsing.
+  offers all nine convert tiers, 1080p/10 Mbps offers all nine INCLUDING the 20
+  and 12 Mbps entries, 384p/1.5 Mbps offers only 328p and specifically drops the
+  equal-bitrate 480p tier. Plus decision-response parsing, and Jellyfin
+  capability parsing.
+
+**Slice 1 evidence (2026-07-25, version 1.0.12, commit `499ab0b`).**
+`QualityTier`, `QUALITY_TIERS` (the nine confirmed rungs), `tiers_for_source`,
+and `PlaybackOptions` live in `src-tauri/src/source/mod.rs`. Jellyfin's
+`MediaSourceInfo` now parses `SupportsTranscoding`, `TranscodingUrl` and
+`TranscodeReasons`, and `playback_options()` maps them; transcoding is offered
+only when the server says so, falling back to the presence of a server-built
+transcode URL and otherwise assuming NO. `PlexLibrary::transcode_decision` calls
+the verified decision endpoint and `DecisionContainer::conversion_ok` fails
+closed on an unreadable answer.
+
+Two facts were established by probing the live server during this slice and are
+encoded in the code's comments: `videoResolution` is a bounding BOX, not the
+output size — a 2.35:1 source asked for `1920x1080` returned `1920x1038`, and
+`1280x720` at 2000 kbps returned `720x388` because bitrate bound first — and all
+nine tier parameter pairs are accepted with `generalDecisionCode` 1001. The
+480p/328p box widths (`848x480`, `584x328`) are Vela's choice, accepted by the
+server; Plex's own client may send different widths, which is immaterial because
+the server refits to the source aspect regardless.
+
+Nothing calls any of this yet, by design, so the play path is byte-for-byte
+unchanged. That required scoped `#[allow(dead_code)]` on exactly the new items,
+each commented `TEMPORARY, remove in slice 3` — **slice 3 must remove them**; do
+not widen them to a module or crate allow.
+
+Canonical dual-side set passed at 1.0.12 with 285 Rust tests (279 before). Seven
+regressions were injected separately from the committed state and each guard
+failed for its own reason, every injection compiling and every restore verified
+clean: a reintroduced bitrate filter; a resolution filter loosened past the
+384p boundary; duplicated tier ids; tiers offered without transcode support; a
+missing transcode flag assumed true; Jellyfin's bits-per-second left
+unconverted; and an unreadable decision treated as permission.
 
 ### Slice 2 — the quality setting (config + Settings, still inert)
 

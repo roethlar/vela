@@ -207,7 +207,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   decisions ruled
   (recorded 2026-07-25 in `.agents/decisions.md`), the Plex contract verified
   against the owner's live server, and six implementation slices written
-  (1.0.12-1.0.17). Two facts worth not rediscovering: Plex's
+  (1.0.12-1.0.17). Slice 1 is committed as `499ab0b` at version 1.0.12: the
+  quality ladder, `PlaybackOptions`, Jellyfin capability parsing, and the Plex
+  decision call, with seven guards each red-proven separately. Nothing calls it
+  yet by design, so the play path is unchanged; the scoped
+  `#[allow(dead_code)]` markers must be removed in slice 3. Two facts worth not
+  rediscovering: Plex's
   `/video/:/transcode/universal/ping` and `/stop` DO NOT EXIST (both 404) and
   teardown is `DELETE /transcode/sessions/<uuid>`; and Plex filters its quality
   ladder by resolution only, never by bitrate. The 2026-07-19 Prefer Compatible
