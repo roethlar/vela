@@ -62,6 +62,13 @@ pub struct AppConfig {
     /// Optional compatibility-display HDR override (`enabled`/`disabled`).
     /// Missing means Auto; unknown values invalidate the document.
     pub playback_display_hdr: Option<String>,
+    /// What Vela does with each kind of server-published marker range. Missing
+    /// means the approved [`SkipPolicy::MISSING`] default; a present value
+    /// outside the closed enum fails deserialization and invalidates the whole
+    /// document. Missing and invalid are deliberately not the same thing.
+    pub skip_intros: Option<SkipPolicy>,
+    pub skip_credits: Option<SkipPolicy>,
+    pub skip_commercials: Option<SkipPolicy>,
     /// Pre-split media-server connections. New writes live in
     /// `connections.json`; this compatibility field is accepted only so the
     /// exact one-time split can move a fully valid legacy document.
@@ -111,6 +118,34 @@ pub struct AppConfig {
     /// removed with the legacy live credential fields.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) connections_split_backup: Option<ConnectionsSplitBackup>,
+}
+
+/// What Vela does when playback enters a marker range of one kind: nothing,
+/// offer the in-player skip button, or seek past it automatically.
+///
+/// This is a closed enum rather than the tolerant-string pattern the older
+/// settings use, so an unrecognized stored value fails deserialization and
+/// invalidates the settings document. The owner ruled on 2026-07-22 that Vela
+/// must not guess what an unrecognized value meant.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum SkipPolicy {
+    Off,
+    Button,
+    Autoskip,
+}
+
+impl SkipPolicy {
+    /// The owner-approved product default for every marker kind — intro and
+    /// credits 2026-07-22, commercials 2026-07-23. A settings file that predates
+    /// these fields gets the clickable prompt, never an automatic seek.
+    pub const MISSING: SkipPolicy = SkipPolicy::Button;
+
+    /// Resolve a stored value, applying the documented missing-field default.
+    /// This is the only place that default is applied.
+    pub fn resolve(stored: Option<SkipPolicy>) -> SkipPolicy {
+        stored.unwrap_or(Self::MISSING)
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1014,6 +1049,98 @@ mod tests {
         );
     }
 
+    // A settings file written before marker skipping existed is valid, and
+    // every kind resolves to the owner-approved Button prompt — never to an
+    // automatic seek the user never asked for.
+    #[test]
+    fn missing_marker_policies_resolve_to_the_approved_button_default() {
+        let old: AppConfig = serde_json::from_str(r#"{"auth_token":"tok"}"#).expect("parses");
+        assert_eq!(old.skip_intros, None, "absence is preserved as absence");
+        assert_eq!(old.skip_credits, None);
+        assert_eq!(old.skip_commercials, None);
+
+        for stored in [old.skip_intros, old.skip_credits, old.skip_commercials] {
+            assert_eq!(
+                SkipPolicy::resolve(stored),
+                SkipPolicy::Button,
+                "a missing marker policy must mean the prompt, not a seek"
+            );
+        }
+    }
+
+    // Missing and invalid are different things: an explicit value outside the
+    // closed enum invalidates the whole document rather than being normalized.
+    #[test]
+    fn unknown_marker_policy_values_invalidate_the_document() {
+        for invalid in [
+            r#"{"skip_intros":"skip"}"#,
+            r#"{"skip_credits":"Button"}"#,
+            r#"{"skip_commercials":true}"#,
+            r#"{"skip_intros":"auto_skip"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<AppConfig>(invalid).is_err(),
+                "{invalid} must fail the whole settings document"
+            );
+        }
+        assert_eq!(
+            serde_json::from_str::<AppConfig>(r#"{"skip_intros":"autoskip"}"#)
+                .expect("the closed enum still accepts its own values")
+                .skip_intros,
+            Some(SkipPolicy::Autoskip)
+        );
+    }
+
+    // The rollback rail and the new marker fields must coexist: setting a skip
+    // policy must not disturb the inert local/SMB/SSH fields an older build
+    // still expects to find, credentials included.
+    #[test]
+    fn marker_policies_leave_the_legacy_rollback_fields_untouched() {
+        let legacy = r#"{
+            "skip_intros": "autoskip",
+            "local_folders": [
+                {"id": "legacy-folder", "name": "Movies", "path": "/Volumes/media", "kind": "movie"}
+            ],
+            "smb_mounts": [
+                {"id": "mount", "name": "Media", "server": "nas", "share": "media",
+                 "username": "user", "password": "pass", "mountpoint": "/Volumes/media",
+                 "kind": "movie", "local_folder_id": "legacy-folder"}
+            ],
+            "ssh_mounts": [
+                {"id": "sshm", "name": "NAS ssh", "host": "nas", "port": 22,
+                 "username": "user", "remote_path": "/srv/media",
+                 "mountpoint": "/mnt/vela-ssh", "local_folder_id": "lf-ssh"}
+            ]
+        }"#;
+        let cfg: AppConfig = serde_json::from_str(legacy).expect("parses");
+        let saved = serde_json::to_string(&cfg).expect("serializes");
+        let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
+
+        assert_eq!(back.skip_intros, Some(SkipPolicy::Autoskip));
+        assert_eq!(back.local_folders[0].path, "/Volumes/media");
+        assert_eq!(back.smb_mounts[0].local_folder_id, "legacy-folder");
+        assert_eq!(
+            back.smb_mounts[0].password, "pass",
+            "rollback credentials survive alongside the new fields"
+        );
+        assert_eq!(back.ssh_mounts[0].mountpoint, "/mnt/vela-ssh");
+    }
+
+    #[test]
+    fn marker_policies_round_trip_every_value() {
+        let cfg = AppConfig {
+            skip_intros: Some(SkipPolicy::Off),
+            skip_credits: Some(SkipPolicy::Button),
+            skip_commercials: Some(SkipPolicy::Autoskip),
+            ..Default::default()
+        };
+        let saved = serde_json::to_string(&cfg).expect("serializes");
+        let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
+        assert_eq!(back.skip_intros, Some(SkipPolicy::Off));
+        assert_eq!(back.skip_credits, Some(SkipPolicy::Button));
+        assert_eq!(back.skip_commercials, Some(SkipPolicy::Autoskip));
+    }
+
     #[test]
     fn playback_preferences_are_optional_and_round_trip_without_affecting_old_configs() {
         let old: AppConfig = serde_json::from_str(r#"{"auth_token":"tok"}"#).expect("parses");
@@ -1116,6 +1243,9 @@ mod tests {
             r#"{"playback_source_policy":"future"}"#,
             r#"{"playback_display_resolution":"16k"}"#,
             r#"{"playback_display_hdr":"maybe"}"#,
+            r#"{"skip_intros":"skip"}"#,
+            r#"{"skip_credits":"Autoskip"}"#,
+            r#"{"skip_commercials":1}"#,
             r#"{"section_sorts":{"":"titleSort:asc"}}"#,
             r#"{"section_sorts":{"jf:1":"future"}}"#,
             r#"{"plex_source_migration":{"from_id":"plex","to_id":"plex-new"}}"#,

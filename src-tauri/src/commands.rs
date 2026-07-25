@@ -904,6 +904,13 @@ pub struct MpvAdvanced {
     /// Black-bar cropping mode: `"off" | "manual" | "auto"` (see config
     /// `mpv_autocrop`). Always one of the three for the UI to bind to.
     pub autocrop: String,
+    /// Marker skip policy per kind, already resolved through the documented
+    /// missing-field default, so the UI always has a concrete value to bind.
+    /// No Settings control reads these yet — the controls land in the same
+    /// commit that makes them affect playback.
+    pub skip_intros: config::SkipPolicy,
+    pub skip_credits: config::SkipPolicy,
+    pub skip_commercials: config::SkipPolicy,
 }
 
 #[tauri::command]
@@ -914,6 +921,9 @@ pub fn get_mpv_advanced() -> Result<MpvAdvanced, String> {
         extra_args: cfg.mpv_extra_args.unwrap_or_default(),
         use_own_config: cfg.mpv_use_own_config.unwrap_or(false),
         autocrop: autocrop_from_config(cfg.mpv_autocrop.as_deref())?,
+        skip_intros: config::SkipPolicy::resolve(cfg.skip_intros),
+        skip_credits: config::SkipPolicy::resolve(cfg.skip_credits),
+        skip_commercials: config::SkipPolicy::resolve(cfg.skip_commercials),
     })
 }
 
@@ -933,11 +943,19 @@ fn autocrop_from_config(value: Option<&str>) -> Result<String, String> {
 /// launch, which surfaces as a normal playback error. An empty `extra_args` clears
 /// the override. `autocrop` is optional so older frontends that don't send it leave
 /// the mode unchanged; when present it must be one of the known three states.
+///
+/// The three marker policies are optional for the same reason. Each is stored
+/// explicitly rather than collapsed to `None` for the default value: an
+/// explicit choice stays explicit, so changing the product default later cannot
+/// silently move a user who deliberately picked today's default.
 #[tauri::command]
 pub fn set_mpv_advanced(
     extra_args: String,
     use_own_config: bool,
     autocrop: Option<String>,
+    skip_intros: Option<config::SkipPolicy>,
+    skip_credits: Option<config::SkipPolicy>,
+    skip_commercials: Option<config::SkipPolicy>,
 ) -> Result<(), String> {
     let trimmed = extra_args.trim().to_string();
     config::update(move |cfg| {
@@ -954,6 +972,15 @@ pub fn set_mpv_advanced(
                 "manual" | "auto" => Some(mode.to_string()),
                 _ => return Err("unknown autocrop mode".to_string()),
             };
+        }
+        if let Some(policy) = skip_intros {
+            cfg.skip_intros = Some(policy);
+        }
+        if let Some(policy) = skip_credits {
+            cfg.skip_credits = Some(policy);
+        }
+        if let Some(policy) = skip_commercials {
+            cfg.skip_commercials = Some(policy);
         }
         Ok(())
     })
