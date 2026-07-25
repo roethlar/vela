@@ -35,9 +35,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/skip-credits-intros-v2.md`, now Active v2 revision 7 with its
   slice version sequence rebased onto the 1.0.4 prerequisite base: the four code
   slices land as 1.0.5 through 1.0.8. Its config-integrity prerequisite is
-  satisfied. No marker code has been written yet; Slice 1 (marker model plus
-  selected provider resolution, no UI and no mpv wiring) is the next work.
-  Settled behavior is recorded in
+  satisfied. Slice 1 is implemented, canonically verified, committed as
+  `c7aa963` at version 1.0.5, and guard-proven: the provider-neutral marker
+  model, the shared normalizer, `include_markers` on both resolve entry points,
+  Plex `includeMarkers=1` on the existing selected-detail request, Jellyfin
+  MediaSegments fetched concurrently with the mandatory item fetch, and Emby
+  issuing no request. The play command still passes `include_markers = false`;
+  nothing reads markers until the Slice 3 config boundary and the Slice 4
+  product flip land. Fifteen injected regressions each failed for their own
+  reason and were restored from the committed state; the full evidence
+  paragraph is canonical in the plan. External review has NOT run for this
+  slice — see Blockers. Settled behavior is recorded in
   `.agents/decisions.md`: missing intro, credit, and commercial settings default
   to Button; the external-mpv control is genuinely clickable; and Space
   activates it only while visible, otherwise retaining its normal pause
@@ -133,13 +141,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Implement marker-skipping Slice 1 per
-  `.agents/plans/skip-credits-intros-v2.md`: the `MediaMarker` / `MarkerKind`
-  model, `StreamResolution.markers`, the `include_markers` resolve argument,
-  Plex detail marker inclusion, Jellyfin MediaSegments, the Emby no-op, and the
-  shared normalize helper — with exact HTTP and fixture tests, no UI and no mpv
-  wiring, and `scripts/bump.sh` to 1.0.5. Red-prove the query/schema and
-  marker-error-degrades guards separately before the full canonical set.
+- Implement marker-skipping Slice 2 per
+  `.agents/plans/skip-credits-intros-v2.md`: add
+  `src-tauri/resources/mpv-scripts/vela-markers.lua` with its explicit
+  overlay/binding/entry-latch behavior and child-env payload read/unlink, update
+  `PROVENANCE.md` with the Vela MIT entry, and bump to 1.0.6. Full Lua behavior
+  is guarded when launch wiring lands in Slice 4; record it if the mpv
+  script-load check is deferred to that slice's real-app E2E.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -150,8 +158,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- None. The marker-plan activation gate cleared on 2026-07-25, and
-  config-integrity/recovery has no unresolved owner or review blocker — that
+- Marker Slice 1 external review is blocked on reviewer routing, and the
+  block is owner-only to clear. `.agents/review/harnesses.local.json` has no
+  `tiers` block for the `codex` harness (its entry predates the tier schema:
+  codex-cli 0.142.5, verified 2026-07-04), so no owner-confirmed
+  (model, effort) pair exists for a codex dispatch and the `codereview`
+  playbook fails closed rather than guessing. Separately,
+  `.agents/model-map.json` is absent from this clone, so a nickname cannot be
+  resolved to a slug under the playbook's fetch contract. Code work may
+  continue; the slice claims no review verdict until this clears.
+- Config-integrity/recovery has no unresolved owner or review blocker — that
   plan is fully landed, verified, and guard-proven.
 
 ## Verification

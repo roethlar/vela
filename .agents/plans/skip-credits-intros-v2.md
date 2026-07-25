@@ -505,6 +505,41 @@ the product-flip slice where the feature is launchable.
   Cargo audit from `src-tauri/`; red-prove the query/schema and
   marker-error-degrades guards separately.
 
+**Slice 1 evidence (2026-07-25, version 1.0.5, commit `c7aa963`).**
+`MarkerKind`, `MediaMarker`, `MAX_MARKER_MS`, and the shared
+`normalize_markers` helper live in `src-tauri/src/source/mod.rs`;
+`StreamResolution` carries `markers`, and `include_markers` is a required
+argument on both `resolve_stream` and `resolve_stream_version`. Plex adds
+`includeMarkers=1` to its existing selected-detail request through reqwest query
+construction and maps `<Marker>` children at mapping time, so an unknown kind or
+malformed offset drops that marker rather than the mandatory response; the
+item-detail and version-enumeration call sites pass `false`. Jellyfin issues
+`GET /MediaSegments/{id}` with the three repeated `includeSegmentTypes` filters
+concurrently with the mandatory item fetch (`tokio::join!`), maps Outro to
+Credits, converts 100ns ticks, and returns `Vec<MediaMarker>` with no error
+channel — a marker failure structurally cannot fail a resolve. Emby issues no
+request at all. The play command passes `include_markers = false` until the
+Slice 3 config boundary and the Slice 4 product flip exist.
+
+Canonical local verification passed at this commit: exact Node 26.5.0/npm 12.0.1
+toolchain, `npm ci`, npm audit (0 vulnerabilities), `npm run check` (301 files,
+0 errors), `npm run build`, `cargo +1.89.0 check --locked`, `cargo +stable
+check/clippy --all-targets -D warnings`, 269 Rust tests (259 before this slice),
+and `cargo audit` at its existing allowed-warning baseline.
+
+Post-commit guard pass: fifteen regressions were injected one at a time and each
+guard failed for its own reason, with every restore taken from the committed
+state and verified clean — max-length bound removed; zero-length range accepted;
+dedup ignoring kind; sort removed; Plex unknown kind accepted; Plex offsets read
+as seconds; Plex malformed offset defaulting to 0; markers always requested;
+markers never requested; segments route changed; commercial filter dropped;
+Outro mapped to Intro; ticks not converted; marker failure escaping instead of
+degrading; and the Emby flavor gate removed. The five whose assertions carry
+custom messages were re-run individually to confirm each compiled and panicked
+on its intended assertion rather than on a build error. No guard was vacuous.
+
+External review is NOT yet run for this slice; no clean verdict is claimed.
+
 ### Slice 2 — Lua script + provenance
 
 - Add `vela-markers.lua`.
