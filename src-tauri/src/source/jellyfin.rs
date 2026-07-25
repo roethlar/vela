@@ -1571,6 +1571,20 @@ impl MediaSource for JellyfinSource {
         })
     }
 
+    async fn playback_options(
+        &self,
+        item_key: &str,
+        version_id: Option<&str>,
+    ) -> Result<crate::source::PlaybackOptions, String> {
+        let info = self.client.playback_info_response(item_key).await?;
+        let source = version_id
+            .and_then(|id| info.media_sources.iter().find(|source| source.id == id))
+            .or_else(|| info.media_sources.first());
+        Ok(source
+            .map(|source| source.playback_options())
+            .unwrap_or_else(|| crate::source::PlaybackOptions::new(true, false, 0, 0, 0)))
+    }
+
     /// Stop an encoding this source started. Jellyfin keys it by device plus
     /// play session, so the session id carried out of `resolve_stream` is the
     /// handle.

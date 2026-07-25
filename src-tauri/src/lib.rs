@@ -299,6 +299,7 @@ pub fn run() {
             commands::get_continue_tombstones,
             commands::search,
             commands::get_children,
+            commands::quality_options,
             commands::get_item_detail,
             commands::get_person_items,
             commands::set_watched,

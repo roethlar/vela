@@ -937,6 +937,46 @@ pub fn get_mpv_advanced() -> Result<MpvAdvanced, String> {
     })
 }
 
+/// What a title's quality submenu may offer for one exact copy.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QualityOptionsDto {
+    /// Whether an "Original" entry belongs in the menu at all.
+    pub can_direct_play: bool,
+    pub source_bitrate_kbps: u32,
+    pub source_height: u32,
+    /// Only the tiers this server will actually deliver for this copy. Empty
+    /// when it will not convert, which the menu renders as no submenu.
+    pub tiers: Vec<crate::source::QualityTier>,
+}
+
+/// Options for one copy, resolved on demand.
+///
+/// Deliberately NOT called when the context menu opens: for Plex this costs a
+/// decision round trip per version, and paying that on every right-click would
+/// make the menu feel slow for the many users who never transcode. The frontend
+/// calls this when the quality submenu is opened.
+#[tauri::command]
+pub async fn quality_options(
+    state: tauri::State<'_, AppState>,
+    item_key: String,
+    version_id: Option<String>,
+) -> Result<QualityOptionsDto, String> {
+    let (source, raw) = {
+        let registry = state.registry.lock().await;
+        registry.route(&item_key)?
+    };
+    let options = source
+        .playback_options(&raw, version_id.as_deref())
+        .await?;
+    Ok(QualityOptionsDto {
+        can_direct_play: options.can_direct_play,
+        source_bitrate_kbps: options.source_bitrate_kbps,
+        source_height: options.source_height,
+        tiers: options.tiers,
+    })
+}
+
 /// The three resolved marker policies for one play. Resolved once, before
 /// stream resolution, so `playback::play` never reads config to decide what
 /// skipping should do.

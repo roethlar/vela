@@ -738,6 +738,17 @@ pub trait MediaSource: Send + Sync {
         quality: &str,
     ) -> Result<StreamResolution, String>;
 
+    /// What this source can deliver for one exact copy, for building the
+    /// per-title quality menu. Default is direct-play-only: a source that has
+    /// not implemented this must never have conversions offered on its behalf.
+    async fn playback_options(
+        &self,
+        _item_key: &str,
+        _version_id: Option<&str>,
+    ) -> Result<PlaybackOptions, String> {
+        Ok(PlaybackOptions::new(true, false, 0, 0, 0))
+    }
+
     /// Stop a transcode this source started. No-op for sources that never
     /// start one.
     async fn stop_transcode(&self, _session: &str) {}

@@ -1266,6 +1266,49 @@ impl MediaSource for PlexSource {
             .await
     }
 
+    async fn playback_options(
+        &self,
+        item_key: &str,
+        version_id: Option<&str>,
+    ) -> Result<crate::source::PlaybackOptions, String> {
+        validate_plex_id("item key", item_key)?;
+        let lib = self.ensure_ready().await?;
+        let detail = lib
+            .get_item_detail(item_key, false)
+            .await
+            .map_err(|error| error.to_string())?;
+        let (media_index, media) = detail
+            .media
+            .iter()
+            .enumerate()
+            .find(|(index, media)| match version_id {
+                Some(id) => plex_media_matches_version(media, *index, id),
+                None => *index == 0,
+            })
+            .ok_or_else(|| "the selected Plex media version is no longer available".to_string())?;
+        let (width, height) = plex_media_dimensions(media);
+        // Ask about the gentlest tier this copy could take: if the server
+        // refuses even that, it will not convert this copy at all, and the menu
+        // must then offer only the original.
+        let can_transcode = match crate::source::tiers_for_source(height).last() {
+            Some(tier) => {
+                let session = uuid::Uuid::new_v4().simple().to_string();
+                lib.transcode_decision(item_key, media_index, Some(*tier), &session)
+                    .await
+                    .map(|decision| decision.conversion_ok())
+                    .unwrap_or(false)
+            }
+            None => false,
+        };
+        Ok(crate::source::PlaybackOptions::new(
+            true,
+            can_transcode,
+            width,
+            height,
+            media.bitrate.unwrap_or(0) as u32,
+        ))
+    }
+
     /// Stop a transcode this source started. Plex keys the session by the id
     /// the client invented at start; losing it orphans a transcode on the
     /// user's server, so this must be called for every session that began.
