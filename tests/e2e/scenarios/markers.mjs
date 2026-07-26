@@ -55,9 +55,15 @@ async function gridPlay(driver) {
      el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
   );
   await driver.waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu (play)');
+  // Leg 1 leaves the item in progress, so from leg 2 on the menu offers
+  // "Resume" / "Play from Beginning" and there is no bare "Play" to find.
+  // Every leg must start at zero — the ranges under test sit at 2-12s, ahead
+  // of any resume point — so take the explicit from-the-top entry when it is
+  // the one on offer.
   const play = await driver.find(
     'xpath',
-    `//button[@role='menuitem' and normalize-space(.)='Play']`,
+    `//button[@role='menuitem' and (normalize-space(.)='Play'` +
+      ` or normalize-space(.)='Play from Beginning')]`,
   );
   await driver.click(play);
 }
