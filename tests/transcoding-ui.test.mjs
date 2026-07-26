@@ -109,10 +109,17 @@ test('a one-off quality is never persisted', () => {
     /let quality = match quality_override[\s\S]{0,400}config::playback_quality/,
     'the override must win for this play and fall back to the stored setting',
   );
-  assert.doesNotMatch(
+  // The setting has exactly one writer, and it is the Settings save. Anything
+  // on the play path that assigns it is a one-off leaking into stored state.
+  assert.equal(
+    [...commands.matchAll(/cfg\.playback_quality = /g)].length,
+    1,
+    'the quality setting must have exactly one writer',
+  );
+  assert.match(
     commands,
-    /quality_override[\s\S]{0,600}cfg\.playback_quality = /,
-    'a one-off choice must never be written to the settings file',
+    /pub fn set_mpv_advanced\([\s\S]{0,2000}cfg\.playback_quality = /,
+    'that writer must be the Settings save, never the play path',
   );
   // Every other launch path keeps the setting: continuation, playlists, and the
   // source-choice reply must not inherit a previous play's one-off.
