@@ -228,10 +228,18 @@ test('Automatic is offered, and something implements it', () => {
   // the sequence context. Launching with `playlist: None` / `run_kind: None`
   // cleared the cursor and run state, and the next playlist entry or next
   // episode then never started when this one ended.
+  // Asserted as a binding AND as the value handed to the launch: an earlier
+  // form matched only the computation, so a regression that left the block in
+  // place and passed `None` to the launch sailed through it.
   assert.match(
     commands,
-    /state\.playlist_cursor\.lock\(\)\.await[\s\S]{0,400}held\.session_id == request\.session_id/,
+    /let playlist = \{\s*\n\s*let cursor = state\.playlist_cursor\.lock\(\)\.await;[\s\S]{0,400}held\.session_id == request\.session_id/,
     'a step-down must inherit the playlist cursor of the session it replaces',
+  );
+  assert.match(
+    commands,
+    /session_id: &session_id,\s*\n\s*playlist,/,
+    'and that inherited cursor must be the one the relaunch is given',
   );
   assert.match(
     commands,
