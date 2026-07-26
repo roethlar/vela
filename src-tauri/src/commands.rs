@@ -6480,11 +6480,24 @@ mod tests {
     }
 
     /// More steps than rungs must stop at the floor, never run off the ladder.
+    ///
+    /// Several counts in a row, not one: a walk that WRAPS to the top instead
+    /// of stopping still lands on the floor every `tiers.len() + 1` steps, so a
+    /// single large count can pass by coincidence — an earlier version of this
+    /// test did exactly that.
     #[test]
     fn the_derived_tier_stops_at_the_floor() {
         let tiers = crate::source::tiers_for_source(1080);
         let floor = tiers.last().expect("non-empty").id;
-        assert_eq!(quality_after_steps("original", &tiers, 99), floor);
+        let reach_floor = tiers.len() as u32;
+        for extra in 0..=(reach_floor + 3) {
+            assert_eq!(
+                quality_after_steps("original", &tiers, reach_floor + extra),
+                floor,
+                "{} steps must still be the floor",
+                reach_floor + extra
+            );
+        }
     }
 
     /// mpv's OSD is large and this is an explanation, not an announcement.
