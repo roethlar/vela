@@ -3622,6 +3622,15 @@ pub(crate) struct StepDownRequest {
     /// without carrying this the cap would reset on every step and Automatic
     /// would walk to the floor two rungs at a time.
     pub steps_taken: u32,
+    /// The quality this play is ACTUALLY running at.
+    ///
+    /// Carried, not reconstructed. It was briefly derived by replaying the step
+    /// count one rung at a time, which desynchronised the moment stepping
+    /// became bitrate-aware and could skip rungs: a 10 Mbps source stepped to
+    /// 8 Mbps, was reconstructed as 20 Mbps, and stepped to 8 Mbps again —
+    /// burning its second and last step on the tier it was already playing
+    /// (codex review of `a8a9fec..081f601`).
+    pub current_quality: String,
 }
 
 /// Carries a verdict from the sampler thread to the async dispatcher that can
@@ -3688,19 +3697,14 @@ pub(crate) async fn apply_step_down(
         registry.route(&item.rating_key).ok()?
     };
     let options = source.playback_options(&key, None).await.ok()?;
-    // Where the walk has already got to: the stored setting, stepped down once
-    // per step already taken. Derived rather than stored, so the current tier
-    // cannot drift out of step with the count that bounds it.
-    let current = quality_after_steps(
-        &current_playback_quality(),
-        &options.tiers,
-        request.steps_taken,
-    );
     // Below what is actually playing, not merely the next rung: the ladder is
     // resolution-filtered, so its top rung can exceed a modest source's own
     // bitrate and "stepping down" would ask the link for MORE (finding `or-5`).
+    // The current quality is CARRIED by the request, never replayed from the
+    // step count: replaying advanced one rung per step while the real step can
+    // skip several, so the two desynchronised and step two repeated step one.
     let next = crate::source::next_tier_below_bitrate(
-        &current,
+        &request.current_quality,
         &options.tiers,
         options.source_bitrate_kbps,
     )?;
@@ -3790,27 +3794,6 @@ fn short_quality_notice(tier: crate::source::QualityTier) -> String {
     } else {
         format!("↓ {} kbps", tier.bitrate_kbps)
     }
-}
-
-/// The quality a play is running at after `steps` step-downs from `stored`.
-/// Stops at the floor rather than running off the end.
-fn quality_after_steps(stored: &str, tiers: &[crate::source::QualityTier], steps: u32) -> String {
-    let mut current = stored.to_string();
-    for _ in 0..steps {
-        match crate::source::next_tier_down(&current, tiers) {
-            Some(tier) => current = tier.id.to_string(),
-            None => break,
-        }
-    }
-    current
-}
-
-/// The quality the running play was launched at. Automatic starts at Original,
-/// and a stored tier is where the ladder walk resumes from.
-fn current_playback_quality() -> String {
-    config::load_config()
-        .map(|cfg| config::playback_quality(cfg.playback_quality.as_deref()))
-        .unwrap_or_else(|_| config::PLAYBACK_QUALITY_ORIGINAL.to_string())
 }
 
 /// A server-side transcode Vela started and is therefore obliged to stop.
@@ -4929,12 +4912,14 @@ async fn play_by_key_locked(
             let queue = state.step_down.clone();
             let session = session_id.to_string();
             let already = steps_taken;
+            let running_quality = quality.clone();
             std::sync::Arc::new(move |position_ms: u64, reason| {
                 queue.request(StepDownRequest {
                     session_id: session.clone(),
                     position_ms,
                     reason,
                     steps_taken: already,
+                    current_quality: running_quality.clone(),
                 });
             }) as playback::StepDownNotify
         }),
@@ -6504,6 +6489,7 @@ mod tests {
             position_ms: 61_000,
             reason: crate::automatic::StepDownReason::DropStorm,
             steps_taken: steps,
+            current_quality: "automatic".to_string(),
         }
     }
 
@@ -6554,42 +6540,7 @@ mod tests {
         );
     }
 
-    /// The current tier is DERIVED from the step count rather than stored, so
-    /// these two must agree or the walk skips or repeats a rung.
-    #[test]
-    fn the_current_tier_follows_the_step_count() {
-        let tiers = crate::source::tiers_for_source(1080);
-        assert_eq!(
-            quality_after_steps("original", &tiers, 0),
-            "original",
-            "an unstepped play is still at its setting"
-        );
-        assert_eq!(quality_after_steps("original", &tiers, 1), tiers[0].id);
-        assert_eq!(quality_after_steps("original", &tiers, 2), tiers[1].id);
-        // Automatic starts at Original, so it walks identically.
-        assert_eq!(quality_after_steps("automatic", &tiers, 2), tiers[1].id);
-    }
 
-    /// More steps than rungs must stop at the floor, never run off the ladder.
-    ///
-    /// Several counts in a row, not one: a walk that WRAPS to the top instead
-    /// of stopping still lands on the floor every `tiers.len() + 1` steps, so a
-    /// single large count can pass by coincidence — an earlier version of this
-    /// test did exactly that.
-    #[test]
-    fn the_derived_tier_stops_at_the_floor() {
-        let tiers = crate::source::tiers_for_source(1080);
-        let floor = tiers.last().expect("non-empty").id;
-        let reach_floor = tiers.len() as u32;
-        for extra in 0..=(reach_floor + 3) {
-            assert_eq!(
-                quality_after_steps("original", &tiers, reach_floor + extra),
-                floor,
-                "{} steps must still be the floor",
-                reach_floor + extra
-            );
-        }
-    }
 
     /// mpv's OSD is large and this is an explanation, not an announcement.
     #[test]

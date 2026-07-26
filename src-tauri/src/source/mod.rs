@@ -1184,6 +1184,30 @@ mod ladder_tests {
         assert_eq!(next_tier_below_bitrate("original", &tiers, floor), None);
     }
 
+    /// The whole point of the cap being two: two steps must reach two DIFFERENT
+    /// tiers. Replaying the ladder one rung per step to work out where a play
+    /// had got to desynchronised from the bitrate-aware step that can skip
+    /// rungs, so a 10 Mbps source stepped to 8 Mbps, was reconstructed as
+    /// 20 Mbps, and stepped to 8 Mbps again — spending its last step on the
+    /// tier it was already playing (codex review of `a8a9fec..081f601`).
+    #[test]
+    fn two_steps_from_a_modest_source_reach_two_different_tiers() {
+        let tiers = tiers_for_source(1080);
+        let source_kbps = 10_000;
+
+        let first = next_tier_below_bitrate("original", &tiers, source_kbps).expect("first step");
+        let second = next_tier_below_bitrate(first.id, &tiers, source_kbps).expect("second step");
+
+        assert!(first.bitrate_kbps < source_kbps, "first step must lower demand");
+        assert_ne!(first.id, second.id, "the second step must not repeat the first");
+        assert!(
+            second.bitrate_kbps < first.bitrate_kbps,
+            "{} must sit below {}",
+            second.id,
+            first.id
+        );
+    }
+
     /// Walking from Original must reach the floor and stop, never loop.
     #[test]
     fn walking_the_whole_ladder_terminates() {

@@ -221,8 +221,13 @@ test('Automatic is offered, and something implements it', () => {
   // must feed it the source bitrate rather than a placeholder.
   assert.match(
     commands,
-    /next_tier_below_bitrate\(\s*&current,\s*&options\.tiers,\s*options\.source_bitrate_kbps,\s*\)/,
-    'a step-down must pick a tier below what is already playing',
+    /next_tier_below_bitrate\(\s*&request\.current_quality,\s*&options\.tiers,\s*options\.source_bitrate_kbps,\s*\)/,
+    'a step-down must step below the quality the play is CARRYING, never a replayed one',
+  );
+  assert.match(
+    commands,
+    /current_quality: running_quality\.clone\(\)/,
+    'the sampler must carry the quality its play is actually running at',
   );
   // Finding or-2: a step-down replaces the play IN PLACE, so it must inherit
   // the sequence context. Launching with `playlist: None` / `run_kind: None`
