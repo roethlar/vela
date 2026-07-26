@@ -1420,7 +1420,10 @@ impl MediaSource for PlexSource {
         let mut delivery = options.resolve(quality);
         let mut transcode_session = None;
         let mut url = String::new();
-        let mut stream_headers = Vec::new();
+        // Both direct files and HLS transcodes authenticate through mpv's
+        // private header include. The URL must stay credential-free because mpv
+        // exposes it through path, argv, title/OSD surfaces, and playlists.
+        let stream_headers = vec![("X-Plex-Token".to_string(), lib.auth_token_clone())];
 
         if let Some(tier) = delivery.tier() {
             // A transcode URL addresses one part; direct play joins them all.
@@ -1466,7 +1469,6 @@ impl MediaSource for PlexSource {
             url = lib
                 .part_url_for_media(media)
                 .ok_or_else(|| "the selected Plex media version has no playable parts".to_string())?;
-            stream_headers = vec![("X-Plex-Token".to_string(), lib.auth_token_clone())];
             preflight_plex_stream(&url, &stream_headers).await?;
         }
 
@@ -2002,6 +2004,65 @@ mod tests {
         (port, hits)
     }
 
+    /// A sequential Plex fixture for the real transcode-resolution path. It
+    /// demands header auth on every provider request, serves one exact media
+    /// version, and approves the requested tier without ever serving media.
+    fn spawn_transcode_resolution_plex(
+        token: &str,
+    ) -> (u16, Arc<Mutex<Vec<String>>>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let captured = hits.clone();
+        let token = token.to_string();
+        std::thread::spawn(move || {
+            for stream in listener.incoming() {
+                let Ok(mut stream) = stream else { continue };
+                let mut buf = [0_u8; 8192];
+                let count = stream.read(&mut buf).unwrap_or(0);
+                if count == 0 {
+                    continue;
+                }
+                let request = String::from_utf8_lossy(&buf[..count]);
+                let path = request
+                    .split_whitespace()
+                    .nth(1)
+                    .unwrap_or("/")
+                    .to_string();
+                captured.lock().unwrap().push(path.clone());
+
+                let authenticated = request.lines().any(|line| {
+                    line.split_once(':').is_some_and(|(name, value)| {
+                        name.eq_ignore_ascii_case("X-Plex-Token") && value.trim() == token
+                    })
+                });
+                if !authenticated {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 401 Unauthorized\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                    continue;
+                }
+
+                let body = if path.starts_with("/library/metadata/42") {
+                    r#"<MediaContainer size="1"><Video ratingKey="42" key="/library/metadata/42" title="Fixture" duration="7200000" viewOffset="0"><Media id="7" duration="7200000" bitrate="8000" width="1920" height="1080" videoResolution="1080" videoCodec="hevc" audioCodec="aac" container="mkv"><Part id="9" key="/library/parts/9/file.mkv" duration="7200000" /></Media></Video></MediaContainer>"#
+                } else if path.starts_with("/video/:/transcode/universal/decision?") {
+                    r#"<MediaContainer generalDecisionCode="1001" />"#
+                } else {
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
+                    );
+                    continue;
+                };
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+        (port, hits)
+    }
+
     fn mock_server(machine: &str, port: u16) -> PlexServer {
         PlexServer {
             name: machine.to_string(),
@@ -2014,6 +2075,61 @@ mod tests {
             machine_identifier: machine.to_string(),
             version: "1".to_string(),
         }
+    }
+
+    // Finding tr-10 was branch wiring: direct play returned token headers while
+    // a successful tier returned none. Exercise the real resolver so a helper
+    // that merely knows how to construct the header cannot satisfy this guard.
+    #[tokio::test]
+    async fn plex_transcode_auth_reaches_stream_resolution() {
+        const TOKEN: &str = "synthetic-transcode-resolution-token";
+        let (port, hits) = spawn_transcode_resolution_plex(TOKEN);
+        let mut lib = PlexLibrary::new(TOKEN.to_string(), "transcode-client".to_string());
+        lib.set_server(mock_server("transcode-fixture", port));
+        let source = PlexSource::new("plex", "Plex", lib);
+        let tier = crate::source::QUALITY_TIERS
+            .iter()
+            .find(|tier| tier.id == "720p-2000")
+            .copied()
+            .expect("tier exists");
+
+        let resolved = source
+            .resolve_stream_version(
+                "42",
+                Some(7_200_000),
+                "media:7",
+                false,
+                Some(tier.id.to_string()),
+            )
+            .await
+            .expect("the fixture approves this tier");
+
+        assert_eq!(
+            resolved.delivery,
+            crate::source::Delivery::Transcode(tier)
+        );
+        let parsed =
+            url::Url::parse(&resolved.url).expect("the resolved transcode URL parses");
+        assert_eq!(
+            parsed.path(),
+            "/video/:/transcode/universal/start.m3u8"
+        );
+        assert!(
+            resolved.transcode_session.is_some(),
+            "a transcode resolution must retain its teardown handle"
+        );
+        assert_eq!(
+            resolved.http_headers,
+            [("X-Plex-Token".to_string(), TOKEN.to_string())],
+            "the transcoded stream must carry exactly one private auth header"
+        );
+
+        let hits = hits.lock().unwrap();
+        assert!(
+            hits.iter()
+                .any(|path| path.starts_with("/video/:/transcode/universal/decision?")),
+            "the guard must reach the real tier decision path"
+        );
     }
 
     /// A scan must reach the server the section KEY came from — and the key the

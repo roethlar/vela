@@ -212,6 +212,13 @@ test("Plex credentials never enter query strings or frontend artwork URLs", () =
     plexRequests,
     /\.query\(\s*&?\s*\[\s*\(\s*["']X-Plex-Token["']/i,
   );
+  // Finding tr-10: the start URL used a local query array, so neither the
+  // append-pair nor inline `.query(&[(...)]` shapes above could see it.
+  assert.doesNotMatch(
+    plexLibrary,
+    /\(\s*["']X-Plex-Token["']\s*,\s*self\.auth_token(?:\.clone\(\))?\s*\)/i,
+    "Plex query tuples must never carry the active token",
+  );
   assert.doesNotMatch(plexLibrary, /poster_transcode_url|X-Plex-Token=\{/i);
   assert.match(plexApi, /\.header\("X-Plex-Token", auth_token\)/);
   assert.match(plexLibrary, /\.header\("X-Plex-Token", &self\.auth_token\)/);

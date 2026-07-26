@@ -1271,10 +1271,8 @@ impl PlexLibrary {
             .ok_or_else(|| "item not found".into())
     }
 
-    /// Build the credential-free complete-part URL for one exact parsed Media
-    /// version. Split-file media remains one mpv EDL over every Part in order.
-    /// HLS transcode URL for one item at one tier, plus the session id that
-    /// must later tear it down.
+    /// Build the credential-free HLS transcode URL for one item at one tier,
+    /// plus the session id that must later tear it down.
     ///
     /// `media_index` is the position of the SELECTED version within the item's
     /// `Media` list — Plex addresses a copy positionally, so omitting it
@@ -1293,10 +1291,10 @@ impl PlexLibrary {
     /// `DELETE /transcode/sessions/<id>`. Losing this id means an orphaned
     /// transcode on the user's server.
     ///
-    /// The token stays in the query string here, unlike the direct part URL
-    /// which moved to a header: mpv follows the HLS playlist's own segment URLs,
-    /// which the server writes, so a header set on the first request would not
-    /// travel with them.
+    /// Authentication deliberately stays OUT of this URL. The caller carries
+    /// `X-Plex-Token` through `StreamResolution.http_headers`, and mpv applies
+    /// that header throughout the HLS master/child/segment request chain
+    /// (live-proven 2026-07-26).
     pub fn transcode_url(
         &self,
         rating_key: &str,
@@ -1332,7 +1330,6 @@ impl PlexLibrary {
             ("videoResolution", format!("{}x{}", tier.width, tier.height)),
             ("session", session.clone()),
             ("X-Plex-Client-Identifier", self.client_identifier.clone()),
-            ("X-Plex-Token", self.auth_token.clone()),
         ];
         let encoded = query
             .iter()
@@ -2134,6 +2131,41 @@ mod tests {
         // and mpv's own seek would be into a stream that begins elsewhere.
         let (resumed, _) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 930).expect("builds");
         assert!(resumed.contains("offset=930"), "{resumed}");
+    }
+
+    // Finding tr-10: no active Plex credential may enter the transcode URL
+    // handed to mpv. Parse the real production builder so aliases or a token
+    // placed under another query key cannot evade the assertion.
+    #[test]
+    fn plex_transcode_auth_url_is_credential_free() {
+        const TOKEN: &str = "synthetic-transcode-url-token";
+        let mut lib = PlexLibrary::new(TOKEN.to_string(), "transcode-client".to_string());
+        lib.set_server_manual(
+            "127.0.0.1".to_string(),
+            1234,
+            false,
+            Some("test".to_string()),
+        );
+        let tier = crate::source::QUALITY_TIERS[0];
+        let (url, _) = lib
+            .transcode_url("42", 0, &media_with_parts(1), tier, 0)
+            .expect("a single-file version builds");
+        let parsed = url::Url::parse(&url).expect("the production transcode URL parses");
+
+        for (key, value) in parsed.query_pairs() {
+            assert!(
+                !key.eq_ignore_ascii_case("X-Plex-Token"),
+                "the transcode URL must not contain a Plex token query key"
+            );
+            assert!(
+                !key.contains(TOKEN) && !value.contains(TOKEN),
+                "the active Plex token must not appear under any query key"
+            );
+        }
+        assert!(
+            !url.contains(TOKEN),
+            "the serialized transcode URL must not contain the active Plex token"
+        );
     }
 
     // Finding tr-11: Plex cannot choose an HLS transcode profile from Vela's

@@ -9,9 +9,11 @@
 // were about a session left running on the user's server, which is a thing only
 // the user's server can confirm.
 //
-// So this scenario asserts the two facts nothing else can:
-//   1. Plex OPENS a transcode session when Vela plays at an explicit tier.
-//   2. Plex has NO such session once that play ends.
+// So this scenario asserts the four facts nothing else can:
+//   1. mpv receives a credential-free transcode path and argv.
+//   2. mpv's final Vela include is a private file carrying the token header.
+//   3. Plex OPENS a transcode session when Vela plays at an explicit tier.
+//   4. Plex has NO such session once that play ends.
 //
 // It deliberately does not test Automatic: a step-down needs genuinely degraded
 // playback, which no scenario can force, and that remains a manual playtest.
@@ -88,10 +90,89 @@ async function waitForPlexReady() {
   );
 }
 
+function mpvArgvForSocket(socketPath) {
+  const expected = `--input-ipc-server=${socketPath}`;
+  const matches = [];
+  for (const entry of fs.readdirSync("/proc", { withFileTypes: true })) {
+    if (!entry.isDirectory() || !/^\d+$/.test(entry.name)) continue;
+    try {
+      const argv = fs
+        .readFileSync(`/proc/${entry.name}/cmdline`)
+        .toString("utf8")
+        .split("\0")
+        .filter(Boolean);
+      if (argv.includes(expected)) matches.push(argv);
+    } catch {
+      // Processes may exit or be unreadable while /proc is scanned.
+    }
+  }
+  assert.equal(
+    matches.length,
+    1,
+    "exactly one mpv process must own the scenario's unique IPC socket",
+  );
+  return matches[0];
+}
+
+function assertSecureTranscodeLaunch(socketPath, mediaPath) {
+  const token = creds.plex.auth_token;
+  let parsed;
+  try {
+    parsed = new URL(mediaPath);
+  } catch {
+    throw new Error("mpv's transcode path must be a valid credential-free URL");
+  }
+  assert.ok(
+    parsed.pathname === "/video/:/transcode/universal/start.m3u8",
+    "a tier play must reach Plex's transcode endpoint, not the part file",
+  );
+  const query = [...parsed.searchParams.entries()];
+  assert.ok(
+    !query.some(([key]) => key.toLowerCase() === "x-plex-token"),
+    "mpv's path must not contain the Plex token query key",
+  );
+  assert.ok(
+    !mediaPath.includes(token) &&
+      !query.some(([key, value]) => key.includes(token) || value.includes(token)),
+    "mpv's path must not contain the active Plex token value",
+  );
+
+  const argv = mpvArgvForSocket(socketPath);
+  assert.ok(
+    argv.every(
+      (argument) =>
+        !argument.includes(token) && !/[?&]X-Plex-Token=/i.test(argument),
+    ),
+    "mpv's argv must not contain a Plex credential",
+  );
+  const includeArgument = argv.filter((argument) => argument.startsWith("--include=")).at(-1);
+  assert.ok(
+    typeof includeArgument === "string",
+    "a transcoded Plex play must receive Vela's private header include",
+  );
+  const includePath = includeArgument.slice("--include=".length);
+  let stat;
+  let contents;
+  try {
+    stat = fs.statSync(includePath);
+    contents = fs.readFileSync(includePath, "utf8");
+  } catch {
+    throw new Error("mpv's private header include must remain readable while it is running");
+  }
+  assert.ok(
+    stat.isFile() && (stat.mode & 0o777) === 0o600,
+    "mpv's Plex header include must be a regular owner-only file",
+  );
+  assert.ok(
+    contents === `http-header-fields="X-Plex-Token: ${token}"\n`,
+    "mpv's private include must contain exactly the one expected Plex token header",
+  );
+}
+
 let invokeSequence = 0;
 
-// WebDriver's execute/sync endpoint does not await Promises, and the results
-// here carry token-bearing URLs, so project to a safe shape in-page.
+// WebDriver's execute/sync endpoint does not await Promises. Provider results
+// are projected to the smallest credential-free shape before crossing it.
 async function invokeProjected(driver, command, args, projection) {
   const slot = `__velaTranscodeInvoke${++invokeSequence}`;
   await driver.exec(
@@ -128,7 +209,7 @@ const ITEM_PROJECTION = `(items) => items.map((item) => ({
 const SECTION_PROJECTION = `(sections) => sections.map((s) => ({
   key: s.key, title: s.title, sectionType: s.sectionType,
 }))`;
-// Tiers only — never the stream URL, which carries the token.
+// Tiers only — never a provider stream URL.
 const QUALITY_PROJECTION = `(options) => ({
   canDirectPlay: options.canDirectPlay,
   sourceBitrateKbps: options.sourceBitrateKbps,
@@ -228,17 +309,14 @@ export default {
     const mpv = await MpvIpc.connect(socketPath);
     let opened = null;
     try {
-      // mpv must be on the transcode endpoint, not the part file.
+      // mpv must be on the transcode endpoint with auth isolated in its
+      // owner-only include — never the path or argv.
       const path = await pollUntil(
         () => mpv.getProp("path").then((p) => (typeof p === "string" && p ? p : null)).catch(() => null),
         "mpv to load the real Plex transcode stream",
         { timeoutMs: 60000 },
       );
-      assert.match(
-        path,
-        /\/video\/:\/transcode\/universal\/start/,
-        "a tier play must reach Plex's transcode endpoint, not the part file",
-      );
+      assertSecureTranscodeLaunch(socketPath, path);
 
       opened = await pollUntil(
         async () => {
