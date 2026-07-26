@@ -2,8 +2,9 @@
 
 ## Status
 
-**IMPLEMENTED and verified 2026-07-26 at `f185449`; external code review
-pending.**
+**COMPLETE 2026-07-26.** Production repair `f185449`, exact-one guard
+strengthening `5c27f89`, all local/hermetic/live verification green, and final
+plain-Codex review accepted with independent guard proof.
 
 No product decision is outstanding. For this repair, Vela will identify its
 universal HLS transcode requests with

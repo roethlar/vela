@@ -7,11 +7,12 @@ through 1.0.27; the IPC prerequisite landed at 1.0.28; Automatic landed and was
 repaired through 1.0.51; and Slice 6's Emby labelling and user documentation
 landed at 1.0.52. The first codex openreview's seven findings and both HIGH
 findings from the two follow-up rounds are fixed through 1.0.54. `tr-11` is
-implemented at 1.0.55 / `f185449`: both Plex universal-transcode builders
-select the live-proven `Web` profile, local and Linux verification pass, and
-the real-Plex decision/session/play/teardown scenario passes. External code
-review is pending before closure. `tr-10` remains a separate HIGH finding: it
-puts the Plex token in mpv's transcode URL, while its live safety gate passed:
+VERIFIED / CLOSED at 1.0.55: repair `f185449` and exact-one guard `5c27f89`
+make both Plex universal-transcode builders select the live-proven `Web`
+profile. Local verification, the clean Linux 38/38 suite, real-Plex
+decision/session/play/teardown, independent mutation proof, and final plain
+Codex review all pass. `tr-10` remains a separate HIGH finding: it puts the
+Plex token in mpv's transcode URL, while its live safety gate passed:
 token-free master and child playlists accepted header auth (200), a token-free
 segment accepted it (206), and teardown returned 204. Its fix is not started.
 Canonical records are `.agents/review/findings/tr-11.md` and

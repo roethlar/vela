@@ -20,21 +20,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **Server transcoding implementation is landed through Slice 6.** The six
   slices landed from 1.0.12 through 1.0.52; all seven first-pass `or-*`
   findings and both later HIGH findings are fixed through 1.0.54. The first
-  real Plex run exposed two HIGH findings. `tr-11` is implemented at
-  `f185449`: both Plex builders now select the `Web` HLS client profile, all
-  local gates and the clean Linux 38/38 suite pass, and the real-Plex scenario
-  passed decision/session/play/teardown end to end. External code review is
-  pending before closure. `tr-10` remains open: mpv still receives the Plex
-  token in its transcode URL, although header-only delivery is live-proven safe.
+  real Plex run exposed two HIGH findings. `tr-11` is VERIFIED / CLOSED at
+  `f185449` plus exact-one guard `5c27f89`: both Plex builders select the `Web`
+  HLS client profile; all local gates, clean Linux 38/38, real-Plex
+  decision/session/play/teardown, independent guard proof, and final plain
+  Codex review pass. `tr-10` remains open: mpv still receives the Plex token in
+  its transcode URL, although header-only delivery is live-proven safe.
   The plan review's nonblocking follow-ups remain `tr-12` (silent decision
   failures) and `tr-13` (duplicated universal-transcode query builders).
 
 ## Next
 
-- **First action:** run plain `codereview codex` over exact base
-  `78ace3dde59c6ee998a4525ec55520d6e49c6902` and evidence head
-  `a0c513a` for `tr-11`. If accepted, close its records in one commit.
-  `tr-10` remains the next repair; `tr-12` and `tr-13` remain separate.
+- **First action:** invoke `plan` for the separate HIGH `tr-10` credential
+  repair. Header-only master/child/segment delivery and teardown are already
+  live-proven; no `tr-10` code change is authorized yet. `tr-12` and `tr-13`
+  remain separate follow-ups.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -45,8 +45,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- **`tr-11` closure awaits external code review.** The tested owner's Plex now
-  transcodes successfully. `tr-10` remains a HIGH credential blocker.
+- **`tr-10` remains a HIGH credential blocker.** `tr-11` is closed.
 
 ## Verification
 
@@ -62,8 +61,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md`
 - `.agents/push-policy.md`
-- `.agents/plans/server-transcoding.md` (`tr-11` review pending; `tr-10` open)
-- `.agents/plans/tr-11-plex-client-profile.md` (implemented and verified)
+- `.agents/plans/server-transcoding.md` (`tr-11` closed; `tr-10` open)
+- `.agents/plans/tr-11-plex-client-profile.md` (complete)
 - `.agents/review/findings/tr-12.md` and
   `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)

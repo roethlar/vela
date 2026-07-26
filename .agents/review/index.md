@@ -31,15 +31,14 @@ risks are admitted separately as `tr-12` and `tr-13`. This explicit one-off
 does not alter the repo's default reviewer routing. Full provenance and triage:
 `.agents/review/findings/tr-11.md`.
 
-**`tr-11` OPEN (HIGH, raised 2026-07-26)** — real Plex conversion is
-unavailable because both universal-transcode builders omit
-`X-Plex-Client-Profile-Name`. The live scenario saw 400 for all 12 eligible
-candidates; Plex logged “unable to find a matching profile.” Adding only
-`X-Plex-Client-Profile-Name=Web` made the decision return 200 / Conversion OK
-and produced usable HLS playlists and a segment. Implemented at 1.0.55 /
-`f185449`; independent guard mutations, the full local matrix, a clean Linux
-38/38 suite, and real-Plex live-transcode 1/1 pass. External code review is
-pending before closure. Detail:
+**`tr-11` VERIFIED / CLOSED 2026-07-26** — both Plex universal-transcode
+builders now select `X-Plex-Client-Profile-Name=Web` at 1.0.55 (`f185449`);
+`5c27f89` parses the real start URL and requires exactly one pair. Full local
+verification, independent missing/duplicate/wrong-value mutations, clean Linux
+38/38, and real-Plex live-transcode 1/1 pass. Plain Codex CLI 0.145.0 resolved
+`gpt-5.6-sol` at max by default and accepted exact
+`78ace3dde59c6ee998a4525ec55520d6e49c6902..5c27f892cb2ca268e56a66d122c3c4cdf21bd7a2`
+with `capability_ok:true`, `guard_confirmed:true`, no comments. Detail:
 `.agents/review/findings/tr-11.md`.
 
 **`tr-10` OPEN (HIGH, raised 2026-07-26)** — a transcoded Plex play returns
