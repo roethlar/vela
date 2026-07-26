@@ -151,6 +151,44 @@ manual watched/unwatched changes and natural completion update every currently
 connected copy of the title. Updates are best-effort and are not queued for an
 offline server.
 
+### Playback quality
+
+The source policies above choose **which copy** plays. Settings → Player →
+Playback quality chooses **how that copy is delivered**, and the two are
+independent.
+
+- **Original** streams the file untouched. It is the default, and it is the
+  only setting that keeps HDR.
+- A **tier** — 1080p at 20/12/10/8 Mbps, 720p, 480p and below — asks the server
+  to convert the file for you. Useful on a slow or remote connection.
+- **Automatic** starts at Original and drops one tier only if playback cannot
+  keep up: sustained decoder frame drops, or a demuxer cache that keeps running
+  dry. It steps at most twice per play, never steps back up, and remembers
+  nothing — the next play starts at Original again.
+
+**Converting forfeits HDR and drops container chapters.** The server re-encodes
+to a plain HLS stream, so HDR metadata does not survive and chapter markers
+embedded in the container are lost. That is inherent to server-side
+transcoding, not a Vela limitation, which is why Original is the default.
+
+A title's own right-click menu can override the setting for one play:
+**Play Version → Quality on \<server\>** when a title exists on more than one
+server, or **Play at Quality** when it exists on one. The menu lists only what
+that server says it will actually deliver for that copy, and it asks the server
+when you open the submenu rather than on every right-click. The choice applies
+to the play it starts and is never saved.
+
+Two things Vela will not convert: a version stored as several files (a
+transcode addresses one part, so converting would end the film at the first
+part boundary), and any copy the server declines to encode. In both cases the
+quality entry is simply absent, and a setting-level request falls back to
+Original.
+
+**Emby transcoding is best-effort and unverified.** The Jellyfin and Emby paths
+share an implementation, and it has been exercised against Jellyfin only. It
+may work on Emby; nothing here asserts that it does. Please open an issue with
+what you see if you run Emby — a report is more useful than a guess.
+
 By default Vela uses a predictable `--no-config` mpv profile. Settings → Player
 can opt into your own `mpv.conf` or append custom mpv options; those settings can
 also override Vela's HDR defaults or prevent playback, so change them

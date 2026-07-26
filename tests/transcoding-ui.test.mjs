@@ -144,6 +144,45 @@ test('an invented quality cannot reach a source', () => {
   );
 });
 
+// Slice 6 — Emby transcoding is best-effort and must be LABELLED limited rather
+// than claimed (owner ruling 2026-07-25). It shares Jellyfin's implementation
+// and has only ever been exercised against Jellyfin.
+test('Emby transcoding is labelled unverified, not claimed', () => {
+  assert.match(
+    settings,
+    /\{#if sources\.some\(\(s\) => s\.kind === "emby"\)\}[\s\S]{0,600}unverified on Emby/,
+    'an Emby user must be told converting is unverified, and only an Emby user',
+  );
+  const readme = read('README.md');
+  assert.match(
+    readme,
+    /Emby transcoding is best-effort and unverified/,
+    'the README must say the same rather than implying Emby support',
+  );
+  // The claim the plan forbids: no document may assert Emby transcoding works.
+  assert.doesNotMatch(
+    readme,
+    /transcoding (?:works|is supported) on Emby/i,
+    'nothing may assert Emby transcoding works without a real server behind it',
+  );
+});
+
+// Slice 6 — the README must state the cost of converting plainly, because it is
+// the one thing a user cannot discover until their HDR is gone.
+test('the README states what converting costs', () => {
+  const readme = read('README.md');
+  assert.match(
+    readme,
+    /\*\*Converting forfeits HDR and drops container chapters\.\*\*/,
+    'the README must say converting costs HDR and chapters, in those terms',
+  );
+  assert.match(
+    readme,
+    /Playback quality[\s\S]{0,900}\*\*Automatic\*\* starts at Original[\s\S]{0,300}at most twice per play, never steps back up/,
+    'the README must describe Automatic with both bounds the owner ruled',
+  );
+});
+
 // Finding tr-6's wiring. The classifier, the retries and the credential-free
 // failure text are all unit-guarded — but a guard-the-wiring sweep (2026-07-25)
 // found that deleting the Plex call site left EVERY test green, because nothing

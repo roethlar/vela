@@ -751,6 +751,19 @@
             it whenever that changes; it isn't remembered per title. A title's
             own right-click menu can override it for one play.
           </p>
+          {#if sources.some((s) => s.kind === "emby")}
+            <!-- Owner ruling 2026-07-25: Emby transcoding is best-effort and
+                 must be labelled limited rather than claimed. The Jellyfin and
+                 Emby paths share an implementation that has only ever been
+                 exercised against Jellyfin. Shown only to users who actually
+                 have an Emby server connected. -->
+            <p class="muted small">
+              <span class="inlineicon"><Icon name="alert" size={14} stroke={2.25} /></span
+              >Converting is <b>unverified on Emby</b>. It shares Jellyfin's
+              implementation and may work, but nothing here has been tested
+              against a real Emby server — please report what you see.
+            </p>
+          {/if}
         </div>
 
         <div class="field">
