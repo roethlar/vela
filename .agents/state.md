@@ -51,8 +51,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   flip then landed as `5dd3e35` at 1.0.10 with its kind-filter guard at
   `e58d978`/1.0.11, so the play command now derives `include_markers` from
   `skip_policies.any_enabled()` and the Settings controls render — but the
-  slice is NOT done: its five behavioural E2E legs have never run (see
-  `## Next`). Settled behavior is recorded in
+  slice is now DONE: its five behavioural E2E legs ran and passed for the first
+  time on 2026-07-25 (`markers` PASS against 1.0.31 on the Linux venue). They
+  had never run because the scenario itself was broken, not the product —
+  `gridPlay` looked for a menu item reading exactly "Play", and leg 1 leaves the
+  item in progress, so from leg 2 on the menu offers "Resume" / "Play from
+  Beginning" instead. Fixed at 1.0.33 (`1c3a9da`) by taking the explicit
+  from-the-top entry, which every leg needs anyway: the ranges under test sit at
+  2-12s, ahead of any resume point. Settled behavior is recorded in
   `.agents/decisions.md`: missing intro, credit, and commercial settings default
   to Button; the external-mpv control is genuinely clickable; and Space
   activates it only while visible, otherwise retaining its normal pause
@@ -84,13 +90,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   reminder. Slice 6 is Emby best-effort labelling and the README Player notes
   (quality setting, one-off menu, the plain statement that converting forfeits
   HDR and drops container chapters).
-- **Slice 5 is PART-BUILT.** Detection (`automatic.rs`, `5e95630`/`7e6fd02`) and
-  mpv sampling (`spawn_health_sampler`, `6021e9f`) are landed and guard-proven.
-  **The relaunch a verdict must trigger is NOT built**: `PlaySpec::step_down` is
-  always `None`, so no play watches itself and Automatic is still inert. The
-  next increment needs the same "a background thread causes a new play" plumbing
-  `PlaybackAdvance` provides for EOF. Detail and the vacuous-guard lesson from
-  that pass are in `.agents/plans/server-transcoding.md`.
+- **Slice 5 (Automatic) is COMPLETE** at 1.0.35: detection (`automatic.rs`),
+  mpv sampling (`spawn_health_sampler`), and the relaunch (`StepDownQueue` plus
+  its own dispatcher in `lib.rs`, `apply_step_down` in `commands.rs`). The
+  `tr-8` gate is withdrawn and `Automatic` is offered again. Only slice 6 —
+  Emby labelling and the README Player notes — remains of the transcoding plan.
+  Three vacuous guards were found and fixed across slice 5's three passes; the
+  detail and the lessons are in `.agents/plans/server-transcoding.md`.
 - **Nothing in the transcoding feature has been exercised against a real
   server.** Every fix above is guarded by unit and static tests only. The
   quality menu, a real conversion, and a real teardown against the owner's Plex

@@ -596,12 +596,40 @@ changes continuously, so a subscription would flood the socket for a value read
 once per tick. A missing drop count skips the sample rather than reading as
 zero, which would look like a counter reset.
 
-**Part 3 — the relaunch. NOT BUILT.** `PlaySpec::step_down` is wired but is
-always `None`, so no play watches itself yet and the sampler never spawns — a
-sampler reporting to nobody would burn a thread and an IPC connection per play.
-What is missing is the "a background thread causes a new play" plumbing, the
-same problem `PlaybackAdvance` solves for EOF. Until `step_down` is `Some`,
-Automatic remains inert and the `tr-8` gate stays up.
+**Part 3 — the relaunch. DONE `94192db`/`a743e50` (1.0.34-35). SLICE 5 IS
+COMPLETE.** A verdict crosses from the sampler thread to the async play path
+through `StepDownQueue` — the same shape `PlaybackAdvance` uses for EOF, but a
+SEPARATE loop declared before the completion dispatcher's marker comment. Two
+reasons, both load-bearing: that dispatcher's contract is that only a joined
+clean-EOF plus final-tracker signal may advance a sequence, and a step-down is
+neither (it replaces the current play in place and must never touch playlists or
+Continue Playing); and `clean-eof-refresh-order.test.mjs` pins that section to
+exactly one spawned task.
+
+The queue holds ONE request, replaced rather than queued — a second verdict can
+only describe a play the first is already replacing. `apply_step_down` refuses a
+verdict whose session is no longer active, resolves the copy's ladder ONLY then
+(a decision round trip per play to prepare for a rare event would tax everyone
+who never steps down), and relaunches through `play_by_key` with
+`quality_override`, `resume_override_ms` (the position the replaced player
+actually reached — the server's stamp lags it, and resuming seconds back is a
+visible stutter), and `steps_taken + 1`.
+
+The current tier is DERIVED — the stored setting stepped down once per step
+already taken — rather than stored, so it cannot drift out of step with the
+count that bounds it. `next_tier_down` walks one rung and returns `None` at the
+floor, which is what stops the walk.
+
+The `tr-8` gate is WITHDRAWN: `Automatic` is offered unconditionally again, its
+help text states both owner bounds, and the guard now protects the same rule
+from the other side — the option and its implementation ship together.
+
+Guards: 8 regressions injected separately across the queue handoff, the
+replacement rule, the derived tier, the floor, the OSD length, the sampler
+spawn, the dispatcher, and the help text. **One was vacuous:** the floor test
+used a single large step count, and a walk that WRAPS still lands on the floor
+every `len + 1` steps, so it passed by coincidence. Fixed by asserting several
+consecutive counts, which no cycle can satisfy.
 
 ### Slice 6 — Emby labelling and documentation
 

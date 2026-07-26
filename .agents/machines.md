@@ -153,6 +153,12 @@ all untestable in this suite at any effort. Behaviour that needs a real video
 output is verified against real mpv on a desktop host instead; do not write a
 scenario here that depends on an OSD overlay being drawn.
 
+**Current-tree worktree (2026-07-25):** `~/dev/vela-main` is a detached worktree
+of the same clone, used to run E2E against current `main` without disturbing the
+old tree or its stash. Refresh it with `git fetch origin && git checkout
+--detach <sha>` from inside it. The original `~/dev/vela` remains at its old
+commit and is NOT the venue any more.
+
 The VM also has a `stash@{0}` (`codex-linux-validation-1a2bef5`) and its clone
 sits at `95312fc` on `main`; the 2026-07-25 sync overwrote working-tree files
 only after confirming every one of them matched a blob already in the mac
