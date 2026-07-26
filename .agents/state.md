@@ -71,27 +71,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **BLOCKED ON AN OWNER GO: the mpv IPC reader corrupts playback positions.**
-  `spawn_position_reader` (`playback.rs`) takes the `data` of ANY observed
-  property as the position. Measured against the real reader over a Unix socket
-  (2026-07-25): a `display-width` event of 3840 stores a position of 3,840,000
-  ms; `display-height` of 2160 stores 2,160,000 ms. mpv emits both before the
-  first `time-pos`, so a play that ENDS in that window — a bad file, a missing
-  codec, an immediate error — defeats the tracker's own `t > 0` clobber guard
-  and writes a bogus "stopped at 36 minutes" to the user's server, destroying
-  the real resume point. This is a live defect independent of any new work, and
-  it is a hard prerequisite for slice 5, whose signals are all numeric and all
-  continuous. Fix and guards are specified in
-  `.agents/plans/server-transcoding.md`; no code is authorized yet.
 - **Transcoding slices 5 and 6 are what remain of that feature**, per
-  `.agents/plans/server-transcoding.md`. Slice 5 is Automatic; its thresholds
-  are now specified in the plan, with two user-visible choices (a cap of 2
-  step-downs per play, and an mpv `show-text` notice) left for the owner. It is
-  also the slice that withdraws the `tr-8` gate in `Settings.svelte` — the guard
-  in `tests/transcoding-ui.test.mjs` fails the moment a decoder-drop observer
-  appears, which is the reminder. Slice 6 is Emby best-effort labelling and the
-  README Player notes (quality setting, one-off menu, the plain statement that
-  converting forfeits HDR and drops container chapters).
+  `.agents/plans/server-transcoding.md`. Slice 5 is Automatic. Its thresholds
+  are specified in the plan and its two user-visible choices are ruled (stepping
+  is ONE-WAY with no step-up; at most 2 step-downs per play; a short `↓ 4 Mbps`
+  mpv OSD notice). Its blocking prerequisite — the IPC reader reading any
+  numeric property as a playback position, which corrupted resume points on a
+  play that failed early — is FIXED at 1.0.28 (`4f7bc21`). Slice 5 is now
+  unblocked and NOT started. It is also the slice that withdraws the `tr-8` gate
+  in `Settings.svelte` — the guard in `tests/transcoding-ui.test.mjs` fails the
+  moment a `decoder-frame-drop-count` SUBSCRIPTION appears, which is the
+  reminder. Slice 6 is Emby best-effort labelling and the README Player notes
+  (quality setting, one-off menu, the plain statement that converting forfeits
+  HDR and drops container chapters).
 - **Nothing in the transcoding feature has been exercised against a real
   server.** Every fix above is guarded by unit and static tests only. The
   quality menu, a real conversion, and a real teardown against the owner's Plex

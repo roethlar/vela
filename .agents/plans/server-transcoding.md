@@ -448,7 +448,25 @@ blank popup. `Original` is listed only when the server reports direct play.
   cache triggers a step down; a healthy play triggers neither; nothing is
   written to config afterwards.
 
-#### PREREQUISITE — the IPC reader must filter by property name (BLOCKING)
+#### PREREQUISITE — the IPC reader must filter by property name — DONE `4f7bc21` (1.0.28)
+
+**CLEARED 2026-07-25.** `position_property_change` now accepts a position only
+from a `property-change` event named `time-pos` carrying a finite, non-negative
+number. Guards: three classification tests (display dimensions; the four numeric
+properties slice 5 will observe; real/null/negative `time-pos` and command
+replies) plus two that drive the REAL reader over a Unix socket — a play that
+dies before its first `time-pos` still reports zero, and a display event after a
+position does not replace it. Five regressions injected separately, each failing
+for its own reason; the socket pair is what catches the reader loop reverting to
+the permissive parse, which a classifier test alone would miss.
+
+Tightened in the same commit: the `tr-8` gate guard matched the bare string
+`decoder-frame-drop-count`, so it fired on the new tests that name the property
+while asserting it is NOT a position. It now matches the `observe_property`
+subscription — what actually means "Automatic is implemented" — and was
+re-proven by injecting a real subscription.
+
+The original defect, kept for the record:
 
 **This is not slice-5 work; it is a live defect that slice 5 would multiply, and
 it must land first.** `spawn_position_reader` in `playback.rs` registers six
@@ -522,16 +540,25 @@ Evaluated on a 2s sample tick over the existing IPC connection.
 - **Floor.** Step down one tier at a time and stop at the lowest tier the server
   offers for that copy. Never step below it and never wrap.
 
-Two choices here are user-visible rather than pure threshold tuning, and are
-called out for the owner rather than assumed:
+Two user-visible choices, both RULED by the owner 2026-07-25:
 
-- **A cap of 2 step-downs per play** is proposed, so a link that is bad
-  throughout cannot march the user down the whole ladder. The alternative is to
-  allow stepping to the floor.
-- **Telling the user.** Proposed: `show-text` over the same IPC connection
-  ("Lowering quality to 4 Mbps") so the picture visibly changing is explained.
-  This renders on the video surface, so it is playtest-only and cannot be
-  asserted on the Linux E2E venue (`.agents/machines.md`).
+- **Stepping is ONE-WAY. There is no step-up.** A tier change is not a stream
+  switch: mpv is a separate process playing a fixed URL, so every step means
+  killing it and relaunching at the current position — a black flash, an audio
+  gap, a re-buffer. Stepping down spends that when playback is already broken;
+  stepping up would spend it to interrupt playback that is currently fine, on
+  speculation, and invites flapping (up → starve → down → repeat), each cycle
+  costing another visible interruption. Real ABR players avoid this by switching
+  segments inside one stream, which Vela cannot do.
+- **At most 2 step-downs per play**, so a link that is bad throughout cannot
+  march the user down the whole ladder. Known consequence, accepted: a genuinely
+  bad link stops two rungs below Original rather than reaching the floor.
+- **Telling the user:** `show-text` over the same IPC connection, kept SHORT —
+  `↓ 4 Mbps`, ~2s. mpv's OSD is obtrusively large, and the message must not
+  become the thing the user notices. Do NOT set `--osd-font-size` to compensate:
+  it is global and would override the user's own mpv config. This renders on the
+  video surface, so it is playtest-only and cannot be asserted on the Linux E2E
+  venue (`.agents/machines.md`).
 
 #### Mechanism
 
