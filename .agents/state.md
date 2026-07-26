@@ -24,16 +24,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   because the decision and start requests omit the required HLS client profile;
   `tr-10` gives mpv the token in its transcode URL. Plex header auth is now
   live-proven through master, child-playlist, and segment requests, so the
-  `tr-10` repair is safe. Canonical evidence is in
-  `.agents/plans/server-transcoding.md` and the two finding files.
+  `tr-10` repair is safe. The owner-directed Claude review of the `tr-11` plan
+  admitted two nonblocking follow-ups: `tr-12` for silent decision failures and
+  `tr-13` for duplicated universal-transcode query builders. Canonical evidence
+  is in `.agents/plans/server-transcoding.md` and the finding files.
 
 ## Next
 
 - **First action:** approve or decline
   `.agents/plans/tr-11-plex-client-profile.md`. It specifies one 1.0.55
   finding-only repair, separate decision/start guards, full verification,
-  independent red proofs, and the real `live-transcode` scenario. No code
-  change is authorized yet.
+  independent red proofs, and a strengthened real `live-transcode` scenario
+  that must prove capability decisions create no server sessions. Claude's
+  five plan findings are triaged in revision 2; no code change is authorized
+  yet.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -64,6 +68,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/push-policy.md`
 - `.agents/plans/server-transcoding.md` (landed; `tr-11` and `tr-10` open)
 - `.agents/plans/tr-11-plex-client-profile.md` (draft; awaiting approval)
+- `.agents/review/findings/tr-12.md` and
+  `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
 - `.agents/review/index.md`, `.agents/review/findings/tr-11.md`, and
   `.agents/review/findings/tr-10.md`

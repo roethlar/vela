@@ -2,15 +2,43 @@
 
 ## Status
 
-**DRAFT — awaiting owner approval. No code change is authorized.**
+**DRAFT revision 2 — awaiting owner approval. No code change is authorized.**
 
-No product decision is outstanding. The technical profile choice is settled by
-live evidence: Vela will identify its universal HLS transcode requests with
-`X-Plex-Client-Profile-Name=Web`. The owner's Plex has that installed HLS
-profile; the same request without a profile returns 400, while adding only
-`Web` returns decision code 1001 (“Conversion OK”) and produces usable HLS.
+No product decision is outstanding. For this repair, Vela will identify its
+universal HLS transcode requests with
+`X-Plex-Client-Profile-Name=Web`. The owner's current Plex installation has
+that HLS profile; the same request without a profile returns 400, while adding
+only `Web` returns decision code 1001 (“Conversion OK”) and produces usable
+HLS. Availability of a profile literally named `Web` on other Plex versions
+and installations is an explicit, unverified portability assumption.
 
 This plan fixes `tr-11` only. `tr-10` remains a separate finding and commit.
+Decision-error observability and the duplicated universal-transcode query
+builders are tracked separately as `tr-12` and `tr-13`; neither expands this
+repair.
+
+## Plan review
+
+An owner-directed one-off `openreview claude` used Claude CLI defaults, with no
+model or effort override. Claude Code 2.1.220 resolved
+`claude-opus-5[1m]` and returned five schema-valid findings over exact range
+`dbdbbdd78c1dd23fca0d53ef6274be40d5620e6a..2c85864d03fe743ed126830c414721a03af76459`
+on 2026-07-26.
+
+Revision 2 admits and resolves the plan-level findings by:
+
+- correcting the canonical Plex provider contract rather than leaving the
+  incomplete parameter list in place;
+- proving that the now-successful capability decisions create no server-side
+  transcode sessions before the playback baseline is taken;
+- scoping `Web` to the one live-proven installation and recording the silent
+  decision-error path as `tr-12`; and
+- moving the header-form negative into the canonical finding and provider
+  contract.
+
+The duplicated query-builder risk is real but is not part of the narrow
+`tr-11` repair; it is admitted separately as `tr-13`. Full provenance and
+triage are in `.agents/review/findings/tr-11.md`.
 
 ## Goal
 
@@ -21,9 +49,11 @@ Acceptance requires all of the following:
 
 1. A tier decision carries `X-Plex-Client-Profile-Name=Web`.
 2. The matching `start.m3u8` URL carries the identical key and value.
-3. The existing direct-play, split-file refusal, quality ladder, session
+3. Every successful capability decision executed while the live scenario
+   searches for a candidate creates no server-side transcode session.
+4. The existing direct-play, split-file refusal, quality ladder, session
    ownership, teardown, and Automatic behavior remain unchanged.
-4. `npm run e2e:live live-transcode` finds a tier, launches mpv on Plex's
+5. `npm run e2e:live live-transcode` finds a tier, launches mpv on Plex's
    universal transcode endpoint, observes a new real server session, quits mpv,
    and observes that session disappear.
 
@@ -37,6 +67,9 @@ Acceptance requires all of the following:
   200, 200, and 206.
 - The selector is a **query parameter**, not a request header. A live probe that
   supplied `X-Plex-Client-Profile-Name` as a header still returned 400.
+- `Web` is live-proven only on the owner's current Plex installation. The
+  repair deliberately assumes the same built-in profile exists elsewhere; it
+  does not claim cross-version or cross-installation verification.
 - Use one Rust constant for the production value. The guards must spell the
   expected wire value `Web` independently so changing the constant to another
   installed profile cannot move the tests with the implementation.
@@ -102,10 +135,25 @@ Add both guards beside the existing Plex transcode tests in
 The tests must reach the two production builders separately. A helper-only test
 is insufficient because it would not prove that either caller uses the value.
 
-### 5. Correct the live command comment
+### 5. Correct and strengthen the live scenario
 
-In `tests/e2e/live/transcode.mjs`, change only the stale leading invocation from
-`npm run e2e:live transcode` to `npm run e2e:live live-transcode`.
+In `tests/e2e/live/transcode.mjs`:
+
+1. change the stale leading invocation from `npm run e2e:live transcode` to
+   `npm run e2e:live live-transcode`;
+2. snapshot `/transcode/sessions` immediately before the candidate loop;
+3. after the candidate decisions finish, observe the session list for a short,
+   bounded window and assert that none of the candidate decisions added a new
+   session; and
+4. only after that assertion, take the existing fresh baseline used to identify
+   the session opened by playback.
+
+The pre-existing 400 responses made this side effect unreachable, so the
+successful post-repair behavior must be established against the real server.
+If a decision creates a session, stop the slice before playback and record a
+new finding; do not silently absorb session retention or teardown into
+`tr-11`, and do not delete any session that cannot be proven to belong to this
+scenario.
 
 ### 6. Bump once
 
@@ -193,6 +241,7 @@ npm run e2e:live live-transcode
 
 Require all existing scenario assertions to pass. Afterward:
 
+- confirm the candidate decision probes added no server-side session;
 - confirm the VM worktree is clean and at the implementation commit;
 - confirm Plex and `plex-watchdog.timer` are active; and
 - confirm the scenario's session is absent without disturbing unrelated active
@@ -212,7 +261,7 @@ After local, hermetic, guard, and live verification:
    `.agents/plans/server-transcoding.md`, and `.agents/state.md` with the commit,
    guard proof, live result, and review verdict;
 4. commit that record-only closeout immediately; and
-5. leave `tr-10` open and next.
+5. leave `tr-10`, `tr-12`, and `tr-13` open; `tr-10` remains next.
 
 Do not push any commit without a separate explicit go.
 

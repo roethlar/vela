@@ -13,7 +13,10 @@ the Plex token in mpv's transcode URL; its live safety gate passed on 2026-07-26
 token-free master and child playlists accepted header auth (200), a token-free
 segment accepted it (206), and teardown returned 204. Neither code fix is
 started; their canonical records are `.agents/review/findings/tr-11.md` and
-`.agents/review/findings/tr-10.md`. The narrow `tr-11` repair plan is
+`.agents/review/findings/tr-10.md`. The `tr-11` plan review also admitted
+`tr-12` (silent Plex decision failures) and `tr-13` (duplicated
+universal-transcode query builders) as separate follow-ups. The narrow `tr-11`
+repair plan is
 `.agents/plans/tr-11-plex-client-profile.md` and is awaiting owner approval.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
@@ -111,9 +114,19 @@ Explicitly REJECTED by the owner, with reasons; do not re-propose:
   helper, not passed in the parameter map. `directPlay`, `directStream`,
   `session`, `subtitleSize` and `audioBoost` are NOT named in that helper and
   reach the URL only through its `**kwargs` passthrough.
+- **HLS client profile — VERIFIED against the owner's current Plex
+  installation 2026-07-26.** Both the universal `decision` request and its
+  matching `start.m3u8` request require
+  `X-Plex-Client-Profile-Name=Web` as a **query parameter**. Sending that value
+  as a request header still returned 400; adding it only to the query returned
+  decision code 1001 and produced a usable HLS master, child playlist, and
+  segment. `Web` is verified on this one installation; Vela assumes, but has
+  not verified, that other Plex versions and installations expose the same
+  built-in profile.
 - **Decision endpoint — VERIFIED against the owner's live server 2026-07-25.**
   `GET /video/:/transcode/universal/decision` with the same parameter set as
-  `start` returns 200 and a `MediaContainer` carrying
+  `start`, including the HLS client-profile selector above, returns 200 and a
+  `MediaContainer` carrying
   `generalDecisionCode`/`generalDecisionText`,
   `directPlayDecisionCode`/`directPlayDecisionText`, and
   `transcodeDecisionCode`/`transcodeDecisionText` (observed: general 1001

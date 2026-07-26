@@ -19,12 +19,25 @@ step-down, and the live scenario discarded its required source id while the
 harness selected the wrong Plex connection. Full verdict and triage:
 `.agents/review/openreview-2026-07-26.md`.
 
+**`tr-11` PLAN review recorded 2026-07-26:** an owner-directed one-off
+`openreview claude` used Claude Code 2.1.220 defaults, with no model or effort
+override, and resolved `claude-opus-5[1m]`. The exact range
+`dbdbbdd78c1dd23fca0d53ef6274be40d5620e6a..2c85864d03fe743ed126830c414721a03af76459`
+returned five schema-valid findings with matching pins and
+`capability_ok:true`. Revision 2 corrects the provider contract, adds the
+decision-session live assertion, scopes the `Web` evidence, and preserves the
+header negative canonically. The broader observability and query-duplication
+risks are admitted separately as `tr-12` and `tr-13`. This explicit one-off
+does not alter the repo's default reviewer routing. Full provenance and triage:
+`.agents/review/findings/tr-11.md`.
+
 **`tr-11` OPEN (HIGH, raised 2026-07-26)** — real Plex conversion is
 unavailable because both universal-transcode builders omit
 `X-Plex-Client-Profile-Name`. The live scenario saw 400 for all 12 eligible
 candidates; Plex logged “unable to find a matching profile.” Adding only
 `X-Plex-Client-Profile-Name=Web` made the decision return 200 / Conversion OK
-and produced usable HLS playlists and a segment. Not fixed. Detail:
+and produced usable HLS playlists and a segment. Revision 2 of the
+Claude-reviewed repair plan awaits owner approval; no code is fixed. Detail:
 `.agents/review/findings/tr-11.md`.
 
 **`tr-10` OPEN (HIGH, raised 2026-07-26)** — a transcoded Plex play returns
@@ -36,6 +49,18 @@ it to the transcode path it added. Not fixed. The live safety gate passed on
 requests and generated no token-bearing child URI. Not found by the slice-3
 codex review. Detail:
 `.agents/review/findings/tr-10.md`.
+
+**`tr-12` OPEN (MEDIUM, raised by the `tr-11` plan review 2026-07-26)** —
+Plex decision request/status/parse failures collapse to the same `false` as a
+valid conversion refusal, so profile incompatibility can remove every tier
+while Vela emits only a generic fallback. Kept separate from the blocking
+profile repair. Detail: `.agents/review/findings/tr-12.md`.
+
+**`tr-13` OPEN (LOW, raised by the `tr-11` plan review 2026-07-26)** — the
+decision and `start.m3u8` builders duplicate their common universal-transcode
+query contract. They have already drifted on delivery flags and omitted the
+same required profile; a shared-builder refactor is deliberately outside
+`tr-11`. Detail: `.agents/review/findings/tr-13.md`.
 
 Transcoding slice-3 loop `tr-3..tr-9` CLOSED 2026-07-25: all seven findings from
 the `codereview codex` pass over `b94fcd1..e0e5fc7` are admitted and fixed —
