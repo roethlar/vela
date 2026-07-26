@@ -103,8 +103,12 @@ async function invokeProjected(driver, command, args, projection) {
   return result.value;
 }
 
+// `sourceId` is credential-free and REQUIRED on the DTO — projecting it away
+// and passing `undefined` made the play request fail deserialization before mpv
+// ever launched, so the scenario proved nothing.
 const ITEM_PROJECTION = `(items) => items.map((item) => ({
   ratingKey: item.ratingKey, title: item.title, mediaType: item.mediaType,
+  sourceId: item.sourceId,
 }))`;
 const SECTION_PROJECTION = `(sections) => sections.map((s) => ({
   key: s.key, title: s.title, sectionType: s.sectionType,
@@ -189,7 +193,7 @@ export default {
       driver,
       "play_item",
       {
-        item: { ...target, sourceId: undefined },
+        item: target,
         startFromBeginning: true,
         expectedSession: null,
         seriesContinuation: false,

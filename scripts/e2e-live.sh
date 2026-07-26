@@ -80,7 +80,20 @@ if jf and (jf.get("base_url") or jf.get("url")):
 # endpoint is for. Host/port/scheme come from the connection's own base_url;
 # older configs kept the same facts in top-level last_server_* fields, which are
 # still honoured so a pre-split install keeps working.
-plex = next((s for s in sources if (s.get("kind") or s.get("type")) == "plex"), None)
+# Fail closed on more than one. live-control stops and starts ONE fixed host, so
+# seeding Vela against a different Plex would time out the outage assertions and
+# briefly disrupt an unrelated server for no reason.
+plex_all = [s for s in sources if (s.get("kind") or s.get("type")) == "plex"]
+if len(plex_all) > 1:
+    wanted = os.environ.get("VELA_LIVE_PLEX_ID")
+    plex_all = [s for s in plex_all if s.get("id") == wanted] if wanted else []
+    if len(plex_all) != 1:
+        sys.exit(
+            "live: several Plex connections are configured and live-control manages "
+            "exactly one host — set VELA_LIVE_PLEX_ID to the connection id of the "
+            "server it controls"
+        )
+plex = plex_all[0] if plex_all else None
 if plex and plex.get("access_token") and plex.get("base_url"):
     parts = urlsplit(plex["base_url"])
     if parts.scheme == "https" and parts.hostname:
