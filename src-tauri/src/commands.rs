@@ -3716,6 +3716,32 @@ pub(crate) async fn apply_step_down(
         next.id
     );
 
+    // A step-down replaces the current play IN PLACE, so it must inherit that
+    // play's sequence context. Launching without it cleared the cursor and the
+    // run state, and the next playlist entry or next episode then never started
+    // when this one ended (finding `or-2`, codex openreview 2026-07-26). Both
+    // are taken only when they belong to the session being replaced.
+    let playlist = {
+        let cursor = state.playlist_cursor.lock().await;
+        cursor
+            .as_ref()
+            .filter(|held| held.session_id == request.session_id)
+            .map(|held| PlaylistLocation {
+                owner: held.owner,
+                playlist_id: held.playlist_id.clone(),
+                entry_id: held.entry_id.clone(),
+                index: held.index,
+            })
+    };
+    let (run_kind, affinity) = {
+        let run = state.playback_run.lock().await;
+        match run.as_ref().filter(|held| held.session_id == request.session_id) {
+            Some(held) => (Some(held.kind), held.affinity_source_id.clone()),
+            None => (None, None),
+        }
+    };
+    let _ = affinity;
+
     let session_id = uuid::Uuid::new_v4().to_string();
     let outcome = play_by_key(
         state,
@@ -3723,11 +3749,11 @@ pub(crate) async fn apply_step_down(
             item: &item,
             start_from_beginning: false,
             session_id: &session_id,
-            playlist: None,
+            playlist,
             // This replaces the exact play the verdict came from, and nothing
             // else: a race with the user's own choice must lose.
             replace_session: Some(&request.session_id),
-            run_kind: None,
+            run_kind,
             explicit_source_id: None,
             persist_explicit_choice: false,
             quality_override: Some(next.id),

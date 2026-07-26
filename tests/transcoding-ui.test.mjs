@@ -224,6 +224,25 @@ test('Automatic is offered, and something implements it', () => {
     /next_tier_below_bitrate\(\s*&current,\s*&options\.tiers,\s*options\.source_bitrate_kbps,\s*\)/,
     'a step-down must pick a tier below what is already playing',
   );
+  // Finding or-2: a step-down replaces the play IN PLACE, so it must inherit
+  // the sequence context. Launching with `playlist: None` / `run_kind: None`
+  // cleared the cursor and run state, and the next playlist entry or next
+  // episode then never started when this one ended.
+  assert.match(
+    commands,
+    /state\.playlist_cursor\.lock\(\)\.await[\s\S]{0,400}held\.session_id == request\.session_id/,
+    'a step-down must inherit the playlist cursor of the session it replaces',
+  );
+  assert.match(
+    commands,
+    /state\.playback_run\.lock\(\)\.await[\s\S]{0,300}held\.session_id == request\.session_id/,
+    'a step-down must inherit the run state of the session it replaces',
+  );
+  assert.doesNotMatch(
+    commands,
+    /replace_session: Some\(&request\.session_id\),\s*\n\s*run_kind: None,/,
+    'the step-down relaunch must carry the run kind, not drop it',
+  );
   // ...and the verdict must reach something that can start the replacement.
   assert.match(
     lib,
