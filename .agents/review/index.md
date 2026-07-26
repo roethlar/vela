@@ -19,6 +19,14 @@ step-down, and the live scenario discarded its required source id while the
 harness selected the wrong Plex connection. Full verdict and triage:
 `.agents/review/openreview-2026-07-26.md`.
 
+**`tr-11` OPEN (HIGH, raised 2026-07-26)** — real Plex conversion is
+unavailable because both universal-transcode builders omit
+`X-Plex-Client-Profile-Name`. The live scenario saw 400 for all 12 eligible
+candidates; Plex logged “unable to find a matching profile.” Adding only
+`X-Plex-Client-Profile-Name=Web` made the decision return 200 / Conversion OK
+and produced usable HLS playlists and a segment. Not fixed. Detail:
+`.agents/review/findings/tr-11.md`.
+
 **`tr-10` OPEN (HIGH, raised 2026-07-26)** — a transcoded Plex play returns
 EMPTY `http_headers` and carries `X-Plex-Token` in the URL instead, so the token
 reaches mpv's `path`, its logs, and its process argv. Direct play was hardened

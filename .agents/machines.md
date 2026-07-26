@@ -173,11 +173,12 @@ all untestable in this suite at any effort. Behaviour that needs a real video
 output is verified against real mpv on a desktop host instead; do not write a
 scenario here that depends on an OSD overlay being drawn.
 
-**Current-tree worktree (2026-07-25):** `~/dev/vela-main` is a detached worktree
-of the same clone, used to run E2E against current `main` without disturbing the
-old tree or its stash. Refresh it with `git fetch origin && git checkout
---detach <sha>` from inside it. The original `~/dev/vela` remains at its old
-commit and is NOT the venue any more.
+**Current-tree worktree (updated 2026-07-26):** `~/dev/vela-main` is a detached
+worktree of the same clone, used to run E2E against current `main` without
+disturbing the old tree or its stash. It is aligned to `85248d9` (1.0.54).
+Refresh it with `git fetch origin && git checkout --detach <sha>` from inside
+it. The original `~/dev/vela` remains at its old commit and is NOT the venue any
+more.
 
 The VM also has a `stash@{0}` (`codex-linux-validation-1a2bef5`) and its clone
 sits at `95312fc` on `main`; the 2026-07-25 sync overwrote working-tree files
@@ -259,6 +260,13 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
     generated child URI contained a token. Teardown returned 204 and a follow-up
     session-list check found none of the probe sessions; the independently active
     session already on the server was left untouched.
+  - **`live-transcode` currently fails before play (2026-07-26).** Run it as
+    `npm run e2e:live live-transcode`; the shorter name in the scenario file's
+    leading comment is stale. Against 1.0.54, all 12 eligible candidates got no
+    tier because Plex returned 400 and logged “unable to find a matching
+    profile.” Adding only `X-Plex-Client-Profile-Name=Web` made the same
+    decision return Conversion OK and the HLS chain work. This is `tr-11`, not a
+    venue failure.
   - The VM was deliberately NOT given an SSH key on the Plex box: that is persistent
     access to the owner's server, granted for a test. The Mac (which already has access)
     runs `scripts/live-control.mjs` for the length of one run — host-only address,
