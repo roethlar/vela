@@ -215,6 +215,15 @@ test('Automatic is offered, and something implements it', () => {
     /steps_taken: request\.steps_taken \+ 1,\s*\n\s*continues_automatic: true,/,
     'a step-down relaunch must declare that it continues an Automatic play',
   );
+  // Finding or-5: the ladder is resolution-filtered, so its top rung can exceed
+  // a modest source's own bitrate. A step-down that used it raw asked a
+  // constrained link for MORE. The caller must use the bitrate-aware step, and
+  // must feed it the source bitrate rather than a placeholder.
+  assert.match(
+    commands,
+    /next_tier_below_bitrate\(\s*&current,\s*&options\.tiers,\s*options\.source_bitrate_kbps,\s*\)/,
+    'a step-down must pick a tier below what is already playing',
+  );
   // ...and the verdict must reach something that can start the replacement.
   assert.match(
     lib,
