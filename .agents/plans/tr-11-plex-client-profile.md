@@ -2,7 +2,7 @@
 
 ## Status
 
-**DRAFT revision 2 — awaiting owner approval. No code change is authorized.**
+**APPROVED 2026-07-26 — owner said “go” after reviewing revision 2.**
 
 No product decision is outstanding. For this repair, Vela will identify its
 universal HLS transcode requests with

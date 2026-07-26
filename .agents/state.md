@@ -31,13 +31,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **First action:** approve or decline
-  `.agents/plans/tr-11-plex-client-profile.md`. It specifies one 1.0.55
-  finding-only repair, separate decision/start guards, full verification,
-  independent red proofs, and a strengthened real `live-transcode` scenario
-  that must prove capability decisions create no server sessions. Claude's
-  five plan findings are triaged in revision 2; no code change is authorized
-  yet.
+- **First action:** implement approved revision 2 of
+  `.agents/plans/tr-11-plex-client-profile.md` as one 1.0.55 finding-only
+  repair, then run full verification, independent red proofs, and the
+  strengthened real `live-transcode` scenario. `tr-10`, `tr-12`, and `tr-13`
+  remain separate.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -67,7 +65,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/machines.md`
 - `.agents/push-policy.md`
 - `.agents/plans/server-transcoding.md` (landed; `tr-11` and `tr-10` open)
-- `.agents/plans/tr-11-plex-client-profile.md` (draft; awaiting approval)
+- `.agents/plans/tr-11-plex-client-profile.md` (approved 2026-07-26)
 - `.agents/review/findings/tr-12.md` and
   `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
