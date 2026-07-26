@@ -91,11 +91,12 @@ Rules the command list doesn't carry on its own:
   or copied UI text that expose token-bearing URLs, auth tokens, SMB passwords,
   or durable-file contents. (See `.agents/decisions.md`, 2026-05-23 and
   2026-07-23.)
-- Keep settings and connection persistence defensive. Pre-split `config.json`
-  may contain Plex/Jellyfin/Emby tokens until the approved split lands; the
-  durable target is private `connections.json` for active connection records
-  and tokens, with `config.json` retaining settings and inert legacy SMB
-  credentials (next bullet). Preserve owner-account permissions, atomic saves,
+- Keep settings and connection persistence defensive. Legacy pre-split
+  `config.json` files may contain Plex/Jellyfin/Emby tokens during migration;
+  the current durable store is private `connections.json` for active connection
+  records and tokens, with `config.json` retaining settings and inert legacy
+  SMB credentials (next bullet). Preserve owner-account permissions, atomic
+  saves,
   fail-closed parsing/validation, and cross-process locking for both files.
   Never replace an unreadable or invalid file with guessed/default runtime
   state. Recovery is an explicit action that first preserves only the invalid

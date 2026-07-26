@@ -4,6 +4,70 @@ Entries rotated verbatim out of `.agents/state.md` `## Now` when they stopped
 being live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-07-26 (catchup sweep — two landed entries, v1.0.54)
+
+Context for readers: marker skipping and its config-integrity prerequisite are
+fully landed and carry no live decision. The two entries below rotate here
+verbatim in their original `## Now` order.
+
+- **Intro/credits/commercial marker skipping is the ACTIVE implementation**
+  (owner activated it 2026-07-25). The plan is
+  `.agents/plans/skip-credits-intros-v2.md`, now Active v2 revision 7, rebased
+  onto the 1.0.4 prerequisite base; the plan records the landed version sequence
+  (corrected 2026-07-25 — two review-fix bumps overtook its prediction). Its
+  config-integrity prerequisite is satisfied. Slice 1 is implemented, canonically
+  verified, committed as
+  `c7aa963` at version 1.0.5, and guard-proven: the provider-neutral marker
+  model, the shared normalizer, `include_markers` on both resolve entry points,
+  Plex `includeMarkers=1` on the existing selected-detail request, Jellyfin
+  MediaSegments fetched concurrently with the mandatory item fetch, and Emby
+  issuing no request. Fifteen injected regressions each failed for their own
+  reason and were restored from the committed state. External review then ran
+  and returned two admitted MEDIUM findings, both about best-effort marker I/O
+  on the playback critical path: `mk-1` bounded the Jellyfin marker lookup and
+  overlapped it with all mandatory work (`be32bde`, 1.0.6), and `mk-2` made a
+  failed Plex marker-bearing detail request retry once without the parameter
+  (`2971672`, 1.0.7). Both repairs are independently red-proven and the full
+  canonical dual-side set passed at 1.0.7 with 271 Rust tests; no follow-up
+  review ran, so no clean verdict is claimed. The full evidence is canonical in
+  the plan and in `.agents/review/findings/mk-1.md` and `mk-2.md`. Settled
+  Slice 2 is committed as `42ab254` at version 1.0.8: the Vela-authored MIT
+  `vela-markers.lua` plus its `PROVENANCE.md` entry. It was verified against
+  real mpv 0.41.0 (payload read, parse, `loaded` property, self-unlink, and both
+  inert degrade paths) because no automated harness covers Lua; button
+  rendering, the hitbox, the Space binding, seek, and the entry latch are
+  deferred to Slice 4's real-app E2E as that slice specifies, and no repo test
+  guards this file yet. Slice 3 is committed as `f62345d` at version 1.0.9: the
+  closed `SkipPolicy` enum, the three `AppConfig` fields, and the `MpvAdvanced`
+  get/set boundary, with missing-field defaulting, unknown-value rejection, and
+  legacy-field preservation each red-proven separately. Slice 4's production
+  flip then landed as `5dd3e35` at 1.0.10 with its kind-filter guard at
+  `e58d978`/1.0.11, so the play command now derives `include_markers` from
+  `skip_policies.any_enabled()` and the Settings controls render — but the
+  slice is now DONE: its five behavioural E2E legs ran and passed for the first
+  time on 2026-07-25 (`markers` PASS against 1.0.31 on the Linux venue). They
+  had never run because the scenario itself was broken, not the product —
+  `gridPlay` looked for a menu item reading exactly "Play", and leg 1 leaves the
+  item in progress, so from leg 2 on the menu offers "Resume" / "Play from
+  Beginning" instead. Fixed at 1.0.33 (`1c3a9da`) by taking the explicit
+  from-the-top entry, which every leg needs anyway: the ranges under test sit at
+  2-12s, ahead of any resume point. Settled behavior is recorded in
+  `.agents/decisions.md`: missing intro, credit, and commercial settings default
+  to Button; the external-mpv control is genuinely clickable; and Space
+  activates it only while visible, otherwise retaining its normal pause
+  behavior. An unknown marker policy does not normalize: it invalidates the
+  settings file under the owner-approved app-wide fail-closed recovery rule.
+  Commercial ranges are in scope wherever an upstream server publishes them;
+  the dated provider evidence and unsupported-provider boundary are canonical
+  in the plan.
+- The app-wide fail-closed settings prerequisite (`connections.json` split,
+  strict boundaries, byte-exact recovery, prior-version rollback, and the Plex
+  credential-path work) is COMPLETE and fully landed through version 1.0.4.
+  Its slice-by-slice detail rotated to `docs/history/state-archive.md`
+  (2026-07-25); canonical evidence stays in
+  `.agents/plans/config-integrity-recovery.md` and
+  `.agents/review/findings/cir-1.md`.
+
 ## Rotated 2026-07-25 (catchup sweep — nine landed entries, v1.0.20)
 
 Context for readers: the 1.0.0 release entries and the whole

@@ -2,31 +2,31 @@
 
 Workflow: unprimed whole-change judgment uses
 `.agents/playbooks/openreview.md`; finding-specific fix verification uses
-`.agents/playbooks/codereview.md`. Claude is the required external reviewer
-harness for Codex-authored code; the concrete model, effort, tier, and transport
-resolve from the owner-confirmed machine-local harness cache. Additional
-reviewers are owner-requested only; Agy is not used. Historical Claude, Agy,
-and Grok loops retain their recorded provenance but are not precedent for
-current reviewer selection or self-review.
+`.agents/playbooks/codereview.md`. Reviews of this repo go to `codex`, called
+plainly with no model or effort override; Claude is not an eligible reviewer
+here. Historical Claude, Agy, and Grok loops retain their recorded provenance
+but are not precedent for current reviewer selection.
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-**`openreview codex` 2026-07-26 over `72e0f48..a8a9fec`: 7 FINDINGS, ALL FIXED (1.0.39-54). Originally all
-ADMITTED — `or-1` HIGH, `or-2`..`or-7` MEDIUM. All OPEN.** The HIGH is that an
-Automatic replacement never spawns a sampler (it relaunches at a concrete tier,
-and the sampler only spawns for `automatic`), so Automatic can take exactly ONE
-step and the entire second-step apparatus is unreachable. Full verdict and
-triage: `.agents/review/openreview-2026-07-26.md`.
+**`openreview codex` 2026-07-26 over `72e0f48..a8a9fec`: 7 FINDINGS, ALL
+FIXED through 1.0.54.** The original `or-1` HIGH and `or-2`..`or-7` MEDIUM
+findings are closed. Two follow-up rounds found two further HIGH defects, also
+fixed: the current quality was reconstructed incorrectly across a second
+step-down, and the live scenario discarded its required source id while the
+harness selected the wrong Plex connection. Full verdict and triage:
+`.agents/review/openreview-2026-07-26.md`.
 
 **`tr-10` OPEN (HIGH, raised 2026-07-26)** — a transcoded Plex play returns
 EMPTY `http_headers` and carries `X-Plex-Token` in the URL instead, so the token
 reaches mpv's `path`, its logs, and its process argv. Direct play was hardened
 against exactly this by the 2026-07-23 credential split; slice 3 did not carry
 it to the transcode path it added. Not fixed: it needs a check against the real
-server (do Plex's HLS segment requests accept header auth?) and possibly an
-owner call. Not found by the slice-3 codex review. Detail:
+server (do Plex's HLS segment requests accept header auth?). The live-control
+permission needed for that check is present. Not found by the slice-3 codex
+review. Detail:
 `.agents/review/findings/tr-10.md`.
 
 Transcoding slice-3 loop `tr-3..tr-9` CLOSED 2026-07-25: all seven findings from

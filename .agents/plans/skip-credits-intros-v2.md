@@ -2,12 +2,12 @@
 
 ## Status
 
-**ACTIVE v2, revision 7 — 2026-07-25.** Supersedes the removed
+**COMPLETE v2, revision 8 — 2026-07-26.** Supersedes the removed
 `.agents/plans/skip-credits-intros.md` (v1). Incorporates both 2026-07-22 plan
 reviews. Self-contained for a cold implementer.
 
 The owner activated this plan for implementation on 2026-07-25 ("yes, activate
-the marker plan"). All three activation conditions are satisfied:
+the marker plan"). At activation, all three conditions were satisfied:
 
 1. Every product choice in **Owner decisions** below is settled in owner-facing
    chat, one decision at a time, and the ruling is recorded here and in
@@ -16,11 +16,14 @@ the marker plan"). All three activation conditions are satisfied:
    (`.agents/plans/config-integrity-recovery.md`) is implemented, reviewed,
    verified, committed, and guard-proven through its Slice 3 closeout
    (2026-07-24, version 1.0.4, `21ecbe8` production and `8b550d6` closeout).
-3. `.agents/state.md` names this plan as the active implementation.
+3. `.agents/state.md` named this plan as the active implementation; that entry
+   rotated after completion.
 
-Revision 7 changes only the status above and rebases the slice version sequence
-onto the actual 1.0.4 prerequisite base; no product behavior in this plan
-changed at activation.
+All four slices are landed through 1.0.11. The five marker glue scenarios later
+ran and passed on the repaired Linux venue after `1c3a9da` made every leg start
+from the beginning; the real-mpv desktop check remains the evidence for the OSD
+button, hitbox, click, and temporary Space binding. Revision 8 changes only the
+status and records that completed verification; no product behavior changed.
 
 v1 claimed "Owner-approved — implementing" without a matching `state.md` or
 `decisions.md` entry; do not treat v1 status as authority over this file.
@@ -688,8 +691,8 @@ message, but for its own reason).
 - **Verify:** full canonical dual-side set plus targeted and full Linux E2E.
   Red-prove every behavior claimed by the E2E separately.
 
-**Slice 4 status (2026-07-25): production landed, BEHAVIOURAL VERIFICATION NOT
-DONE.** The flip is committed as `5dd3e35` at version 1.0.10: `PlaySpec` carries
+**Slice 4 COMPLETE (2026-07-25).** The flip is committed as `5dd3e35` at
+version 1.0.10: `PlaySpec` carries
 `markers_script`, `markers`, and the three resolved policies; `commands.rs`
 resolves policies before stream resolution, passes `include_markers` only when a
 policy is enabled, filters returned markers to enabled kinds, and resolves
@@ -732,20 +735,10 @@ red-proven twice from the committed state: routing Credits to the intro policy
 leaks a disabled kind, and making `any_enabled` unconditional asks the server
 with everything Off. Both failed for their own reason and were restored.
 
-Still unproven: the assembled chain — that a real play resolves policies,
-requests markers from a server, writes the payload, and launches mpv with those
-arguments in that order. Every part is unit tested (`markers_args` polarity
-matrix, owner-only payload write, policy resolution, kind filtering, provider
-parsing against HTTP mocks) and the player half is verified against real mpv,
-but nothing has run the app end to end.
-
-Why not, as of 2026-07-25: the Linux venue cannot render the app (see
-`.agents/machines.md`), and the macOS host cannot substitute — Tauri's
-WebDriver support is Linux/Windows only, and `ProjectDirs` puts config in
-`~/Library/Application Support` with no XDG override, so running the app here
-would drive the owner's real settings and connections rather than a seeded
-fixture. Closing this seam needs either a working venue or an explicit
-owner-supervised playtest.
+The assembled chain is also proven: all five `markers` scenarios ran and passed
+on the Linux venue on 2026-07-25 after `1c3a9da` made every leg choose Play from
+Beginning. The earlier apparent venue outage was a stale plain-`cargo build`
+binary with no embedded frontend; `.agents/machines.md` owns that diagnosis.
 
 **The acceptance list above is superseded on one point (owner, 2026-07-25): the
 E2E venue never runs mpv with a real video output.** Without one mpv publishes
@@ -762,10 +755,8 @@ prove — the glue: the app requests the ranges with all three
 `includeSegmentTypes` filters, writes the payload, injects the script, and the
 script seeks (auto-skip needs no OSD); a commercial range travels the same path;
 a failing marker endpoint costs markers and not playback; and with every policy
-Off the server is never asked and the script is never injected. **It has never
-been executed** — the Linux venue could not render the app under
-WebKitWebDriver at all on 2026-07-25, `smoke` fails identically, and the suite
-currently gates nothing. Diagnosis in `.agents/machines.md`.
+Off the server is never asked and the script is never injected. All five legs
+passed on 2026-07-25.
 
 ### Behavioral E2E acceptance
 

@@ -45,8 +45,8 @@ The 2026-07-19 recording of `claude` frontier (`claude-fable-5` @ max,
 `competitive`) as an openreview-eligible pair on this machine, and the
 2026-07-26 correction in `.agents/machines.md` that said an `openreview` here
 dispatches to claude without asking. Both are now wrong for this repo. `codex`
-needs a durable tier pair recorded; until one is, the owner names the model at
-dispatch.
+is called plainly, with no recorded tier pair and no per-run model or effort
+choice.
 
 ### 2026-05-23 - Use external mpv playback for HDR
 

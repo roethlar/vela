@@ -2,13 +2,21 @@
 
 ## Status
 
-**Revision 3, 2026-07-25 — slices 1-4 are LANDED and all seven slice-3 review
-findings are closed** (versions 1.0.12-1.0.27; evidence per slice below and in
-`.agents/review/findings/tr-3.md`). Slices 5 and 6 remain. Slice 5's thresholds
-are now specified, and it has acquired a **BLOCKING PREREQUISITE**: the mpv IPC
-reader treats any numeric property event as the playback position, which is a
-live defect today and would make Automatic's own signals corrupt every position.
-That fix is not authorized yet. Nothing else in slices 5-6 has started.
+**Revision 4, 2026-07-26 — all six slices are LANDED.** Slices 1-4 landed
+through 1.0.27; the IPC prerequisite landed at 1.0.28; Automatic landed and was
+repaired through 1.0.51; and Slice 6's Emby labelling and user documentation
+landed at 1.0.52. The first codex openreview's seven findings and both HIGH
+findings from the two follow-up rounds are fixed through 1.0.54. One separate
+HIGH remains open: `tr-10`, the Plex token in mpv's transcode URL. Its safe
+repair depends on live Plex HLS header-auth evidence and is canonical in
+`.agents/review/findings/tr-10.md`.
+
+**Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
+slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per
+slice below and in `.agents/review/findings/tr-3.md`). At that point Slices 5
+and 6 remained, and Slice 5 was blocked by the mpv IPC reader treating any
+numeric property event as the playback position. That prerequisite and both
+slices subsequently landed as recorded above.
 
 The original draft status is kept below for the record.
 
@@ -656,6 +664,8 @@ further regressions injected separately; the one that removes the sampler's
 seek call is caught by clippy's dead-code errors under `-D warnings`.
 
 ### Slice 6 — Emby labelling and documentation
+
+**DONE `96f6753` (1.0.52).**
 
 - Emby transcoding is implemented best-effort and labelled limited in the UI and
   README, inviting issue reports, per the 2026-07-25 ruling. Do not claim it
