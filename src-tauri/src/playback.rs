@@ -607,6 +607,32 @@ enum DisplayPropertyChange {
     Height(u32),
 }
 
+/// mpv's playback position in milliseconds, and ONLY that.
+///
+/// This used to take the `data` of ANY event, so every observed property that
+/// happens to be numeric read as a position: a `display-width` of 3840 became a
+/// position of 3,840,000 ms. Booleans and arrays coerce to nothing, so only the
+/// two display dimensions leaked — but mpv emits an observed property's initial
+/// value the moment it is registered, before the first `time-pos`. A play that
+/// ENDED inside that window therefore defeated the tracker's `t > 0` guard (the
+/// one written to avoid clobbering a resume point when mpv fails to start) and
+/// wrote a fabricated "stopped at 36 minutes" to the user's server.
+///
+/// Same strictness as `window_property_change` and `display_property_change`:
+/// the exact event, the exact name, the exact JSON type.
+fn position_property_change(value: &serde_json::Value) -> Option<u64> {
+    if value.get("event")?.as_str()? != "property-change" {
+        return None;
+    }
+    if value.get("name")?.as_str()? != "time-pos" {
+        return None;
+    }
+    let seconds = value.get("data")?.as_f64()?;
+    // A negative or non-finite time-pos is not a position. mpv reports null
+    // here before playback starts, which `as_f64` already rejects.
+    (seconds.is_finite() && seconds >= 0.0).then_some((seconds * 1000.0) as u64)
+}
+
 /// mpv reports actual output identity and pixel dimensions as property-change
 /// events. Accept only the exact JSON types: malformed replies must not invent
 /// compatibility evidence.
@@ -1257,6 +1283,10 @@ fn spawn_position_reader(
             // Ask mpv to push position and window-state updates; then drain every
             // line. Distinct ids keep command replies unambiguous during IPC
             // diagnostics, while parsing below trusts only named property events.
+            // Note for anyone adding a subscription here: mpv sends an observed
+            // property's initial value at once, and every consumer below matches
+            // on the property NAME. Adding a numeric property is safe; widening
+            // a consumer to accept any `data` is not.
             let _ = stream.write_all(
                 b"{\"command\":[\"observe_property\",1,\"time-pos\"]}\n\
                   {\"command\":[\"observe_property\",2,\"fullscreen\"]}\n\
@@ -1277,12 +1307,12 @@ fn spawn_position_reader(
                     Ok(_) => {}
                     Err(_) => break,
                 }
-                // Update position from either a property-change event or a response.
+                // Only `time-pos` is a position. Every other observed property
+                // above is either non-numeric or a display dimension, and a
+                // dimension read as a position corrupts the resume point.
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
-                    if let Some(d) = v.get("data").and_then(|d| d.as_f64()) {
-                        if d >= 0.0 {
-                            last_t_ms_r.store((d * 1000.0) as u64, Ordering::Relaxed);
-                        }
+                    if let Some(ms) = position_property_change(&v) {
+                        last_t_ms_r.store(ms, Ordering::Relaxed);
                     }
                     window_observation.apply_ipc_event(&v);
                 }
@@ -1520,6 +1550,146 @@ fn spawn_end_watcher(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn event(name: &str, data: serde_json::Value) -> serde_json::Value {
+        serde_json::json!({"event": "property-change", "id": 1, "name": name, "data": data})
+    }
+
+    /// Drive the REAL reader over a real socket, feeding it `events` in order,
+    /// and return the position it ends up reporting as authoritative. A test of
+    /// `position_property_change` alone would not have caught the original
+    /// defect, which lived in the reader loop rather than in any classifier.
+    #[cfg(unix)]
+    fn position_reported_after(events: &[serde_json::Value]) -> u64 {
+        use std::io::Write as _;
+        use std::os::unix::net::UnixListener;
+
+        let dir = private_runtime_dir().expect("runtime dir");
+        let socket = dir.join(format!("ipc-test-{}.sock", events.len()));
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).expect("bind");
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let (last_t_ms, done) = spawn_position_reader(
+            socket.to_string_lossy().to_string(),
+            0,
+            stop.clone(),
+            WindowStateObservation::default(),
+        )
+        .expect("reader");
+
+        let (mut mpv, _) = listener.accept().expect("accept");
+        for value in events {
+            writeln!(mpv, "{value}").expect("write");
+        }
+        mpv.flush().expect("flush");
+        // Closing the socket is mpv exiting; the reader hits EOF and finishes,
+        // which is exactly when the tracker reads the final position.
+        drop(mpv);
+        for _ in 0..200 {
+            if done.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&socket);
+        last_t_ms.load(Ordering::Relaxed)
+    }
+
+    /// The end-to-end shape of the bug: mpv announces the display before it
+    /// announces a position, and the play dies there. The tracker only skips
+    /// its write when the position is still zero, so this must stay zero.
+    #[cfg(unix)]
+    #[test]
+    fn a_play_that_dies_before_its_first_position_reports_none() {
+        let reported = position_reported_after(&[
+            event("display-width", serde_json::json!(3840)),
+            event("display-height", serde_json::json!(2160)),
+            event("fullscreen", serde_json::json!(true)),
+        ]);
+        assert_eq!(
+            reported, 0,
+            "a play with no time-pos must report no position, or the tracker \
+             clobbers the user's real resume point"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_display_event_after_a_position_does_not_replace_it() {
+        let reported = position_reported_after(&[
+            event("time-pos", serde_json::json!(61.0)),
+            event("display-width", serde_json::json!(3840)),
+        ]);
+        assert_eq!(
+            reported, 61_000,
+            "the last real position must survive a later display event"
+        );
+    }
+
+    /// The defect: `display-width` 3840 became a position of 3,840,000 ms. mpv
+    /// emits it before the first `time-pos`, so a play that ended in that window
+    /// wrote a fabricated resume point over the user's real one.
+    #[test]
+    fn a_display_dimension_is_not_a_playback_position() {
+        assert_eq!(
+            position_property_change(&event("display-width", serde_json::json!(3840))),
+            None,
+            "a display width must never be read as a position"
+        );
+        assert_eq!(
+            position_property_change(&event("display-height", serde_json::json!(2160))),
+            None,
+            "a display height must never be read as a position"
+        );
+    }
+
+    /// Slice 5's own signals are numeric and continuous. If any numeric property
+    /// can be a position, Automatic corrupts every position it observes.
+    #[test]
+    fn no_other_numeric_property_is_a_playback_position() {
+        for property in [
+            "decoder-frame-drop-count",
+            "demuxer-cache-duration",
+            "cache-speed",
+            "percent-pos",
+        ] {
+            assert_eq!(
+                position_property_change(&event(property, serde_json::json!(12))),
+                None,
+                "{property} must never be read as a position"
+            );
+        }
+    }
+
+    #[test]
+    fn a_real_time_pos_is_still_a_playback_position() {
+        assert_eq!(
+            position_property_change(&event("time-pos", serde_json::json!(42.5))),
+            Some(42_500)
+        );
+        assert_eq!(
+            position_property_change(&event("time-pos", serde_json::json!(0))),
+            Some(0)
+        );
+        // Values mpv really sends around startup and seeks, none of them a position.
+        assert_eq!(
+            position_property_change(&event("time-pos", serde_json::Value::Null)),
+            None,
+            "mpv reports null before playback starts"
+        );
+        assert_eq!(
+            position_property_change(&event("time-pos", serde_json::json!(-1.0))),
+            None,
+            "a negative time-pos is not a position"
+        );
+        // Only property-change events count; a command reply carries no name.
+        assert_eq!(
+            position_property_change(&serde_json::json!({"request_id": 1, "error": "success"})),
+            None
+        );
+    }
 
     fn tmp(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()))

@@ -182,9 +182,14 @@ test('Automatic is offered only once something implements it', () => {
   );
   // The gate exists because the step-down is absent. If it ever arrives, this
   // test is what sends someone back here to remove the gate.
+  //
+  // Matched on the SUBSCRIPTION, not on the property name: `playback.rs` names
+  // the drop count in tests asserting it is not a playback position, and a bare
+  // string match failed on those. What means "Automatic is implemented" is mpv
+  // being asked to report the property, not the property being mentioned.
   assert.doesNotMatch(
     playback,
-    /decoder-frame-drop-count/,
+    /observe_property[^\]]*decoder-frame-drop-count/,
     'the step-down landed: withdraw the tr-8 gate in Settings.svelte and this guard',
   );
 });
