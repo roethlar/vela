@@ -1,5 +1,5 @@
 // LIVE — drives Vela's server-side transcoding against the owner's REAL Plex.
-// `npm run e2e:live transcode`.
+// `npm run e2e:live live-transcode`.
 //
 // The whole transcoding feature was built and reviewed without ever touching a
 // real server. Everything about it — the capability decision, the transcode URL,
@@ -56,6 +56,21 @@ async function transcodeSessionKeys() {
   const container = body?.MediaContainer ?? {};
   const sessions = container.TranscodeSession ?? [];
   return (Array.isArray(sessions) ? sessions : [sessions]).map((s) => s.key ?? s.uuid ?? "");
+}
+
+async function assertNoFreshTranscodeSessions(baseline, durationMs = 5000) {
+  const deadline = Date.now() + durationMs;
+  do {
+    const keys = await transcodeSessionKeys();
+    const fresh = keys.filter((key) => key && !baseline.has(key));
+    assert.deepEqual(
+      fresh,
+      [],
+      "capability decisions must not create server-side transcode sessions",
+    );
+    if (Date.now() >= deadline) return;
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  } while (true);
 }
 
 async function waitForPlexReady() {
@@ -161,6 +176,7 @@ export default {
     );
     assert.ok(items.length > 0, "the real movie library must not be empty");
 
+    const beforeDecisions = new Set(await transcodeSessionKeys());
     let target = null;
     let options = null;
     for (const item of items.slice(0, 12)) {
@@ -181,6 +197,7 @@ export default {
       "no title in the first 12 offered a convertible tier — the real server refused every " +
         "capability decision, which is itself the finding",
     );
+    await assertNoFreshTranscodeSessions(beforeDecisions);
     // or-5: a step down must lower the demand, so the tier we pick must be
     // below the source's own bitrate when the server reported one.
     const tier = options.tiers[options.tiers.length - 1];

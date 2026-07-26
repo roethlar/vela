@@ -6,6 +6,7 @@ use std::time::Duration;
 use url::Url;
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
+const PLEX_HLS_CLIENT_PROFILE_NAME: &str = "Web";
 
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
@@ -1203,6 +1204,10 @@ impl PlexLibrary {
             ("mediaIndex", media_index.to_string()),
             ("partIndex", "0".to_string()),
             ("protocol", "hls".to_string()),
+            (
+                "X-Plex-Client-Profile-Name",
+                PLEX_HLS_CLIENT_PROFILE_NAME.to_string(),
+            ),
             ("directPlay", direct_play.to_string()),
             ("directStream", direct_stream.to_string()),
             ("fastSeek", "1".to_string()),
@@ -1312,6 +1317,10 @@ impl PlexLibrary {
             ("mediaIndex", media_index.to_string()),
             ("partIndex", "0".to_string()),
             ("protocol", "hls".to_string()),
+            (
+                "X-Plex-Client-Profile-Name",
+                PLEX_HLS_CLIENT_PROFILE_NAME.to_string(),
+            ),
             ("directPlay", "0".to_string()),
             ("directStream", "0".to_string()),
             ("fastSeek", "1".to_string()),
@@ -2105,6 +2114,10 @@ mod tests {
         assert!(first_url.contains("/video/:/transcode/universal/start.m3u8?"));
         assert!(first_url.contains("maxVideoBitrate=2000"));
         assert!(
+            first_url.contains("X-Plex-Client-Profile-Name=Web"),
+            "the start URL must select the live-proven HLS profile: {first_url}"
+        );
+        assert!(
             first_url.contains("videoResolution=1280x720"),
             "resolution is sent as a WxH box: {first_url}"
         );
@@ -2114,6 +2127,42 @@ mod tests {
         // and mpv's own seek would be into a stream that begins elsewhere.
         let (resumed, _) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 930).expect("builds");
         assert!(resumed.contains("offset=930"), "{resumed}");
+    }
+
+    // Finding tr-11: Plex cannot choose an HLS transcode profile from Vela's
+    // generic request alone. This must exercise the real decision request
+    // builder; checking only the shared value would miss an omitted insertion.
+    #[tokio::test]
+    async fn a_transcode_decision_selects_the_hls_client_profile() {
+        let body = r#"<MediaContainer generalDecisionCode="1001"/>"#;
+        let response = format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
+            body.len(),
+            body
+        )
+        .into_bytes();
+        let (port, captured) = artwork_server(response).await;
+
+        let decision = artwork_library(port)
+            .transcode_decision(
+                "42",
+                0,
+                Some(crate::source::QUALITY_TIERS[0]),
+                "decision-session",
+            )
+            .await
+            .expect("the synthetic decision response parses");
+        assert!(
+            decision.conversion_ok(),
+            "the fixture is an allowed conversion"
+        );
+
+        let request = captured.await.unwrap();
+        let request_line = request.lines().next().unwrap_or_default();
+        assert!(
+            request_line.contains("X-Plex-Client-Profile-Name=Web"),
+            "the decision query must select the live-proven HLS profile: {request_line}"
+        );
     }
 
     /// Finding or-7: the decision request must describe the delivery that would
