@@ -2,7 +2,8 @@
 
 ## Status
 
-**APPROVED 2026-07-26 — owner said “go” after reviewing revision 2.**
+**IMPLEMENTED and verified 2026-07-26 at `f185449`; external code review
+pending.**
 
 No product decision is outstanding. For this repair, Vela will identify its
 universal HLS transcode requests with
