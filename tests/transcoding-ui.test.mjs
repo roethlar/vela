@@ -243,6 +243,19 @@ test('Automatic is offered, and something implements it', () => {
     /replace_session: Some\(&request\.session_id\),\s*\n\s*run_kind: None,/,
     'the step-down relaunch must carry the run kind, not drop it',
   );
+  // Finding or-3: without an explicit source, Ask Every Time re-entered source
+  // selection for a duplicate title and returned an unobservable
+  // SourceChoiceRequired — the play was never replaced.
+  assert.match(
+    commands,
+    /let explicit_source = Some\(item\.source_id\.clone\(\)\)[\s\S]{0,120}\.or\(affinity\)/,
+    'a step-down must pin the relaunch to the copy already playing',
+  );
+  assert.match(
+    commands,
+    /explicit_source_id: explicit_source\.as_deref\(\),\s*\n\s*persist_explicit_choice: false,/,
+    "Automatic's own source pin must never be persisted as the user's choice",
+  );
   // ...and the verdict must reach something that can start the replacement.
   assert.match(
     lib,

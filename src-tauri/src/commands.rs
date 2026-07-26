@@ -3740,7 +3740,14 @@ pub(crate) async fn apply_step_down(
             None => (None, None),
         }
     };
-    let _ = affinity;
+    // Pin the relaunch to the copy already playing. Without this, Ask Every Time
+    // re-entered source selection for a duplicate title and returned an
+    // unobservable `SourceChoiceRequired` — the running play was never replaced
+    // and no further verdict was emitted (finding `or-3`). The item carries the
+    // source it resolved to; the run's affinity is the fallback for a sequence
+    // that pinned one earlier. Never persisted: Automatic picked this, not the
+    // user, so `persist_explicit_choice` stays false below.
+    let explicit_source = Some(item.source_id.clone()).filter(|id| !id.is_empty()).or(affinity);
 
     let session_id = uuid::Uuid::new_v4().to_string();
     let outcome = play_by_key(
@@ -3754,7 +3761,7 @@ pub(crate) async fn apply_step_down(
             // else: a race with the user's own choice must lose.
             replace_session: Some(&request.session_id),
             run_kind,
-            explicit_source_id: None,
+            explicit_source_id: explicit_source.as_deref(),
             persist_explicit_choice: false,
             quality_override: Some(next.id),
             resume_override_ms: Some(request.position_ms),
