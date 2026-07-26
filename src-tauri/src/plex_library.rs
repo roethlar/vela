@@ -1197,14 +1197,14 @@ impl PlexLibrary {
     ) -> Result<DecisionContainer, Box<dyn std::error::Error>> {
         let base = self.server_base().ok_or("No server selected")?;
         let url = format!("{base}/video/:/transcode/universal/decision");
-        let direct_play = if tier.is_some() { "0" } else { "1" };
+        let (direct_play, direct_stream) = Self::direct_flags(tier.is_some());
         let mut query: Vec<(&str, String)> = vec![
             ("path", format!("/library/metadata/{rating_key}")),
             ("mediaIndex", media_index.to_string()),
             ("partIndex", "0".to_string()),
             ("protocol", "hls".to_string()),
             ("directPlay", direct_play.to_string()),
-            ("directStream", "1".to_string()),
+            ("directStream", direct_stream.to_string()),
             ("fastSeek", "1".to_string()),
             ("copyts", "1".to_string()),
             ("offset", "0".to_string()),
@@ -1340,6 +1340,23 @@ impl PlexLibrary {
             format!("{base}/video/:/transcode/universal/start.m3u8?{encoded}"),
             session,
         ))
+    }
+
+    /// The `directPlay`/`directStream` pair a request must carry for a given
+    /// delivery, shared by the decision and the start URL so the two cannot
+    /// drift apart.
+    ///
+    /// They drifted once: the decision asked with `directStream=1` while the
+    /// start URL forces `0` for a tier, so a server that will remux but not
+    /// encode could answer yes and then refuse the stream mpv was handed
+    /// (finding `or-7`, codex openreview 2026-07-26). Asking about a delivery
+    /// other than the one you would start is not a capability check.
+    pub fn direct_flags(transcoding: bool) -> (&'static str, &'static str) {
+        if transcoding {
+            ("0", "0")
+        } else {
+            ("1", "1")
+        }
     }
 
     /// Where a teardown is sent. Split out so the credential-free shape of the
@@ -2097,6 +2114,37 @@ mod tests {
         // and mpv's own seek would be into a stream that begins elsewhere.
         let (resumed, _) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 930).expect("builds");
         assert!(resumed.contains("offset=930"), "{resumed}");
+    }
+
+    /// Finding or-7: the decision request must describe the delivery that would
+    /// actually be started. It asked with `directStream=1` while the start URL
+    /// forces `directStream=0`, so a server that will remux but not encode
+    /// could answer yes and then refuse the stream Vela handed mpv.
+    #[test]
+    fn the_decision_asks_for_the_delivery_it_would_start() {
+        let lib = artwork_library(1234);
+        let tier = crate::source::QUALITY_TIERS[0];
+        let start = lib
+            .transcode_url("42", 0, &media_with_parts(1), tier, 0)
+            .expect("builds")
+            .0;
+        // The two flags the start URL pins for a tier request.
+        assert!(start.contains("directPlay=0"), "start: {start}");
+        assert!(start.contains("directStream=0"), "start: {start}");
+
+        // The decision is built from the SAME production helper, so it cannot
+        // ask about a different delivery than the one above would start.
+        let (play, stream) = PlexLibrary::direct_flags(true);
+        assert_eq!(
+            (play, stream),
+            ("0", "0"),
+            "a tier decision must ask with the flags the start URL pins"
+        );
+        assert!(start.contains(&format!("directPlay={play}")), "start: {start}");
+        assert!(start.contains(&format!("directStream={stream}")), "start: {start}");
+
+        // Original is unchanged: it asks as, and plays as, direct.
+        assert_eq!(PlexLibrary::direct_flags(false), ("1", "1"));
     }
 
     /// The teardown URL is the one Vela builds that reaches a log on failure,
