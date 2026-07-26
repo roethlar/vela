@@ -3727,6 +3727,7 @@ pub(crate) async fn apply_step_down(
             resume_override_ms: Some(request.position_ms),
             osd_notice: Some(short_quality_notice(next)),
             steps_taken: request.steps_taken + 1,
+            continues_automatic: true,
         },
     )
     .await;
@@ -4558,6 +4559,25 @@ struct PlayLaunchRequest<'a> {
     osd_notice: Option<String>,
     /// Steps this logical play has already taken (see `PlaySpec::steps_taken`).
     steps_taken: u32,
+    /// This launch continues a play Automatic is already managing.
+    ///
+    /// Carried explicitly because a step-down relaunches at a CONCRETE tier:
+    /// inferring "is this Automatic?" from the resolved quality made every
+    /// replacement unwatched, so Automatic could take exactly one step and the
+    /// cap, the cooldown and the step count were all unreachable (finding
+    /// `or-1`, codex openreview 2026-07-26).
+    continues_automatic: bool,
+}
+
+/// Whether Automatic manages this launch, and therefore whether it is watched.
+///
+/// `resolved` is the quality this play will actually use. A user whose setting
+/// is Automatic is managed; a user who picked one tier from the title's menu is
+/// NOT — that is a deliberate choice for this play, not a request to adapt. A
+/// relaunch Automatic itself started stays managed whatever tier it resolved to,
+/// which is the case `or-1` got wrong.
+fn automatic_manages(continues_automatic: bool, one_off: Option<&str>, resolved: &str) -> bool {
+    continues_automatic || (one_off.is_none() && resolved == config::PLAYBACK_QUALITY_AUTOMATIC)
 }
 
 async fn play_by_key(
@@ -4587,6 +4607,7 @@ async fn play_by_key_locked(
         resume_override_ms,
         osd_notice,
         steps_taken,
+        continues_automatic,
     } = request;
     if !validate_playback_session(state, replace_session).await {
         return Err(PlayFailure::superseded());
@@ -4858,7 +4879,7 @@ async fn play_by_key_locked(
         // here: that needs a decision round trip per play, and a verdict is
         // rare — `apply_step_down` resolves the ladder when one actually
         // arrives, and declines if there is nowhere to go.
-        step_down: (quality == config::PLAYBACK_QUALITY_AUTOMATIC).then(|| {
+        step_down: automatic_manages(continues_automatic, quality_override, &quality).then(|| {
             let queue = state.step_down.clone();
             let session = session_id.to_string();
             let already = steps_taken;
@@ -5064,6 +5085,7 @@ pub async fn play_item(
             resume_override_ms: None,
             osd_notice: None,
             steps_taken: 0,
+            continues_automatic: false,
         },
     )
     .await
@@ -5125,6 +5147,7 @@ pub async fn resolve_playback_source_choice(
             resume_override_ms: None,
             osd_notice: None,
             steps_taken: 0,
+            continues_automatic: false,
         },
     )
     .await
@@ -5724,6 +5747,7 @@ async fn play_playlist_entries(
                 resume_override_ms: None,
                 osd_notice: None,
                 steps_taken: 0,
+                continues_automatic: false,
             },
         )
         .await
@@ -5807,6 +5831,7 @@ async fn play_server_playlist_entries(
                 resume_override_ms: None,
                 osd_notice: None,
                 steps_taken: 0,
+                continues_automatic: false,
             },
         )
         .await
@@ -6405,6 +6430,28 @@ mod tests {
                 .unwrap_or_else(|error| error.into_inner())
                 .push(session.to_string());
         }
+    }
+
+    /// Finding or-1: Automatic could take exactly ONE step. The sampler spawned
+    /// only when the resolved quality was `automatic`, and a step-down
+    /// relaunches at a CONCRETE tier — so no replacement was ever watched, and
+    /// the cap, the cooldown and the carried step count were unreachable code.
+    #[test]
+    fn a_step_down_replacement_is_still_managed_by_automatic() {
+        // The case that was broken: a relaunch at a tier, still Automatic's.
+        assert!(
+            automatic_manages(true, Some("1080p-8000"), "1080p-8000"),
+            "a replacement Automatic itself started must keep being watched"
+        );
+        // The ordinary Automatic play.
+        assert!(automatic_manages(false, None, "automatic"));
+        // A deliberate one-off from the title's menu is NOT Automatic: the user
+        // picked this tier for this play and did not ask anything to adapt.
+        assert!(!automatic_manages(false, Some("1080p-8000"), "1080p-8000"));
+        // Even when the stored setting is Automatic, an explicit one-off wins.
+        assert!(!automatic_manages(false, Some("720p-4000"), "720p-4000"));
+        // And a plain Original play is never watched.
+        assert!(!automatic_manages(false, None, "original"));
     }
 
     fn step_request(session: &str, steps: u32) -> StepDownRequest {

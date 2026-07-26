@@ -202,11 +202,18 @@ test('Automatic is offered, and something implements it', () => {
     /<option value="automatic">Automatic<\/option>/,
     'Automatic is implemented, so it must be offered',
   );
-  // A play must actually watch itself — the sampler spawns only for Automatic.
+  // A play must actually watch itself. Gated on the MODE, not on the resolved
+  // quality: a step-down relaunches at a concrete tier, and reading the mode
+  // off that quality left every replacement unwatched (finding or-1).
   assert.match(
     commands,
-    /step_down: \(quality == config::PLAYBACK_QUALITY_AUTOMATIC\)\s*\.then/,
-    'an Automatic play must spawn the health sampler',
+    /step_down: automatic_manages\(continues_automatic, quality_override, &quality\)\s*\.then/,
+    'the sampler must be gated on Automatic mode, not on the resolved quality',
+  );
+  assert.match(
+    commands,
+    /steps_taken: request\.steps_taken \+ 1,\s*\n\s*continues_automatic: true,/,
+    'a step-down relaunch must declare that it continues an Automatic play',
   );
   // ...and the verdict must reach something that can start the replacement.
   assert.match(
