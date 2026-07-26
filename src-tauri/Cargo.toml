@@ -1,6 +1,6 @@
 [package]
 name = "vela"
-version = "1.0.20"
+version = "1.0.21"
 description = "mpv-backed HDR media client (Plex, Jellyfin, Emby)"
 authors = ["Michael Coelho"]
 license = "MIT"
@@ -33,6 +33,12 @@ tauri-plugin-dialog = "2"
 base64 = "0.22"
 if-addrs = "0.15"
 sha2 = "0.10"
+
+# `test-util` is not part of tokio's `full`. It buys paused time, which is the
+# only way to assert a teardown deadline actually fires without the test
+# waiting out that deadline in real seconds.
+[dev-dependencies]
+tokio = { version = "1", features = ["test-util"] }
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"

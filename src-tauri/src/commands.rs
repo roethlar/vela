@@ -27,7 +27,7 @@ const PRODUCT: &str = "Vela";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 /// UTC date the build was cut; updated alongside the version by scripts/bump.sh.
-const BUILD_DATE: &str = "2026-07-25";
+const BUILD_DATE: &str = "2026-07-26";
 
 /// Project home, shown (and opened) from the build-info footer.
 const REPO_URL: &str = "https://github.com/roethlar/vela";
@@ -3610,6 +3610,86 @@ pub(crate) struct PlaybackWindowSession {
     observation: playback::WindowStateObservation,
 }
 
+/// A server-side transcode Vela started and is therefore obliged to stop.
+///
+/// It holds the source itself rather than an id to look up later: the play must
+/// remain stoppable even if the user disconnects that server while it is still
+/// running. Neither backend has a keep-alive and how an abandoned session
+/// expires is unknown, so the DELETE is mandatory, not best-effort.
+pub(crate) struct ActiveTranscode {
+    source: std::sync::Arc<dyn MediaSource>,
+    session: String,
+}
+
+/// Where that record lives while the play runs. `AppState` owns it so that app
+/// exit — which kills mpv and returns without waiting for any tracker tail —
+/// still has something to drain (finding `tr-4`).
+pub(crate) type ActiveTranscodeSlot = std::sync::Arc<std::sync::Mutex<Option<ActiveTranscode>>>;
+
+/// Bounded so a shutdown can never hang on an unreachable server. Matches the
+/// tracker's own HTTP deadline in `playback.rs`.
+const TRANSCODE_TEARDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// Install the record for a play that started a transcode, returning whatever
+/// it displaced so the caller can stop that encoder too. Replacement is not
+/// left to the superseded play's tail: that tail races this registration, and
+/// after it loses the race `take_active_transcode` correctly refuses it.
+pub(crate) fn register_active_transcode(
+    slot: &ActiveTranscodeSlot,
+    source: &std::sync::Arc<dyn MediaSource>,
+    session: String,
+) -> Option<ActiveTranscode> {
+    slot.lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .replace(ActiveTranscode {
+            source: source.clone(),
+            session,
+        })
+}
+
+/// Claim the record for exactly this session. Session-matched so a newer play's
+/// encoder survives an older play's end callback, and `take` so exactly one of
+/// the tail, the failure path, and the exit sweep can ever stop a given session.
+pub(crate) fn take_active_transcode(
+    slot: &ActiveTranscodeSlot,
+    session: &str,
+) -> Option<ActiveTranscode> {
+    let mut guard = slot.lock().unwrap_or_else(|e| e.into_inner());
+    if guard
+        .as_ref()
+        .is_some_and(|active| active.session == session)
+    {
+        guard.take()
+    } else {
+        None
+    }
+}
+
+/// Claim whatever is registered, whatever its session. Only the exit sweep may
+/// do this: it is the last code that will ever run, so leaving a record behind
+/// means leaving an encoder running.
+pub(crate) fn take_any_active_transcode(slot: &ActiveTranscodeSlot) -> Option<ActiveTranscode> {
+    slot.lock().unwrap_or_else(|e| e.into_inner()).take()
+}
+
+/// Stop one transcode, awaited to completion or to its deadline.
+pub(crate) async fn stop_transcode_record(record: ActiveTranscode) {
+    let _ = tokio::time::timeout(
+        TRANSCODE_TEARDOWN_TIMEOUT,
+        record.source.stop_transcode(&record.session),
+    )
+    .await;
+}
+
+/// The same teardown for callers that are plain threads outside any runtime —
+/// the tracker tail and the exit sweep. Both must not return until the DELETE
+/// has been attempted, which is the whole point: a detached task there can die
+/// with the process. Runs on the app's own runtime so the provider's pooled
+/// HTTP connections stay on the reactor that created them.
+pub(crate) fn stop_transcode_record_blocking(record: ActiveTranscode) {
+    tauri::async_runtime::block_on(stop_transcode_record(record));
+}
+
 /// Joins mpv's clean-EOF observation with the matching tracker's completed
 /// final write. The dispatcher receives a UUID only after both happened, so
 /// auto-advance cannot overtake recents/server progress and a stale EOF cannot
@@ -4549,6 +4629,19 @@ async fn play_by_key_locked(
     // started a transcode is obliged to stop it: neither server has a
     // keep-alive, and how an abandoned session expires is unknown.
     let transcode_session = resolved.transcode_session.clone();
+    // Own the session in app state from here on. The end callback alone is not
+    // enough: app exit kills mpv and returns without waiting for any tracker
+    // tail, so a teardown that only exists inside that callback — or in a task
+    // detached from it — can be lost with the runtime and leave an encoder
+    // running on the user's server (finding `tr-4`). Registering here also
+    // covers the launch-failure path below, which never reaches the callback.
+    if let Some(session) = transcode_session.clone() {
+        if let Some(replaced) = register_active_transcode(&state.active_transcode, &src, session) {
+            // A play that supersedes another must stop the encoder it
+            // supersedes; the old tracker's tail can no longer claim it.
+            stop_transcode_record(replaced).await;
+        }
+    }
     let markers_script = resolve_resource("vela-markers.lua");
     // Keep only the kinds the user actually enabled: the script must never be
     // handed a range it is not allowed to act on.
@@ -4597,20 +4690,19 @@ async fn play_by_key_locked(
         let recents_ready = recents_ready.clone();
         let playback_started_at_ms = playback_started_at_ms.clone();
         let advance = state.playback_advance.clone();
-        // Hold the source itself rather than reaching back through the
-        // registry: the play must be stoppable even if the user disconnects
-        // that server while it is still running.
-        let stopping_source = src.clone();
+        let transcode_slot = state.active_transcode.clone();
         let transcode_session = transcode_session.clone();
         Some(std::sync::Arc::new(move |position_ms: u64| {
             // Stop the server-side transcode first: it costs the user's server
             // real work, and the recents/event bookkeeping below must not be
-            // able to skip it by returning early.
-            if let Some(session) = transcode_session.clone() {
-                let source = stopping_source.clone();
-                tauri::async_runtime::spawn(async move {
-                    source.stop_transcode(&session).await;
-                });
+            // able to skip it by returning early. This runs on the tracker's
+            // own thread, outside any runtime, so it BLOCKS until the DELETE
+            // lands or its deadline expires rather than detaching a task the
+            // process may outlive.
+            if let Some(session) = transcode_session.as_deref() {
+                if let Some(record) = take_active_transcode(&transcode_slot, session) {
+                    stop_transcode_record_blocking(record);
+                }
             }
             if !recents_ready.wait_succeeded() {
                 return;
@@ -4700,6 +4792,13 @@ async fn play_by_key_locked(
     let stop = match played {
         Ok(stop) => stop,
         Err(message) => {
+            // mpv never started, so no tracker tail will ever run: this is the
+            // only chance to stop what the resolve already committed us to.
+            if let Some(session) = transcode_session.as_deref() {
+                if let Some(record) = take_active_transcode(&state.active_transcode, session) {
+                    stop_transcode_record(record).await;
+                }
+            }
             // The old player has already been terminated. Restore its cursor
             // bookkeeping for the established failure contract, but never
             // re-authorize its dead session for delayed continuation work.
@@ -5995,6 +6094,196 @@ mod tests {
                 Ok(())
             }
         }
+    }
+
+    /// Records every teardown it is asked for, and can be made to hang so the
+    /// teardown deadline itself is observable.
+    struct TranscodeTestSource {
+        stopped: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        hang: bool,
+    }
+
+    impl TranscodeTestSource {
+        /// Returns the source behind the trait object the slot stores, plus the
+        /// log of sessions it was asked to stop.
+        fn build() -> (
+            std::sync::Arc<dyn crate::source::MediaSource>,
+            std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+        ) {
+            let stopped = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+            let source: std::sync::Arc<dyn crate::source::MediaSource> =
+                std::sync::Arc::new(TranscodeTestSource {
+                    stopped: stopped.clone(),
+                    hang: false,
+                });
+            (source, stopped)
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for TranscodeTestSource {
+        fn id(&self) -> String {
+            "transcoder".to_string()
+        }
+        fn name(&self) -> String {
+            "Transcoder".to_string()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _key: &str,
+            _ty: &str,
+            _sort: Option<&str>,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn search(&self, _query: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(
+            &self,
+            _key: &str,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            _key: &str,
+            _duration_ms: Option<u64>,
+            _include_markers: bool,
+            _quality: &str,
+        ) -> Result<crate::source::StreamResolution, String> {
+            Err("not used".to_string())
+        }
+        async fn stop_transcode(&self, session: &str) {
+            if self.hang {
+                // Longer than any deadline the caller could reasonably set.
+                tokio::time::sleep(Duration::from_secs(3600)).await;
+            }
+            self.stopped
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .push(session.to_string());
+        }
+    }
+
+    fn transcode_slot() -> ActiveTranscodeSlot {
+        std::sync::Arc::new(std::sync::Mutex::new(None))
+    }
+
+    /// The whole point of owning the record in `AppState`: exit kills mpv and
+    /// returns, so the tracker tail that normally issues the DELETE may never
+    /// run. The exit sweep must still find the session and stop it.
+    #[tokio::test]
+    async fn exit_sweep_stops_a_transcode_whose_end_callback_never_ran() {
+        let slot = transcode_slot();
+        let (source, stopped) = TranscodeTestSource::build();
+        assert!(register_active_transcode(&slot, &source, "abc".to_string()).is_none());
+
+        let record = take_any_active_transcode(&slot).expect("exit must find the live transcode");
+        stop_transcode_record(record).await;
+
+        assert_eq!(
+            *stopped.lock().unwrap_or_else(|e| e.into_inner()),
+            vec!["abc".to_string()],
+            "the exit sweep must issue the teardown for the exact live session"
+        );
+    }
+
+    /// A superseded play's tail runs after the replacement has registered. It
+    /// must not tear down the encoder the user is now watching.
+    #[tokio::test]
+    async fn an_older_plays_tail_cannot_stop_a_newer_plays_transcode() {
+        let slot = transcode_slot();
+        let (source, _stopped) = TranscodeTestSource::build();
+        register_active_transcode(&slot, &source, "old".to_string());
+        register_active_transcode(&slot, &source, "new".to_string());
+
+        assert!(
+            take_active_transcode(&slot, "old").is_none(),
+            "the old session is gone; its tail must claim nothing"
+        );
+        let survivor =
+            take_active_transcode(&slot, "new").expect("the newer transcode must still be owned");
+        assert_eq!(survivor.session, "new");
+    }
+
+    /// Registration is what stops the displaced encoder — the superseded tail
+    /// races this and loses, so it cannot be relied on to do it.
+    #[tokio::test]
+    async fn superseding_a_play_hands_back_the_encoder_it_displaced() {
+        let slot = transcode_slot();
+        let (source, stopped) = TranscodeTestSource::build();
+        register_active_transcode(&slot, &source, "first".to_string());
+
+        let displaced = register_active_transcode(&slot, &source, "second".to_string())
+            .expect("replacing a live transcode must hand back the old record");
+        assert_eq!(displaced.session, "first");
+        stop_transcode_record(displaced).await;
+
+        assert_eq!(
+            *stopped.lock().unwrap_or_else(|e| e.into_inner()),
+            vec!["first".to_string()],
+            "the displaced encoder must be the one stopped"
+        );
+    }
+
+    /// Three separate paths may try to stop a session — the tracker tail, the
+    /// launch-failure path, and the exit sweep. Claiming it must be exclusive
+    /// so it is stopped exactly once and never stopped twice.
+    #[tokio::test]
+    async fn a_transcode_can_be_claimed_only_once() {
+        let slot = transcode_slot();
+        let (source, _stopped) = TranscodeTestSource::build();
+        register_active_transcode(&slot, &source, "only".to_string());
+
+        assert!(take_active_transcode(&slot, "only").is_some());
+        assert!(
+            take_active_transcode(&slot, "only").is_none(),
+            "a second claimant must get nothing"
+        );
+        assert!(
+            take_any_active_transcode(&slot).is_none(),
+            "the exit sweep must not re-stop an already-torn-down session"
+        );
+    }
+
+    /// The exit sweep blocks on this call, so an unreachable server must cost a
+    /// bounded delay rather than a hung shutdown.
+    #[tokio::test(start_paused = true)]
+    async fn a_hanging_server_cannot_block_teardown_forever() {
+        let stopped = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let source: std::sync::Arc<dyn crate::source::MediaSource> =
+            std::sync::Arc::new(TranscodeTestSource {
+                stopped: stopped.clone(),
+                hang: true,
+            });
+        let slot = transcode_slot();
+        register_active_transcode(&slot, &source, "wedged".to_string());
+        let record = take_any_active_transcode(&slot).expect("registered");
+
+        // Returns at all: without the deadline this future never completes.
+        stop_transcode_record(record).await;
+
+        assert!(
+            stopped
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty(),
+            "the hung provider never finished; the deadline is what returned"
+        );
     }
 
     fn watch_backing(source_id: &str, rating_key: &str) -> BackingRef {

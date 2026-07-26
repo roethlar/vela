@@ -48,6 +48,11 @@ pub struct AppState {
     /// mpv, so a play that races shutdown either sees this (and doesn't launch) or
     /// has already registered its child for the exit sweep to kill — no orphan.
     pub shutting_down: Arc<AtomicBool>,
+    /// The server-side transcode the running play started, if any. Owned here
+    /// rather than only inside the playback-end callback: exit kills mpv and
+    /// returns without waiting for the tracker tail, so the exit sweep below is
+    /// the last chance to issue the mandatory teardown DELETE.
+    pub(crate) active_transcode: commands::ActiveTranscodeSlot,
     /// Already-killed players handed off for reaping. The periodic reaper drains
     /// this with non-blocking try_wait(), so replacing a player never needs to
     /// spawn a per-child waiter thread (which could fail under thread exhaustion
@@ -119,6 +124,7 @@ pub fn run() {
         tracking_stop: Mutex::new(None),
         current_child: Arc::new(Mutex::new(None)),
         shutting_down: Arc::new(AtomicBool::new(false)),
+        active_transcode: Arc::new(Mutex::new(None)),
         reap_queue: Arc::new(Mutex::new(Vec::new())),
         play_lock: AsyncMutex::new(()),
         watch_edit_lock: AsyncMutex::new(()),
@@ -370,6 +376,15 @@ pub fn run() {
                     .take();
                 if let Some(stop) = stop {
                     stop.store(true, Ordering::Relaxed);
+                }
+                // Unlike the player kill above, this one WAITS. Killing mpv is
+                // a local syscall; stopping a transcode is a request to the
+                // user's server, and nothing after this point will run — the
+                // tracker tail that normally issues it is not joined on exit.
+                // It is bounded by its own deadline, so an unreachable server
+                // delays shutdown rather than blocking it.
+                if let Some(record) = commands::take_any_active_transcode(&state.active_transcode) {
+                    commands::stop_transcode_record_blocking(record);
                 }
             }
         });

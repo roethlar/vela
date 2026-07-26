@@ -14,6 +14,7 @@ const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 
 const settings = read('src/lib/Settings.svelte');
 const commands = read('src-tauri/src/commands.rs');
+const lib = read('src-tauri/src/lib.rs');
 
 test('the quality control ships only while playback reads the setting', () => {
   const offered = settings.includes('id="playback-quality"');
@@ -42,12 +43,43 @@ test('the quality control ships only while playback reads the setting', () => {
 test('a started transcode is always stopped', () => {
   assert.match(
     commands,
-    /stop_transcode\(&session\)/,
-    'the play-end path must stop the transcode session it started',
+    /let transcode_session = resolved\.transcode_session\.clone\(\)/,
+    'the teardown handle must be captured before the resolution is consumed',
   );
   assert.match(
     commands,
-    /let transcode_session = resolved\.transcode_session\.clone\(\)/,
-    'the teardown handle must be captured before the resolution is consumed',
+    /register_active_transcode\(&state\.active_transcode/,
+    'the session must be owned by app state, not only by the end callback',
+  );
+});
+
+// Finding tr-4: the teardown used to be a task detached from the playback-end
+// callback, so app exit — which kills mpv and returns without joining any
+// tracker — could end the process before the DELETE was sent. Each of the three
+// paths that can be the last one to run must issue it itself.
+test('every path that ends a play tears the transcode down', () => {
+  // The tracker tail, on a thread outside any runtime: it must block on the
+  // teardown rather than detach it.
+  assert.match(
+    commands,
+    /take_active_transcode\(&transcode_slot, session\)[\s\S]{0,200}stop_transcode_record_blocking\(record\)/,
+    'the play-end callback must claim its own session and stop it before returning',
+  );
+  assert.doesNotMatch(
+    commands,
+    /async_runtime::spawn\(async move \{[\s\S]{0,200}stop_transcode/,
+    'teardown must never be detached into a task the process can outlive',
+  );
+  // Launch failure: no tracker will ever run, so this is the only chance.
+  assert.match(
+    commands,
+    /take_active_transcode\(&state\.active_transcode, session\)[\s\S]{0,200}stop_transcode_record\(record\)\.await/,
+    'a failed launch must stop the transcode its resolution already started',
+  );
+  // App exit: the last code that runs at all.
+  assert.match(
+    lib,
+    /take_any_active_transcode\(&state\.active_transcode\)[\s\S]{0,200}stop_transcode_record_blocking\(record\)/,
+    'the exit sweep must drain and stop any live transcode',
   );
 });
