@@ -378,7 +378,17 @@ export default {
        return [...group.querySelectorAll('button[role="menuitem"]')].map((button) => button.textContent.trim());`,
       'both merged episode source choices',
     );
-    assert.deepEqual(hierarchySources.sort(), ['Policy Distant', 'Policy Local']);
+    // Each copy also carries its own quality row (transcoding slice 4): version
+    // chooses WHICH copy, quality chooses how that copy is delivered. Asserted
+    // in full rather than filtered, so an entry appearing or vanishing from
+    // this menu is still caught here — this scenario is the only gate that sees
+    // the menu as rendered.
+    assert.deepEqual(hierarchySources.sort(), [
+      'Policy Distant',
+      'Policy Local',
+      'Quality on Policy Distant',
+      'Quality on Policy Local',
+    ]);
     assert.deepEqual(localMock.state.contractViolations, []);
     assert.deepEqual(distantMock.state.contractViolations, []);
     await screenshot('02-merged-hierarchy');
