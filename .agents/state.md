@@ -220,6 +220,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   is unaffected — both its tiers are recorded and owner-confirmed, so
   `codereview claude` and `openreview claude` dispatch without asking**
   (`.agents/machines.md`).
+- **The Linux E2E suite is GREEN at 38/38** (`a8a9fec`, 2026-07-26) — the first
+  run covering the whole transcoding feature, slice 5, and the marker work.
+  `markers` passes for the first time ever, and `sourcepolicy` passes after
+  slice 4's per-copy quality rows were added to its expected menu contents.
+  Note for anyone reading a smaller number in older entries: the suite was
+  37 scenarios before `markers` was added.
+- **BLOCKED, needs an owner decision: the `openreview` of the transcoding work
+  cannot run.** Dispatched `openreview claude` (claude-fable-5 @ max,
+  competitive) over `72e0f48..a8a9fec` on 2026-07-26; the harness returned HTTP
+  429, "You've reached your Fable 5 limit". That is an account quota, not a
+  cache or incantation fault, so a re-probe and retry cannot clear it. Per the
+  `codereview` playbook, switching provider is owner-only and no trigger may
+  silently consume another harness's quota — so this waits for the owner to
+  either let the quota reset or name a different harness. `codex` additionally
+  has no `tiers` block on this machine and would need a model named.
 - The Linux E2E venue outage is RESOLVED (2026-07-25): the venue was never
   broken. `--skip-build` had been reusing a binary produced by a plain `cargo
   build`, which embeds no frontend and so loads `devUrl`; the webview was
