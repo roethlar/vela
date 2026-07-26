@@ -142,10 +142,18 @@ impl AutomaticDetector {
 
     /// Feed one observation and get a verdict.
     pub fn observe(&mut self, sample: HealthSample) -> Option<StepDownReason> {
+        // A sample taken during a quiet period is DISCARDED, not merely
+        // unjudged. Keeping it only delayed its effect: the startup, seek or
+        // replacement burst it described stayed in the windows and fired a
+        // step-down the instant the quiet period expired, however well playback
+        // had recovered by then (finding `or-4`, codex openreview 2026-07-26).
+        if sample.at < self.quiet_until {
+            return None;
+        }
         self.samples.push(sample);
         self.forget_before(sample.at.saturating_sub(CACHE_WINDOW.max(DROP_WINDOW)));
 
-        if sample.at < self.quiet_until || self.steps_taken >= MAX_STEPS_PER_PLAY {
+        if self.steps_taken >= MAX_STEPS_PER_PLAY {
             return None;
         }
         // Drops first: the decoder failing is the more specific diagnosis, and a
@@ -408,6 +416,42 @@ mod tests {
         let mut feed = Feed::new(FILM);
         feed.detector = AutomaticDetector::resuming(FILM, 1);
         assert!(feed.run(120, 40, 0.1).is_some(), "the second step is allowed");
+    }
+
+    /// Finding or-4: samples taken during a quiet period used to be stored and
+    /// merely unjudged, so the burst they described sat in the windows and
+    /// fired the moment the quiet period ended — turning "ignore the startup
+    /// burst" into "act on it, ten seconds late".
+    #[test]
+    fn a_burst_during_the_quiet_period_cannot_fire_when_it_ends() {
+        let mut feed = Feed::new(FILM);
+        // A worst-case startup: every threshold exceeded, for the whole warm-up.
+        while feed.at() < WARM_UP {
+            assert_eq!(feed.step(40, 0.1), None, "warm-up must ignore the burst");
+        }
+        // Playback has recovered by the time the warm-up ends. Nothing from the
+        // burst may survive to trigger on the next healthy sample.
+        assert_eq!(
+            feed.run(6, 0, 30.0),
+            None,
+            "a recovered play must not be stepped down by a burst already forgiven"
+        );
+    }
+
+    /// Same rule on the other quiet period: a replacement stream's own rough
+    /// start must not fire the moment its cooldown expires.
+    #[test]
+    fn a_burst_during_the_cooldown_cannot_fire_when_it_ends() {
+        let mut feed = Feed::new(FILM);
+        feed.detector = AutomaticDetector::resuming(FILM, 1);
+        while feed.at() < COOLDOWN {
+            assert_eq!(feed.step(40, 0.1), None, "cooldown must ignore the burst");
+        }
+        assert_eq!(
+            feed.run(6, 0, 30.0),
+            None,
+            "a settled replacement must not be stepped down by its own startup"
+        );
     }
 
     /// The seek exclusion shipped DEAD once: the detector had `note_seek` and a
