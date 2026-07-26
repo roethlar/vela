@@ -4385,6 +4385,10 @@ struct PlayLaunchRequest<'a> {
     run_kind: Option<PlaybackRunKind>,
     explicit_source_id: Option<&'a str>,
     persist_explicit_choice: bool,
+    /// A one-off quality chosen from the title's own menu. It applies to this
+    /// play and is never written to config — the situation changes, not the
+    /// title (`.agents/decisions.md`, 2026-07-25). `None` uses the setting.
+    quality_override: Option<&'a str>,
 }
 
 async fn play_by_key(
@@ -4410,6 +4414,7 @@ async fn play_by_key_locked(
         run_kind,
         explicit_source_id,
         persist_explicit_choice,
+        quality_override,
     } = request;
     if !validate_playback_session(state, replace_session).await {
         return Err(PlayFailure::superseded());
@@ -4496,11 +4501,16 @@ async fn play_by_key_locked(
     // the server is never asked for markers at all.
     let skip_policies = SkipPolicies::load()?;
     let include_markers = skip_policies.any_enabled();
-    // The user's current quality setting, resolved once here so the sources
-    // never read config themselves.
-    let quality = config::load_config()
-        .map(|cfg| config::playback_quality(cfg.playback_quality.as_deref()))
-        .unwrap_or_else(|_| config::PLAYBACK_QUALITY_ORIGINAL.to_string());
+    // The quality for this play, resolved once here so the sources never read
+    // config themselves. A one-off menu choice wins for this launch only; it is
+    // validated against the same closed set the setting uses, so a value the
+    // frontend invented can never reach a source, and it is NEVER persisted.
+    let quality = match quality_override.filter(|value| config::is_playback_quality(value)) {
+        Some(chosen) => chosen.to_string(),
+        None => config::load_config()
+            .map(|cfg| config::playback_quality(cfg.playback_quality.as_deref()))
+            .unwrap_or_else(|_| config::PLAYBACK_QUALITY_ORIGINAL.to_string()),
+    };
     let resolved = match selection.version_id.as_deref() {
         Some(version_id) => {
             src.resolve_stream_version(
@@ -4832,6 +4842,9 @@ pub async fn play_item(
     expected_session: Option<String>,
     series_continuation: Option<bool>,
     explicit_source_id: Option<String>,
+    // A one-off choice from the title's own quality menu. It governs this
+    // play only and is never stored.
+    quality: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<PlayCommandResult, String> {
     let session_id = uuid::Uuid::new_v4().to_string();
@@ -4848,6 +4861,7 @@ pub async fn play_item(
                 .then_some(PlaybackRunKind::Series),
             explicit_source_id: explicit_source_id.as_deref(),
             persist_explicit_choice: explicit_source_id.is_some(),
+            quality_override: quality.as_deref(),
         },
     )
     .await
@@ -4905,6 +4919,7 @@ pub async fn resolve_playback_source_choice(
             run_kind: pending.run_kind,
             explicit_source_id: Some(&source_id),
             persist_explicit_choice: false,
+            quality_override: None,
         },
     )
     .await
@@ -5500,6 +5515,7 @@ async fn play_playlist_entries(
                 run_kind: Some(PlaybackRunKind::VelaPlaylist),
                 explicit_source_id: None,
                 persist_explicit_choice: false,
+                quality_override: None,
             },
         )
         .await
@@ -5579,6 +5595,7 @@ async fn play_server_playlist_entries(
                 run_kind: Some(PlaybackRunKind::ServerPlaylist),
                 explicit_source_id: None,
                 persist_explicit_choice: false,
+                quality_override: None,
             },
         )
         .await

@@ -54,6 +54,89 @@ test('a started transcode is always stopped', () => {
   );
 });
 
+// Slice 4 — the per-title one-off menu (`.agents/plans/server-transcoding.md`,
+// owner ruling 2026-07-25). Quality nests under version when a title has several
+// copies and is offered directly when it has one; the two labels never appear
+// together; the choice governs one play and is stored nowhere.
+const page = read('src/routes/+page.svelte');
+
+test('quality nests under version, and the two labels are mutually exclusive', () => {
+  // The nesting: the version submenu carries a per-copy quality row.
+  assert.match(
+    page,
+    /aria-label="Play Version"[\s\S]{0,1200}toggleQualityMenu\(mi, b\)/,
+    'each version in Play Version must expand to that copy\'s qualities',
+  );
+  // The collapsed form is the {:else if} of the same branch, so no title can
+  // ever render both labels.
+  assert.match(
+    page,
+    /\{#if \(mi\.backing\?\.length \?\? 0\) > 1 && mi\.canonicalId\}[\s\S]{0,2000}\{:else if mi\.sourceId[\s\S]{0,600}Play at Quality/,
+    'Play at Quality must be the else-branch of Play Version, never a sibling',
+  );
+});
+
+test('quality options are resolved only when the submenu opens', () => {
+  // The Plex decision call is a round trip per version. Paying it on every
+  // right-click would make the menu slow for everyone who never converts.
+  assert.match(
+    page,
+    /async function toggleQualityMenu\([\s\S]{0,700}invoke<QualityOptions>\("quality_options"/,
+    'the options request must live in the submenu toggle',
+  );
+  assert.doesNotMatch(
+    page,
+    /function openMenu\([\s\S]{0,800}quality_options/,
+    'opening the context menu must not ask the server anything',
+  );
+});
+
+test('a one-off quality is never persisted', () => {
+  // It reaches the backend as a play argument...
+  assert.match(
+    page,
+    /invoke<PlayCommandResult>\("play_item", \{[\s\S]{0,300}quality,/,
+    'the chosen quality must travel with the play it starts',
+  );
+  // ...and the backend routes it to this launch only, never to config.
+  assert.match(
+    commands,
+    /quality_override: quality\.as_deref\(\)/,
+    'play_item must pass the one-off choice as an override',
+  );
+  assert.match(
+    commands,
+    /let quality = match quality_override[\s\S]{0,400}config::playback_quality/,
+    'the override must win for this play and fall back to the stored setting',
+  );
+  assert.doesNotMatch(
+    commands,
+    /quality_override[\s\S]{0,600}cfg\.playback_quality = /,
+    'a one-off choice must never be written to the settings file',
+  );
+  // Every other launch path keeps the setting: continuation, playlists, and the
+  // source-choice reply must not inherit a previous play's one-off.
+  assert.equal(
+    [...commands.matchAll(/quality_override: None,/g)].length,
+    3,
+    'automatic continuation, playlist play, and source-choice replies use the setting',
+  );
+});
+
+test('an invented quality cannot reach a source', () => {
+  assert.match(
+    commands,
+    /quality_override\.filter\(\|value\| config::is_playback_quality\(value\)\)/,
+    'the override must be validated against the same closed set as the setting',
+  );
+  const config = read('src-tauri/src/config.rs');
+  assert.match(
+    config,
+    /pub fn is_playback_quality[\s\S]{0,200}playback_quality_values\(\)\.contains/,
+    'that set must be the one the stored setting is validated against',
+  );
+});
+
 // Finding tr-9: the quality menu must not offer conversions for a version the
 // server cannot deliver whole. `transcode_url` refuses to build one (guarded in
 // Rust); this is the other half — the menu never advertising it in the first

@@ -403,6 +403,29 @@ stripped on save.
   nesting; no persistence after a one-off play; no decision request until the
   submenu is opened.
 
+**Slice 4 evidence (2026-07-25, version 1.0.26).** `PlayLaunchRequest` gains
+`quality_override`, and `play_item` gains a `quality` parameter that reaches it.
+The override is filtered through `config::is_playback_quality` — the same closed
+set `validate` uses for the stored setting, now shared as
+`config::playback_quality_values()` — so a value the frontend invented can never
+reach a source. It is never written to config. Every other launch site
+(automatic continuation, playlist play, the source-choice reply) passes
+`quality_override: None` and keeps the setting.
+
+In `+page.svelte`, `Play Version >` now carries a `Quality on <server> >` row per
+copy, and a single-copy title gets `Play at Quality >` as the `{:else if}` of the
+same branch — so the two labels are mutually exclusive by construction.
+`toggleQualityMenu` is the only caller of `quality_options`, so the Plex decision
+round trip is paid when a submenu opens and never when the context menu does.
+
+**One deviation from this slice as written, deliberate.** The slice says the
+entry is "absent entirely when the only version cannot be transcoded". That
+cannot hold together with lazy resolution: whether a copy can be converted is
+only known after the submenu has been opened and the request has returned. The
+lazy rule is the one with a stated performance reason, so it wins; the opened
+submenu says "This server won't convert this title." rather than rendering a
+blank popup. `Original` is listed only when the server reports direct play.
+
 ### Slice 5 — Automatic
 
 - Only active when the setting is `Automatic`. The play starts at `Original`.

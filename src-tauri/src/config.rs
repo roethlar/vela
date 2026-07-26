@@ -146,6 +146,22 @@ pub fn playback_quality(stored: Option<&str>) -> String {
         .to_string()
 }
 
+/// Every value the quality setting may hold: the ladder plus the two non-tier
+/// values. Built from `QUALITY_TIERS` so a tier that leaves the ladder cannot
+/// survive anywhere as a value nothing can honour.
+pub fn playback_quality_values() -> Vec<&'static str> {
+    let mut values = vec![PLAYBACK_QUALITY_ORIGINAL, PLAYBACK_QUALITY_AUTOMATIC];
+    values.extend(crate::source::QUALITY_TIERS.iter().map(|tier| tier.id));
+    values
+}
+
+/// Whether a value is one Vela can actually play at. The one-off menu choice is
+/// checked against exactly the set the stored setting is validated against, so
+/// a frontend-invented value can never reach a source.
+pub fn is_playback_quality(value: &str) -> bool {
+    playback_quality_values().contains(&value)
+}
+
 /// What Vela does when playback enters a marker range of one kind: nothing,
 /// offer the in-player skip button, or seek past it automatically.
 ///
@@ -399,12 +415,10 @@ impl AppConfig {
         )?;
         // The allowed set is the ladder itself plus the two non-tier values, so
         // a tier that leaves the ladder can never linger as a valid setting.
-        let mut quality_values = vec![PLAYBACK_QUALITY_ORIGINAL, PLAYBACK_QUALITY_AUTOMATIC];
-        quality_values.extend(crate::source::QUALITY_TIERS.iter().map(|tier| tier.id));
         validate_optional_closed(
             "playback quality",
             self.playback_quality.as_deref(),
-            &quality_values,
+            &playback_quality_values(),
         )?;
         validate_optional_closed(
             "display resolution",

@@ -2141,10 +2141,13 @@
     return (item.viewOffsetMs ?? 0) > 0;
   }
 
+  // `quality`: a one-off choice from the title's own menu. Null means "use the
+  // setting"; the backend never stores whatever is passed here.
   async function play(
     item: Item,
     intent: PlayIntent = "resume",
     explicitSourceId: string | null = null,
+    quality: string | null = null,
   ) {
     // A user choice always starts a new run. The backend's expected-session
     // check independently prevents an already-awaited continuation from
@@ -2159,6 +2162,7 @@
         expectedSession: null,
         seriesContinuation,
         explicitSourceId,
+        quality,
       });
       await handlePlayCommandResult(result, (sessionId) => {
         if (seriesContinuation) {
@@ -2219,6 +2223,7 @@
     addMenuLoading = false;
     addMenuPlaylists = [];
     addMenuStatus = null;
+    closeQualityMenu();
     // The playlist submenu can be much taller than the old fixed action list.
     menu = {
       x: Math.max(8, Math.min(e.clientX, window.innerWidth - 290)),
@@ -2234,6 +2239,7 @@
     versionMenuOpen = false;
     addMenuLoading = false;
     addMenuStatus = null;
+    closeQualityMenu();
     menu = null;
   }
 
@@ -2273,6 +2279,87 @@
     }
     closeAddMenu();
     versionMenuOpen = true;
+  }
+
+  // The per-title one-off quality choice. Nested under version when a title has
+  // several copies, offered directly when it has one; never both, per the
+  // 2026-07-25 ruling. Nothing here is persisted — the choice applies to the
+  // play it starts and the next play reads the setting again.
+  type QualityTier = { id: string; label: string; bitrateKbps: number };
+  type QualityOptions = {
+    canDirectPlay: boolean;
+    sourceBitrateKbps: number;
+    sourceHeight: number;
+    tiers: QualityTier[];
+  };
+  // Keyed by the backing it belongs to, so a multi-version title can have one
+  // copy's list open without discarding another's.
+  let qualityMenuFor = $state<string | null>(null);
+  let qualityLoading = $state(false);
+  let qualityOptions = $state<QualityOptions | null>(null);
+  let qualityError = $state<string | null>(null);
+  let qualityAttempt = 0;
+
+  function closeQualityMenu() {
+    qualityAttempt++;
+    qualityMenuFor = null;
+    qualityLoading = false;
+    qualityOptions = null;
+    qualityError = null;
+  }
+
+  const backingKey = (b: { sourceId: string; ratingKey: string }) =>
+    b.sourceId + ":" + b.ratingKey;
+
+  // Resolved when the submenu OPENS, never when the context menu does: for Plex
+  // this is a decision round trip per version, and paying it on every
+  // right-click would make the menu feel slow for everyone who never converts.
+  async function toggleQualityMenu(item: Item, b: { sourceId: string; ratingKey: string }) {
+    const key = backingKey(b);
+    if (qualityMenuFor === key) {
+      closeQualityMenu();
+      return;
+    }
+    closeQualityMenu();
+    qualityMenuFor = key;
+    qualityLoading = true;
+    const attempt = ++qualityAttempt;
+    try {
+      const loaded = await invoke<QualityOptions>("quality_options", {
+        itemKey: b.ratingKey,
+        versionId: null,
+      });
+      if (attempt === qualityAttempt && menu) qualityOptions = loaded;
+    } catch (error) {
+      if (attempt === qualityAttempt && menu) qualityError = String(error);
+    } finally {
+      if (attempt === qualityAttempt) qualityLoading = false;
+    }
+  }
+
+  function qualityLabel(tier: QualityTier) {
+    // Two tiers share the label "Convert to 1080p HD", so the bitrate is not
+    // decoration — it is the only thing telling them apart.
+    const rate =
+      tier.bitrateKbps >= 1000
+        ? `${tier.bitrateKbps / 1000} Mbps`
+        : `${tier.bitrateKbps} kbps`;
+    return `${tier.label} — ${rate}`;
+  }
+
+  // One play at one quality. `quality` reaches play_item for this launch only.
+  async function playAtQuality(
+    item: Item,
+    b: { sourceId: string; ratingKey: string },
+    quality: string,
+  ) {
+    closeMenu();
+    await play(
+      { ...item, ratingKey: b.ratingKey, sourceId: b.sourceId },
+      "resume",
+      b.sourceId,
+      quality,
+    );
   }
 
   async function addToPlaylist(saved: PlaylistSummary) {
@@ -3316,6 +3403,7 @@
         e.preventDefault();
         cancelSourceChoice();
       }
+      else if (menu && qualityMenuFor) closeQualityMenu();
       else if (menu && versionMenuOpen) versionMenuOpen = false;
       else if (menu && addMenuOpen) closeAddMenu();
       else if (menu) closeMenu();
@@ -3424,7 +3512,9 @@
       <button role="menuitem" aria-expanded={versionMenuOpen} onclick={toggleVersionMenu}>Play Version <Icon name="chevron" size={13} /></button>
       {#if versionMenuOpen}
         <!-- A deliberate source choice persists for this logical title in the
-             three automatic modes. Ask mode changes this to one-shot in Slice 3. -->
+             three automatic modes. Ask mode changes this to one-shot in Slice 3.
+             Quality nests one level deeper: version chooses WHICH COPY, quality
+             chooses how that copy is delivered (2026-07-25 ruling). -->
         <div class="addsubmenu" role="group" aria-label="Play Version">
           {#each mi.backing! as b (b.sourceId + ":" + b.ratingKey)}
             {#if inProgress}
@@ -3439,12 +3529,64 @@
                 {sourceNameOf(b.sourceId)}
               </button>
             {/if}
+            <button
+              class="qualityrow"
+              role="menuitem"
+              aria-expanded={qualityMenuFor === backingKey(b)}
+              onclick={() => toggleQualityMenu(mi, b)}
+            >
+              Quality on {sourceNameOf(b.sourceId)} <Icon name="chevron" size={13} />
+            </button>
+            {#if qualityMenuFor === backingKey(b)}
+              {@render qualitySubmenu(mi, b)}
+            {/if}
           {/each}
         </div>
+      {/if}
+    {:else if mi.sourceId && mi.mediaType !== "show" && mi.mediaType !== "season"}
+      <!-- One copy: quality is offered directly and the nesting label never
+           appears alongside it. -->
+      {@const only = { sourceId: mi.sourceId!, ratingKey: mi.ratingKey }}
+      <button
+        role="menuitem"
+        aria-expanded={qualityMenuFor === backingKey(only)}
+        onclick={() => toggleQualityMenu(mi, only)}
+      >
+        Play at Quality <Icon name="chevron" size={13} />
+      </button>
+      {#if qualityMenuFor === backingKey(only)}
+        {@render qualitySubmenu(mi, only)}
       {/if}
     {/if}
   </div>
 {/if}
+
+{#snippet qualitySubmenu(item: Item, b: { sourceId: string; ratingKey: string })}
+  <div class="addsubmenu" role="group" aria-label="Choose a quality">
+    {#if qualityLoading}
+      <div class="addempty" role="status">Asking the server…</div>
+    {:else if qualityError}
+      <div class="addstatus addfailure" role="alert">{friendlyError(qualityError)}</div>
+    {:else if qualityOptions}
+      {#if qualityOptions.canDirectPlay}
+        <button role="menuitem" onclick={() => playAtQuality(item, b, "original")}>
+          Original — play the file as it is
+        </button>
+      {/if}
+      {#each qualityOptions.tiers as tier (tier.id)}
+        <button role="menuitem" onclick={() => playAtQuality(item, b, tier.id)}>
+          {qualityLabel(tier)}
+        </button>
+      {/each}
+      {#if qualityOptions.tiers.length === 0}
+        <!-- The server told us it will not convert this copy. Saying so beats a
+             blank popup, and the entry itself cannot be withheld: the answer
+             only exists once the submenu has been opened. -->
+        <div class="addempty">This server won't convert this title.</div>
+      {/if}
+    {/if}
+  </div>
+{/snippet}
 
 {#if sectionMenu}
   {@const sm = sectionMenu.section}
