@@ -85,10 +85,29 @@ teardown is distinguishable from an abandoned one.
 **A second defect was found while fixing this one and is fixed here too.** The
 old code logged `{error}` for transport failures under a comment promising
 "Never print the URL". reqwest 0.13's `Display` renders the full request URL, so
-that line was emitting the Plex `X-Plex-Token` (and the Jellyfin `api_key`) plus
-the session handle to stderr. `describe_transport_failure` is now built from the
-error's own predicates and can never contain a URL; a guard asserts the premise
-(the raw error DOES leak) alongside the fix.
+that line printed exactly what the comment forbade.
+`describe_transport_failure` is now built from the error's own predicates and
+can never contain a URL; a guard asserts the premise (the raw error DOES render
+the URL) alongside the fix.
+
+**CORRECTION (2026-07-25).** This was first recorded here as leaking the Plex
+`X-Plex-Token` and the Jellyfin `api_key`. **That overstated it and was wrong.**
+Both teardown requests authenticate with HEADERS, so their URLs carry no
+credential: what the log exposed was the server address and the transcode
+session handle. The fix stands and the comment it restored was still being
+violated, but the severity claim was not verified before it was written down.
+The sweep that established this is recorded below.
+
+**Sweep for the same class elsewhere (2026-07-25): none found.** Every HTTP
+request VELA ITSELF makes sends the Plex token via an `X-Plex-Token` header and
+the Jellyfin/Emby token via `auth_headers()` — `plex_library.rs`, `plex_api.rs`
+(where `.query(&params)` carries only non-credential parameters), `jellyfin.rs`,
+and `artwork.rs` alike. No reqwest error Vela can produce has a token in its
+URL, so no other `{error}` print can leak one. The query-string token exposure
+that does exist is confined to URLs handed to mpv (Plex transcode and Jellyfin
+`master.m3u8`) and to the webview (Jellyfin poster/backdrop), which is the
+accepted local-only exposure recorded in `.agents/repo-guidance.md` — those URLs
+are never requested by Vela and so never appear in a reqwest error.
 
 Guards: six tests in `source::teardown_tests`, four of them driving a loopback
 server that counts requests. Four regressions injected separately. The post-commit

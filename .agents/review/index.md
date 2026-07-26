@@ -19,9 +19,13 @@ tr-3/tr-5/tr-7 at `049ed78`, then tr-4 `d24224b`, tr-6 `996c417`, tr-8 `47255a8`
 tr-9 `a53da15`, with slice 4's UI at `f236d38`. Thirty regressions were injected
 separately and each failed for its own reason; two guards written during those
 passes were found VACUOUS, strengthened, and re-proven (`512d67f`, `696ec7e`).
-Fixing tr-6 uncovered a separate pre-existing credential leak — reqwest's error
-`Display` embeds the full URL, so the teardown's failure log was emitting the
-Plex token and session handle — fixed and guarded in the same commit. **No
+Fixing tr-6 uncovered a separate pre-existing defect — reqwest's error `Display`
+embeds the full URL, so the teardown's failure log printed exactly what its own
+comment forbade — fixed and guarded in the same commit. **That was first
+recorded as leaking the Plex token; it did not.** Both teardowns authenticate by
+header, so the exposure was the server address and session handle. A sweep for
+the same class across every HTTP path found nothing further: every request Vela
+makes is header-authenticated. Correction and sweep in the finding file. **No
 external review has run on any of these fixes, and none of it has been exercised
 against a real server.** Detail: `.agents/review/findings/tr-3.md`.
 

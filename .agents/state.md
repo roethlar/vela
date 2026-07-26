@@ -169,8 +169,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   a guard strengthening at 1.0.23 (`512d67f`): teardown classifies the answer,
   retries 429/5xx twice with backoff, reports 401/403 once, treats 404 as
   already-gone, and describes transport failures WITHOUT reqwest's `Display` —
-  which embeds the full URL and was leaking the Plex token and session handle
-  into stderr (a pre-existing defect found while fixing tr-6). `tr-8` at 1.0.24
+  which embeds the full URL, so the log printed what its own comment forbade (a
+  pre-existing defect found while fixing tr-6; first recorded here as a token
+  leak, which was WRONG — both teardowns authenticate by header, so the exposure
+  was the server address and session handle. A 2026-07-25 sweep confirmed every
+  request Vela makes is header-authenticated and found no further instance). `tr-8` at 1.0.24
   (`47255a8`): `Automatic` is no longer offered; it stays selectable only for a
   config that already holds it, so no stored value is silently rewritten and no
   document is invalidated. `tr-9` at 1.0.25 (`a53da15`): `conversion_possible`

@@ -1165,9 +1165,15 @@ mod teardown_tests {
         }
     }
 
-    /// A teardown URL carries the Plex token or the Jellyfin `api_key` plus the
-    /// session handle, and reqwest renders the whole URL in its own `Display`.
-    /// Nothing derived from the error may reach a log.
+    /// reqwest renders the whole request URL in its own `Display`, and a
+    /// teardown URL identifies the user's server and the session. Nothing
+    /// derived from the error may reach a log.
+    ///
+    /// The token is not in that URL — every request Vela makes is
+    /// header-authenticated (swept 2026-07-25, `.agents/review/findings/tr-3.md`)
+    /// — but this test uses a token-bearing URL deliberately: it is the
+    /// strongest available statement that NOTHING from the URL survives, and it
+    /// still holds if a credential ever does end up in a query string.
     #[tokio::test]
     async fn a_transport_failure_is_described_without_its_url() {
         let client = reqwest::Client::builder()

@@ -1342,14 +1342,20 @@ impl PlexLibrary {
         ))
     }
 
+    /// Where a teardown is sent. Split out so the credential-free shape of the
+    /// one URL that reaches a failure log is guarded against the real builder
+    /// rather than a copy of its format string.
+    pub fn transcode_session_url(&self, session: &str) -> Option<String> {
+        Some(format!("{}/transcode/sessions/{session}", self.server_base()?))
+    }
+
     /// Tear down one transcode session. Best-effort by return type but
     /// MANDATORY to call: there is no keep-alive ping, and how an abandoned
     /// session expires is unknown, so anything Vela starts it must also stop.
     pub async fn stop_transcode_session(&self, session: &str) {
-        let Some(base) = self.server_base() else {
+        let Some(url) = self.transcode_session_url(session) else {
             return;
         };
-        let url = format!("{base}/transcode/sessions/{session}");
         crate::source::stop_transcode_request("plex", || {
             self.client
                 .delete(&url)
@@ -2091,6 +2097,29 @@ mod tests {
         // and mpv's own seek would be into a stream that begins elsewhere.
         let (resumed, _) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 930).expect("builds");
         assert!(resumed.contains("offset=930"), "{resumed}");
+    }
+
+    /// The teardown URL is the one Vela builds that reaches a log on failure,
+    /// so it must carry no credential — the token belongs in the header
+    /// `stop_transcode_session` sets. Calls the PRODUCTION builder rather than
+    /// re-spelling the format string, or a token added there would not be seen
+    /// here. Guards the invariant the 2026-07-25 sweep established.
+    #[test]
+    fn the_teardown_url_carries_no_credential() {
+        let lib = artwork_library(1234);
+        let url = lib
+            .transcode_session_url("abc123")
+            .expect("a configured server has a teardown URL");
+        let lowered = url.to_ascii_lowercase();
+        assert!(
+            !lowered.contains("token"),
+            "no token may appear in a URL Vela requests: {url}"
+        );
+        assert!(
+            !lowered.contains("api_key"),
+            "no api_key may appear in a URL Vela requests: {url}"
+        );
+        assert!(url.contains("abc123"), "it must still address the session");
     }
 
     // Finding tr-9: a transcode URL addresses ONE part while direct play joins
