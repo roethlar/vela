@@ -2,8 +2,9 @@
 
 ## Status
 
-**DRAFT 2026-07-26 — awaiting owner approval. No implementation is
-authorized.**
+**APPROVED 2026-07-26.** The owner authorized implementation and directed the
+completed code change to the Claude reviewer harness with no model or effort
+override. No push is authorized.
 
 No product decision is outstanding. The active 2026-07-03 and 2026-07-23
 credential decisions already require every Plex media URL handed to mpv to be
@@ -303,8 +304,9 @@ Require all existing and new assertions to pass. Afterward:
 
 After local, hermetic, guard, and live verification:
 
-1. run the repo's finding-specific plain-default `codereview codex` workflow
-   over the implementation commit;
+1. run the repo's finding-specific `codereview` workflow over the
+   implementation commit with the Claude harness, passing no model or effort
+   override, as explicitly directed by the owner;
 2. if it returns an actionable finding, record and address exactly that finding
    in its own commit before proceeding;
 3. update `.agents/review/findings/tr-10.md`, `.agents/review/index.md`,

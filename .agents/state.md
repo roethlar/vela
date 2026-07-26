@@ -27,17 +27,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Codex review pass. `tr-10` remains open: mpv still receives the Plex token in
   its transcode URL, although header-only delivery is live-proven safe. Its
   cold-implementation plan is drafted at
-  `.agents/plans/tr-10-plex-transcode-header-auth.md` and awaits owner approval;
-  no `tr-10` code change is authorized.
+  `.agents/plans/tr-10-plex-transcode-header-auth.md` and was owner-approved
+  2026-07-26. The isolated 1.0.56 repair is in progress; the owner directed the
+  completed code change to Claude review with no model or effort override.
   The plan review's nonblocking follow-ups remain `tr-12` (silent decision
   failures) and `tr-13` (duplicated universal-transcode query builders).
 
 ## Next
 
-- **First action:** owner approves or declines the draft `tr-10` credential
-  plan. On approval, implement its isolated 1.0.56 repair and exact guard/live
-  proof; until then no `tr-10` code change is authorized. `tr-12` and `tr-13`
-  remain separate follow-ups.
+- **First action:** implement the approved isolated 1.0.56 `tr-10` credential
+  repair, complete its exact guard/local/Linux/live proof, then dispatch the
+  owner-directed Claude review. `tr-12` and `tr-13` remain separate follow-ups.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -66,7 +66,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/push-policy.md`
 - `.agents/plans/server-transcoding.md` (`tr-11` closed; `tr-10` open)
 - `.agents/plans/tr-11-plex-client-profile.md` (complete)
-- `.agents/plans/tr-10-plex-transcode-header-auth.md` (draft; approval pending)
+- `.agents/plans/tr-10-plex-transcode-header-auth.md` (approved; in progress)
 - `.agents/review/findings/tr-12.md` and
   `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)

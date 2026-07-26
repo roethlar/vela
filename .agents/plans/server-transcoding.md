@@ -16,8 +16,8 @@ Plex token in mpv's transcode URL, while its live safety gate passed:
 token-free master and child playlists accepted header auth (200), a token-free
 segment accepted it (206), and teardown returned 204. Its fix is not started.
 Its cold-implementation plan is drafted at
-`.agents/plans/tr-10-plex-transcode-header-auth.md` and awaits owner approval;
-no code change is authorized. Canonical records are
+`.agents/plans/tr-10-plex-transcode-header-auth.md`; the owner approved it
+2026-07-26 and the isolated 1.0.56 repair is in progress. Canonical records are
 `.agents/review/findings/tr-11.md` and `.agents/review/findings/tr-10.md`. The
 `tr-11` plan review also admitted
 `tr-12` (silent Plex decision failures) and `tr-13` (duplicated
