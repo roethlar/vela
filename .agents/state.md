@@ -220,6 +220,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   slice 4's per-copy quality rows were added to its expected menu contents.
   Note for anyone reading a smaller number in older entries: the suite was
   37 scenarios before `markers` was added.
+- **OPEN FINDING `tr-10` (HIGH):** a transcoded Plex play returns empty
+  `http_headers` and puts `X-Plex-Token` in the URL handed to mpv, so the token
+  is visible in mpv's `path`, its logs, and its process argv. Direct play was
+  hardened against exactly this by the 2026-07-23 credential split
+  (`.agents/repo-guidance.md`); slice 3 did not carry it to the transcode path.
+  NOT fixed — the fix depends on whether Plex accepts header auth on HLS segment
+  requests, which is unverified against the real server. Detail:
+  `.agents/review/findings/tr-10.md`.
 - **BLOCKED, needs an owner decision: the `openreview` of the transcoding work
   cannot run.** Dispatched `openreview claude` (claude-fable-5 @ max,
   competitive) over `72e0f48..a8a9fec` on 2026-07-26; the harness returned HTTP

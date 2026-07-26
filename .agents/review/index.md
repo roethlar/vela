@@ -13,6 +13,15 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
+**`tr-10` OPEN (HIGH, raised 2026-07-26)** — a transcoded Plex play returns
+EMPTY `http_headers` and carries `X-Plex-Token` in the URL instead, so the token
+reaches mpv's `path`, its logs, and its process argv. Direct play was hardened
+against exactly this by the 2026-07-23 credential split; slice 3 did not carry
+it to the transcode path it added. Not fixed: it needs a check against the real
+server (do Plex's HLS segment requests accept header auth?) and possibly an
+owner call. Not found by the slice-3 codex review. Detail:
+`.agents/review/findings/tr-10.md`.
+
 Transcoding slice-3 loop `tr-3..tr-9` CLOSED 2026-07-25: all seven findings from
 the `codereview codex` pass over `b94fcd1..e0e5fc7` are admitted and fixed —
 tr-3/tr-5/tr-7 at `049ed78`, then tr-4 `d24224b`, tr-6 `996c417`, tr-8 `47255a8`,
