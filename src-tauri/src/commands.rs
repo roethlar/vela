@@ -4675,6 +4675,15 @@ async fn play_by_key_locked(
         intro_policy: skip_policies.intro,
         credits_policy: skip_policies.credits,
         commercial_policy: skip_policies.commercial,
+        // Slice 5, part 2. The detector and the sampler are landed and proven;
+        // what is not built is the relaunch a verdict has to trigger, which
+        // needs the same "a background thread causes a new play" plumbing as
+        // `PlaybackAdvance`. Until that exists, no play watches itself — a
+        // sampler with nowhere to report would burn a thread and an IPC
+        // connection per play for nothing. The `tr-8` gate in Settings.svelte
+        // stays up until this is `Some`.
+        step_down: None,
+        duration: item.duration_ms.map(Duration::from_millis),
     };
     // The tracker can observe a very fast mpv exit before this async command
     // resumes from spawn_blocking. Hold its final recents stamp until the

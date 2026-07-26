@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 // mpv's JSON IPC channel is a Unix domain socket on Linux/macOS and an emulated
 // named pipe on Windows. Both expose the same byte-stream Read+Write interface
@@ -733,6 +733,13 @@ pub struct PlaySpec {
     pub intro_policy: crate::config::SkipPolicy,
     pub credits_policy: crate::config::SkipPolicy,
     pub commercial_policy: crate::config::SkipPolicy,
+    /// Set ONLY when the resolved quality is `Automatic` AND a lower tier is
+    /// actually available for this copy. `None` leaves the sampler unspawned —
+    /// a play that cannot step down must not pay for watching.
+    pub step_down: Option<StepDownNotify>,
+    /// This item's runtime, for the sampler's end-of-file grace. `None` holds
+    /// the cache signal entirely (see `automatic::AutomaticDetector`).
+    pub duration: Option<Duration>,
 }
 
 /// mpv launch args for the autocrop feature, given the config `mode`
@@ -1137,6 +1144,19 @@ pub fn play(
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
 
+    // Automatic only. Like the EOF watcher, failing to spawn is non-fatal:
+    // playback still works, it just cannot step itself down.
+    if let Some(step_down) = spec.step_down.clone() {
+        if let Err(e) = spawn_health_sampler(
+            ipc_path.clone(),
+            stop_flag.clone(),
+            spec.duration,
+            step_down,
+        ) {
+            eprintln!("vela: couldn't spawn mpv health sampler: {e}");
+        }
+    }
+
     // Route the end-of-session notifier: tracked sessions fire it from their
     // tracker tail (after the final server write, so a refresh triggered by it
     // sees the new state); untracked sessions fire it when mpv exits. The match
@@ -1320,6 +1340,129 @@ fn spawn_position_reader(
             done_r.store(true, Ordering::Relaxed);
         })?;
     Ok((last_t_ms, done))
+}
+
+/// Called when Automatic decides this play needs a lower tier. Carries the
+/// position to resume at and why the step happened.
+pub type StepDownNotify = Arc<dyn Fn(u64, crate::automatic::StepDownReason) + Send + Sync>;
+
+/// Watch one play for the two Automatic signals and report the first verdict.
+///
+/// Its own IPC connection, like the EOF watcher: mpv's JSON IPC accepts
+/// concurrent clients, and a separate connection keeps sampling off the
+/// position reader's hot path, where a slow consumer would delay the resume
+/// point everything else depends on.
+///
+/// Sampling is pull, not push. `demuxer-cache-duration` changes continuously,
+/// so observing it would flood the socket for values only read once per tick;
+/// asking on a fixed tick is both quieter and what the thresholds are expressed
+/// in.
+fn spawn_health_sampler(
+    socket_path: String,
+    stop_flag: Arc<AtomicBool>,
+    duration: Option<Duration>,
+    on_step_down: StepDownNotify,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("mpv-health-sampler".into())
+        .spawn(move || {
+            let mut stream = None;
+            for _ in 0..50 {
+                if stop_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+                match ipc_connect(&socket_path) {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(100)),
+                }
+            }
+            let Some(mut stream) = stream else { return };
+            let Ok(read_half) = stream.try_clone() else {
+                return;
+            };
+            let mut reader = BufReader::new(read_half);
+
+            let mut detector = crate::automatic::AutomaticDetector::new(duration);
+            let started = Instant::now();
+            let mut last_position = Duration::ZERO;
+
+            loop {
+                std::thread::sleep(crate::automatic::SAMPLE_TICK);
+                if stop_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+                // One request per property, distinct ids so replies can be told
+                // apart from each other and from mpv's own event stream.
+                if stream
+                    .write_all(
+                        b"{\"command\":[\"get_property\",\"time-pos\"],\"request_id\":101}\n\
+                          {\"command\":[\"get_property\",\"decoder-frame-drop-count\"],\"request_id\":102}\n\
+                          {\"command\":[\"get_property\",\"demuxer-cache-duration\"],\"request_id\":103}\n\
+                          {\"command\":[\"get_property\",\"pause\"],\"request_id\":104}\n",
+                    )
+                    .is_err()
+                {
+                    return; // mpv is gone
+                }
+                let mut sample = crate::automatic::HealthSample {
+                    at: started.elapsed(),
+                    position: last_position,
+                    decoder_drops: 0,
+                    cache_seconds: None,
+                    paused: false,
+                };
+                let mut drops = None;
+                // Drain until every reply has landed, or mpv stops talking.
+                let mut line = String::new();
+                let mut outstanding = 4;
+                while outstanding > 0 {
+                    line.clear();
+                    match reader.read_line(&mut line) {
+                        Ok(0) | Err(_) => return,
+                        Ok(_) => {}
+                    }
+                    let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+                        continue;
+                    };
+                    // Events interleave with replies; only replies carry an id.
+                    let Some(id) = v.get("request_id").and_then(|i| i.as_u64()) else {
+                        continue;
+                    };
+                    let data = v.get("data");
+                    match id {
+                        101 => {
+                            if let Some(seconds) = data.and_then(|d| d.as_f64()) {
+                                if seconds.is_finite() && seconds >= 0.0 {
+                                    last_position = Duration::from_secs_f64(seconds);
+                                    sample.position = last_position;
+                                }
+                            }
+                        }
+                        102 => drops = data.and_then(|d| d.as_u64()),
+                        103 => sample.cache_seconds = data.and_then(|d| d.as_f64()),
+                        104 => sample.paused = data.and_then(|d| d.as_bool()).unwrap_or(false),
+                        _ => continue,
+                    }
+                    outstanding -= 1;
+                }
+                // Without a drop count there is no drop signal to evaluate, and
+                // a missing value must not read as "back to zero" — that would
+                // look like the counter resetting rather than a gap.
+                let Some(drops) = drops else { continue };
+                sample.decoder_drops = drops;
+
+                if let Some(reason) = detector.observe(sample) {
+                    // One verdict per sampler: the caller replaces this play, so
+                    // this thread's mpv is on its way out either way.
+                    on_step_down(last_position.as_millis() as u64, reason);
+                    return;
+                }
+            }
+        })?;
+    Ok(())
 }
 
 /// Sleep until the next ~5s report tick, returning false if playback ended.

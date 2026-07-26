@@ -183,13 +183,20 @@ test('Automatic is offered only once something implements it', () => {
   // The gate exists because the step-down is absent. If it ever arrives, this
   // test is what sends someone back here to remove the gate.
   //
-  // Matched on the SUBSCRIPTION, not on the property name: `playback.rs` names
-  // the drop count in tests asserting it is not a playback position, and a bare
-  // string match failed on those. What means "Automatic is implemented" is mpv
-  // being asked to report the property, not the property being mentioned.
+  // What means "Automatic is implemented" is a play actually WATCHING itself,
+  // which is `step_down` being populated — not the drop count being mentioned
+  // (playback.rs names it in tests asserting it is not a position) and not the
+  // sampler existing (it does, and reports to nobody). An earlier form of this
+  // guard matched `observe_property`, which the sampler does not even use: it
+  // polls with `get_property`. Matching the wiring avoids guessing at mpv verbs.
+  assert.match(
+    commands,
+    /step_down: None,/,
+    'a play must not watch itself until a verdict has somewhere to go',
+  );
   assert.doesNotMatch(
-    playback,
-    /observe_property[^\]]*decoder-frame-drop-count/,
+    settings,
+    /step down only if playback/,
     'the step-down landed: withdraw the tr-8 gate in Settings.svelte and this guard',
   );
 });
