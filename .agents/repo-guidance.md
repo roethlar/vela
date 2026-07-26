@@ -142,6 +142,17 @@ rotation. The evidence is the `## Code review log` in
   looked straight at during his own audit and waved through on an assumption one
   grep would have falsified. When the author's reasoning says "this one is fine",
   that is the moment to go and look.
+- **Guard the WIRING, not just the unit.** Slice 5 of server-transcoding shipped
+  two behaviours dead — a seek exclusion and a step-down cooldown — with guards
+  for both, all passing, because every guard drove the detector directly and
+  none checked that anything called it. A unit test proves a function is
+  correct; only a test that reaches the caller proves the behaviour exists.
+- **A temporary `#![allow(dead_code)]` must be removed in the commit that wires
+  the module up.** While a module is unwired the allow is honest; the moment it
+  is wired, the dead-code lint under `-D warnings` IS the guard that each piece
+  is reachable, and leaving the allow in place blindfolds it. That allow is what
+  hid the two dead behaviours above, and removing it is what exposed them
+  (2026-07-25).
 - **Before recording anything as unguardable, go and read the failure path.**
   Two surfaces were recorded as unguardable and both were wrong, both times
   because the author reasoned about the code instead of reading it. Building the

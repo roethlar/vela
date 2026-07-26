@@ -631,6 +631,30 @@ used a single large step count, and a walk that WRAPS still lands on the floor
 every `len + 1` steps, so it passed by coincidence. Fixed by asserting several
 consecutive counts, which no cycle can satisfy.
 
+**Part 3 shipped two behaviours DEAD, fixed at 1.0.36 (`9a6f20c`).** The
+detector had `note_seek` and `note_step_down`, both guarded, both passing — and
+neither was ever called by the sampler. So the seek exclusion did not exist (a
+seek's refill burst could step the user down) and the "30s cooldown" was really
+the replacement play's 10s warm-up. **The guards tested the detector directly
+and never the wiring, so all of them passed while the behaviour was absent.**
+
+What exposed it was removing `#![allow(dead_code)]` — the placeholder that had
+been legitimate while the module was unwired and became a blindfold the moment
+it was not. The lesson, and the rule to keep: **a temporary `allow(dead_code)`
+must be removed in the same commit that wires the module up, because after that
+the dead-code lint IS the guard that a behaviour is reachable.**
+
+The fixes rather than the wiring: the cooldown now lives in
+`AutomaticDetector::resuming`, which gives a play that has already stepped the
+long quiet period instead of the ordinary warm-up — correct because one sampler
+watches one mpv process and stops at its first verdict, so the cooldown is
+always served by the NEXT detector. `note_step_down` and `steps_taken()` were
+deleted rather than wired: nothing needed them once the count travels through
+the relaunch. Seeks are detected by the sampler itself from the `time-pos` it
+already polls (`looks_like_a_seek`), so no extra subscription is needed. Five
+further regressions injected separately; the one that removes the sampler's
+seek call is caught by clippy's dead-code errors under `-D warnings`.
+
 ### Slice 6 — Emby labelling and documentation
 
 - Emby transcoding is implemented best-effort and labelled limited in the UI and
