@@ -20,11 +20,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **Intro/credits/commercial marker skipping is the ACTIVE implementation**
   (owner activated it 2026-07-25). The plan is
   `.agents/plans/skip-credits-intros-v2.md`, now Active v2 revision 7, rebased
-  onto the 1.0.4 prerequisite base; the plan's own predicted version sequence
-  (1.0.5-1.0.8) was overtaken by the two review-fix bumps and is stale there —
-  the landed versions are named per slice below. Its config-integrity
-  prerequisite is satisfied. Slice 1 is implemented, canonically verified,
-  committed as
+  onto the 1.0.4 prerequisite base; the plan records the landed version sequence
+  (corrected 2026-07-25 — two review-fix bumps overtook its prediction). Its
+  config-integrity prerequisite is satisfied. Slice 1 is implemented, canonically
+  verified, committed as
   `c7aa963` at version 1.0.5, and guard-proven: the provider-neutral marker
   model, the shared normalizer, `include_markers` on both resolve entry points,
   Plex `includeMarkers=1` on the existing selected-detail request, Jellyfin
@@ -72,35 +71,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **Close the four open transcoding findings before anything else in that
-  feature.** Detail in `.agents/review/findings/tr-3.md`; all four came from the
-  2026-07-25 codex review of slice 3 and are admitted, not disputed.
-  1. `tr-4` (HIGH) — teardown is a detached `tauri::async_runtime::spawn` from
-     the playback-end callback in `commands.rs`, and app exit kills mpv and
-     returns, so the DELETE can be lost and a transcode left running on the
-     user's server. Needs an owned active-session record and an awaited
-     shutdown path.
-  2. `tr-6` (MEDIUM) — both providers' teardown checks only transport errors,
-     never `error_for_status`, so 401/429/5xx reads as success with no log and
-     no retry.
-  3. `tr-8` (MEDIUM) — `Automatic` is selectable in Settings but nothing
-     observes mpv or steps down. Same defect class as `tr-1`. Either withhold
-     the value or land slice 5 first; do not ship it selectable and inert.
-  4. `tr-9` (MEDIUM) — every Plex transcode URL hardcodes `partIndex=0`, so a
-     split-file version transcodes only its first part and ends there. The plan
-     records multi-part transcoding as an open question; silent truncation is
-     worse than refusing, so this needs a decision.
-- **Then build transcoding slice 4's UI.** The backend command
-  `quality_options` exists (`de80b8a`); the menu does not. Shape is settled in
-  `.agents/decisions.md` (2026-07-25): `Play Version >` with servers expanding
-  to that server's deliverable qualities when a title has two or more copies,
-  `Play at Quality >` listing qualities directly when it has one, never both,
-  absent entirely when the only copy cannot be converted. Every entry shows its
-  bitrate — two ladder tiers share a label. Resolve options LAZILY when the
-  submenu opens: for Plex it is a decision round trip per version. The choice
-  applies to the play it starts and persists nothing.
-- Slices 5 (Automatic) and 6 (Emby labelling, README) follow, per
-  `.agents/plans/server-transcoding.md`.
+- **Transcoding slices 5 and 6 are what remain of that feature**, per
+  `.agents/plans/server-transcoding.md`. Slice 5 is Automatic: watch mpv over
+  the existing IPC connection for sustained `decoder-frame-drop-count` growth
+  and a repeatedly starving demuxer cache, step down one tier, resume at the
+  current position, persist nothing. It is also the slice that withdraws the
+  `tr-8` gate in `Settings.svelte` — the guard in
+  `tests/transcoding-ui.test.mjs` fails the moment a decoder-drop observer
+  appears, which is the reminder. Slice 6 is Emby best-effort labelling and the
+  README Player notes (quality setting, one-off menu, the plain statement that
+  converting forfeits HDR and drops container chapters).
+- **Nothing in the transcoding feature has been exercised against a real
+  server.** Every fix above is guarded by unit and static tests only. The
+  quality menu, a real conversion, and a real teardown against the owner's Plex
+  need either a playtest or the repaired E2E venue.
 - **Finish marker Slice 4's behavioural verification — the slice is NOT done.**
   Its production flip landed as `5dd3e35` at 1.0.10 (PlaySpec fields, policy
   resolution and marker filtering, payload write/cleanup, arg injection,
@@ -161,21 +145,35 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   separately. Both settings now state which question they answer, per the
   Prefer Compatible ruling. Still inert at play time.
 
-  **Slices 3 and 4 (partial) are landed but NOT clean.** Slice 3 (`e0e5fc7`,
-  1.0.18) wired the play path, both transcode URL builders and teardown; slice
-  4's backend (`de80b8a`, 1.0.19) added the `quality_options` command. A codex
-  review of slice 3 returned SEVEN findings, all admitted
-  (`.agents/review/findings/tr-3.md`). Three are fixed in `049ed78` (1.0.20):
-  Original could silently transcode on a server that omits Jellyfin's optional
-  direct-play flags (tr-3), Original paid a redundant PlaybackInfo round trip
-  (tr-7), and a Jellyfin transcode could start with no session id and so never
-  be stoppable (tr-5). FOUR REMAIN OPEN and block calling this feature done:
-  tr-4 (teardown is a detached task the exit path can lose, leaving an encoder
-  running), tr-6 (teardown ignores the HTTP response, so a 401/429/5xx reads as
-  success), tr-8 (Automatic is selectable but nothing implements it — the same
-  defect class as tr-1), and tr-9 (Plex multi-part media transcodes only its
-  first part). Slice 4's UI — the `Play Version > server > quality` nesting and
-  the collapsed single-version form — is NOT built.
+  Slice 3 (`e0e5fc7`, 1.0.18) wired the play path, both transcode URL builders
+  and teardown; slice 4's backend (`de80b8a`, 1.0.19) added the
+  `quality_options` command. A codex review of slice 3 returned SEVEN findings,
+  all admitted (`.agents/review/findings/tr-3.md`); three were fixed in
+  `049ed78` (1.0.20).
+
+  **All seven review findings are now closed, and slice 4 is complete** (owner
+  go per finding, 2026-07-25). `tr-4` at 1.0.21 (`d24224b`): the transcode is
+  owned in `AppState`, claimed by session id, and torn down by whichever of the
+  tracker tail, the launch-failure path, or the exit sweep runs last — the exit
+  sweep now WAITS, bounded by a 10s deadline. `tr-6` at 1.0.22 (`996c417`) plus
+  a guard strengthening at 1.0.23 (`512d67f`): teardown classifies the answer,
+  retries 429/5xx twice with backoff, reports 401/403 once, treats 404 as
+  already-gone, and describes transport failures WITHOUT reqwest's `Display` —
+  which embeds the full URL and was leaking the Plex token and session handle
+  into stderr (a pre-existing defect found while fixing tr-6). `tr-8` at 1.0.24
+  (`47255a8`): `Automatic` is no longer offered; it stays selectable only for a
+  config that already holds it, so no stored value is silently rewritten and no
+  document is invalidated. `tr-9` at 1.0.25 (`a53da15`): `conversion_possible`
+  is false for anything but exactly one part, `transcode_url` returns `None` so
+  a truncating URL cannot be built at all, and the menu never offers conversion
+  for a split-file version; real multi-part transcoding is DEFERRED and recorded
+  as such in the plan. Slice 4's UI landed at 1.0.26 (`f236d38`) with a guard
+  strengthening at 1.0.27 (`696ec7e`): quality nests under version, `Play at
+  Quality >` is the else-branch so the two labels cannot co-occur, options
+  resolve only when a submenu opens, and the one-off choice is validated against
+  the setting's own closed set and never persisted. 30 regressions were injected
+  separately across the five fixes and each failed for its own reason; two
+  vacuous guards were found during those passes, strengthened, and re-proven.
 
   Two facts worth not rediscovering: Plex's
   `/video/:/transcode/universal/ping` and `/stop` DO NOT EXIST (both 404) and

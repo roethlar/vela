@@ -487,9 +487,14 @@ red-proof any new behavioral guard (temporarily break production code, confirm
 test fails for the right reason, restore from the committed pre-injection
 state). Run `scripts/bump.sh` in every slice that changes shipped Rust,
 frontend, or Lua behavior, per the active version decision. From the activation
-base of 1.0.4 (the config-integrity prerequisite closeout) the four code slices
-below land as 1.0.5 through 1.0.8; if the base moves again before a slice
-starts, use the next patch each time rather than these numbers.
+base of 1.0.4 (the config-integrity prerequisite closeout) this plan predicted
+the four code slices would land as 1.0.5 through 1.0.8. **They did not, and the
+predicted range is superseded by what actually landed** — two review-fix bumps
+(`be32bde` and `2971672`) fell between slices 1 and 2, so the sequence is
+1.0.5 (slice 1, `c7aa963`), 1.0.8 (slice 2, `42ab254`), 1.0.9 (slice 3,
+`f62345d`), 1.0.10 (slice 4, `5dd3e35`), with the kind-filter guard at 1.0.11
+(`e58d978`). The rule that governs, then and now: use the next patch each time,
+never a number written in advance.
 Because the bump script updates both JavaScript and Rust/bundle version
 surfaces, finish every bumped slice with the full canonical dual-side CI command
 set below even when its focused feature work touches only one side. Targeted

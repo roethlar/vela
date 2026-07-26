@@ -12,6 +12,10 @@ Reviewer summary: "No. The default Original path can silently transcode, and
 several teardown paths can leave server encoders running; Automatic playback and
 Plex split-file transcoding are also incomplete."
 
+**ALL SEVEN ARE CLOSED as of 2026-07-25** (versions 1.0.20 through 1.0.25, owner
+go per finding). No follow-up external review has run on the fixes; that remains
+open. Nothing here has been exercised against a real server.
+
 ## tr-3 (HIGH) — Original could silently transcode. FIXED `049ed78` (1.0.20)
 
 `PlaybackOptions::resolve` delegated Original to `direct_or_best_available`,
@@ -47,33 +51,78 @@ now happens only when a real tier is requested.
 delivery nothing could ever stop. It now refuses to transcode without a session
 and plays direct instead.
 
-## OPEN FINDINGS
+## tr-4 (HIGH) — teardown was detached and could be lost at exit. FIXED `d24224b` (1.0.21)
 
-### tr-4 (HIGH) — teardown is detached and can be lost at exit
+`commands.rs` spawned the teardown as a detached task from the playback-end
+callback. The exit handler kills mpv and returns, so the runtime could terminate
+before the DELETE was sent, leaving an encoder running.
 
-`commands.rs` spawns the teardown as a detached task from the playback-end
-callback. The exit handler kills mpv and returns, so the runtime can terminate
-before the DELETE is sent or completes, leaving an encoder running. Needs an
-owned active-session record and an awaited shutdown path, not a fire-and-forget
-spawn.
+The session is now owned in `AppState` as `active_transcode`, registered before
+launch, and claimed by session id so a superseded play's tail cannot stop the
+encoder the user is now watching. Three paths can be the last to run and each
+issues the teardown itself: the tracker tail (blocking, on its own thread), the
+launch-failure path (awaited — no tracker ever runs there), and the exit sweep
+(blocking, and it WAITS, unlike the local mpv kill beside it). Registration
+returns whatever it displaced so the superseding play stops that encoder too.
+Bounded by a 10s deadline so an unreachable server delays shutdown rather than
+blocking it.
 
-### tr-6 (MEDIUM) — teardown ignores the HTTP response
+Guards: five Rust tests in `commands::tests` (exit-sweep drain, session-matched
+claim, displaced record, single claimant, deadline) plus five static wiring
+assertions in `tests/transcoding-ui.test.mjs`. Ten regressions injected
+separately, each failing for its own reason.
 
-Both providers check only transport errors and never apply `error_for_status`,
-so a 401, 429 or 5xx answer is treated as success: nothing is logged and nothing
-is retried while the transcode keeps running.
+## tr-6 (MEDIUM) — teardown ignored the HTTP response. FIXED `996c417` (1.0.22)
 
-### tr-8 (MEDIUM) — Automatic promises unimplemented behaviour
+Both providers checked only transport errors, so a 401, 429 or 5xx answer was
+treated as success: nothing logged, nothing retried, encoder still running.
 
-`Automatic` is selectable in Settings but nothing observes mpv's decoder drops
-or cache starvation and nothing steps down. This is the same class as tr-1: a
-shipped option that does nothing. Either withhold the value until slice 5 lands
-it, or land slice 5 before shipping.
+`source::stop_transcode_request` now classifies the answer — 2xx and 404 settle
+(404 means the session is already gone), 429 and 5xx retry twice with 200ms/600ms
+backoff, other 4xx are reported once — and returns the outcome so a settled
+teardown is distinguishable from an abandoned one.
 
-### tr-9 (MEDIUM) — Plex multi-part media truncates under transcode
+**A second defect was found while fixing this one and is fixed here too.** The
+old code logged `{error}` for transport failures under a comment promising
+"Never print the URL". reqwest 0.13's `Display` renders the full request URL, so
+that line was emitting the Plex `X-Plex-Token` (and the Jellyfin `api_key`) plus
+the session handle to stderr. `describe_transport_failure` is now built from the
+error's own predicates and can never contain a URL; a guard asserts the premise
+(the raw error DOES leak) alongside the fix.
 
-Every transcode URL hardcodes `partIndex=0`, while direct play joins all parts
-as an EDL. A split-file version would transcode only its first part and end at
-that boundary. The plan already records multi-part transcoding as an open
-question; shipping silent truncation is worse than refusing, so this needs a
-decision before the feature is complete.
+Guards: six tests in `source::teardown_tests`, four of them driving a loopback
+server that counts requests. Four regressions injected separately. The post-commit
+pass found the 404 guard VACUOUS — request count alone cannot separate "settled"
+from "refused" — so `stop_transcode_request` was made to return its outcome and
+the guard re-proven (`512d67f`, 1.0.23).
+
+## tr-8 (MEDIUM) — Automatic promised unimplemented behaviour. FIXED `47255a8` (1.0.24)
+
+Owner ruled 2026-07-25: withhold the value rather than land slice 5 first.
+
+`Automatic` is no longer offered by the Settings picker. It remains selectable
+ONLY when the stored value already is `automatic`, labelled "not implemented
+yet; plays as Original" — so opening Settings never silently rewrites a stored
+value, and the config layer still accepts it so no existing document is
+invalidated and a rollback build still honours it. At play time it already
+resolved to Original (tr-3). The help text no longer describes a step-down.
+
+Guards: one test in `tests/transcoding-ui.test.mjs`, including an assertion that
+FAILS once a decoder-drop observer appears — the reminder to withdraw the gate
+in slice 5. Three regressions injected separately.
+
+## tr-9 (MEDIUM) — Plex multi-part media truncated under transcode. FIXED `a53da15` (1.0.25)
+
+Owner ruled 2026-07-25: refuse to convert, defer real multi-part transcoding.
+
+`PlexLibrary::conversion_possible` is true only for exactly one part.
+`transcode_url` checks it and returns `None`, so a truncating URL cannot be
+constructed at all rather than depending on caller discipline.
+`playback_options` reports no transcoding for such a version, so the menu never
+offers it, and it skips the decision round trip whose answer could not change
+the outcome. A Settings-level quality request degrades to Original with a log
+naming the reason. The deferral is recorded in
+`.agents/plans/server-transcoding.md`.
+
+Guards: two Rust tests in `plex_library::tests` and two static assertions.
+Five regressions injected separately.
