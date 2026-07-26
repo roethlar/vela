@@ -26,17 +26,21 @@ portable and may at most point here.
 - Reviewer MCP (verified 2026-07-18): the Claude Code server supports direct
   Workflow dispatch and records model, effort, version, and MCP entrypoint in
   its transcript. Tier pairs live in the gitignored
-  `.agents/review/harnesses.local.json`. **Both tiers are now owner-confirmed
-  for `claude` (recorded 2026-07-19): standard is `claude-fable-5` at xhigh,
-  frontier is `claude-fable-5` at max, graded `competitive`.** The line here
-  previously said frontier and `openreview` mappings were unconfirmed and failed
-  closed — stale on both counts as of 2026-07-25: the cache records them, and
-  the `openreview` playbook's 2026-07-25 amendment retired the separate
-  `openreview_confirmed` gate in favour of the frontier pair's `grade`, which
-  `competitive` satisfies. An `openreview` on this machine therefore dispatches
-  without asking. The harness VERSION half of the cache is separate and still
-  re-probed on change (2.1.215 recorded → 2.1.220 installed); that is a note on
-  the dispatch record, never a gate.
+  `.agents/review/harnesses.local.json`.
+
+  **Reviews of this repo go to `codex`, never to a Claude harness** (decision
+  `.agents/decisions.md` 2026-07-26): the working agent here IS Claude, so a
+  Claude reviewer is not independent. The cache's owner-confirmed `claude` tiers
+  (`claude-fable-5` @ xhigh / @ max, `competitive`) are therefore NOT selectable
+  for review work on this repository, whatever the cache says. `codex` has no
+  `tiers` block on this machine, so its model is named at dispatch until a
+  durable pair is recorded.
+
+  Probed 2026-07-26: codex-cli 0.145.0 (cache records 0.142.5 — a note, not a
+  gate). Headless entry `codex exec`, with `--model`, `-c
+  model_reasoning_effort=<level>`, `--sandbox workspace-write` (needed so the
+  reviewer can drive its own worktree), `--output-schema <file>` and
+  `-o <outfile>` for the structured verdict.
 - Reviewer MCP execution blocker (proved 2026-07-18 on `wsp-1`, Claude Code
   2.1.214): the owner directed launching the server with `--allowedTools`.
   The registration now uses

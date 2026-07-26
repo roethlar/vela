@@ -6,6 +6,38 @@ guidance when relevant.
 
 ## Decisions
 
+### 2026-07-26 - Never review Vela's code with a Claude harness
+
+Status: Active
+
+Decision:
+Independent review passes for this repo - `openreview` and `codereview` alike -
+dispatch to `codex`. A Claude harness is NOT an eligible reviewer here, whatever
+the model or tier, and whatever `.agents/review/harnesses.local.json` records
+for it. The recorded `claude` tier entries stay in the cache for other uses but
+must not be selected for a review of this repository's code.
+
+Reason:
+The working agent on this repo is Claude. Dispatching a Claude harness to review
+Claude's work is not independent review - it is the same family checking its own
+homework, which is the one thing an external pass exists to avoid. Provider
+diversity is the entire value of the second opinion; a stronger tier of the same
+family does not buy it.
+
+This is not a hypothetical concern for this repo. The 2026-07-25/26 transcoding
+session found, in the working agent's own output, four vacuous or dead guards,
+one misdiagnosed venue outage, one overstated severity claim, one fix whose
+wiring was unguarded, and one E2E scenario broken with no local gate catching
+it - none of which the author's own review surfaced.
+
+Supersedes:
+The 2026-07-19 recording of `claude` frontier (`claude-fable-5` @ max,
+`competitive`) as an openreview-eligible pair on this machine, and the
+2026-07-26 correction in `.agents/machines.md` that said an `openreview` here
+dispatches to claude without asking. Both are now wrong for this repo. `codex`
+needs a durable tier pair recorded; until one is, the owner names the model at
+dispatch.
+
 ### 2026-05-23 - Use external mpv playback for HDR
 
 Status: Active

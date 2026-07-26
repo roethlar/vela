@@ -209,17 +209,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Reviewer routing note, `codex` only: that entry in
-  `.agents/review/harnesses.local.json` has no `tiers` block (it predates the
-  tier schema — codex-cli 0.142.5 recorded, 0.145.0 installed) and this clone
-  has no `.agents/model-map.json`, so tier resolution fails closed for codex.
-  The owner cleared it on 2026-07-25 by naming `gpt-5.6-sol` at xhigh as a
-  literal slug requiring no mapping; per the playbook that is a session-only
-  inline pin, NOT written to the cache, so any later codex dispatch needs the
-  owner to name it again or to confirm a durable codex tier entry. **`claude`
-  is unaffected — both its tiers are recorded and owner-confirmed, so
-  `codereview claude` and `openreview claude` dispatch without asking**
-  (`.agents/machines.md`).
+- **Reviews of this repo go to `codex`, never a Claude harness** (decision
+  `.agents/decisions.md` 2026-07-26 — the working agent is Claude, so a Claude
+  reviewer is not independent). `codex`'s cache entry has no `tiers` block, so
+  its model is named at dispatch until the owner records a durable pair;
+  `gpt-5.6-sol` is what the owner has named twice (2026-07-25, 2026-07-26) and
+  is the standing candidate for that pair.
 - **The Linux E2E suite is GREEN at 38/38** (`a8a9fec`, 2026-07-26) — the first
   run covering the whole transcoding feature, slice 5, and the marker work.
   `markers` passes for the first time ever, and `sourcepolicy` passes after
