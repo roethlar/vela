@@ -253,6 +253,12 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
   - **Plex is restored on EVERY exit path** — scenario cleanup, the control server's
     signal handlers, and the launcher's trap. A crashed test must never leave the owner's
     server down. If you ever see `FAILED TO RESTORE PLEX`, start it by hand.
+  - **Plex HLS header auth is live-proven (2026-07-26).** A one-off session
+    requested its master playlist, child playlist, and first segment with the
+    token only in `X-Plex-Token` headers: 200, 200, and 206 respectively. Neither
+    generated child URI contained a token. Teardown returned 204 and a follow-up
+    session-list check found none of the probe sessions; the independently active
+    session already on the server was left untouched.
   - The VM was deliberately NOT given an SSH key on the Plex box: that is persistent
     access to the owner's server, granted for a test. The Mac (which already has access)
     runs `scripts/live-control.mjs` for the length of one run — host-only address,
