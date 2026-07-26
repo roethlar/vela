@@ -228,15 +228,27 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   NOT fixed — the fix depends on whether Plex accepts header auth on HLS segment
   requests, which is unverified against the real server. Detail:
   `.agents/review/findings/tr-10.md`.
-- **BLOCKED, needs an owner decision: the `openreview` of the transcoding work
-  cannot run.** Dispatched `openreview claude` (claude-fable-5 @ max,
-  competitive) over `72e0f48..a8a9fec` on 2026-07-26; the harness returned HTTP
-  429, "You've reached your Fable 5 limit". That is an account quota, not a
-  cache or incantation fault, so a re-probe and retry cannot clear it. Per the
-  `codereview` playbook, switching provider is owner-only and no trigger may
-  silently consume another harness's quota — so this waits for the owner to
-  either let the quota reset or name a different harness. `codex` additionally
-  has no `tiers` block on this machine and would need a model named.
+- **The `openreview codex` pass over `72e0f48..a8a9fec` returned 7 ADMITTED
+  findings (1 HIGH, 6 MEDIUM), ALL OPEN.** `or-1` (HIGH) is that Automatic can
+  only ever take ONE step: the sampler spawns only when the resolved quality is
+  `automatic`, and a step-down relaunches at a concrete tier, so the replacement
+  is never watched and the whole second-step apparatus — the cap, the
+  cooldown-on-resume, the `steps_taken` threading — is unreachable. Verdict and
+  triage: `.agents/review/openreview-2026-07-26.md`. **Slice 5 must not be
+  called complete while `or-1` stands**; the earlier "slice 5 is COMPLETE" entry
+  above is true only of the code that was written, not of the behaviour.
+- **The live E2E harness cannot authenticate to Plex after the connection
+  split.** `scripts/e2e-live.sh` extracts Plex credentials from TOP-LEVEL
+  `config.json` keys (`auth_token`, `last_server_*`), and
+  `tests/e2e/live/plex.mjs` consumes that shape. Those keys are absent from this
+  Mac's config (verified 2026-07-26, keys only), where the Plex connection lives
+  in `sources[]` as a `SourceConfig`, and post-split it lives in
+  `connections.json` under the same shape. So `npm run e2e:live` finds no Plex
+  and exits. The harness was never updated when the split landed; it needs to
+  read a `kind == "plex"` entry from `connections.json` (post-split) or
+  `config.json` (pre-split) and derive host/port/scheme from its `base_url`.
+  NOT fixed. Also note `VELA_E2E_VM_REPO` still defaults to `~/dev/vela`, the
+  old VM tree — the venue is now `~/dev/vela-main`.
 - The Linux E2E venue outage is RESOLVED (2026-07-25): the venue was never
   broken. `--skip-build` had been reusing a binary produced by a plain `cargo
   build`, which embeds no frontend and so loads `devUrl`; the webview was
