@@ -724,22 +724,27 @@ pub(crate) fn describe_transport_failure(error: &reqwest::Error) -> &'static str
 /// Issue a transcode teardown until the server confirms it, refuses it, or the
 /// attempts run out — logging every outcome that is not success. `build` is
 /// called once per attempt because a `RequestBuilder` cannot be reused.
-pub(crate) async fn stop_transcode_request<F>(provider: &str, mut build: F)
+///
+/// Returns how it ended. Nothing in production reads that yet; it is what makes
+/// "settled quietly" distinguishable from "reported and abandoned", which a
+/// request count alone cannot tell apart.
+pub(crate) async fn stop_transcode_request<F>(provider: &str, mut build: F) -> TeardownOutcome
 where
     F: FnMut() -> reqwest::RequestBuilder,
 {
+    let mut last = TeardownOutcome::Retryable("never attempted".to_string());
     for attempt in 0..=TEARDOWN_RETRY_BACKOFF.len() {
-        let outcome = match build().send().await {
+        last = match build().send().await {
             Ok(response) => classify_teardown_status(response.status()),
             // No answer at all — the request may not have reached the server,
             // which is exactly what retrying is for.
             Err(error) => TeardownOutcome::Retryable(describe_transport_failure(&error).to_string()),
         };
-        match outcome {
-            TeardownOutcome::Settled => return,
+        match &last {
+            TeardownOutcome::Settled => return last,
             TeardownOutcome::Refused(reason) => {
                 eprintln!("{provider}: the server refused to stop a transcode session ({reason})");
-                return;
+                return last;
             }
             TeardownOutcome::Retryable(reason) => match TEARDOWN_RETRY_BACKOFF.get(attempt) {
                 Some(delay) => {
@@ -755,6 +760,7 @@ where
             },
         }
     }
+    last
 }
 
 /// Credential-free facts about one exact provider media version. This stays
@@ -1054,24 +1060,32 @@ mod teardown_tests {
         (base, seen)
     }
 
-    async fn run_teardown(statuses: &'static [&'static str]) -> usize {
+    /// The requests the server actually received, and how the teardown ended.
+    /// The count alone cannot separate "settled" from "refused" — both stop
+    /// after one attempt — so every case asserts on both.
+    async fn run_teardown(statuses: &'static [&'static str]) -> (usize, TeardownOutcome) {
         let (base, seen) = canned_server(statuses).await;
         let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(5))
             .build()
             .unwrap();
-        stop_transcode_request("test", || client.delete(&base)).await;
-        seen.load(Ordering::SeqCst)
+        let outcome = stop_transcode_request("test", || client.delete(&base)).await;
+        (seen.load(Ordering::SeqCst), outcome)
     }
 
     /// The tr-6 core: a busy server used to be read as success. It must be read
     /// as failure and tried again, or the encoder keeps running.
     #[tokio::test]
     async fn a_rate_limited_teardown_is_retried_until_it_lands() {
+        let (requests, outcome) = run_teardown(&["429 Too Many Requests", "204 No Content"]).await;
         assert_eq!(
-            run_teardown(&["429 Too Many Requests", "204 No Content"]).await,
-            2,
+            requests, 2,
             "a 429 must be retried, not counted as a completed teardown"
+        );
+        assert_eq!(
+            outcome,
+            TeardownOutcome::Settled,
+            "the retry must be what finally stops the encoder"
         );
     }
 
@@ -1079,10 +1093,15 @@ mod teardown_tests {
     /// rather than stopping after the first bad answer.
     #[tokio::test]
     async fn a_broken_server_is_retried_to_the_attempt_limit() {
+        let (requests, outcome) = run_teardown(&["503 Service Unavailable"; 4]).await;
         assert_eq!(
-            run_teardown(&["503 Service Unavailable"; 4]).await,
+            requests,
             TEARDOWN_RETRY_BACKOFF.len() + 1,
             "every 5xx must be retried, and only up to the attempt limit"
+        );
+        assert!(
+            matches!(outcome, TeardownOutcome::Retryable(_)),
+            "an exhausted teardown must end reported, never as success: {outcome:?}"
         );
     }
 
@@ -1090,10 +1109,11 @@ mod teardown_tests {
     /// wrong answer to an answer that will not change.
     #[tokio::test]
     async fn a_refused_teardown_is_not_retried() {
-        assert_eq!(
-            run_teardown(&["401 Unauthorized"; 4]).await,
-            1,
-            "a 401 must be reported once, not retried"
+        let (requests, outcome) = run_teardown(&["401 Unauthorized"; 4]).await;
+        assert_eq!(requests, 1, "a 401 must be reported once, not retried");
+        assert!(
+            matches!(outcome, TeardownOutcome::Refused(_)),
+            "a rejected credential must be reported, not swallowed: {outcome:?}"
         );
     }
 
@@ -1101,10 +1121,17 @@ mod teardown_tests {
     /// to stop, so this is success, not a failure to retry.
     #[tokio::test]
     async fn an_already_gone_session_settles_without_retrying() {
+        let (requests, outcome) = run_teardown(&["404 Not Found"; 4]).await;
         assert_eq!(
-            run_teardown(&["404 Not Found"; 4]).await,
-            1,
+            requests, 1,
             "a session the server does not have needs no further attempt"
+        );
+        // The count alone would also pass if 404 were classed as a refusal, so
+        // this is the assertion that actually guards the 404 case.
+        assert_eq!(
+            outcome,
+            TeardownOutcome::Settled,
+            "an already-gone session is a finished teardown, not a failure"
         );
     }
 
