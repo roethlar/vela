@@ -1,4 +1,5 @@
 mod artwork;
+mod automatic;
 mod commands;
 mod config;
 mod connections;
