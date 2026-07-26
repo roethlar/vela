@@ -300,14 +300,14 @@ impl JellyfinClient {
                 ("PlaySessionId", play_session_id),
             ],
         );
-        let mut request = self.http.delete(&url);
-        for (name, value) in self.auth_headers() {
-            request = request.header(name, value);
-        }
-        if let Err(error) = request.send().await {
-            // Never print the URL: it carries the api_key.
-            eprintln!("jellyfin: could not stop an active encoding: {error}");
-        }
+        crate::source::stop_transcode_request(self.flavor.kind(), || {
+            let mut request = self.http.delete(&url);
+            for (name, value) in self.auth_headers() {
+                request = request.header(name, value);
+            }
+            request
+        })
+        .await;
     }
 
     /// Mark an item played (POST) or unplayed (DELETE) for the current user.

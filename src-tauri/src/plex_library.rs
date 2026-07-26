@@ -1340,18 +1340,13 @@ impl PlexLibrary {
             return;
         };
         let url = format!("{base}/transcode/sessions/{session}");
-        let result = self
-            .client
-            .delete(&url)
-            .header("X-Plex-Token", &self.auth_token)
-            .header("X-Plex-Client-Identifier", &self.client_identifier)
-            .send()
-            .await;
-        if let Err(error) = result {
-            // Never print the URL: it is server-address detail and the session
-            // handle. The failure itself is what matters.
-            eprintln!("plex: could not stop a transcode session: {error}");
-        }
+        crate::source::stop_transcode_request("plex", || {
+            self.client
+                .delete(&url)
+                .header("X-Plex-Token", &self.auth_token)
+                .header("X-Plex-Client-Identifier", &self.client_identifier)
+        })
+        .await;
     }
 
     pub fn part_url_for_media(&self, media: &PlexDetailMedia) -> Option<String> {

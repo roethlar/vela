@@ -665,6 +665,98 @@ pub struct StreamResolution {
     pub markers: Vec<MediaMarker>,
 }
 
+/// What one transcode-teardown attempt told us.
+///
+/// Finding `tr-6`: both providers used to inspect only the transport result, so
+/// a 401, 429 or 5xx answer counted as success — nothing logged, nothing tried
+/// again, and the encoder still running on the user's server.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum TeardownOutcome {
+    /// Nothing left to stop: the server confirmed the teardown, or says it has
+    /// no such session.
+    Settled,
+    /// The server was busy or briefly broken; another attempt may land.
+    Retryable(String),
+    /// Retrying cannot help — wrong credentials, or the server refuses.
+    Refused(String),
+}
+
+/// Short, deliberately fixed backoff: this runs on the shutdown path, where the
+/// whole teardown is bounded by `TRANSCODE_TEARDOWN_TIMEOUT` in `commands.rs`.
+const TEARDOWN_RETRY_BACKOFF: [std::time::Duration; 2] = [
+    std::time::Duration::from_millis(200),
+    std::time::Duration::from_millis(600),
+];
+
+/// Read the server's answer to a teardown request.
+pub(crate) fn classify_teardown_status(status: reqwest::StatusCode) -> TeardownOutcome {
+    if status == reqwest::StatusCode::NOT_FOUND {
+        // The one 4xx that means the job is already done: there is no such
+        // session, so there is no encoder to stop.
+        return TeardownOutcome::Settled;
+    }
+    if status.is_success() {
+        return TeardownOutcome::Settled;
+    }
+    let reason = format!("HTTP {}", status.as_u16());
+    if status == reqwest::StatusCode::TOO_MANY_REQUESTS || status.is_server_error() {
+        TeardownOutcome::Retryable(reason)
+    } else {
+        TeardownOutcome::Refused(reason)
+    }
+}
+
+/// Describe a transport failure WITHOUT touching the error's own `Display`.
+/// reqwest renders the full request URL there, and a teardown URL carries the
+/// Plex token or the Jellyfin `api_key` plus the session handle.
+pub(crate) fn describe_transport_failure(error: &reqwest::Error) -> &'static str {
+    if error.is_timeout() {
+        "timed out"
+    } else if error.is_connect() {
+        "could not connect"
+    } else if error.is_request() {
+        "the request could not be sent"
+    } else {
+        "the request failed"
+    }
+}
+
+/// Issue a transcode teardown until the server confirms it, refuses it, or the
+/// attempts run out — logging every outcome that is not success. `build` is
+/// called once per attempt because a `RequestBuilder` cannot be reused.
+pub(crate) async fn stop_transcode_request<F>(provider: &str, mut build: F)
+where
+    F: FnMut() -> reqwest::RequestBuilder,
+{
+    for attempt in 0..=TEARDOWN_RETRY_BACKOFF.len() {
+        let outcome = match build().send().await {
+            Ok(response) => classify_teardown_status(response.status()),
+            // No answer at all — the request may not have reached the server,
+            // which is exactly what retrying is for.
+            Err(error) => TeardownOutcome::Retryable(describe_transport_failure(&error).to_string()),
+        };
+        match outcome {
+            TeardownOutcome::Settled => return,
+            TeardownOutcome::Refused(reason) => {
+                eprintln!("{provider}: the server refused to stop a transcode session ({reason})");
+                return;
+            }
+            TeardownOutcome::Retryable(reason) => match TEARDOWN_RETRY_BACKOFF.get(attempt) {
+                Some(delay) => {
+                    eprintln!(
+                        "{provider}: could not stop a transcode session ({reason}); retrying"
+                    );
+                    tokio::time::sleep(*delay).await;
+                }
+                None => eprintln!(
+                    "{provider}: gave up stopping a transcode session after {} attempts ({reason})",
+                    TEARDOWN_RETRY_BACKOFF.len() + 1
+                ),
+            },
+        }
+    }
+}
+
 /// Credential-free facts about one exact provider media version. This stays
 /// entirely behind the Rust command boundary: stream URLs, auth headers, and
 /// provider playback-session ids are resolved only after selection.
@@ -913,6 +1005,160 @@ impl SourceRegistry {
             Some(id) => self.get(id).into_iter().collect(),
             None => self.sources.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod teardown_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+
+    /// A loopback server that answers each teardown request with the next
+    /// canned status and counts what it was actually asked for. Every response
+    /// closes its connection, so a request cannot hide inside a reused one.
+    async fn canned_server(statuses: &'static [&'static str]) -> (String, Arc<AtomicUsize>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let base = format!("http://{}", listener.local_addr().unwrap());
+        let seen = Arc::new(AtomicUsize::new(0));
+        let counter = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else {
+                    return;
+                };
+                let index = counter.fetch_add(1, Ordering::SeqCst);
+                let status = statuses.get(index).copied().unwrap_or("500 Server Error");
+                // Drain the request line and headers before answering.
+                let mut request = Vec::new();
+                let mut byte = [0u8; 1];
+                while !request.ends_with(b"\r\n\r\n") {
+                    use tokio::io::AsyncReadExt;
+                    match socket.read(&mut byte).await {
+                        Ok(0) | Err(_) => break,
+                        Ok(_) => request.push(byte[0]),
+                    }
+                }
+                use tokio::io::AsyncWriteExt;
+                let _ = socket
+                    .write_all(
+                        format!(
+                            "HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                        )
+                        .as_bytes(),
+                    )
+                    .await;
+                let _ = socket.shutdown().await;
+            }
+        });
+        (base, seen)
+    }
+
+    async fn run_teardown(statuses: &'static [&'static str]) -> usize {
+        let (base, seen) = canned_server(statuses).await;
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(5))
+            .build()
+            .unwrap();
+        stop_transcode_request("test", || client.delete(&base)).await;
+        seen.load(Ordering::SeqCst)
+    }
+
+    /// The tr-6 core: a busy server used to be read as success. It must be read
+    /// as failure and tried again, or the encoder keeps running.
+    #[tokio::test]
+    async fn a_rate_limited_teardown_is_retried_until_it_lands() {
+        assert_eq!(
+            run_teardown(&["429 Too Many Requests", "204 No Content"]).await,
+            2,
+            "a 429 must be retried, not counted as a completed teardown"
+        );
+    }
+
+    /// Same class, the other retryable family, and it must exhaust its attempts
+    /// rather than stopping after the first bad answer.
+    #[tokio::test]
+    async fn a_broken_server_is_retried_to_the_attempt_limit() {
+        assert_eq!(
+            run_teardown(&["503 Service Unavailable"; 4]).await,
+            TEARDOWN_RETRY_BACKOFF.len() + 1,
+            "every 5xx must be retried, and only up to the attempt limit"
+        );
+    }
+
+    /// Retrying a rejected credential cannot help; hammering the server is the
+    /// wrong answer to an answer that will not change.
+    #[tokio::test]
+    async fn a_refused_teardown_is_not_retried() {
+        assert_eq!(
+            run_teardown(&["401 Unauthorized"; 4]).await,
+            1,
+            "a 401 must be reported once, not retried"
+        );
+    }
+
+    /// Plex answers 404 for a session it no longer has. There is nothing left
+    /// to stop, so this is success, not a failure to retry.
+    #[tokio::test]
+    async fn an_already_gone_session_settles_without_retrying() {
+        assert_eq!(
+            run_teardown(&["404 Not Found"; 4]).await,
+            1,
+            "a session the server does not have needs no further attempt"
+        );
+    }
+
+    #[test]
+    fn teardown_statuses_are_classified_by_whether_retrying_can_help() {
+        use reqwest::StatusCode;
+        for settled in [StatusCode::NO_CONTENT, StatusCode::OK, StatusCode::NOT_FOUND] {
+            assert_eq!(classify_teardown_status(settled), TeardownOutcome::Settled);
+        }
+        for retryable in [
+            StatusCode::TOO_MANY_REQUESTS,
+            StatusCode::INTERNAL_SERVER_ERROR,
+            StatusCode::SERVICE_UNAVAILABLE,
+        ] {
+            assert!(
+                matches!(
+                    classify_teardown_status(retryable),
+                    TeardownOutcome::Retryable(_)
+                ),
+                "{retryable} must be retried"
+            );
+        }
+        for refused in [StatusCode::UNAUTHORIZED, StatusCode::FORBIDDEN] {
+            assert!(
+                matches!(
+                    classify_teardown_status(refused),
+                    TeardownOutcome::Refused(_)
+                ),
+                "{refused} must be reported rather than retried"
+            );
+        }
+    }
+
+    /// A teardown URL carries the Plex token or the Jellyfin `api_key` plus the
+    /// session handle, and reqwest renders the whole URL in its own `Display`.
+    /// Nothing derived from the error may reach a log.
+    #[tokio::test]
+    async fn a_transport_failure_is_described_without_its_url() {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(200))
+            .build()
+            .unwrap();
+        let error = client
+            .delete("http://127.0.0.1:9/transcode/sessions/SESSIONHANDLE?X-Plex-Token=SECRETTOKEN")
+            .send()
+            .await
+            .expect_err("port 9 must not answer");
+        // The premise: the error itself does leak, which is why it is never used.
+        assert!(error.to_string().contains("SECRETTOKEN"));
+
+        let described = describe_transport_failure(&error);
+        assert!(!described.contains("SECRETTOKEN"), "token leaked: {described}");
+        assert!(!described.contains("SESSIONHANDLE"), "session leaked: {described}");
+        assert!(!described.contains("127.0.0.1"), "server address leaked: {described}");
     }
 }
 
