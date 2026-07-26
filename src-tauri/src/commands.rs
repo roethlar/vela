@@ -956,25 +956,62 @@ pub struct QualityOptionsDto {
 /// decision round trip per version, and paying that on every right-click would
 /// make the menu feel slow for the many users who never transcode. The frontend
 /// calls this when the quality submenu is opened.
+/// `item`, when given, pins the answer to the version that will ACTUALLY play.
+/// Without it the source falls back to its default media entry while the play
+/// path uses the policy's choice, so a title with several versions could be
+/// described by one and played as another — offering a tier that then degrades
+/// to Original, or hiding one that was available (finding `or-6`, codex
+/// openreview 2026-07-26). An explicit `version_id` still wins.
 #[tauri::command]
 pub async fn quality_options(
     state: tauri::State<'_, AppState>,
     item_key: String,
+    item: Option<ItemDto>,
     version_id: Option<String>,
 ) -> Result<QualityOptionsDto, String> {
     let (source, raw) = {
         let registry = state.registry.lock().await;
         registry.route(&item_key)?
     };
-    let options = source
-        .playback_options(&raw, version_id.as_deref())
-        .await?;
+    let pinned = match (version_id, item) {
+        (Some(explicit), _) => Some(explicit),
+        (None, Some(item)) => selected_version_for(&state, &item, &source.id(), &raw).await,
+        (None, None) => None,
+    };
+    let options = source.playback_options(&raw, pinned.as_deref()).await?;
     Ok(QualityOptionsDto {
         can_direct_play: options.can_direct_play,
         source_bitrate_kbps: options.source_bitrate_kbps,
         source_height: options.source_height,
         tiers: options.tiers,
     })
+}
+
+/// The version the play path would choose for `item`, when that choice lands on
+/// the copy this menu row is about.
+///
+/// Read-only: `select_playback_version` probes and ranks but writes nothing, and
+/// its Ask-mode `Choice` is a returned value rather than an enqueued prompt — so
+/// asking it here cannot pop a dialog. Every uncertainty answers `None`, which
+/// is the previous behaviour: the source's own default version.
+async fn selected_version_for(
+    state: &AppState,
+    item: &ItemDto,
+    source_id: &str,
+    raw_item_key: &str,
+) -> Option<String> {
+    match select_playback_version(state, item, None, None, None, false).await {
+        Ok(PlaybackSelectionOutcome::Ready { selection, .. }) => {
+            // Only when the policy picked the very copy being described. For a
+            // multi-copy title the menu asks per copy, and the policy's winner
+            // may be a different one — whose version id means nothing here.
+            (selection.source_id == source_id && selection.raw_item_key == raw_item_key)
+                .then_some(selection.version_id)
+                .flatten()
+        }
+        // Ambiguous under Ask, or nothing playable: describe the default.
+        Ok(PlaybackSelectionOutcome::Choice(_)) | Err(_) => None,
+    }
 }
 
 /// The three resolved marker policies for one play. Resolved once, before

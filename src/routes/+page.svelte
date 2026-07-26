@@ -2327,6 +2327,10 @@
     try {
       const loaded = await invoke<QualityOptions>("quality_options", {
         itemKey: b.ratingKey,
+        // Pins the answer to the version that will actually play rather than
+        // the source's default one (or-6). The backend ignores it when the
+        // policy's winner is a different copy than this row.
+        item,
         versionId: null,
       });
       if (attempt === qualityAttempt && menu) qualityOptions = loaded;

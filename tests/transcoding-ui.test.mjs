@@ -91,6 +91,34 @@ test('quality options are resolved only when the submenu opens', () => {
   );
 });
 
+// Finding or-6: with no item, the source answers for its DEFAULT version while
+// the play path uses the policy's choice — so the menu could describe one
+// version and play another, offering a tier that then degrades to Original.
+test('the quality menu describes the version that will play', () => {
+  assert.match(
+    page,
+    /invoke<QualityOptions>\("quality_options", \{[\s\S]{0,400}\n\s*item,/,
+    'the menu must send the item so the answer can be pinned to the real version',
+  );
+  assert.match(
+    commands,
+    /\(None, Some\(item\)\) => selected_version_for\(&state, &item, &source\.id\(\), &raw\)/,
+    'the backend must resolve the version the play path would choose',
+  );
+  // ...and only when the policy landed on the copy this row is about.
+  assert.match(
+    commands,
+    /selection\.source_id == source_id && selection\.raw_item_key == raw_item_key/,
+    "another copy's version id must never describe this one",
+  );
+  // Ask mode must not turn a menu hover into a source-choice prompt.
+  assert.match(
+    commands,
+    /Ok\(PlaybackSelectionOutcome::Choice\(_\)\) \| Err\(_\) => None/,
+    'an ambiguous or failed selection must fall back, never prompt',
+  );
+});
+
 test('a one-off quality is never persisted', () => {
   // It reaches the backend as a play argument...
   assert.match(
