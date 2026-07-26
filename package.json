@@ -1,6 +1,6 @@
 {
   "name": "vela",
-  "version": "1.0.33",
+  "version": "1.0.34",
   "description": "mpv-backed HDR media client for Plex, Jellyfin, and Emby",
   "type": "module",
   "engines": {

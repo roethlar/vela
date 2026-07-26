@@ -3610,6 +3610,168 @@ pub(crate) struct PlaybackWindowSession {
     observation: playback::WindowStateObservation,
 }
 
+/// A health sampler's verdict, waiting for something that can act on it.
+pub(crate) struct StepDownRequest {
+    /// The play that produced the verdict. A relaunch is refused if this is no
+    /// longer the active session: by then the verdict describes a player the
+    /// user has already replaced.
+    pub session_id: String,
+    pub position_ms: u64,
+    pub reason: crate::automatic::StepDownReason,
+    /// Steps already taken in this LOGICAL play. A step-down relaunches mpv, so
+    /// without carrying this the cap would reset on every step and Automatic
+    /// would walk to the floor two rungs at a time.
+    pub steps_taken: u32,
+}
+
+/// Carries a verdict from the sampler thread to the async dispatcher that can
+/// start a new play, the same shape `PlaybackAdvance` uses for clean EOF.
+///
+/// Holds ONE request, replaced rather than queued: a second verdict can only
+/// describe a play the first is already replacing.
+#[derive(Default)]
+pub(crate) struct StepDownQueue {
+    pending: std::sync::Mutex<Option<StepDownRequest>>,
+    changed: tokio::sync::Notify,
+}
+
+impl StepDownQueue {
+    pub(crate) fn request(&self, request: StepDownRequest) {
+        *self
+            .pending
+            .lock()
+            .unwrap_or_else(|error| error.into_inner()) = Some(request);
+        self.changed.notify_one();
+    }
+
+    pub(crate) async fn next(&self) -> StepDownRequest {
+        loop {
+            // Register interest BEFORE checking, or a request arriving between
+            // the check and the wait would not wake this loop.
+            let changed = self.changed.notified();
+            if let Some(request) = self
+                .pending
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take()
+            {
+                return request;
+            }
+            changed.await;
+        }
+    }
+}
+
+/// Act on one verdict: relaunch the running play one tier lower, at the
+/// position it had reached. Returns the tier it stepped to, for the caller's
+/// log and for tests; `None` means the verdict was declined, which is ordinary.
+pub(crate) async fn apply_step_down(
+    state: &AppState,
+    request: StepDownRequest,
+) -> Option<crate::source::QualityTier> {
+    // The verdict describes one exact player. If the user has since started
+    // something else, that player is already gone and stepping it down would
+    // replace whatever they chose instead.
+    let item = {
+        let active = state.active_playback_item.lock().await;
+        match active.as_ref() {
+            Some((session, item)) if *session == request.session_id => item.clone(),
+            _ => return None,
+        }
+    };
+
+    // What this copy can actually be delivered as, asked only now: a verdict is
+    // rare, and paying a decision round trip on every play to prepare for one
+    // would tax everybody who never steps down.
+    let (source, key) = {
+        let registry = state.registry.lock().await;
+        registry.route(&item.rating_key).ok()?
+    };
+    let options = source.playback_options(&key, None).await.ok()?;
+    // Where the walk has already got to: the stored setting, stepped down once
+    // per step already taken. Derived rather than stored, so the current tier
+    // cannot drift out of step with the count that bounds it.
+    let current = quality_after_steps(
+        &current_playback_quality(),
+        &options.tiers,
+        request.steps_taken,
+    );
+    let next = crate::source::next_tier_down(&current, &options.tiers)?;
+
+    eprintln!(
+        "vela: {} — stepping down to {}",
+        match request.reason {
+            crate::automatic::StepDownReason::DropStorm =>
+                "playback is dropping frames faster than it can decode",
+            crate::automatic::StepDownReason::StarvingCache =>
+                "playback keeps running out of buffered video",
+        },
+        next.id
+    );
+
+    let session_id = uuid::Uuid::new_v4().to_string();
+    let outcome = play_by_key(
+        state,
+        PlayLaunchRequest {
+            item: &item,
+            start_from_beginning: false,
+            session_id: &session_id,
+            playlist: None,
+            // This replaces the exact play the verdict came from, and nothing
+            // else: a race with the user's own choice must lose.
+            replace_session: Some(&request.session_id),
+            run_kind: None,
+            explicit_source_id: None,
+            persist_explicit_choice: false,
+            quality_override: Some(next.id),
+            resume_override_ms: Some(request.position_ms),
+            osd_notice: Some(short_quality_notice(next)),
+            steps_taken: request.steps_taken + 1,
+        },
+    )
+    .await;
+    match outcome {
+        Ok(_) => Some(next),
+        Err(failure) => {
+            eprintln!("vela: couldn't lower the quality: {}", failure.message);
+            None
+        }
+    }
+}
+
+/// The OSD line for a step-down. Deliberately tiny — mpv's OSD is large, and
+/// this is an explanation, not an announcement (owner, 2026-07-25).
+fn short_quality_notice(tier: crate::source::QualityTier) -> String {
+    if tier.bitrate_kbps >= 1000 && tier.bitrate_kbps.is_multiple_of(1000) {
+        format!("↓ {} Mbps", tier.bitrate_kbps / 1000)
+    } else if tier.bitrate_kbps >= 1000 {
+        format!("↓ {:.1} Mbps", tier.bitrate_kbps as f64 / 1000.0)
+    } else {
+        format!("↓ {} kbps", tier.bitrate_kbps)
+    }
+}
+
+/// The quality a play is running at after `steps` step-downs from `stored`.
+/// Stops at the floor rather than running off the end.
+fn quality_after_steps(stored: &str, tiers: &[crate::source::QualityTier], steps: u32) -> String {
+    let mut current = stored.to_string();
+    for _ in 0..steps {
+        match crate::source::next_tier_down(&current, tiers) {
+            Some(tier) => current = tier.id.to_string(),
+            None => break,
+        }
+    }
+    current
+}
+
+/// The quality the running play was launched at. Automatic starts at Original,
+/// and a stored tier is where the ladder walk resumes from.
+fn current_playback_quality() -> String {
+    config::load_config()
+        .map(|cfg| config::playback_quality(cfg.playback_quality.as_deref()))
+        .unwrap_or_else(|_| config::PLAYBACK_QUALITY_ORIGINAL.to_string())
+}
+
 /// A server-side transcode Vela started and is therefore obliged to stop.
 ///
 /// It holds the source itself rather than an id to look up later: the play must
@@ -4389,6 +4551,13 @@ struct PlayLaunchRequest<'a> {
     /// play and is never written to config — the situation changes, not the
     /// title (`.agents/decisions.md`, 2026-07-25). `None` uses the setting.
     quality_override: Option<&'a str>,
+    /// Start here exactly, ignoring both resume sources. Only an Automatic
+    /// step-down sets it, to resume where the replaced player actually was.
+    resume_override_ms: Option<u64>,
+    /// A short OSD line explaining a play the user did not start.
+    osd_notice: Option<String>,
+    /// Steps this logical play has already taken (see `PlaySpec::steps_taken`).
+    steps_taken: u32,
 }
 
 async fn play_by_key(
@@ -4415,6 +4584,9 @@ async fn play_by_key_locked(
         explicit_source_id,
         persist_explicit_choice,
         quality_override,
+        resume_override_ms,
+        osd_notice,
+        steps_taken,
     } = request;
     if !validate_playback_session(state, replace_session).await {
         return Err(PlayFailure::superseded());
@@ -4613,7 +4785,14 @@ async fn play_by_key_locked(
     } else {
         0
     };
-    let resume_ms = playback_start_ms(start_from_beginning, resolved.resume_ms, local_resume_ms);
+    // An Automatic step-down resumes at the position the replaced player had
+    // actually reached — the server's stamp lags it by up to a report interval,
+    // and resuming even a few seconds back is a visible stutter in what should
+    // look like the picture quality changing.
+    let resume_ms = match resume_override_ms {
+        Some(exact) => exact,
+        None => playback_start_ms(start_from_beginning, resolved.resume_ms, local_resume_ms),
+    };
     // Resolve the bundled mpv autocrop script here (the command layer holds the
     // AppHandle; `playback::play` does not). Whether it's injected depends on the
     // `mpv_autocrop` config mode, decided in `play`. `resolve` only computes the
@@ -4675,15 +4854,26 @@ async fn play_by_key_locked(
         intro_policy: skip_policies.intro,
         credits_policy: skip_policies.credits,
         commercial_policy: skip_policies.commercial,
-        // Slice 5, part 2. The detector and the sampler are landed and proven;
-        // what is not built is the relaunch a verdict has to trigger, which
-        // needs the same "a background thread causes a new play" plumbing as
-        // `PlaybackAdvance`. Until that exists, no play watches itself — a
-        // sampler with nowhere to report would burn a thread and an IPC
-        // connection per play for nothing. The `tr-8` gate in Settings.svelte
-        // stays up until this is `Some`.
-        step_down: None,
+        // Automatic only. Whether a lower tier actually exists is NOT checked
+        // here: that needs a decision round trip per play, and a verdict is
+        // rare — `apply_step_down` resolves the ladder when one actually
+        // arrives, and declines if there is nowhere to go.
+        step_down: (quality == config::PLAYBACK_QUALITY_AUTOMATIC).then(|| {
+            let queue = state.step_down.clone();
+            let session = session_id.to_string();
+            let already = steps_taken;
+            std::sync::Arc::new(move |position_ms: u64, reason| {
+                queue.request(StepDownRequest {
+                    session_id: session.clone(),
+                    position_ms,
+                    reason,
+                    steps_taken: already,
+                });
+            }) as playback::StepDownNotify
+        }),
         duration: item.duration_ms.map(Duration::from_millis),
+        osd_notice,
+        steps_taken,
     };
     // The tracker can observe a very fast mpv exit before this async command
     // resumes from spawn_blocking. Hold its final recents stamp until the
@@ -4871,6 +5061,9 @@ pub async fn play_item(
             explicit_source_id: explicit_source_id.as_deref(),
             persist_explicit_choice: explicit_source_id.is_some(),
             quality_override: quality.as_deref(),
+            resume_override_ms: None,
+            osd_notice: None,
+            steps_taken: 0,
         },
     )
     .await
@@ -4929,6 +5122,9 @@ pub async fn resolve_playback_source_choice(
             explicit_source_id: Some(&source_id),
             persist_explicit_choice: false,
             quality_override: None,
+            resume_override_ms: None,
+            osd_notice: None,
+            steps_taken: 0,
         },
     )
     .await
@@ -5525,6 +5721,9 @@ async fn play_playlist_entries(
                 explicit_source_id: None,
                 persist_explicit_choice: false,
                 quality_override: None,
+                resume_override_ms: None,
+                osd_notice: None,
+                steps_taken: 0,
             },
         )
         .await
@@ -5605,6 +5804,9 @@ async fn play_server_playlist_entries(
                 explicit_source_id: None,
                 persist_explicit_choice: false,
                 quality_override: None,
+                resume_override_ms: None,
+                osd_notice: None,
+                steps_taken: 0,
             },
         )
         .await
@@ -6202,6 +6404,104 @@ mod tests {
                 .lock()
                 .unwrap_or_else(|error| error.into_inner())
                 .push(session.to_string());
+        }
+    }
+
+    fn step_request(session: &str, steps: u32) -> StepDownRequest {
+        StepDownRequest {
+            session_id: session.to_string(),
+            position_ms: 61_000,
+            reason: crate::automatic::StepDownReason::DropStorm,
+            steps_taken: steps,
+        }
+    }
+
+    /// A verdict has to cross from a plain sampler thread to the async path
+    /// that can start a play; this is the handoff.
+    #[tokio::test]
+    async fn a_verdict_reaches_the_dispatcher() {
+        let queue = StepDownQueue::default();
+        queue.request(step_request("s1", 0));
+        let got = queue.next().await;
+        assert_eq!(got.session_id, "s1");
+        assert_eq!(got.position_ms, 61_000);
+    }
+
+    /// The waiter must be woken by a request that arrives while it is parked,
+    /// not only by one already queued — otherwise a step-down lands whenever
+    /// the NEXT one happens to arrive.
+    #[tokio::test]
+    async fn a_parked_dispatcher_is_woken_by_a_later_verdict() {
+        let queue = std::sync::Arc::new(StepDownQueue::default());
+        let writer = queue.clone();
+        let handle = tokio::spawn(async move { queue.next().await });
+        tokio::task::yield_now().await;
+        writer.request(step_request("later", 1));
+        let got = tokio::time::timeout(Duration::from_secs(5), handle)
+            .await
+            .expect("the parked dispatcher must wake")
+            .expect("join");
+        assert_eq!(got.session_id, "later");
+        assert_eq!(got.steps_taken, 1, "the step count must survive the handoff");
+    }
+
+    /// Two verdicts can only mean the second describes a play the first is
+    /// already replacing, so the newer one wins and the older is dropped.
+    #[tokio::test]
+    async fn a_newer_verdict_replaces_an_unhandled_one() {
+        let queue = StepDownQueue::default();
+        queue.request(step_request("old", 0));
+        queue.request(step_request("new", 1));
+        let got = queue.next().await;
+        assert_eq!(got.session_id, "new");
+        // And nothing is left behind to fire a second relaunch.
+        assert!(
+            tokio::time::timeout(Duration::from_millis(200), queue.next())
+                .await
+                .is_err(),
+            "the superseded verdict must not still be waiting"
+        );
+    }
+
+    /// The current tier is DERIVED from the step count rather than stored, so
+    /// these two must agree or the walk skips or repeats a rung.
+    #[test]
+    fn the_current_tier_follows_the_step_count() {
+        let tiers = crate::source::tiers_for_source(1080);
+        assert_eq!(
+            quality_after_steps("original", &tiers, 0),
+            "original",
+            "an unstepped play is still at its setting"
+        );
+        assert_eq!(quality_after_steps("original", &tiers, 1), tiers[0].id);
+        assert_eq!(quality_after_steps("original", &tiers, 2), tiers[1].id);
+        // Automatic starts at Original, so it walks identically.
+        assert_eq!(quality_after_steps("automatic", &tiers, 2), tiers[1].id);
+    }
+
+    /// More steps than rungs must stop at the floor, never run off the ladder.
+    #[test]
+    fn the_derived_tier_stops_at_the_floor() {
+        let tiers = crate::source::tiers_for_source(1080);
+        let floor = tiers.last().expect("non-empty").id;
+        assert_eq!(quality_after_steps("original", &tiers, 99), floor);
+    }
+
+    /// mpv's OSD is large and this is an explanation, not an announcement.
+    #[test]
+    fn the_step_down_notice_stays_short() {
+        for tier in crate::source::QUALITY_TIERS {
+            let notice = short_quality_notice(*tier);
+            assert!(
+                notice.chars().count() <= 12,
+                "{notice:?} is too long for an OSD line"
+            );
+            assert!(notice.starts_with('↓'), "{notice:?} must read as a drop");
+            // The bitrate is the whole point — it is what changed.
+            assert!(
+                notice.contains("Mbps") || notice.contains("kbps"),
+                "{notice:?} must name the new bitrate"
+            );
         }
     }
 

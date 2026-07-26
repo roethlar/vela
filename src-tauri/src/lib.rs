@@ -54,6 +54,10 @@ pub struct AppState {
     /// returns without waiting for the tracker tail, so the exit sweep below is
     /// the last chance to issue the mandatory teardown DELETE.
     pub(crate) active_transcode: commands::ActiveTranscodeSlot,
+    /// Automatic's verdicts, from the sampler thread to the dispatcher that can
+    /// start a new play. Same shape as `playback_advance` and for the same
+    /// reason: a plain thread cannot await the async play path.
+    pub(crate) step_down: Arc<commands::StepDownQueue>,
     /// Already-killed players handed off for reaping. The periodic reaper drains
     /// this with non-blocking try_wait(), so replacing a player never needs to
     /// spawn a per-child waiter thread (which could fail under thread exhaustion
@@ -126,6 +130,7 @@ pub fn run() {
         current_child: Arc::new(Mutex::new(None)),
         shutting_down: Arc::new(AtomicBool::new(false)),
         active_transcode: Arc::new(Mutex::new(None)),
+        step_down: Arc::new(commands::StepDownQueue::default()),
         reap_queue: Arc::new(Mutex::new(Vec::new())),
         play_lock: AsyncMutex::new(()),
         watch_edit_lock: AsyncMutex::new(()),
@@ -199,6 +204,24 @@ pub fn run() {
                 .app_handle
                 .set(app.handle().clone());
             durable::register_app_handle(app.handle().clone());
+
+            // Automatic's step-down dispatcher. Deliberately NOT folded into the
+            // completion dispatcher below, and deliberately declared BEFORE its
+            // marker comment: that dispatcher's contract is that only a joined
+            // clean-EOF plus final-tracker signal may advance a sequence, and
+            // `clean-eof-refresh-order.test.mjs` pins its section to exactly one
+            // spawned task. A step-down is neither a completion nor an advance —
+            // it replaces the current play in place and must never touch
+            // playlists or Continue Playing — so it gets its own loop out here.
+            let step_down_handle = app.handle().clone();
+            let step_down_queue = app.handle().state::<AppState>().step_down.clone();
+            tauri::async_runtime::spawn(async move {
+                loop {
+                    let request = step_down_queue.next().await;
+                    let state = step_down_handle.state::<AppState>();
+                    commands::apply_step_down(&state, request).await;
+                }
+            });
 
             // Playback sequence dispatcher: only the joined clean-EOF and
             // final-tracker signal can advance a playlist or authorize Continue

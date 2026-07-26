@@ -740,6 +740,15 @@ pub struct PlaySpec {
     /// This item's runtime, for the sampler's end-of-file grace. `None` holds
     /// the cache signal entirely (see `automatic::AutomaticDetector`).
     pub duration: Option<Duration>,
+    /// Shown once over mpv's OSD when this launch starts, for a play the user
+    /// did not ask for — an Automatic step-down. Kept very short on purpose:
+    /// mpv's OSD is large, and the notice must not become the thing the user
+    /// notices. Never set `--osd-font-size` to compensate; it is global and
+    /// would override the user's own mpv config.
+    pub osd_notice: Option<String>,
+    /// Steps this LOGICAL play has already taken, carried into the new
+    /// detector so the cap counts plays rather than mpv processes.
+    pub steps_taken: u32,
 }
 
 /// mpv launch args for the autocrop feature, given the config `mode`
@@ -1151,9 +1160,18 @@ pub fn play(
             ipc_path.clone(),
             stop_flag.clone(),
             spec.duration,
+            spec.steps_taken,
             step_down,
         ) {
             eprintln!("vela: couldn't spawn mpv health sampler: {e}");
+        }
+    }
+
+    // Explain a play the user did not ask for. Best-effort and fire-and-forget:
+    // a notice that fails to render must never affect playback.
+    if let Some(notice) = spec.osd_notice.clone() {
+        if let Err(e) = spawn_osd_notice(ipc_path.clone(), stop_flag.clone(), notice) {
+            eprintln!("vela: couldn't show the playback notice: {e}");
         }
     }
 
@@ -1357,10 +1375,50 @@ pub type StepDownNotify = Arc<dyn Fn(u64, crate::automatic::StepDownReason) + Se
 /// so observing it would flood the socket for values only read once per tick;
 /// asking on a fixed tick is both quieter and what the thresholds are expressed
 /// in.
+/// Show one short OSD line on this player, then stop. Its own connection and
+/// its own thread so a slow or refused write cannot delay the trackers.
+fn spawn_osd_notice(
+    socket_path: String,
+    stop_flag: Arc<AtomicBool>,
+    notice: String,
+) -> std::io::Result<()> {
+    std::thread::Builder::new()
+        .name("mpv-osd-notice".into())
+        .spawn(move || {
+            let mut stream = None;
+            for _ in 0..50 {
+                if stop_flag.load(Ordering::Relaxed) {
+                    return;
+                }
+                match ipc_connect(&socket_path) {
+                    Ok(s) => {
+                        stream = Some(s);
+                        break;
+                    }
+                    Err(_) => std::thread::sleep(Duration::from_millis(100)),
+                }
+            }
+            let Some(mut stream) = stream else { return };
+            // Let the picture arrive first — a notice drawn over a black frame
+            // during load explains nothing.
+            std::thread::sleep(Duration::from_millis(1500));
+            if stop_flag.load(Ordering::Relaxed) {
+                return;
+            }
+            // JSON-encoded so a title or unit can never break the command.
+            let text = serde_json::Value::String(notice);
+            let _ = stream.write_all(
+                format!("{{\"command\":[\"show-text\",{text},2000]}}\n").as_bytes(),
+            );
+        })?;
+    Ok(())
+}
+
 fn spawn_health_sampler(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
     duration: Option<Duration>,
+    steps_taken: u32,
     on_step_down: StepDownNotify,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
@@ -1385,7 +1443,7 @@ fn spawn_health_sampler(
             };
             let mut reader = BufReader::new(read_half);
 
-            let mut detector = crate::automatic::AutomaticDetector::new(duration);
+            let mut detector = crate::automatic::AutomaticDetector::resuming(duration, steps_taken);
             let started = Instant::now();
             let mut last_position = Duration::ZERO;
 

@@ -485,6 +485,28 @@ pub fn tiers_for_source(source_height: u32) -> Vec<QualityTier> {
         .collect()
 }
 
+/// The tier Automatic should drop to from `current`, or `None` at the floor.
+///
+/// `current` is the quality this play is running at: `"original"` (or anything
+/// that is not a tier, including `"automatic"`, which starts at Original) steps
+/// to the gentlest tier this copy offers; a tier steps to the next one below it
+/// in `tiers`. `None` means there is nowhere lower to go, which is what stops
+/// the walk — Automatic never wraps and never steps up (owner, 2026-07-25).
+///
+/// `tiers` must be the list for THIS copy on THIS server, as resolved by
+/// `PlaybackOptions`: stepping into a tier the server will not deliver would
+/// turn a degraded play into a failed one.
+pub fn next_tier_down(current: &str, tiers: &[QualityTier]) -> Option<QualityTier> {
+    match tiers.iter().position(|tier| tier.id == current) {
+        // Already on the ladder: the next rung down, if there is one. The list
+        // is ordered highest-bitrate first, so that is simply the next entry.
+        Some(index) => tiers.get(index + 1).copied(),
+        // Not on the ladder — Original, Automatic, or a tier this copy does not
+        // offer. Start at the top of what this copy can actually deliver.
+        None => tiers.first().copied(),
+    }
+}
+
 /// What a given server can actually do with one exact copy, and therefore what
 /// Vela is allowed to offer for it. Never offer an option not represented here.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1011,6 +1033,89 @@ impl SourceRegistry {
             Some(id) => self.get(id).into_iter().collect(),
             None => self.sources.clone(),
         })
+    }
+}
+
+#[cfg(test)]
+mod ladder_tests {
+    use super::*;
+
+    /// The ladder must stay ordered highest-bitrate first: `next_tier_down`
+    /// takes "the next entry" to mean "lower", and nothing else enforces that.
+    #[test]
+    fn the_ladder_descends() {
+        for pair in QUALITY_TIERS.windows(2) {
+            assert!(
+                pair[0].bitrate_kbps > pair[1].bitrate_kbps,
+                "{} must sit above {}",
+                pair[0].id,
+                pair[1].id
+            );
+        }
+    }
+
+    #[test]
+    fn original_steps_to_the_gentlest_tier_this_copy_offers() {
+        let tiers = tiers_for_source(1080);
+        let first = tiers.first().copied().expect("1080p offers tiers");
+        assert_eq!(next_tier_down("original", &tiers).map(|t| t.id), Some(first.id));
+        // Automatic starts at Original, so it steps the same way.
+        assert_eq!(next_tier_down("automatic", &tiers).map(|t| t.id), Some(first.id));
+    }
+
+    #[test]
+    fn a_tier_steps_to_the_next_one_below_it() {
+        let tiers = tiers_for_source(1080);
+        let stepped = next_tier_down(tiers[0].id, &tiers).expect("not the floor");
+        assert_eq!(stepped.id, tiers[1].id);
+        assert!(
+            stepped.bitrate_kbps < tiers[0].bitrate_kbps,
+            "a step must lower the bitrate"
+        );
+    }
+
+    /// What stops the walk. Without it Automatic would wrap to the top and
+    /// oscillate forever.
+    #[test]
+    fn the_floor_has_nowhere_lower() {
+        let tiers = tiers_for_source(1080);
+        let floor = tiers.last().copied().expect("non-empty");
+        assert_eq!(next_tier_down(floor.id, &tiers), None);
+    }
+
+    /// A copy the server will not convert has no ladder, so there is no step to
+    /// take — Automatic must not invent one.
+    #[test]
+    fn a_copy_with_no_tiers_cannot_step() {
+        assert_eq!(next_tier_down("original", &[]), None);
+        assert_eq!(next_tier_down("1080p-8000", &[]), None);
+    }
+
+    /// A tier this copy does not offer (a stale one-off, a lower-resolution
+    /// source) must land on this copy's own ladder rather than nothing.
+    #[test]
+    fn a_tier_outside_this_copys_ladder_starts_at_its_top() {
+        // A 480p source offers no 1080p tier.
+        let tiers = tiers_for_source(480);
+        assert!(!tiers.iter().any(|t| t.id == "1080p-8000"));
+        assert_eq!(
+            next_tier_down("1080p-8000", &tiers).map(|t| t.id),
+            tiers.first().map(|t| t.id),
+        );
+    }
+
+    /// Walking from Original must reach the floor and stop, never loop.
+    #[test]
+    fn walking_the_whole_ladder_terminates() {
+        let tiers = tiers_for_source(2160);
+        let mut current = "original".to_string();
+        let mut seen = Vec::new();
+        while let Some(next) = next_tier_down(&current, &tiers) {
+            assert!(!seen.contains(&next.id), "revisited {}: the walk loops", next.id);
+            seen.push(next.id);
+            current = next.id.to_string();
+        }
+        assert_eq!(seen.len(), tiers.len(), "the walk must visit every rung once");
     }
 }
 

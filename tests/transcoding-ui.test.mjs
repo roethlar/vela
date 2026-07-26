@@ -166,38 +166,33 @@ test('the Plex quality menu withholds conversion for a split-file version', () =
 // drops or cache starvation and nothing stepped down — the same class as tr-1,
 // a shipped option that does nothing. The rule it violated is the durable one:
 // a control ships in the slice that makes it work, never before.
-test('Automatic is offered only once something implements it', () => {
-  const offers = settings.match(/<option value="automatic">/g) ?? [];
-  assert.equal(offers.length, 1, 'the value must appear in exactly one place');
+// Slice 5 made it work, so the gate is WITHDRAWN — and this now guards the same
+// rule from the other side: the option and its implementation ship together, so
+// neither can be removed or hollowed out without the other going with it.
+test('Automatic is offered, and something implements it', () => {
   assert.match(
     settings,
-    /\{#if playbackQuality === "automatic"\}[\s\S]{0,200}<option value="automatic">/,
-    'Automatic may only be shown to a config that already stores it, never offered outright',
+    /<option value="automatic">Automatic<\/option>/,
+    'Automatic is implemented, so it must be offered',
   );
-  // The help text must not describe behaviour the build does not have.
-  assert.doesNotMatch(
-    settings,
-    /Automatic starts at Original and steps down/,
-    'the help text must not promise a step-down that nothing implements',
-  );
-  // The gate exists because the step-down is absent. If it ever arrives, this
-  // test is what sends someone back here to remove the gate.
-  //
-  // What means "Automatic is implemented" is a play actually WATCHING itself,
-  // which is `step_down` being populated — not the drop count being mentioned
-  // (playback.rs names it in tests asserting it is not a position) and not the
-  // sampler existing (it does, and reports to nobody). An earlier form of this
-  // guard matched `observe_property`, which the sampler does not even use: it
-  // polls with `get_property`. Matching the wiring avoids guessing at mpv verbs.
+  // A play must actually watch itself — the sampler spawns only for Automatic.
   assert.match(
     commands,
-    /step_down: None,/,
-    'a play must not watch itself until a verdict has somewhere to go',
+    /step_down: \(quality == config::PLAYBACK_QUALITY_AUTOMATIC\)\s*\.then/,
+    'an Automatic play must spawn the health sampler',
   );
-  assert.doesNotMatch(
+  // ...and the verdict must reach something that can start the replacement.
+  assert.match(
+    lib,
+    /step_down_queue\.next\(\)\.await[\s\S]{0,220}apply_step_down/,
+    'a verdict must reach a dispatcher that can start the replacement play',
+  );
+  // The help text may describe the step-down only because it now exists, and
+  // must state both bounds the owner ruled on.
+  assert.match(
     settings,
-    /step down only if playback/,
-    'the step-down landed: withdraw the tr-8 gate in Settings.svelte and this guard',
+    /drops a step only if playback[\s\S]{0,140}at most twice, and never back up/,
+    'the help text must state the cap and that stepping is one-way',
   );
 });
 

@@ -95,10 +95,18 @@ pub struct AutomaticDetector {
 
 impl AutomaticDetector {
     pub fn new(duration: Option<Duration>) -> Self {
+        Self::resuming(duration, 0)
+    }
+
+    /// For the player a step-down just started. `already_taken` carries the
+    /// count across the relaunch — the cap is per logical play, and a step-down
+    /// replaces mpv, so a detector that started from zero each time would let
+    /// Automatic walk the ladder without limit.
+    pub fn resuming(duration: Option<Duration>, already_taken: u32) -> Self {
         Self {
             duration,
             samples: Vec::new(),
-            steps_taken: 0,
+            steps_taken: already_taken,
             quiet_until: WARM_UP,
         }
     }
@@ -422,6 +430,29 @@ mod tests {
 
     /// A verdict the caller could not act on must not consume one of the two
     /// steps — that is why `note_step_down` is separate from `observe`.
+    /// A step-down relaunches mpv with a fresh detector. If the count did not
+    /// come with it, every relaunch would restore both steps and the cap would
+    /// never bind.
+    #[test]
+    fn the_step_count_survives_a_relaunch() {
+        let mut feed = Feed::new(FILM);
+        feed.detector = AutomaticDetector::resuming(FILM, 2);
+        feed.finish_warm_up();
+        assert_eq!(
+            feed.run(60, 40, 0.1),
+            None,
+            "a play that already stepped twice must not step again after relaunching"
+        );
+
+        // One step already taken still leaves exactly one.
+        let mut feed = Feed::new(FILM);
+        feed.detector = AutomaticDetector::resuming(FILM, 1);
+        feed.finish_warm_up();
+        assert!(feed.run(6, 15, 30.0).is_some(), "the second step is allowed");
+        feed.detector.note_step_down(feed.at());
+        assert_eq!(feed.run(60, 40, 0.1), None, "but not a third");
+    }
+
     #[test]
     fn an_unacted_verdict_costs_no_step() {
         let mut feed = Feed::new(FILM);
