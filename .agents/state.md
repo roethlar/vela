@@ -9,7 +9,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Vela 1.0.0 is published**; the current source version is 1.0.54. The release
+- **Vela 1.0.0 is published**; the current source version is 1.0.55. The release
   detail rotated to `docs/history/state-archive.md` (2026-07-25) and its
   canonical evidence lives in `.agents/plans/v1-release-readiness.md`.
 - Product behavior remains as settled in `.agents/decisions.md`: Vela is a
@@ -20,22 +20,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **Server transcoding implementation is landed through Slice 6.** The six
   slices landed from 1.0.12 through 1.0.52; all seven first-pass `or-*`
   findings and both later HIGH findings are fixed through 1.0.54. The first
-  real Plex run exposed two open HIGH findings: `tr-11` blocks conversion
-  because the decision and start requests omit the required HLS client profile;
-  `tr-10` gives mpv the token in its transcode URL. Plex header auth is now
-  live-proven through master, child-playlist, and segment requests, so the
-  `tr-10` repair is safe. The owner-directed Claude review of the `tr-11` plan
-  admitted two nonblocking follow-ups: `tr-12` for silent decision failures and
-  `tr-13` for duplicated universal-transcode query builders. Canonical evidence
-  is in `.agents/plans/server-transcoding.md` and the finding files.
+  real Plex run exposed two HIGH findings. `tr-11` is implemented at
+  `f185449`: both Plex builders now select the `Web` HLS client profile, all
+  local gates and the clean Linux 38/38 suite pass, and the real-Plex scenario
+  passed decision/session/play/teardown end to end. External code review is
+  pending before closure. `tr-10` remains open: mpv still receives the Plex
+  token in its transcode URL, although header-only delivery is live-proven safe.
+  The plan review's nonblocking follow-ups remain `tr-12` (silent decision
+  failures) and `tr-13` (duplicated universal-transcode query builders).
 
 ## Next
 
-- **First action:** implement approved revision 2 of
-  `.agents/plans/tr-11-plex-client-profile.md` as one 1.0.55 finding-only
-  repair, then run full verification, independent red proofs, and the
-  strengthened real `live-transcode` scenario. `tr-10`, `tr-12`, and `tr-13`
-  remain separate.
+- **First action:** run plain `codereview codex` over exact base
+  `78ace3dde59c6ee998a4525ec55520d6e49c6902` and evidence head
+  `a0c513a` for `tr-11`. If accepted, close its records in one commit.
+  `tr-10` remains the next repair; `tr-12` and `tr-13` remain separate.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -46,9 +45,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- **`tr-11` blocks real Plex transcoding.** There is no external venue blocker:
-  the VM is aligned, live-control permission is present, and Plex plus its
-  watchdog are active.
+- **`tr-11` closure awaits external code review.** The tested owner's Plex now
+  transcodes successfully. `tr-10` remains a HIGH credential blocker.
 
 ## Verification
 
@@ -64,8 +62,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md`
 - `.agents/push-policy.md`
-- `.agents/plans/server-transcoding.md` (landed; `tr-11` and `tr-10` open)
-- `.agents/plans/tr-11-plex-client-profile.md` (approved 2026-07-26)
+- `.agents/plans/server-transcoding.md` (`tr-11` review pending; `tr-10` open)
+- `.agents/plans/tr-11-plex-client-profile.md` (implemented and verified)
 - `.agents/review/findings/tr-12.md` and
   `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)

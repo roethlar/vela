@@ -36,8 +36,10 @@ unavailable because both universal-transcode builders omit
 `X-Plex-Client-Profile-Name`. The live scenario saw 400 for all 12 eligible
 candidates; Plex logged “unable to find a matching profile.” Adding only
 `X-Plex-Client-Profile-Name=Web` made the decision return 200 / Conversion OK
-and produced usable HLS playlists and a segment. Revision 2 of the
-Claude-reviewed repair plan awaits owner approval; no code is fixed. Detail:
+and produced usable HLS playlists and a segment. Implemented at 1.0.55 /
+`f185449`; independent guard mutations, the full local matrix, a clean Linux
+38/38 suite, and real-Plex live-transcode 1/1 pass. External code review is
+pending before closure. Detail:
 `.agents/review/findings/tr-11.md`.
 
 **`tr-10` OPEN (HIGH, raised 2026-07-26)** — a transcoded Plex play returns
