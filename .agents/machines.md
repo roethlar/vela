@@ -25,9 +25,18 @@ portable and may at most point here.
   clean pass. Re-dispatch it, and never read silence as agreement.**
 - Reviewer MCP (verified 2026-07-18): the Claude Code server supports direct
   Workflow dispatch and records model, effort, version, and MCP entrypoint in
-  its transcript. The owner-confirmed standard `codereview` pair lives in the
-  gitignored `.agents/review/harnesses.local.json`; frontier and `openreview`
-  mappings remain unconfirmed and therefore fail closed.
+  its transcript. Tier pairs live in the gitignored
+  `.agents/review/harnesses.local.json`. **Both tiers are now owner-confirmed
+  for `claude` (recorded 2026-07-19): standard is `claude-fable-5` at xhigh,
+  frontier is `claude-fable-5` at max, graded `competitive`.** The line here
+  previously said frontier and `openreview` mappings were unconfirmed and failed
+  closed — stale on both counts as of 2026-07-25: the cache records them, and
+  the `openreview` playbook's 2026-07-25 amendment retired the separate
+  `openreview_confirmed` gate in favour of the frontier pair's `grade`, which
+  `competitive` satisfies. An `openreview` on this machine therefore dispatches
+  without asking. The harness VERSION half of the cache is separate and still
+  re-probed on change (2.1.215 recorded → 2.1.220 installed); that is a note on
+  the dispatch record, never a gate.
 - Reviewer MCP execution blocker (proved 2026-07-18 on `wsp-1`, Claude Code
   2.1.214): the owner directed launching the server with `--allowedTools`.
   The registration now uses

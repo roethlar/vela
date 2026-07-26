@@ -209,14 +209,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- Reviewer routing note for the next dispatch: the `codex` entry in
+- Reviewer routing note, `codex` only: that entry in
   `.agents/review/harnesses.local.json` has no `tiers` block (it predates the
-  tier schema — codex-cli 0.142.5, verified 2026-07-04) and this clone has no
-  `.agents/model-map.json`, so tier resolution failed closed. The owner cleared
-  it on 2026-07-25 by naming `gpt-5.6-sol` at xhigh as a literal slug requiring
-  no mapping. Per the playbook that is a session-only inline pin: it was NOT
-  written to the harness cache or any map, and any later dispatch needs the
-  owner to name it again or to confirm a durable codex tier entry.
+  tier schema — codex-cli 0.142.5 recorded, 0.145.0 installed) and this clone
+  has no `.agents/model-map.json`, so tier resolution fails closed for codex.
+  The owner cleared it on 2026-07-25 by naming `gpt-5.6-sol` at xhigh as a
+  literal slug requiring no mapping; per the playbook that is a session-only
+  inline pin, NOT written to the cache, so any later codex dispatch needs the
+  owner to name it again or to confirm a durable codex tier entry. **`claude`
+  is unaffected — both its tiers are recorded and owner-confirmed, so
+  `codereview claude` and `openreview claude` dispatch without asking**
+  (`.agents/machines.md`).
 - The Linux E2E venue outage is RESOLVED (2026-07-25): the venue was never
   broken. `--skip-build` had been reusing a binary produced by a plain `cargo
   build`, which embeds no frontend and so loads `devUrl`; the webview was
