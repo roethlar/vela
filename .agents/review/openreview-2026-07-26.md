@@ -72,7 +72,7 @@ it never then reaches a genuinely lower tier.
 | or-3 | MEDIUM | FIXED `9933b28` (1.0.45) |
 | or-4 | MEDIUM | FIXED `a277f8a` (1.0.41) |
 | or-5 | MEDIUM | FIXED `827ad8b` + `774e21d` (1.0.42-43) |
-| or-6 | MEDIUM | **DEFERRED — needs an owner design call, see below** |
+| or-6 | MEDIUM | FIXED `6d0f84e` + `ba48c17` (1.0.53-54) |
 | or-7 | MEDIUM | FIXED `9485fe4` (1.0.47) |
 
 Every fix was red-proven by injecting its regression separately. Three guards
@@ -89,6 +89,24 @@ helper). That is the same rate this session has seen throughout.
 item with several media versions the menu can describe one version while
 playback policy selects another — omitting valid tiers, or offering one that
 then degrades to Original.
+
+**FIXED 2026-07-26 by option (1), after the objection to it turned out to be
+wrong.** The deferral below claimed `select_playback_version` mutates state and
+can enqueue a source-choice prompt. It does neither: it probes, ranks, and
+returns, and its Ask-mode `Choice` is a RETURNED VALUE that the caller decides
+what to do with. Reading the function instead of reasoning about it is what
+settled this — the same lesson `.agents/repo-guidance.md` already records about
+recording things as unguardable.
+
+`quality_options` now takes the item and resolves the version the play path
+would choose, using it only when the policy landed on the very copy the menu row
+describes; anything ambiguous falls back to the source's default, which is the
+old behaviour. Four regressions injected separately; one guard was vacuous
+(matching the copy-comparison alone let `true || (...)` pass) and was tightened
+to pin the whole condition.
+
+The original deferral, kept because its option analysis is still the record of
+what was considered:
 
 **DEFERRED 2026-07-26 — this one needs an owner decision, not a patch.** The
 finding is real and reproduced by reading the code: with `versionId: null` the

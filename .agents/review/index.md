@@ -13,7 +13,7 @@ Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
 (smb-1..smb-6).
 
-**`openreview codex` 2026-07-26 over `72e0f48..a8a9fec`: 7 FINDINGS, 6 FIXED (1.0.39-47), `or-6` deferred to an owner design call. Originally all
+**`openreview codex` 2026-07-26 over `72e0f48..a8a9fec`: 7 FINDINGS, ALL FIXED (1.0.39-54). Originally all
 ADMITTED — `or-1` HIGH, `or-2`..`or-7` MEDIUM. All OPEN.** The HIGH is that an
 Automatic replacement never spawns a sampler (it relaunches at a concrete tier,
 and the sampler only spawns for `automatic`), so Automatic can take exactly ONE

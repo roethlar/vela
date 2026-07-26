@@ -236,11 +236,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (sequence context dropped), `or-3` (Ask mode re-prompted instead of
   replacing), `or-4` (quiet-period samples fired at the boundary), `or-5`
   (the first step could ask for MORE bandwidth than the source), `or-7` (the
-  Plex decision asked about a delivery it would not start). **`or-6` is
-  DEFERRED and needs an owner design call** — three options with different
-  costs, written out in `.agents/review/openreview-2026-07-26.md`; the summary
-  is that a side-effect-free version selection does not exist today, so pinning
-  the menu to the version that will play is more than a patch.
+  Plex decision asked about a delivery it would not start), and `or-6` (the
+  menu described the source's default version rather than the one that would
+  play). ALL SEVEN ARE FIXED, through 1.0.54. `or-6` was briefly deferred on a
+  wrong premise — `select_playback_version` was assumed to mutate state and
+  enqueue an Ask prompt; it does neither, and reading it settled the question.
+- **Two further codex rounds over the fixes found two more HIGHs, both fixed.**
+  Round 2 (`a8a9fec..081f601`): the `or-5` fix made stepping bitrate-aware and
+  able to skip rungs, while the current tier was still replayed one rung per
+  step — so a 10 Mbps source stepped to 8, was reconstructed as 20, and stepped
+  to 8 again, spending its last step on the tier it was already playing. Fixed
+  at 1.0.50 by CARRYING the running quality in `StepDownRequest` and deleting
+  the replay helper. Round 3 (`081f601..bc19fb8`): the new live transcode
+  scenario projected `sourceId` away and passed `undefined` for a required
+  field, so it would have failed before mpv launched and proven nothing; and
+  the live harness picked the first of several Plex connections while
+  live-control manages one fixed host. Both fixed at 1.0.51.
 - **The live E2E harness cannot authenticate to Plex after the connection
   split.** `scripts/e2e-live.sh` extracts Plex credentials from TOP-LEVEL
   `config.json` keys (`auth_token`, `last_server_*`), and
