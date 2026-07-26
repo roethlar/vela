@@ -32,15 +32,22 @@ portable and may at most point here.
   `.agents/decisions.md` 2026-07-26): the working agent here IS Claude, so a
   Claude reviewer is not independent. The cache's owner-confirmed `claude` tiers
   (`claude-fable-5` @ xhigh / @ max, `competitive`) are therefore NOT selectable
-  for review work on this repository, whatever the cache says. `codex` has no
-  `tiers` block on this machine, so its model is named at dispatch until a
-  durable pair is recorded.
+  for review work on this repository, whatever the cache says.
 
-  Probed 2026-07-26: codex-cli 0.145.0 (cache records 0.142.5 — a note, not a
-  gate). Headless entry `codex exec`, with `--model`, `-c
-  model_reasoning_effort=<level>`, `--sandbox workspace-write` (needed so the
-  reviewer can drive its own worktree), `--output-schema <file>` and
-  `-o <outfile>` for the structured verdict.
+  **Codex is called plainly — no `--model`, no reasoning-effort override, and
+  no model/effort pair recorded for it.** The whole dispatch, probed and used
+  2026-07-26 against codex-cli 0.145.0 (cache records 0.142.5 — a note, not a
+  gate):
+
+  ```
+  codex exec --sandbox workspace-write \
+    --output-schema <schema.json> -o <outfile> "<prompt>"
+  ```
+
+  `workspace-write` is required so the reviewer can drive its own `git
+  worktree`; `--output-schema` plus `-o` carry the structured verdict. Nothing
+  else is passed. Do not add `--model` or `-c model_reasoning_effort=...`, and
+  do not ask the owner to name either.
 - Reviewer MCP execution blocker (proved 2026-07-18 on `wsp-1`, Claude Code
   2.1.214): the owner directed launching the server with `--allowedTools`.
   The registration now uses

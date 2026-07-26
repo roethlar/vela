@@ -17,6 +17,16 @@ the model or tier, and whatever `.agents/review/harnesses.local.json` records
 for it. The recorded `claude` tier entries stay in the cache for other uses but
 must not be selected for a review of this repository's code.
 
+**Call codex plainly: no `--model`, no reasoning-effort override** (owner,
+2026-07-26). The dispatch is `codex exec` plus only the mechanical flags a
+review needs - `--sandbox workspace-write` for the reviewer's own worktree,
+`--output-schema` and `-o` for the structured verdict. Codex's own defaults
+choose the model and effort. Do not name a model at dispatch, do not record a
+model or effort pair for codex in the harness cache, and do not ask the owner
+to name one. This overrides the playbooks' tier->(model, effort) resolution for
+this repo: the owner's instruction is the higher authority, and the value here
+is the independent provider, not a pinned tier.
+
 Reason:
 The working agent on this repo is Claude. Dispatching a Claude harness to review
 Claude's work is not independent review - it is the same family checking its own

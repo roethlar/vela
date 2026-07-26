@@ -209,12 +209,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- **Reviews of this repo go to `codex`, never a Claude harness** (decision
-  `.agents/decisions.md` 2026-07-26 — the working agent is Claude, so a Claude
-  reviewer is not independent). `codex`'s cache entry has no `tiers` block, so
-  its model is named at dispatch until the owner records a durable pair;
-  `gpt-5.6-sol` is what the owner has named twice (2026-07-25, 2026-07-26) and
-  is the standing candidate for that pair.
+- **Reviews of this repo go to `codex`, called plainly — no model, no effort,
+  no recorded pair** (decision `.agents/decisions.md` 2026-07-26; exact command
+  in `.agents/machines.md`). The working agent is Claude, so a Claude reviewer
+  is not independent; and the value is the independent provider, not a pinned
+  tier, so codex's own defaults are used and nobody is asked to name one.
 - **The Linux E2E suite is GREEN at 38/38** (`a8a9fec`, 2026-07-26) — the first
   run covering the whole transcoding feature, slice 5, and the marker work.
   `markers` passes for the first time ever, and `sourcepolicy` passes after
