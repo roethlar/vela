@@ -243,6 +243,13 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
     the REAL service. The owner installed a NOPASSWD sudoers rule scoped to FOUR literal
     commands — start/stop `plexmediaserver.service` and `plex-watchdog.timer`, nothing
     else (`/etc/sudoers.d/vela-e2e`; remove with `sudo rm` to revoke).
+  - **THAT RULE IS GONE as of 2026-07-26.** `ssh -o BatchMode=yes michael@altiera
+    "sudo -n /usr/bin/systemctl is-active plexmediaserver.service"` answers
+    `sudo: a password is required`. `live-control.mjs` shells to exactly those
+    commands, so EVERY live Plex scenario now fails in `seed` at its first
+    `/plex/start` — including ones that never stop the server. Restoring
+    `/etc/sudoers.d/vela-e2e` is an owner action; nothing agent-side can work
+    around it, and nothing should try.
   - **`plex-watchdog.timer` restarts Plex every 5 minutes.** It must be stopped for the
     window and restored after, or a test is racing a robot.
   - **Plex is restored on EVERY exit path** — scenario cleanup, the control server's
