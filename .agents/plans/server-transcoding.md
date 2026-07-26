@@ -13,7 +13,8 @@ the Plex token in mpv's transcode URL; its live safety gate passed on 2026-07-26
 token-free master and child playlists accepted header auth (200), a token-free
 segment accepted it (206), and teardown returned 204. Neither code fix is
 started; their canonical records are `.agents/review/findings/tr-11.md` and
-`.agents/review/findings/tr-10.md`.
+`.agents/review/findings/tr-10.md`. The narrow `tr-11` repair plan is
+`.agents/plans/tr-11-plex-client-profile.md` and is awaiting owner approval.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per

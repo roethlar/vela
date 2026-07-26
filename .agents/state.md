@@ -29,10 +29,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- **First action:** draft an owner-approved plan for `tr-11`, then fix and
-  verify it as one finding/commit before touching `tr-10`. Real Plex
-  transcoding cannot start until the missing client profile is repaired. No
-  code change is authorized yet.
+- **First action:** approve or decline
+  `.agents/plans/tr-11-plex-client-profile.md`. It specifies one 1.0.55
+  finding-only repair, separate decision/start guards, full verification,
+  independent red proofs, and the real `live-transcode` scenario. No code
+  change is authorized yet.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -62,6 +63,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/machines.md`
 - `.agents/push-policy.md`
 - `.agents/plans/server-transcoding.md` (landed; `tr-11` and `tr-10` open)
+- `.agents/plans/tr-11-plex-client-profile.md` (draft; awaiting approval)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
 - `.agents/review/index.md`, `.agents/review/findings/tr-11.md`, and
   `.agents/review/findings/tr-10.md`
