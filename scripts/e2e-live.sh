@@ -11,8 +11,16 @@
 set -euo pipefail
 
 VM="${VELA_E2E_VM:-michael@192.168.64.5}"
-VM_REPO="${VELA_E2E_VM_REPO:-~/dev/vela}"
-CFG="$HOME/Library/Application Support/com.vela.vela/config.json"
+# The venue is the current-main worktree; the older clone beside it is kept for
+# its stash and is NOT updated (see .agents/machines.md).
+VM_REPO="${VELA_E2E_VM_REPO:-~/dev/vela-main}"
+STATE="$HOME/Library/Application Support/com.vela.vela"
+CFG="$STATE/config.json"
+# Active connections moved out of config.json into a private connections.json
+# when the config split landed (slice 1 of config-integrity-recovery). Both
+# layouts are read below: a pre-split config keeps its connections in
+# `config.json.sources`, a post-split one in `connections.json.sources`.
+CONNS="$STATE/connections.json"
 CREDS_REMOTE="/tmp/vela-live-creds.json"
 
 [ -f "$CFG" ] || { echo "live: no Vela config at $CFG — configure a server in the app first" >&2; exit 1; }
@@ -44,21 +52,47 @@ CONTROL_ADDR="$(sed -n 's/^live-control: //p' "$CONTROL_LOG" | head -1)"
 
 # Reshape the real config into just what the live scenarios need. Each source is copied
 # whole (it carries its own credentials); the scenarios rewrite the endpoints they proxy.
-python3 - "$CFG" "$TMP" "http://$CONTROL_ADDR/$SECRET" <<'PY'
-import json, sys
-cfg, out, control = sys.argv[1], sys.argv[2], sys.argv[3]
+python3 - "$CFG" "$CONNS" "$TMP" "http://$CONTROL_ADDR/$SECRET" <<'PY'
+import json, os, sys
+from urllib.parse import urlsplit
+cfg, conns, out, control = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 c = json.load(open(cfg))
 d = {"control": control}
 
-jf = next((s for s in c.get("sources", []) if (s.get("kind") or s.get("type")) == "jellyfin"), None)
+# Connections live in connections.json after the config split and in
+# config.json before it. Prefer the split file when present; a pre-split
+# install has none. Either way the record shape is the same SourceConfig.
+sources = []
+if os.path.exists(conns):
+    try:
+        sources = json.load(open(conns)).get("sources") or []
+    except Exception as e:
+        sys.exit(f"live: connections.json is present but unreadable ({e})")
+if not sources:
+    sources = c.get("sources") or []
+
+jf = next((s for s in sources if (s.get("kind") or s.get("type")) == "jellyfin"), None)
 if jf and (jf.get("base_url") or jf.get("url")):
     d["jellyfin"] = {"baseUrl": jf.get("base_url") or jf.get("url"), "source": jf}
 
-# Plex is restored from TOP-LEVEL config (auth_token + last_server_*), not from `sources`,
-# and only when the scheme is https (lib.rs). It cannot be proxied — it is HTTPS behind a
-# plex.direct certificate — so the live Plex scenario stops the REAL server instead, which
-# is what the control endpoint is for.
-if c.get("auth_token") and c.get("last_server_host") and c.get("last_server_scheme") == "https":
+# Plex cannot be proxied — it is HTTPS behind a plex.direct certificate — so the
+# live Plex scenario stops the REAL server instead, which is what the control
+# endpoint is for. Host/port/scheme come from the connection's own base_url;
+# older configs kept the same facts in top-level last_server_* fields, which are
+# still honoured so a pre-split install keeps working.
+plex = next((s for s in sources if (s.get("kind") or s.get("type")) == "plex"), None)
+if plex and plex.get("access_token") and plex.get("base_url"):
+    parts = urlsplit(plex["base_url"])
+    if parts.scheme == "https" and parts.hostname:
+        d["plex"] = {
+            "auth_token": plex["access_token"],
+            "client_identifier": plex.get("device_id"),
+            "last_server_host": parts.hostname,
+            "last_server_port": parts.port or 32400,
+            "last_server_scheme": parts.scheme,
+        }
+if "plex" not in d and c.get("auth_token") and c.get("last_server_host") \
+        and c.get("last_server_scheme") == "https":
     d["plex"] = {
         "auth_token": c["auth_token"],
         "client_identifier": c.get("client_identifier"),
@@ -68,7 +102,10 @@ if c.get("auth_token") and c.get("last_server_host") and c.get("last_server_sche
     }
 
 if not d.get("jellyfin") and not d.get("plex"):
-    sys.exit("live: the Vela config has neither a Jellyfin source nor a saved https Plex server")
+    sys.exit(
+        "live: no Jellyfin source and no https Plex connection found in "
+        "connections.json or config.json — connect a server in the app first"
+    )
 json.dump(d, open(out, "w"))
 PY
 
