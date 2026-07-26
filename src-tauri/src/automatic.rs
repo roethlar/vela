@@ -354,34 +354,69 @@ mod tests {
         let mut feed = Feed::new(FILM);
         feed.finish_warm_up();
         assert!(feed.run(6, 15, 30.0).is_some());
-        let at = feed.at();
-        feed.detector.note_step_down(at);
-        // The replacement stream's own first seconds look exactly like failure.
-        while feed.at() < at + COOLDOWN {
-            assert_eq!(
-                feed.step(40, 0.1),
-                None,
-                "the new stream must be given time to establish"
-            );
-        }
+        feed.detector.note_step_down(feed.at());
+        // A fixed count, NOT `while at < COOLDOWN`: that loop body never runs if
+        // the cooldown is zeroed, so the test passed with the guard disarmed.
+        // Ten ticks is 20s — inside the 30s cooldown, and long enough that both
+        // signals would otherwise have fired several times over.
+        assert_eq!(
+            feed.run(10, 40, 0.1),
+            None,
+            "the replacement stream must be given time to establish"
+        );
     }
 
     #[test]
     fn stepping_stops_at_the_cap() {
         let mut feed = Feed::new(FILM);
         feed.finish_warm_up();
-        for step in 0..MAX_STEPS_PER_PLAY {
-            let verdict = feed.run(30, 15, 30.0);
-            assert!(verdict.is_some(), "step {step} should have been called for");
-            let at = feed.at();
-            feed.detector.note_step_down(at);
+        // Two, spelled out rather than read from the constant: the cap is an
+        // owner ruling (2026-07-25), so this must fail if the constant moves.
+        for step in 0..2 {
+            assert!(
+                feed.run(30, 15, 30.0).is_some(),
+                "step {step} should have been called for"
+            );
+            feed.detector.note_step_down(feed.at());
         }
-        assert_eq!(feed.detector.steps_taken(), MAX_STEPS_PER_PLAY);
-        // Playback still failing, but the ladder walk is over.
+        assert_eq!(feed.detector.steps_taken(), 2);
+        // Playback is still failing, but the ladder walk is over.
         assert_eq!(
             feed.run(60, 40, 0.1),
             None,
-            "no more than {MAX_STEPS_PER_PLAY} steps in one play"
+            "a play may never step down more than twice"
+        );
+    }
+
+    /// Stray drops are normal — a few frames on a scene change, a moment of
+    /// contention. Only a storm is worth interrupting the film for.
+    #[test]
+    fn a_low_but_steady_drop_rate_is_tolerated() {
+        let mut feed = Feed::new(FILM);
+        feed.finish_warm_up();
+        // Rising every single sample, so only the SIZE of the growth separates
+        // this from a storm: 2 per tick is 10 across the 10s window, well under
+        // the threshold.
+        assert_eq!(
+            feed.run(30, 2, 30.0),
+            None,
+            "a trickle of dropped frames is not a storm"
+        );
+    }
+
+    /// A brief dip is not starvation — the cache recovers on its own constantly.
+    #[test]
+    fn a_brief_cache_dip_is_tolerated() {
+        let mut feed = Feed::new(FILM);
+        feed.finish_warm_up();
+        // Two starved samples inside one window, then recovery. One short of
+        // the threshold, so this is what separates a dip from starvation.
+        assert_eq!(feed.step(0, 0.2), None);
+        assert_eq!(feed.step(0, 0.2), None);
+        assert_eq!(
+            feed.run(10, 0, 30.0),
+            None,
+            "a cache that dips twice and recovers is not starving"
         );
     }
 
