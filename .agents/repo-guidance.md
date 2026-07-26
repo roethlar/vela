@@ -74,7 +74,11 @@ Rules the command list doesn't carry on its own:
 
 ## Remotes & Sync
 
-- `origin`: `http://q.internal:3000/michael/vela.git` (fetch and push).
+- `origin`: `http://q:3000/michael/vela.git` (fetch and push; verified against
+  `git remote -v` 2026-07-25).
+- `github`: `https://github.com/roethlar/vela.git` — the remote CI actually
+  runs on (see Verification above).
+- `vm`: the Linux E2E host; see `.agents/machines.md`.
 - Push policy lives in `.agents/push-policy.md`.
 
 ## Earned Practices

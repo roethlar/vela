@@ -151,8 +151,7 @@ scenario here that depends on an OSD overlay being drawn.
 The VM also has a `stash@{0}` (`codex-linux-validation-1a2bef5`) and its clone
 sits at `95312fc` on `main`; the 2026-07-25 sync overwrote working-tree files
 only after confirming every one of them matched a blob already in the mac
-repo, so nothing original was lost. `xdotool` is NOT installed, which the
-marker E2E's pointer-click leg requires.
+repo, so nothing original was lost.
 
 Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
 

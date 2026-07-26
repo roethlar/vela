@@ -4,6 +4,115 @@ Entries rotated verbatim out of `.agents/state.md` `## Now` when they stopped
 being live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-07-25 (catchup sweep — nine landed entries, v1.0.20)
+
+Context for readers: the 1.0.0 release entries and the whole
+config-integrity/recovery track were landed, verified, guard-proven, and
+carried no live decision anymore. They rotate here verbatim in their original
+`## Now` order. One exception to verbatim: the guard-pass entry's trailing
+push-status sentence was deleted rather than copied, per the 2026-07-11 ruling
+that push state is never recorded in these files.
+
+- **Vela 1.0.0 is published.** Annotated tag `v1.0.0` targets
+  `06df6812d7fe81185213778669fcaa87680ac83b`; the public Latest release is
+  `https://github.com/roethlar/vela/releases/tag/v1.0.0`. It contains the
+  universal macOS DMG, Windows NSIS and MSI installers, Linux AppImage/deb/rpm,
+  Arch package, and the verified checksum manifest.
+- The release closed the native Bash 3 wrapper, fail-closed artifact inventory,
+  Arch packaging, real-Plex completion/refresh, 1.0 docs/graphics, cross-platform
+  package, and Windows install-over gates. Exact commits, guard red proofs,
+  live-state restoration, workflow evidence, artifact hashes, and the GitHub
+  permission recovery are canonical in
+  `.agents/plans/v1-release-readiness.md`.
+- The tag's first release jobs exposed missing GitHub release-write permission
+  before publication. The future-tag fix is `9f97355`; repository workflow
+  defaults remain read-only. The 1.0 release itself was created and populated
+  with `gh` from the successful exact-tag-commit rehearsal, then downloaded
+  and checksum-verified before publication.
+- The app-wide fail-closed settings prerequisite is COMPLETE at
+  `.agents/plans/config-integrity-recovery.md`. It specifies independent
+  strict boundaries and targeted byte-exact recovery for settings and active
+  server connections. Active connection records and plaintext tokens move to
+  private `connections.json`; valid connections survive a settings reset
+  without reauthorization. The owner rejected an OS credential vault and
+  app-managed pretend encryption: owner-account file/backup permissions,
+  redacted runtime handling, private request headers, and removal of Plex token
+  URLs/query strings are the security boundary. Unknown fields invalidate only
+  their whole owning file; documented legacy rollback fields and non-settings
+  media payloads remain compatible. Slice 1 is implemented and canonically
+  verified at version 1.0.1: active connections now live in private
+  `connections.json`, startup and runtime fail closed behind the two-file gate,
+  a valid combined 1.0.0 config splits only after an exact verified backup, and
+  invalid combined settings are not mined. Native Windows ACL validation and
+  the checksum-matched Linux real-app suite passed. Slice 1 landed as `016a958`;
+  its mandatory post-commit guard regressions were injected, failed for their
+  intended reasons, restored, and rerun green. A vacuous source-write static
+  guard found during that pass was strengthened and independently red-proven.
+- Slice 2 is implemented and canonically verified at version 1.0.2. Invalid
+  settings and connections now offer real Rename/Reconnect and Exit buttons;
+  recovery uses an exact private no-replace rename and targeted validated
+  default while leaving the other file and playlists unchanged. Damaged legacy
+  combined settings yield no connection data and require reconnection. A
+  private strict recovery record keeps crashes after the user's click blocked
+  across restart and resumes only an exact unambiguous transaction state.
+  Checksum-matched Linux real-app coverage passed 35/35, including click, Space,
+  Exit no-write, restart, preserved-connection, reconnect, and crash-resume
+  cases; native Windows no-replace, ACL, recovery, and resume tests passed.
+  Slice 2 landed as `0c9b48f`. Nine behavior guards were independently
+  red-proven and restored. A vacuous busy-disabled button check found during
+  that pass was strengthened and then failed for the intended regression.
+- Slice 2A is implemented, canonically verified, committed, and independently
+  red-proven at version 1.0.3. Settings and connections independently retain
+  the three newest private, distinct, strictly valid prior versions. A
+  damaged-file screen shows all available versions newest first as real dated
+  buttons while retaining fresh-file recovery and Exit. Rollback is bound to
+  the selected whole file/version, preserves the exact damaged current file
+  first, and leaves the other durable file and playlists untouched.
+  Checksum-identical native Windows tests and the rebuilt Linux real-app suite
+  passed. Production landed as `b09b610`; the guard pass found and strengthened
+  three insufficient tests in `ee79573`, `b8d2860`, and `ac65b0f`, then proved
+  their exact regressions red and restored green.
+- Slice 3 production is implemented, independently reviewed, canonically
+  verified, and committed at version 1.0.4 as `21ecbe8`. Plex artwork,
+  progress, timeline, and playback now keep credentials in backend/header
+  paths; legacy persisted Plex artwork is converted or removed; provider Part
+  keys containing the active credential fail closed; and mpv's private
+  per-launch include is cleaned on partial write, replacement, confirmed exit,
+  and app exit. Both independent review passes returned findings (two HIGH,
+  five MEDIUM, five LOW total), every finding was admitted and resolved, and no
+  clean verdict is claimed. Canonical local verification passed with 51 Node
+  tests and 259 Rust tests; checksum-identical native Windows passed 255/255
+  after one nonreproducible transient history-test failure, and the rebuilt
+  Linux real app passed 37/37 E2E scenarios.
+- Slice 3's post-commit guard pass is complete (2026-07-24). Beyond the
+  restored regressions that proved progress and timeline header auth; settings
+  and playlist legacy-artwork sanitation; embedded provider-Part credential
+  refusal; frontend protocol conversion and Windows CSP; artwork dimension,
+  MIME, traversal, query, header-auth, redirect, declared-size, and streamed
+  size bounds; mpv ACL-before-write, partial-write cleanup, process-query
+  retention/reaping, replacement ordering, and exit-queue cleanup; discovery
+  body nonreflection; and exact/embedded mock-log redaction, the three
+  real-app multiplex behaviors were red-proven separately on the Linux E2E
+  venue: a transcode query token failed the Plex mock contract, and
+  query-token progress and query-token timeline each failed the
+  source-token-header assertion. Every regression was restored from its
+  committed state and reran green; one restored-green run needed an immediate
+  rerun after a transient Settings-dialog timeout on the identical binary.
+  Closeout verification passed with the exact Node/npm toolchain, 51 Node
+  tests, 259 Rust tests, and the rebuilt Linux real app at 37/37 E2E
+  scenarios. The full evidence paragraph is canonical in
+  `.agents/plans/config-integrity-recovery.md`; the docs-only closeout
+  (evidence plus this state entry) landed as `8b550d6`.
+- The required plan `openreview` ran over exact range `7a4b5b0..bf3730a` with
+  Claude Code 2.1.218 / `claude-opus-4-8` at max and admitted one MEDIUM finding,
+  `cir-1`. The owner resolved it on 2026-07-23: damaged settings are renamed
+  whole and replaced or Vela exits; damaged connections are renamed and enter
+  reconnection or Vela exits; a damaged legacy combined config is not mined for
+  connection records and therefore also requires reconnection. Plan revision 4
+  records the repair. The owner declined a follow-up Claude review and
+  explicitly activated implementation on 2026-07-23; no clean follow-up verdict
+  is claimed.
+
 ## Rotated 2026-07-17 (drift pass — seven landed entries, v0.1.57)
 
 Context for readers: seven `## Now` entries were landed, externally accepted,
