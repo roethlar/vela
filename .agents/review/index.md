@@ -23,10 +23,10 @@ harness selected the wrong Plex connection. Full verdict and triage:
 EMPTY `http_headers` and carries `X-Plex-Token` in the URL instead, so the token
 reaches mpv's `path`, its logs, and its process argv. Direct play was hardened
 against exactly this by the 2026-07-23 credential split; slice 3 did not carry
-it to the transcode path it added. Not fixed: it needs a check against the real
-server (do Plex's HLS segment requests accept header auth?). The live-control
-permission needed for that check is present. Not found by the slice-3 codex
-review. Detail:
+it to the transcode path it added. Not fixed. The live safety gate passed on
+2026-07-26: Plex accepted header-only master, child-playlist, and segment
+requests and generated no token-bearing child URI. Not found by the slice-3
+codex review. Detail:
 `.agents/review/findings/tr-10.md`.
 
 Transcoding slice-3 loop `tr-3..tr-9` CLOSED 2026-07-25: all seven findings from
