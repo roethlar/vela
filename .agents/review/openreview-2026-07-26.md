@@ -63,12 +63,60 @@ source selects the 20 Mbps tier even when the source itself is 10 Mbps, so a
 starving link is "stepped down" to a higher bitrate target. Compounded by or-1,
 it never then reaches a genuinely lower tier.
 
+## Outcomes
+
+| id | severity | status |
+|------|----------|--------|
+| or-1 | HIGH | FIXED `53dab6e` + `ef95144` (1.0.39-40) |
+| or-2 | MEDIUM | FIXED `3f070f1` + `5dac833` (1.0.44, 1.0.46) |
+| or-3 | MEDIUM | FIXED `9933b28` (1.0.45) |
+| or-4 | MEDIUM | FIXED `a277f8a` (1.0.41) |
+| or-5 | MEDIUM | FIXED `827ad8b` + `774e21d` (1.0.42-43) |
+| or-6 | MEDIUM | **DEFERRED — needs an owner design call, see below** |
+| or-7 | MEDIUM | FIXED `9485fe4` (1.0.47) |
+
+Every fix was red-proven by injecting its regression separately. Three guards
+written during this pass were VACUOUS on their first attempt and were caught
+only by injection — the Automatic-mode gate's one-off clause (unguardable, so
+the clause was deleted rather than kept), the inherited playlist cursor (matched
+the computation without proving it reached the launch), and the `or-7` flag
+mapping (re-derived the rule in the test instead of calling the production
+helper). That is the same rate this session has seen throughout.
+
 ## or-6 (MEDIUM) — the quality menu is not pinned to the version that will play
 
 `+page.svelte` sends `versionId: null` on every `quality_options` request. For an
 item with several media versions the menu can describe one version while
 playback policy selects another — omitting valid tiers, or offering one that
 then degrades to Original.
+
+**DEFERRED 2026-07-26 — this one needs an owner decision, not a patch.** The
+finding is real and reproduced by reading the code: with `versionId: null` the
+source falls back to its default media entry, while the play path uses
+`selection.version_id` from `select_playback_version`. Slice 4's menu already
+pins the COPY (each `Play Version` row asks about its own backing), so the gap
+is narrower than it looks: it is multiple media VERSIONS inside one copy, which
+is Plex `Media[]`.
+
+Three ways to close it, and they are not equivalent:
+
+1. **Have `quality_options` run the same selection the play will.** Strongest —
+   menu and play agree by construction. But `select_playback_version` takes
+   `state` and MUTATES it: in Ask Every Time it enqueues a pending
+   source-choice. A menu opening must not enqueue a choice or pop a dialog, so
+   this needs a side-effect-free variant of the selection, which does not exist
+   today.
+2. **Enumerate versions in the menu**, one row per version under each copy, and
+   pass the chosen `version_id` through both the options request and the play.
+   Honest and explicit, but it deepens an already three-level menu and needs a
+   `version_id` parameter on the play command.
+3. **Accept the mismatch** and have the menu say it describes the default
+   version.
+
+(1) is the right answer if a pure selection can be factored out; (2) is a
+product change; (3) is a documentation change. Picking between them is a design
+call with visible consequences, so it is left to the owner rather than decided
+here. Nothing about it blocks the other six fixes.
 
 ## or-7 (MEDIUM) — the Plex capability probe does not test the delivery it starts
 

@@ -229,14 +229,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   requests, which is unverified against the real server. Detail:
   `.agents/review/findings/tr-10.md`.
 - **The `openreview codex` pass over `72e0f48..a8a9fec` returned 7 ADMITTED
-  findings (1 HIGH, 6 MEDIUM), ALL OPEN.** `or-1` (HIGH) is that Automatic can
-  only ever take ONE step: the sampler spawns only when the resolved quality is
-  `automatic`, and a step-down relaunches at a concrete tier, so the replacement
-  is never watched and the whole second-step apparatus — the cap, the
-  cooldown-on-resume, the `steps_taken` threading — is unreachable. Verdict and
-  triage: `.agents/review/openreview-2026-07-26.md`. **Slice 5 must not be
-  called complete while `or-1` stands**; the earlier "slice 5 is COMPLETE" entry
-  above is true only of the code that was written, not of the behaviour.
+  findings (1 HIGH, 6 MEDIUM). SIX ARE FIXED** at 1.0.39-1.0.47, each
+  red-proven by injecting its own regression: `or-1` (Automatic could take only
+  ONE step — the sampler was gated on the resolved quality, and a step-down
+  relaunches at a concrete tier, so no replacement was ever watched), `or-2`
+  (sequence context dropped), `or-3` (Ask mode re-prompted instead of
+  replacing), `or-4` (quiet-period samples fired at the boundary), `or-5`
+  (the first step could ask for MORE bandwidth than the source), `or-7` (the
+  Plex decision asked about a delivery it would not start). **`or-6` is
+  DEFERRED and needs an owner design call** — three options with different
+  costs, written out in `.agents/review/openreview-2026-07-26.md`; the summary
+  is that a side-effect-free version selection does not exist today, so pinning
+  the menu to the version that will play is more than a patch.
 - **The live E2E harness cannot authenticate to Plex after the connection
   split.** `scripts/e2e-live.sh` extracts Plex credentials from TOP-LEVEL
   `config.json` keys (`auth_token`, `last_server_*`), and
