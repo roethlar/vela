@@ -144,6 +144,33 @@ test('an invented quality cannot reach a source', () => {
   );
 });
 
+// Finding tr-6's wiring. The classifier, the retries and the credential-free
+// failure text are all unit-guarded — but a guard-the-wiring sweep (2026-07-25)
+// found that deleting the Plex call site left EVERY test green, because nothing
+// proved a teardown actually goes through it. Same defect class that shipped two
+// dead behaviours in slice 5.
+test('both providers tear down through the classifier', () => {
+  const plexLibrary = read('src-tauri/src/plex_library.rs');
+  const jellyfin = read('src-tauri/src/source/jellyfin.rs');
+  assert.match(
+    plexLibrary,
+    /pub async fn stop_transcode_session[\s\S]{0,400}crate::source::stop_transcode_request\("plex"/,
+    'the Plex teardown must go through the shared classifier, not a bare send',
+  );
+  assert.match(
+    jellyfin,
+    /async fn stop_transcode[\s\S]{0,400}crate::source::stop_transcode_request\(self\.flavor\.kind\(\)/,
+    'the Jellyfin/Emby teardown must go through the shared classifier too',
+  );
+  // A bare `.send()` on a teardown is what the classifier replaced; it must not
+  // come back alongside it.
+  assert.doesNotMatch(
+    plexLibrary,
+    /transcode_session_url[\s\S]{0,300}\.delete\([\s\S]{0,200}\.send\(\)/,
+    'a teardown must never send its own request past the classifier',
+  );
+});
+
 // Finding tr-9: the quality menu must not offer conversions for a version the
 // server cannot deliver whole. `transcode_url` refuses to build one (guarded in
 // Rust); this is the other half — the menu never advertising it in the first

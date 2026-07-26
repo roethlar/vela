@@ -110,7 +110,15 @@ accepted local-only exposure recorded in `.agents/repo-guidance.md` — those UR
 are never requested by Vela and so never appear in a reqwest error.
 
 Guards: six tests in `source::teardown_tests`, four of them driving a loopback
-server that counts requests. Four regressions injected separately. The post-commit
+server that counts requests. Four regressions injected separately.
+
+**A guard-the-wiring sweep on 2026-07-25 found this fix's WIRING unguarded.**
+Deleting the Plex call site to `stop_transcode_request` left every test green:
+the classifier, the retries and the credential-free failure text were all proven
+in isolation, and nothing proved a teardown reached them. Same defect class that
+shipped two dead behaviours in slice 5. Closed by asserting both providers' call
+sites, red-proven separately for each. The sweep also covered tr-4, tr-9 and
+slice 4, whose wiring was already guarded — this was the only gap. The post-commit
 pass found the 404 guard VACUOUS — request count alone cannot separate "settled"
 from "refused" — so `stop_transcode_request` was made to return its outcome and
 the guard re-proven (`512d67f`, 1.0.23).
