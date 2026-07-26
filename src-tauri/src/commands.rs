@@ -4571,13 +4571,19 @@ struct PlayLaunchRequest<'a> {
 
 /// Whether Automatic manages this launch, and therefore whether it is watched.
 ///
-/// `resolved` is the quality this play will actually use. A user whose setting
-/// is Automatic is managed; a user who picked one tier from the title's menu is
-/// NOT — that is a deliberate choice for this play, not a request to adapt. A
-/// relaunch Automatic itself started stays managed whatever tier it resolved to,
-/// which is the case `or-1` got wrong.
-fn automatic_manages(continues_automatic: bool, one_off: Option<&str>, resolved: &str) -> bool {
-    continues_automatic || (one_off.is_none() && resolved == config::PLAYBACK_QUALITY_AUTOMATIC)
+/// `resolved` is the quality this play will actually use, after any one-off from
+/// the title's menu has been applied. A play that resolved to Automatic is
+/// managed; one that resolved to a concrete tier is not, which is exactly what
+/// makes a deliberate menu choice a choice rather than a request to adapt. A
+/// relaunch Automatic itself started stays managed whatever tier it resolved to
+/// — the case `or-1` got wrong, and the only reason this takes a flag at all.
+///
+/// It deliberately does NOT also test "was there a one-off?". That clause was
+/// unguardable: a one-off resolves to its own tier, so `resolved` already
+/// carries the distinction, and the only input it changed was a one-off of
+/// `automatic` itself — which a user asking for Automatic should get.
+fn automatic_manages(continues_automatic: bool, resolved: &str) -> bool {
+    continues_automatic || resolved == config::PLAYBACK_QUALITY_AUTOMATIC
 }
 
 async fn play_by_key(
@@ -4879,7 +4885,7 @@ async fn play_by_key_locked(
         // here: that needs a decision round trip per play, and a verdict is
         // rare — `apply_step_down` resolves the ladder when one actually
         // arrives, and declines if there is nowhere to go.
-        step_down: automatic_manages(continues_automatic, quality_override, &quality).then(|| {
+        step_down: automatic_manages(continues_automatic, &quality).then(|| {
             let queue = state.step_down.clone();
             let session = session_id.to_string();
             let already = steps_taken;
@@ -6440,18 +6446,16 @@ mod tests {
     fn a_step_down_replacement_is_still_managed_by_automatic() {
         // The case that was broken: a relaunch at a tier, still Automatic's.
         assert!(
-            automatic_manages(true, Some("1080p-8000"), "1080p-8000"),
+            automatic_manages(true, "1080p-8000"),
             "a replacement Automatic itself started must keep being watched"
         );
         // The ordinary Automatic play.
-        assert!(automatic_manages(false, None, "automatic"));
-        // A deliberate one-off from the title's menu is NOT Automatic: the user
-        // picked this tier for this play and did not ask anything to adapt.
-        assert!(!automatic_manages(false, Some("1080p-8000"), "1080p-8000"));
-        // Even when the stored setting is Automatic, an explicit one-off wins.
-        assert!(!automatic_manages(false, Some("720p-4000"), "720p-4000"));
+        assert!(automatic_manages(false, "automatic"));
+        // A deliberate one-off from the title's menu resolves to its own tier
+        // and is NOT watched: the user picked this for this play.
+        assert!(!automatic_manages(false, "1080p-8000"));
         // And a plain Original play is never watched.
-        assert!(!automatic_manages(false, None, "original"));
+        assert!(!automatic_manages(false, "original"));
     }
 
     fn step_request(session: &str, steps: u32) -> StepDownRequest {

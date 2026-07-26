@@ -207,7 +207,7 @@ test('Automatic is offered, and something implements it', () => {
   // off that quality left every replacement unwatched (finding or-1).
   assert.match(
     commands,
-    /step_down: automatic_manages\(continues_automatic, quality_override, &quality\)\s*\.then/,
+    /step_down: automatic_manages\(continues_automatic, &quality\)\s*\.then/,
     'the sampler must be gated on Automatic mode, not on the resolved quality',
   );
   assert.match(
