@@ -1,6 +1,6 @@
 # Maintainer: Michael Coelho
 pkgname=vela
-pkgver=1.0.23
+pkgver=1.0.24
 pkgrel=1
 pkgdesc='mpv-backed HDR media client for Plex, Jellyfin, and Emby'
 arch=('x86_64')

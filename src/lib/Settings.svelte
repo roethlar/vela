@@ -736,17 +736,26 @@
                   : `${tier.bitrateKbps} kbps`}
               </option>
             {/each}
-            <option value="automatic">Automatic</option>
+            <!-- Finding tr-8: Automatic is not implemented — nothing watches
+                 mpv for decoder drops or a starving cache, and nothing steps
+                 down. It is therefore not offered. It stays selectable only for
+                 a config that already holds it, so opening Settings does not
+                 silently rewrite the user's stored value, and it says plainly
+                 what it currently does. Delete this branch when the step-down
+                 lands. -->
+            {#if playbackQuality === "automatic"}
+              <option value="automatic">
+                Automatic — not implemented yet; plays as Original
+              </option>
+            {/if}
           </select>
           <p class="muted small">
             How the copy you play is <b>delivered</b>. Original streams the file
             untouched and is the only setting that keeps HDR. Anything else asks
             your server to convert it, which costs HDR and container chapters.
-            Automatic starts at Original and steps down only if playback can't
-            keep up. Set this to suit where you are — a slow connection now, a
-            fast one later — and change it whenever that changes; it isn't
-            remembered per title. A title's own right-click menu can override it
-            for one play.
+            Set this to suit where you are — a slow connection now, a fast one
+            later — and change it whenever that changes; it isn't remembered per
+            title. A title's own right-click menu can override it for one play.
           </p>
         </div>
 

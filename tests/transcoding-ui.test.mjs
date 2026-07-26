@@ -15,6 +15,7 @@ const read = (rel) => fs.readFileSync(path.join(repoRoot, rel), 'utf8');
 const settings = read('src/lib/Settings.svelte');
 const commands = read('src-tauri/src/commands.rs');
 const lib = read('src-tauri/src/lib.rs');
+const playback = read('src-tauri/src/playback.rs');
 
 test('the quality control ships only while playback reads the setting', () => {
   const offered = settings.includes('id="playback-quality"');
@@ -50,6 +51,33 @@ test('a started transcode is always stopped', () => {
     commands,
     /register_active_transcode\(&state\.active_transcode/,
     'the session must be owned by app state, not only by the end callback',
+  );
+});
+
+// Finding tr-8: `Automatic` was selectable while nothing observed mpv's decoder
+// drops or cache starvation and nothing stepped down — the same class as tr-1,
+// a shipped option that does nothing. The rule it violated is the durable one:
+// a control ships in the slice that makes it work, never before.
+test('Automatic is offered only once something implements it', () => {
+  const offers = settings.match(/<option value="automatic">/g) ?? [];
+  assert.equal(offers.length, 1, 'the value must appear in exactly one place');
+  assert.match(
+    settings,
+    /\{#if playbackQuality === "automatic"\}[\s\S]{0,200}<option value="automatic">/,
+    'Automatic may only be shown to a config that already stores it, never offered outright',
+  );
+  // The help text must not describe behaviour the build does not have.
+  assert.doesNotMatch(
+    settings,
+    /Automatic starts at Original and steps down/,
+    'the help text must not promise a step-down that nothing implements',
+  );
+  // The gate exists because the step-down is absent. If it ever arrives, this
+  // test is what sends someone back here to remove the gate.
+  assert.doesNotMatch(
+    playback,
+    /decoder-frame-drop-count/,
+    'the step-down landed: withdraw the tr-8 gate in Settings.svelte and this guard',
   );
 });
 
