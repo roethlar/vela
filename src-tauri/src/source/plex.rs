@@ -2099,7 +2099,7 @@ mod tests {
                 Some(7_200_000),
                 "media:7",
                 false,
-                Some(tier.id.to_string()),
+                tier.id,
             )
             .await
             .expect("the fixture approves this tier");
