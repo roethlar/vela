@@ -201,10 +201,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   no mapping. Per the playbook that is a session-only inline pin: it was NOT
   written to the harness cache or any map, and any later dispatch needs the
   owner to name it again or to confirm a durable codex tier entry.
-- The Linux E2E venue is BROKEN (2026-07-25) and gates nothing at present:
-  `smoke` fails the same "timed out waiting for app render" as `markers` on a
-  clean build of current `main`. It blocks marker Slice 4's behavioural
-  verification and needs an owner decision. Diagnosis:
+- The Linux E2E venue outage is RESOLVED (2026-07-25): the venue was never
+  broken. `--skip-build` had been reusing a binary produced by a plain `cargo
+  build`, which embeds no frontend and so loads `devUrl`; the webview was
+  sitting on a connection-refused page. Rebuilt with `tauri build --debug`,
+  `smoke` passes. Full diagnosis and the standing caution are in
   `.agents/machines.md`.
 
 ## Verification

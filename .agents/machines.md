@@ -109,34 +109,39 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
 
 ## Linux VM (E2E host)
 
-**BROKEN for E2E as of 2026-07-25 — the app never renders under
-WebKitWebDriver.** `npm run e2e -- --skip-build smoke` fails with "timed out
-after 15000ms waiting for app render" on a clean build of current `main`, so
-this is not specific to any one scenario and the suite currently gates nothing.
-Established that day:
+**NOT BROKEN. Diagnosed and cleared 2026-07-25.** The venue works; the binary
+being run did not.
 
-- Not a stale tree: the source was synced and 103 files verified
-  checksum-identical, `npm ci` / `npm run check` / `cargo build` all succeed,
-  and `cargo +stable test` passes 277 tests here.
-- Not the driver version: the vendored `WebKitWebDriver` is
-  `2.52.3-0ubuntu0.26.04.2`, exactly matching the system
-  `libwebkit2gtk-4.1-0`.
-- Not a crash: running the debug binary directly under `xvfb-run` starts
-  cleanly with no panic.
-- Not obviously GL: the run emits `libEGL ... DRI3/DRI2 failed to create
-  screen` warnings, and forcing `WEBKIT_DISABLE_COMPOSITING_MODE=1` plus
-  `LIBGL_ALWAYS_SOFTWARE=1` does not change the outcome.
-- Not the driver stack: launched by hand exactly as `run.mjs` does,
-  `tauri-driver` listens on 4444 and its spawned vendored `WebKitWebDriver`
-  listens on 4445. The driver binary also runs and binds standalone. The lone
-  `Error serving connection ... Connection refused` line in the artifacts log
-  is a startup-race artifact, not the failure.
+`--skip-build` reuses `src-tauri/target/debug/vela` **whatever produced it**, and
+what had produced it was a plain `cargo build`. `run.mjs` says why that matters
+in its own comment: "tauri build (unlike plain cargo build) embeds the built
+frontend, so no dev server is involved." A `cargo build` binary has no embedded
+frontend, so it falls back to `tauri.conf.json`'s `devUrl`
+(`http://localhost:1420`) and waits for a Vite dev server that no E2E run
+starts.
 
-So the session is established and the app launches; what never happens is the
-render the harness waits for. The next step is to determine whether the webview
-paints at all under this Xvfb display (launch the app on the harness's display
-and capture the window), and whether the last known-good 37/37 run of
-2026-07-24 is reproducible by reverting the tree — this has NOT been done.
+The evidence, from a throwaway scenario that asked the page for its state
+instead of asserting one:
+
+```
+readyState: "complete", hasTauri: true, headings: [], href: "about:blank",
+bodyHead: "Could not connect to localhost: Connection refused"
+```
+
+So WebKit, Xvfb, the driver stack and the Tauri IPC bridge were all healthy the
+whole time — the webview had simply loaded a connection-refused error page.
+`npm run e2e -- smoke` (no `--skip-build`) rebuilds with `tauri build --debug`
+and PASSES.
+
+**The lesson worth keeping: `cargo build` on this host produces a binary that
+cannot pass E2E.** Never hand-build the app here and then run with
+`--skip-build`; let the harness build, or run `npm run tauri -- build --debug
+--no-bundle` yourself.
+
+The prior investigation's five "not X" bullets were all correct and all beside
+the point; one of them — "`cargo build` succeeds" — was in fact the cause,
+recorded as evidence of health. Keeping that here as the caution it is: a
+diagnostic that only rules things out never has to name the thing it ruled in.
 `xdotool` was installed by the owner on 2026-07-25, but the marker pointer leg
 is dead for a different reason (below).
 
