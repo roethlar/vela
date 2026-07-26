@@ -507,6 +507,36 @@ pub fn next_tier_down(current: &str, tiers: &[QualityTier]) -> Option<QualityTie
     }
 }
 
+/// The tier Automatic should drop to from a play currently running at
+/// `source_bitrate_kbps`, or `None` at the floor.
+///
+/// Distinct from `next_tier_down` because the ladder is filtered by RESOLUTION
+/// only: its top rung for a 1080p source is 20 Mbps, so a starving 10 Mbps
+/// stream was being "stepped down" to a HIGHER bitrate target and the link was
+/// no less constrained than before (finding `or-5`, codex openreview
+/// 2026-07-26). A step that does not ask for less is not a step down.
+///
+/// `source_bitrate_kbps` of 0 means the provider did not report one; the ladder
+/// is then used as-is, since there is nothing to compare against.
+pub fn next_tier_below_bitrate(
+    current: &str,
+    tiers: &[QualityTier],
+    source_bitrate_kbps: u32,
+) -> Option<QualityTier> {
+    let next = next_tier_down(current, tiers)?;
+    if source_bitrate_kbps == 0 || next.bitrate_kbps < source_bitrate_kbps {
+        return Some(next);
+    }
+    // The next rung is not actually cheaper than what is already playing. Walk
+    // on until one is, so the first Automatic step from Original always lowers
+    // the demand rather than raising it.
+    tiers
+        .iter()
+        .skip_while(|tier| tier.id != next.id)
+        .find(|tier| tier.bitrate_kbps < source_bitrate_kbps)
+        .copied()
+}
+
 /// What a given server can actually do with one exact copy, and therefore what
 /// Vela is allowed to offer for it. Never offer an option not represented here.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1102,6 +1132,56 @@ mod ladder_tests {
             next_tier_down("1080p-8000", &tiers).map(|t| t.id),
             tiers.first().map(|t| t.id),
         );
+    }
+
+    /// Finding or-5: the ladder is filtered by RESOLUTION, so its top rung for
+    /// a 1080p source is 20 Mbps. A starving 10 Mbps stream was "stepped down"
+    /// to a 20 Mbps target — asking a constrained link for twice as much.
+    #[test]
+    fn the_first_step_never_asks_for_more_than_is_already_playing() {
+        let tiers = tiers_for_source(1080);
+        // A modest 1080p source: the ladder's top rungs are all above it.
+        let stepped = next_tier_below_bitrate("original", &tiers, 10_000)
+            .expect("a 10 Mbps source has cheaper rungs below it");
+        assert!(
+            stepped.bitrate_kbps < 10_000,
+            "stepping down must lower the demand, got {} kbps for a 10000 kbps source",
+            stepped.bitrate_kbps
+        );
+        // And it takes the FIRST cheaper rung, not the cheapest available.
+        let expected = tiers
+            .iter()
+            .find(|tier| tier.bitrate_kbps < 10_000)
+            .expect("some rung is cheaper");
+        assert_eq!(stepped.id, expected.id, "it must not overshoot the ladder");
+    }
+
+    #[test]
+    fn a_high_bitrate_source_still_steps_to_the_top_rung() {
+        let tiers = tiers_for_source(1080);
+        // A 40 Mbps remux: every rung is already cheaper, so the ordinary
+        // top-of-ladder step is correct and nothing is skipped.
+        let stepped = next_tier_below_bitrate("original", &tiers, 40_000).expect("steps");
+        assert_eq!(stepped.id, tiers[0].id);
+    }
+
+    #[test]
+    fn an_unreported_bitrate_uses_the_ladder_unchanged() {
+        let tiers = tiers_for_source(1080);
+        assert_eq!(
+            next_tier_below_bitrate("original", &tiers, 0).map(|t| t.id),
+            next_tier_down("original", &tiers).map(|t| t.id),
+            "with no source bitrate there is nothing to compare against"
+        );
+    }
+
+    /// A source below every rung has nowhere cheaper to go, and must say so
+    /// rather than offering a step that raises the demand.
+    #[test]
+    fn a_source_below_the_whole_ladder_cannot_step() {
+        let tiers = tiers_for_source(1080);
+        let floor = tiers.last().expect("non-empty").bitrate_kbps;
+        assert_eq!(next_tier_below_bitrate("original", &tiers, floor), None);
     }
 
     /// Walking from Original must reach the floor and stop, never loop.

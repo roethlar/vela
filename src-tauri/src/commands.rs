@@ -3696,7 +3696,14 @@ pub(crate) async fn apply_step_down(
         &options.tiers,
         request.steps_taken,
     );
-    let next = crate::source::next_tier_down(&current, &options.tiers)?;
+    // Below what is actually playing, not merely the next rung: the ladder is
+    // resolution-filtered, so its top rung can exceed a modest source's own
+    // bitrate and "stepping down" would ask the link for MORE (finding `or-5`).
+    let next = crate::source::next_tier_below_bitrate(
+        &current,
+        &options.tiers,
+        options.source_bitrate_kbps,
+    )?;
 
     eprintln!(
         "vela: {} — stepping down to {}",
