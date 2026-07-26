@@ -11,12 +11,6 @@
 //! on speculation that a better tier might now fit is not, and it invites
 //! flapping. So there is no step-up and nothing here looks for one.
 
-// Nothing calls this yet: the detector lands before the sampler and the
-// relaunch so its thresholds can be red-proven without a player in the way.
-// DELETE this allow in the commit that wires `AutomaticDetector` into the mpv
-// sampler — after that, an unused item here is a real finding.
-#![allow(dead_code)]
-
 use std::time::Duration;
 
 /// How often playback is sampled. Every window below is expressed in seconds
@@ -57,6 +51,30 @@ const CACHE_STARVED_SAMPLES: usize = 3;
 /// spurious step-down.
 const END_OF_FILE_GRACE: Duration = Duration::from_secs(20);
 
+/// How far the position may differ from "one tick further on" before it is a
+/// seek rather than playback. Generous: a late tick or a brief stall must not
+/// read as a seek, while any real jump is far larger than this.
+const SEEK_TOLERANCE: Duration = Duration::from_secs(3);
+
+/// Whether the position moved in a way playback alone cannot explain.
+///
+/// The sampler polls `time-pos` anyway, so a seek is visible without observing
+/// mpv's own event — and it must be visible, because a seek refills the cache
+/// and bursts the decoder, which is indistinguishable from the failures this
+/// module exists to detect.
+pub fn looks_like_a_seek(previous: Duration, current: Duration, paused: bool) -> bool {
+    // A paused player should not advance at all; a playing one advances by
+    // about one tick.
+    let expected = previous + if paused { Duration::ZERO } else { SAMPLE_TICK };
+    if current > expected {
+        current - expected > SEEK_TOLERANCE
+    } else {
+        // Backwards is always a seek — playback never rewinds — but allow the
+        // same tolerance so jitter around a stalled position is not one.
+        expected - current > SEEK_TOLERANCE
+    }
+}
+
 /// One observation of how playback is coping.
 #[derive(Clone, Copy, Debug)]
 pub struct HealthSample {
@@ -94,20 +112,24 @@ pub struct AutomaticDetector {
 }
 
 impl AutomaticDetector {
-    pub fn new(duration: Option<Duration>) -> Self {
-        Self::resuming(duration, 0)
-    }
-
-    /// For the player a step-down just started. `already_taken` carries the
-    /// count across the relaunch — the cap is per logical play, and a step-down
+    /// For a play the user started. `already_taken` carries the step count
+    /// across a relaunch — the cap is per logical play, and a step-down
     /// replaces mpv, so a detector that started from zero each time would let
     /// Automatic walk the ladder without limit.
+    ///
+    /// It also decides how long this detector stays quiet. A play that has
+    /// already stepped is a REPLACEMENT stream, and its first seconds look
+    /// exactly like the failure that caused the step, so it gets the longer
+    /// cooldown rather than an ordinary warm-up. This is where the cooldown
+    /// lives because one sampler watches one mpv process and stops at its first
+    /// verdict — the cooldown is always served by the next detector, never by
+    /// the one that produced the verdict.
     pub fn resuming(duration: Option<Duration>, already_taken: u32) -> Self {
         Self {
             duration,
             samples: Vec::new(),
             steps_taken: already_taken,
-            quiet_until: WARM_UP,
+            quiet_until: if already_taken > 0 { COOLDOWN } else { WARM_UP },
         }
     }
 
@@ -116,18 +138,6 @@ impl AutomaticDetector {
     pub fn note_seek(&mut self, at: Duration) {
         self.samples.clear();
         self.quiet_until = at + WARM_UP;
-    }
-
-    /// Record that the caller acted on a verdict. Kept separate from `observe`
-    /// so a caller that could not carry out the step does not consume one.
-    pub fn note_step_down(&mut self, at: Duration) {
-        self.steps_taken += 1;
-        self.samples.clear();
-        self.quiet_until = at + COOLDOWN;
-    }
-
-    pub fn steps_taken(&self) -> u32 {
-        self.steps_taken
     }
 
     /// Feed one observation and get a verdict.
@@ -207,7 +217,7 @@ mod tests {
     impl Feed {
         fn new(duration: Option<Duration>) -> Self {
             Self {
-                detector: AutomaticDetector::new(duration),
+                detector: AutomaticDetector::resuming(duration, 0),
                 tick: 0,
                 drops: 0,
             }
@@ -323,7 +333,7 @@ mod tests {
     /// The signal that would otherwise fire on every complete playthrough.
     #[test]
     fn an_emptying_cache_at_the_end_of_the_file_is_not_starvation() {
-        let mut detector = AutomaticDetector::new(Some(Duration::from_secs(600)));
+        let mut detector = AutomaticDetector::resuming(Some(Duration::from_secs(600)), 0);
         for tick in 0..40u32 {
             let at = Duration::from_secs(300) + SAMPLE_TICK * tick;
             let verdict = detector.observe(HealthSample {
@@ -357,43 +367,68 @@ mod tests {
         }
     }
 
+    /// A play that already stepped is a REPLACEMENT stream, and its first
+    /// seconds look exactly like the failure that caused the step. It gets the
+    /// long cooldown, not an ordinary warm-up.
+    ///
+    /// A fixed count, NOT `while at < COOLDOWN`: that loop body never runs when
+    /// the cooldown is zeroed, and an earlier version of this test passed with
+    /// the guard disarmed for exactly that reason.
     #[test]
-    fn a_step_down_is_followed_by_a_cooldown() {
+    fn a_replacement_stream_gets_the_longer_cooldown() {
         let mut feed = Feed::new(FILM);
-        feed.finish_warm_up();
-        assert!(feed.run(6, 15, 30.0).is_some());
-        feed.detector.note_step_down(feed.at());
-        // A fixed count, NOT `while at < COOLDOWN`: that loop body never runs if
-        // the cooldown is zeroed, so the test passed with the guard disarmed.
-        // Ten ticks is 20s — inside the 30s cooldown, and long enough that both
-        // signals would otherwise have fired several times over.
+        feed.detector = AutomaticDetector::resuming(FILM, 1);
+        // Ten ticks is 20s — past the ordinary warm-up, inside the cooldown,
+        // and long enough that both signals would otherwise have fired.
         assert_eq!(
             feed.run(10, 40, 0.1),
             None,
             "the replacement stream must be given time to establish"
         );
+        // ...and once the cooldown is over it does still watch.
+        assert!(
+            feed.run(15, 40, 0.1).is_some(),
+            "the cooldown must expire, not disable the detector"
+        );
     }
 
     #[test]
     fn stepping_stops_at_the_cap() {
-        let mut feed = Feed::new(FILM);
-        feed.finish_warm_up();
         // Two, spelled out rather than read from the constant: the cap is an
         // owner ruling (2026-07-25), so this must fail if the constant moves.
-        for step in 0..2 {
-            assert!(
-                feed.run(30, 15, 30.0).is_some(),
-                "step {step} should have been called for"
-            );
-            feed.detector.note_step_down(feed.at());
-        }
-        assert_eq!(feed.detector.steps_taken(), 2);
-        // Playback is still failing, but the ladder walk is over.
+        let mut feed = Feed::new(FILM);
+        feed.detector = AutomaticDetector::resuming(FILM, 2);
         assert_eq!(
-            feed.run(60, 40, 0.1),
+            feed.run(120, 40, 0.1),
             None,
             "a play may never step down more than twice"
         );
+        // One fewer step and the same playback does still trigger, so the cap
+        // is what stopped it rather than anything else about this feed.
+        let mut feed = Feed::new(FILM);
+        feed.detector = AutomaticDetector::resuming(FILM, 1);
+        assert!(feed.run(120, 40, 0.1).is_some(), "the second step is allowed");
+    }
+
+    /// The seek exclusion shipped DEAD once: the detector had `note_seek` and a
+    /// guard for it, but nothing in the sampler ever called it, so a seek's
+    /// refill could step the user down. This guards the decision the sampler
+    /// actually makes.
+    #[test]
+    fn a_position_jump_reads_as_a_seek() {
+        let at = Duration::from_secs(100);
+        // Ordinary playback: one tick further on.
+        assert!(!looks_like_a_seek(at, at + SAMPLE_TICK, false));
+        // A stalled but playing player has not seeked either.
+        assert!(!looks_like_a_seek(at, at, false));
+        // Paused: no movement is expected, and none happened.
+        assert!(!looks_like_a_seek(at, at, true));
+
+        // A jump forward, and a jump back.
+        assert!(looks_like_a_seek(at, at + Duration::from_secs(300), false));
+        assert!(looks_like_a_seek(at, Duration::from_secs(10), false));
+        // A paused player whose position moves at all has been seeked.
+        assert!(looks_like_a_seek(at, at + Duration::from_secs(60), true));
     }
 
     /// Stray drops are normal — a few frames on a scene change, a moment of
@@ -444,21 +479,14 @@ mod tests {
             "a play that already stepped twice must not step again after relaunching"
         );
 
-        // One step already taken still leaves exactly one.
+        // One step already taken still leaves exactly one: this play may
+        // step, and the play that step produces may not.
         let mut feed = Feed::new(FILM);
         feed.detector = AutomaticDetector::resuming(FILM, 1);
-        feed.finish_warm_up();
-        assert!(feed.run(6, 15, 30.0).is_some(), "the second step is allowed");
-        feed.detector.note_step_down(feed.at());
-        assert_eq!(feed.run(60, 40, 0.1), None, "but not a third");
-    }
-
-    #[test]
-    fn an_unacted_verdict_costs_no_step() {
-        let mut feed = Feed::new(FILM);
-        feed.finish_warm_up();
-        assert!(feed.run(6, 15, 30.0).is_some());
-        assert_eq!(feed.detector.steps_taken(), 0);
+        assert!(feed.run(120, 40, 0.1).is_some(), "the second step is allowed");
+        let mut after = Feed::new(FILM);
+        after.detector = AutomaticDetector::resuming(FILM, 2);
+        assert_eq!(after.run(120, 40, 0.1), None, "but not a third");
     }
 
     /// Without a known length the end-of-file grace cannot be applied, so the

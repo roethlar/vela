@@ -1446,6 +1446,8 @@ fn spawn_health_sampler(
             let mut detector = crate::automatic::AutomaticDetector::resuming(duration, steps_taken);
             let started = Instant::now();
             let mut last_position = Duration::ZERO;
+            // Where the position was one tick ago, for spotting a seek.
+            let mut previous_position = Duration::ZERO;
 
             loop {
                 std::thread::sleep(crate::automatic::SAMPLE_TICK);
@@ -1511,6 +1513,20 @@ fn spawn_health_sampler(
                 // look like the counter resetting rather than a gap.
                 let Some(drops) = drops else { continue };
                 sample.decoder_drops = drops;
+
+                // A seek refills the cache and bursts the decoder, which reads
+                // exactly like the failures below. The sampler is what notices,
+                // because it is the only thing here watching the position.
+                if crate::automatic::looks_like_a_seek(
+                    previous_position,
+                    sample.position,
+                    sample.paused,
+                ) {
+                    detector.note_seek(sample.at);
+                    previous_position = sample.position;
+                    continue;
+                }
+                previous_position = sample.position;
 
                 if let Some(reason) = detector.observe(sample) {
                     // One verdict per sampler: the caller replaces this play, so
