@@ -84,6 +84,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   reminder. Slice 6 is Emby best-effort labelling and the README Player notes
   (quality setting, one-off menu, the plain statement that converting forfeits
   HDR and drops container chapters).
+- **Slice 5 is PART-BUILT.** Detection (`automatic.rs`, `5e95630`/`7e6fd02`) and
+  mpv sampling (`spawn_health_sampler`, `6021e9f`) are landed and guard-proven.
+  **The relaunch a verdict must trigger is NOT built**: `PlaySpec::step_down` is
+  always `None`, so no play watches itself and Automatic is still inert. The
+  next increment needs the same "a background thread causes a new play" plumbing
+  `PlaybackAdvance` provides for EOF. Detail and the vacuous-guard lesson from
+  that pass are in `.agents/plans/server-transcoding.md`.
 - **Nothing in the transcoding feature has been exercised against a real
   server.** Every fix above is guarded by unit and static tests only. The
   quality menu, a real conversion, and a real teardown against the owner's Plex

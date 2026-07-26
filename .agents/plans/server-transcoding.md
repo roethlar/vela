@@ -568,6 +568,41 @@ the next tier with that offset. It reuses slice 4's `quality_override` end to
 end, which is what makes "persist nothing" true by construction rather than by
 discipline — the override never touches config.
 
+#### Slice 5 progress
+
+**Part 1 — detection. DONE `5e95630`/`7e6fd02` (1.0.29-30).**
+`src-tauri/src/automatic.rs` holds `AutomaticDetector`: pure, player-free, one
+instance per play. Every threshold above is a named constant and every one is
+guarded — 14 tests covering both triggers, both tolerances (a drop trickle and a
+brief cache dip), warm-up, seek, cooldown, the cap, pause, the end-of-file
+grace, unknown duration, and that an unacted verdict costs no step. Eleven
+regressions injected separately.
+
+**Four of those guards were VACUOUS on their first pass and were caught only by
+injection.** The cooldown test looped `while at < COOLDOWN`, whose body never
+runs when the constant is zeroed; the cap test read `MAX_STEPS_PER_PLAY` instead
+of spelling out 2, so lifting the cap moved the test with it; and neither
+threshold constant (`DROP_GROWTH`, `CACHE_STARVED_SAMPLES`) had a test in the
+tolerance band, so slackening either changed nothing. Fixed by adding the two
+tolerance tests and pinning the ruled cap literally. The pattern worth carrying:
+**a test that only exercises the trigger side of a threshold cannot detect the
+threshold moving down.**
+
+**Part 2 — sampling. DONE `6021e9f` (1.0.31).** `spawn_health_sampler` in
+`playback.rs` takes its own IPC connection (mpv accepts concurrent clients, and
+this keeps sampling off the position reader's hot path) and POLLS with
+`get_property` on the 2s tick rather than observing: `demuxer-cache-duration`
+changes continuously, so a subscription would flood the socket for a value read
+once per tick. A missing drop count skips the sample rather than reading as
+zero, which would look like a counter reset.
+
+**Part 3 — the relaunch. NOT BUILT.** `PlaySpec::step_down` is wired but is
+always `None`, so no play watches itself yet and the sampler never spawns — a
+sampler reporting to nobody would burn a thread and an IPC connection per play.
+What is missing is the "a background thread causes a new play" plumbing, the
+same problem `PlaybackAdvance` solves for EOF. Until `step_down` is `Some`,
+Automatic remains inert and the `tr-8` gate stays up.
+
 ### Slice 6 — Emby labelling and documentation
 
 - Emby transcoding is implemented best-effort and labelled limited in the UI and
