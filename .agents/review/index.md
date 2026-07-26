@@ -48,7 +48,9 @@ against exactly this by the 2026-07-23 credential split; slice 3 did not carry
 it to the transcode path it added. Not fixed. The live safety gate passed on
 2026-07-26: Plex accepted header-only master, child-playlist, and segment
 requests and generated no token-bearing child URI. Not found by the slice-3
-codex review. Detail:
+codex review. A cold-implementation plan is drafted at
+`.agents/plans/tr-10-plex-transcode-header-auth.md` and awaits owner approval;
+no code change is authorized. Detail:
 `.agents/review/findings/tr-10.md`.
 
 **`tr-12` OPEN (MEDIUM, raised by the `tr-11` plan review 2026-07-26)** —

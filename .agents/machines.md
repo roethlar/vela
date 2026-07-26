@@ -175,7 +175,8 @@ scenario here that depends on an OSD overlay being drawn.
 
 **Current-tree worktree (updated 2026-07-26):** `~/dev/vela-main` is a detached
 worktree of the same clone, used to run E2E against current `main` without
-disturbing the old tree or its stash. It is aligned to `85248d9` (1.0.54).
+disturbing the old tree or its stash. It is clean and aligned to `f185449`
+(1.0.55), re-verified read-only 2026-07-26.
 Refresh it with `git fetch origin && git checkout --detach <sha>` from inside
 it. The original `~/dev/vela` remains at its old commit and is NOT the venue any
 more.
@@ -260,13 +261,12 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
     generated child URI contained a token. Teardown returned 204 and a follow-up
     session-list check found none of the probe sessions; the independently active
     session already on the server was left untouched.
-  - **`live-transcode` currently fails before play (2026-07-26).** Run it as
-    `npm run e2e:live live-transcode`; the shorter name in the scenario file's
-    leading comment is stale. Against 1.0.54, all 12 eligible candidates got no
-    tier because Plex returned 400 and logged “unable to find a matching
-    profile.” Adding only `X-Plex-Client-Profile-Name=Web` made the same
-    decision return Conversion OK and the HLS chain work. This is `tr-11`, not a
-    venue failure.
+  - **`live-transcode` passes at 1.0.55 (2026-07-26).** Run it as
+    `npm run e2e:live live-transcode`. At exact `f185449`, candidate decisions
+    created no server session, explicit-tier playback reached the universal
+    transcode endpoint and opened a fresh real session, and quitting mpv removed
+    it. This closed `tr-11`; `tr-10` remains open because that successful path
+    still carries the Plex token in mpv's URL.
   - The VM was deliberately NOT given an SSH key on the Plex box: that is persistent
     access to the owner's server, granted for a test. The Mac (which already has access)
     runs `scripts/live-control.mjs` for the length of one run — host-only address,

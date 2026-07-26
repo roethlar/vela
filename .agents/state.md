@@ -25,15 +25,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   HLS client profile; all local gates, clean Linux 38/38, real-Plex
   decision/session/play/teardown, independent guard proof, and final plain
   Codex review pass. `tr-10` remains open: mpv still receives the Plex token in
-  its transcode URL, although header-only delivery is live-proven safe.
+  its transcode URL, although header-only delivery is live-proven safe. Its
+  cold-implementation plan is drafted at
+  `.agents/plans/tr-10-plex-transcode-header-auth.md` and awaits owner approval;
+  no `tr-10` code change is authorized.
   The plan review's nonblocking follow-ups remain `tr-12` (silent decision
   failures) and `tr-13` (duplicated universal-transcode query builders).
 
 ## Next
 
-- **First action:** invoke `plan` for the separate HIGH `tr-10` credential
-  repair. Header-only master/child/segment delivery and teardown are already
-  live-proven; no `tr-10` code change is authorized yet. `tr-12` and `tr-13`
+- **First action:** owner approves or declines the draft `tr-10` credential
+  plan. On approval, implement its isolated 1.0.56 repair and exact guard/live
+  proof; until then no `tr-10` code change is authorized. `tr-12` and `tr-13`
   remain separate follow-ups.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
@@ -63,6 +66,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/push-policy.md`
 - `.agents/plans/server-transcoding.md` (`tr-11` closed; `tr-10` open)
 - `.agents/plans/tr-11-plex-client-profile.md` (complete)
+- `.agents/plans/tr-10-plex-transcode-header-auth.md` (draft; approval pending)
 - `.agents/review/findings/tr-12.md` and
   `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
