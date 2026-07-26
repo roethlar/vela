@@ -2,6 +2,16 @@
 
 ## Status
 
+**Revision 3, 2026-07-25 — slices 1-4 are LANDED and all seven slice-3 review
+findings are closed** (versions 1.0.12-1.0.27; evidence per slice below and in
+`.agents/review/findings/tr-3.md`). Slices 5 and 6 remain. Slice 5's thresholds
+are now specified, and it has acquired a **BLOCKING PREREQUISITE**: the mpv IPC
+reader treats any numeric property event as the playback position, which is a
+live defect today and would make Automatic's own signals corrupt every position.
+That fix is not authorized yet. Nothing else in slices 5-6 has started.
+
+The original draft status is kept below for the record.
+
 **Draft v2, 2026-07-25. NOT yet approved for implementation.** Every product
 choice in **Owner decisions** is now ruled and recorded in
 `.agents/decisions.md`. What still blocks implementation is evidence, not
@@ -432,13 +442,104 @@ blank popup. `Original` is listed only when the server reports direct play.
 - Watch mpv over the existing IPC connection for the two signals ruled on
   2026-07-25: sustained decoder frame drops (`decoder-frame-drop-count`) and a
   repeatedly starving demuxer cache (`demuxer-cache-duration`, `cache-speed`).
-  Specify the window and thresholds here when implementing; they are
-  implementation detail, not owner decisions.
 - On either signal, step down one tier and resume at the current position.
 - **Persist nothing.** The next play starts at `Original` again.
 - **Guards, proven separately:** a drop-storm triggers a step down; a starving
   cache triggers a step down; a healthy play triggers neither; nothing is
   written to config afterwards.
+
+#### PREREQUISITE — the IPC reader must filter by property name (BLOCKING)
+
+**This is not slice-5 work; it is a live defect that slice 5 would multiply, and
+it must land first.** `spawn_position_reader` in `playback.rs` registers six
+`observe_property` subscriptions but then treats the `data` field of ANY event as
+the playback position:
+
+```rust
+if let Some(d) = v.get("data").and_then(|d| d.as_f64()) {
+    if d >= 0.0 { last_t_ms_r.store((d * 1000.0) as u64, ...); }
+}
+```
+
+`fullscreen` and `window-maximized` are booleans and `display-names` is an array,
+so those coerce to `None` harmlessly — but `display-width` and `display-height`
+are numbers. Measured directly against the real reader over a Unix socket
+(2026-07-25): a `display-width` event of `3840` stores a position of **3,840,000
+ms**, and `display-height` of `2160` stores **2,160,000 ms**.
+
+Why it matters today, before any Automatic work: mpv emits the initial value of
+every observed property the moment it is registered, so both events arrive
+before the first `time-pos`. During steady playback the next `time-pos` (~1/s)
+overwrites the wrong value, so the corruption is transient. The damage window is
+a play that ENDS inside it — mpv failing on a bad file, a missing codec, an
+immediate error. The tracker's own guard exists for exactly that case:
+
+> Skip if we never read a real position (mpv failed to start / exited
+> immediately) so we don't clobber an existing resume point with 0.
+
+That guard tests `t > 0`, and a `display-height` event makes `t > 0` false-true.
+So the failed play writes "stopped at 36 minutes" to the user's server and
+destroys the real resume point for that title.
+
+Slice 5 cannot be built on this reader. Its signals are
+`decoder-frame-drop-count`, `demuxer-cache-duration` and `cache-speed` — all
+numeric, all firing continuously — so the position would be wrong essentially
+all the time rather than only at startup. Measured: a drop count of `12` stores a
+position of 12,000 ms.
+
+The fix is to accept a position only from a `property-change` event whose `name`
+is `time-pos`, matching the strictness `window_property_change` and
+`display_property_change` already apply. The "or a response" path the comment
+mentions is vestigial — the reader only ever sends `observe_property`, whose
+replies carry no `data`.
+
+Guards: a `display-width` event leaves the position untouched; a
+`display-height` event leaves it untouched; a numeric non-position property
+leaves it untouched; a real `time-pos` event still updates it; and a play that
+ends before any `time-pos` still reports zero so the tracker's clobber guard
+holds.
+
+#### Thresholds (implementation detail, specified here per this slice's own rule)
+
+Evaluated on a 2s sample tick over the existing IPC connection.
+
+- **Warm-up exclusion.** Ignore both signals for the first 10s of a play and for
+  10s after any seek. A filling cache and a burst of drops are normal there, and
+  a step-down triggered by startup would fire on every play.
+- **Drop storm.** `decoder-frame-drop-count` grows by ≥50 frames across a 10s
+  window AND grows in ≥4 of that window's 5 samples. At 24fps that is >8% of
+  frames sustained for ten seconds — well clear of a single hiccup from a seek
+  or a display change, which the sample-count condition also excludes.
+- **Starving cache.** `demuxer-cache-duration` < 1.0s in ≥3 samples within a 15s
+  window, while not paused. **Excluded in the last 20s of the file**, where the
+  cache empties legitimately because there is nothing left to read; without that
+  exclusion every complete playthrough would end with a spurious step-down.
+  `cache-speed` is recorded with the trigger for diagnosis but is not itself a
+  condition — a slow cache that still stays ahead is not a problem.
+- **Cooldown.** After a step-down, ignore both signals for 30s. The replacement
+  stream has to establish, and its first seconds look exactly like the failure
+  the signals detect.
+- **Floor.** Step down one tier at a time and stop at the lowest tier the server
+  offers for that copy. Never step below it and never wrap.
+
+Two choices here are user-visible rather than pure threshold tuning, and are
+called out for the owner rather than assumed:
+
+- **A cap of 2 step-downs per play** is proposed, so a link that is bad
+  throughout cannot march the user down the whole ladder. The alternative is to
+  allow stepping to the floor.
+- **Telling the user.** Proposed: `show-text` over the same IPC connection
+  ("Lowering quality to 4 Mbps") so the picture visibly changing is explained.
+  This renders on the video surface, so it is playtest-only and cannot be
+  asserted on the Linux E2E venue (`.agents/machines.md`).
+
+#### Mechanism
+
+A step-down is an internal re-play, not a new mechanism: capture `time-pos`, tear
+down the current transcode session through the `tr-4` machinery, and relaunch at
+the next tier with that offset. It reuses slice 4's `quality_override` end to
+end, which is what makes "persist nothing" true by construction rather than by
+discipline — the override never touches config.
 
 ### Slice 6 — Emby labelling and documentation
 

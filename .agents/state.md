@@ -71,13 +71,24 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
+- **BLOCKED ON AN OWNER GO: the mpv IPC reader corrupts playback positions.**
+  `spawn_position_reader` (`playback.rs`) takes the `data` of ANY observed
+  property as the position. Measured against the real reader over a Unix socket
+  (2026-07-25): a `display-width` event of 3840 stores a position of 3,840,000
+  ms; `display-height` of 2160 stores 2,160,000 ms. mpv emits both before the
+  first `time-pos`, so a play that ENDS in that window — a bad file, a missing
+  codec, an immediate error — defeats the tracker's own `t > 0` clobber guard
+  and writes a bogus "stopped at 36 minutes" to the user's server, destroying
+  the real resume point. This is a live defect independent of any new work, and
+  it is a hard prerequisite for slice 5, whose signals are all numeric and all
+  continuous. Fix and guards are specified in
+  `.agents/plans/server-transcoding.md`; no code is authorized yet.
 - **Transcoding slices 5 and 6 are what remain of that feature**, per
-  `.agents/plans/server-transcoding.md`. Slice 5 is Automatic: watch mpv over
-  the existing IPC connection for sustained `decoder-frame-drop-count` growth
-  and a repeatedly starving demuxer cache, step down one tier, resume at the
-  current position, persist nothing. It is also the slice that withdraws the
-  `tr-8` gate in `Settings.svelte` — the guard in
-  `tests/transcoding-ui.test.mjs` fails the moment a decoder-drop observer
+  `.agents/plans/server-transcoding.md`. Slice 5 is Automatic; its thresholds
+  are now specified in the plan, with two user-visible choices (a cap of 2
+  step-downs per play, and an mpv `show-text` notice) left for the owner. It is
+  also the slice that withdraws the `tr-8` gate in `Settings.svelte` — the guard
+  in `tests/transcoding-ui.test.mjs` fails the moment a decoder-drop observer
   appears, which is the reminder. Slice 6 is Emby best-effort labelling and the
   README Player notes (quality setting, one-off menu, the plain statement that
   converting forfeits HDR and drops container chapters).
