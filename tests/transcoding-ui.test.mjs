@@ -54,6 +54,24 @@ test('a started transcode is always stopped', () => {
   );
 });
 
+// Finding tr-9: the quality menu must not offer conversions for a version the
+// server cannot deliver whole. `transcode_url` refuses to build one (guarded in
+// Rust); this is the other half — the menu never advertising it in the first
+// place, which no Rust test can reach without a live Plex server.
+test('the Plex quality menu withholds conversion for a split-file version', () => {
+  const plexSource = read('src-tauri/src/source/plex.rs');
+  assert.match(
+    plexSource,
+    /let can_transcode = if !PlexLibrary::conversion_possible\(media\) \{\s*false/,
+    'playback_options must report no transcoding for a version that cannot be converted whole',
+  );
+  assert.match(
+    plexSource,
+    /let split_file = !PlexLibrary::conversion_possible\(media\);/,
+    'the play path must recognise the split-file case rather than truncating',
+  );
+});
+
 // Finding tr-8: `Automatic` was selectable while nothing observed mpv's decoder
 // drops or cache starvation and nothing stepped down — the same class as tr-1,
 // a shipped option that does nothing. The rule it violated is the durable one:

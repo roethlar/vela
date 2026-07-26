@@ -1274,9 +1274,13 @@ impl PlexLibrary {
     /// `media_index` is the position of the SELECTED version within the item's
     /// `Media` list — Plex addresses a copy positionally, so omitting it
     /// silently means "the first one" and a user who picked the second copy
-    /// would watch the first. `partIndex` stays 0: multi-part versions are an
-    /// open question recorded in the transcoding plan, not something to guess
-    /// at here.
+    /// would watch the first.
+    ///
+    /// `partIndex` stays 0 because a transcode URL addresses ONE part, while
+    /// direct play joins every part as an EDL. A split-file version would
+    /// therefore convert only its first part and end at that boundary. Callers
+    /// must not reach this for such a version — see `media_is_split_file`
+    /// (finding `tr-9`); real multi-part transcoding is deferred.
     ///
     /// The session id is generated HERE and is the only handle that exists:
     /// Plex issues nothing, `/video/:/transcode/universal/ping` and `/stop` do
@@ -1292,9 +1296,15 @@ impl PlexLibrary {
         &self,
         rating_key: &str,
         media_index: usize,
+        media: &PlexDetailMedia,
         tier: crate::source::QualityTier,
         offset_seconds: u64,
     ) -> Option<(String, String)> {
+        // Refused here rather than left to callers: a URL that truncates the
+        // user's film must not be constructible at all (finding `tr-9`).
+        if !Self::conversion_possible(media) {
+            return None;
+        }
         let base = self.server_base()?;
         let session = uuid::Uuid::new_v4().simple().to_string();
         let query = [
@@ -1347,6 +1357,18 @@ impl PlexLibrary {
                 .header("X-Plex-Client-Identifier", &self.client_identifier)
         })
         .await;
+    }
+
+    /// Whether this version may be converted at all.
+    ///
+    /// Only a single-file version can. Direct play joins several parts as an
+    /// `edl://`, while a transcode URL addresses ONE part index — so converting
+    /// a split-file version would hand the user a copy that ends at the first
+    /// part boundary. Silent truncation is worse than not converting, so it is
+    /// refused and real multi-part transcoding stays deferred (finding `tr-9`).
+    /// A version with no parts has nothing to convert either.
+    pub fn conversion_possible(media: &PlexDetailMedia) -> bool {
+        media.parts.len() == 1
     }
 
     pub fn part_url_for_media(&self, media: &PlexDetailMedia) -> Option<String> {
@@ -2021,6 +2043,20 @@ mod tests {
         }
     }
 
+    /// A version stored as `parts` files. One part is the ordinary case; more
+    /// than one is the split-file case a transcode cannot deliver whole.
+    fn media_with_parts(parts: usize) -> PlexDetailMedia {
+        PlexDetailMedia {
+            parts: (0..parts)
+                .map(|index| PlexDetailPart {
+                    key: format!("/library/parts/{index}/file.mkv"),
+                    ..Default::default()
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
     // Every transcode Vela starts must be stoppable, and the session id is the
     // only handle that exists. A URL missing it, or two launches sharing one,
     // means an orphaned transcode on the user's server.
@@ -2033,8 +2069,8 @@ mod tests {
             .copied()
             .expect("tier exists");
 
-        let (first_url, first_session) = lib.transcode_url("42", 0, tier, 0).expect("builds");
-        let (_, second_session) = lib.transcode_url("42", 0, tier, 0).expect("builds");
+        let (first_url, first_session) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 0).expect("builds");
+        let (_, second_session) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 0).expect("builds");
         assert_ne!(
             first_session, second_session,
             "each launch needs its own session or one teardown kills another play"
@@ -2053,8 +2089,49 @@ mod tests {
 
         // Resume must reach the transcoder: without it the server starts at zero
         // and mpv's own seek would be into a stream that begins elsewhere.
-        let (resumed, _) = lib.transcode_url("42", 0, tier, 930).expect("builds");
+        let (resumed, _) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 930).expect("builds");
         assert!(resumed.contains("offset=930"), "{resumed}");
+    }
+
+    // Finding tr-9: a transcode URL addresses ONE part while direct play joins
+    // them all, so converting a split-file version silently ends the film at
+    // the first part boundary. Refusing is the ruled behaviour; real multi-part
+    // transcoding is deferred.
+    #[tokio::test]
+    async fn a_split_file_version_is_never_given_a_transcode_url() {
+        let lib = artwork_library(1234);
+        let tier = crate::source::QUALITY_TIERS[0];
+
+        assert!(
+            lib.transcode_url("42", 0, &media_with_parts(1), tier, 0)
+                .is_some(),
+            "an ordinary single-file version must still convert"
+        );
+        assert_eq!(
+            lib.transcode_url("42", 0, &media_with_parts(2), tier, 0)
+                .map(|(url, _)| url),
+            None,
+            "a two-part version would truncate at the first boundary"
+        );
+        assert_eq!(
+            lib.transcode_url("42", 0, &media_with_parts(5), tier, 0)
+                .map(|(url, _)| url),
+            None,
+            "and so would any longer split"
+        );
+    }
+
+    #[test]
+    fn only_a_single_file_version_can_be_converted() {
+        assert!(PlexLibrary::conversion_possible(&media_with_parts(1)));
+        assert!(
+            !PlexLibrary::conversion_possible(&media_with_parts(2)),
+            "a split-file version cannot be converted whole"
+        );
+        assert!(
+            !PlexLibrary::conversion_possible(&media_with_parts(0)),
+            "a version with no parts has nothing to convert"
+        );
     }
 
     // Plex addresses a copy positionally. A request that ignores the selected
@@ -2064,8 +2141,8 @@ mod tests {
         let lib = artwork_library(1234);
         let tier = crate::source::QUALITY_TIERS[0];
 
-        let (first, _) = lib.transcode_url("42", 0, tier, 0).expect("builds");
-        let (second, _) = lib.transcode_url("42", 1, tier, 0).expect("builds");
+        let (first, _) = lib.transcode_url("42", 0, &media_with_parts(1), tier, 0).expect("builds");
+        let (second, _) = lib.transcode_url("42", 1, &media_with_parts(1), tier, 0).expect("builds");
         assert!(first.contains("mediaIndex=0"), "{first}");
         assert!(
             second.contains("mediaIndex=1"),

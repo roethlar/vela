@@ -1287,18 +1287,25 @@ impl MediaSource for PlexSource {
             })
             .ok_or_else(|| "the selected Plex media version is no longer available".to_string())?;
         let (width, height) = plex_media_dimensions(media);
-        // Ask about the gentlest tier this copy could take: if the server
-        // refuses even that, it will not convert this copy at all, and the menu
-        // must then offer only the original.
-        let can_transcode = match crate::source::tiers_for_source(height).last() {
-            Some(tier) => {
-                let session = uuid::Uuid::new_v4().simple().to_string();
-                lib.transcode_decision(item_key, media_index, Some(*tier), &session)
-                    .await
-                    .map(|decision| decision.conversion_ok())
-                    .unwrap_or(false)
+        // A split-file version cannot be converted whole (finding `tr-9`), and
+        // the menu must never carry an entry that would fail or truncate. Skip
+        // the decision request too: the answer cannot change the outcome.
+        let can_transcode = if !PlexLibrary::conversion_possible(media) {
+            false
+        } else {
+            // Ask about the gentlest tier this copy could take: if the server
+            // refuses even that, it will not convert this copy at all, and the
+            // menu must then offer only the original.
+            match crate::source::tiers_for_source(height).last() {
+                Some(tier) => {
+                    let session = uuid::Uuid::new_v4().simple().to_string();
+                    lib.transcode_decision(item_key, media_index, Some(*tier), &session)
+                        .await
+                        .map(|decision| decision.conversion_ok())
+                        .unwrap_or(false)
+                }
+                None => false,
             }
-            None => false,
         };
         Ok(crate::source::PlaybackOptions::new(
             true,
@@ -1416,16 +1423,22 @@ impl MediaSource for PlexSource {
         let mut stream_headers = Vec::new();
 
         if let Some(tier) = delivery.tier() {
+            // A transcode URL addresses one part; direct play joins them all.
+            // Converting a split-file version would hand the user a copy that
+            // ends at the first part boundary, so refuse the conversion and
+            // play the whole file instead (finding `tr-9`).
+            let split_file = !PlexLibrary::conversion_possible(media);
             let session = uuid::Uuid::new_v4().simple().to_string();
             // Ask before converting: a server that will not convert this copy
             // must not be handed a transcode URL that then fails the play.
-            let permitted = lib
-                .transcode_decision(item_key, media_index, Some(tier), &session)
-                .await
-                .map(|decision| decision.conversion_ok())
-                .unwrap_or(false);
+            let permitted = !split_file
+                && lib
+                    .transcode_decision(item_key, media_index, Some(tier), &session)
+                    .await
+                    .map(|decision| decision.conversion_ok())
+                    .unwrap_or(false);
             match permitted
-                .then(|| lib.transcode_url(item_key, media_index, tier, resume_ms / 1000))
+                .then(|| lib.transcode_url(item_key, media_index, media, tier, resume_ms / 1000))
                 .flatten()
             {
                 Some((transcode_url, session)) => {
@@ -1434,7 +1447,16 @@ impl MediaSource for PlexSource {
                 }
                 None => {
                     // Degrade to the original rather than refuse to play.
-                    eprintln!("plex: conversion unavailable for this copy; playing the original");
+                    if split_file {
+                        eprintln!(
+                            "plex: this copy is split across files, which cannot be converted \
+                             without truncating it; playing the original"
+                        );
+                    } else {
+                        eprintln!(
+                            "plex: conversion unavailable for this copy; playing the original"
+                        );
+                    }
                     delivery = crate::source::Delivery::Original;
                 }
             }

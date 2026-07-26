@@ -199,8 +199,16 @@ Every entry must show its bitrate, since two tiers share the label
 - **Progress/resume.** Both backends already check in by item/session; a
   transcode adds a session id to keep alive, and Plex's session lifecycle is the
   unverified part above.
-- **Split-file Plex media.** Vela currently joins Parts as `edl://`. A transcode
-  URL is per media/part index; decide what happens for multi-part versions.
+- **Split-file Plex media — RULED 2026-07-25, finding `tr-9`.** Vela joins Parts
+  as `edl://` for direct play, while a transcode URL addresses ONE part index, so
+  converting a split-file version would end the film at the first part boundary.
+  Vela **refuses to convert** such a version: `PlexLibrary::conversion_possible`
+  is false for anything other than exactly one part, `transcode_url` returns
+  `None` so a truncating URL cannot be constructed at all, `playback_options`
+  reports no transcoding so the menu never offers it, and a Settings-level
+  quality request degrades to Original with a log naming the reason. **Real
+  multi-part transcoding is DEFERRED** and remains unimplemented; it would need
+  per-part sessions stitched back into an EDL, which is not in any slice below.
 
 ---
 
