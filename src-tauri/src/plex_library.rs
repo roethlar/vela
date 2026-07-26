@@ -2113,9 +2113,16 @@ mod tests {
         );
         assert!(first_url.contains("/video/:/transcode/universal/start.m3u8?"));
         assert!(first_url.contains("maxVideoBitrate=2000"));
-        assert!(
-            first_url.contains("X-Plex-Client-Profile-Name=Web"),
-            "the start URL must select the live-proven HLS profile: {first_url}"
+        let profile_names = url::Url::parse(&first_url)
+            .expect("the production start URL parses")
+            .query_pairs()
+            .filter(|(key, _)| key == "X-Plex-Client-Profile-Name")
+            .map(|(_, value)| value.into_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            profile_names,
+            ["Web"],
+            "the start URL must select the live-proven HLS profile exactly once: {first_url}"
         );
         assert!(
             first_url.contains("videoResolution=1280x720"),
