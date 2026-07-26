@@ -106,9 +106,11 @@ test('the quality menu describes the version that will play', () => {
     'the backend must resolve the version the play path would choose',
   );
   // ...and only when the policy landed on the copy this row is about.
+  // Pinned as the WHOLE condition: matching the comparison alone let a
+  // regression wrap it in `true || (...)` and still pass.
   assert.match(
     commands,
-    /selection\.source_id == source_id && selection\.raw_item_key == raw_item_key/,
+    /\(selection\.source_id == source_id && selection\.raw_item_key == raw_item_key\)\s*\n\s*\.then_some\(selection\.version_id\)/,
     "another copy's version id must never describe this one",
   );
   // Ask mode must not turn a menu hover into a source-choice prompt.
