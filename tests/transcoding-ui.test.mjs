@@ -258,6 +258,39 @@ test('the Plex quality menu withholds conversion for a split-file version', () =
   );
 });
 
+// Finding tr-12: a failed Plex decision request is not evidence that the
+// server validly refused conversion. Rust behavior tests guard classification
+// and fallback; this pins the two caller/reporting wires that can otherwise be
+// deleted while both outcomes still happen to resolve to `false`.
+test('Plex decision failures surface separately from valid refusals', () => {
+  const plexSource = read('src-tauri/src/source/plex.rs');
+  assert.match(
+    plexSource,
+    /async fn playback_options[\s\S]{0,2600}transcode_decision\([\s\S]{0,220}\.map_err\(\|error\| error\.to_string\(\)\)\?[\s\S]{0,80}\.conversion_ok\(\)/,
+    'the quality menu must receive a failed decision as an error, not an ordinary refusal',
+  );
+  assert.match(
+    plexSource,
+    /let mut decision_error: Option<PlexDecisionError> = None;[\s\S]{0,700}Err\(error\) => \{[\s\S]{0,120}decision_error = Some\(error\);/,
+    'an explicit tier must retain the safe decision failure for its fallback diagnostic',
+  );
+  assert.match(
+    plexSource,
+    /else if let Some\(error\) = decision_error \{\s*eprintln!\("\{error\} Playing the original\."\);\s*\} else \{\s*eprintln!\(\s*"plex: conversion unavailable for this copy; playing the original"/,
+    'a failed request and a valid refusal must reach distinct fallback messages',
+  );
+  assert.match(
+    page,
+    /catch \(error\) \{[\s\S]{0,220}qualityError = String\(error\);/,
+    'the quality-menu request must retain the propagated safe error',
+  );
+  assert.match(
+    page,
+    /\{:else if qualityError\}\s*<div class="addstatus addfailure" role="alert">\{friendlyError\(qualityError\)\}<\/div>/,
+    'the existing quality submenu must render the safe error inline',
+  );
+});
+
 // Finding tr-8: `Automatic` was selectable while nothing observed mpv's decoder
 // drops or cache starvation and nothing stepped down — the same class as tr-1,
 // a shipped option that does nothing. The rule it violated is the durable one:

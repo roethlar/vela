@@ -12,7 +12,9 @@ use super::{
     PlaylistDto, SectionDto, StreamResolution,
 };
 use crate::playback::{ProgressTarget, TrackInfo};
-use crate::plex_library::{PlexDetail, PlexLibrary, PlexPlaylist, PlexServer, PlexVideo};
+use crate::plex_library::{
+    PlexDecisionError, PlexDetail, PlexLibrary, PlexPlaylist, PlexServer, PlexVideo,
+};
 
 fn library_from_config(cfg: &crate::config::SourceConfig) -> Option<PlexLibrary> {
     if cfg.kind != "plex" || cfg.id.trim().is_empty() || cfg.name.trim().is_empty() {
@@ -1301,8 +1303,8 @@ impl MediaSource for PlexSource {
                     let session = uuid::Uuid::new_v4().simple().to_string();
                     lib.transcode_decision(item_key, media_index, Some(*tier), &session)
                         .await
-                        .map(|decision| decision.conversion_ok())
-                        .unwrap_or(false)
+                        .map_err(|error| error.to_string())?
+                        .conversion_ok()
                 }
                 None => false,
             }
@@ -1434,12 +1436,21 @@ impl MediaSource for PlexSource {
             let session = uuid::Uuid::new_v4().simple().to_string();
             // Ask before converting: a server that will not convert this copy
             // must not be handed a transcode URL that then fails the play.
-            let permitted = !split_file
-                && lib
+            let mut decision_error: Option<PlexDecisionError> = None;
+            let permitted = if split_file {
+                false
+            } else {
+                match lib
                     .transcode_decision(item_key, media_index, Some(tier), &session)
                     .await
-                    .map(|decision| decision.conversion_ok())
-                    .unwrap_or(false);
+                {
+                    Ok(decision) => decision.conversion_ok(),
+                    Err(error) => {
+                        decision_error = Some(error);
+                        false
+                    }
+                }
+            };
             match permitted
                 .then(|| lib.transcode_url(item_key, media_index, media, tier, resume_ms / 1000))
                 .flatten()
@@ -1455,6 +1466,8 @@ impl MediaSource for PlexSource {
                             "plex: this copy is split across files, which cannot be converted \
                              without truncating it; playing the original"
                         );
+                    } else if let Some(error) = decision_error {
+                        eprintln!("{error} Playing the original.");
                     } else {
                         eprintln!(
                             "plex: conversion unavailable for this copy; playing the original"
@@ -2006,15 +2019,20 @@ mod tests {
 
     /// A sequential Plex fixture for the real transcode-resolution path. It
     /// demands header auth on every provider request, serves one exact media
-    /// version, and approves the requested tier without ever serving media.
+    /// version, and returns the caller-selected decision response. The original
+    /// part accepts HEAD so decision failures can exercise the real fallback.
     fn spawn_transcode_resolution_plex(
         token: &str,
+        decision_status: &str,
+        decision_body: &str,
     ) -> (u16, Arc<Mutex<Vec<String>>>) {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let hits: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
         let captured = hits.clone();
         let token = token.to_string();
+        let decision_status = decision_status.to_string();
+        let decision_body = decision_body.to_string();
         std::thread::spawn(move || {
             for stream in listener.incoming() {
                 let Ok(mut stream) = stream else { continue };
@@ -2043,10 +2061,15 @@ mod tests {
                     continue;
                 }
 
-                let body = if path.starts_with("/library/metadata/42") {
-                    r#"<MediaContainer size="1"><Video ratingKey="42" key="/library/metadata/42" title="Fixture" duration="7200000" viewOffset="0"><Media id="7" duration="7200000" bitrate="8000" width="1920" height="1080" videoResolution="1080" videoCodec="hevc" audioCodec="aac" container="mkv"><Part id="9" key="/library/parts/9/file.mkv" duration="7200000" /></Media></Video></MediaContainer>"#
+                let (status, body): (&str, &str) = if path.starts_with("/library/metadata/42") {
+                    (
+                        "200 OK",
+                        r#"<MediaContainer size="1"><Video ratingKey="42" key="/library/metadata/42" title="Fixture" duration="7200000" viewOffset="0"><Media id="7" duration="7200000" bitrate="8000" width="1920" height="1080" videoResolution="1080" videoCodec="hevc" audioCodec="aac" container="mkv"><Part id="9" key="/library/parts/9/file.mkv" duration="7200000" /></Media></Video></MediaContainer>"#,
+                    )
                 } else if path.starts_with("/video/:/transcode/universal/decision?") {
-                    r#"<MediaContainer generalDecisionCode="1001" />"#
+                    (decision_status.as_str(), decision_body.as_str())
+                } else if path.starts_with("/library/parts/9/file.mkv") {
+                    ("200 OK", "")
                 } else {
                     let _ = stream.write_all(
                         b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n",
@@ -2054,7 +2077,7 @@ mod tests {
                     continue;
                 };
                 let response = format!(
-                    "HTTP/1.1 200 OK\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    "HTTP/1.1 {status}\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
                     body.len()
                 );
                 let _ = stream.write_all(response.as_bytes());
@@ -2083,7 +2106,11 @@ mod tests {
     #[tokio::test]
     async fn plex_transcode_auth_reaches_stream_resolution() {
         const TOKEN: &str = "synthetic-transcode-resolution-token";
-        let (port, hits) = spawn_transcode_resolution_plex(TOKEN);
+        let (port, hits) = spawn_transcode_resolution_plex(
+            TOKEN,
+            "200 OK",
+            r#"<MediaContainer generalDecisionCode="1001" />"#,
+        );
         let mut lib = PlexLibrary::new(TOKEN.to_string(), "transcode-client".to_string());
         lib.set_server(mock_server("transcode-fixture", port));
         let source = PlexSource::new("plex", "Plex", lib);
@@ -2129,6 +2156,145 @@ mod tests {
             hits.iter()
                 .any(|path| path.starts_with("/video/:/transcode/universal/decision?")),
             "the guard must reach the real tier decision path"
+        );
+    }
+
+    fn transcode_resolution_source(port: u16, token: &str) -> PlexSource {
+        let mut lib = PlexLibrary::new(token.to_string(), "transcode-client".to_string());
+        lib.set_server(mock_server("transcode-fixture", port));
+        PlexSource::new("plex", "Plex", lib)
+    }
+
+    #[tokio::test]
+    async fn plex_quality_options_surface_http_decision_failure() {
+        const TOKEN: &str = "synthetic-quality-http-token";
+        let (port, hits) = spawn_transcode_resolution_plex(
+            TOKEN,
+            "503 Service Unavailable",
+            r#"<MediaContainer generalDecisionCode="2000" diagnostic="BODY_SENTINEL"/>"#,
+        );
+        let source = transcode_resolution_source(port, TOKEN);
+        let error = source
+            .playback_options("42", Some("media:7"))
+            .await
+            .expect_err("an HTTP decision failure must not look like a refusal");
+
+        assert_eq!(
+            error,
+            "Plex could not check conversion because the server returned HTTP 503."
+        );
+        assert!(!error.contains(TOKEN));
+        assert!(!error.contains("BODY_SENTINEL"));
+        assert!(
+            hits.lock()
+                .unwrap()
+                .iter()
+                .any(|path| path.starts_with("/video/:/transcode/universal/decision?")),
+            "the options guard must reach the real decision request"
+        );
+    }
+
+    #[tokio::test]
+    async fn plex_quality_options_surface_malformed_decision_failure() {
+        const TOKEN: &str = "synthetic-quality-parse-token";
+        let (port, hits) = spawn_transcode_resolution_plex(
+            TOKEN,
+            "200 OK",
+            "<MediaContainer><BODY_SENTINEL>",
+        );
+        let source = transcode_resolution_source(port, TOKEN);
+        let error = source
+            .playback_options("42", Some("media:7"))
+            .await
+            .expect_err("malformed decision XML must not look like a refusal");
+
+        assert_eq!(
+            error,
+            "Plex could not check conversion because the response was invalid."
+        );
+        assert!(!error.contains(TOKEN));
+        assert!(!error.contains("BODY_SENTINEL"));
+        assert!(
+            hits.lock()
+                .unwrap()
+                .iter()
+                .any(|path| path.starts_with("/video/:/transcode/universal/decision?")),
+            "the options guard must reach the real decision request"
+        );
+    }
+
+    #[tokio::test]
+    async fn plex_quality_options_keep_a_valid_refusal_quiet() {
+        const TOKEN: &str = "synthetic-quality-refusal-token";
+        let (port, hits) = spawn_transcode_resolution_plex(
+            TOKEN,
+            "200 OK",
+            r#"<MediaContainer generalDecisionCode="2000"
+                               generalDecisionText="Conversion unavailable."/>"#,
+        );
+        let source = transcode_resolution_source(port, TOKEN);
+        let options = source
+            .playback_options("42", Some("media:7"))
+            .await
+            .expect("a valid negative decision is an ordinary capability result");
+
+        assert!(options.tiers.is_empty());
+        assert!(options.can_direct_play);
+        assert!(
+            hits.lock()
+                .unwrap()
+                .iter()
+                .any(|path| path.starts_with("/video/:/transcode/universal/decision?")),
+            "the refusal guard must reach the real decision request"
+        );
+    }
+
+    #[tokio::test]
+    async fn plex_tier_play_falls_back_after_decision_failure() {
+        const TOKEN: &str = "synthetic-decision-fallback-token";
+        let (port, hits) = spawn_transcode_resolution_plex(
+            TOKEN,
+            "200 OK",
+            "<MediaContainer><BODY_SENTINEL>",
+        );
+        let source = transcode_resolution_source(port, TOKEN);
+        let tier = crate::source::QUALITY_TIERS
+            .iter()
+            .find(|tier| tier.id == "720p-2000")
+            .copied()
+            .expect("tier exists");
+        let resolved = source
+            .resolve_stream_version(
+                "42",
+                Some(7_200_000),
+                "media:7",
+                false,
+                tier.id,
+            )
+            .await
+            .expect("a failed decision must retain the playable Original fallback");
+
+        assert_eq!(resolved.delivery, crate::source::Delivery::Original);
+        let parsed =
+            url::Url::parse(&resolved.url).expect("the fallback part URL parses");
+        assert_eq!(parsed.path(), "/library/parts/9/file.mkv");
+        assert!(!resolved.url.contains("start.m3u8"));
+        assert!(!resolved.url.contains(TOKEN));
+        assert_eq!(
+            resolved.http_headers,
+            [("X-Plex-Token".to_string(), TOKEN.to_string())]
+        );
+        assert_eq!(resolved.transcode_session, None);
+        let hits = hits.lock().unwrap();
+        assert!(
+            hits.iter()
+                .any(|path| path.starts_with("/video/:/transcode/universal/decision?")),
+            "the fallback guard must reach the real decision request"
+        );
+        assert!(
+            hits.iter()
+                .any(|path| path.starts_with("/library/parts/9/file.mkv")),
+            "the fallback must preflight the original part"
         );
     }
 

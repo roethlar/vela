@@ -70,6 +70,7 @@ export async function startMockPlex({
   year = 2020,
   guid = 'imdb://tt7654321',
   mediaFile = null,
+  decisionResponse = null,
 }) {
   const state = {
     requests: [],
@@ -214,6 +215,17 @@ export async function startMockPlex({
         state.contractViolations.push(`invalid artwork parameters on ${name}`);
       }
       sendImage();
+      return;
+    }
+    if (request.path === '/video/:/transcode/universal/decision') {
+      if (request.query['X-Plex-Client-Profile-Name'] !== 'Web') {
+        state.contractViolations.push(`decision omitted the Web profile on ${name}`);
+      }
+      const response = decisionResponse ?? {
+        status: 200,
+        body: '<MediaContainer generalDecisionCode="2000" />',
+      };
+      send(response.body, response.status);
       return;
     }
     if (request.path === '/:/timeline' || request.path === '/:/progress') {

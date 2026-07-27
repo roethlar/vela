@@ -280,6 +280,82 @@ impl DecisionContainer {
     }
 }
 
+/// Credential-safe failure categories for Plex's universal-transcode decision
+/// request. No variant retains request, response, server, session, item, or
+/// credential data: reqwest errors render their full URL, so even wrapping the
+/// original error would make this unsafe to show or log.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PlexDecisionError {
+    NoServer,
+    TimedOut,
+    Unreachable,
+    RequestFailed,
+    HttpStatus(u16),
+    BodyRead,
+    InvalidResponse,
+}
+
+impl PlexDecisionError {
+    fn from_transport(error: &reqwest::Error) -> Self {
+        if error.is_timeout() {
+            Self::TimedOut
+        } else if error.is_connect() {
+            Self::Unreachable
+        } else {
+            Self::RequestFailed
+        }
+    }
+}
+
+impl std::fmt::Display for PlexDecisionError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::NoServer => {
+                write!(
+                    formatter,
+                    "Plex could not check conversion because no server is available."
+                )
+            }
+            Self::TimedOut => {
+                write!(
+                    formatter,
+                    "Plex could not check conversion because the request timed out."
+                )
+            }
+            Self::Unreachable => {
+                write!(
+                    formatter,
+                    "Plex could not check conversion because the server could not be reached."
+                )
+            }
+            Self::RequestFailed => {
+                write!(
+                    formatter,
+                    "Plex could not check conversion because the request failed."
+                )
+            }
+            Self::HttpStatus(status) => write!(
+                formatter,
+                "Plex could not check conversion because the server returned HTTP {status}."
+            ),
+            Self::BodyRead => {
+                write!(
+                    formatter,
+                    "Plex could not check conversion because the response could not be read."
+                )
+            }
+            Self::InvalidResponse => {
+                write!(
+                    formatter,
+                    "Plex could not check conversion because the response was invalid."
+                )
+            }
+        }
+    }
+}
+
+impl std::error::Error for PlexDecisionError {}
+
 /// Root wrapper: the metadata endpoint returns the item as a `Video` (movie/
 /// episode) or a `Directory` (show/season) under `MediaContainer`.
 #[derive(Debug, Deserialize, Default)]
@@ -1195,8 +1271,8 @@ impl PlexLibrary {
         media_index: usize,
         tier: Option<crate::source::QualityTier>,
         session: &str,
-    ) -> Result<DecisionContainer, Box<dyn std::error::Error>> {
-        let base = self.server_base().ok_or("No server selected")?;
+    ) -> Result<DecisionContainer, PlexDecisionError> {
+        let base = self.server_base().ok_or(PlexDecisionError::NoServer)?;
         let url = format!("{base}/video/:/transcode/universal/decision");
         let (direct_play, direct_stream) = Self::direct_flags(tier.is_some());
         let mut query: Vec<(&str, String)> = vec![
@@ -1224,7 +1300,7 @@ impl PlexLibrary {
                 format!("{}x{}", tier.width, tier.height),
             ));
         }
-        let body = self
+        let response = self
             .client
             .get(&url)
             .header("X-Plex-Token", &self.auth_token)
@@ -1232,11 +1308,22 @@ impl PlexLibrary {
             .header("Accept", "application/xml")
             .query(&query)
             .send()
-            .await?
-            .error_for_status()?
+            .await
+            .map_err(|error| PlexDecisionError::from_transport(&error))?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(PlexDecisionError::HttpStatus(status.as_u16()));
+        }
+        let body = response
             .text()
-            .await?;
-        Ok(serde_xml_rs::from_str(&body)?)
+            .await
+            .map_err(|_| PlexDecisionError::BodyRead)?;
+        let decision: DecisionContainer =
+            serde_xml_rs::from_str(&body).map_err(|_| PlexDecisionError::InvalidResponse)?;
+        if decision.general_decision_code.is_none() {
+            return Err(PlexDecisionError::InvalidResponse);
+        }
+        Ok(decision)
     }
 
     async fn fetch_item_detail(
@@ -2064,6 +2151,14 @@ mod tests {
         library
     }
 
+    fn decision_http_response(status: &str, body: &str) -> Vec<u8> {
+        format!(
+            "HTTP/1.1 {status}\r\nContent-Type: application/xml\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+        .into_bytes()
+    }
+
     fn artwork_request() -> crate::artwork::ArtworkRequest {
         crate::artwork::ArtworkRequest {
             path: "/library/metadata/42/thumb/7".to_string(),
@@ -2201,6 +2296,156 @@ mod tests {
         assert!(
             request_line.contains("X-Plex-Client-Profile-Name=Web"),
             "the decision query must select the live-proven HLS profile: {request_line}"
+        );
+    }
+
+    #[tokio::test]
+    async fn plex_decision_transport_error_is_sanitized() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("reserve an unreachable loopback port");
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+        let error = artwork_library(port)
+            .transcode_decision(
+                "RATING_SENTINEL",
+                0,
+                Some(crate::source::QUALITY_TIERS[0]),
+                "SESSION_SENTINEL",
+            )
+            .await
+            .expect_err("the closed loopback port must refuse the decision request");
+        let displayed = error.to_string();
+
+        assert_eq!(error, PlexDecisionError::Unreachable);
+        assert_eq!(
+            displayed,
+            "Plex could not check conversion because the server could not be reached."
+        );
+        for secret in [
+            "127.0.0.1",
+            &port.to_string(),
+            "RATING_SENTINEL",
+            "SESSION_SENTINEL",
+            "synthetic-artwork-token",
+        ] {
+            assert!(
+                !displayed.contains(secret),
+                "safe transport text retained request context"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plex_decision_http_error_is_sanitized() {
+        let body =
+            r#"<MediaContainer generalDecisionCode="2000" diagnostic="BODY_SENTINEL"/>"#;
+        let (port, captured) = artwork_server(decision_http_response(
+            "503 Service Unavailable",
+            body,
+        ))
+        .await;
+        let error = artwork_library(port)
+            .transcode_decision(
+                "RATING_SENTINEL",
+                0,
+                Some(crate::source::QUALITY_TIERS[0]),
+                "SESSION_SENTINEL",
+            )
+            .await
+            .expect_err("HTTP 503 must not become a valid Plex refusal");
+        let request = captured.await.unwrap();
+        assert!(
+            request.contains("SESSION_SENTINEL"),
+            "the fixture must prove sensitive request context existed"
+        );
+        let displayed = error.to_string();
+
+        assert_eq!(error, PlexDecisionError::HttpStatus(503));
+        assert_eq!(
+            displayed,
+            "Plex could not check conversion because the server returned HTTP 503."
+        );
+        for secret in [
+            "127.0.0.1",
+            "RATING_SENTINEL",
+            "SESSION_SENTINEL",
+            "BODY_SENTINEL",
+            "synthetic-artwork-token",
+        ] {
+            assert!(
+                !displayed.contains(secret),
+                "safe status text retained request or response context"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn plex_decision_malformed_body_is_sanitized() {
+        let body = "<MediaContainer><BODY_SENTINEL>";
+        let (port, _) =
+            artwork_server(decision_http_response("200 OK", body)).await;
+        let error = artwork_library(port)
+            .transcode_decision(
+                "42",
+                0,
+                Some(crate::source::QUALITY_TIERS[0]),
+                "decision-session",
+            )
+            .await
+            .expect_err("malformed decision XML must be reported");
+        let displayed = error.to_string();
+
+        assert_eq!(error, PlexDecisionError::InvalidResponse);
+        assert_eq!(
+            displayed,
+            "Plex could not check conversion because the response was invalid."
+        );
+        assert!(
+            !displayed.contains("BODY_SENTINEL"),
+            "a decision response body must never enter its diagnostic"
+        );
+    }
+
+    #[tokio::test]
+    async fn plex_decision_missing_code_is_invalid() {
+        let (port, _) = artwork_server(decision_http_response(
+            "200 OK",
+            "<MediaContainer/>",
+        ))
+        .await;
+        let error = artwork_library(port)
+            .transcode_decision(
+                "42",
+                0,
+                Some(crate::source::QUALITY_TIERS[0]),
+                "decision-session",
+            )
+            .await
+            .expect_err("a decision with no decision code is not a valid refusal");
+
+        assert_eq!(error, PlexDecisionError::InvalidResponse);
+    }
+
+    #[tokio::test]
+    async fn plex_decision_valid_refusal_is_quiet() {
+        let body = r#"<MediaContainer generalDecisionCode="2000"
+                     generalDecisionText="Conversion unavailable."/>"#;
+        let (port, _) =
+            artwork_server(decision_http_response("200 OK", body)).await;
+        let decision = artwork_library(port)
+            .transcode_decision(
+                "42",
+                0,
+                Some(crate::source::QUALITY_TIERS[0]),
+                "decision-session",
+            )
+            .await
+            .expect("a present negative decision code is a valid response");
+
+        assert!(
+            !decision.conversion_ok(),
+            "a valid refusal stays an ordinary capability result"
         );
     }
 
