@@ -12,7 +12,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - **Vela 1.0.58 is published as GitHub's Latest release** from exact commit
   `791ff479de29fa264f367b32b1c06dbee00160fa`. Its canonical workflow,
   artifact, checksum, recovery, and publication evidence lives in
-  `.agents/plans/v1-release-readiness.md`.
+  `.agents/plans/v1-release-readiness.md`. The checkout-free release attachment
+  repair is landed at `3fa2858` with an independently regressed static guard and
+  green exact-commit GitHub CI.
 - Product behavior remains as settled in `.agents/decisions.md`: Vela is a
   multi-server Plex/Jellyfin/experimental-Emby client, delegates HDR playback
   to external mpv, uses title-level watched state across duplicate copies, and
@@ -68,11 +70,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - The rare queued watch-edit race remains an owner-accepted, disclosed 1.0
   limitation; its durable technical record is
   `.agents/plans/continue-watching-watch-state.md`.
-- Before the next tag, scope the small release-workflow repair recorded in
-  `.agents/plans/v1-release-readiness.md`: the checkout-free inventory job's
-  final `gh release upload` needs an explicit repository selector. The 1.0.58
-  release was recovered manually without using the VM.
-
 ## Blockers
 
 - None for the published 1.0.58 release. The unrelated continuation/mpv and

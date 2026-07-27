@@ -210,9 +210,16 @@ classes and generated `SHA256SUMS`, then failed only while attaching the Arch
 package and manifest: that checkout-free job invoked `gh release upload`
 without `--repo`, so `gh` could not resolve a repository. Under Slice 5's
 manual-attachment rail, the two workflow artifacts were downloaded, verified,
-and uploaded with an explicit repository selector. This leaves a nonblocking
-workflow repair to make before the next tag; it did not weaken the 1.0.58
-artifact proof.
+and uploaded with an explicit repository selector. It did not weaken the
+1.0.58 artifact proof.
+
+The permanent automation repair landed at `3fa2858`: the checkout-free
+inventory job now supplies `--repo "$GITHUB_REPOSITORY"`, and the existing
+static release-workflow guard requires that selector on the upload command.
+Deleting only the selector made the focused guard fail for that missing
+contract; restoring the committed workflow returned all three focused checks
+to green. `actionlint` was not installed locally. Exact-commit GitHub CI passed
+in `https://github.com/roethlar/vela/actions/runs/30280854039`.
 
 The manifest matched the downloaded Arch package and GitHub's immutable digests
 for the other six promised packages:
