@@ -25,7 +25,10 @@ test("release artifacts fail closed through a final inventory", () => {
     /find artifacts -type f ! -name SHA256SUMS -print0 \| sort -z/,
   );
   assert.match(workflow, /name: vela-sha256sums\n\s+if-no-files-found: error/);
-  assert.match(workflow, /gh release upload[\s\S]*--clobber/);
+  assert.match(
+    workflow,
+    /gh release upload "\$GITHUB_REF_NAME"[\s\S]*--repo "\$GITHUB_REPOSITORY"[\s\S]*--clobber/,
+  );
 });
 
 test("the Arch package is built without root and uploaded", () => {

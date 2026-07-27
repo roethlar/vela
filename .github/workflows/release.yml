@@ -283,4 +283,5 @@ jobs:
           gh release upload "$GITHUB_REF_NAME" \
             artifacts/vela-arch/*.pkg.tar.zst \
             artifacts/SHA256SUMS \
+            --repo "$GITHUB_REPOSITORY" \
             --clobber
