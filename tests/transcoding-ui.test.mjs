@@ -291,6 +291,96 @@ test('Plex decision failures surface separately from valid refusals', () => {
   );
 });
 
+// Finding tr-13 is structural: two currently equal vectors can still drift
+// later. Rust guards compare both real wire outputs; this proves those outputs
+// actually come from one production query contract rather than two copies.
+test('Plex universal-transcode endpoints use one query contract', () => {
+  const plexLibrary = read('src-tauri/src/plex_library.rs');
+  const testBoundary = plexLibrary.indexOf('\n#[cfg(test)]');
+  assert.ok(testBoundary > 0, 'the Rust test boundary must remain discoverable');
+  const production = plexLibrary.slice(0, testBoundary);
+
+  assert.equal(
+    [...production.matchAll(/fn universal_transcode_query\(/g)].length,
+    1,
+    'the common Plex query contract must have exactly one production builder',
+  );
+
+  const builderStart = production.indexOf('    fn universal_transcode_query(');
+  const decisionStart = production.indexOf('    pub async fn transcode_decision(');
+  const decisionEnd = production.indexOf('\n    async fn fetch_item_detail(', decisionStart);
+  const startStart = production.indexOf('    pub fn transcode_url(');
+  const startEnd = production.indexOf('\n    pub fn transcode_session_url(', startStart);
+  assert.ok(
+    builderStart >= 0 &&
+      decisionStart > builderStart &&
+      decisionEnd > decisionStart &&
+      startStart > decisionEnd &&
+      startEnd > startStart,
+    'the universal-transcode production blocks must remain independently inspectable',
+  );
+
+  const builder = production.slice(builderStart, decisionStart);
+  const decision = production.slice(decisionStart, decisionEnd);
+  const start = production.slice(startStart, startEnd);
+  for (const [name, caller] of [
+    ['decision', decision],
+    ['start', start],
+  ]) {
+    assert.equal(
+      [...caller.matchAll(/Self::universal_transcode_query\(/g)].length,
+      1,
+      `the ${name} endpoint must call the shared query builder exactly once`,
+    );
+  }
+
+  const commonKeys = [
+    'path',
+    'mediaIndex',
+    'partIndex',
+    'protocol',
+    'X-Plex-Client-Profile-Name',
+    'directPlay',
+    'directStream',
+    'fastSeek',
+    'copyts',
+    'offset',
+    'maxVideoBitrate',
+    'videoResolution',
+    'session',
+  ];
+  for (const key of commonKeys) {
+    const pair = new RegExp(`\\(\\s*${JSON.stringify(key)}\\s*,`, 'g');
+    assert.equal(
+      [...builder.matchAll(pair)].length,
+      1,
+      `${key} must be constructed exactly once in the shared builder`,
+    );
+    assert.doesNotMatch(
+      decision,
+      pair,
+      `${key} must not be reconstructed in the decision caller`,
+    );
+    assert.doesNotMatch(
+      start,
+      pair,
+      `${key} must not be reconstructed in the start caller`,
+    );
+  }
+
+  const clientIdPair = /\(\s*"X-Plex-Client-Identifier"\s*,/g;
+  assert.equal(
+    [...builder.matchAll(clientIdPair)].length,
+    1,
+    'the start-only client identifier must be represented once in the builder',
+  );
+  assert.doesNotMatch(
+    builder,
+    /\(\s*"X-Plex-Token"\s*,/,
+    'the shared query builder must never accept or serialize a Plex token',
+  );
+});
+
 // Finding tr-8: `Automatic` was selectable while nothing observed mpv's decoder
 // drops or cache starvation and nothing stepped down — the same class as tr-1,
 // a shipped option that does nothing. The rule it violated is the durable one:

@@ -8,6 +8,21 @@ use url::Url;
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 const PLEX_HLS_CLIENT_PROFILE_NAME: &str = "Web";
 
+#[derive(Clone, Copy)]
+enum UniversalTranscodeDelivery {
+    Direct,
+    Tier(crate::source::QualityTier),
+}
+
+#[derive(Clone, Copy)]
+enum UniversalTranscodeEndpoint<'a> {
+    Decision,
+    Start {
+        offset_seconds: u64,
+        client_identifier: &'a str,
+    },
+}
+
 #[derive(Debug, Deserialize, Clone)]
 #[allow(dead_code)] // deserialized Plex XML fields; not all are read in code
 pub struct PlexServer {
@@ -1257,25 +1272,29 @@ impl PlexLibrary {
             .map_err(|_| original.into())
     }
 
-    /// Ask what this server would do with `rating_key` under a candidate tier,
-    /// without starting a transcode. `tier` of `None` asks about direct play.
-    ///
-    /// The session id is caller-supplied because Plex has no server-issued
-    /// session concept here: the client invents the id, and the same id is what
-    /// later tears the session down via `DELETE /transcode/sessions/<id>`
-    /// (verified 2026-07-25 — `/transcode/universal/ping` and `/stop` do not
-    /// exist).
-    pub async fn transcode_decision(
-        &self,
+    /// Build the complete universal-transcode query contract shared by Plex's
+    /// capability decision and HLS start endpoints. Delivery and endpoint
+    /// differences are typed so common fields cannot drift between callers.
+    fn universal_transcode_query(
         rating_key: &str,
         media_index: usize,
-        tier: Option<crate::source::QualityTier>,
         session: &str,
-    ) -> Result<DecisionContainer, PlexDecisionError> {
-        let base = self.server_base().ok_or(PlexDecisionError::NoServer)?;
-        let url = format!("{base}/video/:/transcode/universal/decision");
-        let (direct_play, direct_stream) = Self::direct_flags(tier.is_some());
-        let mut query: Vec<(&str, String)> = vec![
+        delivery: UniversalTranscodeDelivery,
+        endpoint: UniversalTranscodeEndpoint<'_>,
+    ) -> Vec<(&'static str, String)> {
+        let (direct_play, direct_stream, tier) = match delivery {
+            UniversalTranscodeDelivery::Direct => ("1", "1", None),
+            UniversalTranscodeDelivery::Tier(tier) => ("0", "0", Some(tier)),
+        };
+        let (offset_seconds, client_identifier) = match endpoint {
+            UniversalTranscodeEndpoint::Decision => (0, None),
+            UniversalTranscodeEndpoint::Start {
+                offset_seconds,
+                client_identifier,
+            } => (offset_seconds, Some(client_identifier)),
+        };
+
+        let mut query = vec![
             ("path", format!("/library/metadata/{rating_key}")),
             ("mediaIndex", media_index.to_string()),
             ("partIndex", "0".to_string()),
@@ -1288,8 +1307,7 @@ impl PlexLibrary {
             ("directStream", direct_stream.to_string()),
             ("fastSeek", "1".to_string()),
             ("copyts", "1".to_string()),
-            ("offset", "0".to_string()),
-            ("session", session.to_string()),
+            ("offset", offset_seconds.to_string()),
         ];
         if let Some(tier) = tier {
             query.push(("maxVideoBitrate", tier.bitrate_kbps.to_string()));
@@ -1300,6 +1318,43 @@ impl PlexLibrary {
                 format!("{}x{}", tier.width, tier.height),
             ));
         }
+        query.push(("session", session.to_string()));
+        if let Some(client_identifier) = client_identifier {
+            query.push((
+                "X-Plex-Client-Identifier",
+                client_identifier.to_string(),
+            ));
+        }
+        query
+    }
+
+    /// Ask what this server would do with `rating_key` under a candidate tier,
+    /// without starting a transcode. `tier` of `None` asks about direct play.
+    ///
+    /// The decision session id is caller-supplied and creates no server-side
+    /// session. A later start generates its own id, which is the handle Vela
+    /// tears down via `DELETE /transcode/sessions/<id>` (verified 2026-07-25 —
+    /// `/transcode/universal/ping` and `/stop` do not exist).
+    pub async fn transcode_decision(
+        &self,
+        rating_key: &str,
+        media_index: usize,
+        tier: Option<crate::source::QualityTier>,
+        session: &str,
+    ) -> Result<DecisionContainer, PlexDecisionError> {
+        let base = self.server_base().ok_or(PlexDecisionError::NoServer)?;
+        let url = format!("{base}/video/:/transcode/universal/decision");
+        let delivery = tier.map_or(
+            UniversalTranscodeDelivery::Direct,
+            UniversalTranscodeDelivery::Tier,
+        );
+        let query = Self::universal_transcode_query(
+            rating_key,
+            media_index,
+            session,
+            delivery,
+            UniversalTranscodeEndpoint::Decision,
+        );
         let response = self
             .client
             .get(&url)
@@ -1397,27 +1452,16 @@ impl PlexLibrary {
         }
         let base = self.server_base()?;
         let session = uuid::Uuid::new_v4().simple().to_string();
-        let query = [
-            ("path", format!("/library/metadata/{rating_key}")),
-            ("mediaIndex", media_index.to_string()),
-            ("partIndex", "0".to_string()),
-            ("protocol", "hls".to_string()),
-            (
-                "X-Plex-Client-Profile-Name",
-                PLEX_HLS_CLIENT_PROFILE_NAME.to_string(),
-            ),
-            ("directPlay", "0".to_string()),
-            ("directStream", "0".to_string()),
-            ("fastSeek", "1".to_string()),
-            ("copyts", "1".to_string()),
-            ("offset", offset_seconds.to_string()),
-            ("maxVideoBitrate", tier.bitrate_kbps.to_string()),
-            // A bounding box: the server refits to the source aspect and may go
-            // smaller still when the bitrate binds first.
-            ("videoResolution", format!("{}x{}", tier.width, tier.height)),
-            ("session", session.clone()),
-            ("X-Plex-Client-Identifier", self.client_identifier.clone()),
-        ];
+        let query = Self::universal_transcode_query(
+            rating_key,
+            media_index,
+            &session,
+            UniversalTranscodeDelivery::Tier(tier),
+            UniversalTranscodeEndpoint::Start {
+                offset_seconds,
+                client_identifier: &self.client_identifier,
+            },
+        );
         let encoded = query
             .iter()
             .map(|(key, value)| {
@@ -1433,23 +1477,6 @@ impl PlexLibrary {
             format!("{base}/video/:/transcode/universal/start.m3u8?{encoded}"),
             session,
         ))
-    }
-
-    /// The `directPlay`/`directStream` pair a request must carry for a given
-    /// delivery, shared by the decision and the start URL so the two cannot
-    /// drift apart.
-    ///
-    /// They drifted once: the decision asked with `directStream=1` while the
-    /// start URL forces `0` for a tier, so a server that will remux but not
-    /// encode could answer yes and then refuse the stream mpv was handed
-    /// (finding `or-7`, codex openreview 2026-07-26). Asking about a delivery
-    /// other than the one you would start is not a capability check.
-    pub fn direct_flags(transcoding: bool) -> (&'static str, &'static str) {
-        if transcoding {
-            ("0", "0")
-        } else {
-            ("1", "1")
-        }
     }
 
     /// Where a teardown is sent. Split out so the credential-free shape of the
@@ -2159,6 +2186,61 @@ mod tests {
         .into_bytes()
     }
 
+    fn captured_request_url(request: &str) -> Url {
+        let target = request
+            .lines()
+            .next()
+            .and_then(|line| line.split_whitespace().nth(1))
+            .expect("captured request has a target");
+        Url::parse(&format!("http://loopback{target}"))
+            .expect("captured request target parses as a URL")
+    }
+
+    fn owned_query_pairs(url: &Url) -> Vec<(String, String)> {
+        url.query_pairs()
+            .map(|(key, value)| (key.into_owned(), value.into_owned()))
+            .collect()
+    }
+
+    fn normalize_single_pair(
+        pairs: &mut [(String, String)],
+        key: &str,
+        expected: &str,
+        normalized: &str,
+    ) {
+        let matching = pairs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (candidate, _))| (candidate == key).then_some(index))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matching.len(),
+            1,
+            "the query must carry exactly one {key} pair"
+        );
+        assert_eq!(pairs[matching[0]].1, expected, "unexpected {key} value");
+        pairs[matching[0]].1 = normalized.to_string();
+    }
+
+    fn remove_single_pair(
+        pairs: &mut Vec<(String, String)>,
+        key: &str,
+        expected: &str,
+    ) {
+        let matching = pairs
+            .iter()
+            .enumerate()
+            .filter_map(|(index, (candidate, _))| (candidate == key).then_some(index))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            matching.len(),
+            1,
+            "the query must carry exactly one {key} pair"
+        );
+        assert_eq!(pairs[matching[0]].1, expected, "unexpected {key} value");
+        pairs.remove(matching[0]);
+    }
+
     fn artwork_request() -> crate::artwork::ArtworkRequest {
         crate::artwork::ArtworkRequest {
             path: "/library/metadata/42/thumb/7".to_string(),
@@ -2297,6 +2379,162 @@ mod tests {
             request_line.contains("X-Plex-Client-Profile-Name=Web"),
             "the decision query must select the live-proven HLS profile: {request_line}"
         );
+    }
+
+    // Finding tr-13: the decision and start endpoints must serialize one
+    // duplicate-sensitive common contract. Compare the two real production
+    // callers, not the shared helper, so an omitted or caller-local pair fails.
+    #[tokio::test]
+    async fn universal_transcode_endpoints_share_one_query_contract() {
+        let body = r#"<MediaContainer generalDecisionCode="1001"/>"#;
+        let (port, captured) =
+            artwork_server(decision_http_response("200 OK", body)).await;
+        let lib = artwork_library(port);
+        let tier = crate::source::QUALITY_TIERS
+            .iter()
+            .find(|tier| tier.id == "720p-2000")
+            .copied()
+            .expect("tier exists");
+
+        lib.transcode_decision("42", 3, Some(tier), "decision-session")
+            .await
+            .expect("the tier decision succeeds");
+        let request = captured.await.unwrap();
+        let decision_url = captured_request_url(&request);
+        assert_eq!(
+            decision_url.path(),
+            "/video/:/transcode/universal/decision"
+        );
+
+        let (start_url, start_session) = lib
+            .transcode_url("42", 3, &media_with_parts(1), tier, 0)
+            .expect("the tier start URL builds");
+        let start_url = Url::parse(&start_url).expect("the production start URL parses");
+        assert_eq!(
+            start_url.path(),
+            "/video/:/transcode/universal/start.m3u8"
+        );
+
+        let lowered_request = request.to_ascii_lowercase();
+        for header in [
+            "x-plex-token: synthetic-artwork-token",
+            "x-plex-client-identifier: art-client",
+            "accept: application/xml",
+        ] {
+            assert!(
+                lowered_request.contains(header),
+                "the decision request must preserve its {header} header"
+            );
+        }
+
+        let mut decision_pairs = owned_query_pairs(&decision_url);
+        let mut start_pairs = owned_query_pairs(&start_url);
+        assert!(
+            !decision_pairs
+                .iter()
+                .any(|(key, _)| key == "X-Plex-Client-Identifier"),
+            "the decision client id belongs in its header, not its query"
+        );
+        remove_single_pair(
+            &mut start_pairs,
+            "X-Plex-Client-Identifier",
+            "art-client",
+        );
+
+        for (key, value) in decision_pairs.iter().chain(start_pairs.iter()) {
+            assert!(
+                !key.eq_ignore_ascii_case("X-Plex-Token"),
+                "universal-transcode queries must stay token-free"
+            );
+            assert!(
+                !key.contains("synthetic-artwork-token")
+                    && !value.contains("synthetic-artwork-token"),
+                "the active Plex token must not appear under another query key"
+            );
+        }
+
+        normalize_single_pair(
+            &mut decision_pairs,
+            "session",
+            "decision-session",
+            "<session>",
+        );
+        normalize_single_pair(
+            &mut start_pairs,
+            "session",
+            &start_session,
+            "<session>",
+        );
+        decision_pairs.sort();
+        start_pairs.sort();
+
+        let mut expected = vec![
+            (
+                "X-Plex-Client-Profile-Name".to_string(),
+                "Web".to_string(),
+            ),
+            ("copyts".to_string(), "1".to_string()),
+            ("directPlay".to_string(), "0".to_string()),
+            ("directStream".to_string(), "0".to_string()),
+            ("fastSeek".to_string(), "1".to_string()),
+            ("maxVideoBitrate".to_string(), "2000".to_string()),
+            ("mediaIndex".to_string(), "3".to_string()),
+            ("offset".to_string(), "0".to_string()),
+            ("partIndex".to_string(), "0".to_string()),
+            ("path".to_string(), "/library/metadata/42".to_string()),
+            ("protocol".to_string(), "hls".to_string()),
+            ("session".to_string(), "<session>".to_string()),
+            ("videoResolution".to_string(), "1280x720".to_string()),
+        ];
+        expected.sort();
+
+        assert_eq!(
+            decision_pairs, start_pairs,
+            "decision and start common query pairs drifted"
+        );
+        assert_eq!(
+            decision_pairs, expected,
+            "the shared outputs no longer match the independently pinned contract"
+        );
+    }
+
+    #[tokio::test]
+    async fn universal_transcode_direct_decision_preserves_direct_delivery() {
+        let body = r#"<MediaContainer generalDecisionCode="1001"/>"#;
+        let (port, captured) =
+            artwork_server(decision_http_response("200 OK", body)).await;
+        let lib = artwork_library(port);
+
+        lib.transcode_decision("42", 2, None, "direct-session")
+            .await
+            .expect("the direct decision succeeds");
+        let request = captured.await.unwrap();
+        let url = captured_request_url(&request);
+        let mut pairs = owned_query_pairs(&url);
+        pairs.sort();
+
+        let mut expected = vec![
+            (
+                "X-Plex-Client-Profile-Name".to_string(),
+                "Web".to_string(),
+            ),
+            ("copyts".to_string(), "1".to_string()),
+            ("directPlay".to_string(), "1".to_string()),
+            ("directStream".to_string(), "1".to_string()),
+            ("fastSeek".to_string(), "1".to_string()),
+            ("mediaIndex".to_string(), "2".to_string()),
+            ("offset".to_string(), "0".to_string()),
+            ("partIndex".to_string(), "0".to_string()),
+            ("path".to_string(), "/library/metadata/42".to_string()),
+            ("protocol".to_string(), "hls".to_string()),
+            ("session".to_string(), "direct-session".to_string()),
+        ];
+        expected.sort();
+        assert_eq!(pairs, expected, "the direct decision wire contract changed");
+
+        let lowered_request = request.to_ascii_lowercase();
+        assert!(lowered_request.contains("x-plex-token: synthetic-artwork-token"));
+        assert!(lowered_request.contains("x-plex-client-identifier: art-client"));
     }
 
     #[tokio::test]
@@ -2447,37 +2685,6 @@ mod tests {
             !decision.conversion_ok(),
             "a valid refusal stays an ordinary capability result"
         );
-    }
-
-    /// Finding or-7: the decision request must describe the delivery that would
-    /// actually be started. It asked with `directStream=1` while the start URL
-    /// forces `directStream=0`, so a server that will remux but not encode
-    /// could answer yes and then refuse the stream Vela handed mpv.
-    #[test]
-    fn the_decision_asks_for_the_delivery_it_would_start() {
-        let lib = artwork_library(1234);
-        let tier = crate::source::QUALITY_TIERS[0];
-        let start = lib
-            .transcode_url("42", 0, &media_with_parts(1), tier, 0)
-            .expect("builds")
-            .0;
-        // The two flags the start URL pins for a tier request.
-        assert!(start.contains("directPlay=0"), "start: {start}");
-        assert!(start.contains("directStream=0"), "start: {start}");
-
-        // The decision is built from the SAME production helper, so it cannot
-        // ask about a different delivery than the one above would start.
-        let (play, stream) = PlexLibrary::direct_flags(true);
-        assert_eq!(
-            (play, stream),
-            ("0", "0"),
-            "a tier decision must ask with the flags the start URL pins"
-        );
-        assert!(start.contains(&format!("directPlay={play}")), "start: {start}");
-        assert!(start.contains(&format!("directStream={stream}")), "start: {start}");
-
-        // Original is unchanged: it asks as, and plays as, direct.
-        assert_eq!(PlexLibrary::direct_flags(false), ("1", "1"));
     }
 
     /// The teardown URL is the one Vela builds that reaches a log on failure,
