@@ -2,8 +2,7 @@
 
 ## Status
 
-**Revision 1 APPROVED; PROPORTIONATE VERIFICATION PASSED; EXTERNAL REVIEW
-BLOCKED ON GROK AUTH 2026-07-27.**
+**Revision 1 APPROVED; VERIFIED / CLOSED 2026-07-27.**
 
 The owner approved Revision 1 and supplied the implementation go on 2026-07-26.
 No product decision is outstanding: this is a Plex-private refactor that must
@@ -61,8 +60,17 @@ The owner then rerouted the final review to Grok only, with no model argument.
 Grok 0.2.112's real dispatch and the one allowed fresh retry both failed HTTP
 401 after its built-in auth recovery, before inference or any tool call. The
 dedicated worktree stayed clean at the reviewed head and was removed. No
-Claude fallback or extra verification ran; closeout now waits for Grok
-reauthentication and a fresh go.
+Claude fallback or extra verification ran.
+
+After Grok also became unavailable, the owner selected Kimi Code CLI 0.29.2,
+explicit alias `kimi-code/k3`, at `max` effort. Its invocation transcript
+confirmed alias `kimi-code/k3`, server model `k3`, and `max`. Kimi accepted
+exact `735b591..81d5497` with matching pins, `capability_ok:true`,
+`guard_confirmed:true`, and no comments. Its decision-only missing-`copyts`
+mutation made the focused Rust guard fail 1/1 for the intended mismatch; exact
+restoration passed 1/1, with 360 tests filtered out both times. The disposable
+worktree was clean at the reviewed SHA and removed. `tr-13` is
+VERIFIED/CLOSED; the prior Claude and Grok attempts remain transport history.
 
 ## Goal
 
@@ -428,26 +436,18 @@ Afterward:
 
 ## Review and closeout
 
-After local, guard, Linux, and live verification:
+Local, guard, proportionate Linux, and live verification completed as recorded
+above. The final owner-selected Kimi review inspected both production callers,
+the shared builder, both Rust wire guards, and the Node wiring guard. Its
+caller-specific drift proof failed red for the intended mismatch, restored
+green, and left the exact reviewed head clean. The accepted schema verdict
+closed the finding with no correction commit.
 
-1. run the finding-specific codereview workflow over the exact implementation
-   range with the owner-selected reviewer and no model argument; after the
-   failed Claude result, the owner selected Grok as the replacement;
-2. require the reviewer to inspect both production wire guards and independently
-   prove one caller-specific drift red/restored-green;
-3. if the review returns an actionable finding, record and address exactly that
-   finding in its own commit, rerun affected and canonical verification, and
-   dispatch a fresh Grok review under the same owner-selected routing;
-4. update `.agents/review/findings/tr-13.md`, `.agents/review/index.md`,
-   `.agents/plans/server-transcoding.md`, this plan, `.agents/state.md`, and
-   `.agents/machines.md` with the implementation/correction commits, independent
-   guard proof, Linux/live result, venue state, and final review verdict;
-5. commit the record-only closeout immediately.
-
-The owner-directed Claude review of `tr-12` and the owner-rerouted Grok review
-of `tr-13` are finding-specific exceptions and do not change this repo's
-standing Codex routing. For `tr-13`, the owner explicitly supplied no model;
-do not add one. Do not push any commit without a separate explicit go.
+The owner-directed Claude review of `tr-12` and the owner-directed Claude,
+Grok, and Kimi transports for `tr-13` are finding-specific exceptions and do
+not change this repo's standing Codex routing. The Kimi model and effort were
+inline, session-only values. The record-only closeout is committed immediately;
+no push is authorized without a separate explicit go.
 
 ## Expected files
 

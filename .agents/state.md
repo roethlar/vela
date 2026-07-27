@@ -44,16 +44,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   teardown. Owner-directed Claude Code 2.1.220 reached its isolated
   caller-drift proof over exact `735b591..81d5497` and cleaned up, but its CLI
   returned no structured verdict or transcript. The one allowed re-emission
-  could not resume the non-persisted session, so `tr-13` is contested rather
-  than verified. The owner rerouted the replacement review to Grok only with no
+  could not resume the non-persisted session, so `tr-13` was contested at that
+  point. The owner rerouted the replacement review to Grok only with no
   model argument; Grok 0.2.112 and its one fresh retry both failed HTTP 401
-  before inference. No Grok review round or additional verification ran.
+  before inference. The owner then selected Kimi Code CLI 0.29.2 /
+  `kimi-code/k3` at `max`; its transcript confirmed alias, server model `k3`,
+  and effort, and it accepted exact `735b591..81d5497` with matching pins,
+  `capability_ok:true`, `guard_confirmed:true`, and no comments. Its
+  decision-only missing-`copyts` mutation made the focused guard fail for the
+  intended mismatch, exact restoration passed, and the clean worktree was
+  removed. `tr-13` and the server-transcoding plan are VERIFIED/CLOSED; the
+  Claude and Grok attempts remain transport history.
 
 ## Next
 
-- **First action:** after the owner reauthenticates Grok and says go, rerun the
-  same exact `tr-13` review with no model argument and only the focused
-  caller-drift red/green proof.
+- No implementation or review loop is active; await the owner's next scoped
+  request.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -64,9 +70,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- `tr-13` closeout is blocked on Grok CLI reauthentication after two HTTP 401
-  failures before inference. The unrelated continuation/mpv and `refresh` E2E
-  flakes remain recorded and are not being retried or repaired under `tr-13`.
+- None. The unrelated continuation/mpv and `refresh` E2E flakes remain
+  recorded and were not retried or repaired under `tr-13`.
 
 ## Verification
 
@@ -82,15 +87,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md`
 - `.agents/push-policy.md`
-- `.agents/plans/server-transcoding.md` (`tr-11`, `tr-10`, and `tr-12` closed;
-  `tr-13` contested)
+- `.agents/plans/server-transcoding.md` (complete)
 - `.agents/plans/tr-11-plex-client-profile.md` (complete)
 - `.agents/plans/tr-10-plex-transcode-header-auth.md` (complete)
 - `.agents/plans/tr-12-plex-decision-diagnostics.md` (complete)
-- `.agents/plans/tr-13-plex-universal-query-builder.md` (approved; closeout
-  contested)
+- `.agents/plans/tr-13-plex-universal-query-builder.md` (complete)
 - `.agents/review/findings/tr-12.md` (complete)
-- `.agents/review/findings/tr-13.md` and `.agents/review/tr-13.contested.md`
+- `.agents/review/findings/tr-13.md` (complete) and
+  `.agents/review/tr-13.contested.md` (resolved transport history)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
 - `.agents/review/index.md`, `.agents/review/findings/tr-11.md`, and
   `.agents/review/findings/tr-10.md`

@@ -26,7 +26,14 @@ portable and may at most point here.
 - Grok 0.2.112 was probed on 2026-07-27. Its built-in writable profile is named
   `workspace` (not Codex's `workspace-write`). Two no-model `tr-13` dispatches
   failed HTTP 401 after built-in auth recovery, before inference or tools; do
-  not retry until the owner has reauthenticated with `grok login`.
+  not retry unless the owner explicitly returns to Grok and first
+  reauthenticates with `grok login`.
+- Kimi Code CLI is `/Users/michael/.kimi-code/bin/kimi`, version 0.29.2 as of
+  2026-07-27. Headless `-p` mode already uses the auto permission policy and
+  rejects explicit `--auto` or `--yolo`. Use
+  `KIMI_MODEL_THINKING_EFFORT=<effort>` for a launch-scoped effort and
+  `-m <alias> --output-format stream-json`; the saved session wire records the
+  alias, server model, and effective effort.
 - Reviewer MCP (verified 2026-07-18): the Claude Code server supports direct
   Workflow dispatch and records model, effort, version, and MCP entrypoint in
   its transcript. Tier pairs live in the gitignored
@@ -47,7 +54,7 @@ portable and may at most point here.
   `capability_ok:true`, `guard_confirmed:true`, and no comments. The worktree
   was removed. This one-off does not change the standing Codex routing above.
 
-  **Owner-directed `tr-13` exception (2026-07-27):** Claude Code 2.1.220 was
+  **Owner-directed `tr-13` Claude transport (2026-07-27):** Claude Code 2.1.220 was
   called with no model or effort override over exact `735b591..81d5497`. The
   process created `/tmp/vela-tr13-claude-review-20260727`, reached two focused
   Rust guard invocations around its caller-only mutation/restoration, and
@@ -57,6 +64,18 @@ portable and may at most point here.
   used `--no-session-persistence`. The main worktree remained clean, no review
   verdict counts, and future schema-bound CLI reviews must retain a resumable
   session until their result payload has been validated.
+
+  **Owner-directed `tr-13` final Kimi review (2026-07-27):** after the Claude
+  payload failure and Grok HTTP 401, the owner selected Kimi Code CLI 0.29.2,
+  alias `kimi-code/k3`, at `max`. A bare launch with incompatible `--auto`
+  failed before Kimi started; the real prompt-mode dispatch used its implicit
+  auto policy. Session `bcc9531b-d82a-44e1-bce3-d79df9f73ebf` records alias
+  `kimi-code/k3`, server model `k3`, and thinking effort `max`. It accepted
+  exact `735b591..81d5497` with matching pins, `capability_ok:true`,
+  `guard_confirmed:true`, and no comments after a decision-only
+  missing-`copyts` red/restored-green proof. The disposable worktree
+  `/tmp/vela-tr13-kimi-review-20260727` was clean at `81d5497` and removed.
+  This one-off does not change standing Codex routing.
 
   **Codex is called plainly — no `--model`, no reasoning-effort override, and
   no model/effort pair recorded for it.** The whole dispatch, probed and used

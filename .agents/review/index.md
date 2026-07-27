@@ -60,22 +60,18 @@ accepted exact `a7d792e..9cde6b2` with `capability_ok:true`,
 `guard_confirmed:true`, and no comments. Detail:
 `.agents/review/findings/tr-12.md`.
 
-**`tr-13` CONTESTED (LOW, raised by the `tr-11` plan review 2026-07-26)** —
-the shared universal-transcode query contract landed in 1.0.58 at `81d5497`;
-the local gate, six independent mutations, and relevant Linux `plexdecision`
-scenario passed. Repeated, unrelated continuation/mpv and `refresh` E2E
-harness races remain disclosed; the owner ruled them non-blocking for this LOW
-refactor rather than opening a harness project. Real-Plex `live-transcode`
-passed 1/1 with clean teardown. Owner-directed Claude Code 2.1.220, called with
-no model or effort override over exact `735b591..81d5497`, reached its
-caller-drift worktree proof and cleaned up, but returned only success metadata
-with no structured verdict or transcript. Its single re-emission attempt could
-not resume the non-persisted session, so no verdict counts and closure awaits
-the owner. The owner then rerouted the review to Grok only, with no model
-argument. Grok 0.2.112's real dispatch and one fresh retry both failed HTTP 401
-after built-in auth recovery, before inference or any tool call. The untouched
-review worktree was removed; no Grok verdict counts, and reauthentication is
-the sole remaining blocker.
+**`tr-13` VERIFIED / CLOSED 2026-07-27 (LOW, raised by the `tr-11` plan
+review)** — the shared universal-transcode query contract landed in 1.0.58 at
+`81d5497`; the local gate, six independent mutations, relevant Linux
+`plexdecision`, and real-Plex `live-transcode` passed. The owner ruled the
+unrelated Linux harness races non-blocking for this LOW refactor. Kimi Code CLI
+0.29.2 / `kimi-code/k3` / `max` / standard accepted exact
+`735b591..81d5497` with `capability_ok:true`, `guard_confirmed:true`, and no
+comments. Its decision-only missing-`copyts` mutation made the focused Rust
+guard fail 1/1 for the intended query mismatch; exact restoration passed 1/1,
+and the disposable worktree was clean and removed. The earlier Claude missing
+payload and Grok HTTP 401 remain recorded transport failures and contributed no
+verdict.
 Plan: `.agents/plans/tr-13-plex-universal-query-builder.md`.
 Detail: `.agents/review/findings/tr-13.md`.
 

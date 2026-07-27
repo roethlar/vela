@@ -2,9 +2,8 @@
 
 ## Status
 
-**Revision 8, 2026-07-27 — all six slices, both HIGH live-Plex repairs, and
-MEDIUM `tr-12` are LANDED; LOW `tr-13` closeout is blocked on reviewer
-transport.** Slices
+**Revision 8, 2026-07-27 — all six slices and every admitted follow-up through
+LOW `tr-13` are VERIFIED/CLOSED.** Slices
 1-6 landed through 1.0.52; the first codex openreview's seven findings and two
 follow-up HIGH findings are fixed through 1.0.54. `tr-11` is VERIFIED/CLOSED in
 1.0.55 at `f185449` plus exact-one guard `5c27f89`; `tr-10` is VERIFIED/CLOSED
@@ -33,7 +32,12 @@ not service the one allowed re-emission. No review verdict counts, and the
 owner rerouted the replacement review to Grok only, with no model argument.
 Grok 0.2.112's real dispatch and one fresh retry both failed HTTP 401 after
 auth recovery, before inference or any tool call. Its untouched worktree was
-removed; Grok reauthentication is now the sole closeout blocker.
+removed. The final owner-selected Kimi Code CLI 0.29.2 review used
+`kimi-code/k3` at `max`, accepted exact `735b591..81d5497` with matching pins,
+`capability_ok:true`, `guard_confirmed:true`, and no comments, and independently
+proved the caller-drift guard red/restored-green. Its clean disposable
+worktree was removed. The earlier Claude and Grok results remain transport
+history; `tr-13` and the server-transcoding plan are complete.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per
