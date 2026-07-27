@@ -3,7 +3,7 @@
 ## Status
 
 **Revision 7, 2026-07-26 — all six slices, both HIGH live-Plex repairs, and
-MEDIUM `tr-12` are LANDED; LOW `tr-13` is planned but not approved.** Slices
+MEDIUM `tr-12` are LANDED; LOW `tr-13` is approved and active.** Slices
 1-6 landed through 1.0.52; the first codex openreview's seven findings and two
 follow-up HIGH findings are fixed through 1.0.54. `tr-11` is VERIFIED/CLOSED in
 1.0.55 at `f185449` plus exact-one guard `5c27f89`; `tr-10` is VERIFIED/CLOSED
@@ -19,8 +19,8 @@ Claude accepted the exact implementation range with an independent guard proof
 and no comments. Its cold record is
 `.agents/plans/tr-12-plex-decision-diagnostics.md`. LOW `tr-13` now has a
 Revision 1 cold plan at
-`.agents/plans/tr-13-plex-universal-query-builder.md`; implementation remains
-separately gated on owner approval and go.
+`.agents/plans/tr-13-plex-universal-query-builder.md`; the owner approved it and
+supplied the implementation go on 2026-07-26.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per

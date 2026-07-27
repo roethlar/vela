@@ -2,12 +2,11 @@
 
 ## Status
 
-**Revision 1 DRAFT 2026-07-26. NOT APPROVED FOR IMPLEMENTATION.**
+**Revision 1 APPROVED AND ACTIVE 2026-07-26.**
 
-The owner authorized this planning pass on 2026-07-26. No product decision is
-outstanding: this is a Plex-private refactor that must preserve the current
-decision and `start.m3u8` wire contract. Implementation remains blocked until
-the owner approves this plan and gives an implementation go.
+The owner approved Revision 1 and supplied the implementation go on 2026-07-26.
+No product decision is outstanding: this is a Plex-private refactor that must
+preserve the current decision and `start.m3u8` wire contract.
 
 This plan fixes `tr-13` only. It does not change the behavior closed under
 `tr-10`, `tr-11`, or `tr-12`.
