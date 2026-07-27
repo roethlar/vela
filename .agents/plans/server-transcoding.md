@@ -12,10 +12,10 @@ real-Plex, and final-review gates. Their cold records are
 `.agents/plans/tr-11-plex-client-profile.md` and
 `.agents/plans/tr-10-plex-transcode-header-auth.md`.
 
-The `tr-11` plan review's MEDIUM `tr-12` follow-up now has draft revision 1 at
-`.agents/plans/tr-12-plex-decision-diagnostics.md`; owner ruling and approval
-remain pending. LOW `tr-13` (duplicated universal-transcode query builders)
-remains open and separately gated.
+The `tr-11` plan review's MEDIUM `tr-12` follow-up has approved revision 1 at
+`.agents/plans/tr-12-plex-decision-diagnostics.md`; implementation has not
+started and remains separately gated. LOW `tr-13` (duplicated
+universal-transcode query builders) remains open and separately gated.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per

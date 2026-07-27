@@ -1703,3 +1703,36 @@ which is a wording problem and is fixed with wording.
 Supersedes:
 Nothing. It preserves the 2026-07-19 duplicate-copy decision and records that
 its Prefer Compatible mode is inert, not broken, for single-copy libraries.
+
+## 2026-07-26 - Plex decision failures surface without blocking playable fallback
+
+Status: APPROVED (owner, 2026-07-26). Implementation plan:
+`.agents/plans/tr-12-plex-decision-diagnostics.md`.
+
+Decision:
+When an on-demand Plex quality-menu request fails before producing a valid
+capability decision, Vela shows the existing inline menu error with a
+credential-safe reason. It does not present that failure as the ordinary
+“This server won't convert this title” refusal state.
+
+When an explicitly requested tier encounters the same failure during playback
+resolution, Vela keeps the fail-closed behavior: it plays Original when that
+copy remains playable and writes the credential-safe reason once to its log. A
+valid negative Plex decision remains a quiet capability refusal.
+
+Decision diagnostics may identify only a fixed failure category and numeric
+HTTP status. They never include the request URL, server address, rating key,
+decision session id, token, response body, or raw reqwest/serde error.
+
+Reason:
+The quality submenu is where the user explicitly asks what the server can
+convert, so hiding a failed probe there as a legitimate refusal is misleading
+and unactionable. An explicit play has a different priority: when Original
+still works, preserving playback is better than turning the diagnostic into a
+hard failure. The split makes the failure visible in its interactive context
+without sacrificing the safe fallback.
+
+Supersedes:
+The unresolved user-facing-versus-log-only choice recorded in finding `tr-12`.
+It does not change the existing fail-closed playback fallback or any valid Plex
+capability decision.

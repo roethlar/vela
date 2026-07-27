@@ -2,9 +2,9 @@
 
 ## Status
 
-**Draft revision 1, 2026-07-26. NOT APPROVED FOR IMPLEMENTATION.**
+**Revision 1 APPROVED by the owner 2026-07-26. IMPLEMENTATION NOT STARTED.**
 
-One owner ruling remains. Recommended behavior:
+The approved behavior is:
 
 - when the on-demand quality submenu cannot complete a Plex decision request,
   use its existing inline error surface to show a credential-safe reason instead
@@ -15,10 +15,9 @@ One owner ruling remains. Recommended behavior:
 - keep a valid Plex negative decision quiet and render the existing
   “This server won't convert this title” state.
 
-Approval of this plan approves that split. A separate explicit implementation
-go is still required. Record the ruling in `.agents/decisions.md` and replace
-this draft status before starting code. No product code may change while this
-status remains draft.
+The ruling is recorded in `.agents/decisions.md`. A separate explicit
+implementation go is still required; plan approval alone authorizes no product
+code change.
 
 This plan fixes `tr-12` only. It does not refactor the duplicated Plex
 universal-transcode query builders (`tr-13`).

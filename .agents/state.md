@@ -29,16 +29,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   transcode tokens out of URLs and carries auth through the private mpv include.
   It passed explicit local gates, independent guard mutations, clean Linux E2E
   38/38, real-Plex `live-transcode` 1/1, and fresh Claude re-review PASS.
-  MEDIUM `tr-12` now has draft revision 1 at
-  `.agents/plans/tr-12-plex-decision-diagnostics.md`; owner ruling and approval
-  remain pending. LOW `tr-13` (duplicated universal-transcode query builders)
-  remains separately gated.
+  MEDIUM `tr-12` has approved revision 1 at
+  `.agents/plans/tr-12-plex-decision-diagnostics.md`; implementation has not
+  started. LOW `tr-13` (duplicated universal-transcode query builders) remains
+  separately gated.
 
 ## Next
 
-- **First action:** ask the owner to approve or revise `tr-12` draft revision 1,
-  including the recommended inline-menu / logged-playback diagnostic split.
-  Implementation needs a later explicit go. `tr-13` remains separately gated.
+- **First action:** implement approved `tr-12` revision 1 only after the owner
+  gives its separate explicit go, then run its recorded verification and
+  owner-directed Claude review. `tr-13` remains separately gated.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -49,8 +49,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- No evidence blocker is known. `tr-12` implementation is owner-gated on the
-  draft ruling/approval and then a separate implementation go.
+- No evidence blocker is known. Approved `tr-12` implementation awaits its
+  separate explicit owner go.
 
 ## Verification
 
@@ -69,7 +69,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/server-transcoding.md` (`tr-11` and `tr-10` closed)
 - `.agents/plans/tr-11-plex-client-profile.md` (complete)
 - `.agents/plans/tr-10-plex-transcode-header-auth.md` (complete)
-- `.agents/plans/tr-12-plex-decision-diagnostics.md` (draft revision 1)
+- `.agents/plans/tr-12-plex-decision-diagnostics.md` (revision 1 approved)
 - `.agents/review/findings/tr-12.md` and
   `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
