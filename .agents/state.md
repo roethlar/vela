@@ -37,15 +37,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   no comments. LOW `tr-13` implementation landed at `81d5497` in 1.0.58: one
   typed, token-blind Plex universal-transcode query contract now serves both
   production endpoints, and the local gate plus six isolated mutations passed.
-  It is not verified/closed because repeated unrelated Linux E2E harness races
-  prevented the required clean 39/39; see its plan and finding record.
+  Repeated unrelated Linux E2E harness races prevented a clean 39/39; see its
+  plan and finding record. On 2026-07-27 the owner ruled those failures
+  non-blocking for this LOW refactor rather than expanding into harness work.
 
 ## Next
 
-- **First action:** owner decides whether to authorize a separate narrow plan
-  to stabilize the pre-existing continuation/mpv and `refresh` E2E races. Then
-  resume `.agents/plans/tr-13-plex-universal-query-builder.md` at the required
-  full Linux 39/39 gate before live Plex or Claude review.
+- **First action:** run `tr-13`'s real-Plex `live-transcode` check, then dispatch
+  the owner-directed Claude review with no model argument and close the finding
+  if both pass.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -56,11 +56,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- `tr-13` is blocked at Linux verification: unchanged continuation scenarios
-  intermittently receive `mpv: property unavailable`, while `refresh`
-  repeatedly loses its one-shot mock hold window and once held WebDriver for
-  38 minutes. The repo's stall threshold is crossed; another unchanged retry
-  is not authorized evidence.
+- No external blocker. The unrelated continuation/mpv and `refresh` E2E flakes
+  remain recorded and are not being retried or repaired under `tr-13`.
 
 ## Verification
 

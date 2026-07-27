@@ -62,9 +62,11 @@ accepted exact `a7d792e..9cde6b2` with `capability_ok:true`,
 
 **`tr-13` IN PROGRESS (LOW, raised by the `tr-11` plan review 2026-07-26)** —
 the shared universal-transcode query contract landed in 1.0.58 at `81d5497`;
-the local gate and six independent mutations passed. Required Linux 39/39 is
-blocked by repeated, unrelated continuation/mpv and `refresh` E2E harness
-races, so live Plex and the owner-directed Claude review have not run.
+the local gate, six independent mutations, and relevant Linux `plexdecision`
+scenario passed. Repeated, unrelated continuation/mpv and `refresh` E2E
+harness races remain disclosed; the owner ruled them non-blocking for this LOW
+refactor rather than opening a harness project. Live Plex and the
+owner-directed Claude review are next.
 Plan: `.agents/plans/tr-13-plex-universal-query-builder.md`.
 Detail: `.agents/review/findings/tr-13.md`.
 

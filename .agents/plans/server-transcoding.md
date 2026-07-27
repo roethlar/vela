@@ -3,8 +3,7 @@
 ## Status
 
 **Revision 8, 2026-07-27 — all six slices, both HIGH live-Plex repairs, and
-MEDIUM `tr-12` are LANDED; LOW `tr-13` code is landed but verification is
-blocked.** Slices
+MEDIUM `tr-12` are LANDED; LOW `tr-13` is in proportionate closeout.** Slices
 1-6 landed through 1.0.52; the first codex openreview's seven findings and two
 follow-up HIGH findings are fixed through 1.0.54. `tr-11` is VERIFIED/CLOSED in
 1.0.55 at `f185449` plus exact-one guard `5c27f89`; `tr-10` is VERIFIED/CLOSED
@@ -21,10 +20,11 @@ and no comments. Its cold record is
 `.agents/plans/tr-12-plex-decision-diagnostics.md`. LOW `tr-13` landed in
 1.0.58 at `81d5497` under its approved Revision 1 plan at
 `.agents/plans/tr-13-plex-universal-query-builder.md`. Its full local gate and
-six independent mutations passed, but repeated pre-existing Linux E2E harness
-races have prevented the required clean 39/39. Live Plex and the
-owner-directed Claude review remain blocked behind a separate narrow harness
-repair decision.
+six independent mutations and relevant Linux `plexdecision` scenario passed.
+Repeated pre-existing Linux E2E harness races prevented a clean 39/39 and
+remain disclosed. The owner ruled them non-blocking for this LOW refactor
+rather than expanding into a harness project; live Plex and the
+owner-directed Claude review are next.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per

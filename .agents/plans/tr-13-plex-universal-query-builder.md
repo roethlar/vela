@@ -2,7 +2,7 @@
 
 ## Status
 
-**Revision 1 APPROVED; IMPLEMENTATION LANDED; VERIFICATION BLOCKED
+**Revision 1 APPROVED; IMPLEMENTATION LANDED; PROPORTIONATE CLOSEOUT ACTIVE
 2026-07-27.**
 
 The owner approved Revision 1 and supplied the implementation go on 2026-07-26.
@@ -31,10 +31,13 @@ pre-existing harness races:
   (`/Users/michael/.ptk/jobs/job-7397-56.log`,
   `/Users/michael/.ptk/jobs/job-7397-57.log`).
 
-That repeated blocker crossed the repo's three-cycle stall threshold. Do not
-waive the 39/39 requirement or proceed to live Plex / finding review. The next
-action needs owner approval for a separate narrow plan to stabilize the
-pre-existing E2E races, after which this plan resumes at the full Linux gate.
+That repeated blocker crossed the repo's three-cycle stall threshold. On
+2026-07-27 the owner ruled that this LOW, Plex-private refactor must not expand
+into a separate repair project for unrelated test-harness races. The failed
+full-suite attempts remain disclosed evidence rather than a green gate; the
+relevant `plexdecision` scenario, complete local gate, and six independent
+mutations are sufficient to proceed to the already-planned live Plex check and
+Claude review.
 
 ## Goal
 
