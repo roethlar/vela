@@ -3,8 +3,8 @@
 ## Status
 
 **Revision 8, 2026-07-27 — all six slices, both HIGH live-Plex repairs, and
-MEDIUM `tr-12` are LANDED; LOW `tr-13` closeout is contested on a missing
-review payload.** Slices
+MEDIUM `tr-12` are LANDED; LOW `tr-13` closeout is blocked on reviewer
+transport.** Slices
 1-6 landed through 1.0.52; the first codex openreview's seven findings and two
 follow-up HIGH findings are fixed through 1.0.54. `tr-11` is VERIFIED/CLOSED in
 1.0.55 at `f185449` plus exact-one guard `5c27f89`; `tr-10` is VERIFIED/CLOSED
@@ -30,7 +30,10 @@ Code 2.1.220 run, with no model or effort override over exact
 `735b591..81d5497`, reached its isolated caller-drift proof and cleaned up but
 returned no structured verdict or transcript; its non-persisted session could
 not service the one allowed re-emission. No review verdict counts, and the
-owner must rule on closeout before `tr-13` can be marked verified.
+owner rerouted the replacement review to Grok only, with no model argument.
+Grok 0.2.112's real dispatch and one fresh retry both failed HTTP 401 after
+auth recovery, before inference or any tool call. Its untouched worktree was
+removed; Grok reauthentication is now the sole closeout blocker.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per

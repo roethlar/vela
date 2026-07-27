@@ -23,6 +23,10 @@ portable and may at most point here.
   once) — and `grok --sandbox read-only -p "$(cat <prompt>)"`. **grok has twice
   returned only its preamble with no JSON verdict; that is a FAILED run, not a
   clean pass. Re-dispatch it, and never read silence as agreement.**
+- Grok 0.2.112 was probed on 2026-07-27. Its built-in writable profile is named
+  `workspace` (not Codex's `workspace-write`). Two no-model `tr-13` dispatches
+  failed HTTP 401 after built-in auth recovery, before inference or tools; do
+  not retry until the owner has reauthenticated with `grok login`.
 - Reviewer MCP (verified 2026-07-18): the Claude Code server supports direct
   Workflow dispatch and records model, effort, version, and MCP entrypoint in
   its transcript. Tier pairs live in the gitignored

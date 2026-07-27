@@ -71,7 +71,11 @@ no model or effort override over exact `735b591..81d5497`, reached its
 caller-drift worktree proof and cleaned up, but returned only success metadata
 with no structured verdict or transcript. Its single re-emission attempt could
 not resume the non-persisted session, so no verdict counts and closure awaits
-the owner.
+the owner. The owner then rerouted the review to Grok only, with no model
+argument. Grok 0.2.112's real dispatch and one fresh retry both failed HTTP 401
+after built-in auth recovery, before inference or any tool call. The untouched
+review worktree was removed; no Grok verdict counts, and reauthentication is
+the sole remaining blocker.
 Plan: `.agents/plans/tr-13-plex-universal-query-builder.md`.
 Detail: `.agents/review/findings/tr-13.md`.
 

@@ -2,8 +2,8 @@
 
 ## Status
 
-**Revision 1 APPROVED; PROPORTIONATE VERIFICATION PASSED; CLAUDE REVIEW
-RESULT CONTESTED 2026-07-27.**
+**Revision 1 APPROVED; PROPORTIONATE VERIFICATION PASSED; EXTERNAL REVIEW
+BLOCKED ON GROK AUTH 2026-07-27.**
 
 The owner approved Revision 1 and supplied the implementation go on 2026-07-26.
 No product decision is outstanding: this is a Plex-private refactor that must
@@ -56,6 +56,13 @@ tool transcript, resolved model, proof booleans, and pins were absent. The one
 allowed re-emission could not resume the deliberately non-persisted session.
 The codereview contract therefore counts no verdict and routes closeout to the
 owner; no additional test or review run has been started.
+
+The owner then rerouted the final review to Grok only, with no model argument.
+Grok 0.2.112's real dispatch and the one allowed fresh retry both failed HTTP
+401 after its built-in auth recovery, before inference or any tool call. The
+dedicated worktree stayed clean at the reviewed head and was removed. No
+Claude fallback or extra verification ran; closeout now waits for Grok
+reauthentication and a fresh go.
 
 ## Goal
 
@@ -423,24 +430,24 @@ Afterward:
 
 After local, guard, Linux, and live verification:
 
-1. run the finding-specific `codereview claude` workflow over the exact
-   implementation range, with no model argument; use the playbook's standard
-   omitted-effort default;
+1. run the finding-specific codereview workflow over the exact implementation
+   range with the owner-selected reviewer and no model argument; after the
+   failed Claude result, the owner selected Grok as the replacement;
 2. require the reviewer to inspect both production wire guards and independently
    prove one caller-specific drift red/restored-green;
 3. if the review returns an actionable finding, record and address exactly that
    finding in its own commit, rerun affected and canonical verification, and
-   dispatch a fresh Claude review under the same owner-selected routing;
+   dispatch a fresh Grok review under the same owner-selected routing;
 4. update `.agents/review/findings/tr-13.md`, `.agents/review/index.md`,
    `.agents/plans/server-transcoding.md`, this plan, `.agents/state.md`, and
    `.agents/machines.md` with the implementation/correction commits, independent
    guard proof, Linux/live result, venue state, and final review verdict;
 5. commit the record-only closeout immediately.
 
-The owner-directed Claude reviews of `tr-12` and `tr-13` are finding-specific
-exceptions and do not change this repo's standing Codex routing. For `tr-13`,
-the owner explicitly supplied no model; do not add one. Do not push any commit
-without a separate explicit go.
+The owner-directed Claude review of `tr-12` and the owner-rerouted Grok review
+of `tr-13` are finding-specific exceptions and do not change this repo's
+standing Codex routing. For `tr-13`, the owner explicitly supplied no model;
+do not add one. Do not push any commit without a separate explicit go.
 
 ## Expected files
 

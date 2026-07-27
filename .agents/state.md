@@ -45,14 +45,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   caller-drift proof over exact `735b591..81d5497` and cleaned up, but its CLI
   returned no structured verdict or transcript. The one allowed re-emission
   could not resume the non-persisted session, so `tr-13` is contested rather
-  than verified.
+  than verified. The owner rerouted the replacement review to Grok only with no
+  model argument; Grok 0.2.112 and its one fresh retry both failed HTTP 401
+  before inference. No Grok review round or additional verification ran.
 
 ## Next
 
-- **First action:** obtain the owner's ruling on
-  `.agents/review/tr-13.contested.md`: authorize one fresh, transcript-capturing
-  Claude dispatch or waive the external-verdict gate without claiming Claude
-  acceptance.
+- **First action:** after the owner reauthenticates Grok and says go, rerun the
+  same exact `tr-13` review with no model argument and only the focused
+  caller-drift red/green proof.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -63,9 +64,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- `tr-13` closeout is blocked on the owner's ruling after Claude returned no
-  verdict payload. The unrelated continuation/mpv and `refresh` E2E flakes
-  remain recorded and are not being retried or repaired under `tr-13`.
+- `tr-13` closeout is blocked on Grok CLI reauthentication after two HTTP 401
+  failures before inference. The unrelated continuation/mpv and `refresh` E2E
+  flakes remain recorded and are not being retried or repaired under `tr-13`.
 
 ## Verification
 
