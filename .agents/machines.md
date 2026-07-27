@@ -175,8 +175,8 @@ scenario here that depends on an OSD overlay being drawn.
 
 **Current-tree worktree (updated 2026-07-26):** `~/dev/vela-main` is a detached
 worktree of the same clone, used to run E2E against current `main` without
-disturbing the old tree or its stash. It is clean and aligned to `f185449`
-(1.0.55), re-verified read-only 2026-07-26.
+disturbing the old tree or its stash. It is clean and aligned to `ca15258`
+(1.0.56), re-verified after exact-commit Linux and live proof 2026-07-26.
 Refresh it with `git fetch origin && git checkout --detach <sha>` from inside
 it. The original `~/dev/vela` remains at its old commit and is NOT the venue any
 more.
@@ -261,12 +261,17 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
     generated child URI contained a token. Teardown returned 204 and a follow-up
     session-list check found none of the probe sessions; the independently active
     session already on the server was left untouched.
-  - **`live-transcode` passes at 1.0.55 (2026-07-26).** Run it as
-    `npm run e2e:live live-transcode`. At exact `f185449`, candidate decisions
-    created no server session, explicit-tier playback reached the universal
-    transcode endpoint and opened a fresh real session, and quitting mpv removed
-    it. This closed `tr-11`; `tr-10` remains open because that successful path
-    still carries the Plex token in mpv's URL.
+  - **`live-transcode` passes at 1.0.56 (2026-07-26).** Run it as
+    `npm run e2e:live live-transcode`. At exact `ca15258`, candidate decisions
+    created no server session; explicit-tier playback gave mpv a credential-free
+    universal-transcode path and argv plus one exact token header in a regular
+    0600 include; the play opened a fresh real session; and quitting mpv removed
+    it. Post-run Plex/watchdog were active, the credentials file was absent, and
+    there was no mpv process or live mpv socket listener. This closes `tr-10`.
+  - Historical E2E runs leave inert `mpv-*.sock` filesystem nodes under old
+    owner-only `/tmp/vela-*` directories. Do not treat their presence as a live
+    player and do not broad-delete `/tmp`; use `pgrep -x mpv` plus `ss -xl` to
+    distinguish a live process/listener from an inert node.
   - The VM was deliberately NOT given an SSH key on the Plex box: that is persistent
     access to the owner's server, granted for a test. The Mac (which already has access)
     runs `scripts/live-control.mjs` for the length of one run — host-only address,

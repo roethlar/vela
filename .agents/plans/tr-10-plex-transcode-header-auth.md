@@ -2,9 +2,12 @@
 
 ## Status
 
-**APPROVED 2026-07-26.** The owner authorized implementation and directed the
-completed code change to the Claude reviewer harness with no model or effort
-override. No push is authorized.
+**COMPLETE 2026-07-26.** Implementation `d91e8d2` plus review correction
+`ca15258` passed the full local gate, independent guard mutations, Linux E2E
+38/38, real-Plex `live-transcode` 1/1, and a fresh Claude re-review. The harness
+resolved its default to `claude-opus-5[1m]`; no model or effort override was
+supplied. Canonical evidence is in `.agents/review/findings/tr-10.md`. No push
+is authorized.
 
 No product decision is outstanding. The active 2026-07-03 and 2026-07-23
 credential decisions already require every Plex media URL handed to mpv to be

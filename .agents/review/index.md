@@ -41,17 +41,12 @@ verification, independent missing/duplicate/wrong-value mutations, clean Linux
 with `capability_ok:true`, `guard_confirmed:true`, no comments. Detail:
 `.agents/review/findings/tr-11.md`.
 
-**`tr-10` OPEN (HIGH, raised 2026-07-26)** — a transcoded Plex play returns
-EMPTY `http_headers` and carries `X-Plex-Token` in the URL instead, so the token
-reaches mpv's `path`, its logs, and its process argv. Direct play was hardened
-against exactly this by the 2026-07-23 credential split; slice 3 did not carry
-it to the transcode path it added. Not fixed. The live safety gate passed on
-2026-07-26: Plex accepted header-only master, child-playlist, and segment
-requests and generated no token-bearing child URI. Not found by the slice-3
-codex review. A cold-implementation plan is drafted at
-`.agents/plans/tr-10-plex-transcode-header-auth.md`; the owner approved it
-2026-07-26 and directed the completed change to Claude review with no model or
-effort override. Implementation is in progress. Detail:
+**`tr-10` VERIFIED / CLOSED (HIGH, raised and closed 2026-07-26)** — 1.0.56
+removes the Plex token from the universal-transcode URL and returns the same
+private token header for direct and transcoded delivery. Implementation
+`d91e8d2` plus Claude review correction `ca15258` passed independent guard
+mutations, the full local gate, clean Linux E2E 38/38, real-Plex
+`live-transcode` 1/1, and a fresh Claude re-review PASS. Detail:
 `.agents/review/findings/tr-10.md`.
 
 **`tr-12` OPEN (MEDIUM, raised by the `tr-11` plan review 2026-07-26)** —
