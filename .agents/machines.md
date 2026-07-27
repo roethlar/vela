@@ -34,6 +34,15 @@ portable and may at most point here.
   (`claude-fable-5` @ xhigh / @ max, `competitive`) are therefore NOT selectable
   for review work on this repository, whatever the cache says.
 
+  **Owner-directed `tr-12` exception (2026-07-26):** the owner explicitly
+  required a one-off finding review by Claude with no model or effort override.
+  Claude Code 2.1.220 resolved `claude-opus-5[1m]`; its transcript exposed no
+  effort field. The repo hook redirected shell calls to PTK, and the reviewer
+  used it to complete an independent HTTP-status red/restored-green proof in a
+  disposable worktree. It accepted exact `a7d792e..9cde6b2` with
+  `capability_ok:true`, `guard_confirmed:true`, and no comments. The worktree
+  was removed. This one-off does not change the standing Codex routing above.
+
   **Codex is called plainly — no `--model`, no reasoning-effort override, and
   no model/effort pair recorded for it.** The whole dispatch, probed and used
   2026-07-26 against codex-cli 0.145.0 (cache records 0.142.5 — a note, not a
@@ -175,8 +184,10 @@ scenario here that depends on an OSD overlay being drawn.
 
 **Current-tree worktree (updated 2026-07-26):** `~/dev/vela-main` is a detached
 worktree of the same clone, used to run E2E against current `main` without
-disturbing the old tree or its stash. It is clean and aligned to `ca15258`
-(1.0.56), re-verified after exact-commit Linux and live proof 2026-07-26.
+disturbing the old tree or its stash. It is clean and aligned to `9cde6b2`
+(1.0.57), re-verified after focused E2E 1/1, full E2E 39/39, and real-Plex
+`live-transcode` 1/1 on 2026-07-26. The temporary bundle/patch were removed and
+the VM returned to its prior powered-off state.
 Refresh it with `git fetch origin && git checkout --detach <sha>` from inside
 it. The original `~/dev/vela` remains at its old commit and is NOT the venue any
 more.
@@ -265,9 +276,15 @@ Recorded 2026-07-14. Owner-approved access (2026-07-14) to the boxes below.
     `npm run e2e:live live-transcode`. At exact `ca15258`, candidate decisions
     created no server session; explicit-tier playback gave mpv a credential-free
     universal-transcode path and argv plus one exact token header in a regular
-    0600 include; the play opened a fresh real session; and quitting mpv removed
-    it. Post-run Plex/watchdog were active, the credentials file was absent, and
-    there was no mpv process or live mpv socket listener. This closes `tr-10`.
+  0600 include; the play opened a fresh real session; and quitting mpv removed
+  it. Post-run Plex/watchdog were active, the credentials file was absent, and
+  there was no mpv process or live mpv socket listener. This closes `tr-10`.
+  - **`live-transcode` also passes at 1.0.57 (2026-07-26).** At exact
+    `9cde6b2`, candidate decision probes again created no fresh session;
+    explicit-tier playback opened one fresh session and teardown removed it.
+    Post-run Plex/watchdog were active, the credentials file was absent, and
+    there was no mpv process or live mpv socket listener. This is the positive
+    live regression gate for `tr-12`.
   - Historical E2E runs leave inert `mpv-*.sock` filesystem nodes under old
     owner-only `/tmp/vela-*` directories. Do not treat their presence as a live
     player and do not broad-delete `/tmp`; use `pgrep -x mpv` plus `ss -xl` to

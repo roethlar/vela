@@ -9,7 +9,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Vela 1.0.0 is published**; the current source version is 1.0.56. The release
+- **Vela 1.0.0 is published**; the current source version is 1.0.57. The release
   detail rotated to `docs/history/state-archive.md` (2026-07-25) and its
   canonical evidence lives in `.agents/plans/v1-release-readiness.md`.
 - Product behavior remains as settled in `.agents/decisions.md`: Vela is a
@@ -29,17 +29,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   transcode tokens out of URLs and carries auth through the private mpv include.
   It passed explicit local gates, independent guard mutations, clean Linux E2E
   38/38, real-Plex `live-transcode` 1/1, and fresh Claude re-review PASS.
-  MEDIUM `tr-12` has approved revision 1 at
-  `.agents/plans/tr-12-plex-decision-diagnostics.md`; the owner activated
-  implementation on 2026-07-26, and the 1.0.57 repair is in progress. LOW
-  `tr-13` (duplicated universal-transcode query builders) remains separately
-  gated.
+  MEDIUM `tr-12` is VERIFIED/CLOSED in 1.0.57 at `9cde6b2`: safe typed decision
+  failures reach the quality-menu alert, explicit tiers retain a logged
+  Original fallback, and valid refusals stay quiet. All local/mutation gates,
+  Linux E2E 39/39, and real-Plex `live-transcode` 1/1 passed; owner-directed
+  Claude accepted exact `a7d792e..9cde6b2` with an independent guard proof and
+  no comments. LOW `tr-13` (duplicated universal-transcode query builders)
+  remains separately gated.
 
 ## Next
 
-- **First action:** implement approved `tr-12` revision 1, run its recorded
-  local/mutation/Linux/live gates, and dispatch the owner-directed Claude
-  review with no model or effort override. `tr-13` remains separately gated.
+- **First action:** await owner direction on separately gated `tr-13`; if the
+  owner chooses it, draft and approve its cold implementation plan before code.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -50,7 +51,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- No blocker is known for active `tr-12` implementation.
+- No implementation is active. `tr-13` awaits owner direction rather than
+  blocking completed work.
 
 ## Verification
 
@@ -66,12 +68,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/decisions.md`
 - `.agents/machines.md`
 - `.agents/push-policy.md`
-- `.agents/plans/server-transcoding.md` (`tr-11` and `tr-10` closed)
+- `.agents/plans/server-transcoding.md` (`tr-11`, `tr-10`, and `tr-12` closed;
+  `tr-13` open)
 - `.agents/plans/tr-11-plex-client-profile.md` (complete)
 - `.agents/plans/tr-10-plex-transcode-header-auth.md` (complete)
-- `.agents/plans/tr-12-plex-decision-diagnostics.md` (revision 1 approved)
-- `.agents/review/findings/tr-12.md` and
-  `.agents/review/findings/tr-13.md` (open follow-ups from the plan review)
+- `.agents/plans/tr-12-plex-decision-diagnostics.md` (complete)
+- `.agents/review/findings/tr-12.md` (complete)
+- `.agents/review/findings/tr-13.md` (open follow-up from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
 - `.agents/review/index.md`, `.agents/review/findings/tr-11.md`, and
   `.agents/review/findings/tr-10.md`

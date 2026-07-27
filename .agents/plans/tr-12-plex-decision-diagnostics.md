@@ -2,8 +2,9 @@
 
 ## Status
 
-**Revision 1 APPROVED and ACTIVATED by the owner 2026-07-26. Implementation is
-in progress and owns Vela 1.0.57.**
+**Revision 1 COMPLETED 2026-07-26. Implementation `9cde6b2` owns Vela 1.0.57;
+verification evidence is recorded in `09d781a` and
+`.agents/review/findings/tr-12.md`.**
 
 The approved behavior is:
 
@@ -417,6 +418,29 @@ After local, guard, hermetic, and live verification:
 This owner-directed Claude review is a one-off for `tr-12`; it does not change
 the repository's standing reviewer routing. Do not push any commit without a
 separate explicit go.
+
+## Completion record
+
+- `9cde6b2` implemented the payload-free decision boundary, both caller
+  behaviors, all guards, the mock-Plex decision endpoint/scenario, and the
+  script-owned 1.0.57 version surfaces.
+- Every planned production/wiring mutation failed for its intended reason and
+  restored clean; focused guards then passed 5/5, 3/3, 1/1, and Node 1/1.
+- The complete local gate passed with 360 Rust tests; exact committed Linux
+  verification passed focused `plexdecision` 1/1 and full E2E 39/39; the
+  screenshot showed a complete non-overflowing inline alert.
+- Real-Plex `live-transcode` passed 1/1: decision probes created no session, the
+  explicit-tier play opened its own session, and teardown removed it. Plex and
+  its watchdog were active afterward; no mpv process/listener or credentials
+  file remained.
+- Owner-directed Claude Code 2.1.220, invoked with no model or effort override,
+  resolved `claude-opus-5[1m]`; the transcript exposed no effort field. It
+  accepted exact `a7d792e6d79e16ad6d749159ac6da2f00e2b0ecd..9cde6b22f8fae4b195088f86df91ef4308bce899`
+  with `capability_ok:true`, `guard_confirmed:true`, and no comments after an
+  independent HTTP-status red/restored-green proof.
+- The VM worktree was clean at `9cde6b2`, transfer/reviewer artifacts were
+  removed, and the VM returned to its prior powered-off state. No push ran.
+- `tr-13` remains open and separately gated.
 
 ## Expected files
 

@@ -3,9 +3,10 @@
 Workflow: unprimed whole-change judgment uses
 `.agents/playbooks/openreview.md`; finding-specific fix verification uses
 `.agents/playbooks/codereview.md`. Reviews of this repo go to `codex`, called
-plainly with no model or effort override; Claude is not an eligible reviewer
-here. Historical Claude, Agy, and Grok loops retain their recorded provenance
-but are not precedent for current reviewer selection.
+plainly with no model or effort override; Claude is not an eligible default
+reviewer here. Historical or explicitly owner-directed Claude, Agy, and Grok
+loops retain their recorded provenance but are not precedent for current
+reviewer selection.
 Per-finding detail: see `.agents/review/findings/<id>.md`.
 Closed prior loops: `.agents/review/2026-07-04-feature-batch-closed.md`
 (rev-1..rev-6) and `.agents/review/2026-07-04-smb-native-closed.md`
@@ -49,13 +50,15 @@ mutations, the full local gate, clean Linux E2E 38/38, real-Plex
 `live-transcode` 1/1, and a fresh Claude re-review PASS. Detail:
 `.agents/review/findings/tr-10.md`.
 
-**`tr-12` OPEN (MEDIUM, raised by the `tr-11` plan review 2026-07-26)** —
-Plex decision request/status/parse failures collapse to the same `false` as a
-valid conversion refusal, so profile incompatibility can remove every tier
-while Vela emits only a generic fallback. Approved revision 1 is
-`.agents/plans/tr-12-plex-decision-diagnostics.md`; the owner approved it on
-2026-07-26 and supplied the separate implementation go. Work is in progress.
-Detail: `.agents/review/findings/tr-12.md`.
+**`tr-12` VERIFIED / CLOSED (MEDIUM, 2026-07-26)** — 1.0.57 distinguishes
+credential-safe Plex decision failures from valid refusals: the quality menu
+uses its inline alert, while explicit tiers log once and retain Original.
+Implementation `9cde6b2` passed every independent mutation, the complete local
+gate, Linux E2E 39/39, and real-Plex `live-transcode` 1/1. Owner-directed Claude
+Code 2.1.220 resolved `claude-opus-5[1m]` with no model or effort override and
+accepted exact `a7d792e..9cde6b2` with `capability_ok:true`,
+`guard_confirmed:true`, and no comments. Detail:
+`.agents/review/findings/tr-12.md`.
 
 **`tr-13` OPEN (LOW, raised by the `tr-11` plan review 2026-07-26)** — the
 decision and `start.m3u8` builders duplicate their common universal-transcode
