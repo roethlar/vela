@@ -64,7 +64,9 @@ accepted exact `a7d792e..9cde6b2` with `capability_ok:true`,
 decision and `start.m3u8` builders duplicate their common universal-transcode
 query contract. They have already drifted on delivery flags and omitted the
 same required profile; a shared-builder refactor is deliberately outside
-`tr-11`. Detail: `.agents/review/findings/tr-13.md`.
+`tr-11`. Revision 1 is cold-drafted and awaits owner approval; no code is
+authorized. Plan: `.agents/plans/tr-13-plex-universal-query-builder.md`.
+Detail: `.agents/review/findings/tr-13.md`.
 
 Transcoding slice-3 loop `tr-3..tr-9` CLOSED 2026-07-25: all seven findings from
 the `codereview codex` pass over `b94fcd1..e0e5fc7` are admitted and fixed —

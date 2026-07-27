@@ -34,13 +34,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Original fallback, and valid refusals stay quiet. All local/mutation gates,
   Linux E2E 39/39, and real-Plex `live-transcode` 1/1 passed; owner-directed
   Claude accepted exact `a7d792e..9cde6b2` with an independent guard proof and
-  no comments. LOW `tr-13` (duplicated universal-transcode query builders)
-  remains separately gated.
+  no comments. LOW `tr-13` (duplicated universal-transcode query builders) now
+  has a Revision 1 cold plan; no implementation is approved or active.
 
 ## Next
 
-- **First action:** await owner direction on separately gated `tr-13`; if the
-  owner chooses it, draft and approve its cold implementation plan before code.
+- **First action:** ask the owner to approve or revise
+  `.agents/plans/tr-13-plex-universal-query-builder.md`. Approval alone records
+  the plan; implementation still requires an explicit go unless the owner
+  supplies both together.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -51,8 +53,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- No implementation is active. `tr-13` awaits owner direction rather than
-  blocking completed work.
+- No implementation is active. `tr-13` Revision 1 awaits owner approval and an
+  implementation go; completed work remains unblocked.
 
 ## Verification
 
@@ -73,6 +75,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/tr-11-plex-client-profile.md` (complete)
 - `.agents/plans/tr-10-plex-transcode-header-auth.md` (complete)
 - `.agents/plans/tr-12-plex-decision-diagnostics.md` (complete)
+- `.agents/plans/tr-13-plex-universal-query-builder.md` (draft; approval pending)
 - `.agents/review/findings/tr-12.md` (complete)
 - `.agents/review/findings/tr-13.md` (open follow-up from the plan review)
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)

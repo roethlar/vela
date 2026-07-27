@@ -2,13 +2,14 @@
 
 ## Status
 
-**Revision 6, 2026-07-26 — all six slices, both HIGH live-Plex repairs, and
-MEDIUM `tr-12` are LANDED.** Slices 1-6 landed through 1.0.52; the first codex
-openreview's seven findings and two follow-up HIGH findings are fixed through
-1.0.54. `tr-11` is VERIFIED/CLOSED in 1.0.55 at `f185449` plus exact-one guard
-`5c27f89`; `tr-10` is VERIFIED/CLOSED in 1.0.56 at implementation `d91e8d2`
-plus Claude-review correction `ca15258`. Both passed their recorded local,
-mutation, clean-Linux, real-Plex, and final-review gates. Their cold records are
+**Revision 7, 2026-07-26 — all six slices, both HIGH live-Plex repairs, and
+MEDIUM `tr-12` are LANDED; LOW `tr-13` is planned but not approved.** Slices
+1-6 landed through 1.0.52; the first codex openreview's seven findings and two
+follow-up HIGH findings are fixed through 1.0.54. `tr-11` is VERIFIED/CLOSED in
+1.0.55 at `f185449` plus exact-one guard `5c27f89`; `tr-10` is VERIFIED/CLOSED
+in 1.0.56 at implementation `d91e8d2` plus Claude-review correction `ca15258`.
+Both passed their recorded local, mutation, clean-Linux, real-Plex, and
+final-review gates. Their cold records are
 `.agents/plans/tr-11-plex-client-profile.md` and
 `.agents/plans/tr-10-plex-transcode-header-auth.md`.
 
@@ -16,8 +17,10 @@ The `tr-11` plan review's MEDIUM `tr-12` follow-up is VERIFIED/CLOSED in 1.0.57
 at `9cde6b2`; every local/mutation/Linux/live gate passed, and owner-directed
 Claude accepted the exact implementation range with an independent guard proof
 and no comments. Its cold record is
-`.agents/plans/tr-12-plex-decision-diagnostics.md`. LOW `tr-13` (duplicated
-universal-transcode query builders) remains open and separately gated.
+`.agents/plans/tr-12-plex-decision-diagnostics.md`. LOW `tr-13` now has a
+Revision 1 cold plan at
+`.agents/plans/tr-13-plex-universal-query-builder.md`; implementation remains
+separately gated on owner approval and go.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per
