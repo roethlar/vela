@@ -9,9 +9,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Vela 1.0.0 is published**; the current source version is 1.0.58. The release
-  detail rotated to `docs/history/state-archive.md` (2026-07-25) and its
-  canonical evidence lives in `.agents/plans/v1-release-readiness.md`.
+- **Vela 1.0.58 is published as GitHub's Latest release** from exact commit
+  `791ff479de29fa264f367b32b1c06dbee00160fa`. Its canonical workflow,
+  artifact, checksum, recovery, and publication evidence lives in
+  `.agents/plans/v1-release-readiness.md`.
 - Product behavior remains as settled in `.agents/decisions.md`: Vela is a
   multi-server Plex/Jellyfin/experimental-Emby client, delegates HDR playback
   to external mpv, uses title-level watched state across duplicate copies, and
@@ -67,11 +68,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - The rare queued watch-edit race remains an owner-accepted, disclosed 1.0
   limitation; its durable technical record is
   `.agents/plans/continue-watching-watch-state.md`.
+- Before the next tag, scope the small release-workflow repair recorded in
+  `.agents/plans/v1-release-readiness.md`: the checkout-free inventory job's
+  final `gh release upload` needs an explicit repository selector. The 1.0.58
+  release was recovered manually without using the VM.
 
 ## Blockers
 
-- None. The unrelated continuation/mpv and `refresh` E2E flakes remain
-  recorded and were not retried or repaired under `tr-13`.
+- None for the published 1.0.58 release. The unrelated continuation/mpv and
+  `refresh` E2E flakes remain recorded and were not retried or repaired under
+  `tr-13`.
 
 ## Verification
 

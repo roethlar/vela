@@ -193,3 +193,51 @@ verified at `read`.
 GitHub reports the release non-draft, non-prerelease, Latest, targeted at the
 exact candidate, with eight uploaded assets. Published URL:
 `https://github.com/roethlar/vela/releases/tag/v1.0.0`.
+
+## Maintenance release: Vela 1.0.58
+
+Vela 1.0.58 was published on 2026-07-27 from exact commit
+`791ff479de29fa264f367b32b1c06dbee00160fa`. Annotated tag `v1.0.58` has tag
+object `80982e7b97a599240e8af3893d486fe688d45db9` and peels to that exact commit.
+GitHub CI passed on the candidate in
+`https://github.com/roethlar/vela/actions/runs/30277549893`.
+
+The tagged release workflow ran at
+`https://github.com/roethlar/vela/actions/runs/30278423592`. Its npm audit,
+macOS universal DMG, Linux AppImage/deb/rpm, Windows MSI/NSIS, and non-root Arch
+jobs all passed. The inventory job recognized all seven promised package
+classes and generated `SHA256SUMS`, then failed only while attaching the Arch
+package and manifest: that checkout-free job invoked `gh release upload`
+without `--repo`, so `gh` could not resolve a repository. Under Slice 5's
+manual-attachment rail, the two workflow artifacts were downloaded, verified,
+and uploaded with an explicit repository selector. This leaves a nonblocking
+workflow repair to make before the next tag; it did not weaken the 1.0.58
+artifact proof.
+
+The manifest matched the downloaded Arch package and GitHub's immutable digests
+for the other six promised packages:
+
+```text
+6bd44d765841d4c7cfae23d4f49e663b9e8fe3a32ad49f7ba8f0f80fbb3635bc  vela-1.0.58-1-x86_64.pkg.tar.zst
+7278ed90c868fc1af1577039084e0e16b02bb87ae8d50feb3fdef6c2556d975a  Vela_1.0.58_amd64.AppImage
+f4d1b17a76a001cd70341b8558a88d0205f1833db5ad6376fca9cdfaee7d74fd  Vela_1.0.58_amd64.deb
+356cdb598525dcedb075e0fad11d031eda7cf6a5445638a9479c6b26f5e34e85  Vela-1.0.58-1.x86_64.rpm
+40b610c46b7651044c90382479ef6db899c65244410f57cebf25dc2e44bcddca  Vela_1.0.58_universal.dmg
+769d095bb4420196207d6eb53dfd5161957609a8118b3c3729781122e0679332  Vela_1.0.58_x64_en-US.msi
+36bce683b8d8bdd5db8df12c4a2bd93975aa5fa5d3de689949fb23b3cc8cfc0a  Vela_1.0.58_x64-setup.exe
+```
+
+The published release has nine nonempty assets: those seven packages,
+`SHA256SUMS` (`d6894d4cedd80163c702e5bb31be28feedef6371142fa5ce3bd6ef804f37b399`),
+and the extra universal app archive
+`Vela_1.0.58_universal.app.tar.gz`
+(`8a116fdd35202939ed8434efbd301b00adf80d71dd3fcbbef338e87a77d0cd74`).
+The manually attached Arch package and manifest were downloaded back from the
+public release; the manifest was byte-identical and verified the package.
+GitHub reports the release non-draft, non-prerelease, and Latest, with title
+`Vela 1.0.58`, the exact target above, and publication timestamp
+`2026-07-27T15:24:03Z`:
+`https://github.com/roethlar/vela/releases/tag/v1.0.58`.
+
+No VM execution was required for this publication; the exact-commit GitHub CI
+and tagged release workflow supplied the release evidence.
