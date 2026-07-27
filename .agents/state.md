@@ -30,15 +30,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   It passed explicit local gates, independent guard mutations, clean Linux E2E
   38/38, real-Plex `live-transcode` 1/1, and fresh Claude re-review PASS.
   MEDIUM `tr-12` has approved revision 1 at
-  `.agents/plans/tr-12-plex-decision-diagnostics.md`; implementation has not
-  started. LOW `tr-13` (duplicated universal-transcode query builders) remains
-  separately gated.
+  `.agents/plans/tr-12-plex-decision-diagnostics.md`; the owner activated
+  implementation on 2026-07-26, and the 1.0.57 repair is in progress. LOW
+  `tr-13` (duplicated universal-transcode query builders) remains separately
+  gated.
 
 ## Next
 
-- **First action:** implement approved `tr-12` revision 1 only after the owner
-  gives its separate explicit go, then run its recorded verification and
-  owner-directed Claude review. `tr-13` remains separately gated.
+- **First action:** implement approved `tr-12` revision 1, run its recorded
+  local/mutation/Linux/live gates, and dispatch the owner-directed Claude
+  review with no model or effort override. `tr-13` remains separately gated.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -49,8 +50,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- No evidence blocker is known. Approved `tr-12` implementation awaits its
-  separate explicit owner go.
+- No blocker is known for active `tr-12` implementation.
 
 ## Verification
 

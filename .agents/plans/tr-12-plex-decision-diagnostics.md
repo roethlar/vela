@@ -2,7 +2,8 @@
 
 ## Status
 
-**Revision 1 APPROVED by the owner 2026-07-26. IMPLEMENTATION NOT STARTED.**
+**Revision 1 APPROVED and ACTIVATED by the owner 2026-07-26. Implementation is
+in progress and owns Vela 1.0.57.**
 
 The approved behavior is:
 
@@ -15,9 +16,8 @@ The approved behavior is:
 - keep a valid Plex negative decision quiet and render the existing
   “This server won't convert this title” state.
 
-The ruling is recorded in `.agents/decisions.md`. A separate explicit
-implementation go is still required; plan approval alone authorizes no product
-code change.
+The ruling is recorded in `.agents/decisions.md`. The owner supplied the
+separate implementation go on 2026-07-26.
 
 This plan fixes `tr-12` only. It does not refactor the duplicated Plex
 universal-transcode query builders (`tr-13`).

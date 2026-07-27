@@ -54,7 +54,7 @@ Plex decision request/status/parse failures collapse to the same `false` as a
 valid conversion refusal, so profile incompatibility can remove every tier
 while Vela emits only a generic fallback. Approved revision 1 is
 `.agents/plans/tr-12-plex-decision-diagnostics.md`; the owner approved it on
-2026-07-26, but implementation has not started and remains separately gated.
+2026-07-26 and supplied the separate implementation go. Work is in progress.
 Detail: `.agents/review/findings/tr-12.md`.
 
 **`tr-13` OPEN (LOW, raised by the `tr-11` plan review 2026-07-26)** — the
