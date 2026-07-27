@@ -182,12 +182,19 @@ all untestable in this suite at any effort. Behaviour that needs a real video
 output is verified against real mpv on a desktop host instead; do not write a
 scenario here that depends on an OSD overlay being drawn.
 
-**Current-tree worktree (updated 2026-07-26):** `~/dev/vela-main` is a detached
+**Current-tree worktree (updated 2026-07-27):** `~/dev/vela-main` is a detached
 worktree of the same clone, used to run E2E against current `main` without
-disturbing the old tree or its stash. It is clean and aligned to `9cde6b2`
-(1.0.57), re-verified after focused E2E 1/1, full E2E 39/39, and real-Plex
-`live-transcode` 1/1 on 2026-07-26. The temporary bundle/patch were removed and
-the VM returned to its prior powered-off state.
+disturbing the old tree or its stash. It is clean and aligned to `81d5497`
+(1.0.58); the checksum-verified temporary bundle and both copies were removed.
+The `tr-13`-specific `plexdecision` scenario passed, but the required full
+39/39 did not: the first run reached 34/39, the second reached 20 pass / 4 fail
+before a 38-minute `refresh` WebDriver stall, and a graceful reboot plus
+focused runs isolated repeated pre-existing continuation/mpv and `refresh`
+harness races. Logs:
+`/Users/michael/.ptk/jobs/job-7397-{49,50,51,56,57}.log`. Live Plex was not run
+because the hermetic gate remains red. The venue was checked for process,
+listener, credential, and worktree residue, then returned to its prior
+powered-off state.
 Refresh it with `git fetch origin && git checkout --detach <sha>` from inside
 it. The original `~/dev/vela` remains at its old commit and is NOT the venue any
 more.

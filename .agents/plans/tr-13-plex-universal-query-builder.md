@@ -2,7 +2,8 @@
 
 ## Status
 
-**Revision 1 APPROVED AND ACTIVE 2026-07-26.**
+**Revision 1 APPROVED; IMPLEMENTATION LANDED; VERIFICATION BLOCKED
+2026-07-27.**
 
 The owner approved Revision 1 and supplied the implementation go on 2026-07-26.
 No product decision is outstanding: this is a Plex-private refactor that must
@@ -10,6 +11,30 @@ preserve the current decision and `start.m3u8` wire contract.
 
 This plan fixes `tr-13` only. It does not change the behavior closed under
 `tr-10`, `tr-11`, or `tr-12`.
+
+Implementation landed in 1.0.58 at `81d5497`. The complete local gate and all
+six independent guard mutations passed. The required clean Linux 39/39 gate is
+not yet available because unchanged, unrelated E2E scenarios repeatedly hit
+pre-existing harness races:
+
+- the first full run reached 34/39; `plexdecision` passed, four scenarios
+  received `mpv: property unavailable`, and `refresh` lost its mock hold
+  window (`/Users/michael/.ptk/jobs/job-7397-49.log`);
+- the unchanged five-scenario retry passed 5/5
+  (`/Users/michael/.ptk/jobs/job-7397-50.log`);
+- a second full run reached 20 pass / 4 fail before `refresh` held one
+  WebDriver call for 38 minutes and was terminated through the runner's
+  SIGTERM cleanup path (`/Users/michael/.ptk/jobs/job-7397-51.log`);
+- after a graceful VM reboot, the four prior mpv/WebDriver failures passed,
+  while `refresh` failed the same 15-second listing assertion both in the
+  five-scenario pass and alone
+  (`/Users/michael/.ptk/jobs/job-7397-56.log`,
+  `/Users/michael/.ptk/jobs/job-7397-57.log`).
+
+That repeated blocker crossed the repo's three-cycle stall threshold. Do not
+waive the 39/39 requirement or proceed to live Plex / finding review. The next
+action needs owner approval for a separate narrow plan to stabilize the
+pre-existing E2E races, after which this plan resumes at the full Linux gate.
 
 ## Goal
 
@@ -377,22 +402,24 @@ Afterward:
 
 After local, guard, Linux, and live verification:
 
-1. run the finding-specific `codereview codex` workflow over the exact
-   implementation range, plainly, with no model or effort override;
+1. run the finding-specific `codereview claude` workflow over the exact
+   implementation range, with no model argument; use the playbook's standard
+   omitted-effort default;
 2. require the reviewer to inspect both production wire guards and independently
    prove one caller-specific drift red/restored-green;
 3. if the review returns an actionable finding, record and address exactly that
    finding in its own commit, rerun affected and canonical verification, and
-   dispatch a fresh plain-Codex review;
+   dispatch a fresh Claude review under the same owner-selected routing;
 4. update `.agents/review/findings/tr-13.md`, `.agents/review/index.md`,
    `.agents/plans/server-transcoding.md`, this plan, `.agents/state.md`, and
    `.agents/machines.md` with the implementation/correction commits, independent
    guard proof, Linux/live result, venue state, and final review verdict;
 5. commit the record-only closeout immediately.
 
-The owner-directed Claude review of `tr-12` was a one-off exception and does not
-change this repo's standing Codex routing. Do not push any commit without a
-separate explicit go.
+The owner-directed Claude reviews of `tr-12` and `tr-13` are finding-specific
+exceptions and do not change this repo's standing Codex routing. For `tr-13`,
+the owner explicitly supplied no model; do not add one. Do not push any commit
+without a separate explicit go.
 
 ## Expected files
 

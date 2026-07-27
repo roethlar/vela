@@ -9,7 +9,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- **Vela 1.0.0 is published**; the current source version is 1.0.57. The release
+- **Vela 1.0.0 is published**; the current source version is 1.0.58. The release
   detail rotated to `docs/history/state-archive.md` (2026-07-25) and its
   canonical evidence lives in `.agents/plans/v1-release-readiness.md`.
 - Product behavior remains as settled in `.agents/decisions.md`: Vela is a
@@ -34,14 +34,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Original fallback, and valid refusals stay quiet. All local/mutation gates,
   Linux E2E 39/39, and real-Plex `live-transcode` 1/1 passed; owner-directed
   Claude accepted exact `a7d792e..9cde6b2` with an independent guard proof and
-  no comments. LOW `tr-13` (duplicated universal-transcode query builders) now
-  has an owner-approved Revision 1 cold plan and active implementation.
+  no comments. LOW `tr-13` implementation landed at `81d5497` in 1.0.58: one
+  typed, token-blind Plex universal-transcode query contract now serves both
+  production endpoints, and the local gate plus six isolated mutations passed.
+  It is not verified/closed because repeated unrelated Linux E2E harness races
+  prevented the required clean 39/39; see its plan and finding record.
 
 ## Next
 
-- **First action:** implement the shared Plex universal-transcode query contract
-  and its real-wire/source-wiring guards under
-  `.agents/plans/tr-13-plex-universal-query-builder.md`.
+- **First action:** owner decides whether to authorize a separate narrow plan
+  to stabilize the pre-existing continuation/mpv and `refresh` E2E races. Then
+  resume `.agents/plans/tr-13-plex-universal-query-builder.md` at the required
+  full Linux 39/39 gate before live Plex or Claude review.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -52,7 +56,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- No external blocker. `tr-13` implementation is active on `main`.
+- `tr-13` is blocked at Linux verification: unchanged continuation scenarios
+  intermittently receive `mpv: property unavailable`, while `refresh`
+  repeatedly loses its one-shot mock hold window and once held WebDriver for
+  38 minutes. The repo's stall threshold is crossed; another unchanged retry
+  is not authorized evidence.
 
 ## Verification
 

@@ -60,11 +60,11 @@ accepted exact `a7d792e..9cde6b2` with `capability_ok:true`,
 `guard_confirmed:true`, and no comments. Detail:
 `.agents/review/findings/tr-12.md`.
 
-**`tr-13` OPEN (LOW, raised by the `tr-11` plan review 2026-07-26)** — the
-decision and `start.m3u8` builders duplicate their common universal-transcode
-query contract. They have already drifted on delivery flags and omitted the
-same required profile; a shared-builder refactor is deliberately outside
-`tr-11`. Revision 1 is owner-approved and implementation is active.
+**`tr-13` IN PROGRESS (LOW, raised by the `tr-11` plan review 2026-07-26)** —
+the shared universal-transcode query contract landed in 1.0.58 at `81d5497`;
+the local gate and six independent mutations passed. Required Linux 39/39 is
+blocked by repeated, unrelated continuation/mpv and `refresh` E2E harness
+races, so live Plex and the owner-directed Claude review have not run.
 Plan: `.agents/plans/tr-13-plex-universal-query-builder.md`.
 Detail: `.agents/review/findings/tr-13.md`.
 
