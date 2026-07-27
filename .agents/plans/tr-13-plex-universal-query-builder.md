@@ -2,8 +2,8 @@
 
 ## Status
 
-**Revision 1 APPROVED; IMPLEMENTATION LANDED; PROPORTIONATE CLOSEOUT ACTIVE
-2026-07-27.**
+**Revision 1 APPROVED; PROPORTIONATE VERIFICATION PASSED; CLAUDE REVIEW
+PENDING 2026-07-27.**
 
 The owner approved Revision 1 and supplied the implementation go on 2026-07-26.
 No product decision is outstanding: this is a Plex-private refactor that must
@@ -38,6 +38,14 @@ full-suite attempts remain disclosed evidence rather than a green gate; the
 relevant `plexdecision` scenario, complete local gate, and six independent
 mutations are sufficient to proceed to the already-planned live Plex check and
 Claude review.
+
+`npm run e2e:live live-transcode` then passed 1/1 against the owner's real Plex
+server on 2026-07-27: decision probes created no session, playback handed mpv a
+credential-free URL with private header auth, the scenario observed its own new
+session, and teardown removed it. Plex and `plex-watchdog.timer` remained
+active; the VM worktree and process/listener/credential checks were clean, and
+the VM returned to its prior stopped state. Only the owner-directed Claude
+review remains.
 
 ## Goal
 

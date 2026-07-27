@@ -191,10 +191,11 @@ The `tr-13`-specific `plexdecision` scenario passed, but the required full
 before a 38-minute `refresh` WebDriver stall, and a graceful reboot plus
 focused runs isolated repeated pre-existing continuation/mpv and `refresh`
 harness races. Logs:
-`/Users/michael/.ptk/jobs/job-7397-{49,50,51,56,57}.log`. Live Plex was not run
-because the hermetic gate remains red. The venue was checked for process,
-listener, credential, and worktree residue, then returned to its prior
-powered-off state.
+`/Users/michael/.ptk/jobs/job-7397-{49,50,51,56,57}.log`. Under the owner's
+proportionate-verification ruling, real-Plex `live-transcode` then passed 1/1
+on 2026-07-27. The venue was checked for process, listener, credential, and
+worktree residue, Plex and `plex-watchdog.timer` were active, and the VM
+returned to its prior powered-off state.
 Refresh it with `git fetch origin && git checkout --detach <sha>` from inside
 it. The original `~/dev/vela` remains at its old commit and is NOT the venue any
 more.

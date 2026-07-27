@@ -23,8 +23,9 @@ and no comments. Its cold record is
 six independent mutations and relevant Linux `plexdecision` scenario passed.
 Repeated pre-existing Linux E2E harness races prevented a clean 39/39 and
 remain disclosed. The owner ruled them non-blocking for this LOW refactor
-rather than expanding into a harness project; live Plex and the
-owner-directed Claude review are next.
+rather than expanding into a harness project. Real-Plex `live-transcode`
+passed 1/1 with clean session and venue teardown; the owner-directed Claude
+review is next.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per

@@ -65,8 +65,8 @@ the shared universal-transcode query contract landed in 1.0.58 at `81d5497`;
 the local gate, six independent mutations, and relevant Linux `plexdecision`
 scenario passed. Repeated, unrelated continuation/mpv and `refresh` E2E
 harness races remain disclosed; the owner ruled them non-blocking for this LOW
-refactor rather than opening a harness project. Live Plex and the
-owner-directed Claude review are next.
+refactor rather than opening a harness project. Real-Plex `live-transcode`
+passed 1/1 with clean teardown; the owner-directed Claude review is next.
 Plan: `.agents/plans/tr-13-plex-universal-query-builder.md`.
 Detail: `.agents/review/findings/tr-13.md`.
 

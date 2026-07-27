@@ -40,12 +40,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Repeated unrelated Linux E2E harness races prevented a clean 39/39; see its
   plan and finding record. On 2026-07-27 the owner ruled those failures
   non-blocking for this LOW refactor rather than expanding into harness work.
+  Real-Plex `live-transcode` then passed 1/1 with clean session and venue
+  teardown; only the owner-directed Claude review remains.
 
 ## Next
 
-- **First action:** run `tr-13`'s real-Plex `live-transcode` check, then dispatch
-  the owner-directed Claude review with no model argument and close the finding
-  if both pass.
+- **First action:** dispatch `tr-13`'s owner-directed Claude review with no
+  model argument, require its independent caller-drift guard proof, and close
+  the finding if accepted.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
