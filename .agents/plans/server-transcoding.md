@@ -2,27 +2,20 @@
 
 ## Status
 
-**Revision 4, 2026-07-26 — all six slices are LANDED.** Slices 1-4 landed
-through 1.0.27; the IPC prerequisite landed at 1.0.28; Automatic landed and was
-repaired through 1.0.51; and Slice 6's Emby labelling and user documentation
-landed at 1.0.52. The first codex openreview's seven findings and both HIGH
-findings from the two follow-up rounds are fixed through 1.0.54. `tr-11` is
-VERIFIED / CLOSED at 1.0.55: repair `f185449` and exact-one guard `5c27f89`
-make both Plex universal-transcode builders select the live-proven `Web`
-profile. Local verification, the clean Linux 38/38 suite, real-Plex
-decision/session/play/teardown, independent mutation proof, and final plain
-Codex review all pass. `tr-10` remains a separate HIGH finding: it puts the
-Plex token in mpv's transcode URL, while its live safety gate passed:
-token-free master and child playlists accepted header auth (200), a token-free
-segment accepted it (206), and teardown returned 204. `tr-10` is now
-VERIFIED/CLOSED in 1.0.56: implementation `d91e8d2` plus review correction
-`ca15258` passed all local, guard, Linux, live, and Claude review gates. Its
-cold-implementation record is
-`.agents/plans/tr-10-plex-transcode-header-auth.md`. Canonical records are
-`.agents/review/findings/tr-11.md` and `.agents/review/findings/tr-10.md`. The
-`tr-11` plan review also admitted
-`tr-12` (silent Plex decision failures) and `tr-13` (duplicated
-universal-transcode query builders) as separate follow-ups.
+**Revision 5, 2026-07-26 — all six slices and both HIGH live-Plex repairs are
+LANDED.** Slices 1-6 landed through 1.0.52; the first codex openreview's seven
+findings and two follow-up HIGH findings are fixed through 1.0.54. `tr-11` is
+VERIFIED/CLOSED in 1.0.55 at `f185449` plus exact-one guard `5c27f89`; `tr-10`
+is VERIFIED/CLOSED in 1.0.56 at implementation `d91e8d2` plus Claude-review
+correction `ca15258`. Both passed their recorded local, mutation, clean-Linux,
+real-Plex, and final-review gates. Their cold records are
+`.agents/plans/tr-11-plex-client-profile.md` and
+`.agents/plans/tr-10-plex-transcode-header-auth.md`.
+
+The `tr-11` plan review's MEDIUM `tr-12` follow-up now has draft revision 1 at
+`.agents/plans/tr-12-plex-decision-diagnostics.md`; owner ruling and approval
+remain pending. LOW `tr-13` (duplicated universal-transcode query builders)
+remains open and separately gated.
 
 **Historical Revision 3, 2026-07-25 — slices 1-4 were LANDED and all seven
 slice-3 review findings were closed** (versions 1.0.12-1.0.27; evidence per
