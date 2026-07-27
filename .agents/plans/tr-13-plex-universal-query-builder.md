@@ -3,7 +3,7 @@
 ## Status
 
 **Revision 1 APPROVED; PROPORTIONATE VERIFICATION PASSED; CLAUDE REVIEW
-PENDING 2026-07-27.**
+RESULT CONTESTED 2026-07-27.**
 
 The owner approved Revision 1 and supplied the implementation go on 2026-07-26.
 No product decision is outstanding: this is a Plex-private refactor that must
@@ -44,8 +44,18 @@ server on 2026-07-27: decision probes created no session, playback handed mpv a
 credential-free URL with private header auth, the scenario observed its own new
 session, and teardown removed it. Plex and `plex-watchdog.timer` remained
 active; the VM worktree and process/listener/credential checks were clean, and
-the VM returned to its prior stopped state. Only the owner-directed Claude
-review remains.
+the VM returned to its prior stopped state.
+
+The owner-directed Claude Code 2.1.220 review was then dispatched with no model
+or effort argument over exact
+`735b5910132631a44aacde66f2b6d40ec8c8b0ff..81d5497e8396bd0701766838cb35eb3f8c05948d`.
+Its process reached the requested detached-worktree caller-drift proof, ran the
+focused Rust guard twice around mutation/restoration, and removed the worktree.
+The CLI nevertheless returned only success metadata: the structured verdict,
+tool transcript, resolved model, proof booleans, and pins were absent. The one
+allowed re-emission could not resume the deliberately non-persisted session.
+The codereview contract therefore counts no verdict and routes closeout to the
+owner; no additional test or review run has been started.
 
 ## Goal
 

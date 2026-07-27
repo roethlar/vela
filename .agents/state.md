@@ -41,13 +41,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   plan and finding record. On 2026-07-27 the owner ruled those failures
   non-blocking for this LOW refactor rather than expanding into harness work.
   Real-Plex `live-transcode` then passed 1/1 with clean session and venue
-  teardown; only the owner-directed Claude review remains.
+  teardown. Owner-directed Claude Code 2.1.220 reached its isolated
+  caller-drift proof over exact `735b591..81d5497` and cleaned up, but its CLI
+  returned no structured verdict or transcript. The one allowed re-emission
+  could not resume the non-persisted session, so `tr-13` is contested rather
+  than verified.
 
 ## Next
 
-- **First action:** dispatch `tr-13`'s owner-directed Claude review with no
-  model argument, require its independent caller-drift guard proof, and close
-  the finding if accepted.
+- **First action:** obtain the owner's ruling on
+  `.agents/review/tr-13.contested.md`: authorize one fresh, transcript-capturing
+  Claude dispatch or waive the external-verdict gate without claiming Claude
+  acceptance.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -58,7 +63,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Blockers
 
-- No external blocker. The unrelated continuation/mpv and `refresh` E2E flakes
+- `tr-13` closeout is blocked on the owner's ruling after Claude returned no
+  verdict payload. The unrelated continuation/mpv and `refresh` E2E flakes
   remain recorded and are not being retried or repaired under `tr-13`.
 
 ## Verification
@@ -76,13 +82,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/machines.md`
 - `.agents/push-policy.md`
 - `.agents/plans/server-transcoding.md` (`tr-11`, `tr-10`, and `tr-12` closed;
-  `tr-13` open)
+  `tr-13` contested)
 - `.agents/plans/tr-11-plex-client-profile.md` (complete)
 - `.agents/plans/tr-10-plex-transcode-header-auth.md` (complete)
 - `.agents/plans/tr-12-plex-decision-diagnostics.md` (complete)
-- `.agents/plans/tr-13-plex-universal-query-builder.md` (approved; active)
+- `.agents/plans/tr-13-plex-universal-query-builder.md` (approved; closeout
+  contested)
 - `.agents/review/findings/tr-12.md` (complete)
-- `.agents/review/findings/tr-13.md` (open follow-up from the plan review)
+- `.agents/review/findings/tr-13.md` and `.agents/review/tr-13.contested.md`
 - `.agents/plans/skip-credits-intros-v2.md` (landed; evidence only)
 - `.agents/review/index.md`, `.agents/review/findings/tr-11.md`, and
   `.agents/review/findings/tr-10.md`

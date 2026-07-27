@@ -43,6 +43,17 @@ portable and may at most point here.
   `capability_ok:true`, `guard_confirmed:true`, and no comments. The worktree
   was removed. This one-off does not change the standing Codex routing above.
 
+  **Owner-directed `tr-13` exception (2026-07-27):** Claude Code 2.1.220 was
+  called with no model or effort override over exact `735b591..81d5497`. The
+  process created `/tmp/vela-tr13-claude-review-20260727`, reached two focused
+  Rust guard invocations around its caller-only mutation/restoration, and
+  removed the worktree. Its final JSON contained only zero-exit execution
+  metadata—no result payload, tool transcript, resolved model, pins, or proof
+  booleans. The one allowed re-emission could not resume because the dispatch
+  used `--no-session-persistence`. The main worktree remained clean, no review
+  verdict counts, and future schema-bound CLI reviews must retain a resumable
+  session until their result payload has been validated.
+
   **Codex is called plainly — no `--model`, no reasoning-effort override, and
   no model/effort pair recorded for it.** The whole dispatch, probed and used
   2026-07-26 against codex-cli 0.145.0 (cache records 0.142.5 — a note, not a

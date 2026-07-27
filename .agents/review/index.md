@@ -60,13 +60,18 @@ accepted exact `a7d792e..9cde6b2` with `capability_ok:true`,
 `guard_confirmed:true`, and no comments. Detail:
 `.agents/review/findings/tr-12.md`.
 
-**`tr-13` IN PROGRESS (LOW, raised by the `tr-11` plan review 2026-07-26)** —
+**`tr-13` CONTESTED (LOW, raised by the `tr-11` plan review 2026-07-26)** —
 the shared universal-transcode query contract landed in 1.0.58 at `81d5497`;
 the local gate, six independent mutations, and relevant Linux `plexdecision`
 scenario passed. Repeated, unrelated continuation/mpv and `refresh` E2E
 harness races remain disclosed; the owner ruled them non-blocking for this LOW
 refactor rather than opening a harness project. Real-Plex `live-transcode`
-passed 1/1 with clean teardown; the owner-directed Claude review is next.
+passed 1/1 with clean teardown. Owner-directed Claude Code 2.1.220, called with
+no model or effort override over exact `735b591..81d5497`, reached its
+caller-drift worktree proof and cleaned up, but returned only success metadata
+with no structured verdict or transcript. Its single re-emission attempt could
+not resume the non-persisted session, so no verdict counts and closure awaits
+the owner.
 Plan: `.agents/plans/tr-13-plex-universal-query-builder.md`.
 Detail: `.agents/review/findings/tr-13.md`.
 
