@@ -1,17 +1,18 @@
-# Plan: Library view sorting (DRAFT — awaiting owner decision)
+# Plan: Library view sorting (LANDED 2026-07-06)
 
 ## Status
-**LANDED 2026-07-06.** All slices landed (`c368270`, `9a47d43`, `21552c9`) +
-`reviewloop codex` converged r1-r3 (r1 3 findings, r2 1 finding, r3 accepted;
-fixups `c904c66`, `19b2735`; trail `.agents/review/index.md` loop `sort-1`).
+**LANDED 2026-07-06.** All implemented slices landed (`c368270`, `9a47d43`,
+`21552c9`) + `reviewloop codex` converged r1-r3 (r1 3 findings, r2 1 finding,
+r3 accepted; fixups `c904c66`, `19b2735`; trail `.agents/review/index.md` loop
+`sort-1`).
 Folder dropped; JF/local last-played population deferred (2026-07-09: the
 LOCAL half of that deferral is DEAD — local sources removed, decision
 `.agents/decisions.md` 2026-07-08; only the JF population remains deferred).
 Effective set delivered: date added, date last played, title, release date —
 per-source AND merged views. Owner playtest VERIFIED 2026-07-10 ("sorting
-works"). Follow-up QUEUED the same day (see `.agents/state.md` ## Next):
-TV shows want a "Date Last Episode Added" sort — the delivered date-added
-sort on shows appears to use the series' own addedAt.
+works"). The follow-up TV "Date Last Episode Added" sort and per-library
+persistence landed and were owner-confirmed; see
+`.agents/plans/show-last-episode-sort.md`.
 
 ## Goal
 Sort options available in **all** library views: **date added, date last played,
@@ -76,11 +77,12 @@ inconsistent across views/backends.
    — deferred). Populated from the mtime during the local walk and from Plex `addedAt`.
    Local `addedAt` sort arm. JF `added_at_ms` stays None (server sort already works;
    DateCreated-in-Fields is a follow-up). Unit-tested, guard-proven.
-3. **NEXT — relax the merged "All" view.** Allow addedAt / lastViewedAt /
-   originallyAvailableAt in `get_type_listing` (`commands.rs:2345-2349`) + extend
-   `merge_sort_page` (`:2701-2711`), and widen the frontend `TYPE_SORTS`
-   (`+page.svelte:76`). A backend missing a value sorts last (document it). This is
-   what makes the sorts work in *all* views, not just per-source.
+3. **LANDED (`21552c9`) — relax the merged "All" view.** Allow addedAt /
+   lastViewedAt / originallyAvailableAt in `get_type_listing`
+   (`commands.rs:2345-2349`) + extend `merge_sort_page` (`:2701-2711`), and
+   widen the frontend `TYPE_SORTS` (`+page.svelte:76`). A backend missing a
+   value sorts last (document it). This is what makes the sorts work in *all*
+   views, not just per-source.
 4. **DROPPED — `folder` sort** (owner 2026-07-06: podcast/audio need, not video).
 5. **DEFERRED (low value for a Plex-first owner) — populate JF `last_watched_at_ms`
    + `added_at_ms`** (parse the ISO-8601 dates, add to `Fields=`). Only matters for
@@ -97,8 +99,8 @@ inconsistent across views/backends.
 - **Recommend deferring full-date release precision** — `year:desc` already covers
   "release date" for practically all browsing; a full `originallyAvailableAt` date
   field is plumbing across four backends for marginal gain.
-- Owner is Plex-first: slices 1-2 + 5 (merged) deliver the felt improvement; 3-4
-  are polish for the local/JF paths.
+- Owner is Plex-first: slices 1-3 delivered the felt improvement; the dropped
+  and deferred work remains low-value local/JF polish.
 
 ## Verification
 - Rust unit tests on the pure sort (`sort_and_page` variants) — guard-proven

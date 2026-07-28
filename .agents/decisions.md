@@ -582,9 +582,9 @@ flip landing last, and the per-slice commit + reviewloop discipline.
 
 ### 2026-07-08 - Vela is a multi-server client: local/SMB/SSH playback dropped
 
-Status: Active (slice 1 — turn-off-and-delete — landed 2026-07-08, 0.1.33
-`6855df5`, owner-playtested; slice 3 docs sweep landed 2026-07-09; only
-slice 2, the E2E re-home, remains — `.agents/plans/drop-local-sources.md`)
+Status: Active decision; implementation COMPLETE 2026-07-09. All three slices
+landed, including the final E2E re-home — evidence:
+`.agents/plans/drop-local-sources.md`.
 
 Decision:
 Vela will not play local files at all. The local-family sources (local

@@ -1,8 +1,8 @@
 # Plan: TV "Date Last Episode Added" sort (owner ask, 2026-07-10)
 
 ## Status
-**LANDED 2026-07-10 on the owner's explicit "go" (`9cd3323`, 0.1.44) —
-awaiting owner playtest.** Both slices (show-only "Last episode added"
+**LANDED 2026-07-10 on the owner's explicit "go" (`9cd3323`, 0.1.44) and
+OWNER-CONFIRMED 2026-07-15.** Both slices (show-only "Last episode added"
 sort; per-library sort persistence) verified before landing: unit tests
 guard-proven red→green, `sortpersist` restart E2E red→green on the VM,
 full suite 13/13, local CI green, Plex key live-verified. The r1

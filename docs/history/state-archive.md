@@ -4,6 +4,60 @@ Entries rotated verbatim out of `.agents/state.md` `## Now` when they stopped
 being live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-07-28 (catchup sweep — two landed entries, v1.0.58)
+
+Context for readers: the release/publication track and server-transcoding
+implementation are fully landed and carry no live decision. The two entries
+below rotate here verbatim in their original `## Now` order. GitHub's public
+Latest endpoint was re-verified before rotation at local/GitHub
+`363dbb6b8abfba9809159de1b3c2294f9a00a0f4`; canonical `origin` was
+temporarily unreachable.
+
+- **Vela 1.0.58 is published as GitHub's Latest release** from exact commit
+  `791ff479de29fa264f367b32b1c06dbee00160fa`. Its canonical workflow,
+  artifact, checksum, recovery, and publication evidence lives in
+  `.agents/plans/v1-release-readiness.md`. The checkout-free release attachment
+  repair is landed at `3fa2858` with an independently regressed static guard and
+  green exact-commit GitHub CI.
+- **Server transcoding implementation is landed through Slice 6.** The six
+  slices landed from 1.0.12 through 1.0.52; all seven first-pass `or-*`
+  findings and both later HIGH findings are fixed through 1.0.54. The first
+  real Plex run exposed two HIGH findings. `tr-11` is VERIFIED / CLOSED at
+  `f185449` plus exact-one guard `5c27f89`: both Plex builders select the `Web`
+  HLS client profile; all local gates, clean Linux 38/38, real-Plex
+  decision/session/play/teardown, independent guard proof, and final plain
+  Codex review pass. HIGH `tr-10` is also VERIFIED/CLOSED in 1.0.56:
+  implementation `d91e8d2` plus Claude review correction `ca15258` keeps Plex
+  transcode tokens out of URLs and carries auth through the private mpv include.
+  It passed explicit local gates, independent guard mutations, clean Linux E2E
+  38/38, real-Plex `live-transcode` 1/1, and fresh Claude re-review PASS.
+  MEDIUM `tr-12` is VERIFIED/CLOSED in 1.0.57 at `9cde6b2`: safe typed decision
+  failures reach the quality-menu alert, explicit tiers retain a logged
+  Original fallback, and valid refusals stay quiet. All local/mutation gates,
+  Linux E2E 39/39, and real-Plex `live-transcode` 1/1 passed; owner-directed
+  Claude accepted exact `a7d792e..9cde6b2` with an independent guard proof and
+  no comments. LOW `tr-13` implementation landed at `81d5497` in 1.0.58: one
+  typed, token-blind Plex universal-transcode query contract now serves both
+  production endpoints, and the local gate plus six isolated mutations passed.
+  Repeated unrelated Linux E2E harness races prevented a clean 39/39; see its
+  plan and finding record. On 2026-07-27 the owner ruled those failures
+  non-blocking for this LOW refactor rather than expanding into harness work.
+  Real-Plex `live-transcode` then passed 1/1 with clean session and venue
+  teardown. Owner-directed Claude Code 2.1.220 reached its isolated
+  caller-drift proof over exact `735b591..81d5497` and cleaned up, but its CLI
+  returned no structured verdict or transcript. The one allowed re-emission
+  could not resume the non-persisted session, so `tr-13` was contested at that
+  point. The owner rerouted the replacement review to Grok only with no
+  model argument; Grok 0.2.112 and its one fresh retry both failed HTTP 401
+  before inference. The owner then selected Kimi Code CLI 0.29.2 /
+  `kimi-code/k3` at `max`; its transcript confirmed alias, server model `k3`,
+  and effort, and it accepted exact `735b591..81d5497` with matching pins,
+  `capability_ok:true`, `guard_confirmed:true`, and no comments. Its
+  decision-only missing-`copyts` mutation made the focused guard fail for the
+  intended mismatch, exact restoration passed, and the clean worktree was
+  removed. `tr-13` and the server-transcoding plan are VERIFIED/CLOSED; the
+  Claude and Grok attempts remain transport history.
+
 ## Rotated 2026-07-26 (catchup sweep — two landed entries, v1.0.54)
 
 Context for readers: marker skipping and its config-integrity prerequisite are

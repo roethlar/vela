@@ -13,9 +13,8 @@ Slice 1 (turn-off-and-delete) landed 2026-07-08 (0.1.33, `6855df5`; loop
 2026-07-09 — README/ISSUES/repo-guidance de-localed, six obsolete plans
 bannered, decision closures recorded; the "repo-map refresh" item is moot
 (`.agents/repo-map.json` was retired by the 2026-07-08 governance refresh).
-Slice 2 (E2E re-home) is in progress on the owner's Linux VM. Slices 2 and 3
-were reordered (3 before 2) while the VM was provisioned — they are
-independent; slice 2 still precedes any further feature work.
+Slices 2 and 3 were reordered (3 before 2) while the VM was provisioned; they
+were independent, and Slice 2 later completed the plan.
 Plan-review loop CLOSED accepted at r5 (five rounds, nine findings
 dls-r1..r4 all resolved — see Review log).
 

@@ -216,9 +216,10 @@ all untestable in this suite at any effort. Behaviour that needs a real video
 output is verified against real mpv on a desktop host instead; do not write a
 scenario here that depends on an OSD overlay being drawn.
 
-**Current-tree worktree (updated 2026-07-27):** `~/dev/vela-main` is a detached
-worktree of the same clone, used to run E2E against current `main` without
-disturbing the old tree or its stash. It is clean and aligned to `81d5497`
+**1.0.58 validation worktree (last verified 2026-07-27):** `~/dev/vela-main`
+is a detached worktree of the same clone, used to run E2E against the release
+code without disturbing the old tree or its stash. It is clean and aligned to
+`81d5497`
 (1.0.58); the checksum-verified temporary bundle and both copies were removed.
 The `tr-13`-specific `plexdecision` scenario passed, but the required full
 39/39 did not: the first run reached 34/39, the second reached 20 pass / 4 fail
