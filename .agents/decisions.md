@@ -1736,3 +1736,31 @@ Supersedes:
 The unresolved user-facing-versus-log-only choice recorded in finding `tr-12`.
 It does not change the existing fail-closed playback fallback or any valid Plex
 capability decision.
+
+## 2026-07-28 - Library sorting uses a field dropdown and boxed arrow direction toggle
+
+Status: APPROVED (owner, 2026-07-28). Implementation plan:
+`.agents/plans/library-sort-direction.md`.
+
+Decision:
+Library roots expose one direction-neutral dropdown for the sort field and one
+adjacent boxed arrow button for direction. The button displays `↑` while the
+active order is ascending and `↓` while it is descending; activating it toggles
+between those states without changing the selected field. Changing the field
+likewise retains the active direction.
+
+The button stays visually arrow-only. Its accessible name and tooltip state the
+current direction and the direction activation will select, so arrow
+orientation is not the only semantic signal.
+
+Reason:
+The field list stays short and scannable while direction remains a one-action,
+always-visible control. A boxed arrow uses less breadcrumb space than a second
+text dropdown without hiding the state from keyboard or assistive-technology
+users.
+
+Supersedes:
+The two-text-selector control proposed in Revision 1 of
+`.agents/plans/library-sort-direction.md`. It does not change the existing sort
+fields, per-library persistence, merged-view restrictions, or default
+`titleSort:asc` ordering.

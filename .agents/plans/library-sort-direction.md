@@ -2,16 +2,16 @@
 
 ## Status
 
-**DRAFT Revision 1 — awaiting one owner decision; no implementation go.**
+**Revision 2 APPROVED by the owner 2026-07-28; no implementation go.**
 
 Owner requirement, recorded 2026-07-28: library sorting needs an
 ascending/descending option.
 
-Revision 1 proposes two adjacent, explicitly labelled controls in a library
-root: a direction-neutral `Sort by` field selector and an
-`Ascending`/`Descending` direction selector. Changing either control preserves
-the other dimension. Approval of that product contract is the only outstanding
-decision; implementation remains blocked until the owner rules on it.
+The owner settled the control contract as a direction-neutral sort-field
+dropdown plus an adjacent boxed up/down arrow that toggles direction. Up means
+ascending, down means descending, and changing either dimension preserves the
+other. No product decision remains open; implementation still requires a
+separate explicit go.
 
 ## Goal
 
@@ -25,8 +25,9 @@ Acceptance requires all of the following:
    ascending and descending order.
 2. The merged `All` view offers both directions for every field it can already
    sort locally; source-only fields remain absent there.
-3. The direction is visible and keyboard-operable as a labelled control rather
-   than encoded only in a field label.
+3. The direction is visible as a boxed up/down arrow and remains
+   keyboard-operable and text-labelled for assistive technology rather than
+   encoded only in a field label.
 4. Changing the field preserves the selected direction; changing the direction
    preserves the field.
 5. A library with no saved preference still opens at `titleSort:asc`.
@@ -63,19 +64,24 @@ Acceptance requires all of the following:
   `.agents/plans/library-sorting.md` and
   `.agents/plans/show-last-episode-sort.md`.
 
-## Product contract proposed by Revision 1
+## Approved product contract
 
 ### Controls
 
 - Replace the direction-bearing field options with a direction-neutral field
   selector carrying `aria-label="Sort by"`.
-- Add an adjacent direction selector carrying `aria-label="Sort direction"`
-  with exactly `Ascending` (`asc`) and `Descending` (`desc`).
+- Add an adjacent square button that displays `↑` for ascending and `↓` for
+  descending. Activating it toggles the current direction without changing the
+  selected field.
+- Give the arrow button a dynamic accessible name and tooltip that state both
+  the current direction and the activation result, for example
+  `Sort direction: ascending; activate for descending`.
 - Put both controls in one `.sort-controls` group. The group, not an individual
   selector, owns the existing auto margin in the breadcrumb row so wrapping
   remains coherent at narrow widths.
-- Do not add a new icon or an icon-only toggle. The two direction names must be
-  visible without hover and usable by keyboard and assistive technology.
+- Keep the visible button arrow-only as the owner specified. Use text in its
+  accessible name and tooltip; do not make arrow orientation the only semantic
+  signal.
 
 ### Fields and availability
 
@@ -94,7 +100,7 @@ Both suffixes are valid for every row wherever that field is available.
 ### State transitions
 
 - Keep `<field>:<direction>` as the one canonical in-memory and wire token.
-- Derive the two displayed control values from that token.
+- Derive the displayed field and arrow-button state from that token.
 - On field change, compose the new field with the current direction, persist if
   a source library is active, then reload.
 - On direction change, compose the current field with the new direction,
@@ -140,15 +146,16 @@ In `src/routes/+page.svelte`:
    a UI capability decision.
 3. Replace exact-token `TYPE_SORTS` checks with field-based merged capability
    checks.
-4. Keep `sort` as the canonical request/persistence token. Render the controls
-   from parsed field/direction values and route both change handlers through one
-   function that sets the complete token, performs the existing best-effort
-   per-library persistence, and reloads.
+4. Keep `sort` as the canonical request/persistence token. Render the field
+   dropdown and arrow button from parsed field/direction values and route both
+   change handlers through one function that sets the complete token, performs
+   the existing best-effort per-library persistence, and reloads.
 5. Update `select` and `selectType` to validate the complete token under the
    section/view restrictions before adopting it.
-6. Replace the single `.sort` styling rule with a `.sort-controls` group and
-   shared selector styling. Preserve the current breadcrumb layout, focus
-   visibility, theme tokens, and narrow-width wrapping.
+6. Replace the single `.sort` styling rule with a `.sort-controls` group, field
+   selector styling, and a square direction-button rule. Preserve the current
+   breadcrumb layout, focus visibility, theme tokens, and narrow-width
+   wrapping.
 
 ### 2. Closed backend token contract
 
@@ -204,13 +211,17 @@ Rust unit coverage:
 
 Extend `tests/e2e/scenarios/sortpersist.mjs`:
 
-- Address controls by their accessibility labels, not presentation classes.
+- Address the field dropdown and direction button by their accessibility
+  labels, not presentation classes.
 - Prove a field change preserves the current direction.
+- Prove the visible arrow and accessible name agree with the current direction
+  before and after activation.
 - Prove both `SortBy` and `SortOrder` reach the Jellyfin mock for descending and
   ascending requests.
 - Prove the exact ascending token reaches `section_sorts`.
-- Restart the app, reopen the library, and prove the first listing request and
-  both visible controls already reflect the persisted ascending token.
+- Restart the app, reopen the library, and prove the first listing request,
+  field dropdown, and direction button already reflect the persisted ascending
+  token.
 - Retain screenshot evidence with both controls visible.
 
 ### 5. Version and closeout
@@ -243,8 +254,9 @@ Independent guard proof before landing:
    ordering guard fails, restore it, and prove green.
 4. Let an ascending optional comparison use ordinary `Option` order; prove the
    missing-last guard fails, restore it, and prove green.
-5. Make the frontend direction handler retain/emit `desc`; prove `sortpersist`
-   fails at the request or persistence assertion, restore it, and prove green.
+5. Make the frontend arrow handler retain/emit `desc`; prove `sortpersist`
+   fails at the request, persistence, or arrow-state assertion, restore it, and
+   prove green.
 
 After restoration, run the repo's complete cross-stack verification from
 `.agents/repo-guidance.md`: exact JS toolchain check, clean install, npm audit,
