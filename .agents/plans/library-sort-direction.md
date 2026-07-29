@@ -2,7 +2,8 @@
 
 ## Status
 
-**LANDED 2026-07-28 on the owner's explicit `go` (`c0d1412`, 1.0.59).**
+**OWNER-CONFIRMED 2026-07-28 after landing on the owner's explicit `go`
+(`c0d1412`, 1.0.59).**
 
 Owner requirement, recorded 2026-07-28: library sorting needs an
 ascending/descending option.
@@ -12,7 +13,9 @@ dropdown plus an adjacent boxed up/down arrow that toggles direction. Up means
 ascending, down means descending, and changing either dimension preserves the
 other. The implementation, five independent guard mutations, canonical local
 verification, and focused/full Linux real-app coverage are complete. No product
-decision or implementation gate remains open.
+decision or implementation gate remains open. The owner playtested the landed
+control, confirmed it working on 2026-07-28, and authorized publication of the
+1.0.59 GitHub release.
 
 ## Goal
 
