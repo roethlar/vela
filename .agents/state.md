@@ -9,8 +9,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- Vela 1.0.59 is an owner-confirmed release candidate. The owner authorized
-  GitHub publication on 2026-07-28; exact release evidence will be recorded in
+- Vela 1.0.59 is published as GitHub's Latest release from exact commit
+  `59919210f5e4d2b8b5547acd6b2c7324509286ce`. Its canonical workflow,
+  artifact, checksum, package-inspection, and publication evidence lives in
   `.agents/plans/v1-release-readiness.md`.
 - Product behavior remains as settled in `.agents/decisions.md`: Vela is a
   multi-server Plex/Jellyfin/experimental-Emby client, delegates HDR playback

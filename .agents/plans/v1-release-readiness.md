@@ -248,3 +248,50 @@ GitHub reports the release non-draft, non-prerelease, and Latest, with title
 
 No VM execution was required for this publication; the exact-commit GitHub CI
 and tagged release workflow supplied the release evidence.
+
+## Maintenance release: Vela 1.0.59
+
+Vela 1.0.59 was published from exact commit
+`59919210f5e4d2b8b5547acd6b2c7324509286ce`. Annotated tag `v1.0.59` has tag
+object `fb0ca13acd1112dbfb65e17d98baa7b1f2836f80` and peels to that exact commit.
+GitHub CI passed on the candidate in
+`https://github.com/roethlar/vela/actions/runs/30420572850`.
+
+The tagged release workflow passed in
+`https://github.com/roethlar/vela/actions/runs/30420740712`: npm audit, macOS
+universal DMG, Linux AppImage/deb/rpm, Windows MSI/NSIS, non-root Arch, and the
+final inventory job were all green. The inventory job found all seven promised
+package classes, generated `SHA256SUMS`, and attached the Arch package and
+manifest successfully through the repaired explicit-repository path.
+
+A fresh draft download matched GitHub's immutable digests for all nine
+nonempty assets. The seven-line manifest verified every promised package:
+
+```text
+f04c9ebb7d82d5eb09b5a7c0e837382b9107d33000c3a4babbb22f2c4ef3f837  vela-1.0.59-1-x86_64.pkg.tar.zst
+7d2d320ac6222aeac09c7ab665aaa936b9b292e22b76659c47658bf606759ccc  Vela_1.0.59_amd64.AppImage
+34bca1e29f78c4942ddf551092038d3b8672d7975810ba05f411dce98b070edb  Vela_1.0.59_amd64.deb
+fb2e3804a23fdae91f125077a4d4a68e64dc2e6969d02cf67a439f3f86e1bc79  Vela-1.0.59-1.x86_64.rpm
+072d1cfa3b31e114bf0e33f457eba6e6919e0b35e9db0186d6f969a261864f20  Vela_1.0.59_universal.dmg
+9005f3aeaf0c17d1b5acd985699dbd9b4ac4c53640f07aee03479365aa13962d  Vela_1.0.59_x64_en-US.msi
+b4dad4631e628c4166367c262ce0cedbbbe3ddb510579a7fb6dc2f08a906a9c5  Vela_1.0.59_x64-setup.exe
+```
+
+`SHA256SUMS` itself has digest
+`f07d583ae6549d13bd8692dccd4bfb7f2bfcf9616792541158f79971c237ff49`;
+the extra `Vela_1.0.59_universal.app.tar.gz` has digest
+`b1bec643f88cc438bc55f37fa8d71e7285a8b79920072a3ddd894f6c96872c66`.
+`hdiutil verify` accepted the downloaded DMG. Both the DMG and universal app
+archive reported version/build 1.0.59 and contained x86_64 and arm64 binaries.
+Debian control metadata reported `vela` 1.0.59 amd64; Arch metadata reported
+`vela` 1.0.59-1 x86_64. File inspection identified the remaining downloads as
+the expected x86_64 AppImage, RPM, x64 MSI, and NSIS installer types.
+
+GitHub reports release database ID `361499610`, title `Vela 1.0.59`, exact
+target above, non-draft, non-prerelease, and Latest, with publication timestamp
+`2026-07-29T04:06:32Z`. The anonymous release page returned HTTP 200:
+`https://github.com/roethlar/vela/releases/tag/v1.0.59`.
+
+No VM execution was required for publication; the owner-confirmed product
+playtest, exact-commit GitHub CI, and successful tagged release workflow supplied
+the release evidence.
