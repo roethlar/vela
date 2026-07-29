@@ -1539,6 +1539,7 @@ impl MediaSource for PlexSource {
 /// other key passes through verbatim.
 fn plex_sort_key(sort: &str) -> &str {
     match sort {
+        "episodeAddedAt:asc" => "episode.addedAt:asc",
         "episodeAddedAt:desc" => "episode.addedAt:desc",
         other => other,
     }
@@ -2850,18 +2851,28 @@ mod tests {
 
     #[test]
     fn plex_sort_key_translates_only_the_leaf_added_sort() {
-        assert_eq!(
-            plex_sort_key("episodeAddedAt:desc"),
-            "episode.addedAt:desc",
-            "the one Vela key that isn't Plex-native must translate"
-        );
+        for direction in ["asc", "desc"] {
+            let vela = format!("episodeAddedAt:{direction}");
+            let plex = format!("episode.addedAt:{direction}");
+            assert_eq!(
+                plex_sort_key(&vela),
+                plex,
+                "the one Vela field that isn't Plex-native must translate in either direction"
+            );
+        }
         // Every other allowed key is Plex-native and passes through verbatim.
         for key in [
             "titleSort:asc",
+            "titleSort:desc",
+            "year:asc",
             "year:desc",
+            "addedAt:asc",
             "addedAt:desc",
+            "originallyAvailableAt:asc",
             "originallyAvailableAt:desc",
+            "rating:asc",
             "rating:desc",
+            "lastViewedAt:asc",
             "lastViewedAt:desc",
         ] {
             assert_eq!(plex_sort_key(key), key, "{key} must pass through");

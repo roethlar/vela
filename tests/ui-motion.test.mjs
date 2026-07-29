@@ -471,7 +471,8 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
     /aria-label=["']Search your libraries["']/,
     /class=["']sideitem["']/,
     /class=["']crumbs["']/,
-    /class=["']sort["']/,
+    /aria-label=["']Sort by["']/,
+    /class=["']sort-direction["']/,
     /aria-label=["']Settings["']/,
   ]) assert.match(page, retained, `page control disappeared while migrating empties: ${retained}`);
   for (const retained of [/id=["']playlist-create["']/, /id=["']playlist-rename["']/, /Delete playlist/]) {

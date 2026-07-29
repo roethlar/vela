@@ -343,11 +343,18 @@ impl std::fmt::Debug for SourceConfig {
 
 pub(crate) const ALLOWED_SECTION_SORTS: &[&str] = &[
     "titleSort:asc",
+    "titleSort:desc",
+    "year:asc",
     "year:desc",
+    "addedAt:asc",
     "addedAt:desc",
+    "episodeAddedAt:asc",
     "episodeAddedAt:desc",
+    "originallyAvailableAt:asc",
     "originallyAvailableAt:desc",
+    "rating:asc",
     "rating:desc",
+    "lastViewedAt:asc",
     "lastViewedAt:desc",
 ];
 
@@ -1094,9 +1101,8 @@ mod tests {
         fs::remove_dir_all(root).unwrap();
     }
 
-    // Per-library sort preferences: absent in old configs (defaults empty),
-    // round-trips entries, unknown keys are the reader's problem (get_sections
-    // fail-closes against the sort whitelist — this layer just persists).
+    // Per-library sort preferences: absent in old configs (defaults empty);
+    // explicit field/direction tokens validate and round-trip unchanged.
     #[test]
     fn section_sorts_default_empty_and_round_trip() {
         let old: AppConfig = serde_json::from_str(r#"{"auth_token":"tok"}"#).expect("parses");
@@ -1104,12 +1110,20 @@ mod tests {
 
         let mut cfg = AppConfig::default();
         cfg.section_sorts
-            .insert("plex-1:6".into(), "episodeAddedAt:desc".into());
+            .insert("plex-1:6".into(), "episodeAddedAt:asc".into());
+        cfg.section_sorts
+            .insert("jf-1:7".into(), "rating:asc".into());
+        cfg.validate().expect("ascending sort tokens validate");
         let saved = serde_json::to_string(&cfg).expect("serializes");
         let back: AppConfig = serde_json::from_str(&saved).expect("round-trips");
+        back.validate().expect("round-tripped sorts still validate");
         assert_eq!(
             back.section_sorts.get("plex-1:6").map(String::as_str),
-            Some("episodeAddedAt:desc")
+            Some("episodeAddedAt:asc")
+        );
+        assert_eq!(
+            back.section_sorts.get("jf-1:7").map(String::as_str),
+            Some("rating:asc")
         );
     }
 

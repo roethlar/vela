@@ -136,16 +136,62 @@
   let typeTabs = $derived(
     ["movie", "show", "video"].filter((t) => sections.some((s) => s.sectionType === t))
   );
-  // Merged listings only honor fields items carry on the DTO across sources:
-  // title, year (release date), date added, last played. `rating` has no DTO
-  // field, so it stays a per-source (server-side) sort only.
-  const TYPE_SORTS = new Set([
-    "titleSort:asc",
-    "year:desc",
-    "originallyAvailableAt:desc",
-    "addedAt:desc",
-    "lastViewedAt:desc",
-  ]);
+  type SortDirection = "asc" | "desc";
+  type SortFieldKey =
+    | "titleSort"
+    | "year"
+    | "addedAt"
+    | "episodeAddedAt"
+    | "originallyAvailableAt"
+    | "rating"
+    | "lastViewedAt";
+  type SortField = {
+    key: SortFieldKey;
+    label: string;
+    showOnly?: boolean;
+    merged?: boolean;
+  };
+  type ParsedSort = { field: SortField; direction: SortDirection };
+
+  const DEFAULT_SORT = "titleSort:asc";
+  // One direction-neutral field inventory drives both controls and the
+  // section/view restrictions. Merged listings only honor fields items carry
+  // on the DTO across sources; rating and leaf-added remain source-side only.
+  const SORT_FIELDS: SortField[] = [
+    { key: "titleSort", label: "Title", merged: true },
+    { key: "year", label: "Year", merged: true },
+    { key: "addedAt", label: "Date added", merged: true },
+    { key: "episodeAddedAt", label: "Last episode added", showOnly: true },
+    { key: "originallyAvailableAt", label: "Release date", merged: true },
+    { key: "rating", label: "Rating" },
+    { key: "lastViewedAt", label: "Last played", merged: true },
+  ];
+
+  function parseSort(value: string | null | undefined): ParsedSort | null {
+    const parts = value?.split(":");
+    if (!parts || parts.length !== 2) return null;
+    const [fieldKey, direction] = parts;
+    if (direction !== "asc" && direction !== "desc") return null;
+    const field = SORT_FIELDS.find((candidate) => candidate.key === fieldKey);
+    return field ? { field, direction } : null;
+  }
+
+  function composeSort(field: SortFieldKey, direction: SortDirection): string {
+    return `${field}:${direction}`;
+  }
+
+  function sortAllowedForSection(
+    value: string | null | undefined,
+    sectionType: string,
+  ): value is string {
+    const parsed = parseSort(value);
+    return parsed !== null && (!parsed.field.showOnly || sectionType === "show");
+  }
+
+  function sortAllowedForMerged(value: string): boolean {
+    return parseSort(value)?.field.merged === true;
+  }
+
   function sourceNameOf(id: string): string {
     return sources.find((s) => s.id === id)?.name ?? "";
   }
@@ -246,23 +292,18 @@
   function retractThrough(claimedGen: number) {
     errorParts = errorParts.filter((p) => !(p.gen && p.gen <= claimedGen));
   }
-  let sort = $state("titleSort:asc");
+  let sort = $state(DEFAULT_SORT);
+  let parsedSort = $derived(
+    parseSort(sort) ?? { field: SORT_FIELDS[0], direction: "asc" as SortDirection },
+  );
+  let sortDirectionLabel = $derived(
+    parsedSort.direction === "asc"
+      ? "Sort direction: ascending; activate for descending"
+      : "Sort direction: descending; activate for ascending",
+  );
   let searchQuery = $state("");
   let searchTerm = $state(""); // the query backing the current search results view
   const PAGE = 60;
-
-  // `showOnly` sorts exist only for show sections (server-side semantics:
-  // Plex `episode.addedAt`, JF `DateLastContentAdded`); the select filters
-  // them out elsewhere and select() resets a leaked one on section switch.
-  const SORTS: { key: string; label: string; showOnly?: boolean }[] = [
-    { key: "titleSort:asc", label: "Title (A–Z)" },
-    { key: "year:desc", label: "Year (newest)" },
-    { key: "addedAt:desc", label: "Recently added" },
-    { key: "episodeAddedAt:desc", label: "Last episode added", showOnly: true },
-    { key: "originallyAvailableAt:desc", label: "Release date" },
-    { key: "rating:desc", label: "Rating" },
-    { key: "lastViewedAt:desc", label: "Recently played" },
-  ];
 
   // Device-link state
   type Pin = {
@@ -1563,15 +1604,12 @@
     active = section;
     activeType = null;
     // Entering a library sets its sort deterministically: the persisted
-    // per-library preference when valid for this section's type, else the
-    // default. This also guarantees a show-only sort can never leak in from
-    // the previously viewed section (the reset discipline selectType()
-    // applies via TYPE_SORTS).
-    const saved = SORTS.find((s) => s.key === section.sort);
-    sort =
-      saved && (!saved.showOnly || section.sectionType === "show")
-        ? saved.key
-        : "titleSort:asc";
+    // per-library preference when its field and direction are both valid for
+    // this section's type, else the default. This also guarantees a show-only
+    // field can never leak in from the previously viewed section.
+    sort = sortAllowedForSection(section.sort, section.sectionType)
+      ? section.sort
+      : DEFAULT_SORT;
     crumbs = [{ title: section.title, ratingKey: null }];
     await resetAndLoad({ keepError: auto });
   }
@@ -1585,7 +1623,7 @@
     personView = null;
     active = null;
     activeType = t;
-    if (!TYPE_SORTS.has(sort)) sort = "titleSort:asc";
+    if (!sortAllowedForMerged(sort)) sort = DEFAULT_SORT;
     crumbs = [{ title: TYPE_LABELS[t] ?? t, ratingKey: null }];
     await resetAndLoad();
   }
@@ -1880,7 +1918,10 @@
     await resetAndLoad();
   }
 
-  async function changeSort() {
+  async function applySort(field: SortFieldKey, direction: SortDirection) {
+    const next = composeSort(field, direction);
+    if (next === sort) return;
+    sort = next;
     // Per-library persistence (owner ask 2026-07-10): remember the choice on
     // the section AND in config, so reopening the library — this session or
     // after a restart — lands on it. Best-effort: a failed write must not
@@ -1892,6 +1933,21 @@
       invoke("set_section_sort", { sectionKey: active.key, sort }).catch(() => {});
     }
     await resetAndLoad();
+  }
+
+  async function changeSortField(event: Event) {
+    const key = (event.currentTarget as HTMLSelectElement).value;
+    const field = SORT_FIELDS.find((candidate) => candidate.key === key);
+    if (!field) return;
+    if (activeType ? !field.merged : field.showOnly && active?.sectionType !== "show") return;
+    await applySort(field.key, parsedSort.direction);
+  }
+
+  async function toggleSortDirection() {
+    await applySort(
+      parsedSort.field.key,
+      parsedSort.direction === "asc" ? "desc" : "asc",
+    );
   }
 
   // `rerun`: refreshWatchState() re-enters the CURRENT root to pick up new watch
@@ -3338,15 +3394,33 @@
         <button class="crumb" class:current={i === crumbs.length - 1} onclick={() => goCrumb(i)}>{c.title}</button>
       {/each}
       {#if (active || activeType) && crumbs.length === 1}
-        <select class="sort" bind:value={sort} onchange={changeSort}>
-          <!-- Merged type view: DTO-sortable keys only. Section view: hide
-               show-only sorts outside show sections. -->
-          {#each activeType
-            ? SORTS.filter((s) => TYPE_SORTS.has(s.key))
-            : SORTS.filter((s) => !s.showOnly || active?.sectionType === "show") as s (s.key)}
-            <option value={s.key}>{s.label}</option>
-          {/each}
-        </select>
+        <div class="sort-controls">
+          <select
+            class="sort-field"
+            aria-label="Sort by"
+            value={parsedSort.field.key}
+            onchange={changeSortField}
+          >
+            <!-- Merged type view: DTO-sortable fields only. Section view:
+                 hide the show-only field outside show sections. -->
+            {#each activeType
+              ? SORT_FIELDS.filter((field) => field.merged)
+              : SORT_FIELDS.filter(
+                  (field) => !field.showOnly || active?.sectionType === "show",
+                ) as field (field.key)}
+              <option value={field.key}>{field.label}</option>
+            {/each}
+          </select>
+          <button
+            type="button"
+            class="sort-direction"
+            aria-label={sortDirectionLabel}
+            title={sortDirectionLabel}
+            onclick={toggleSortDirection}
+          >
+            {parsedSort.direction === "asc" ? "↑" : "↓"}
+          </button>
+        </div>
       {/if}
     </div>
     {#if items.length === 0}
@@ -3859,15 +3933,46 @@
     flex-wrap: wrap;
     animation: vela-slide-down 0.16s var(--ease);
   }
-  .crumbs .sort {
+  .crumbs .sort-controls {
     margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    flex: 0 0 auto;
+  }
+  .crumbs .sort-field,
+  .crumbs .sort-direction {
     background: var(--surface);
     border: 1px solid var(--border);
     color: var(--text-2);
-    padding: 0.3rem 0.5rem;
     border-radius: 7px;
     font-size: 0.85rem;
     cursor: pointer;
+  }
+  .crumbs .sort-field {
+    padding: 0.3rem 0.5rem;
+  }
+  .crumbs .sort-direction {
+    width: 2rem;
+    height: 2rem;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-family: inherit;
+    font-size: 1rem;
+    line-height: 1;
+  }
+  .crumbs .sort-field:hover,
+  .crumbs .sort-direction:hover {
+    background: var(--surface-2);
+    color: var(--text-bright);
+  }
+  .crumbs .sort-field:focus-visible,
+  .crumbs .sort-direction:focus-visible {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px var(--accent-glow);
   }
   .crumbs .back {
     background: var(--surface);
