@@ -17,11 +17,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- The owner requested an ascending/descending direction option for library
-  sorting on 2026-07-28. Current sort choices encode one fixed direction each;
-  Revision 2 is approved in `.agents/plans/library-sort-direction.md` with a
-  sort-field dropdown and boxed arrow toggle. No implementation or review loop
-  is active; product code awaits a separate explicit go.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -31,10 +26,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/continue-watching-watch-state.md`.
 ## Blockers
 
-- No known technical blocker to planning the sort-direction option. Product
-  code remains gated on an approved plan.
-- The unrelated continuation/mpv and `refresh` E2E flakes remain recorded; they
-  were not retried or repaired under `tr-13`.
+- No known product blocker.
+- The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
+  They reproduced during the 1.0.59 full Linux run in `continueon`,
+  `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.
 
 ## Verification
 
@@ -52,8 +47,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/push-policy.md`
 - `.agents/plans/library-sorting.md` and
   `.agents/plans/show-last-episode-sort.md` (landed sorting baseline)
-- `.agents/plans/library-sort-direction.md` (approved follow-up; awaiting
-  implementation go)
+- `.agents/plans/library-sort-direction.md` (landed at `c0d1412`, 1.0.59)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`
 - `docs/history/state-archive.md` for superseded state

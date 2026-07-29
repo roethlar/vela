@@ -2,7 +2,7 @@
 
 ## Status
 
-**Revision 2 APPROVED by the owner 2026-07-28; no implementation go.**
+**LANDED 2026-07-28 on the owner's explicit `go` (`c0d1412`, 1.0.59).**
 
 Owner requirement, recorded 2026-07-28: library sorting needs an
 ascending/descending option.
@@ -10,8 +10,9 @@ ascending/descending option.
 The owner settled the control contract as a direction-neutral sort-field
 dropdown plus an adjacent boxed up/down arrow that toggles direction. Up means
 ascending, down means descending, and changing either dimension preserves the
-other. No product decision remains open; implementation still requires a
-separate explicit go.
+other. The implementation, five independent guard mutations, canonical local
+verification, and focused/full Linux real-app coverage are complete. No product
+decision or implementation gate remains open.
 
 ## Goal
 
@@ -263,6 +264,42 @@ After restoration, run the repo's complete cross-stack verification from
 frontend check/build, Rust MSRV and stable checks, clippy, Rust tests, Cargo
 audit, and the full Linux E2E suite. The working tree must be clean after the
 single landing commit.
+
+## Closeout evidence
+
+- The cohesive product/test/version slice landed in `c0d1412` at 1.0.59.
+  `scripts/bump.sh` ran exactly once, advancing 1.0.58 → 1.0.59.
+- Focused frontend check/build and affected Rust command/config/Plex/merged-sort
+  tests passed. The Linux `sortpersist` scenario passed after a fresh Tauri
+  build and again after committed-state restoration.
+- All five prescribed mutations failed for their intended discriminator and
+  passed after restoration:
+  1. removing `episodeAddedAt:asc` from the closed allowlist was caught as that
+     exact unsupported token;
+  2. removing its Plex translation produced the exact
+     `episodeAddedAt:asc`/`episode.addedAt:asc` mismatch;
+  3. reversing title ascending produced the exact reversed title order;
+  4. using ordinary ascending `Option` ordering put `undated` first and failed
+     the missing-last assertion;
+  5. forcing the arrow handler to stay descending timed out only while waiting
+     for the second toggle's new ascending Jellyfin request.
+- Canonical local verification passed with Node 26.5.0/npm 12.0.1, a clean
+  install, zero npm vulnerabilities, frontend check/build, Rust 1.89 and
+  rolling-stable checks, clippy with warnings denied, all 362 Rust tests, and
+  Cargo audit with only the already-recorded 17 allowed
+  unmaintained/unsoundness notices.
+- The restored Linux full suite completed 36/39. The changed `sortpersist`
+  scenario passed and retained both screenshots
+  (`sortpersist-01-field-and-direction.png` and
+  `sortpersist-02-persisted-after-restart.png`). The three failures were the
+  explicitly out-of-scope, pre-existing harness races: `continueon`
+  (delayed PlaybackInfo ordering), `playverbs` (player-action element timing),
+  and `refresh` (refresh-owned listing settle timeout). No sorting failure
+  occurred.
+- The screenshot evidence was visually checked: both runs show the neutral
+  `Year` field selector and adjacent boxed `↑`. The VM's temporary source
+  overlay was restored, no app/driver/mpv/temp-config residue remained, and the
+  VM returned to its prior stopped state.
 
 ## Out of scope
 

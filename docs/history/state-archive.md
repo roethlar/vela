@@ -1,8 +1,21 @@
 # State Archive
 
-Entries rotated verbatim out of `.agents/state.md` `## Now` when they stopped
-being live (handoff pruning rule). Newest rotation first; each block keeps its
+Entries rotated verbatim out of `.agents/state.md` when they stopped being
+live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
+
+## Rotated 2026-07-28 (sort-direction implementation, v1.0.59)
+
+Context for readers: the queued item below received the owner's explicit `go`
+and landed at `c0d1412`; its complete contract and verification evidence are
+canonical in `.agents/plans/library-sort-direction.md`. The original queue
+entry rotates here verbatim.
+
+- The owner requested an ascending/descending direction option for library
+  sorting on 2026-07-28. Current sort choices encode one fixed direction each;
+  Revision 2 is approved in `.agents/plans/library-sort-direction.md` with a
+  sort-field dropdown and boxed arrow toggle. No implementation or review loop
+  is active; product code awaits a separate explicit go.
 
 ## Rotated 2026-07-28 (catchup sweep — two landed entries, v1.0.58)
 
