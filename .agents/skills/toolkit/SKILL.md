@@ -11,10 +11,11 @@ one plain line per verb — do not improvise additions:
   current state, next action, blockers.
 - `handoff` — save my place fast so the next session resumes (ends by
   committing its notes).
-- `review` / `codereview <harness> <model> <effort>` — verify fixes
-  against their records with a second model.
-- `openreview <harness>` — whole-change judgment: is this the best way
-  to the goal.
+- `review` / `codereview <harness> <model> <effort> [<base>..<head>]` —
+  hunt defects in a landed range and verify each fix against its record
+  with a second model.
+- `openreview <harness>` — approach-soundness judgment of a change, code
+  or plan: would a fresh reviewer have solved it this way.
 - `git` — plain-English git help (push, reconcile, remotes, branches).
 - `new-project` — set up a brand-new governed project.
 - `update-governance` — pull the latest toolkit and apply it here.

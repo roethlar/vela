@@ -63,8 +63,12 @@ classification, say so plainly and ask — never guess.
 
 Scope defaults to `all` when omitted. Push the current branch, and its tags,
 to each remote in scope, creating the branch on the remote where it does not
-exist yet. This executes immediately: typing the operation is the
-instruction, consistent with the repo's push policy. A push a remote rejects
+exist yet. **This executes immediately. Typing the operation is the
+authorization — never prompt for confirmation of a push the owner just
+asked for.** The repo's push policy governs pushes the agent would make on
+its own initiative, after a commit; it does not re-gate an instruction the
+owner has already given. Say what will be pushed where as you do it, not as
+a question. A push a remote rejects
 (non-fast-forward, permissions, unreachable host) is reported in plain
 English with a proposed next step — never retried with force. After pushing,
 mention any other local branches that still carry unpushed work.

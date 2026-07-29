@@ -1,16 +1,16 @@
 ---
-description: Refresh this repo's governance from the AgentGovernanceBootstrap toolkit. Use when the owner asks to update or refresh governance.
+description: Refresh this repo's governance from the governance toolkit (Bixi). Use when the owner asks to update or refresh governance.
 # toolkit-owned; edits are drift — see AGENTS.md
 ---
 
-Refresh this repo's governance from the AgentGovernanceBootstrap toolkit.
+Refresh this repo's governance from the governance toolkit (Bixi).
 
 1. Locate the toolkit clone on this machine — never assume a fixed path.
    Check `.agents/machines.md` first (a found clone is recorded there); else
    scan this repo's sibling directories for a checkout containing
    `tools/shipped-set.json`. If none exists, clone one as a sibling of this
    repo and record it in `.agents/machines.md`:
-   `git clone https://github.com/roethlar/AgentGovernanceBootstrap.git ../AgentGovernanceBootstrap`.
+   `git clone https://github.com/roethlar/Bixi.git ../Bixi`.
 2. From this repo's root, run the refresh script:
    `py -3 <toolkit>/tools/refresh.py` (Windows) or
    `python3 <toolkit>/tools/refresh.py` (macOS/Linux).

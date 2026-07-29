@@ -1,12 +1,14 @@
 ---
-description: Run the codereview playbook with a named reviewer harness to verify the current finding against its record. Use when the owner says codereview <harness> <model> <effort>.
+description: Run the codereview playbook with a named reviewer harness — hunt defects in a landed range or verify the current finding against its record. Use when the owner says codereview <harness> <model> <effort> [<base>..<head>].
 # toolkit-owned; edits are drift — see AGENTS.md
 ---
 
 Run the `codereview` playbook operator: read
-`.agents/playbooks/codereview.md` and follow it to review the current
-finding. Grammar: `/codereview <harness> <model> <effort>` (e.g.
-`/codereview codex <model> xhigh`); `<model>` is the owner's literal
+`.agents/playbooks/codereview.md` and follow it. Grammar:
+`/codereview <harness> <model> <effort> [<base>..<head>]` (e.g.
+`/codereview codex <model> xhigh`); a trailing pinned range dispatches
+the defect-generation half over landed commits, and without one the verb
+continues the active per-finding loop. `<model>` is the owner's literal
 word, used verbatim and checked against no list, per the playbook's
 "Dispatch grammar" section, and `/review` is a
 pure alias of this command. The named harness is the reviewer; it is

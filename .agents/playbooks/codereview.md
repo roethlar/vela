@@ -1,23 +1,30 @@
 <!-- toolkit-owned; edits are drift — see AGENTS.md -->
 
-# Playbook: synchronous cross-harness finding review (`codereview`)
+# Playbook: synchronous cross-harness defect review (`codereview`)
 
-A portable workflow for reviewing a multi-fix sweep (security pass, refactor,
-bug-fix batch) on one git repo with strong per-fix verification. You — the agent in
-the harness you launched from — play the **coder**. The **reviewer** is a second,
-independent agent harness (`codex`, `agy`, `grok`, a subagent, …) that you dispatch
-**headless and one-shot per finding** to get a different model's eyes on the fix.
+A portable workflow for the defect lifecycle of landed changes on one git
+repo: dispatch a reviewer over a pinned commit range to hunt defects, triage
+what comes back, and verify each admitted finding's fix with strong per-fix
+proof. You — the agent in the harness you launched from — play the **coder**.
+The **reviewer** is a second, independent agent harness (`codex`, `agy`,
+`grok`, a subagent, …) that you dispatch **headless and one-shot** — per
+landed range in the generation half, per finding in the verification half —
+to get a different model's eyes on the work.
 
-**Framing (deliberate):** this loop verifies specific findings against their
-recorded evidence — the reviewer is handed the finding record and judges the fix
-against it. That conformance priming is intentional here: it suits verification
-work, batch triage, and reviewer models that wander without a rubric. For an
-unprimed whole-change judgment — "is this the best way to achieve the goal?" —
-use the `openreview` playbook instead; the owner chooses per invocation, by name.
+**Framing (deliberate):** both halves of this loop are deliberately primed —
+the generation pass hunts defects in a pinned landed range, and the
+verification pass judges a fix against its recorded finding. That priming is
+intentional here: it suits defect work, batch triage, and reviewer models
+that wander without a rubric. For an unprimed approach-soundness judgment —
+"would a fresh reviewer have solved this problem this way?" — use the
+`openreview` playbook instead; the owner chooses per invocation, by name.
 
 Invoke it with `codereview <harness> <model> <effort>` (in Claude Code: the
 tab-completable `/codereview <harness> <model> <effort>`; see "Dispatch
-grammar" for how `<model>` is handled). This file is durable
+grammar" for how `<model>` is handled). A trailing pinned range —
+`codereview <harness> <model> <effort> <base>..<head>` — dispatches the
+generation half ("Change review" below); without one, the verb continues
+the active per-finding loop. This file is durable
 guidance; it defers to this repo's `AGENTS.md` and
 `.agents/` layout wherever they overlap. Where this playbook and the repo's
 invariants disagree, the invariants win.
@@ -45,13 +52,16 @@ finding has to predict an observable failure and a fix has to demonstrate it clo
 
 ## Atomic unit
 
-The whole loop rests on one rule: **one finding ↔ one branch ↔ one verdict**. That is
-what keeps each fix independently reviewable and bisectable. It is the same discipline
-as the repo's one-item-per-commit rule, applied across two roles. Broad multi-finding
-branches are forbidden unless the owner explicitly asks for a sweep. Per-finding
-branches are this loop's INTERNAL mechanics — its atomic unit and guard-proof
-isolation — not a repository branch policy: whether the repo uses branches for other
-work stays repository policy, per `AGENTS.md` (Git Safety).
+The whole loop rests on one rule, stated in the repo's own commit currency:
+**one finding ↔ one commit ↔ one verdict** where repo policy lands work directly
+on the default branch, and **one finding ↔ one branch ↔ one verdict** where repo
+policy works on branches. That is what keeps each fix independently reviewable
+and bisectable. It is the same discipline as the repo's one-item-per-commit
+rule, applied across two roles. Broad multi-finding slices are forbidden unless
+the owner explicitly asks for a sweep. Per-finding isolation is this loop's
+INTERNAL mechanics — its atomic unit and guard-proof isolation — not a
+repository branch policy: which mode applies stays repository policy, per
+`AGENTS.md` (Git Safety).
 
 ## Operator
 
@@ -63,6 +73,11 @@ verbatim and checked against no list (see "Dispatch grammar"); `<effort>`
 sets the effort level. The
 `<agent>` shorthand used elsewhere in this playbook is the same reviewer-harness
 token.
+
+With a trailing pinned range — `codereview <harness> <model> <effort>
+<base>..<head>` — the same verb dispatches the generation half over landed
+commits instead (see "Change review (defect generation)"). Without a range it
+continues the active per-finding loop.
 
 The flow is **synchronous by construction**: the coder dispatches the reviewer and
 blocks on its verdict before acting on that finding. There is therefore **no
@@ -369,21 +384,70 @@ never rides an existing reviewer thread; the re-prime is the price of fresh
 eyes. Mid-thread effort nudges on an existing conversation are rejected as
 anchored escalation.
 
+## Change review (defect generation)
+
+`codereview <harness> <model> <effort> <base>..<head>` — a trailing pinned
+range dispatches a whole-change **defect hunt** over landed commits; this is
+where findings come from when no external pass supplies them. Both endpoints
+resolve to commit SHAs at dispatch time, and the reviewer evaluates
+`git diff <base-sha>..<head-sha>` from the shared workspace (you do not pipe
+it the diff), under the same probe-derived incantation and
+self-permissioning launch as every other dispatch here. The mandate is
+bounded: find defects in that range — each with evidence and a predicted
+observable failure — not restyle the repo, and not judge the approach
+(`openreview` owns that question).
+
+Tier routing: standard by default; T1 (sensitive paths) is evaluated against
+the range diff before dispatch, and the owner `frontier` phrase forces
+frontier as everywhere. T2–T5 are per-finding triggers and do not fire on a
+generation pass.
+
+The generation verdict contract (structured, fail-closed) — result payload:
+
+```json
+{"verdict":"clean|findings","capability_ok":true,
+ "reviewed_sha":"<head-sha>","base_sha":"<base-sha>",
+ "findings":[{"title":"…","evidence":"file:line — …",
+  "predicted_failure":"…","severity":"CRITICAL|HIGH|MEDIUM|LOW",
+  "better_approach":"…"}]}
+```
+
+The orchestrator — never the reviewer — computes acceptance, with the same
+fail-closed set as the per-finding contract (step 3 below): non-zero exit,
+missing/invalid envelope, off-schema payload, `verdict` outside the enum,
+either SHA ≠ its dispatched pin, `capability_ok` not literally `true`,
+`findings` non-empty with verdict `clean`, or empty with verdict `findings`
+→ **not** a clean pass. Recovery is the per-finding contract's: extraction
+before rejection, one re-emission-only re-prompt, then contested to the
+owner.
+
+A `clean` verdict is a complete, valid result. Record it with provenance
+wherever the repo tracks review outcomes — "codereview <agent>
+(<model> @ <effort>, <tier>) over <base>..<head>: no material issue" — and
+stop; do not re-dispatch shopping for findings. A `findings` verdict yields
+**candidate** findings only: every one passes the finding intake and triage
+gate below before any work, and DECLINED is an expected fate for the
+speculative ones.
+
 ## Per-finding flow
 
 For each admitted finding (intake/triage and the coder's own guard proof are done —
 see the gate below):
 
-1. **Finish the fix** on a per-finding branch `fix/<id>-<slug>`, smallest coherent
-   slice, touching only the files the finding doc declares.
+1. **Finish the fix** as its own isolated slice — smallest coherent unit,
+   touching only the files the finding doc declares. Default-branch mode: one
+   commit per finding, landed at the branch head. Branch mode: a per-finding
+   branch `fix/<id>-<slug>`.
 2. **Dispatch the reviewer** headless and one-shot, in the harness's **JSON output
    mode** (the flag found while probing), at the routed tier's owner-named
    (model, effort) pair — **standard at high** unless an escalation trigger or
    the owner phrase routes **frontier at xhigh** (see "Reviewer tiers and
-   routing"). Pass an **explicit base**: the reviewed
-   branch **head SHA** and the **base SHA** (the merge-base with the main branch at
-   dispatch time), so the reviewer evaluates `git diff <base-sha>..<head-sha>` against
-   a fixed snapshot — a `main..branch` range is *not* stable if the main branch moves.
+   routing"). Pass **explicit pins**: in branch mode the reviewed branch **head
+   SHA** and the **base SHA** (the merge-base with the main branch at dispatch
+   time); in default-branch mode the fix commit as **head SHA** and its parent
+   as **base SHA**. Either way the reviewer evaluates
+   `git diff <base-sha>..<head-sha>` against a fixed snapshot — a symbolic
+   `main..branch` range is *not* stable if the main branch moves.
    The reviewer reads the code from the **shared workspace** (you do not pipe it the
    diff); it reads `.agents/review/findings/<id>.md`, and **independently performs the
    guard proof** (revert → confirm FAIL → restore → confirm PASS) **in its own `git
@@ -426,10 +490,14 @@ see the gate below):
    comments. Flip the finding **Status** and the index row. State whether this
    record is committed (it should be, as part of the verification history).
 5. **Act on the recorded verdict:**
-   - **accepted** → the branch is ready for an **owner-gated** merge. Do not merge,
-     push, or rewrite history on agent authority; leave the branch (or hand off a
-     `merge-<id>` branch).
-   - **reopened** → apply fix-ups on the same branch, then re-run
+   - **accepted** → default-branch mode: the fix is already landed — close the
+     finding and sync its paperwork in the same motion (status, index row,
+     records). Branch mode: the branch is ready for an **owner-gated** merge —
+     do not merge, push, or rewrite history on agent authority; leave the
+     branch (or hand off a `merge-<id>` branch).
+   - **reopened** → apply fix-ups — a follow-up commit in default-branch mode
+     (never an amend of the reviewed commit), or further commits on the same
+     branch in branch mode — then re-run
      `codereview <agent>` as a **repair-delta redispatch** (see below). The
      reopen escalates one tier on redispatch (trigger T5).
    - **invalid** → write `.agents/review/<id>.contested.md` (which kind of
@@ -503,7 +571,7 @@ Written when a finding is admitted; the coder completes the lower half when work
 
 **Severity**: CRITICAL | HIGH | MEDIUM | LOW — <one-line justification>
 **Status**: Open | In progress | Verified | Contested
-**Branch**: `fix/<id-lowercased>-<short-slug>`
+**Branch**: `fix/<id-lowercased>-<short-slug>` (branch mode; `—` in default-branch mode)
 **Commit**: `<git-sha>` (filled in after commit)
 
 ## Evidence
@@ -589,8 +657,8 @@ it does not copy the table.
   an accept. Fail closed: re-prompt once, then route to the owner as contested.
 - **Reviewer mutating the coder's tree.** The reviewer's guard proof belongs in its
   own `git worktree`; it must never revert/restore in the coder's working tree.
-- **Merging or pushing without an owner go.** Accepted is a verdict, not merge
-  authority.
+- **Merging or pushing without an owner go** (branch mode). Accepted is a
+  verdict, not merge authority.
 - **Rewriting history** (amend/rebase/squash/force-push) on reviewed work without an
   explicit owner go.
 - **Editing the index prose freely.** It is a status board; discussion goes in the
@@ -601,8 +669,8 @@ it does not copy the table.
 ## Knobs
 
 - **Single-agent mode**: one agent alternates coder and reviewer hats (no foreign
-  harness). Keep per-finding branches, the guard proof, and the recorded-verdict
-  trail. The discipline that matters in this mode is writing the DECLINED and contested
+  harness). Keep the per-finding atomic unit (commit or branch), the guard
+  proof, and the recorded-verdict trail. The discipline that matters in this mode is writing the DECLINED and contested
   reasons down even though one mind holds both roles — that is what stops self-agreement
   from collapsing the loop.
 - **Adjudicator (optional)**: when coder and reviewer disagree (a contested record), a
