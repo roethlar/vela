@@ -19,8 +19,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 - The owner requested an ascending/descending direction option for library
   sorting on 2026-07-28. Current sort choices encode one fixed direction each;
-  no implementation or review loop is active, and a code change awaits an
-  approved plan.
+  Revision 1 is drafted in `.agents/plans/library-sort-direction.md` and awaits
+  the owner's control-contract decision. No implementation or review loop is
+  active.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
@@ -51,6 +52,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/push-policy.md`
 - `.agents/plans/library-sorting.md` and
   `.agents/plans/show-last-episode-sort.md` (landed sorting baseline)
+- `.agents/plans/library-sort-direction.md` (draft follow-up; awaiting owner
+  decision)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`
 - `docs/history/state-archive.md` for superseded state
