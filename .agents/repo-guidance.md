@@ -58,9 +58,9 @@ from the retired `.agents/repo-map.json`, 2026-07-08; verified against
 
 CI note: `.github/workflows/ci.yml` runs on the `github` remote
 (`https://github.com/roethlar/vela.git` — confirmed active 2026-07-04 via
-`gh api .../actions/runs`), NOT on the gitea `origin` (no
-`.gitea/workflows/`). Run the commands locally before claiming completion;
-CI only covers pushes that reach the github remote.
+`gh api .../actions/runs`), NOT on the Gitea `origin`, which has no Gitea
+Actions workflow configuration. Run the commands locally before claiming
+completion; CI only covers pushes that reach the github remote.
 
 Rules the command list doesn't carry on its own:
 
@@ -114,7 +114,7 @@ Rules the command list doesn't carry on its own:
   `spawn_blocking` patterns.
 - Generated outputs and dependency/build directories are not source of truth.
   Do not edit `build/`, `.svelte-kit/`, `node_modules/`, `src-tauri/target/`,
-  `src-tauri/gen/`, or packaged Arch output under `packaging/arch/pkg/`.
+  `src-tauri/gen/`, or generated `makepkg` output beneath `packaging/arch/`.
 
 ### Guard discipline (earned the hard way, r17-r24 of library-refresh-scan)
 
