@@ -61,3 +61,4 @@ vela-live-creds*.json
 .headroom/
 .tokensave/
 .claude/.headroom_wrap_marker.json
+.tokensave/
