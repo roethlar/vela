@@ -1,6 +1,6 @@
 ---
 name: review
-description: Pure alias of the codereview skill. Use when the owner says review <harness> <model> <effort> [<base>..<head>].
+description: Pure alias of the codereview skill. Use when the owner says review [<harness> <model> <effort>] [<base>..<head>] — the bare word included.
 # toolkit-owned; edits are drift — see AGENTS.md
 ---
 

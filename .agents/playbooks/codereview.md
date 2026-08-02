@@ -313,6 +313,24 @@ written into the cache unless the owner says to keep it; the dispatch record
 carries `(inline, session-only)` provenance so no artifact can launder an
 override into a default.
 
+When the owner omits `<harness>` as well — a bare `codereview` with nothing
+after it — the agent **asks which reviewer to run**, in one line, and attaches
+what the machine-local cache already holds as recall: the harnesses and models
+dispatched from this machine before. The list is a reminder, never a menu — a
+word that is not on it is used verbatim like any other, and an empty cache asks
+with no list. Nothing is probed, scanned, enumerated, or looked up to build it:
+reading the cache is the whole operation. The answer is **not** written back as
+a bare-invocation default, so the next one asks again and no stored preference
+can go stale.
+
+A bare invocation never resolves a reviewer on its own. This toolkit keeps no
+list of models and cannot judge one — a local model behind a harness may be a
+better adjudicator than a flagship, a second harness may serve worse models
+than the one already running, and "harness" has no boundary a machine can test.
+Independence and quality come from the owner's word at dispatch; the reviewer
+line of the dispatch record names what actually ran, so a review by the coder's
+own model is visible in the record rather than prevented by a guess.
+
 Review validity comes from the review itself, never from conformance to an
 expected invocation shape: environment quirks — hooks that redirect commands
 to other tools, wrappers, proxies, an unfamiliar harness — are recorded as

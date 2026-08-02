@@ -90,6 +90,13 @@ grammar" section (canonical): the owner's literal word is used verbatim,
 checked against no list — and a named model confers nothing:
 the frontier pair's `grade` above remains the only eligibility gate.
 
+A bare `openreview` with no `<agent>` asks which reviewer to run, with the
+machine-local cache's prior dispatches as recall and nothing stored back,
+exactly as that same section defines; the named agent's frontier pair then
+routes as above. Fixed frontier routing picks the tier, never the reviewer:
+it cannot make a dispatch independent of whatever model wrote the change, and
+claims no such thing. That independence is the owner's word at dispatch.
+
 ## Verdict contract (structured, fail-closed)
 
 The reviewer leads with its own approach, never with a defect list. Its

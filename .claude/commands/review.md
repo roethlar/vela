@@ -1,5 +1,5 @@
 ---
-description: Pure alias of codereview. Use when the owner says review <harness> <model> <effort> [<base>..<head>].
+description: Pure alias of codereview. Use when the owner says review [<harness> <model> <effort>] [<base>..<head>] — the bare word included.
 # toolkit-owned; edits are drift — see AGENTS.md
 ---
 
