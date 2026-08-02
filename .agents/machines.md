@@ -116,7 +116,7 @@ portable and may at most point here.
 - Temporary `chr-1` reviewer artifacts (2026-07-18): cleanup COMPLETE
   2026-07-19 with explicit owner approval. The four session-added allow
   entries (`Bash`, `Bash(*)`, `Bash(node *)`, `Bash(perl *)`) were removed
-  from the ignored `.claude/settings.local.json` with every pre-existing
+  from the ignored `.claude/settings.local.json` <!-- lint: allow (owner ruled leave-it, 2026-08-02: historical cleanup of gitignored Claude local settings; path is per-machine) --> with every pre-existing
   permission preserved; `/tmp/claude-mcp-review.mjs` was already deleted; the
   `.claude/worktrees/chr-1-opus-review` worktree was confirmed clean at
   `fe8eebe` and removed during branch cleanup (`git worktree list` shows only
