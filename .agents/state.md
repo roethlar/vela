@@ -21,6 +21,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
+- Launch marketing drafts are in-repo and unpushed: GitHub social preview
+  `docs/images/social-preview.png` (1280×640) and Reddit copy
+  `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
+  GitHub repo social image and to post on Reddit.
 - Parked future directions, not current blockers: the migration-time one-shot
   Plex-to-Jellyfin/Emby watched-state copy; real Emby integration coverage; and
   a full frontend TLS multi-Plex rebind fixture if a second Plex server or
