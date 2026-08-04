@@ -16,11 +16,12 @@ subreddits dislike multi-sub spam.
 
 | Subreddit | Fit | Notes |
 | --- | --- | --- |
-| r/selfhosted | Strong | Desktop client for home media servers |
-| r/PleX | Strong | Primary backend; be clear it is not official Plex |
-| r/jellyfin | Strong | Supported path; honest scope vs Plex |
+| r/jellyfin | Stronger candidate | Client discussion is normal there; still read promo rules day-of. Honest scope vs Plex. |
+| r/htpc | Maybe | Exists (Home Theater PC). Partial fit for desktop + mpv + HDR living-room path; more hardware/setup oriented. Check sidebar before posting. |
 | r/linux | Medium | AppImage/deb/rpm/Arch; HDR needs Wayland path |
 | r/opensource | Medium | Link license + GitHub; less product-chatty |
+| r/PleX | **Do not launch-post** | Exists (capital X; no separate brand as r/plex). Explicit rule: no self-promotion of your app/service; ban risk. Fine later only as answers if someone asks. |
+| r/selfhosted | **Skip** | Owner note: community is mean to people who post AI-coded apps. |
 
 Avoid sounding like an ad. Lead with the problem and what is different.
 
