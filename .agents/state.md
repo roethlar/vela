@@ -9,6 +9,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- The 2026-08-05 README refresh split the old monolith: README.md is now
+  end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
+  server name scrubbed to "Plex"); deep user reference moved to
+  `docs/usage.md`, build/dev/architecture to `docs/development.md`. The
+  2026-07-25 transcoding-statement guards in `tests/transcoding-ui.test.mjs`
+  were repointed from README.md to docs/usage.md with owner approval.
 - Vela 1.0.59 is published as GitHub's Latest release from exact commit
   `59919210f5e4d2b8b5547acd6b2c7324509286ce`. Its canonical workflow,
   artifact, checksum, package-inspection, and publication evidence lives in

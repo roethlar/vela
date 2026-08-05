@@ -176,40 +176,45 @@ test('an invented quality cannot reach a source', () => {
 
 // Slice 6 — Emby transcoding is best-effort and must be LABELLED limited rather
 // than claimed (owner ruling 2026-07-25). It shares Jellyfin's implementation
-// and has only ever been exercised against Jellyfin.
+// and has only ever been exercised against Jellyfin. The user-facing statements
+// this ruling pinned lived in README.md until the 2026-08 README refresh moved
+// them verbatim to docs/usage.md (owner-approved 2026-08-05); the guard reads
+// the new canonical location.
 test('Emby transcoding is labelled unverified, not claimed', () => {
   assert.match(
     settings,
     /\{#if sources\.some\(\(s\) => s\.kind === "emby"\)\}[\s\S]{0,600}unverified on Emby/,
     'an Emby user must be told converting is unverified, and only an Emby user',
   );
-  const readme = read('README.md');
+  const usage = read('docs/usage.md');
   assert.match(
-    readme,
+    usage,
     /Emby transcoding is best-effort and unverified/,
-    'the README must say the same rather than implying Emby support',
+    'the user docs must say the same rather than implying Emby support',
   );
   // The claim the plan forbids: no document may assert Emby transcoding works.
   assert.doesNotMatch(
-    readme,
+    usage,
     /transcoding (?:works|is supported) on Emby/i,
     'nothing may assert Emby transcoding works without a real server behind it',
   );
 });
 
-// Slice 6 — the README must state the cost of converting plainly, because it is
-// the one thing a user cannot discover until their HDR is gone.
-test('the README states what converting costs', () => {
-  const readme = read('README.md');
+// Slice 6 — the user docs must state the cost of converting plainly, because
+// it is the one thing a user cannot discover until their HDR is gone. (Moved
+// from README.md to docs/usage.md in the 2026-08 README refresh, owner-approved
+// 2026-08-05.)
+test('the user docs state what converting costs', () => {
+  const usage = read('docs/usage.md');
   assert.match(
-    readme,
+    usage,
     /\*\*Converting forfeits HDR and drops container chapters\.\*\*/,
-    'the README must say converting costs HDR and chapters, in those terms',
+    'the user docs must say converting costs HDR and chapters, in those terms',
   );
   assert.match(
-    readme,
+    usage,
     /Playback quality[\s\S]{0,900}\*\*Automatic\*\* starts at Original[\s\S]{0,300}at most twice per play, never steps back up/,
-    'the README must describe Automatic with both bounds the owner ruled',
+    'the user docs must describe Automatic with both bounds the owner ruled',
   );
 });
 
