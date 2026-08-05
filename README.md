@@ -9,6 +9,11 @@
   Plex · Jellyfin · experimental Emby &nbsp;—&nbsp; Linux · macOS · Windows
 </p>
 
+<p align="center">
+  <a href="https://ko-fi.com/michaelcoelho"><img src="https://img.shields.io/badge/Ko--fi-Support-FF5E5B?logo=kofi&logoColor=white" alt="Support on Ko-fi"></a>
+  <a href="https://github.com/sponsors/roethlar"><img src="https://img.shields.io/github/sponsors/roethlar?logo=github&label=GitHub%20Sponsors" alt="GitHub Sponsors"></a>
+</p>
+
 Vela brings server libraries into a focused native desktop interface and hands
 video playback to [mpv](https://mpv.io/) in its own window. That separation is
 the point: the library gets a polished app UI, while video keeps mpv's mature
