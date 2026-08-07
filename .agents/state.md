@@ -25,8 +25,24 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   offers Prefer Best, Prefer Compatible, Prefer Fastest Source, Ask Every Time,
   and per-title Play Version.
 
+- Release code signing is wired into `.github/workflows/release.yml` on branch
+  `ci/release-code-signing` (unpushed, never exercised by a real run). macOS
+  signs and notarizes through tauri-cli; Windows signs during bundling via
+  Tauri's `bundle > windows > signCommand` hook, injected as a CI-only
+  `src-tauri/tauri.windows.conf.json` because tauri-action builds and uploads in
+  one action. Both are gated on non-empty secrets, so a secretless run stays
+  unsigned and green; Linux and Arch artifacts are never signed. Durable facts
+  learned while building it: tauri-cli tests the `APPLE_*` variables for
+  presence only (an empty-but-defined secret reads as "please sign"), it
+  downgrades a failed notarization to a warning, and it staples the `.app` while
+  signing but never notarizing the `.dmg` that wraps it.
+
 ## Next
 
+- The first signed release will make README.md ("Release binaries are
+  unsigned") and RELEASE_NOTES.md stale. Both are accurate for 1.0.59 as
+  published, so they were deliberately left alone; update them with the release
+  that actually ships signed.
 - Launch marketing drafts are in-repo and unpushed: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
