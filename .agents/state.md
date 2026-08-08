@@ -25,8 +25,34 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   offers Prefer Best, Prefer Compatible, Prefer Fastest Source, Ask Every Time,
   and per-title Play Version.
 
+- Release code signing is wired into `.github/workflows/release.yml` on branch
+  `ci/release-code-signing` — **pushed and PROVEN GREEN by dispatch run
+  31228844221 (2026-08-07)**: macOS universal bundle signed and notarized
+  through tauri-cli with every assertion passing; Windows MSI + NSIS signed
+  during bundling via Tauri's `bundle > windows > signCommand` hook (CI-only
+  `src-tauri/tauri.windows.conf.json`, injected because tauri-action builds
+  and uploads in one action), signature assertions passing. Both paths gated
+  on non-empty secrets, so a secretless run stays unsigned and green; Linux
+  and Arch artifacts are never signed. Two fixes rode the proving run:
+  `79e9635` (npm audit lockfile bumps — two advisories published after the
+  last audit run were blocking the whole pipeline) and a repo-secret
+  correction (`AZURE_SIGNING_ACCOUNT` is `roethlar-app-signing`; the first
+  run 403'd on a wrong account name, no workflow change needed). **The
+  branch is unmerged — merging into master is owner-gated and is the last
+  step before a tagged release ships signed.** Durable facts learned:
+  tauri-cli tests the `APPLE_*` variables for presence only (an
+  empty-but-defined secret reads as "please sign"); it staples the `.app`
+  while signing but never notarizing the `.dmg` that wraps it; a failed
+  notarization SUBMISSION fails the build — only notarize-auth LOOKUP
+  failures are downgraded to a warning (and with the full API-key triple
+  exported, lookup cannot fail).
+
 ## Next
 
+- The first signed release will make README.md ("Release binaries are
+  unsigned") and RELEASE_NOTES.md stale. Both are accurate for 1.0.59 as
+  published, so they were deliberately left alone; update them with the release
+  that actually ships signed.
 - Launch marketing drafts are in-repo and unpushed: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
