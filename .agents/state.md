@@ -15,32 +15,27 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `docs/usage.md`, build/dev/architecture to `docs/development.md`. The
   2026-07-25 transcoding-statement guards in `tests/transcoding-ui.test.mjs`
   were repointed from README.md to docs/usage.md with owner approval.
-- Vela 1.0.59 is published as GitHub's Latest release from exact commit
-  `59919210f5e4d2b8b5547acd6b2c7324509286ce`. Its canonical workflow,
-  artifact, checksum, package-inspection, and publication evidence lives in
-  `.agents/plans/v1-release-readiness.md`.
+- Vela 1.0.60 is published as GitHub's Latest release from exact commit
+  `10b968b583a44c4738ece324b5fcbb9d58276235` — the FIRST SIGNED release:
+  the macOS universal DMG is Developer ID signed and notarized (spctl
+  `Notarized Developer ID`), the Windows MSI + NSIS are Authenticode signed
+  (Azure Trusted Signing); Linux and Arch artifacts remain unsigned by
+  design. Its canonical workflow, checksum, local signature-inspection, and
+  publication evidence lives in `.agents/plans/v1-release-readiness.md`.
 - Product behavior remains as settled in `.agents/decisions.md`: Vela is a
   multi-server Plex/Jellyfin/experimental-Emby client, delegates HDR playback
   to external mpv, uses title-level watched state across duplicate copies, and
   offers Prefer Best, Prefer Compatible, Prefer Fastest Source, Ask Every Time,
   and per-title Play Version.
 
-- Release code signing is merged into `main` at `b9c6199` (2026-08-07), proven
-  green by dispatch run 31228844221 before the merge: macOS universal bundle
-  signed and notarized, Windows MSI + NSIS signed, both gated on non-empty
-  secrets so a secretless run stays unsigned and green; Linux and Arch
-  artifacts are never signed. The next tagged release ships signed. The full
-  wiring detail and durable tauri-cli signing facts rotated verbatim to
-  `docs/history/state-archive.md` (2026-08-08). The merged
+- Release code signing merged at `b9c6199` (2026-08-07) shipped in 1.0.60.
+  The wiring detail and durable tauri-cli signing facts live in
+  `docs/history/state-archive.md` (2026-08-08 rotation). The merged
   `ci/release-code-signing` branch still exists locally and on `github`;
   deleting it is owner-gated.
 
 ## Next
 
-- The first signed release will make README.md ("Release binaries are
-  unsigned") and RELEASE_NOTES.md stale. Both are accurate for 1.0.59 as
-  published, so they were deliberately left alone; update them with the release
-  that actually ships signed.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

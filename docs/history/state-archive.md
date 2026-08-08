@@ -4,6 +4,17 @@ Entries rotated verbatim out of `.agents/state.md` when they stopped being
 live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-08-08 (catchup sweep — superseded by signed 1.0.60)
+
+Context for readers: Vela 1.0.60 (first signed release) was published on
+2026-08-08, superseding 1.0.59 as GitHub's Latest. The 1.0.59 entry below
+rotates here verbatim.
+
+- Vela 1.0.59 is published as GitHub's Latest release from exact commit
+  `59919210f5e4d2b8b5547acd6b2c7324509286ce`. Its canonical workflow,
+  artifact, checksum, package-inspection, and publication evidence lives in
+  `.agents/plans/v1-release-readiness.md`.
+
 ## Rotated 2026-08-08 (catchup sweep — signing branch merged)
 
 Context for readers: the entry below recorded release code signing as wired

@@ -295,3 +295,62 @@ target above, non-draft, non-prerelease, and Latest, with publication timestamp
 No VM execution was required for publication; the owner-confirmed product
 playtest, exact-commit GitHub CI, and successful tagged release workflow supplied
 the release evidence.
+
+## Maintenance release: Vela 1.0.60 (first signed release)
+
+Vela 1.0.60 was published on 2026-08-08 from exact commit
+`10b968b583a44c4738ece324b5fcbb9d58276235` — the first release shipping SIGNED
+macOS and Windows artifacts, after the `ci/release-code-signing` merge at
+`b9c6199`. Annotated tag `v1.0.60` has tag object
+`a36c36ba1698f170c21b65ffd91e7b22032a7d7a` and peels to that exact commit.
+
+The tagged release workflow passed in
+`https://github.com/roethlar/vela/actions/runs/31240332521`: npm audit, macOS
+universal DMG, Linux AppImage/deb/rpm, Windows MSI/NSIS, non-root Arch, and
+the final inventory job were all green. Both signing assertion steps ran and
+passed: `Require a signed and notarized macOS bundle` (codesign deep/strict,
+Developer ID authority, stapler validate, spctl) and `Require signed Windows
+installers` (Authenticode `Valid` on the MSI and NSIS). Linux and Arch
+artifacts are unsigned by design.
+
+A fresh draft download matched GitHub's immutable digests for all nine
+nonempty assets. The seven-line manifest verified every promised package:
+
+```text
+d8bc9c1b192fb519ef98f3d70d4947b5028f655a364741ae381a568efac02aeb  vela-1.0.60-1-x86_64.pkg.tar.zst
+f84df70c82f2b78611f69ec39507685cb32cc63c24b7dbb58b5db1cd24f38ff1  Vela_1.0.60_amd64.AppImage
+5e8fdaa54b98255708dbad523db0bd260ca62a942beb27f04d29d9da775ecceb  Vela_1.0.60_amd64.deb
+27edf4e9c5c897fb1c0b2b98e19a7f6fefb771de66879f130ffe08e6b37b8109  Vela-1.0.60-1.x86_64.rpm
+a8a86be32a526418ec6e4be52db57ad8ce420afdfdc41fc433337b982bf279a1  Vela_1.0.60_universal.dmg
+2e9239bcc01433c2dcf8b492a1a3cb1f0200aebcd77f696f562114de006590fa  Vela_1.0.60_x64_en-US.msi
+a62dc7768a9118fc119c24f7f5930ba5bdec3678773d877e4b6e2cc71c322dfb  Vela_1.0.60_x64-setup.exe
+```
+
+`SHA256SUMS` itself has digest
+`c4a58ebad21b08a70b5e508e3b163ec6c586715714433c4c12b36a8f273794dd`;
+the extra `Vela_1.0.60_universal.app.tar.gz` has digest
+`289470fdf5327a347a56dc3a8613098fc7ea04478e06247539f8df090d91c449`.
+
+Local macOS inspection of the downloaded DMG: `hdiutil verify` VALID; the DMG
+is `Developer ID Application: MICHAEL COELHO (27R2KCAHN7)` signed and
+satisfies its designated requirement; the bundled app passes
+`codesign --verify --deep --strict`, `xcrun stapler validate` (notarization
+ticket stapled), and `spctl --assess` reports `accepted` with
+`source=Notarized Developer ID`; it reports version 1.0.60 and contains
+x86_64 and arm64 binaries. Windows Authenticode validity is evidenced by the
+in-run assertion above (no Authenticode verifier on the macOS dev host).
+
+GitHub reports release database ID `367113525`, title `Vela 1.0.60`, exact
+target above, non-draft, non-prerelease, and Latest, with publication
+timestamp `2026-08-08T05:03:46Z`. The anonymous release page returned HTTP
+200: `https://github.com/roethlar/vela/releases/tag/v1.0.60`. The release
+notes body is the `RELEASE_NOTES.md` content at the tag.
+
+Local pre-tag verification ran the full repo set with the pinned toolchain
+(Node 26.5.0/npm 12.0.1 from a checksum-verified official archive, staged in
+`/tmp` because the dev host's Homebrew Node had drifted to 26.7.0/12.0.2):
+toolchain assertion, `npm ci`, `npm audit` (0 vulnerabilities),
+svelte-check (0/0), production build, `cargo +1.89.0 check --locked`,
+`cargo +stable check --locked`, `clippy --all-targets --locked -D warnings`,
+`cargo +stable test --locked`, and `cargo audit` (only the standing allowed
+RUSTSEC-2024-0429 notice) — all green.
