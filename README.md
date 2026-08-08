@@ -63,9 +63,10 @@ for macOS, Windows, Linux, or Arch.
    custom executable under Settings → Player.
 2. **Download Vela** from
    [GitHub Releases](https://github.com/roethlar/vela/releases/latest) and
-   install it. Release binaries are unsigned: macOS Gatekeeper and Windows
-   SmartScreen may ask for an explicit approval. `SHA256SUMS` is attached to
-   every release.
+   install it. macOS and Windows releases are signed — Developer ID signed and
+   notarized on macOS, Authenticode signed on Windows — so Gatekeeper and
+   SmartScreen accept them without an approval prompt. Linux and Arch packages
+   are unsigned. `SHA256SUMS` is attached to every release.
 3. **Connect a server.** Open Settings → Servers. Link Plex with its device
    code, or add Jellyfin/Emby with a username and password or an API key.
 4. **Pick a library and play.** Movies play from their detail view; shows

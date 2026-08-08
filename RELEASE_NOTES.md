@@ -1,27 +1,28 @@
-# Vela 1.0.59
+# Vela 1.0.60
 
-Vela 1.0.59 makes every existing library sort reversible with an independent
-ascending or descending direction.
+Vela 1.0.60 ships signed release binaries: the macOS app is Developer ID
+signed and notarized, and the Windows installers are Authenticode signed.
 
 ## Highlights
 
-- Choose what to sort by from a direction-neutral dropdown, then toggle the
-  adjacent boxed `↑` or `↓` control to reverse the order.
-- Change the sort field without losing the selected direction, or change the
-  direction without losing the field.
-- Restore each source library's complete sort choice after restart. The merged
-  **All** view remains session-only, matching its existing behavior.
-- Use the arrow control from a keyboard or assistive technology through its
-  dynamic direction label and tooltip.
+- Install on macOS without a Gatekeeper approval prompt — the universal DMG
+  (Apple Silicon and Intel) is Developer ID signed and notarized by Apple.
+- Install on Windows without a SmartScreen warning — both the MSI and the NSIS
+  installer are Authenticode signed through Azure Trusted Signing.
+- Read a refreshed end-user README with real-library screenshots; the deep
+  user reference moved to `docs/usage.md` and the build/dev documentation to
+  `docs/development.md`.
+- Pick up dependency security fixes (postcss, SvelteKit, nanoid).
 
 ## Downloads
 
-Native packages are attached for macOS, Windows, Debian/Ubuntu, RPM-based Linux,
-Arch Linux, and AppImage users. `SHA256SUMS` covers every promised package.
+Native packages are attached for macOS, Windows, Debian/Ubuntu, RPM-based
+Linux, Arch Linux, and AppImage users. `SHA256SUMS` covers every promised
+package.
 
-Vela and its installers are unsigned, so macOS Gatekeeper or Windows
-SmartScreen may require explicit approval. mpv 0.38 or newer remains a separate
-required installation.
+The macOS and Windows artifacts are signed; the Linux packages and the Arch
+package are unsigned, as before. mpv 0.38 or newer remains a separate required
+installation.
 
 ## Server status
 
@@ -36,4 +37,4 @@ The rare queued watch-edit race disclosed in 1.0.0 remains an accepted
 limitation. Full setup and privacy details are in the
 [README](https://github.com/roethlar/vela#readme).
 
-[Changes since 1.0.58](https://github.com/roethlar/vela/compare/v1.0.58...v1.0.59)
+[Changes since 1.0.59](https://github.com/roethlar/vela/compare/v1.0.59...v1.0.60)
