@@ -39,6 +39,7 @@ PROTECTED = frozenset({
     ".claude/hooks/protect-governance.py",
     ".codex/hooks.json",
     ".agents/playbooks/catchup.md",
+    ".agents/playbooks/drift.md",
     ".agents/playbooks/codereview.md",
     ".agents/playbooks/handoff.md",
     ".agents/playbooks/openreview.md",
