@@ -28,6 +28,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   offers Prefer Best, Prefer Compatible, Prefer Fastest Source, Ask Every Time,
   and per-title Play Version.
 
+- JS toolchain pin moved to Node 26.7.0 / npm 12.0.2 (2026-08-18): `.node-version`, `packageManager`, and the four CI/release `npm install --global` sites. `engines.node` remains `>=26.5.0 <27`. The Linux E2E VM is still on the old user-local 26.5.0/12.0.1 tree and will fail the checker until that host is realigned.
 - Release code signing merged at `b9c6199` (2026-08-07) shipped in 1.0.60.
   The wiring detail and durable tauri-cli signing facts live in
   `docs/history/state-archive.md` (2026-08-08 rotation). The merged
@@ -36,6 +37,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
+- Realign the Linux E2E VM from user-local Node 26.5.0/npm 12.0.1 to the new repo pin (26.7.0/12.0.2). Owner-gated; do not touch that host without a go.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
