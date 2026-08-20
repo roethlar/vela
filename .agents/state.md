@@ -9,37 +9,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- 2026-08-20 macOS AirPlay synchronization diagnostic at
-  `.agents/plans/macos-airplay-sync.md` is owner-approved and in progress;
-  production edits remain unapproved. On the same AirPlay route, the
-  credential-free stereo flash/click fixture stayed physically synchronized
-  after startup with both forced CoreAudio and forced AVFoundation. CoreAudio
-  swallowed the first click; AVFoundation swallowed about half of it. Both
-  reported near-zero internal `avsync`. Installed Vela 1.0.60 has no saved
-  advanced mpv args, own config, or autocrop override. Its real server-backed
-  play reproduced roughly two seconds of physically late audio while IPC still
-  reported CoreAudio, zero audio delay, and `avsync=0.006 ms`; unlike the local
-  fixture, it was network MKV with 48 kHz E-AC-3 5.1 downmixed to stereo.
-  Owner separately approved changing that live process to AVFoundation over
-  IPC; mpv switched without an explicit reload or relaunch and physical sync
-  became correct (`avsync=0.359 ms`). This proves the existing AVFoundation AO
-  fixes the affected stream and eliminates any need for a guessed delay or
-  AirPlay detector. Codec/channel-layout/input-path causality remains unproved
-  but no longer blocks backend selection. A restarted play reverted to
-  CoreAudio and reproduced the offset; switching the new process to
-  AVFoundation restored sync. That same process followed AirPlay -> Mac mini
-  Speakers -> AirPlay automatically and remained physically synchronized in
-  both directions. No route detector/listener/polling/delay is needed. The
-  provisional production direction is macOS
-  `--ao=avfoundation,coreaudio`, preserving Advanced-argument override; it is
-  not approved. Next evidence gate is AVFoundation pause/resume, seek, and
-  software-volume response because its observed 96,000-sample queue may delay
-  controls. Own-config precedence also needs one owner ruling before an
-  implementation plan. Plezy `current-ao` is no longer required. The
-  listener/polling/2,000 ms compensation design remains withdrawn. The two
-  retained Claude verdicts over `32ef827f..9a79bb3` remain historical evidence
-  at `.agents/review/openreview-2026-08-20-airplay-plan.md`; no verdict was
-  discarded and no further Claude session is authorized.
+- 2026-08-20 macOS AirPlay diagnostics selected an AVFoundation-first production
+  path, now drafted at `.agents/plans/macos-airplay-sync.md`; implementation is
+  not approved. The affected server-backed MKV/E-AC-3 play was physically about
+  two seconds audio-late under CoreAudio despite near-zero mpv `avsync`; changing
+  that live process to AVFoundation restored physical sync, as it did again after
+  a fresh CoreAudio launch. The same AVFoundation process followed AirPlay ->
+  built-in speakers -> AirPlay and stayed synchronized, so Vela needs no route
+  detector, listener, polling, guessed delay, or new setting. The production
+  design adds macOS `--ao=avfoundation,coreaudio` before Advanced mpv arguments,
+  with no non-macOS behavior change. Two manual volume-timing attempts were
+  inconclusive (the second IPC OSD cue was not visible); upstream mpv 0.41 source
+  directly applies AVFoundation mute/volume and pause controls, while packaged
+  pause/resume and seek remain explicit acceptance checks. One owner ruling
+  remains: preserve expert own-config ownership by omitting Vela's AO preference
+  when `mpv_use_own_config=true` (recommended), or enforce Vela's AO preference.
 - 2026-08-20 owner review-process constraint: never start more than one Claude
   session without explicit owner approval; never impose a low timeout, end a
   Claude process, or discard any verdict for any reason without explicit owner
@@ -93,9 +77,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Resolve the macOS AirPlay plan's admitted review choices one owner decision at
-  a time, beginning with bounded CoreAudio polling versus one app-lifetime
-  listener. Then revise or review the plan only under explicit owner direction.
+- Resolve the macOS AirPlay plan's one remaining owner decision: whether
+  `mpv_use_own_config=true` omits Vela's AVFoundation-first AO preference
+  (recommended) or Vela enforces that preference. Implementation remains
+  unapproved until the plan records the ruling and receives an explicit go.
 - Owner decision after direct-IP isolation: plan the macOS local-network fix
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
