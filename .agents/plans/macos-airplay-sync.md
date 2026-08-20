@@ -311,4 +311,13 @@ out of portable state.
 
 ## Review log
 
-- Pending: independent `openreview claude` over the committed plan range.
+- 2026-08-20 owner-directed `openreview claude` used Claude Code 2.1.237,
+  `claude-opus-5` at owner-specified `xhigh`, over pinned
+  `32ef827f..9a79bb3`. Two sessions completed naturally and both verdicts are
+  retained in `.agents/review/openreview-2026-08-20-airplay-plan.md`: session 1
+  returned `acceptable_with_changes` with `capability_ok:false` because the
+  orchestrator's launch grant blocked the required diff check; session 2
+  returned `acceptable_with_changes`, `capability_ok:true`, exact pins, and a
+  zero-exit diff check. No recommendation is adopted. First owner decision is
+  the reviewers' live-route conflict: bounded polling versus one app-lifetime
+  CoreAudio listener; neither recommends the draft's per-play listener.

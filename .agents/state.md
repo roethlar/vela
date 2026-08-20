@@ -9,12 +9,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- 2026-08-20 macOS AirPlay synchronization plan drafted at
-  `.agents/plans/macos-airplay-sync.md`; implementation is not approved. The
-  proposed fix detects CoreAudio's transport type without device-name parsing,
-  applies a default/calibratable video delay only for AirPlay, resets it for
-  other outputs, and updates the live mpv property when the system output
-  changes mid-play. Independent Claude openreview is pending.
+- 2026-08-20 macOS AirPlay synchronization plan at
+  `.agents/plans/macos-airplay-sync.md` has two retained owner-directed Claude
+  verdicts over `32ef827f..9a79bb3`, both `acceptable_with_changes`; the second
+  is schema-valid with `capability_ok:true`. Full provenance and seven admitted
+  consolidated plan findings are in
+  `.agents/review/openreview-2026-08-20-airplay-plan.md`. No recommendation is
+  adopted and implementation is not approved. First owner decision is live
+  route observation: bounded polling versus one app-lifetime CoreAudio
+  listener; neither reviewer recommends the draft's per-play listener.
+- 2026-08-20 owner review-process constraint: never start more than one Claude
+  session without explicit owner approval; never impose a low timeout, end a
+  Claude process, or discard any verdict for any reason without explicit owner
+  approval. A failed capability/schema check is reported with its verdict
+  retained and does not authorize a retry.
 - 2026-08-20 explicit local signed-build path is implemented at
   `scripts/build-signed-macos.sh`: macOS-only, Keychain-identity based, loads
   sibling `Certificates` API metadata without reading `.p12` passwords, fails
@@ -63,9 +71,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Complete the owner-requested Claude openreview of the committed macOS AirPlay
-  synchronization plan, record its pinned verdict, and route any material
-  design change to the owner one decision at a time.
+- Resolve the macOS AirPlay plan's admitted review choices one owner decision at
+  a time, beginning with bounded CoreAudio polling versus one app-lifetime
+  listener. Then revise or review the plan only under explicit owner direction.
 - Owner decision after direct-IP isolation: plan the macOS local-network fix
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
