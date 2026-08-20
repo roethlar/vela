@@ -20,10 +20,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   play reproduced roughly two seconds of physically late audio while IPC still
   reported CoreAudio, zero audio delay, and `avsync=0.006 ms`; unlike the local
   fixture, it was network MKV with 48 kHz E-AC-3 5.1 downmixed to stereo.
-  Codec/channel-layout/input-path causality remains unproved. Next proposed
-  diagnostic is a temporary live switch of this same session to AVFoundation;
-  that mutation awaits a separate owner `go`. Plezy `current-ao` follows only
-  if still material. The
+  Owner separately approved changing that live process to AVFoundation over
+  IPC; mpv switched without an explicit reload or relaunch and physical sync
+  became correct (`avsync=0.359 ms`). This proves the existing AVFoundation AO
+  fixes the affected stream and eliminates any need for a guessed delay or
+  AirPlay detector. Codec/channel-layout/input-path causality remains unproved
+  but no longer blocks backend selection. Next evidence gate is whether
+  AVFoundation follows built-in <-> AirPlay route changes during one play and
+  remains correct on ordinary output; that system-output mutation awaits a
+  separate owner `go`. Plezy `current-ao` is no longer required for root cause.
+  The
   listener/polling/2,000 ms compensation design remains withdrawn. The two
   retained Claude verdicts over `32ef827f..9a79bb3` remain historical evidence
   at `.agents/review/openreview-2026-08-20-airplay-plan.md`; no verdict was

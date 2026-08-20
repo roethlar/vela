@@ -41,6 +41,11 @@ the only place allowed to know about a particular box.
   title, headers, or credentials were queried. The local stereo AAC fixture
   remained synchronized through the same AO, making media/format/input path a
   controlled difference rather than proving a general CoreAudio defect.
+- Owner-approved live IPC change of that exact Vela play to
+  `ao=avfoundation` succeeded without an explicit reload or relaunch. IPC then
+  reported `current-ao=avfoundation` and `avsync=0.359 ms`; the owner observed
+  physical sync was correct. The write changed only the live mpv process and
+  did not modify Vela or mpv settings.
 
 - Local Developer ID signing/notarization configured 2026-08-20. The login
   Keychain holds Apple's Developer ID G2 intermediate and `Developer ID

@@ -239,13 +239,20 @@ proved guards, regression analysis, and owner approval before code changes.
   as 48 kHz stereo. Video used VideoToolbox, display timing was 240 Hz, and
   `video-sync=audio`. mpv therefore believed the stream was synchronized while
   the AirPlay endpoint physically presented its audio about two seconds late.
+- With that exact play still running, the owner separately approved one IPC
+  write setting `ao=avfoundation`. mpv accepted it and changed
+  `current-ao` from CoreAudio to AVFoundation without an explicit audio reload,
+  seek, or relaunch. IPC then reported `avsync=0.000359` seconds. The owner
+  observed that physical A/V synchronization became correct. No persisted Vela
+  or mpv setting changed; the selection belongs only to that live process.
 - Interim disposition: the audio-output hypothesis is rejected for
-  steady-state stereo playback, and the backend-gap hypothesis is rejected for
-  this local fixture. The embedded-path and launch-context hypotheses remain,
-  and the media/format/input-path difference is now load-bearing: local stereo
-  AAC remained synchronized through CoreAudio while network E-AC-3 5.1
-  downmixed to stereo did not. No single cause among codec, channel layout,
-  demux/input path, or their interaction is established yet.
+  general stereo playback but confirmed for the affected server-backed stream:
+  AVFoundation fixes the physical offset CoreAudio leaves invisible to mpv.
+  The backend-gap hypothesis is rejected because an existing upstream backend
+  is correct. The embedded-path hypothesis is unnecessary for this
+  reproduction. Codec/channel layout/input path still determine why CoreAudio
+  fails only on the real stream, but they no longer block selecting the
+  working backend. Route-change and non-AirPlay compatibility remain unproved.
 
 ## Result matrix
 
@@ -258,6 +265,7 @@ Fill this table during the separately approved diagnostic run:
 | Standalone Vela-equivalent | Built-in | AVFoundation | pending | pending | pending | pending |
 | Standalone Vela-equivalent | AirPlay | AVFoundation | steady-state synchronized; about half of first click absent | `current-ao=avfoundation`; delay 0; `avsync=-0.142 ms`; 96,000-sample buffer | pending | Correct after initial preroll |
 | Installed Vela 1.0.60 server-backed play | AirPlay | CoreAudio | audio late roughly 2 seconds | E-AC-3 5.1 -> stereo; `avsync=0.006 ms`; delay 0 | not tested | Defect reproduced |
+| Same installed Vela play after live AO change | AirPlay | AVFoundation | synchronized | E-AC-3 5.1 -> stereo; `avsync=0.359 ms`; delay 0 | AO changed live without relaunch | Defect corrected |
 | Plezy 2.16.0 | AirPlay | pending runtime proof | observed synchronized | pending | pending | pending |
 
 ## Prior review disposition
