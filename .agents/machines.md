@@ -46,6 +46,14 @@ the only place allowed to know about a particular box.
   reported `current-ao=avfoundation` and `avsync=0.359 ms`; the owner observed
   physical sync was correct. The write changed only the live mpv process and
   did not modify Vela or mpv settings.
+- The first changed process ended naturally. Restarting the same item launched
+  CoreAudio again and reproduced the offset; changing that new process to
+  AVFoundation restored sync. With it still playing, AirPlay -> Mac mini
+  Speakers kept AVFoundation/automatic-device selection, reported
+  `avsync=0.011 ms`, moved sound to built-in output, and remained physically
+  synchronized. Mac mini Speakers -> AirPlay kept the same AO/process,
+  reported `avsync=0.007 ms`, moved sound back to AirPlay, and remained
+  physically synchronized. No listener, polling, delay, or relaunch was used.
 
 - Local Developer ID signing/notarization configured 2026-08-20. The login
   Keychain holds Apple's Developer ID G2 intermediate and `Developer ID

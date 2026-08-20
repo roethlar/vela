@@ -25,11 +25,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   became correct (`avsync=0.359 ms`). This proves the existing AVFoundation AO
   fixes the affected stream and eliminates any need for a guessed delay or
   AirPlay detector. Codec/channel-layout/input-path causality remains unproved
-  but no longer blocks backend selection. Next evidence gate is whether
-  AVFoundation follows built-in <-> AirPlay route changes during one play and
-  remains correct on ordinary output; that system-output mutation awaits a
-  separate owner `go`. Plezy `current-ao` is no longer required for root cause.
-  The
+  but no longer blocks backend selection. A restarted play reverted to
+  CoreAudio and reproduced the offset; switching the new process to
+  AVFoundation restored sync. That same process followed AirPlay -> Mac mini
+  Speakers -> AirPlay automatically and remained physically synchronized in
+  both directions. No route detector/listener/polling/delay is needed. The
+  provisional production direction is macOS
+  `--ao=avfoundation,coreaudio`, preserving Advanced-argument override; it is
+  not approved. Next evidence gate is AVFoundation pause/resume, seek, and
+  software-volume response because its observed 96,000-sample queue may delay
+  controls. Own-config precedence also needs one owner ruling before an
+  implementation plan. Plezy `current-ao` is no longer required. The
   listener/polling/2,000 ms compensation design remains withdrawn. The two
   retained Claude verdicts over `32ef827f..9a79bb3` remain historical evidence
   at `.agents/review/openreview-2026-08-20-airplay-plan.md`; no verdict was

@@ -245,6 +245,21 @@ proved guards, regression analysis, and owner approval before code changes.
   seek, or relaunch. IPC then reported `avsync=0.000359` seconds. The owner
   observed that physical A/V synchronization became correct. No persisted Vela
   or mpv setting changed; the selection belongs only to that live process.
+- The play ended before the route test. Restarting the same item created a new
+  mpv process on CoreAudio and reproduced the physical offset, proving again
+  that the IPC AO change was process-local. The approved diagnostic reapplied
+  AVFoundation to the new process; physical synchronization returned.
+- With that second AVFoundation process still playing, the owner changed the
+  system output from AirPlay to Mac mini Speakers. macOS reported the new
+  default, mpv remained `current-ao=avfoundation` with
+  `audio-device=auto` and `avsync=0.000011` seconds, sound moved to the built-in
+  speakers, and the owner confirmed physical sync.
+- The owner then changed the system output back to AirPlay. The same mpv
+  process remained on AVFoundation with automatic device selection and
+  `avsync=0.000007` seconds; sound moved back to AirPlay and remained physically
+  synchronized. AVFoundation therefore owns both live route transitions
+  correctly without Vela polling, listening, applying a delay, or relaunching
+  mpv.
 - Interim disposition: the audio-output hypothesis is rejected for
   general stereo playback but confirmed for the affected server-backed stream:
   AVFoundation fixes the physical offset CoreAudio leaves invisible to mpv.
@@ -252,7 +267,10 @@ proved guards, regression analysis, and owner approval before code changes.
   is correct. The embedded-path hypothesis is unnecessary for this
   reproduction. Codec/channel layout/input path still determine why CoreAudio
   fails only on the real stream, but they no longer block selecting the
-  working backend. Route-change and non-AirPlay compatibility remain unproved.
+  working backend. Built-in output and both live built-in/AirPlay transitions
+  are now proved. AVFoundation control-response behavior remains unproved; its
+  observed 96,000-sample queue can delay software volume changes or expose
+  pause/seek edge behavior even while presentation remains synchronized.
 
 ## Result matrix
 
@@ -266,7 +284,27 @@ Fill this table during the separately approved diagnostic run:
 | Standalone Vela-equivalent | AirPlay | AVFoundation | steady-state synchronized; about half of first click absent | `current-ao=avfoundation`; delay 0; `avsync=-0.142 ms`; 96,000-sample buffer | pending | Correct after initial preroll |
 | Installed Vela 1.0.60 server-backed play | AirPlay | CoreAudio | audio late roughly 2 seconds | E-AC-3 5.1 -> stereo; `avsync=0.006 ms`; delay 0 | not tested | Defect reproduced |
 | Same installed Vela play after live AO change | AirPlay | AVFoundation | synchronized | E-AC-3 5.1 -> stereo; `avsync=0.359 ms`; delay 0 | AO changed live without relaunch | Defect corrected |
+| Same AVFoundation play | Mac mini Speakers | AVFoundation | synchronized | automatic device; `avsync=0.011 ms` | AirPlay -> built-in followed automatically | Passed |
+| Same AVFoundation play | AirPlay after built-in | AVFoundation | synchronized | automatic device; `avsync=0.007 ms` | built-in -> AirPlay followed automatically | Passed |
 | Plezy 2.16.0 | AirPlay | pending runtime proof | observed synchronized | pending | pending | pending |
+
+## Provisional implementation direction
+
+Evidence selects a macOS AVFoundation-first AO policy, with CoreAudio retained
+as initialization fallback. The production candidate is an explicit
+`--ao=avfoundation,coreaudio` Vela default on macOS, placed before Advanced mpv
+arguments so the existing last-option-wins escape hatch remains authoritative.
+No route detector, CoreAudio dependency, listener, polling loop, IPC monitor,
+delay setting, or UI calibration control is justified.
+
+This is not yet an approved implementation plan. Before settling it, test the
+same affected stream on AVFoundation for pause/resume, forward/backward seek,
+and software-volume response. Determine whether the observed 96,000-sample
+queue creates a control delay and whether an upstream AO option can reduce it
+without introducing dropouts. Also decide explicitly whether the Vela default
+should apply when `mpv_use_own_config=true`, because a command-line AO list
+would override an AO selected only in `mpv.conf`; Advanced arguments would
+remain able to override it either way.
 
 ## Prior review disposition
 
