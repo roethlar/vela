@@ -24,6 +24,21 @@ npm ci
 ./scripts/build.sh
 ```
 
+On a Mac whose login Keychain already contains the Developer ID identity, use
+the explicit signed-build wrapper to build the universal DMG, submit it for
+notarization, staple it, and independently verify both the app and disk image:
+
+```bash
+./scripts/build-signed-macos.sh
+```
+
+The wrapper reads App Store Connect API metadata from the sibling
+`../Certificates` directory by default. Set `VELA_SIGNING_DIR` to use another
+private directory. It never imports a `.p12` or reads its password; one-time
+Keychain provisioning must already be complete, and any missing identity,
+credential, signature, staple, Gatekeeper acceptance, or architecture fails
+the build.
+
 On Windows, use the equivalent PowerShell wrapper:
 
 ```powershell

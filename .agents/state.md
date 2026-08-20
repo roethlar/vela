@@ -9,6 +9,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- 2026-08-20 explicit local signed-build path is implemented at
+  `scripts/build-signed-macos.sh`: macOS-only, Keychain-identity based, loads
+  sibling `Certificates` API metadata without reading `.p12` passwords, fails
+  closed on partial/unsafe credentials, delegates compilation to `build.sh`,
+  then independently checks DMG/app Developer ID signatures, staple,
+  Gatekeeper, and both universal architectures. Hermetic guards cover the
+  success and pre-build refusal paths; removing only `spctl` failed its guard
+  for the exact missing assessment, restored green. Real Apple submission and
+  artifact evidence are machine-specific in `.agents/machines.md`.
 - 2026-08-20 macOS 27 local-network failure under investigation: Jellyfin at
   `altiera:8096` is reachable from the host and answers its public endpoint,
   but the installed `/Applications/Vela.app` is unsigned/ad-hoc and fails its

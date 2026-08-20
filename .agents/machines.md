@@ -12,13 +12,14 @@ the only place allowed to know about a particular box.
   App Store Connect API metadata and the private `.p8` remain canonical in
   `../Certificates/AppStoreConnectCertInfo.csv`; the `.p12`, `.p8`, password
   list, and API metadata file are owner-only (`0600`). Never copy credential
-  values into this repo or command output. For a local Tauri build, set
-  `APPLE_SIGNING_IDENTITY`, load `APPLE_API_ISSUER` / `APPLE_API_KEY` from that
-  CSV, point `APPLE_API_KEY_PATH` at its `KeyFile`, then run
-  `bash ./scripts/build.sh`. Exact `fc3472b` universal build was Developer ID
-  signed, accepted and stapled by Apple notarization, Gatekeeper accepted as
-  `Notarized Developer ID`, and produced identical `dist/` / bundle DMGs with
-  SHA-256 `3cae06142f329a4e9d1d9dcb5ea0cb1d1222541a029444cbd0025ba950a92a6f`.
+  values into this repo or command output. Use
+  `scripts/build-signed-macos.sh` for a fail-closed local signed build; it loads
+  the non-secret metadata from that CSV and uses the installed identity. Its
+  2026-08-20 real-path proof submitted `f6c85900-9550-4d71-99bf-2485e7f1d165`,
+  Apple accepted and stapled it, Gatekeeper accepted the mounted app as
+  `Notarized Developer ID`, and both universal architectures were present.
+  Resulting DMG SHA-256:
+  `7cb333e33fbfbffac749cd7c1b5364f4e0443a2caefbc7e37c06a7ab370a977c`.
 
 Relocated out of `.agents/state.md` 2026-07-14 (drift pass) — state.md stays
 portable and may at most point here.
