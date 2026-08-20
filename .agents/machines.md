@@ -21,6 +21,18 @@ the only place allowed to know about a particular box.
   not contain a nonzero audio-sync override. Retained unified logs do not
   reveal which AO the synchronized Plezy play selected, so runtime AO remains
   an explicit diagnostic gap.
+- Credential-free AirPlay A/B on 2026-08-20 used a 12-second 1280x720 60 fps
+  stereo flash/click fixture. Forced CoreAudio selected `AirPlay (126)`,
+  reported `avsync=-5.736 ms` and 11.610 ms device latency, swallowed the first
+  click, then remained physically synchronized. Forced AVFoundation reported
+  `avsync=-0.142 ms`, swallowed about half of the first click, then remained
+  physically synchronized. Both backends therefore passed steady-state stereo
+  sync; the difference was initial preroll only. An earlier mono fixture made
+  CoreAudio fail with macOS `paramErr (-50)` and was excluded from sync
+  comparison.
+- Installed Vela 1.0.60's sanitized playback settings at the same diagnostic
+  point were `mpv_extra_args=null`, `mpv_use_own_config=false`, and
+  `mpv_autocrop=null`. No connection fields or media URLs were read or printed.
 
 - Local Developer ID signing/notarization configured 2026-08-20. The login
   Keychain holds Apple's Developer ID G2 intermediate and `Developer ID

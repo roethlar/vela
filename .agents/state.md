@@ -9,19 +9,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- 2026-08-20 macOS AirPlay synchronization plan at
-  `.agents/plans/macos-airplay-sync.md` is revised backend-first after direct
-  Plezy 2.16.0 source comparison: Plezy has no macOS AirPlay detector or
-  automatic delay, embeds mpv 0.41.0 through MPVKit 1.0.23, and explicitly
-  prefers `coreaudio,avfoundation`. The prior listener/polling/2,000 ms
-  compensation design is withdrawn before implementation. Owner approved this
-  planning correction only; diagnostic execution and production edits remain
-  unapproved. Next evidence gate is one credential-free physical flash/click
-  matrix forcing standalone CoreAudio versus AVFoundation plus runtime proof
-  of Plezy's actual `current-ao`; no polling-versus-listener owner decision is
-  live. The two retained Claude verdicts over `32ef827f..9a79bb3` remain
-  historical evidence at
-  `.agents/review/openreview-2026-08-20-airplay-plan.md`; no verdict was
+- 2026-08-20 macOS AirPlay synchronization diagnostic at
+  `.agents/plans/macos-airplay-sync.md` is owner-approved and in progress;
+  production edits remain unapproved. On the same AirPlay route, the
+  credential-free stereo flash/click fixture stayed physically synchronized
+  after startup with both forced CoreAudio and forced AVFoundation. CoreAudio
+  swallowed the first click; AVFoundation swallowed about half of it. Both
+  reported near-zero internal `avsync`, so forcing AVFoundation is not the
+  steady-state fix. Installed Vela 1.0.60 has no saved advanced mpv args, own
+  config, or autocrop override. Next gate is a sanitized reproduction through
+  Vela's real server-backed launch to isolate launch-context/media-format
+  differences, followed by Plezy `current-ao` only if still material. The
+  listener/polling/2,000 ms compensation design remains withdrawn. The two
+  retained Claude verdicts over `32ef827f..9a79bb3` remain historical evidence
+  at `.agents/review/openreview-2026-08-20-airplay-plan.md`; no verdict was
   discarded and no further Claude session is authorized.
 - 2026-08-20 owner review-process constraint: never start more than one Claude
   session without explicit owner approval; never impose a low timeout, end a

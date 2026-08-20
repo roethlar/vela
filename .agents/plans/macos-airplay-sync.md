@@ -2,8 +2,9 @@
 
 ## Status
 
-**Revised 2026-08-20 after the owner approved a backend-first plan correction;
-diagnostic execution and implementation are not approved.**
+**Revised 2026-08-20 after the owner approved a backend-first plan correction.
+The owner approved diagnostic execution on 2026-08-20; it is in progress.
+Implementation is not approved.**
 
 The earlier design assumed Vela had to detect AirPlay and impose a nominal
 2,000 ms video delay. Direct inspection of Plezy 2.16.0 falsified the premise
@@ -200,6 +201,41 @@ Use the first matching branch:
 Each branch requires a new cold-implementable production plan, independently
 proved guards, regression analysis, and owner approval before code changes.
 
+## Evidence log
+
+### 2026-08-20 — AirPlay launch A/B, physical observation pending
+
+- Generated a credential-free 12-second 1280x720 60 fps flash/click fixture.
+  The valid comparison fixture contains stereo 48 kHz AAC audio and has
+  SHA-256 `f5e5b5641234a3876ad535bb41e8970f005730d194039d1cef40c7716262877e`.
+- An initial mono fixture was invalid for the sync comparison: forced
+  CoreAudio rejected its input channel layout with macOS `paramErr (-50)` and
+  produced no audio. This independently reproduces the failure that motivated
+  Plezy's AVFoundation fallback, but it says nothing about physical A/V sync.
+- With the stereo fixture and system output already AirPlay, forced CoreAudio
+  opened device `AirPlay (126)`. IPC reported `current-ao=coreaudio`,
+  `audio-device=auto`, `audio-delay=0`, and `avsync=-0.005736` seconds. The AO
+  reported 11,609,977 ns device latency, 354,166 ns AudioUnit latency, and a
+  1,148-sample device buffer.
+- With every other argument and route condition unchanged, forced
+  AVFoundation opened `AVSampleBufferAudioRenderer`. IPC reported
+  `current-ao=avfoundation`, `audio-device=auto`, `audio-delay=0`, and
+  `avsync=-0.000142` seconds. It allocated a 96,000-sample device buffer.
+- Both valid runs completed naturally. The owner observed that CoreAudio
+  swallowed the first click and then kept every remaining click synchronized
+  with its flash. AVFoundation swallowed roughly half of the first click and
+  then kept every remaining click synchronized with its flash. Neither backend
+  had a steady-state physical offset on this stereo fixture.
+- Installed Vela 1.0.60 has no stored `mpv_extra_args`, does not enable the
+  own-config path, and has no stored autocrop override. Those sanitized fields
+  exclude the three user-controlled launch differences without exposing the
+  connection document's other fields.
+- Interim disposition: the audio-output hypothesis is rejected for
+  steady-state stereo playback, and the backend-gap hypothesis is rejected for
+  this local fixture. The embedded-path and launch-context hypotheses remain,
+  as does a newly exposed media/format/input-path variable between the local
+  fixture and the server-backed item that reproduced the Vela defect.
+
 ## Result matrix
 
 Fill this table during the separately approved diagnostic run:
@@ -207,9 +243,9 @@ Fill this table during the separately approved diagnostic run:
 | Player/path | Output at launch | Forced/actual AO | Physical offset | mpv-reported state | Mid-play switch | Result |
 | --- | --- | --- | --- | --- | --- | --- |
 | Standalone Vela-equivalent | Built-in | CoreAudio | pending | pending | pending | pending |
-| Standalone Vela-equivalent | AirPlay | CoreAudio | pending | pending | pending | pending |
+| Standalone Vela-equivalent | AirPlay | CoreAudio | steady-state synchronized; first click absent | `current-ao=coreaudio`; delay 0; `avsync=-5.736 ms`; reported device latency 11.610 ms | pending | Correct after initial preroll |
 | Standalone Vela-equivalent | Built-in | AVFoundation | pending | pending | pending | pending |
-| Standalone Vela-equivalent | AirPlay | AVFoundation | pending | pending | pending | pending |
+| Standalone Vela-equivalent | AirPlay | AVFoundation | steady-state synchronized; about half of first click absent | `current-ao=avfoundation`; delay 0; `avsync=-0.142 ms`; 96,000-sample buffer | pending | Correct after initial preroll |
 | Plezy 2.16.0 | AirPlay | pending runtime proof | observed synchronized | pending | pending | pending |
 
 ## Prior review disposition
