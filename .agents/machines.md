@@ -6,6 +6,22 @@ the only place allowed to know about a particular box.
 
 ## macOS dev host (`/Users/michael/Dev/vela`)
 
+- AirPlay investigation baseline recorded 2026-08-20: macOS 27.0 build
+  `26A5416b`; the tested system default output identified itself as AirPlay.
+  `/opt/homebrew/bin/mpv` is 0.41.0 and reports automatic AO order
+  `coreaudio`, `avfoundation`, `null`, `coreaudio_exclusive`, `pcm`. A muted
+  direct probe opened CoreAudio on the AirPlay output and reported about
+  11.6 ms device latency, not the observed roughly two-second physical
+  endpoint delay.
+- `/Applications/Plezy.app` is 2.16.0 build 142, matching sibling source tag
+  `2.16.0`. That tag pins MPVKit 1.0.23 at
+  `ee423a7e8727eeee4748f08cb7d3c00e935ed45e`, built from mpv 0.41.0, and
+  configures `ao=coreaudio,avfoundation`. Source inspection found no macOS
+  AirPlay detector or automatic audio-delay path; saved Plezy preferences did
+  not contain a nonzero audio-sync override. Retained unified logs do not
+  reveal which AO the synchronized Plezy play selected, so runtime AO remains
+  an explicit diagnostic gap.
+
 - Local Developer ID signing/notarization configured 2026-08-20. The login
   Keychain holds Apple's Developer ID G2 intermediate and `Developer ID
   Application: MICHAEL COELHO (27R2KCAHN7)` (leaf expires 2031-08-08).

@@ -2,6 +2,15 @@
 
 ## Status
 
+On 2026-08-20, direct comparison with Plezy 2.16.0 falsified the reviewed
+plan's foundational assumption that a working mpv client needs AirPlay
+transport detection plus a nominal delay. The owner approved revising the
+durable plan to require backend/runtime proof first. The reviewed compensation
+design is withdrawn before implementation; the findings below remain intact
+as historical constraints if evidence later reopens that design. They are no
+longer an active polling-versus-listener decision queue. No additional review
+session was started.
+
 Two owner-directed Claude sessions completed naturally over the same pinned
 plan range. Neither process was terminated. Both verdicts are retained here:
 the first failed only the workflow's capability proof and remains substantive
@@ -206,16 +215,20 @@ proportionate severity. They are **ADMITTED as plan findings**, consolidated as:
 - **AR-6 LOW** — verify exact CoreAudio crate features (`V1-F5`).
 - **AR-7 LOW** — name and guard frontend platform detection (`V2-F5`).
 
-No finding is fixed and no material change is adopted until the owner rules on
-the design choices one at a time.
+No finding was fixed and no material change was adopted before the reviewed
+design was withdrawn.
 
-## Shared conclusions and contested choices
+## Shared conclusions and contested choices in the withdrawn design
+
+These were the review's design choices at the time. They are preserved as
+verdict evidence, not pending owner rulings, after the backend-first plan
+revision recorded in the status above.
 
 Both verdicts agree that CoreAudio transport plus mpv delay is the right base
 approach, that a real mid-play switch spike must precede the live monitor, and
 that the plan must not blindly force zero over user configuration.
 
-First owner-routed conflict — live route observation:
+Historical conflict — live route observation:
 
 - Verdict 1: bounded CoreAudio polling during a play, avoiding callback
   lifetime and registration risk.
@@ -223,9 +236,9 @@ First owner-routed conflict — live route observation:
   avoiding polling and per-play registration.
 - Draft plan: a per-play listener; neither reviewer recommends retaining it.
 
-Next conflict after that ruling — own-config behavior:
+Historical conflict — own-config behavior:
 
 - Verdict 1: `mpv_use_own_config` makes the play fully unmanaged.
 - Verdict 2: manage AirPlay but capture and restore mpv's actual baseline delay.
 
-Other non-conflicting material changes wait behind those rulings.
+Other non-conflicting material changes remain historical recommendations.

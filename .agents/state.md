@@ -10,14 +10,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Now
 
 - 2026-08-20 macOS AirPlay synchronization plan at
-  `.agents/plans/macos-airplay-sync.md` has two retained owner-directed Claude
-  verdicts over `32ef827f..9a79bb3`, both `acceptable_with_changes`; the second
-  is schema-valid with `capability_ok:true`. Full provenance and seven admitted
-  consolidated plan findings are in
-  `.agents/review/openreview-2026-08-20-airplay-plan.md`. No recommendation is
-  adopted and implementation is not approved. First owner decision is live
-  route observation: bounded polling versus one app-lifetime CoreAudio
-  listener; neither reviewer recommends the draft's per-play listener.
+  `.agents/plans/macos-airplay-sync.md` is revised backend-first after direct
+  Plezy 2.16.0 source comparison: Plezy has no macOS AirPlay detector or
+  automatic delay, embeds mpv 0.41.0 through MPVKit 1.0.23, and explicitly
+  prefers `coreaudio,avfoundation`. The prior listener/polling/2,000 ms
+  compensation design is withdrawn before implementation. Owner approved this
+  planning correction only; diagnostic execution and production edits remain
+  unapproved. Next evidence gate is one credential-free physical flash/click
+  matrix forcing standalone CoreAudio versus AVFoundation plus runtime proof
+  of Plezy's actual `current-ao`; no polling-versus-listener owner decision is
+  live. The two retained Claude verdicts over `32ef827f..9a79bb3` remain
+  historical evidence at
+  `.agents/review/openreview-2026-08-20-airplay-plan.md`; no verdict was
+  discarded and no further Claude session is authorized.
 - 2026-08-20 owner review-process constraint: never start more than one Claude
   session without explicit owner approval; never impose a low timeout, end a
   Claude process, or discard any verdict for any reason without explicit owner

@@ -1,323 +1,233 @@
-# Plan: Automatic macOS AirPlay A/V synchronization
+# Plan: Diagnose macOS AirPlay A/V synchronization
 
 ## Status
 
-**Drafted 2026-08-20 at the owner's request; implementation is not approved.**
-The owner rejected a global `--audio-delay=-2.0` workaround because it requires
-manual edits whenever the system output changes. The required product behavior
-is automatic compensation when macOS routes mpv to AirPlay/HomePod, automatic
-removal on other outputs, and no per-route user action. Independent Claude
-openreview is pending.
+**Revised 2026-08-20 after the owner approved a backend-first plan correction;
+diagnostic execution and implementation are not approved.**
 
-Three recommended details remain part of the plan rather than settled owner
-decisions until the owner approves it:
+The earlier design assumed Vela had to detect AirPlay and impose a nominal
+2,000 ms video delay. Direct inspection of Plezy 2.16.0 falsified the premise
+that a working mpv client necessarily does that: Plezy contains no macOS
+AirPlay detector or automatic delay policy. The listener, polling, delay
+setting, and route-transition design from the earlier draft are withdrawn.
+They must not be implemented from this document.
 
-- manage route changes during an active play, not only the route at launch;
-- use 2,000 ms as the enabled-by-default AirPlay compensation, with a one-time
-  adjustable value in Settings;
-- preserve expert ownership when advanced mpv options explicitly select an
-  audio device or set `--audio-delay`.
+The next owner gate is a controlled runtime experiment identifying which
+audio output actually gives correct physical presentation timing. A later
+implementation plan must be based on that evidence and separately approved.
 
-## Goal and acceptance contract
+## Problem and goal
 
-On macOS, ordinary Vela playback follows the current system output. If that
-output is an AirPlay device (including a HomePod exposed by CoreAudio as
-AirPlay), Vela delays video by the configured compensation. If the output is
-not AirPlay, Vela applies no compensation. Vela reevaluates the route for every
-play and while mpv remains alive, so changing output before or during playback
-does not require editing Settings or restarting Vela.
+On the affected macOS host, Vela-spawned mpv presents video ahead of audio
+when the system output is an AirPlay/HomePod speaker. Infuse and Plezy do not
+show the same defect. The goal of this plan is to isolate the material
+difference before selecting a fix.
 
-Acceptance requires all of these independently proved behaviors:
+Any eventual product fix must:
 
-1. Starting on AirPlay launches mpv with the configured negative mpv
-   `audio-delay` (positive user-facing "video delay" maps to mpv's negative
-   value).
-2. Starting on local, USB, HDMI/DisplayPort, Bluetooth, aggregate, virtual, or
-   unknown output does not apply the AirPlay compensation.
-3. During one live mpv session, AirPlay -> non-AirPlay sets mpv's
-   `audio-delay` to `0`, and non-AirPlay -> AirPlay sets it to the configured
-   negative value without relaunching mpv.
-4. A transient CoreAudio query failure never invents an AirPlay route. At
-   launch it falls back to zero compensation; during playback it retains the
-   last known value and performs bounded retries.
-5. Closing/replacing mpv or exiting Vela terminates the route monitor and
-   unregisters its CoreAudio listener; completed plays leave no accumulating
-   threads or callbacks.
-6. Windows and Linux launch arguments and playback behavior are byte-for-byte
-   unaffected by the feature policy.
-7. A user can calibrate the AirPlay value once; switching devices thereafter
-   remains automatic.
+1. work automatically as the system output changes, without a per-device
+   manual setting;
+2. keep Vela's settled external-mpv playback boundary;
+3. preserve ordinary built-in, USB, HDMI/DisplayPort, Bluetooth, aggregate,
+   and virtual output behavior;
+4. preserve advanced mpv argument precedence and the opt-in own-config path;
+5. avoid a guessed constant delay unless controlled physical measurement
+   proves no backend can own the timing correctly.
 
-## Evidence and constraints
+## Established evidence
 
-- Vela deliberately launches the system mpv out of process from
-  `src-tauri/src/playback.rs`; that product boundary remains unchanged.
-- User-supplied `mpv_extra_args` are appended after Vela defaults, and the UI
-  promises that they override those defaults. The feature must preserve that
-  contract rather than silently fighting an explicit `--audio-delay`.
-- On the affected Mac, macOS reports the current default output as `AirPlay`
-  with CoreAudio transport `airplay`; mpv 0.41 selects that device but reports
-  only about 11.6 ms of CoreAudio device latency. That omits the observed
-  roughly two-second wireless presentation buffer, so mpv cannot correct this
-  route from its current latency measurement alone.
-- mpv defines positive `audio-delay` as delaying audio and negative values as
-  delaying video. A user-facing 2.0-second AirPlay video compensation therefore
-  becomes mpv property value `-2.0`.
-- The runtime must not shell out to `system_profiler`, parse localized device
-  names, or assume names contain "AirPlay" or "HomePod". CoreAudio publishes a
-  stable transport-type property for this purpose.
-- Existing playback IPC supports multiple independent clients and already uses
-  one stop flag per play. The new monitor may own a separate IPC connection;
-  it must not consume or serialize through the progress/EOF clients.
-- The config document uses `#[serde(default, deny_unknown_fields)]`, validates
-  before use/save, preserves missing fields for backward compatibility, and
-  must continue failing closed on invalid persisted settings.
+### Vela path
 
-## Design
+- Vela launches the system mpv executable out of process from
+  `src-tauri/src/playback.rs`.
+- Unless the owner enables the own-config option, Vela passes `--no-config`.
+- Vela sets video/HDR options but does not select `--ao`; advanced user
+  arguments are appended after Vela defaults and therefore retain their
+  documented override precedence.
+- The affected host's `/opt/homebrew/bin/mpv` is mpv 0.41.0. Its compiled
+  automatic audio-output order is CoreAudio, AVFoundation, null,
+  CoreAudio-exclusive, then PCM.
+- A direct AirPlay probe selected `ao=coreaudio`. mpv reported about 11.6 ms
+  of device latency, which does not represent the observed wireless
+  presentation delay.
 
-### 1. Pure policy and persisted setting
+### Plezy comparison
 
-Add a macOS AirPlay compensation setting to `AppConfig`, stored as a positive
-integer number of milliseconds so JSON cannot contain NaN/infinity and command
-construction avoids floating-point validation ambiguity:
+- The installed Plezy is 2.16.0 build 142, matching source tag `2.16.0`.
+- Plezy embeds mpv 0.41.0 through MPVKit 1.0.23 and explicitly sets
+  `ao=coreaudio,avfoundation` before `mpv_initialize`.
+- Plezy has no macOS AirPlay transport detector, CoreAudio route listener, or
+  polling loop that controls synchronization, and no automatic AirPlay delay.
+  Its persisted audio-sync offset defaults to zero and is applied only when
+  the user has selected a nonzero value.
+- Plezy added the AVFoundation fallback because macOS 27 can reject
+  `ao_coreaudio` channel-layout initialization with `paramErr (-50)`. Static
+  source therefore cannot establish whether a particular play used
+  CoreAudio or fell through to AVFoundation.
+- Retained macOS unified logs do not expose Plezy's selected mpv AO. The
+  actual working AO remains unverified.
+- Plezy's MPVKit fork contains custom AVFoundation timing and presentation
+  patches, while its CoreAudio implementation is upstream mpv 0.41.0 apart
+  from build-guard changes. Those patches are a possible difference only if
+  Plezy actually selects AVFoundation or its embedded presentation path is
+  otherwise material.
 
-- field: `airplay_video_delay_ms: Option<u16>`;
-- missing value resolves to `2_000` ms;
-- accepted persisted/UI range: `0..=5_000` ms;
-- zero explicitly disables compensation while retaining automatic route
-  detection;
-- serialize `None` for the product default so existing and fresh configs stay
-  sparse.
+### Limits on inference
 
-Extend `MpvAdvanced`, `get_mpv_advanced`, and `set_mpv_advanced` with the
-resolved millisecond value. The new setter argument is optional: omission by
-the slice-1 frontend preserves the existing field, while slice 2 begins sending
-the explicit value. Reject out-of-range command values before entering
-`config::update`; validate the persisted field in `AppConfig::validate` so a
-manually corrupted value fails closed like other invalid settings.
+- Infuse is closed source. Its correct behavior is comparative evidence, not
+  evidence for a specific internal implementation.
+- Plezy and Vela sharing an mpv version and AO priority does not prove they
+  use the same AO at runtime.
+- mpv's internal `avsync` can be zero while a wireless endpoint presents
+  audio later than the latency exposed to mpv. Acceptance must include a
+  physical flash/click observation, not only mpv properties.
+- System default output is not necessarily mpv's actual output if an own
+  config or explicit argument pins a device.
 
-Keep route-independent policy in a small testable module. It accepts the
-resolved setting, current route classification, last applied value, and expert
-override classification, and returns one of:
+## Hypotheses to distinguish
 
-- `Set(delay)` for a known route whose desired value changed;
-- `Keep` for an unknown/transient route during a live play;
-- `Unmanaged` when an explicit expert override owns sync/output selection.
+1. **Audio-output hypothesis:** standalone CoreAudio omits AirPlay's endpoint
+   latency, while AVFoundation owns a presentation clock that keeps physical
+   audio and video synchronized. Plezy works because CoreAudio fails on
+   macOS 27 and its AVFoundation fallback opens.
+2. **Embedded-path hypothesis:** both apps select CoreAudio, but Plezy's
+   embedded MPVKit/video presentation path behaves differently from mpv's
+   standalone macOS window.
+3. **Launch-context hypothesis:** the AO and renderer can work, but a Vela
+   environment, effective argument, startup order, or route-change sequence
+   changes the result.
+4. **Backend-gap hypothesis:** neither upstream standalone backend accounts
+   for the endpoint delay. A route-aware correction may be necessary, but
+   only after the first three hypotheses are eliminated.
 
-At launch, `Unknown` resolves to `Set(0)` because no previous trustworthy route
-exists. Convert milliseconds to seconds only at the final mpv boundary.
+## Diagnostic acceptance contract
 
-### 2. CoreAudio route adapter
+The diagnostic slice is complete only when its evidence record contains:
 
-Add macOS-only dependency `objc2-core-audio` in the existing objc2 0.6 / Apple
-framework dependency family, with only its `AudioHardware` feature. Put all
-unsafe framework calls behind `src-tauri/src/macos_audio.rs`; non-macOS code
-must not compile or link the dependency.
+1. one local, credential-free flash/click fixture used for every comparison;
+2. the same physical Mac, display, HomePod/AirPlay target, volume conditions,
+   and route-selected-before-launch sequence for the controlled A/B runs;
+3. forced CoreAudio and forced AVFoundation results using Vela-equivalent
+   standalone mpv arguments, on both built-in output and AirPlay;
+4. `current-ao`, `audio-device`, `audio-delay`, and available mpv A/V clock
+   properties captured without media-server URLs or credentials;
+5. physical sync measured from the fixture, with observation uncertainty
+   recorded; mpv's internal clock is supporting evidence only;
+6. Plezy's actual `current-ao` for one synchronized AirPlay play, or a clear
+   record that it could not be obtained non-invasively;
+7. one mid-play output-switch observation only for each launch path already
+   shown to be synchronized, recording whether mpv follows the new default;
+8. a filled result matrix and an evidence-backed disposition for all four
+   hypotheses;
+9. a proposed minimal production design, its regressions and verification
+   surface, followed by a separate owner approval before any product edit.
 
-The synchronous detector performs two typed CoreAudio property reads:
+## Diagnostic procedure
 
-1. query `kAudioObjectSystemObject` for
-   `kAudioHardwarePropertyDefaultOutputDevice`;
-2. query that `AudioDeviceID` for `kAudioDevicePropertyTransportType` and
-   compare it with `kAudioDeviceTransportTypeAirPlay`.
+### Stage 1 — establish a controlled fixture and baseline
 
-Return `AirPlay`, `Other`, or `Unknown`; never classify by device name. Treat a
-missing device, unsupported property, wrong data size, or nonzero `OSStatus` as
-`Unknown`. Do not log device names or UIDs.
+- Generate a short local file under an owner-private temporary directory.
+  It must contain repeated, frame-identifiable flashes paired with short
+  clicks and no server URL or account data.
+- Record the macOS build, default output transport, HomePod target, display
+  refresh rate, mpv path/version, Plezy version, and MPVKit pin in the
+  evidence log. Keep host-specific values in `.agents/machines.md` and point
+  to them from this plan.
+- Derive the standalone argument baseline directly from Vela's command
+  construction. Do not enable the owner's mpv config and do not use the
+  persisted Advanced arguments field for the experiment.
+- Use an owner-private per-run IPC endpoint and log path. Capture only
+  selected AO/device/timing lines; never retain a full media-server playback
+  log.
 
-Register `AudioObjectAddPropertyListener` on the system object's default-output
-property for live changes. The C callback must be panic-free and nonblocking:
-it only marks an atomic dirty flag and wakes a Rust monitor. The owning monitor
-keeps callback state alive, calls `AudioObjectRemovePropertyListener` before
-dropping it, and documents every unsafe lifetime invariant next to the call.
-If registration fails, launch-time compensation still works and playback
-continues; emit one generic diagnostic without output identity.
+### Stage 2 — force the two upstream macOS AOs
 
-### 3. Launch-time wiring and expert overrides
+For each of built-in output and the selected AirPlay/HomePod output:
 
-Before spawning mpv, load config once as Vela already does, parse advanced
-arguments once, and classify explicit expert ownership:
+1. launch the fixture with Vela-equivalent arguments plus forced
+   `--ao=coreaudio`;
+2. capture the selected AO and properties through the temporary IPC endpoint;
+3. measure physical flash/click alignment;
+4. repeat with forced `--ao=avfoundation`;
+5. repeat a result if the physical observation is ambiguous.
 
-- any effective `--audio-delay=...` disables Vela-managed AirPlay compensation
-  for that play;
-- any effective `--audio-device=...` other than `auto` disables it because mpv
-  is no longer guaranteed to follow the macOS default route;
-- when duplicate options exist, inspect the last effective value, matching
-  mpv's last-option-wins behavior;
-- `--audio-device=auto` keeps automatic management enabled.
+The primary comparison is physical synchronization. Startup success,
+dropouts, seeking, pause/resume, volume response, and format acceptance are
+secondary compatibility observations that must still be recorded.
 
-Do not disable the feature merely because "Use my own mpv config" is enabled:
-Vela's command-line defaults already override config-file values, and the
-documented advanced-argument escape hatch remains authoritative. State this
-precedence in Settings help.
+### Stage 3 — identify Plezy's working runtime path
 
-When managed, query CoreAudio immediately before command construction and add
-`--audio-delay=<seconds>` before user extra arguments. This order preserves the
-existing promise that a user argument wins. Always pass an explicit zero for a
-known non-AirPlay route so an own `mpv.conf` delay cannot leave ordinary
-system-output playback offset; the explicit advanced argument remains the
-supported override.
+- First attempt a narrow, non-persistent diagnostic using Plezy's existing
+  mpv log/event path, filtering to AO selection only.
+- Do not capture unfiltered output from a server-backed play because it can
+  contain token-bearing URLs or headers.
+- If the release build does not expose `current-ao`, stop and request owner
+  authority before modifying or building the sibling Plezy repository. The
+  fallback is a disposable diagnostic-only Plezy change that queries
+  `current-ao` once after `file-loaded`; it is never committed or shipped.
+- Record the selected AO, whether fallback occurred, and the physical sync
+  observation. Do not infer the AO from the static priority list.
 
-Extract command application into a helper taking an injected route result so
-Rust tests can inspect `Command::get_args`. Add a separate wiring guard proving
-the real `play` path invokes that helper; red-proof it by deleting only the
-call, observing the guard fail for the missing launch wiring, then restoring.
+### Stage 4 — test live route changes only after launch behavior is known
 
-### 4. Live route monitor over mpv IPC
+- For every AO shown synchronized at launch, switch built-in -> AirPlay and
+  AirPlay -> built-in during the same play.
+- Record `audio-device`, `current-ao`, discontinuity/reinitialization events,
+  and physical sync after stabilization.
+- This stage answers whether the eventual fix must react to route changes or
+  whether the selected Apple backend already owns them. It does not authorize
+  a Vela listener or polling loop.
 
-After mpv is registered and its IPC endpoint exists, start one macOS-only
-monitor for managed plays. It owns:
+### Stage 5 — choose the smallest evidence-backed design
 
-- the CoreAudio default-output listener;
-- the play's stop flag;
-- a dedicated mpv IPC connection; and
-- the last successfully applied delay.
+Use the first matching branch:
 
-The monitor connects with the existing bounded IPC startup retry. Its own
-connection is nonblocking or uses a short read timeout so it can both detect
-mpv EOF and react to route notifications. Immediately after registering the
-listener it re-queries and applies the current route once, closing the race
-between the pre-spawn query and live monitoring. On a known route transition it
-sends one JSON IPC `set_property`, `audio-delay`, `<seconds>` command. It drains
-only its own command replies/events. IPC EOF, the play stop flag, or Vela
-shutdown ends the loop and unregisters the listener.
+- **AVFoundation correct; CoreAudio wrong:** propose an explicit macOS AO
+  preference in Vela. Verify fallback and common local/HDMI/USB/compressed
+  formats. Do not add device detection or a delay setting.
+- **Both standalone AOs correct; Vela wrong:** compare Vela's effective argv,
+  process environment, launch timing, and window/presentation context against
+  the controlled command. Fix the divergent launch behavior.
+- **Plezy correct on CoreAudio while standalone CoreAudio is wrong:** isolate
+  MPVKit, embedded-renderer, app-bundle, and patch differences one at a time.
+  Preserve the external-mpv product decision unless the owner explicitly
+  changes it.
+- **Neither standalone AO correct:** only then reopen measured route-aware
+  correction. The design must use mpv's actual AO/device and baseline delay,
+  not merely the system default, and must honor zero/own-config/expert
+  ownership. The retained Claude findings become active constraints again.
 
-CoreAudio can briefly expose no default device during a switch. Coalesce
-notifications, debounce the first read, and retry `Unknown` on a short bounded
-schedule. Preserve the last applied delay during that window; after retries are
-exhausted, keep the last value and wait for the next OS notification. Never
-poll continuously and never change playback if the route remains unknown.
+Each branch requires a new cold-implementable production plan, independently
+proved guards, regression analysis, and owner approval before code changes.
 
-A monitor spawn/listener failure is nonfatal: retain correct launch-time
-behavior and log one generic diagnostic. A post-launch IPC write failure means
-mpv is gone or its control channel failed; stop the monitor rather than spin.
+## Result matrix
 
-### 5. Settings and user-facing behavior
+Fill this table during the separately approved diagnostic run:
 
-In Settings -> Player -> Advanced mpv options, show a macOS-only numeric control
-named **AirPlay video delay**:
+| Player/path | Output at launch | Forced/actual AO | Physical offset | mpv-reported state | Mid-play switch | Result |
+| --- | --- | --- | --- | --- | --- | --- |
+| Standalone Vela-equivalent | Built-in | CoreAudio | pending | pending | pending | pending |
+| Standalone Vela-equivalent | AirPlay | CoreAudio | pending | pending | pending | pending |
+| Standalone Vela-equivalent | Built-in | AVFoundation | pending | pending | pending | pending |
+| Standalone Vela-equivalent | AirPlay | AVFoundation | pending | pending | pending | pending |
+| Plezy 2.16.0 | AirPlay | pending runtime proof | observed synchronized | pending | pending | pending |
 
-- display seconds with 0.05-second steps;
-- default 2.00 seconds, accepted range 0.00-5.00;
-- explain that Vela applies it automatically only while system output is
-  AirPlay/HomePod and removes it on other outputs;
-- explain that zero disables compensation and explicit `--audio-delay` or a
-  non-auto `--audio-device` advanced option takes ownership for that play.
+## Prior review disposition
 
-Save through the existing single advanced-settings command so one save remains
-atomic. Do not expose a per-device toggle or require restart. Update
-`docs/usage.md` with the same behavior and precedence, without presenting the
-old global argument workaround as the product solution.
+The two retained Claude verdicts in
+`.agents/review/openreview-2026-08-20-airplay-plan.md` reviewed the withdrawn
+route-detection/constant-delay design. Their records and provenance remain
+intact. Their findings are historical constraints if evidence later forces a
+compensation design; they are not an active polling-versus-listener decision
+queue now.
 
-## Delivery slices
+No further Claude session is authorized by this revision. The owner's durable
+review-process constraint remains: never start more than one Claude session
+without explicit approval; never impose a low timeout, terminate a Claude
+process, or discard a verdict without explicit approval.
 
-### Slice 1 - complete backend behavior
+## Verification for this planning slice
 
-- Add config field, validation, resolved default, command DTO/setter coverage,
-  pure policy, and expert-argument classification.
-- Add the macOS CoreAudio detector/listener adapter and target-only dependency.
-- Wire launch-time arguments and the live IPC monitor.
-- Add all Rust policy, config, argument, monitor-lifetime, and IPC transition
-  guards listed below.
-- Keep default behavior automatic at 2,000 ms even before the UI control lands;
-  this slice is therefore complete and useful rather than dead configuration.
-- Update `.agents/state.md` and commit the slice with its guard proof.
-
-### Slice 2 - calibration UI and documentation
-
-- Extend the Settings TypeScript shape/state/save flow and render the macOS-only
-  control with honest precedence copy.
-- Add frontend guards for resolved load, validation/save payload, and platform
-  visibility.
-- Update `docs/usage.md`, `.agents/state.md`, and this plan's evidence/status.
-- Run packaged macOS acceptance, then commit UI/docs and evidence together.
-
-## Verification and red proof
-
-### Automated behavior guards
-
-- Config: missing -> 2,000; zero and 5,000 accepted; 5,001 rejected; setter
-  rejection leaves the prior durable config byte-for-byte unchanged.
-- Policy table: AirPlay/non-AirPlay/unknown at launch; AirPlay -> other and other
-  -> AirPlay live transitions; repeated same route emits no duplicate IPC set;
-  unknown preserves the last live value.
-- Expert precedence: last `--audio-delay` wins ownership; explicit non-auto
-  `--audio-device` disables management; `--audio-device=auto` does not; comments
-  and unrelated options do not trigger either rule.
-- Command argv: managed AirPlay emits the negative configured seconds before
-  extra args; managed other emits zero; unmanaged emits no Vela sync argument;
-  Linux/Windows helper paths emit none.
-- Monitor integration with injected route events and a fake mpv Unix socket:
-  assert exact JSON commands for AirPlay and reset-to-zero, no command for
-  unknown/repeated routes, termination on IPC EOF, and listener cleanup on
-  every exit path.
-- Wiring: the real `play` path invokes both initial command configuration and
-  monitor startup under macOS management.
-- Frontend: control loads 2.00 from 2,000 ms, saves rounded validated
-  milliseconds, rejects out-of-range input without invoking backend, and is not
-  rendered on non-macOS.
-
-Red-proof each claimed behavior separately. At minimum inject and restore:
-
-1. invert the AirPlay delay sign;
-2. remove the non-AirPlay reset-to-zero command;
-3. remove IPC-EOF monitor termination;
-4. make `Unknown` reset to zero during a live route switch;
-5. remove the real `play` wiring call; and
-6. bypass the expert `--audio-delay` override.
-
-Each corresponding guard must fail for the exact intended reason before the
-slice is called complete.
-
-### Canonical and platform checks
-
-Run the full both-sides command set from `.agents/repo-guidance.md`: exact JS
-toolchain check, `npm ci`, both audits, `npm run check`, `npm run build`, Rust
-1.89 and stable checks, stable clippy/tests, and Cargo audit. Run focused Rust
-and frontend guards during development. On macOS also run the signed universal
-wrapper so the target-only framework link is proved in the actual bundle.
-
-Packaged owner acceptance on the signed app and mpv 0.41+:
-
-1. remove any old global audio-delay workaround;
-2. start a known lip-sync clip on Mac speakers and verify mpv IPC reports
-   `audio-delay=0`;
-3. switch to AirPlay/HomePod during the same play and verify IPC reports the
-   configured negative value and perceived sync is correct;
-4. switch back during the same play and verify IPC returns to zero and sync is
-   correct;
-5. begin new plays on each route to prove launch-time behavior independently;
-6. close mpv after repeated switches and verify no named monitor thread or
-   CoreAudio callback remains; and
-7. set an explicit advanced `--audio-delay`, repeat a route switch, and verify
-   Vela does not overwrite it.
-
-Record the tested device kind, configured milliseconds, mpv version, signed
-artifact hash, and observed results in `.agents/machines.md`; keep device names
-out of portable state.
-
-## Non-goals
-
-- No embedded player or libmpv migration.
-- No global `mpv.conf` edit and no requirement that users toggle advanced args
-  when outputs change.
-- No device-name matching, `system_profiler` subprocess, periodic process-wide
-  polling, or assumption that Bluetooth has AirPlay's delay.
-- No attempt to compensate a deliberately pinned custom mpv audio device; the
-  explicit advanced configuration owns that path.
-- No server, transcoding, watched-state, or media-timestamp changes.
-- No claim that exactly 2,000 ms fits every receiver; the automatic route
-  behavior is fixed, while the one-time value remains calibratable.
-
-## Review log
-
-- 2026-08-20 owner-directed `openreview claude` used Claude Code 2.1.237,
-  `claude-opus-5` at owner-specified `xhigh`, over pinned
-  `32ef827f..9a79bb3`. Two sessions completed naturally and both verdicts are
-  retained in `.agents/review/openreview-2026-08-20-airplay-plan.md`: session 1
-  returned `acceptable_with_changes` with `capability_ok:false` because the
-  orchestrator's launch grant blocked the required diff check; session 2
-  returned `acceptable_with_changes`, `capability_ok:true`, exact pins, and a
-  zero-exit diff check. No recommendation is adopted. First owner decision is
-  the reviewers' live-route conflict: bounded polling versus one app-lifetime
-  CoreAudio listener; neither recommends the draft's per-play listener.
+This revision changes no shipped behavior. Run `git diff --check`, inspect the
+plan/review/state/machine record as one coherent diff, and commit the planning
+record. No product build or platform CI is required for this docs-only slice.
