@@ -230,11 +230,22 @@ proved guards, regression analysis, and owner approval before code changes.
   own-config path, and has no stored autocrop override. Those sanitized fields
   exclude the three user-controlled launch differences without exposing the
   connection document's other fields.
+- The owner then reproduced the persistent defect through installed Vela
+  1.0.60 on the same AirPlay output: physical audio was roughly two seconds
+  late. Sanitized live IPC showed `current-ao=coreaudio`,
+  `audio-device=auto`, `audio-delay=0`, and `avsync=0.000006` seconds. The input
+  was a network-backed MKV with H.264 video at 23.976025 fps and E-AC-3
+  `5.1(side)` audio at 48 kHz, decoded to float planar and output by CoreAudio
+  as 48 kHz stereo. Video used VideoToolbox, display timing was 240 Hz, and
+  `video-sync=audio`. mpv therefore believed the stream was synchronized while
+  the AirPlay endpoint physically presented its audio about two seconds late.
 - Interim disposition: the audio-output hypothesis is rejected for
   steady-state stereo playback, and the backend-gap hypothesis is rejected for
   this local fixture. The embedded-path and launch-context hypotheses remain,
-  as does a newly exposed media/format/input-path variable between the local
-  fixture and the server-backed item that reproduced the Vela defect.
+  and the media/format/input-path difference is now load-bearing: local stereo
+  AAC remained synchronized through CoreAudio while network E-AC-3 5.1
+  downmixed to stereo did not. No single cause among codec, channel layout,
+  demux/input path, or their interaction is established yet.
 
 ## Result matrix
 
@@ -246,6 +257,7 @@ Fill this table during the separately approved diagnostic run:
 | Standalone Vela-equivalent | AirPlay | CoreAudio | steady-state synchronized; first click absent | `current-ao=coreaudio`; delay 0; `avsync=-5.736 ms`; reported device latency 11.610 ms | pending | Correct after initial preroll |
 | Standalone Vela-equivalent | Built-in | AVFoundation | pending | pending | pending | pending |
 | Standalone Vela-equivalent | AirPlay | AVFoundation | steady-state synchronized; about half of first click absent | `current-ao=avfoundation`; delay 0; `avsync=-0.142 ms`; 96,000-sample buffer | pending | Correct after initial preroll |
+| Installed Vela 1.0.60 server-backed play | AirPlay | CoreAudio | audio late roughly 2 seconds | E-AC-3 5.1 -> stereo; `avsync=0.006 ms`; delay 0 | not tested | Defect reproduced |
 | Plezy 2.16.0 | AirPlay | pending runtime proof | observed synchronized | pending | pending | pending |
 
 ## Prior review disposition

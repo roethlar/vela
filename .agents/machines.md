@@ -33,6 +33,14 @@ the only place allowed to know about a particular box.
 - Installed Vela 1.0.60's sanitized playback settings at the same diagnostic
   point were `mpv_extra_args=null`, `mpv_use_own_config=false`, and
   `mpv_autocrop=null`. No connection fields or media URLs were read or printed.
+- Installed Vela 1.0.60 then reproduced roughly two seconds of physically late
+  AirPlay audio on a network MKV with H.264/VideoToolbox video at 23.976025 fps
+  and 48 kHz E-AC-3 `5.1(side)` decoded/downmixed to 48 kHz stereo. Live IPC
+  reported CoreAudio, automatic device selection, `audio-delay=0`,
+  `avsync=0.006 ms`, `video-sync=audio`, and 240 Hz display timing. No URL,
+  title, headers, or credentials were queried. The local stereo AAC fixture
+  remained synchronized through the same AO, making media/format/input path a
+  controlled difference rather than proving a general CoreAudio defect.
 
 - Local Developer ID signing/notarization configured 2026-08-20. The login
   Keychain holds Apple's Developer ID G2 intermediate and `Developer ID

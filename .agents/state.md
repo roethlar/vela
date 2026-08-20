@@ -15,11 +15,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   credential-free stereo flash/click fixture stayed physically synchronized
   after startup with both forced CoreAudio and forced AVFoundation. CoreAudio
   swallowed the first click; AVFoundation swallowed about half of it. Both
-  reported near-zero internal `avsync`, so forcing AVFoundation is not the
-  steady-state fix. Installed Vela 1.0.60 has no saved advanced mpv args, own
-  config, or autocrop override. Next gate is a sanitized reproduction through
-  Vela's real server-backed launch to isolate launch-context/media-format
-  differences, followed by Plezy `current-ao` only if still material. The
+  reported near-zero internal `avsync`. Installed Vela 1.0.60 has no saved
+  advanced mpv args, own config, or autocrop override. Its real server-backed
+  play reproduced roughly two seconds of physically late audio while IPC still
+  reported CoreAudio, zero audio delay, and `avsync=0.006 ms`; unlike the local
+  fixture, it was network MKV with 48 kHz E-AC-3 5.1 downmixed to stereo.
+  Codec/channel-layout/input-path causality remains unproved. Next proposed
+  diagnostic is a temporary live switch of this same session to AVFoundation;
+  that mutation awaits a separate owner `go`. Plezy `current-ao` follows only
+  if still material. The
   listener/polling/2,000 ms compensation design remains withdrawn. The two
   retained Claude verdicts over `32ef827f..9a79bb3` remain historical evidence
   at `.agents/review/openreview-2026-08-20-airplay-plan.md`; no verdict was
