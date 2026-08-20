@@ -6,6 +6,20 @@ the only place allowed to know about a particular box.
 
 ## macOS dev host (`/Users/michael/Dev/vela`)
 
+- Local Developer ID signing/notarization configured 2026-08-20. The login
+  Keychain holds Apple's Developer ID G2 intermediate and `Developer ID
+  Application: MICHAEL COELHO (27R2KCAHN7)` (leaf expires 2031-08-08).
+  App Store Connect API metadata and the private `.p8` remain canonical in
+  `../Certificates/AppStoreConnectCertInfo.csv`; the `.p12`, `.p8`, password
+  list, and API metadata file are owner-only (`0600`). Never copy credential
+  values into this repo or command output. For a local Tauri build, set
+  `APPLE_SIGNING_IDENTITY`, load `APPLE_API_ISSUER` / `APPLE_API_KEY` from that
+  CSV, point `APPLE_API_KEY_PATH` at its `KeyFile`, then run
+  `bash ./scripts/build.sh`. Exact `fc3472b` universal build was Developer ID
+  signed, accepted and stapled by Apple notarization, Gatekeeper accepted as
+  `Notarized Developer ID`, and produced identical `dist/` / bundle DMGs with
+  SHA-256 `3cae06142f329a4e9d1d9dcb5ea0cb1d1222541a029444cbd0025ba950a92a6f`.
+
 Relocated out of `.agents/state.md` 2026-07-14 (drift pass) — state.md stays
 portable and may at most point here.
 

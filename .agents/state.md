@@ -9,6 +9,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- 2026-08-20 macOS 27 local-network failure under investigation: Jellyfin at
+  `altiera:8096` is reachable from the host and answers its public endpoint,
+  but the installed `/Applications/Vela.app` is unsigned/ad-hoc and fails its
+  authentication transport request. A fresh locally signed, notarized,
+  Gatekeeper-accepted universal build independently confirmed the packaged
+  `Info.plist` still lacks Apple's `NSLocalNetworkUsageDescription`; Apple says
+  apps that connect directly to local hosts should declare it. `altiera` also
+  advertises four IPv6 addresses that refuse 8096 before its working IPv4
+  addresses; direct-IP Vela isolation test is still pending. Local signing
+  setup details live in `.agents/machines.md`; no product fix is approved yet.
+
 - The 2026-08-05 README refresh split the old monolith: README.md is now
   end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
   server name scrubbed to "Plex"); deep user reference moved to
@@ -36,6 +47,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   deleting it is owner-gated.
 
 ## Next
+
+- Owner decision after direct-IP isolation: plan the macOS local-network fix
+  (package the usage description, guard the built app metadata, and surface
+  actionable transport causes instead of reqwest's shallow request error).
 
 - Realign the Linux E2E VM from user-local Node 26.5.0/npm 12.0.1 to the new repo pin (26.7.0/12.0.2). Owner-gated; do not touch that host without a go.
 - Launch marketing drafts are in-repo: GitHub social preview
