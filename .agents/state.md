@@ -21,9 +21,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   with no non-macOS behavior change. Two manual volume-timing attempts were
   inconclusive (the second IPC OSD cue was not visible); upstream mpv 0.41 source
   directly applies AVFoundation mute/volume and pause controls, while packaged
-  pause/resume and seek remain explicit acceptance checks. One owner ruling
-  remains: preserve expert own-config ownership by omitting Vela's AO preference
-  when `mpv_use_own_config=true` (recommended), or enforce Vela's AO preference.
+  pause/resume and seek remain explicit acceptance checks. The owner settled
+  own-config precedence on 2026-08-20: when `mpv_use_own_config=true`, Vela
+  omits its AO preference and the expert's `mpv.conf` owns audio-output
+  selection. The production plan has no unresolved design decisions and awaits
+  a separate explicit implementation go.
 - 2026-08-20 owner review-process constraint: never start more than one Claude
   session without explicit owner approval; never impose a low timeout, end a
   Claude process, or discard any verdict for any reason without explicit owner
@@ -77,10 +79,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Resolve the macOS AirPlay plan's one remaining owner decision: whether
-  `mpv_use_own_config=true` omits Vela's AVFoundation-first AO preference
-  (recommended) or Vela enforces that preference. Implementation remains
-  unapproved until the plan records the ruling and receives an explicit go.
+- Review the settled macOS AVFoundation-first plan and obtain a separate
+  explicit go before product implementation.
 - Owner decision after direct-IP isolation: plan the macOS local-network fix
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).

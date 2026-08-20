@@ -2,7 +2,7 @@
 
 ## Status
 
-**Production plan drafted 2026-08-20 after owner-approved diagnostics;
+**Production plan finalized 2026-08-20 after owner-approved diagnostics;
 implementation is not approved.**
 
 The diagnostics replaced the withdrawn AirPlay delay/route-monitor design with
@@ -11,13 +11,14 @@ retain CoreAudio as initialization fallback. AVFoundation fixed the affected
 live stream and followed system output changes in both directions without Vela
 intervention.
 
-One owner decision remains unresolved and blocks implementation approval:
-whether enabling **Use my own mpv config** also disables Vela's AO preference.
-The recommendation is to preserve expert ownership by omitting Vela's AO
-argument when `mpv_use_own_config=true`; Advanced mpv arguments remain the
-explicit command-line override in either case.
+The owner settled own-config precedence on 2026-08-20: enabling **Use my own
+mpv config** disables Vela's AO preference. When
+`mpv_use_own_config=true`, Vela omits its AO argument and the expert's
+`mpv.conf` owns audio-output selection. Advanced mpv arguments remain the
+explicit command-line override. All design decisions are settled;
+implementation still requires a separate explicit go.
 
-No Claude session or further plan review is authorized by this draft.
+No Claude session or further plan review is authorized by this plan update.
 
 ## Goal and acceptance contract
 
@@ -41,8 +42,8 @@ Acceptance requires independently proved behavior:
    manual timing attempts recorded below.
 7. mpv Advanced arguments retain last-option-wins ownership: a later user
    `--ao=...` overrides Vela's default.
-8. The own-config branch follows the eventual owner ruling recorded in this
-   plan before implementation.
+8. With own config enabled, Vela omits its AO preference and the user's
+   `mpv.conf` owns audio-output selection.
 9. No non-macOS launch argument, config schema, frontend control, IPC thread, or
    playback behavior changes.
 10. If AVFoundation cannot initialize, mpv tries CoreAudio through the ordered
@@ -169,20 +170,12 @@ special parsing. Do not add `--audio-delay`, `--audio-device`,
 The ordered AO list gives mpv the fallback. Vela must not inspect
 `current-ao`, retry a backend itself, or alter behavior after launch.
 
-### 3. Resolve own-config precedence before implementation
+### 3. Preserve own-config ownership
 
-Pending owner ruling:
-
-- **Preserve own config (recommended):** when `mpv_use_own_config=true`, omit
-  Vela's AO argument along with `--no-config`. An expert's `mpv.conf` owns AO
-  selection. They can opt into the proven path with `ao=avfoundation,coreaudio`
-  in that file or through Advanced arguments.
-- **Enforce Vela AO:** append Vela's AO list even with own config enabled. This
-  gives the sync fix to that mode by default, but silently overrides any AO set
-  only in `mpv.conf`; an Advanced argument remains the escape hatch.
-
-Record the chosen wording in this status and `.agents/state.md`. Do not infer
-approval from the implementation go.
+When `mpv_use_own_config=true`, omit Vela's AO argument along with
+`--no-config`. An expert's `mpv.conf` owns AO selection. They can opt into the
+proven path with `ao=avfoundation,coreaudio` in that file or through Advanced
+arguments. This rule was owner-approved on 2026-08-20.
 
 ### 4. Document the resulting contract
 
@@ -223,7 +216,7 @@ Unit-test the helper through `Command::get_args` without spawning mpv:
    `--ao=avfoundation,coreaudio`;
 2. it appears before every Advanced argument;
 3. a later Advanced `--ao=coreaudio` is retained and is the last effective AO;
-4. own-config true includes or omits Vela's AO exactly as the owner rules;
+4. own-config true omits Vela's AO preference;
 5. own-config false still contains `--no-config`, while true does not;
 6. all existing video/HDR/GPU defaults remain present;
 7. non-macOS helper builds append no Vela AO;
@@ -295,7 +288,6 @@ URLs, titles, headers, tokens, or full playback logs.
   diagnostic click. Packaged acceptance must check realistic startup content.
 - **Control behavior:** direct renderer volume/mute and synchronizer pause are
   source-backed, but seek remains a required real-play acceptance check.
-- **Own-config surprise:** blocked on the explicit owner ruling above.
 
 Rollback is one argument-policy removal plus its documentation. No persisted
 schema or migration is introduced.
