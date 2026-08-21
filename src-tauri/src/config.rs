@@ -39,7 +39,8 @@ pub struct AppConfig {
     /// lighter profile) without Vela having to guess.
     pub mpv_extra_args: Option<String>,
     /// When true, Vela drops `--no-config` so mpv loads the user's own
-    /// `~/.config/mpv/mpv.conf`. Off by default for a reproducible launch.
+    /// `~/.config/mpv/mpv.conf`. It also leaves macOS audio-output selection to
+    /// that config. Off by default for a reproducible launch.
     pub mpv_use_own_config: Option<bool>,
     /// Black-bar cropping via mpv's bundled `autocrop.lua`, three-state:
     /// `"off"` (default; nothing injected), `"manual"` (script loaded with

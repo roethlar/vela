@@ -2,8 +2,9 @@
 
 ## Status
 
-**Production plan finalized 2026-08-20 after owner-approved diagnostics;
-implementation is not approved.**
+**Implementation completed for Vela 1.0.61 on 2026-08-21. Automated
+verification and native DMG construction pass; packaged physical playback
+acceptance is in progress.**
 
 The diagnostics replaced the withdrawn AirPlay delay/route-monitor design with
 one proven launch policy: on macOS, prefer mpv's AVFoundation audio output and
@@ -291,6 +292,33 @@ URLs, titles, headers, tokens, or full playback logs.
 
 Rollback is one argument-policy removal plus its documentation. No persisted
 schema or migration is introduced.
+
+## Implementation evidence
+
+- `src-tauri/src/playback.rs` now routes the shipped `play` path through the
+  testable base-command helper. On macOS with Vela-owned defaults it appends
+  exactly `--ao=avfoundation,coreaudio` before Advanced arguments; own-config
+  mode omits the AO preference. No route detector, delay, device pin, setting,
+  IPC monitor, or dependency was introduced.
+- Focused guards proved red for each intended regression before restoration:
+  missing AO preference, reversed `coreaudio,avfoundation` order, Vela's AO
+  appended after an Advanced override, and Vela's AO applied in own-config
+  mode. The restored focused tests pass.
+- Vela was bumped once from 1.0.60 to 1.0.61 through `scripts/bump.sh` as
+  required by the repository's code-change version policy.
+- Final automated verification on 1.0.61 passed: pinned Node/npm assertion,
+  npm audit, 71 frontend policy tests plus Svelte diagnostics, frontend build,
+  Rust 1.89 and stable checks, stable clippy with warnings denied, all 365 Rust
+  tests, and `git diff --check`.
+- RustSec audit initially found newly published `RUSTSEC-2026-0258` in locked
+  `h2` 0.4.15. The separate prerequisite commit `3e1d0c8` updates only the
+  locked package to patched 0.4.16 and release documentation. The rerun has no
+  vulnerabilities and retains the repository's 17 existing informational
+  warnings.
+- `scripts/build.sh --native` produced and launched
+  `dist/Vela_1.0.61_aarch64.dmg`. Physical AirPlay sync, route transition, and
+  normal pause/seek/mute/volume observations remain pending on that running
+  package; do not infer them from automated command-construction evidence.
 
 ## Prior review disposition
 

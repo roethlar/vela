@@ -24,8 +24,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   pause/resume and seek remain explicit acceptance checks. The owner settled
   own-config precedence on 2026-08-20: when `mpv_use_own_config=true`, Vela
   omits its AO preference and the expert's `mpv.conf` owns audio-output
-  selection. The production plan has no unresolved design decisions and awaits
-  a separate explicit implementation go.
+  selection. The implementation is complete for Vela 1.0.61: the shipped play
+  path uses a testable base-command helper, macOS appends
+  `--ao=avfoundation,coreaudio` before Advanced arguments only when Vela owns
+  defaults, and docs/release notes describe the contract. All four focused
+  mutation proofs failed for the intended reason and restored green. Pinned
+  Node/npm, npm audit/check/build, Rust MSRV/stable check, clippy, all 365 Rust
+  tests, RustSec audit, `git diff --check`, and the native 1.0.61 DMG build pass.
+  The freshly built DMG is running; packaged physical AirPlay/control
+  acceptance remains pending and must not be inferred from automated evidence.
 - 2026-08-20 owner review-process constraint: never start more than one Claude
   session without explicit owner approval; never impose a low timeout, end a
   Claude process, or discard any verdict for any reason without explicit owner
@@ -79,8 +86,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Next
 
-- Review the settled macOS AVFoundation-first plan and obtain a separate
-  explicit go before product implementation.
+- Complete physical AirPlay sync, route-transition, pause/seek/mute/volume, and
+  startup-preroll acceptance on the running Vela 1.0.61 DMG, then close the
+  implementation record.
 - Owner decision after direct-IP isolation: plan the macOS local-network fix
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).

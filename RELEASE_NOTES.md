@@ -2,6 +2,9 @@
 
 ## Fixes
 
+- Keep macOS AirPlay/HomePod video and audio synchronized by preferring mpv's
+  AVFoundation audio output, with CoreAudio retained as fallback and expert
+  overrides preserved.
 - Update `h2` to 0.4.16 to address `RUSTSEC-2026-0258`, an unbounded empty DATA
   frame denial-of-service vulnerability.
 
