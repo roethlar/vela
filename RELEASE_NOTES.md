@@ -1,3 +1,10 @@
+# Unreleased
+
+## Fixes
+
+- Update `h2` to 0.4.16 to address `RUSTSEC-2026-0258`, an unbounded empty DATA
+  frame denial-of-service vulnerability.
+
 # Vela 1.0.60
 
 Vela 1.0.60 ships signed release binaries: the macOS app is Developer ID
