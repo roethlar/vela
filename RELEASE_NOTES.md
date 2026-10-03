@@ -9,6 +9,8 @@
   frame denial-of-service vulnerability.
 - Update `rustls` to 0.23.45 to address `RUSTSEC-2026-0285`, TLS 1.3
   handshake messages accepted across encryption-level boundaries.
+- Update `devalue` to 5.9.4 to address `GHSA-9rgm-9g3h-6x36` and related
+  build-time serialization advisories.
 
 # Vela 1.0.60
 
