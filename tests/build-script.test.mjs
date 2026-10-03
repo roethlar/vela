@@ -76,6 +76,7 @@ test("an explicit Linux build collects only fresh requested bundles", { skip: po
 
   await executable(path.join(fakeBin, "uname"), "#!/bin/sh\nprintf 'Linux\\n'\n");
   await executable(path.join(fakeBin, "node"), "#!/bin/sh\nexit 0\n");
+  await fakeLinuxPackageTools(fakeBin);
   await executable(
     path.join(fakeBin, "npm"),
     `#!/bin/sh
@@ -108,6 +109,85 @@ printf 'fresh\\n' > src-tauri/target/release/bundle/rpm/Vela-0.1.51-1.aarch64.rp
   assert.deepEqual(await readdir(path.join(bundleRoot, "appimage")), [
     "Vela_0.1.39_aarch64.AppImage",
   ]);
+});
+
+// Fakes for every package manager build.sh knows, so the prerequisite check is
+// hermetic whatever distro (or macOS) the suite runs on. Packages whose name
+// matches `missingPattern` report as not installed; installs are logged.
+async function fakeLinuxPackageTools(fakeBin, { missingPattern = "", callLog = "/dev/null" } = {}) {
+  const missing = `case "$pkg" in *${missingPattern || "__nothing__"}*) exit 1 ;; esac`;
+  const lastArg = `for pkg in "$@"; do :; done`;
+  const log = `printf '%s %s\\n' "$(basename "$0")" "$*" >> "${callLog}"`;
+  await executable(path.join(fakeBin, "cargo"), "#!/bin/sh\nexit 0\n");
+  await executable(path.join(fakeBin, "id"), "#!/bin/sh\nprintf '1000\\n'\n");
+  await executable(path.join(fakeBin, "sudo"), `#!/bin/sh\n${log}\n`);
+  await executable(
+    path.join(fakeBin, "pacman"),
+    `#!/bin/sh\n[ "$1" = -Q ] || { ${log}; exit 0; }\n${lastArg}\n${missing}\n`,
+  );
+  await executable(
+    path.join(fakeBin, "dpkg-query"),
+    `#!/bin/sh\n${lastArg}\n${missing}\nprintf 'installed'\n`,
+  );
+  await executable(path.join(fakeBin, "rpm"), `#!/bin/sh\n${lastArg}\n${missing}\n`);
+  await executable(path.join(fakeBin, "apt-get"), `#!/bin/sh\n${log}\n`);
+  await executable(path.join(fakeBin, "dnf"), `#!/bin/sh\n${log}\n`);
+}
+
+async function linuxPrereqFixture(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), "vela-build-prereq-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const scripts = path.join(root, "scripts");
+  const fakeBin = path.join(root, "fake-bin");
+  const callLog = path.join(root, "calls.log");
+  await Promise.all([
+    mkdir(scripts, { recursive: true }),
+    mkdir(fakeBin, { recursive: true }),
+    mkdir(path.join(root, "node_modules"), { recursive: true }),
+  ]);
+  await copyFile(path.join(repoRoot, "scripts", "build.sh"), path.join(scripts, "build.sh"));
+  await chmod(path.join(scripts, "build.sh"), 0o755);
+  await writeFile(path.join(root, "node_modules", ".package-lock.json"), "{}\n");
+  await writeFile(callLog, "");
+  await executable(path.join(fakeBin, "uname"), "#!/bin/sh\nprintf 'Linux\\n'\n");
+  await executable(path.join(fakeBin, "node"), "#!/bin/sh\nexit 0\n");
+  await executable(
+    path.join(fakeBin, "npm"),
+    `#!/bin/sh
+printf 'npm %s\\n' "$*" >> "${callLog}"
+mkdir -p src-tauri/target/release/bundle/deb
+printf 'fresh\\n' > src-tauri/target/release/bundle/deb/Vela_1.0.0_amd64.deb
+`,
+  );
+  await fakeLinuxPackageTools(fakeBin, { missingPattern: "webkit", callLog });
+  const run = (...args) =>
+    spawnSync("/bin/bash", [path.join(scripts, "build.sh"), "--bundles", "deb", ...args], {
+      cwd: root,
+      encoding: "utf8",
+      input: "",
+      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
+    });
+  return { root, callLog, run };
+}
+
+test("a Linux build names missing system packages and stops before building", { skip: posixBashUnavailable }, async (t) => {
+  const fixture = await linuxPrereqFixture(t);
+  const run = fixture.run();
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /Missing build prerequisites: \S*webkit\S*\n/);
+  assert.match(run.stderr, /Install with: sudo .*webkit/);
+  assert.match(run.stderr, /--install-deps/);
+  assert.equal(await readFile(fixture.callLog, "utf8"), "");
+});
+
+test("a Linux build with --install-deps installs only the missing packages, then builds", { skip: posixBashUnavailable }, async (t) => {
+  const fixture = await linuxPrereqFixture(t);
+  const run = fixture.run("--install-deps");
+  assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+  const calls = (await readFile(fixture.callLog, "utf8")).trim().split("\n");
+  assert.match(calls[0], /^sudo (pacman -S --needed|apt-get install -y|dnf install -y) \S*webkit\S*$/);
+  assert.match(calls[1], /^npm run tauri -- build --bundles deb$/);
+  assert.deepEqual(await readdir(path.join(fixture.root, "dist")), ["Vela_1.0.0_amd64.deb"]);
 });
 
 test("the native macOS build works with Bash 3 empty-array nounset semantics", { skip: posixBashUnavailable }, async (t) => {

@@ -33,15 +33,24 @@
 #   scripts/build.sh                 # build the host's default bundle
 #   scripts/build.sh --native        # macOS: host arch only (skip universal)
 #   scripts/build.sh --bundles deb,rpm,appimage   # override the bundle targets
+#   scripts/build.sh --install-deps  # Linux: install missing system packages
+#                                    # without asking first
+#
+# On Linux the script checks the system build prerequisites up front (pacman,
+# apt, or dnf hosts). When packages are missing it lists them and offers to
+# install them; without a terminal to ask on, it prints the install command
+# and stops instead.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
 universal=1            # macOS: build a universal (arm64 + x86_64) binary by default.
 bundles=""             # empty => pick a sensible default for the host below.
+install_deps=0         # Linux: 1 => install missing system packages unprompted.
 
 while [ $# -gt 0 ]; do
   case "$1" in
     --native)    universal=0 ;;
+    --install-deps) install_deps=1 ;;
     --bundles)   shift; bundles="${1:?--bundles needs a value}" ;;
     --bundles=*) bundles="${1#*=}" ;;
     -h|--help)
@@ -111,6 +120,70 @@ case "$os" in
     fi
     ;;
 esac
+
+# --- Linux build prerequisites -------------------------------------------------
+# Discover missing system packages before anything compiles, so the failure is
+# one actionable line instead of a pkg-config error minutes into the build (or
+# a binary that cannot load libwebkit2gtk at launch). The Debian list mirrors
+# the CI workflows; the Arch list adds the PKGBUILD's runtime depends, which
+# makepkg refuses to build without.
+pkg_installed() {
+  case "$1" in
+    pacman) pacman -Q "$2" >/dev/null 2>&1 ;;
+    apt)    [ "$(dpkg-query -W -f='${db:Status-Status}' "$2" 2>/dev/null)" = installed ] ;;
+    dnf)    rpm -q "$2" >/dev/null 2>&1 ;;
+  esac
+}
+
+ensure_linux_prereqs() {
+  local pm pkgs=() install=() missing=() p answer
+  if is_arch && command -v pacman >/dev/null 2>&1; then
+    pm=pacman; install=(pacman -S --needed)
+    pkgs=(base-devel webkit2gtk-4.1 libsoup3 gtk3 librsvg)
+    if [ "$mode" = arch ]; then pkgs+=(mpv hicolor-icon-theme); else pkgs+=(patchelf); fi
+  elif command -v apt-get >/dev/null 2>&1 && command -v dpkg-query >/dev/null 2>&1; then
+    pm=apt; install=(apt-get install -y)
+    pkgs=(build-essential pkg-config libwebkit2gtk-4.1-dev libsoup-3.0-dev
+          libgtk-3-dev librsvg2-dev libayatana-appindicator3-dev patchelf)
+  elif command -v dnf >/dev/null 2>&1 && command -v rpm >/dev/null 2>&1; then
+    pm=dnf; install=(dnf install -y)
+    pkgs=(gcc pkgconf-pkg-config webkit2gtk4.1-devel libsoup3-devel gtk3-devel
+          librsvg2-devel libappindicator-gtk3-devel patchelf)
+  else
+    echo "==> Unrecognized package manager; skipping the system prerequisite check" >&2
+    return 0
+  fi
+
+  for p in "${pkgs[@]}"; do
+    pkg_installed "$pm" "$p" || missing+=("$p")
+  done
+  [ "${#missing[@]}" -gt 0 ] || return 0
+
+  [ "$(id -u)" -eq 0 ] || install=(sudo "${install[@]}")
+  echo "==> Missing build prerequisites: ${missing[*]}" >&2
+  echo "    Install with: ${install[*]} ${missing[*]}" >&2
+  if [ "$install_deps" -ne 1 ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      read -r -p "    Install them now? [Y/n] " answer
+      case "$answer" in
+        ""|[Yy]*) ;;
+        *) echo "Cannot build without them." >&2; exit 1 ;;
+      esac
+    else
+      echo "    Run that command, or re-run with --install-deps." >&2
+      exit 1
+    fi
+  fi
+  "${install[@]}" "${missing[@]}"
+}
+
+if [ "$os" = linux ]; then
+  ensure_linux_prereqs
+  command -v cargo >/dev/null 2>&1 || {
+    echo "Rust is not installed (no cargo on PATH); install it from https://rustup.rs" >&2
+    exit 1
+  }
+fi
 
 # An incompatible local toolchain (e.g. Node 26's bundled npm 11) can rewrite
 # the lockfile. The accepted ranges live in package.json engines.
