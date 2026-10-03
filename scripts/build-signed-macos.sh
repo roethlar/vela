@@ -89,7 +89,10 @@ case "$APPLE_API_KEY_PATH" in
 esac
 [ -f "$APPLE_API_KEY_PATH" ] || die "App Store Connect private key is missing: $APPLE_API_KEY_PATH"
 
-key_mode="$(stat -f '%Lp' "$APPLE_API_KEY_PATH" 2>/dev/null || stat -c '%a' "$APPLE_API_KEY_PATH" 2>/dev/null)" ||
+# Separate substitutions: GNU `stat -f` prints filesystem status before failing,
+# which must not be concatenated with the fallback's mode.
+key_mode="$(stat -f '%Lp' "$APPLE_API_KEY_PATH" 2>/dev/null)" ||
+  key_mode="$(stat -c '%a' "$APPLE_API_KEY_PATH" 2>/dev/null)" ||
   die "could not inspect private-key permissions: $APPLE_API_KEY_PATH"
 case "$key_mode" in
   400|600) ;;
