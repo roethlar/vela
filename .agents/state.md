@@ -84,6 +84,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   26.7.0 (`.node-version`) / npm 12.0.2 (four `npm install --global` sites).
   The Linux E2E VM's user-local 26.5.0/12.0.1 is inside both ranges
   (assumption: not re-run on that host).
+- 2026-10-03 build-health pass on an Arch-family x86_64 host (unpushed):
+  `scripts/build.sh` now checks Linux system packages (pacman/apt/dnf) and
+  offers to install them (`--install-deps`; no terminal => prints the command
+  and stops); the dnf package list is untested (assumption). The E2E driver
+  fetch uses Launchpad's permanent URL after the archive pool 404'd the pinned
+  2.52.3 package. `devalue` 5.9.4 and `rustls` 0.23.45 clear the then-open
+  advisories. On that host the full verification set, E2E 39/39 (driver 2.52.3
+  against system WebKitGTK 2.52.6), and the Arch package build passed. Nothing
+  here was exercised on macOS or Windows; `scripts/build.ps1` has no
+  prerequisite check.
 - Release code signing merged at `b9c6199` (2026-08-07) shipped in 1.0.60.
   The wiring detail and durable tauri-cli signing facts live in
   `docs/history/state-archive.md` (2026-08-08 rotation). The merged
