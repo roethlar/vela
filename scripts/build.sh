@@ -112,8 +112,8 @@ case "$os" in
     ;;
 esac
 
-# A mismatched local toolchain can rewrite the lockfile or produce a bundle
-# different from CI. The pins live in .node-version and packageManager.
+# An incompatible local toolchain (e.g. Node 26's bundled npm 11) can rewrite
+# the lockfile. The accepted ranges live in package.json engines.
 node scripts/check-js-toolchain.mjs
 
 # --- Ensure JS deps exist and are current (tauri CLI lives in node_modules) ---

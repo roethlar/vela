@@ -1764,3 +1764,31 @@ The two-text-selector control proposed in Revision 1 of
 `.agents/plans/library-sort-direction.md`. It does not change the existing sort
 fields, per-library persistence, merged-view restrictions, or default
 `titleSort:asc` ordering.
+
+## 2026-10-03 - JavaScript toolchain check is a compatibility range, not an exact pin
+
+Status: APPROVED (owner, 2026-10-03).
+
+Decision:
+`scripts/check-js-toolchain.mjs` accepts any Node inside `package.json`
+`engines.node` (currently `>=26.5.0 <27`) and any npm inside `engines.npm`
+(`>=12`, deliberately no upper bound). `engines` is the single canonical home
+for both ranges; the exact `packageManager: npm@12.0.2` field is removed.
+`.node-version` and the workflows' `npm install --global npm@12.0.2` remain
+only as the fixed baseline CI and release builds run on, not as a requirement
+on local machines.
+
+Reason:
+The exact pin refused to build on any machine whose Node 26 or npm 12 had
+simply taken a patch or minor update, which is every rolling-release
+developer host. The hazard the pin existed for is Node 26's bundled npm 11
+rewriting the lockfile; the npm 12 floor still fails closed on that. The owner
+chose the floor-only option over a same-major cap, accepting that a future npm
+major builds without a checker refusal.
+
+Supersedes:
+The "one pinned Node 26/npm 12 baseline" exactness in the 2026-07-15
+dependency-baseline decision and the exact-match requirement of review finding
+`dlr-s8-1`, for local and VM paths. The Node 26 line choice, the npm 12
+minimum, and the requirement that every install path run the checker before
+installing are unchanged.

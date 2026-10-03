@@ -35,8 +35,11 @@ This section is the canonical home for the verification commands (carved in
 from the retired `.agents/repo-map.json`, 2026-07-08; verified against
 `package.json` scripts and `.github/workflows/ci.yml` on 2026-07-15):
 
-- `node scripts/check-js-toolchain.mjs` (repo root) — require the exact Node
-  and npm executables pinned by `.node-version` and `packageManager`.
+- `node scripts/check-js-toolchain.mjs` (repo root) — require Node and npm
+  executables inside the `package.json` `engines` ranges (floor-only for npm;
+  decision `.agents/decisions.md` 2026-10-03). `.node-version` and the
+  workflows' `npm install --global npm@<version>` are only CI's tested
+  baseline.
 - `npm ci` (repo root) — clean, lockfile-exact JavaScript install.
 - `npm audit` (repo root) — fail closed on known npm vulnerabilities.
 - `npm run check` (repo root) — frontend type and Svelte validation.
