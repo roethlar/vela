@@ -7,6 +7,8 @@
   overrides preserved.
 - Update `h2` to 0.4.16 to address `RUSTSEC-2026-0258`, an unbounded empty DATA
   frame denial-of-service vulnerability.
+- Update `rustls` to 0.23.45 to address `RUSTSEC-2026-0285`, TLS 1.3
+  handshake messages accepted across encryption-level boundaries.
 
 # Vela 1.0.60
 
