@@ -276,7 +276,7 @@ test("Player Settings exposes the four duplicate-source policies and exact prior
   assert.match(settings, /invoke<PlaybackPreferences>\("get_playback_preferences"\)/);
   assert.match(settings, /invoke\("set_playback_preferences"/);
 
-  const page = sources.get("src/routes/+page.svelte");
+  const page = sources.get("src/App.svelte");
   assert.ok(page, "main page source is available");
   assert.match(page, />Play Version <Icon name="chevron"/);
   assert.match(page, /aria-label="Play Version"/);
@@ -314,7 +314,7 @@ test("Player Settings exposes the four duplicate-source policies and exact prior
 });
 
 test("merged hierarchy coordinates travel through browse and season pagination", () => {
-  const page = sources.get("src/routes/+page.svelte");
+  const page = sources.get("src/App.svelte");
   const season = sources.get("src/lib/SeasonDetail.svelte");
   assert.ok(page && season, "hierarchy surfaces are available");
   assert.match(page, /backing: here\.backing/);
@@ -327,7 +327,7 @@ test("merged hierarchy coordinates travel through browse and season pagination",
 });
 
 test("multi-server Plex linking pauses for an explicit credential-free server choice", () => {
-  const page = sources.get("src/routes/+page.svelte");
+  const page = sources.get("src/App.svelte");
   const choiceType = page.match(/type PlexServerChoice = \{([^}]+)\}/)?.[1] ?? "";
 
   assert.match(choiceType, /machineIdentifier:\s*string/);
@@ -367,7 +367,7 @@ test("Settings removes every connected server by its exact source id", () => {
 });
 
 test("Continue Watching has no duplicate playback action row", () => {
-  const page = sources.get("src/routes/+page.svelte");
+  const page = sources.get("src/App.svelte");
   assert.ok(page, "the application page must exist");
   assert.equal(
     /\bflowactions\b|Playback choices for/.test(page),
@@ -427,7 +427,7 @@ test("Icon names are typed, defined, used, and free of migrated raw UI glyphs", 
   for (const [file, glyphs] of rawGlyphContracts) {
     assert.doesNotMatch(sources.get(file), glyphs, `${file} still renders a migrated raw glyph`);
   }
-  const page = sources.get("src/routes/+page.svelte");
+  const page = sources.get("src/App.svelte");
   assert.doesNotMatch(page, /Add to Playlist\s*→/u, "the playlist submenu still uses a raw arrow");
   assert.match(
     page,

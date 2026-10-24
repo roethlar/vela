@@ -213,7 +213,7 @@ test("every runtime image has async decoding and media art uses the shared revea
   }
 
   const qrImages = images.filter(({ file, tag }) =>
-    file === "src/routes/+page.svelte" && /alt=["']Plex device-link QR code["']/.test(tag),
+    file === "src/App.svelte" && /alt=["']Plex device-link QR code["']/.test(tag),
   );
   assert.equal(qrImages.length, 1, "the Plex authorization QR must remain the sole functional image");
   const qr = qrImages[0];
@@ -229,7 +229,7 @@ test("every runtime image has async decoding and media art uses the shared revea
 });
 
 test("media frames keep their fixed underlays and obsolete failure hiding is absent", () => {
-  const page = sources.get("src/routes/+page.svelte");
+  const page = sources.get("src/App.svelte");
   const item = sources.get("src/lib/ItemDetail.svelte");
   const season = sources.get("src/lib/SeasonDetail.svelte");
   const playlists = sources.get("src/lib/PlaylistsView.svelte");

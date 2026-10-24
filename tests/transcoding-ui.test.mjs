@@ -58,7 +58,7 @@ test('a started transcode is always stopped', () => {
 // owner ruling 2026-07-25). Quality nests under version when a title has several
 // copies and is offered directly when it has one; the two labels never appear
 // together; the choice governs one play and is stored nowhere.
-const page = read('src/routes/+page.svelte');
+const page = read('src/App.svelte');
 
 test('quality nests under version, and the two labels are mutually exclusive', () => {
   // The nesting: the version submenu carries a per-copy quality row.

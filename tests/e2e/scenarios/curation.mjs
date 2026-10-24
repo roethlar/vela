@@ -107,7 +107,7 @@ export default {
     // tombstone (app down, so no config-lock race) makes the post-restart
     // assertions depend on tombstone APPLICATION — the hero must suppress a
     // feed item that is actually present (both-feeds suppression,
-    // +page.svelte heroItems) — not merely on the entry having been removed.
+    // App.svelte heroItems) — not merely on the entry having been removed.
     const { execSync } = await import('node:child_process');
     // Only THIS scenario's app counts: scope pgrep hits to processes whose
     // environ carries our unique XDG_CONFIG_HOME — a user-launched Vela (or

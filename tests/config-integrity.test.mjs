@@ -15,7 +15,7 @@ const plexSource = fs.readFileSync("src-tauri/src/source/plex.rs", "utf8");
 const artwork = fs.readFileSync("src-tauri/src/artwork.rs", "utf8");
 const tauriConfig = fs.readFileSync("src-tauri/tauri.conf.json", "utf8");
 const backend = `${commands}\n${playback}`;
-const page = fs.readFileSync("src/routes/+page.svelte", "utf8");
+const page = fs.readFileSync("src/App.svelte", "utf8");
 const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
 
 function attributesBefore(source, declaration) {
