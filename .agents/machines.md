@@ -70,6 +70,26 @@ the only place allowed to know about a particular box.
   Resulting DMG SHA-256:
   `7cb333e33fbfbffac749cd7c1b5364f4e0443a2caefbc7e37c06a7ab370a977c`.
 
+- JS and Rust toolchain for this repo, observed 2026-10-24 over
+  `ssh michael@nagatha` (macOS 27.0.1 build `26A434`, arm64):
+  - Homebrew Node is 26.12.1 with its bundled npm 11.20.0, which is below
+    `engines.npm` (`>=12`). Don't change the Homebrew npm. Install a
+    scratch-prefix npm instead (`npm install --prefix <dir> --global
+    npm@12.0.2`) and put `<dir>/bin` first on `PATH`. With that,
+    `node scripts/check-js-toolchain.mjs` passes, and so does every npm
+    command.
+  - rustup lives in `~/.cargo/bin` (stable 1.99.1, plus 1.89.0 and other
+    pinned toolchains). That directory is not on `PATH` for
+    `ssh ... 'zsh -l -s'`, so prefix `PATH=$HOME/.cargo/bin:$PATH` before any
+    Cargo or Tauri command.
+  - The zsh builtin `log` shadows the unified-log tool, so call
+    `/usr/bin/log show ...` explicitly.
+  - While the console is locked, an SSH session has no screen access:
+    `screencapture` fails with "could not create image from display", and
+    sshd has no Automation (Apple Events) grant. A GUI app launched over SSH
+    does run, but nothing visual can be checked from SSH. Visual acceptance
+    needs the owner at the desktop.
+
 Relocated out of `.agents/state.md` 2026-07-14 (drift pass) — state.md stays
 portable and may at most point here.
 
