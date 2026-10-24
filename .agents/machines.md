@@ -70,6 +70,26 @@ the only place allowed to know about a particular box.
   Resulting DMG SHA-256:
   `7cb333e33fbfbffac749cd7c1b5364f4e0443a2caefbc7e37c06a7ab370a977c`.
 
+- JS and Rust toolchain for this repo, observed 2026-10-24 over
+  `ssh michael@nagatha` (macOS 27.0.1 build `26A434`, arm64):
+  - Homebrew Node is 26.12.1 with its bundled npm 11.20.0, which is below
+    `engines.npm` (`>=12`). Don't change the Homebrew npm. Install a
+    scratch-prefix npm instead (`npm install --prefix <dir> --global
+    npm@12.0.2`) and put `<dir>/bin` first on `PATH`. With that,
+    `node scripts/check-js-toolchain.mjs` passes, and so does every npm
+    command.
+  - rustup lives in `~/.cargo/bin` (stable 1.99.1, plus 1.89.0 and other
+    pinned toolchains). That directory is not on `PATH` for
+    `ssh ... 'zsh -l -s'`, so prefix `PATH=$HOME/.cargo/bin:$PATH` before any
+    Cargo or Tauri command.
+  - The zsh builtin `log` shadows the unified-log tool, so call
+    `/usr/bin/log show ...` explicitly.
+  - While the console is locked, an SSH session has no screen access:
+    `screencapture` fails with "could not create image from display", and
+    sshd has no Automation (Apple Events) grant. A GUI app launched over SSH
+    does run, but nothing visual can be checked from SSH. Visual acceptance
+    needs the owner at the desktop.
+
 Relocated out of `.agents/state.md` 2026-07-14 (drift pass) — state.md stays
 portable and may at most point here.
 
@@ -78,7 +98,10 @@ portable and may at most point here.
   with rustup, tauri-driver, Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64
   WebKitWebDriver, debug binary built). See the Linux VM section below.
 - The mac clone has a `vm` remote. **The push policy is ASK, and that includes
-  `vm`** (`.agents/push-policy.md`). To run E2E without pushing, `scp` the
+  `vm`** (`.agents/push-policy.md`). Corrected 2026-10-24: the Mac's
+  `~/Dev/vela` has only `origin` (magneto Gitea) and `github`, with no `vm`
+  remote. Reach the VM with the git-bundle-plus-`scp` route (for example
+  `.agents/plans/remove-sveltekit.md`, Host constraints). To run E2E without pushing, `scp` the
   changed files into `~/dev/vela` and verify by checksum before running — no
   `git push`, no `git checkout -- .` on the VM's tree (that has silently
   reverted work).
@@ -255,11 +278,12 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     `-c core.autocrlf=false` on each git command that writes its files.
     Never run `git -C <worktree> config`: worktrees share `.git/config`, so
     that command rewrites the main clone's setting.
-  - This clone's only configured remote is `origin`, which points at GitHub
-    (`https://github.com/roethlar/vela`). Corrected 2026-10-24: the Gitea at
-    `http://magneto:3001/michael/vela.git` (Gitea 28.1.0) IS reachable from
-    here by URL, and the stored Git credentials can push to it; it is the
-    canonical Gitea `origin` (`.agents/repo-guidance.md`, Remotes & Sync).
+  - As of 2026-10-24 this clone's remotes follow `.agents/repo-guidance.md`
+    (Remotes & Sync):
+    - `origin` is the canonical Gitea, `http://magneto:3001/michael/vela.git`
+      (Gitea 28.1.0). It is reachable from here, and the stored Git
+      credentials can push to it.
+    - `github` is `https://github.com/roethlar/vela`.
     Host `q` and its q:3000 Gitea are retired (owner, 2026-10-24). Use
     `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` for unattended Gitea calls.
 
@@ -358,6 +382,21 @@ Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
   12.0.2 baseline) into that tree with its own Node, and prove `bash -lc`
   reports the new pair and the checker passes. Keep the 26.5.0 directory as
   the rollback. Update the baseline above once done.
+  Still pending at 2026-10-24: the VM could not be started (next bullet).
+- How the VM is hosted (observed 2026-10-24): it is the UTM 4.7.5 QEMU guest
+  named `Ubuntu`, bundle `/Volumes/Apps/VMs/Linux.utm`, app
+  `/Volumes/Apps/Applications/UTM.app`. It was suspended, not powered off,
+  and 192.168.64.5 refused SSH. It can't be started from an SSH session on
+  the Mac:
+  - `utmctl` fails with OSStatus -1743 and prints "utmctl does not work from
+    SSH sessions or before logging in". sshd has no Apple Events grant.
+  - `open 'utm://start?name=Ubuntu'` exits 0, but while the console is locked
+    LaunchServices only hands the request to CoreServicesUIAgent, and UTM
+    never receives it. No QEMU process starts.
+
+  Starting it needs the owner at the Mac's desktop: unlock the Mac and start
+  `Ubuntu` in UTM. Requests queued by `open` may then start it on their own
+  (assumption, not observed).
 
 - The fetched E2E driver now uses Ubuntu's SHA-pinned
   `webkitgtk-webdriver` 2.52.3 package, exactly matching this VM's WebKitGTK;
