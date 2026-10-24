@@ -128,7 +128,7 @@ test("Slice 3 surface motion is CSS-only and reduced motion kills duration, dela
   const itemSource = sources.get("src/lib/ItemDetail.svelte");
   const seasonSource = sources.get("src/lib/SeasonDetail.svelte");
   const settingsSource = sources.get("src/lib/Settings.svelte");
-  const pageSource = sources.get("src/routes/+page.svelte");
+  const pageSource = sources.get("src/App.svelte");
   assert.ok(itemSource && seasonSource && settingsSource && pageSource);
 
   for (const [file, source] of [
@@ -187,7 +187,7 @@ test("Slice 3 surface motion is CSS-only and reduced motion kills duration, dela
 });
 
 test("grid and cast entrances share a bounded rise while cover-flow depth and easing stay coherent", () => {
-  const pageSource = sources.get("src/routes/+page.svelte");
+  const pageSource = sources.get("src/App.svelte");
   const itemSource = sources.get("src/lib/ItemDetail.svelte");
   assert.ok(pageSource && itemSource);
   const pageMarkup = componentMarkup(pageSource);
@@ -265,7 +265,7 @@ test("grid and cast entrances share a bounded rise while cover-flow depth and ea
 
 test("button press, episode hover, and watched-badge pop are composable and narrowly owned", () => {
   const seasonSource = sources.get("src/lib/SeasonDetail.svelte");
-  const pageSource = sources.get("src/routes/+page.svelte");
+  const pageSource = sources.get("src/App.svelte");
   assert.ok(seasonSource && pageSource);
   const seasonStyle = componentStyle(seasonSource);
   const pageStyle = componentStyle(pageSource);
@@ -371,37 +371,37 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
 
   const categories = [
     callFor(
-      "src/routes/+page.svelte",
+      "src/App.svelte",
       'heading="Welcome to Vela"',
       'hint="Connect Plex, Jellyfin, or Emby to start browsing your library in HDR."',
       "film",
     ),
     callFor(
-      "src/routes/+page.svelte",
+      "src/App.svelte",
       'heading="No titles on Home yet"',
       'hint="Choose a library from the sidebar to start browsing."',
       "film",
     ),
     callFor(
-      "src/routes/+page.svelte",
+      "src/App.svelte",
       'heading="No libraries found"',
       'hint="Check the connected server, then use Refresh libraries."',
       "film",
     ),
     callFor(
-      "src/routes/+page.svelte",
+      "src/App.svelte",
       'heading="No titles in this view"',
       'hint="Go back, refresh libraries, or choose another library."',
       "film",
     ),
     callFor(
-      "src/routes/+page.svelte",
+      "src/App.svelte",
       'heading={`No matches for “${searchTerm}”`}',
       'hint="Check the spelling or try a broader search."',
       "film",
     ),
     callFor(
-      "src/routes/+page.svelte",
+      "src/App.svelte",
       'heading={`No titles found for ${personView.name}`}',
       'hint="Go back to keep browsing."',
       "film",
@@ -446,7 +446,7 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
 
   const recognized = new Set(categories.map(({ file, index }) => `${file}:${index}`));
   const expectedFiles = new Set([
-    "src/routes/+page.svelte",
+    "src/App.svelte",
     "src/lib/PlaylistsView.svelte",
     "src/lib/ServerPlaylistView.svelte",
     "src/lib/SeasonDetail.svelte",
@@ -460,7 +460,7 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
     }
   }
 
-  const page = sources.get("src/routes/+page.svelte");
+  const page = sources.get("src/App.svelte");
   const playlists = sources.get("src/lib/PlaylistsView.svelte");
   const serverPlaylist = sources.get("src/lib/ServerPlaylistView.svelte");
   const season = sources.get("src/lib/SeasonDetail.svelte");

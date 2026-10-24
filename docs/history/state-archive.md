@@ -32,6 +32,30 @@ floor to 26.12.1 (decision `.agents/decisions.md` 2026-10-03, amended
   The Linux E2E VM's user-local 26.5.0/12.0.1 is inside both ranges
   (assumption: not re-run on that host).
 
+## Rotated 2026-10-23 (SvelteKit removal implemented)
+
+Context for readers: the owner approved `.agents/plans/remove-sveltekit.md`
+and ruled G1 "rename" on 2026-10-23, and Slices 1-4 were implemented on branch
+`remove-sveltekit`. The pre-approval text of the npm audit bullet below was
+superseded. It rotates here verbatim; the bullet's first sentence stays in
+`.agents/state.md`.
+
+- The npm lockfile got a non-breaking `npm audit fix` on 2026-10-23, with no
+  package.json change. It fixed the high advisories in devalue (5.9.4), vite
+  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2). `npm audit` still
+  fails on two low advisories: @sveltejs/kit GHSA-pfhg-q3qv-9q6r and
+  GHSA-27mw-82g8-phjj, which also flag @sveltejs/adapter-static. No 2.x
+  release fixes them. On 2026-10-23 the owner chose to remove SvelteKit
+  rather than upgrade to Kit 3, keeping Svelte 5 and Vite as a plain SPA, with
+  Node staying a build and test tool. The plan is drafted at
+  `.agents/plans/remove-sveltekit.md` (revision 1, 2026-10-23). It awaits the
+  owner's plan approval and one ruling, G1 (rename the root component). The
+  Kit 3 plan, `.agents/plans/sveltekit-3-upgrade.md`, is superseded and was
+  never implemented. Neither advisory's code path is reachable in Vela's
+  static SPA, but the gate fails closed. No implementation is active.
+  Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass. The
+  same 5 CRLF test failures as above remain, and nothing new fails.
+
 ## Rotated 2026-08-08 (catchup sweep — superseded by signed 1.0.60)
 
 Context for readers: Vela 1.0.60 (first signed release) was published on

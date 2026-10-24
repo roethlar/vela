@@ -22,6 +22,14 @@ export default {
     const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, 'package.json'), 'utf8'));
     // Catches running a stale embedded frontend as much as a wrong version.
     assert.equal(state.footer, `Vela v${pkg.version}`);
+    // The Geist UI face must actually load and be the body font. Do not use
+    // document.fonts.check(): it returns true when no face matches at all.
+    await driver.waitFor(
+      `return [...document.fonts].some((f) => f.family.replace(/["']/g, "") === "Geist Variable" && f.status === "loaded")`,
+      'Geist Variable font loaded',
+    );
+    const bodyFont = await driver.exec(`return getComputedStyle(document.body).fontFamily`);
+    assert.match(bodyFont, /^["']?Geist Variable["']?\s*,/, 'body must use the Geist UI font');
     await screenshot('01-welcome');
 
     const addSource = await driver.find(

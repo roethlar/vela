@@ -929,12 +929,16 @@ mutually compatible set: no prereleases, forced peer graphs, or independently
 latest version outside a direct package's declared compatibility range. Thus
 TypeScript remains on current compatible 6 while SvelteKit excludes 7; Rust
 stays rolling stable while Vela preserves and tests its declared 1.89 MSRV.
+(Superseded 2026-10-23: SvelteKit was removed, so no installed peer range
+excludes TypeScript 7 any more. See the 2026-10-23 entry.)
 
 Known npm vulnerabilities fail CI under the existing fail-closed security
 rule. Current SvelteKit still requests vulnerable `cookie ^0.6.0`; because Vela
 is a static SPA with no server-cookie use, the owner approved a narrow, tested
 override to the closest patched 0.7 line plus a failing npm-audit gate. There is
 no blanket suppression and no `npm audit fix --force` downgrade.
+Superseded 2026-10-23: SvelteKit was removed (see the 2026-10-23 entry); the
+override and `cookie` are gone.
 
 Reason:
 CI and release still use EOL Node 20 and JavaScript actions whose internal
@@ -1805,3 +1809,50 @@ compatibility policy and expresses the security move in its terms:
 still no `packageManager` field. `.node-version` (26.12.1) and the workflows'
 npm 12.0.2 remain CI's fixed baseline only. Raise the floor, never the
 baseline alone, when a later Node 26 security release lands.
+
+## 2026-10-23 - The frontend is plain Svelte 5 and Vite; SvelteKit is removed
+
+Status: APPROVED (owner, 2026-10-23). The owner answered "go with your rec"
+when the recommendation was to remove SvelteKit and keep Svelte 5 and Vite,
+then set the standing direction "do everything in the most correct manner
+possible, commit and push as needed". Gate G1 was ruled "rename".
+Implementation plan: `.agents/plans/remove-sveltekit.md`.
+
+Decision:
+Vela's frontend no longer uses SvelteKit or adapter-static. It is a Svelte 5
+single-page app built by Vite with `@sveltejs/vite-plugin-svelte`:
+
+- a root `index.html`;
+- `src/main.ts`, which mounts the root component with `mount()`;
+- Vite's `public/` for static files;
+- `$lib`, defined once in `tsconfig.json` `paths` and read by Vite through
+  `resolve.tsconfigPaths`;
+- output in `build/`, which Tauri embeds.
+
+`tests/frontend-shell.test.mjs` and `scripts/check-frontend-build.mjs` (run
+by `npm run build`) guard that shell. Node remains a build and test tool. The
+owner chose that over a Node-free rewrite, and chose removal over the Kit 3
+upgrade. Under G1 the root component was renamed from `src/routes/+page.svelte`
+to `src/App.svelte`. Historical records that cite `src/routes/+page.svelte`
+refer to what is now `src/App.svelte`, and records that cite `src/app.html`
+refer to what is now `index.html`.
+
+Reason:
+Vela used no SvelteKit feature. Kit contributed only generated config, a
+breaking major version, and two low advisories (GHSA-pfhg-q3qv-9q6r,
+GHSA-27mw-82g8-phjj) with no 2.x fix. Those advisories failed the closed npm
+audit gate in CI and release.
+
+Supersedes:
+- The 2026-07-15 dependency decision's Kit-scoped `cookie` override. It has
+  no target, and `cookie` has left the dependency graph.
+- That decision's example "TypeScript remains on current compatible 6 while
+  SvelteKit excludes 7". No installed peer range excludes TypeScript 7 now:
+  svelte-check peers `typescript >=5.0.0`. The `~6.0.3` range in
+  `package.json` is the only fence. It stays until a separate refresh proves
+  TypeScript 7 with svelte-check.
+- The `.agents/repo-guidance.md` Mission Detail line "SvelteKit is configured
+  as a static SPA for Tauri."
+
+The 2026-07-15 rules that npm audit fails closed, with no blanket suppression
+and no `npm audit fix --force`, stay in force.

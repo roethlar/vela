@@ -6,7 +6,7 @@
 //
 // TWO mock sources are configured and "Mock JF A" is explicitly selected:
 // case 13's empty-Home redirect requires `activeSource !== null`
-// (+page.svelte:331), and selection also keeps `singleSource` true so the
+// (App.svelte:331), and selection also keeps `singleSource` true so the
 // disappearance fallback is armed for the destructive cases.
 import assert from "node:assert/strict";
 import {
@@ -381,7 +381,7 @@ export default {
       "library B's own cards",
     );
     // The CARDS cannot prove the gate: loadMore reads LIVE `active`
-    // (+page.svelte:727), so an ungated stale leg would simply clear B's grid
+    // (App.svelte:727), so an ungated stale leg would simply clear B's grid
     // and re-list B — same cards, every assertion green (lrs-8/codex r2:
     // lrs-2). The request log is what distinguishes them: the superseded leg
     // must issue NO listing at all.

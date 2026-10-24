@@ -319,7 +319,7 @@ export default {
         'Dark and One Light must compute different focus glows',
       );
 
-      // A new real app session exercises app.html's pre-paint localStorage path,
+      // A new real app session exercises index.html's pre-paint localStorage path,
       // not merely Settings' in-memory state.
       await restart();
       await driver.waitFor(
