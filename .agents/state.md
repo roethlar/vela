@@ -81,7 +81,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     vulnerabilities), `npm run check` (70 pass; svelte-check 0 errors, 0
     warnings), and `npm run build` (B1-B6 passed). Rust: the 1.89 MSRV check,
     and stable check, clippy `-D warnings` and test. cargo audit also passed.
-    `main` keeps failing npm audit until the branch merges.
+    After the merge of `main`, run 40061360150 at `af96dc5` passed every job
+    on Node 26.12.1/npm 12.0.2: `npm audit` (0 vulnerabilities), `npm run
+    check` (77 pass, 0 skipped; svelte-check 0 errors, 0 warnings), `npm run
+    build` (B1-B6 passed), the 1.89 MSRV check, stable check, clippy, 364 Rust
+    tests, and cargo audit. `main` keeps failing npm audit until the branch
+    merges.
 - 2026-08-20 macOS AirPlay diagnostics selected an AVFoundation-first production
   path, now drafted at `.agents/plans/macos-airplay-sync.md`; implementation is
   not approved. The affected server-backed MKV/E-AC-3 play was physically about
