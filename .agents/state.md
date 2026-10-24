@@ -55,8 +55,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `npm run e2e`; the VM webview-mount red-proof; the Mac desktop smoke and
     `tauri dev`/HMR; the Cargo commands; and the codex Review, where the
     owner chooses `codereview` or `openreview`.
-  - CI is unverified until the PR's GitHub run completes. `main` keeps
-    failing npm audit until the branch merges.
+  - GitHub CI passed on PR #2 (https://github.com/roethlar/vela/pull/2), run
+    40059537619 at `367bdf6`. Frontend: `npm ci`, `npm audit` (0
+    vulnerabilities), `npm run check` (70 pass; svelte-check 0 errors, 0
+    warnings), and `npm run build` (B1-B6 passed). Rust: the 1.89 MSRV check,
+    and stable check, clippy `-D warnings` and test. cargo audit also passed.
+    `main` keeps failing npm audit until the branch merges.
 - The 2026-08-05 README refresh split the old monolith: README.md is now
   end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
   server name scrubbed to "Plex"); deep user reference moved to

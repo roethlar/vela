@@ -135,6 +135,17 @@ Implementation log (2026-10-23, branch `remove-sveltekit` off `main`
   pushing this branch and opening a PR against `main`. Merging is not part of
   that direction. GitHub CI on the PR is the first CI run of `npm run check` and
   `npm run build` since the audit gate went red.
+- CI: PR #2 (https://github.com/roethlar/vela/pull/2), `ci.yml` run
+  40059537619 at `367bdf6`, passed every job:
+  - Frontend: `npm ci`, `npm audit` ("found 0 vulnerabilities"),
+    `npm run check` (70 pass, 0 fail; svelte-check 0 errors, 0 warnings), and
+    `npm run build` ("check-frontend-build: B1-B6 passed");
+  - Rust: the 1.89 MSRV check, and stable check, clippy `-D warnings` and
+    test;
+  - cargo audit.
+
+  The release workflow's `npm-audit` job wasn't run, because no release was
+  dispatched.
 
 ## Goal
 
