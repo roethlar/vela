@@ -255,11 +255,12 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     `-c core.autocrlf=false` on each git command that writes its files.
     Never run `git -C <worktree> config`: worktrees share `.git/config`, so
     that command rewrites the main clone's setting.
-  - This clone's only configured remote is `origin`, which points at GitHub
-    (`https://github.com/roethlar/vela`). Corrected 2026-10-24: the Gitea at
-    `http://magneto:3001/michael/vela.git` (Gitea 28.1.0) IS reachable from
-    here by URL, and the stored Git credentials can push to it; it is the
-    canonical Gitea `origin` (`.agents/repo-guidance.md`, Remotes & Sync).
+  - As of 2026-10-24 this clone's remotes follow `.agents/repo-guidance.md`
+    (Remotes & Sync):
+    - `origin` is the canonical Gitea, `http://magneto:3001/michael/vela.git`
+      (Gitea 28.1.0). It is reachable from here, and the stored Git
+      credentials can push to it.
+    - `github` is `https://github.com/roethlar/vela`.
     Host `q` and its q:3000 Gitea are retired (owner, 2026-10-24). Use
     `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` for unattended Gitea calls.
 
