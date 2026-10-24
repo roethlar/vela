@@ -2,8 +2,15 @@
 
 ## Status
 
-**DRAFT, revision 1 (2026-10-23). Awaiting the owner's plan approval and one
-ruling (gate G1 below). No implementation is authorized.**
+**APPROVED, revision 1 (owner, 2026-10-23). G1 ruled "rename". Implementation
+is authorized.**
+
+- Approval: the owner answered "go with your rec" when the recommendation was
+  to remove SvelteKit and keep Svelte 5 and Vite. The owner then set the
+  standing direction "do everything in the most correct manner possible,
+  commit and push as needed."
+- G1: ruled "rename" (`src/routes/+page.svelte` becomes `src/App.svelte`), the
+  plan's recommendation. Slice 3 runs.
 
 Owner direction (2026-10-23): remove SvelteKit from Vela instead of upgrading
 it to Kit 3. Keep Svelte 5 and Vite. Node stays as a build and test tool; the
@@ -25,7 +32,7 @@ Record the owner's approval wording, and the G1 ruling when it lands, on this
 status line before Slice 0 starts. The `.agents/decisions.md` entry that
 carries the same wording lands in Slice 4.
 
-Owner gate pending:
+Owner gate (ruled "rename", 2026-10-23):
 
 - **G1, rename the root component.** Slice 3 runs only if the owner rules
   "rename". Slices 0, 1, 2 and 4 do not depend on G1. If the owner rules
