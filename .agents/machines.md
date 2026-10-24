@@ -254,6 +254,14 @@ Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
   user-local `node`/`npm`/`npx` symlinks and that versioned directory rolls the
   alignment back. `bash -lc` resolves the user-local pair, matching the E2E
   launcher; a clean install and the real-app `smoke` scenario passed.
+- Pending (2026-10-23): the repo pin moved to Node 26.12.1 (Oct 2026 security
+  release) with npm still 12.0.1, so `scripts/check-js-toolchain.mjs` rejects
+  this VM's 26.5.0 until it is re-aligned. Re-align with the same reversible
+  recipe: verify the official arm64 26.12.1 archive against its SHASUMS,
+  extract to `~/.local/opt/node-v26.12.1`, repoint only the three
+  `~/.local/bin` symlinks, install npm 12.0.1 into that tree with its own Node,
+  and prove `bash -lc` reports v26.12.1/12.0.1. Keep the 26.5.0 directory as
+  the rollback. Update the baseline above once done.
 
 - The fetched E2E driver now uses Ubuntu's SHA-pinned
   `webkitgtk-webdriver` 2.52.3 package, exactly matching this VM's WebKitGTK;

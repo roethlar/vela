@@ -9,6 +9,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- The Node pin moved from 26.5.0 to 26.12.1 (2026-10-23, owner go), for the
+  October 2026 Node security release. `.node-version` and `engines`
+  (`>=26.12.1 <27`) are updated, and npm stays at 12.0.1. Node only builds and
+  tests Vela; the shipped app runs no Node, so no end user was exposed. Verified
+  on Windows with Node 26.12.1: `npm ci` and `npm run build` pass.
+  `node --test tests/` has 5 failures from CRLF checkout line endings
+  (`core.autocrlf=true`). They fail the same way on unmodified `main`, and a copy
+  of `main` checked out with LF endings doesn't hit them. `npm run check` fails
+  on the same test. Not run: the toolchain check (this host has npm 11.20.0) and
+  the Cargo commands (no Rust change). The E2E VM still needs re-aligning; see
+  the Pending note in `.agents/machines.md`.
 - The 2026-08-05 README refresh split the old monolith: README.md is now
   end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
   server name scrubbed to "Plex"); deep user reference moved to
