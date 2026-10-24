@@ -6,6 +6,70 @@ the only place allowed to know about a particular box.
 
 ## macOS dev host (`/Users/michael/Dev/vela`)
 
+- AirPlay investigation baseline recorded 2026-08-20: macOS 27.0 build
+  `26A5416b`; the tested system default output identified itself as AirPlay.
+  `/opt/homebrew/bin/mpv` is 0.41.0 and reports automatic AO order
+  `coreaudio`, `avfoundation`, `null`, `coreaudio_exclusive`, `pcm`. A muted
+  direct probe opened CoreAudio on the AirPlay output and reported about
+  11.6 ms device latency, not the observed roughly two-second physical
+  endpoint delay.
+- `/Applications/Plezy.app` is 2.16.0 build 142, matching sibling source tag
+  `2.16.0`. That tag pins MPVKit 1.0.23 at
+  `ee423a7e8727eeee4748f08cb7d3c00e935ed45e`, built from mpv 0.41.0, and
+  configures `ao=coreaudio,avfoundation`. Source inspection found no macOS
+  AirPlay detector or automatic audio-delay path; saved Plezy preferences did
+  not contain a nonzero audio-sync override. Retained unified logs do not
+  reveal which AO the synchronized Plezy play selected, so runtime AO remains
+  an explicit diagnostic gap.
+- Credential-free AirPlay A/B on 2026-08-20 used a 12-second 1280x720 60 fps
+  stereo flash/click fixture. Forced CoreAudio selected `AirPlay (126)`,
+  reported `avsync=-5.736 ms` and 11.610 ms device latency, swallowed the first
+  click, then remained physically synchronized. Forced AVFoundation reported
+  `avsync=-0.142 ms`, swallowed about half of the first click, then remained
+  physically synchronized. Both backends therefore passed steady-state stereo
+  sync; the difference was initial preroll only. An earlier mono fixture made
+  CoreAudio fail with macOS `paramErr (-50)` and was excluded from sync
+  comparison.
+- Installed Vela 1.0.60's sanitized playback settings at the same diagnostic
+  point were `mpv_extra_args=null`, `mpv_use_own_config=false`, and
+  `mpv_autocrop=null`. No connection fields or media URLs were read or printed.
+- Installed Vela 1.0.60 then reproduced roughly two seconds of physically late
+  AirPlay audio on a network MKV with H.264/VideoToolbox video at 23.976025 fps
+  and 48 kHz E-AC-3 `5.1(side)` decoded/downmixed to 48 kHz stereo. Live IPC
+  reported CoreAudio, automatic device selection, `audio-delay=0`,
+  `avsync=0.006 ms`, `video-sync=audio`, and 240 Hz display timing. No URL,
+  title, headers, or credentials were queried. The local stereo AAC fixture
+  remained synchronized through the same AO, making media/format/input path a
+  controlled difference rather than proving a general CoreAudio defect.
+- Owner-approved live IPC change of that exact Vela play to
+  `ao=avfoundation` succeeded without an explicit reload or relaunch. IPC then
+  reported `current-ao=avfoundation` and `avsync=0.359 ms`; the owner observed
+  physical sync was correct. The write changed only the live mpv process and
+  did not modify Vela or mpv settings.
+- The first changed process ended naturally. Restarting the same item launched
+  CoreAudio again and reproduced the offset; changing that new process to
+  AVFoundation restored sync. With it still playing, AirPlay -> Mac mini
+  Speakers kept AVFoundation/automatic-device selection, reported
+  `avsync=0.011 ms`, moved sound to built-in output, and remained physically
+  synchronized. Mac mini Speakers -> AirPlay kept the same AO/process,
+  reported `avsync=0.007 ms`, moved sound back to AirPlay, and remained
+  physically synchronized. No listener, polling, delay, or relaunch was used.
+
+- Local Developer ID signing/notarization configured 2026-08-20. The login
+  Keychain holds Apple's Developer ID G2 intermediate and `Developer ID
+  Application: MICHAEL COELHO (27R2KCAHN7)` (leaf expires 2031-08-08).
+  App Store Connect API metadata and the private `.p8` remain canonical in
+  `../Certificates/AppStoreConnectCertInfo.csv`; the `.p12`, `.p8`, password
+  list, and API metadata file are owner-only (`0600`). Never copy credential
+  values into this repo or command output. Use
+  `scripts/build-signed-macos.sh` for a fail-closed local signed build; it loads
+  the non-secret metadata from that CSV and uses the installed identity. Its
+  2026-08-20 real-path proof submitted `f6c85900-9550-4d71-99bf-2485e7f1d165`,
+  Apple accepted and stapled it, Gatekeeper accepted the mounted app as
+  `Notarized Developer ID`, and both universal architectures were present.
+  Resulting DMG SHA-256:
+  `7cb333e33fbfbffac749cd7c1b5364f4e0443a2caefbc7e37c06a7ab370a977c`.
+
 Relocated out of `.agents/state.md` 2026-07-14 (drift pass) — state.md stays
 portable and may at most point here.
 
@@ -177,18 +241,24 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     cannot link here until the Build Tools are reinstalled. The per-user
     Vela at the path above is still present.
   - Node 26.12.1 is installed host-wide from the official MSI
-    (`winget install OpenJS.NodeJS`), with its bundled npm 11.20.0. The
-    pinned npm 12.0.1 is not installed globally, so the toolchain check
-    fails here. Run npm through `npx -y npm@12.0.1` instead.
+    (`winget install OpenJS.NodeJS`), with its bundled npm 11.20.0. No
+    npm 12 is installed globally, so the toolchain check (`engines.npm`
+    `>=12`) fails here. Run npm through `npx -y npm@12.0.2` (CI's baseline)
+    instead, or put a scratch-prefix npm 12 first on `PATH` for the check.
   - rustup is installed (`winget install Rustlang.Rustup`) with
     stable-x86_64-pc-windows-msvc only; 1.89.0 is not installed.
   - This clone has `core.autocrlf=true`. The resulting CRLF checkout fails
     five line-ending-sensitive node tests, so run `node --test tests/` and
     `npm run check` in an LF worktree (`git -c core.autocrlf=false worktree
     add ...`).
-  - This clone's only remote is `origin`, which points at GitHub
-    (`https://github.com/roethlar/vela`). There is no Gitea remote, and the
-    Gitea host was unreachable from here.
+  - This clone's only configured remote is `origin`, which points at GitHub
+    (`https://github.com/roethlar/vela`). Corrected 2026-10-24: the Gitea at
+    `http://magneto:3001/michael/vela.git` (Gitea 28.1.0) IS reachable from
+    here by URL, and the stored Git credentials can push to it. The
+    `http://q:3000/michael/vela.git` that `.agents/repo-guidance.md` names as
+    `origin` is NOT reachable from here (`git ls-remote` and HTTP time out;
+    `q` resolves to `q.internal`, a different address from `magneto`). Use
+    `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` for unattended Gitea calls.
 
 ## Linux VM (E2E host)
 
@@ -274,13 +344,16 @@ Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
   user-local `node`/`npm`/`npx` symlinks and that versioned directory rolls the
   alignment back. `bash -lc` resolves the user-local pair, matching the E2E
   launcher; a clean install and the real-app `smoke` scenario passed.
-- Pending (2026-10-23): the repo pin moved to Node 26.12.1 (Oct 2026 security
-  release) with npm still 12.0.1, so `scripts/check-js-toolchain.mjs` rejects
-  this VM's 26.5.0 until it is re-aligned. Re-align with the same reversible
-  recipe: verify the official arm64 26.12.1 archive against its SHASUMS,
-  extract to `~/.local/opt/node-v26.12.1`, repoint only the three
-  `~/.local/bin` symlinks, install npm 12.0.1 into that tree with its own Node,
-  and prove `bash -lc` reports v26.12.1/12.0.1. Keep the 26.5.0 directory as
+- Pending (2026-10-23, restated 2026-10-24 for the merged toolchain policy):
+  `engines.node` is now `>=26.12.1 <27` (a security floor for the Oct 2026
+  Node security release; `engines.npm` stays `>=12`), so
+  `scripts/check-js-toolchain.mjs` rejects this VM's Node 26.5.0 until it is
+  re-aligned; its npm 12.0.1 is still inside the range. Re-align with the same
+  reversible recipe: verify the official arm64 26.12.1 (or any newer 26.x)
+  archive against its SHASUMS, extract to `~/.local/opt/node-v26.12.1`,
+  repoint only the three `~/.local/bin` symlinks, install npm 12.0.1 (or CI's
+  12.0.2 baseline) into that tree with its own Node, and prove `bash -lc`
+  reports the new pair and the checker passes. Keep the 26.5.0 directory as
   the rollback. Update the baseline above once done.
 
 - The fetched E2E driver now uses Ubuntu's SHA-pinned

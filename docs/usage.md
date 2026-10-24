@@ -69,10 +69,13 @@ what you see if you run Emby — a report is more useful than a guess.
 
 ## Player behavior notes
 
-By default Vela uses a predictable `--no-config` mpv profile. Settings → Player
-can opt into your own `mpv.conf` or append custom mpv options; those settings
-can also override Vela's HDR defaults or prevent playback, so change them
-deliberately.
+By default Vela uses a predictable `--no-config` mpv profile. On macOS, that
+profile prefers AVFoundation audio with CoreAudio as fallback so AirPlay and
+local-output transitions remain synchronized; Vela does not guess or apply an
+AirPlay delay. Settings → Player can opt into your own `mpv.conf`, which also
+hands audio-output selection to that file. Custom mpv options are appended
+after Vela's defaults and can override the audio output, HDR defaults, or other
+playback behavior, so change them deliberately.
 
 Black-bar cropping is Off by default. Manual mode runs on `Shift+C`; Automatic
 mode attempts every video. Automatic crop detection can be unreliable with HDR

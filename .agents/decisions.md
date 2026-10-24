@@ -1764,3 +1764,44 @@ The two-text-selector control proposed in Revision 1 of
 `.agents/plans/library-sort-direction.md`. It does not change the existing sort
 fields, per-library persistence, merged-view restrictions, or default
 `titleSort:asc` ordering.
+
+## 2026-10-03 - JavaScript toolchain check is a compatibility range, not an exact pin
+
+Status: APPROVED (owner, 2026-10-03; amended 2026-10-24: the `engines.node`
+lower bound is a security floor, now `>=26.12.1` — see Amendment below).
+
+Decision:
+`scripts/check-js-toolchain.mjs` accepts any Node inside `package.json`
+`engines.node` (currently `>=26.5.0 <27`) and any npm inside `engines.npm`
+(`>=12`, deliberately no upper bound). `engines` is the single canonical home
+for both ranges; the exact `packageManager: npm@12.0.2` field is removed.
+`.node-version` and the workflows' `npm install --global npm@12.0.2` remain
+only as the fixed baseline CI and release builds run on, not as a requirement
+on local machines.
+
+Reason:
+The exact pin refused to build on any machine whose Node 26 or npm 12 had
+simply taken a patch or minor update, which is every rolling-release
+developer host. The hazard the pin existed for is Node 26's bundled npm 11
+rewriting the lockfile; the npm 12 floor still fails closed on that. The owner
+chose the floor-only option over a same-major cap, accepting that a future npm
+major builds without a checker refusal.
+
+Supersedes:
+The "one pinned Node 26/npm 12 baseline" exactness in the 2026-07-15
+dependency-baseline decision and the exact-match requirement of review finding
+`dlr-s8-1`, for local and VM paths. The Node 26 line choice, the npm 12
+minimum, and the requirement that every install path run the checker before
+installing are unchanged.
+
+Amendment (2026-10-24):
+The range's lower bound doubles as a security floor: it must exclude every
+Node 26 release with a known vulnerability in the toolchain. On 2026-10-23 the
+owner approved moving to Node 26.12.1 for the October 2026 Node security
+release; that work landed as an exact pin on a branch that
+had not yet seen this decision. Reconciling the two keeps this decision's
+compatibility policy and expresses the security move in its terms:
+`engines.node` is `>=26.12.1 <27`, `engines.npm` stays `>=12`, and there is
+still no `packageManager` field. `.node-version` (26.12.1) and the workflows'
+npm 12.0.2 remain CI's fixed baseline only. Raise the floor, never the
+baseline alone, when a later Node 26 security release lands.

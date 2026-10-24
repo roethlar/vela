@@ -277,8 +277,8 @@ switch ($os) {
   }
 }
 
-# A mismatched local toolchain can rewrite the lockfile or produce a bundle
-# different from CI. The pins live in .node-version and packageManager.
+# An incompatible local toolchain (e.g. Node 26's bundled npm 11) can rewrite
+# the lockfile. The accepted ranges live in package.json engines.
 Invoke-Checked -FilePath 'node' -ArgumentList @('scripts/check-js-toolchain.mjs')
 
 $nodeModulesMarker = Join-Path 'node_modules' '.package-lock.json'

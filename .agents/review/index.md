@@ -1,5 +1,14 @@
 # Review status
 
+**macOS AirPlay PLAN review recorded 2026-08-20:** owner-directed
+`openreview claude` used Claude Code 2.1.237 / `claude-opus-5` / `xhigh` over
+`32ef827f..9a79bb3`. Two completed verdicts are retained: first
+`acceptable_with_changes` with a capability-proof permission failure, second
+schema-valid `acceptable_with_changes` with `capability_ok:true`. Seven
+consolidated plan findings are admitted; no recommendation is adopted. Full
+provenance, verdicts, intake, and contested choices:
+`.agents/review/openreview-2026-08-20-airplay-plan.md`.
+
 Workflow: unprimed whole-change judgment uses
 `.agents/playbooks/openreview.md`; finding-specific fix verification uses
 `.agents/playbooks/codereview.md`. Reviews of this repo go to `codex`, called

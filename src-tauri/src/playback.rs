@@ -366,6 +366,68 @@ fn parse_extra_mpv_args(raw: &str) -> Vec<String> {
         .collect()
 }
 
+/// Construct the deterministic, non-media-specific portion of Vela's mpv
+/// launch. Per-play resources (credentials, IPC, title, resume point, scripts,
+/// and URL) stay in `play`; keeping defaults here makes their ordering directly
+/// testable without spawning mpv.
+fn base_mpv_command(mpv_bin: &str, cfg: &crate::config::AppConfig) -> Command {
+    let use_own_config = cfg.mpv_use_own_config.unwrap_or(false);
+    let mut cmd = Command::new(mpv_bin);
+    if !use_own_config {
+        // Keep Vela's playback deterministic unless the expert explicitly asks
+        // mpv to load their own configuration.
+        cmd.arg("--no-config");
+    }
+    cmd.arg("--no-ytdl")
+        .arg("--vo=gpu-next,gpu") // gpu-next is the libplacebo HDR path
+        .arg("--profile=gpu-hq")
+        .arg("--hwdec=auto")
+        .arg("--hwdec-codecs=all")
+        // Preserve source HDR metadata (PQ/BT.2020) for the compositor or OS.
+        .arg("--target-colorspace-hint=yes")
+        .arg("--hdr-compute-peak=yes");
+
+    // GPU API/context selection is platform-specific.
+    // * Linux: Vulkan via Wayland/X11 WSI is the reliable HDR path.
+    // * macOS: mpv only exposes Vulkan over Metal (macvk), so let it auto-pick.
+    // * Windows: D3D11 negotiates HDR through the DXGI swapchain.
+    #[cfg(target_os = "macos")]
+    {
+        cmd.arg("--gpu-api=vulkan"); // macvk (Metal-backed) only context on macOS
+    }
+    #[cfg(target_os = "windows")]
+    {
+        cmd.arg("--gpu-api=d3d11"); // HDR via DXGI swapchain on Windows 10/11
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        // Force Vulkan (the HDR-capable backend, always built into modern mpv)
+        // but let mpv auto-pick a context. Naming specific backends (e.g.
+        // x11vk) risks listing one a given build lacks — mpv validates option
+        // values up front and would exit after spawn() succeeded (silent failure).
+        cmd.arg("--gpu-api=vulkan");
+        // Enables the experimental Vulkan HDR WSI layer where present (KDE/NVIDIA).
+        cmd.env("ENABLE_HDR_WSI", "1");
+    }
+
+    #[cfg(target_os = "macos")]
+    if !use_own_config {
+        // AVFoundation owns AirPlay presentation timing and follows system
+        // route changes. CoreAudio remains initialization fallback.
+        cmd.arg("--ao=avfoundation,coreaudio");
+    }
+
+    // User-supplied advanced options remain last among defaults, so repeated
+    // mpv options retain their documented last-option-wins behavior.
+    if let Some(extra) = cfg.mpv_extra_args.as_deref() {
+        for arg in parse_extra_mpv_args(extra) {
+            cmd.arg(arg);
+        }
+    }
+
+    cmd
+}
+
 /// Look for an mpv shipped alongside our own executable — e.g. a packager (or a
 /// future bundled installer) dropped `mpv.exe` next to the app or in an `mpv/`
 /// subfolder. Resolved relative to the running binary so it works from any
@@ -934,59 +996,9 @@ pub fn play(
         .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
 
     // Advanced/user mpv config (Settings → Advanced mpv options), loaded once here.
-    let cfg = crate::config::load_config()
-        .map_err(|_| "could not read Vela settings".to_string())?;
-    let use_own_config = cfg.mpv_use_own_config.unwrap_or(false);
-
-    let mut cmd = Command::new(&mpv_bin);
-    // Reproducible launch by default: ignore the user's mpv.conf unless they opted
-    // in via "Use my own mpv config".
-    if !use_own_config {
-        cmd.arg("--no-config");
-    }
-    cmd.arg("--no-ytdl")
-        .arg("--vo=gpu-next,gpu") // gpu-next first: best HDR passthrough
-        .arg("--profile=gpu-hq")
-        .arg("--hwdec=auto")
-        .arg("--hwdec-codecs=all")
-        // HDR: let mpv negotiate the display colorspace (PQ/BT.2020) with the
-        // compositor (Wayland) or the OS (macOS EDR).
-        .arg("--target-colorspace-hint=yes")
-        .arg("--hdr-compute-peak=yes");
-
-    // GPU API/context selection is platform-specific.
-    //   * Linux: Vulkan via the Wayland/X11 WSI is the reliable HDR path.
-    //   * macOS: mpv only exposes Vulkan over Metal (macvk), so let it auto-pick.
-    //   * Windows: D3D11 negotiates HDR through the DXGI swapchain.
-    #[cfg(target_os = "macos")]
-    {
-        cmd.arg("--gpu-api=vulkan"); // macvk (Metal-backed) is the only context on macOS
-    }
-    #[cfg(target_os = "windows")]
-    {
-        cmd.arg("--gpu-api=d3d11"); // HDR via the DXGI swapchain on Windows 10/11
-    }
-    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
-    {
-        // Force Vulkan (the HDR-capable backend, always built into modern mpv)
-        // but let mpv auto-pick the context. Naming specific backends (e.g.
-        // x11vk) risks listing one a given build lacks — mpv validates option
-        // values up front and would exit after spawn() succeeded (silent failure).
-        cmd.arg("--gpu-api=vulkan");
-        // Enables the experimental Vulkan HDR WSI layer where present (KDE/NVIDIA).
-        cmd.env("ENABLE_HDR_WSI", "1");
-    }
-
-    // User-supplied advanced options. Appended AFTER our render defaults so they
-    // override them (mpv applies the last value of a repeated option), but BEFORE
-    // the IPC server, resume seek, and `--`/URL below — those are re-asserted next so
-    // a user option can't clobber the socket Vela needs for progress/resume/
-    // auto-advance, or feed the media URL to mpv as an option.
-    if let Some(extra) = cfg.mpv_extra_args.as_deref() {
-        for arg in parse_extra_mpv_args(extra) {
-            cmd.arg(arg);
-        }
-    }
+    let cfg =
+        crate::config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    let mut cmd = base_mpv_command(&mpv_bin, &cfg);
 
     // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
     // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
@@ -1767,6 +1779,100 @@ fn spawn_end_watcher(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn base_command_args(cfg: crate::config::AppConfig) -> Vec<String> {
+        base_mpv_command("mpv", &cfg)
+            .get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn base_mpv_command_preserves_render_defaults_without_managed_sync_overrides() {
+        let args = base_command_args(crate::config::AppConfig::default());
+
+        for expected in [
+            "--no-config",
+            "--no-ytdl",
+            "--vo=gpu-next,gpu",
+            "--profile=gpu-hq",
+            "--hwdec=auto",
+            "--hwdec-codecs=all",
+            "--target-colorspace-hint=yes",
+            "--hdr-compute-peak=yes",
+        ] {
+            assert!(args.iter().any(|arg| arg == expected), "missing {expected}");
+        }
+        #[cfg(target_os = "windows")]
+        assert!(args.iter().any(|arg| arg == "--gpu-api=d3d11"));
+        #[cfg(not(target_os = "windows"))]
+        assert!(args.iter().any(|arg| arg == "--gpu-api=vulkan"));
+        assert!(
+            args.iter()
+                .all(|arg| !arg.starts_with("--audio-delay") && !arg.starts_with("--audio-device")),
+            "Vela must not guess AirPlay delay or pin an output device: {args:?}"
+        );
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_base_mpv_command_prefers_avfoundation_before_advanced_overrides() {
+        let cfg = crate::config::AppConfig {
+            mpv_extra_args: Some("# expert override\n--volume=80\n--ao=coreaudio".into()),
+            ..Default::default()
+        };
+        let args = base_command_args(cfg);
+        let preferred = args
+            .iter()
+            .position(|arg| arg == "--ao=avfoundation,coreaudio")
+            .expect("macOS default must prefer AVFoundation with CoreAudio fallback");
+        let override_position = args
+            .iter()
+            .position(|arg| arg == "--ao=coreaudio")
+            .expect("Advanced AO override must be retained");
+
+        assert_eq!(
+            args.iter()
+                .filter(|arg| *arg == "--ao=avfoundation,coreaudio")
+                .count(),
+            1,
+            "Vela's AO preference must be appended exactly once"
+        );
+        assert!(
+            preferred < override_position,
+            "Advanced options must remain last-option-wins: {args:?}"
+        );
+    }
+
+    #[test]
+    fn own_mpv_config_owns_audio_output_selection() {
+        let cfg = crate::config::AppConfig {
+            mpv_use_own_config: Some(true),
+            mpv_extra_args: Some("--ao=coreaudio".into()),
+            ..Default::default()
+        };
+        let args = base_command_args(cfg);
+
+        assert!(!args.iter().any(|arg| arg == "--no-config"));
+        assert!(
+            !args.iter().any(|arg| arg == "--ao=avfoundation,coreaudio"),
+            "own-config mode must not override ao from mpv.conf"
+        );
+        assert!(
+            args.iter().any(|arg| arg == "--ao=coreaudio"),
+            "Advanced options remain authoritative in own-config mode"
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn non_macos_base_command_does_not_set_an_audio_output() {
+        let args = base_command_args(crate::config::AppConfig::default());
+        assert!(
+            args.iter().all(|arg| !arg.starts_with("--ao=")),
+            "the AVFoundation policy is macOS-only: {args:?}"
+        );
+    }
 
     fn event(name: &str, data: serde_json::Value) -> serde_json::Value {
         serde_json::json!({"event": "property-change", "id": 1, "name": name, "data": data})
