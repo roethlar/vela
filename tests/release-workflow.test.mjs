@@ -5,10 +5,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const workflow = await readFile(
-  path.join(repoRoot, ".github", "workflows", "release.yml"),
-  "utf8",
-);
+// The patterns below spell line breaks as \n; a Windows checkout with
+// core.autocrlf=true has CRLF, so normalize at read time.
+const workflow = (
+  await readFile(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8")
+).replace(/\r\n/g, "\n");
 
 test("release artifacts fail closed through a final inventory", () => {
   assert.doesNotMatch(workflow, /if-no-files-found:\s*ignore/);

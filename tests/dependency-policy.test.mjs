@@ -6,16 +6,20 @@ import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 
+// The patterns below spell line breaks as \n; a Windows checkout with
+// core.autocrlf=true has CRLF, so normalize at read time.
+const readText = async (...args) => (await readFile(...args)).replace(/\r\n/g, "\n");
+
 test("the released Wayland API uses the locally secured scanner", async () => {
-  const cargoToml = await readFile(
+  const cargoToml = await readText(
     path.join(repoRoot, "src-tauri", "Cargo.toml"),
     "utf8",
   );
-  const cargoLock = await readFile(
+  const cargoLock = await readText(
     path.join(repoRoot, "src-tauri", "Cargo.lock"),
     "utf8",
   );
-  const vendorToml = await readFile(
+  const vendorToml = await readText(
     path.join(
       repoRoot,
       "src-tauri",
@@ -25,7 +29,7 @@ test("the released Wayland API uses the locally secured scanner", async () => {
     ),
     "utf8",
   );
-  const vendorParser = await readFile(
+  const vendorParser = await readText(
     path.join(
       repoRoot,
       "src-tauri",
@@ -69,7 +73,7 @@ test("the released Wayland API uses the locally secured scanner", async () => {
 });
 
 test("non-x86 Windows cannot select an x86-64-v3 mpv build", async () => {
-  const commands = await readFile(
+  const commands = await readText(
     path.join(repoRoot, "src-tauri", "src", "commands.rs"),
     "utf8",
   );
@@ -81,11 +85,11 @@ test("non-x86 Windows cannot select an x86-64-v3 mpv build", async () => {
 });
 
 test("Ask source choices stay one-shot, session-safe, and credential-free", async () => {
-  const commands = await readFile(
+  const commands = await readText(
     path.join(repoRoot, "src-tauri", "src", "commands.rs"),
     "utf8",
   );
-  const lib = await readFile(path.join(repoRoot, "src-tauri", "src", "lib.rs"), "utf8");
+  const lib = await readText(path.join(repoRoot, "src-tauri", "src", "lib.rs"), "utf8");
 
   const publicChoice = commands.match(
     /pub struct PlaybackSourceChoiceDto \{(?<body>[\s\S]*?)\n\}/,
