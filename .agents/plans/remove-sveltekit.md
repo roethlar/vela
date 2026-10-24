@@ -57,7 +57,7 @@ Amendment (2026-10-24, history reconciliation; no plan scope change):
   installing npm 12.0.1 on the VM still satisfies the range. Slice 0's
   pre-migration baseline is now `main` at `bc12bc5`, not `b365873`.
 - The Review step covers the branch's net diff against `main`
-  (`git diff bc12bc5 <branch head>`), which includes how this merge was
+  (`git diff main...<branch head>`), which includes how this merge was
   resolved.
 
 Implementation log (2026-10-23, branch `remove-sveltekit` off `main`
