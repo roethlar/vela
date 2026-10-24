@@ -32,6 +32,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   only builds and tests Vela; the shipped app runs no Node, so no end user was
   exposed. The Linux E2E VM's user-local Node 26.5.0 is now below the floor;
   see the Pending note in `.agents/machines.md`.
+- Node tests are line-ending-agnostic, 2026-10-24. Five tests failed on a
+  Windows `core.autocrlf=true` checkout because their patterns spell line
+  breaks as `\n`. `tests/dependency-policy.test.mjs`,
+  `tests/live-release-safety.test.mjs` and `tests/release-workflow.test.mjs`
+  now normalize CRLF to LF when they read source. No `.gitattributes` rule was
+  added: pinning LF would change the bytes every Windows checkout builds from,
+  CI's included (`scripts/build.ps1`, `.github/scripts/azure-sign.ps1`,
+  `packaging/arch/PKGBUILD` among them), which is code-like and would need a
+  plan. Each of the 14 newline-dependent assertions in those files was
+  red-proved separately in both a CRLF and an LF checkout and restored green.
+  Test-only; nothing shipped changes.
 - Rust lockfile refresh, 2026-10-23. CI on `main` went red after the 2026-08-08
   green run. The causes were new upstream advisories and a new stable lint, not
   repo changes. `cargo update -p` moved async-trait 0.1.89 -> 0.1.92, which
@@ -58,9 +69,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Kit 3 plan, `.agents/plans/sveltekit-3-upgrade.md`, is superseded and was
   never implemented. Neither advisory's code path is reachable in Vela's
   static SPA, but the gate fails closed. No implementation is active.
-  Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass. The
-  same 5 CRLF-checkout test failures recorded for the Windows host in
-  `.agents/machines.md` remain, and nothing new fails.
+  Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass, and
+  nothing new fails. The 5 CRLF-checkout test failures seen then are fixed
+  (line-ending bullet above).
 - 2026-08-20 macOS AirPlay diagnostics selected an AVFoundation-first production
   path, now drafted at `.agents/plans/macos-airplay-sync.md`; implementation is
   not approved. The affected server-backed MKV/E-AC-3 play was physically about

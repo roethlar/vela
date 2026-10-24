@@ -5,7 +5,11 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-const livePlex = await readFile(path.join(repoRoot, "tests", "e2e", "live", "plex.mjs"), "utf8");
+// The patterns below spell line breaks as \n; a Windows checkout with
+// core.autocrlf=true has CRLF, so normalize at read time.
+const livePlex = (
+  await readFile(path.join(repoRoot, "tests", "e2e", "live", "plex.mjs"), "utf8")
+).replace(/\r\n/g, "\n");
 
 function sourceSlice(startNeedle, endNeedle) {
   const start = livePlex.indexOf(startNeedle);

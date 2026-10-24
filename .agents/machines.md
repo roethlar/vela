@@ -247,10 +247,14 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     instead, or put a scratch-prefix npm 12 first on `PATH` for the check.
   - rustup is installed (`winget install Rustlang.Rustup`) with
     stable-x86_64-pc-windows-msvc only; 1.89.0 is not installed.
-  - This clone has `core.autocrlf=true`. The resulting CRLF checkout fails
-    five line-ending-sensitive node tests, so run `node --test tests/` and
-    `npm run check` in an LF worktree (`git -c core.autocrlf=false worktree
-    add ...`).
+  - This clone has `core.autocrlf=true`, from the system gitconfig
+    (`C:/Program Files/Git/etc/gitconfig`), with no repo-local override, so it
+    checks out CRLF. Since 2026-10-24 the node tests normalize CRLF at read
+    time, and `node --test tests/` and `npm run check` pass in this checkout
+    directly; no LF worktree is needed. If you still want one, pass
+    `-c core.autocrlf=false` on each git command that writes its files.
+    Never run `git -C <worktree> config`: worktrees share `.git/config`, so
+    that command rewrites the main clone's setting.
   - This clone's only configured remote is `origin`, which points at GitHub
     (`https://github.com/roethlar/vela`). Corrected 2026-10-24: the Gitea at
     `http://magneto:3001/michael/vela.git` (Gitea 28.1.0) IS reachable from
