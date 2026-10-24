@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const srcRoot = path.join(repoRoot, "src");
 const appCss = fs.readFileSync(path.join(srcRoot, "app.css"), "utf8");
-const appHtml = fs.readFileSync(path.join(srcRoot, "app.html"), "utf8");
+const appHtml = fs.readFileSync(path.join(repoRoot, "index.html"), "utf8");
 
 function filesBelow(dir, suffix) {
   return fs

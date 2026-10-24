@@ -100,7 +100,7 @@
   let activeTab = $state<TabId>("connected");
 
   // Theme catalog (mirrors the blocks in app.css). Persisted to localStorage and
-  // applied to <html data-theme>; app.html applies the saved value before paint.
+  // applied to <html data-theme>; index.html applies the saved value before paint.
   type ThemeMode = "dark" | "light";
   type ThemeDef = { id: string; label: string; mode: ThemeMode; swatch: [string, string, string] };
   const THEMES: ThemeDef[] = [
