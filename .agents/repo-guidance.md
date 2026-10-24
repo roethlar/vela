@@ -40,8 +40,11 @@ This section is the canonical home for the verification commands (carved in
 from the retired `.agents/repo-map.json`, 2026-07-08; verified against
 `package.json` scripts and `.github/workflows/ci.yml` on 2026-07-15):
 
-- `node scripts/check-js-toolchain.mjs` (repo root) — require the exact Node
-  and npm executables pinned by `.node-version` and `packageManager`.
+- `node scripts/check-js-toolchain.mjs` (repo root) — require Node and npm
+  executables inside the `package.json` `engines` ranges (floor-only for npm;
+  decision `.agents/decisions.md` 2026-10-03). `.node-version` and the
+  workflows' `npm install --global npm@<version>` are only CI's tested
+  baseline.
 - `npm ci` (repo root) — clean, lockfile-exact JavaScript install.
 - `npm audit` (repo root) — fail closed on known npm vulnerabilities.
 - `npm run check` (repo root) — frontend type and Svelte validation.
@@ -82,6 +85,11 @@ Rules the command list doesn't carry on its own:
 
 - `origin`: `http://q:3000/michael/vela.git` (fetch and push; verified against
   `git remote -v` 2026-07-25).
+- Gitea at `http://magneto:3001/michael/vela.git` (Gitea 28.1.0) also hosts
+  this repo and held the owner's newest known work on 2026-10-24, when q:3000
+  was unreachable from the Windows host. Which of q:3000 and magneto:3001 is
+  canonical is unverified; keep both fast-forward-only (never force) and see
+  `.agents/state.md` (Blockers) for the open question.
 - `github`: `https://github.com/roethlar/vela.git` — the remote CI actually
   runs on (see Verification above).
 - `vm`: the Linux E2E host; see `.agents/machines.md`.

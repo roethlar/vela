@@ -41,6 +41,25 @@ Owner gate (ruled "rename", 2026-10-23):
   "keep", delete Slice 3 from this plan and drop the rename paragraph from the
   Slice 4 decision text.
 
+Amendment (2026-10-24, history reconciliation; no plan scope change):
+
+- `main` was reconciled with the Gitea history at `bc12bc5` (see
+  `.agents/state.md`), and this branch merged that `main` without a rebase.
+  The branch version stays 1.0.62, above `main`'s 1.0.61 (AirPlay audio).
+- The JS toolchain policy is now the range of decision `.agents/decisions.md`
+  2026-10-03 (amended 2026-10-24): `engines.node` `>=26.12.1 <27`,
+  `engines.npm` `>=12`, and no `packageManager` field. CI's baseline is Node
+  26.12.1 and npm 12.0.2. Wherever this plan says "pinned 12.0.1" or
+  `npx -y npm@12.0.1`, read "any npm >=12; use 12.0.2 to match CI". Slice 2's
+  "`packageManager` stays unchanged" is moot. On the Windows host the checker
+  passes once a scratch-prefix npm 12 is first on `PATH`.
+- Slice 0's recipe follows the restated `.agents/machines.md` Pending bullet;
+  installing npm 12.0.1 on the VM still satisfies the range. Slice 0's
+  pre-migration baseline is now `main` at `bc12bc5`, not `b365873`.
+- The Review step covers the branch's net diff against `main`
+  (`git diff bc12bc5 <branch head>`), which includes how this merge was
+  resolved.
+
 Implementation log (2026-10-23, branch `remove-sveltekit` off `main`
 `b365873`):
 

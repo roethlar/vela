@@ -2,8 +2,10 @@
 # Fetch Ubuntu's WebKitWebDriver 2.52.3 into tests/e2e/vendor/wkdriver/.
 #
 # Ubuntu 26.04 now packages a driver matching the E2E venue's WebKitGTK; see
-# .agents/plans/e2e-harness.md (2026-07-15 amendment). URLs and sha256s are
-# pinned to that exact update for both supported architectures.
+# .agents/plans/e2e-harness.md (2026-07-15 amendment). The sha256s are pinned
+# to that exact update for both supported architectures. The download uses
+# Launchpad's permanent file URL: the archive pool drops a package as soon as
+# a newer update supersedes it, which turned the pool URL into a 404.
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
@@ -12,12 +14,10 @@ vendor="$here/vendor/wkdriver"
 case "$(uname -m)" in
   x86_64)
     DEB_ARCH=amd64
-    DRIVER_BASE=https://archive.ubuntu.com/ubuntu
     DRIVER_SHA=b9ee5970c048e0e685fc35567d1c8b16be8a433c1d72cc74428a58cd65c8355a
     ;;
   aarch64)
     DEB_ARCH=arm64
-    DRIVER_BASE=https://ports.ubuntu.com/ubuntu-ports
     DRIVER_SHA=15db04ce64da81ef59397006ba8e0fcef60ad4a5fd436b8fe90d668d58fada2a
     ;;
   *)
@@ -27,7 +27,7 @@ case "$(uname -m)" in
 esac
 
 DRIVER_DEB="webkitgtk-webdriver_2.52.3-0ubuntu0.26.04.2_${DEB_ARCH}.deb"
-DRIVER_URL="$DRIVER_BASE/pool/universe/w/webkit2gtk/$DRIVER_DEB"
+DRIVER_URL="https://launchpad.net/ubuntu/+archive/primary/+files/$DRIVER_DEB"
 STAMP="$vendor/.package"
 
 if [[ -x "$vendor/WebKitWebDriver" && -f "$STAMP" && "${1:-}" != "--force" ]] &&

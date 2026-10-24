@@ -13,8 +13,14 @@ Ayatana AppIndicator, and `patchelf`; macOS needs Xcode Command Line Tools;
 Windows needs WebView2, MSVC Build Tools, and PowerShell 7 for the wrapper
 below. The current Arch PKGBUILD targets x86_64.
 
-Install the Node and npm versions pinned by `.node-version` and `package.json`,
-then run:
+On Linux, `scripts/build.sh` checks those system packages itself on pacman,
+apt, and dnf hosts. When some are missing it lists them with the exact install
+command and offers to run it; `--install-deps` installs without asking, and a
+run with no terminal attached prints the command and stops. Rust and Node are
+not installed for you.
+
+Install a Node and npm inside the `engines` ranges in `package.json` (Node 26
+bundles npm 11, so npm 12 or newer must be installed separately), then run:
 
 ```bash
 git clone https://github.com/roethlar/vela.git
@@ -23,6 +29,21 @@ node scripts/check-js-toolchain.mjs
 npm ci
 ./scripts/build.sh
 ```
+
+On a Mac whose login Keychain already contains the Developer ID identity, use
+the explicit signed-build wrapper to build the universal DMG, submit it for
+notarization, staple it, and independently verify both the app and disk image:
+
+```bash
+./scripts/build-signed-macos.sh
+```
+
+The wrapper reads App Store Connect API metadata from the sibling
+`../Certificates` directory by default. Set `VELA_SIGNING_DIR` to use another
+private directory. It never imports a `.p12` or reads its password; one-time
+Keychain provisioning must already be complete, and any missing identity,
+credential, signature, staple, Gatekeeper acceptance, or architecture fails
+the build.
 
 On Windows, use the equivalent PowerShell wrapper:
 

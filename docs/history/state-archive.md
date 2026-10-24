@@ -4,6 +4,34 @@ Entries rotated verbatim out of `.agents/state.md` when they stopped being
 live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-10-24 (GitHub/Gitea reconciliation — toolchain entries merged)
+
+Context for readers: GitHub `main` and the Gitea copy diverged at `1bd738e`.
+Gitea recorded the 2026-10-03 range-checked toolchain (Node `>=26.5.0 <27`,
+baseline 26.7.0); GitHub recorded the 2026-10-23 exact Node 26.12.1 pin with
+npm 12.0.1. The reconciliation merge kept the range policy and raised its
+floor to 26.12.1 (decision `.agents/decisions.md` 2026-10-03, amended
+2026-10-24), superseding both entries. They rotate here verbatim.
+
+- The Node pin moved from 26.5.0 to 26.12.1 (2026-10-23, owner go), for the
+  October 2026 Node security release. `.node-version` and `engines`
+  (`>=26.12.1 <27`) are updated, and npm stays at 12.0.1. Node only builds and
+  tests Vela; the shipped app runs no Node, so no end user was exposed. Verified
+  on Windows with Node 26.12.1: `npm ci` and `npm run build` pass.
+  `node --test tests/` has 5 failures from CRLF checkout line endings
+  (`core.autocrlf=true`). They fail the same way on unmodified `main`, and a copy
+  of `main` checked out with LF endings doesn't hit them. `npm run check` fails
+  on the same test. Not run: the toolchain check (this host has npm 11.20.0) and
+  the Cargo commands (no Rust change). The E2E VM still needs re-aligning; see
+  the Pending note in `.agents/machines.md`.
+- JS toolchain is range-checked, not exact-pinned (2026-10-03, decision in
+  `.agents/decisions.md`): `scripts/check-js-toolchain.mjs` accepts any Node in
+  `engines.node` (`>=26.5.0 <27`) and any npm in `engines.npm` (`>=12`);
+  `packageManager` is gone. CI/release still build on a fixed baseline, Node
+  26.7.0 (`.node-version`) / npm 12.0.2 (four `npm install --global` sites).
+  The Linux E2E VM's user-local 26.5.0/12.0.1 is inside both ranges
+  (assumption: not re-run on that host).
+
 ## Rotated 2026-10-23 (SvelteKit removal implemented)
 
 Context for readers: the owner approved `.agents/plans/remove-sveltekit.md`
