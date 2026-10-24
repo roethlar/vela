@@ -254,10 +254,9 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
   - This clone's only configured remote is `origin`, which points at GitHub
     (`https://github.com/roethlar/vela`). Corrected 2026-10-24: the Gitea at
     `http://magneto:3001/michael/vela.git` (Gitea 28.1.0) IS reachable from
-    here by URL, and the stored Git credentials can push to it. The
-    `http://q:3000/michael/vela.git` that `.agents/repo-guidance.md` names as
-    `origin` is NOT reachable from here (`git ls-remote` and HTTP time out;
-    `q` resolves to `q.internal`, a different address from `magneto`). Use
+    here by URL, and the stored Git credentials can push to it; it is the
+    canonical Gitea `origin` (`.agents/repo-guidance.md`, Remotes & Sync).
+    Host `q` and its q:3000 Gitea are retired (owner, 2026-10-24). Use
     `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` for unattended Gitea calls.
 
 ## Linux VM (E2E host)

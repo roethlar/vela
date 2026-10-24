@@ -20,8 +20,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   crate (the 2026-10-23 versions below supersede Gitea's h2 0.4.16, rustls
   0.23.45 and rustls-webpki 0.103.15); `package-lock.json` was regenerated with
   npm 12.0.2 from GitHub's audited lock, so devalue 5.9.4, vite 8.3.5 and
-  source-map-js 1.2.2 all hold. Which Gitea host is canonical is open; see
-  Blockers.
+  source-map-js 1.2.2 all hold. The magneto Gitea is the canonical `origin`;
+  host `q` (q:3000) is retired (`.agents/repo-guidance.md`, Remotes & Sync).
 - JS toolchain is range-checked with a security floor (decision
   `.agents/decisions.md` 2026-10-03, amended 2026-10-24):
   `scripts/check-js-toolchain.mjs` accepts any Node in `engines.node`
@@ -194,16 +194,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Blockers
 
 - No known product blocker.
-- Canonical remote unconfirmed (open question, 2026-10-24).
-  `.agents/repo-guidance.md` names `origin` as `http://q:3000/michael/vela.git`,
-  but q:3000 was unreachable from the Windows host (connection timeout) while
-  Gitea 28.1.0 at `http://magneto:3001/michael/vela.git` held the newest known
-  copy (`d67bc4d`, 2026-10-03), which the reconciliation used. `q` and
-  `magneto` resolve to different addresses. Whether q holds commits newer than
-  2026-10-03 is unknown. From a host that reaches q, compare
-  `git ls-remote http://q:3000/michael/vela.git` against `main`; if q has
-  diverged, merge (never force) and record which host is canonical in
-  `.agents/repo-guidance.md`.
 - The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
   They reproduced during the 1.0.59 full Linux run in `continueon`,
   `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.

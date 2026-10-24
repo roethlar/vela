@@ -83,13 +83,11 @@ Rules the command list doesn't carry on its own:
 
 ## Remotes & Sync
 
-- `origin`: `http://q:3000/michael/vela.git` (fetch and push; verified against
-  `git remote -v` 2026-07-25).
-- Gitea at `http://magneto:3001/michael/vela.git` (Gitea 28.1.0) also hosts
-  this repo and held the owner's newest known work on 2026-10-24, when q:3000
-  was unreachable from the Windows host. Which of q:3000 and magneto:3001 is
-  canonical is unverified; keep both fast-forward-only (never force) and see
-  `.agents/state.md` (Blockers) for the open question.
+- `origin`: `http://magneto:3001/michael/vela.git` (Gitea 28.1.0; fetch and
+  push) — the canonical Gitea (owner, 2026-10-24). The former `origin`,
+  `http://q:3000/michael/vela.git` on host `q`, is retired (owner,
+  2026-10-24: "q is gone"); a clone whose `origin` still points there needs
+  its remote realigned.
 - `github`: `https://github.com/roethlar/vela.git` — the remote CI actually
   runs on (see Verification above).
 - `vm`: the Linux E2E host; see `.agents/machines.md`.
