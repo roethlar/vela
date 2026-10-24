@@ -4,7 +4,7 @@
 
 ## Mission Detail
 
-- Vela is a Tauri 2 desktop app with a SvelteKit/TypeScript frontend in `src/`
+- Vela is a Tauri 2 desktop app with a Svelte 5/TypeScript frontend in `src/`
   and a Rust backend in `src-tauri/`.
 - The app browses Plex, Jellyfin, and Emby media servers through a common
   media-source abstraction. Local folder, SMB, and SSH/SFTP sources were
@@ -13,8 +13,13 @@
 - Playback is intentionally delegated to the system `mpv` binary in its own
   window for HDR passthrough. Do not embed video in the webview unless the
   owner explicitly changes that product decision.
-- SvelteKit is configured as a static SPA for Tauri. Vite dev uses port `1420`
-  with strict port behavior.
+- The frontend is a single-page Svelte 5 app built by Vite (no SvelteKit;
+  decision `.agents/decisions.md` 2026-10-23). Root `index.html` loads
+  `src/main.ts`, which mounts the root component. `$lib` is defined only in
+  `tsconfig.json` `paths`. Vite dev uses port `1420` with strict port
+  behavior. The build goes to `build/`, which Tauri embeds
+  (`frontendDist: ../build`); `tests/frontend-shell.test.mjs` keeps these in
+  agreement.
 - Linux release packaging lives in `src-tauri/bundle/linux/` for Tauri bundles
   and `packaging/arch/` for the Arch package.
 
@@ -40,8 +45,9 @@ from the retired `.agents/repo-map.json`, 2026-07-08; verified against
 - `npm ci` (repo root) — clean, lockfile-exact JavaScript install.
 - `npm audit` (repo root) — fail closed on known npm vulnerabilities.
 - `npm run check` (repo root) — frontend type and Svelte validation.
-- `npm run build` (repo root) — production frontend build, or any change
-  that can affect the Tauri frontend bundle.
+- `npm run build` (repo root) — production frontend build plus its post-build
+  layout check (`scripts/check-frontend-build.mjs`), for any change that can
+  affect the Tauri frontend bundle.
 - `cargo +1.89.0 check --locked` (from `src-tauri/`) — declared MSRV compile
   floor.
 - `cargo +stable check --locked` (from `src-tauri/`) — rolling-stable compile
@@ -113,7 +119,7 @@ Rules the command list doesn't carry on its own:
   filesystem, process, or network work. Use the existing lock boundaries and
   `spawn_blocking` patterns.
 - Generated outputs and dependency/build directories are not source of truth.
-  Do not edit `build/`, `.svelte-kit/`, `node_modules/`, `src-tauri/target/`,
+  Do not edit `build/`, `node_modules/`, `src-tauri/target/`,
   `src-tauri/gen/`, or generated `makepkg` output beneath `packaging/arch/`.
 
 ### Guard discipline (earned the hard way, r17-r24 of library-refresh-scan)

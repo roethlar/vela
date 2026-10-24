@@ -2,8 +2,10 @@
 
 ## Status
 
-**APPROVED, revision 1 (owner, 2026-10-23). G1 ruled "rename". Implementation
-is authorized.**
+**APPROVED, revision 1 (owner, 2026-10-23). G1 ruled "rename". Slices 1-4 are
+implemented on branch `remove-sveltekit`, which is not merged. Before merge:
+Slice 0, the VM E2E proofs, the Mac desktop smoke, and the Review step (see the
+implementation log).**
 
 - Approval: the owner answered "go with your rec" when the recommendation was
   to remove SvelteKit and keep Svelte 5 and Vite. The owner then set the
@@ -39,9 +41,100 @@ Owner gate (ruled "rename", 2026-10-23):
   "keep", delete Slice 3 from this plan and drop the rename paragraph from the
   Slice 4 decision text.
 
-Implementation log:
+Implementation log (2026-10-23, branch `remove-sveltekit` off `main`
+`b365873`):
 
-- (none yet)
+- Venue: the Windows authoring host, per Host constraints. All work ran in an
+  LF worktree (`git -c core.autocrlf=false worktree add`) with Node 26.12.1 and
+  `npx -y npm@12.0.1` for every npm command. Not run there:
+  `node scripts/check-js-toolchain.mjs` (the PATH npm is 11.20.0) and every
+  Cargo command (no MSVC build tools). `scripts/bump.sh` can't run (no
+  `python3`), so both bumps used a line-for-line Node port of its embedded
+  Python, kept outside the repo. Each bump diff touched only the seven version
+  fields (`package.json`, the two `package-lock.json` root copies,
+  `tauri.conf.json`, `Cargo.toml`, the `vela` entry in `Cargo.lock`, the
+  `PKGBUILD` `pkgver`) and `BUILD_DATE`, which became `2026-10-24` because the
+  script uses the UTC date.
+- Slice 0: NOT RUN. It needs the owner's Mac and the E2E VM. No E2E baseline
+  exists yet.
+- Slice 1 (`149f2c1`): the font assertions are in `smoke`. Only a syntax and
+  module-load check ran. The on-Kit green run and red-proofs F1 and F2 are NOT
+  RUN (VM only).
+- Slice 2 (`ecf0d9c`), base captures taken at `149f2c1`:
+  - A1: base `npm audit` exit 1, naming GHSA-pfhg-q3qv-9q6r and
+    GHSA-27mw-82g8-phjj. Head: exit 0 on a clean `npm ci`, "found 0
+    vulnerabilities". `npm ls @sveltejs/kit @sveltejs/adapter-static cookie`
+    is empty. `npm ls --all` shows no invalid, missing or peer errors; its
+    only change from the base is one fewer UNMET OPTIONAL entry, Kit's
+    `@opentelemetry/api`.
+  - Lock: exactly the 11 probe packages were removed. Nothing was added. The
+    only changed entry is the root `packages[""]`, which lost the two Kit
+    devDependencies.
+  - `npm run check`: node tests 68 pass, 2 skipped, 0 fail (base: 64 pass,
+    2 skipped). svelte-check went from `COMPLETED 303 FILES` to `295 FILES`,
+    0 errors, 0 warnings. The non-`node_modules` `tsc --listFilesOnly` set is
+    exactly `src/main.ts`, `src/lib/{errors,imageReveal,types}.ts` and
+    `vite.config.js`. `--showConfig` compiler options differ from the base
+    only in `paths` (re-based, `$app/types` dropped), the dropped `rootDirs`,
+    and the added `types`. `include`/`exclude` differ only in spelling; Kit's
+    service-worker excludes matched no file.
+  - `npm run build`: no warnings; the post-build check passes. The output is
+    `build/index.html`, `build/favicon.png`, and `build/assets/` with one `.js`,
+    one `.css` and five `.woff2`. There is no `build/_app`. The five woff2
+    sha256 values equal the base's.
+  - Dev server: `vite dev` bound 1420 and served `index.html` with the
+    `/src/main.ts` entry. A second `vite dev` exited 1 with "Port 1420 is
+    already in use". NOT RUN: HMR in a disposable worktree, `npm run tauri dev`,
+    the Mac desktop smoke (WKWebView), the VM `npm run e2e`, and
+    `cargo +stable check --locked`.
+  - `resolveConfig({ root, configFile }, "build", "production")` works under
+    `node --test`; `tests/frontend-shell.test.mjs` uses it, not the fallback.
+  - Red-proofs, in a disposable LF worktree at `ecf0d9c` with its own `npm ci`,
+    restored each time with `git checkout HEAD -- .` and shown green again:
+    - T1-T5: svelte-check reported `Type 'string' is not assignable to type
+      'number'` at `src/lib/Icon.svelte` 2:9, `src/routes/+page.svelte` 2:9,
+      `src/main.ts` 10:14, `src/lib/types.ts` 205:14, and `vite.config.js`
+      47:36.
+    - T6: `src/main.ts` 3:8, "Cannot find module or type declarations for
+      side-effect import of './app.css'".
+    - T7: `npm run check` stops first at S3 (`tsconfig paths["$lib"] must be
+      ["./src/lib"]`). svelte-check run directly reports `Cannot find module
+      '$lib/...'` for each `$lib` import. `npm run build` fails because
+      Rolldown can't resolve `$lib/EmptyState.svelte`.
+    - S1a, S1b and S1c each fail S1 on their own message (outDir/frontendDist,
+      emptyOutDir, post-build wiring). S2a and S2b each fail S2 (port,
+      strictPort). S3a fails S3, and `npm run build` then fails with the
+      misleading "failed to load virtual css module" message from the probe.
+      S4a fails S4 (`id="app"` count) and S4b fails S4 (import order).
+      `npm run check` exits 1 for every one of them.
+    - B1 fails B1 ("0 module scripts"). B2 also fails, because without an
+      entry Vite emits no stylesheet, and S4 fails. B2 fails B2 (no Geist
+      `@font-face`, no woff2 url). B3 fails B3 ("5 CSS url() values inline a
+      font as data:font"); B2's woff2-file assertion also fails, as it must
+      when every font is inlined. B4 and B5 each fail only their own
+      assertion, and B5 also fails `ui-foundation` ("first paint must accept
+      the complete theme catalog"). B6: `149f2c1` (Kit) was built in that
+      worktree, then the worktree was checked out at `ecf0d9c` with
+      `emptyOutDir: false`. The build check failed only at B6. After the
+      restore, the rebuild cleared `_app` and passed.
+    - Webview mount: the local half ran. `getElementById("missing")` fails S4.
+      The VM `smoke` half (`app render`) is NOT RUN.
+- Slice 3 (`7b01fae`): `git grep -n "+page.svelte" -- tests src scripts
+  ISSUES.md` returns nothing. `npm run check` is green, with svelte-check still
+  at 295 files. `npm run build` is green, including the post-build check.
+  Version 1.0.61 to 1.0.62. Red-proof at `7b01fae`: after
+  `git mv src/App.svelte src/Gone.svelte`, all six node test files fail.
+  `config-integrity`, `transcoding-ui` and `watch-edit-position` fail with
+  ENOENT on `src/App.svelte`. `image-reveal` (2 tests), `ui-foundation`
+  (5 tests) and `ui-motion` (4 tests) fail their assertions. Restored and
+  green. S4b was re-proven at `7b01fae`, because its import line changed. The
+  VM `smoke`/`uifoundation` runs are NOT RUN.
+- Review: NOT RUN. The Review section needs the owner to choose `codereview` or
+  `openreview` for the codex dispatch.
+- Push: the owner's standing direction ("commit and push as needed") covers
+  pushing this branch and opening a PR against `main`. Merging is not part of
+  that direction. GitHub CI on the PR is the first CI run of `npm run check` and
+  `npm run build` since the audit gate went red.
 
 ## Goal
 

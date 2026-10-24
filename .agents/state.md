@@ -19,9 +19,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   new version's MSRV is <= 1.71, within the 1.89 floor. Only `Cargo.lock`
   changed. The Rust gates can't run on the Windows authoring host (no MSVC build
   tools), so the GitHub CI run on this commit is their verification. The
-  remaining red CI gate is npm audit,
-  on two low @sveltejs/kit advisories, which removing SvelteKit clears
-  (plan-gated; see the next-but-one bullet).
+  remaining red CI gate on `main` is npm audit, on two low @sveltejs/kit
+  advisories. The SvelteKit removal clears them; it is on an unmerged branch
+  (see the next-but-one bullet).
 - The Node pin moved from 26.5.0 to 26.12.1 (2026-10-23, owner go), for the
   October 2026 Node security release. `.node-version` and `engines`
   (`>=26.12.1 <27`) are updated, and npm stays at 12.0.1. Node only builds and
@@ -35,19 +35,28 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the Pending note in `.agents/machines.md`.
 - The npm lockfile got a non-breaking `npm audit fix` on 2026-10-23, with no
   package.json change. It fixed the high advisories in devalue (5.9.4), vite
-  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2). `npm audit` still
-  fails on two low advisories: @sveltejs/kit GHSA-pfhg-q3qv-9q6r and
-  GHSA-27mw-82g8-phjj, which also flag @sveltejs/adapter-static. No 2.x
-  release fixes them. On 2026-10-23 the owner chose to remove SvelteKit
-  rather than upgrade to Kit 3, keeping Svelte 5 and Vite as a plain SPA, with
-  Node staying a build and test tool. The plan is drafted at
-  `.agents/plans/remove-sveltekit.md` (revision 1, 2026-10-23). It awaits the
-  owner's plan approval and one ruling, G1 (rename the root component). The
-  Kit 3 plan, `.agents/plans/sveltekit-3-upgrade.md`, is superseded and was
-  never implemented. Neither advisory's code path is reachable in Vela's
-  static SPA, but the gate fails closed. No implementation is active.
-  Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass. The
-  same 5 CRLF test failures as above remain, and nothing new fails.
+  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2).
+- SvelteKit removal, 2026-10-23. The owner approved
+  `.agents/plans/remove-sveltekit.md` and ruled G1 "rename"; the decision is
+  `.agents/decisions.md` 2026-10-23. Slices 1-4 are implemented on branch
+  `remove-sveltekit`, which is NOT merged to `main`. The branch is at
+  version 1.0.62.
+  - The frontend is plain Svelte 5 and Vite. Root `index.html` loads
+    `src/main.ts`, which mounts `src/App.svelte`. Static files are in
+    `public/`, and `$lib` is defined in tsconfig `paths`.
+    `npm run build` runs `scripts/check-frontend-build.mjs`, and
+    `tests/frontend-shell.test.mjs` guards the shell.
+  - Verified on the Windows host, in an LF worktree with npm 12.0.1: `npm ci`;
+    `npm audit` (0 vulnerabilities); `npm run check` (68 pass, 2 skipped;
+    svelte-check 295 files, 0 errors, 0 warnings); `npm run build`; and every
+    local guard red-proof (see the plan's implementation log).
+  - NOT verified, and blocking the merge: Slice 0 (VM Node re-alignment and the
+    E2E baseline); Slice 1's E2E run and its F1/F2 red-proofs; the full VM
+    `npm run e2e`; the VM webview-mount red-proof; the Mac desktop smoke and
+    `tauri dev`/HMR; the Cargo commands; and the codex Review, where the
+    owner chooses `codereview` or `openreview`.
+  - CI is unverified until the PR's GitHub run completes. `main` keeps
+    failing npm audit until the branch merges.
 - The 2026-08-05 README refresh split the old monolith: README.md is now
   end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
   server name scrubbed to "Plex"); deep user reference moved to
@@ -111,8 +120,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/show-last-episode-sort.md` (landed sorting baseline)
 - `.agents/plans/library-sort-direction.md` (landed at `c0d1412`, 1.0.59)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
-- `.agents/plans/remove-sveltekit.md` (draft; awaiting owner approval and
-  ruling G1)
+- `.agents/plans/remove-sveltekit.md` (approved; implemented on unmerged
+  branch `remove-sveltekit`; merge blockers in its status and log)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`
 - `docs/history/state-archive.md` for superseded state
 
