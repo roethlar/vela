@@ -9,6 +9,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- Rust lockfile refresh, 2026-10-23. CI on `main` went red after the 2026-08-08
+  green run. The causes were new upstream advisories and a new stable lint, not
+  repo changes. `cargo update -p` moved async-trait 0.1.89 -> 0.1.92, which
+  resolves clippy 1.99's `double_must_use` in its generated code (19 hits at
+  `src/source/mod.rs:844`). It also moved h2 0.4.15 -> 0.4.20 (RUSTSEC-2026-0258),
+  rustls 0.23.42 -> 0.23.46 (RUSTSEC-2026-0348, -0349 and two more), and
+  rustls-webpki 0.103.13 -> 0.103.16, and added syn 3.0.9 for async-trait. Every
+  new version's MSRV is <= 1.71, within the 1.89 floor. Only `Cargo.lock`
+  changed. The Rust gates can't run on the Windows authoring host (no MSVC build
+  tools), so the GitHub CI run on this commit is their verification. The
+  remaining red CI gate is npm audit,
+  on two low @sveltejs/kit advisories that need the breaking kit 3.1.0 upgrade
+  (plan-gated).
 - The Node pin moved from 26.5.0 to 26.12.1 (2026-10-23, owner go), for the
   October 2026 Node security release. `.node-version` and `engines`
   (`>=26.12.1 <27`) are updated, and npm stays at 12.0.1. Node only builds and
