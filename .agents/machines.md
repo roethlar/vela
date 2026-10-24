@@ -169,6 +169,26 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
   installer exited successfully, and both file metadata and the uninstall
   registration report 1.0.0. Vela was not running before the silent upgrade,
   so no process needed to be stopped or relaunched.
+- Re-observed locally on 2026-10-23. The toolchain has changed since the
+  2026-07-20 record, so the native-build claim above no longer holds:
+  - Windows Server 2025 Standard, build 26100, PowerShell 7.6.7.
+  - **No Visual Studio Build Tools:** no `vswhere`, and no Visual Studio
+    install directory. Cargo check, clippy and test, and native packaging,
+    cannot link here until the Build Tools are reinstalled. The per-user
+    Vela at the path above is still present.
+  - Node 26.12.1 is installed host-wide from the official MSI
+    (`winget install OpenJS.NodeJS`), with its bundled npm 11.20.0. The
+    pinned npm 12.0.1 is not installed globally, so the toolchain check
+    fails here. Run npm through `npx -y npm@12.0.1` instead.
+  - rustup is installed (`winget install Rustlang.Rustup`) with
+    stable-x86_64-pc-windows-msvc only; 1.89.0 is not installed.
+  - This clone has `core.autocrlf=true`. The resulting CRLF checkout fails
+    five line-ending-sensitive node tests, so run `node --test tests/` and
+    `npm run check` in an LF worktree (`git -c core.autocrlf=false worktree
+    add ...`).
+  - This clone's only remote is `origin`, which points at GitHub
+    (`https://github.com/roethlar/vela`). There is no Gitea remote, and the
+    Gitea host was unreachable from here.
 
 ## Linux VM (E2E host)
 
