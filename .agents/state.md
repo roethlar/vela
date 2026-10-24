@@ -20,6 +20,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   on the same test. Not run: the toolchain check (this host has npm 11.20.0) and
   the Cargo commands (no Rust change). The E2E VM still needs re-aligning; see
   the Pending note in `.agents/machines.md`.
+- The npm lockfile got a non-breaking `npm audit fix` on 2026-10-23, with no
+  package.json change. It fixed the high advisories in devalue (5.9.4), vite
+  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2). `npm audit` still
+  fails on two low advisories: @sveltejs/kit GHSA-pfhg-q3qv-9q6r and
+  GHSA-27mw-82g8-phjj, which also flag @sveltejs/adapter-static. The fix needs
+  @sveltejs/kit 3.1.0, a breaking major upgrade that waits on an owner go.
+  Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass. The
+  same 5 CRLF test failures as above remain, and nothing new fails.
 - The 2026-08-05 README refresh split the old monolith: README.md is now
   end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
   server name scrubbed to "Plex"); deep user reference moved to
