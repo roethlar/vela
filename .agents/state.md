@@ -53,25 +53,51 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   new version's MSRV is <= 1.71, within the 1.89 floor. Only `Cargo.lock`
   changed. The Rust gates can't run on the Windows authoring host (no MSVC build
   tools), so the GitHub CI run on this commit is their verification. The
-  remaining red CI gate is npm audit,
-  on two low @sveltejs/kit advisories, which removing SvelteKit clears
-  (plan-gated; see the npm lockfile bullet below).
+  remaining red CI gate on `main` is npm audit, on two low @sveltejs/kit
+  advisories. The SvelteKit removal clears them; it is on an unmerged branch
+  (see the SvelteKit removal bullet below).
 - The npm lockfile got a non-breaking `npm audit fix` on 2026-10-23, with no
   package.json change. It fixed the high advisories in devalue (5.9.4), vite
-  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2). `npm audit` still
-  fails on two low advisories: @sveltejs/kit GHSA-pfhg-q3qv-9q6r and
-  GHSA-27mw-82g8-phjj, which also flag @sveltejs/adapter-static. No 2.x
-  release fixes them. On 2026-10-23 the owner chose to remove SvelteKit
-  rather than upgrade to Kit 3, keeping Svelte 5 and Vite as a plain SPA, with
-  Node staying a build and test tool. The plan is drafted at
-  `.agents/plans/remove-sveltekit.md` (revision 1, 2026-10-23). It awaits the
-  owner's plan approval and one ruling, G1 (rename the root component). The
-  Kit 3 plan, `.agents/plans/sveltekit-3-upgrade.md`, is superseded and was
-  never implemented. Neither advisory's code path is reachable in Vela's
-  static SPA, but the gate fails closed. No implementation is active.
-  Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass, and
-  nothing new fails. The 5 CRLF-checkout test failures seen then are fixed
-  (line-ending bullet above).
+  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2).
+- SvelteKit removal, 2026-10-23. The owner approved
+  `.agents/plans/remove-sveltekit.md` and ruled G1 "rename"; the decision is
+  `.agents/decisions.md` 2026-10-23. Slices 1-4 are implemented on branch
+  `remove-sveltekit`, which is NOT merged to `main`. The branch is at
+  version 1.0.62, and on 2026-10-24 it merged the reconciled `main`
+  (`bc12bc5`, 1.0.61) without a rebase; the plan's 2026-10-24 amendment
+  carries the consequences.
+  - The frontend is plain Svelte 5 and Vite. Root `index.html` loads
+    `src/main.ts`, which mounts `src/App.svelte`. Static files are in
+    `public/`, and `$lib` is defined in tsconfig `paths`.
+    `npm run build` runs `scripts/check-frontend-build.mjs`, and
+    `tests/frontend-shell.test.mjs` guards the shell.
+  - Verified on the Windows host, in an LF worktree with npm 12.0.1: `npm ci`;
+    `npm audit` (0 vulnerabilities); `npm run check` (68 pass, 2 skipped;
+    svelte-check 295 files, 0 errors, 0 warnings); `npm run build`; and every
+    local guard red-proof (see the plan's implementation log).
+  - Re-verified after the 2026-10-24 merge of `main`, in an LF worktree with
+    Node 26.12.1/npm 12.0.2: `node scripts/check-js-toolchain.mjs`; `npm ci`;
+    `npm audit` (0 vulnerabilities); `npm run check` (68 pass, 0 fail, 6
+    skipped, all POSIX-bash build-script cases; svelte-check 295 files, 0
+    errors, 0 warnings); `npm run build` (B1-B6 passed); `node --test
+    tests/`. The lock differs from `main`'s by exactly the 11 removed Kit
+    packages.
+  - NOT verified, and blocking the merge: Slice 0 (VM Node re-alignment and the
+    E2E baseline); Slice 1's E2E run and its F1/F2 red-proofs; the full VM
+    `npm run e2e`; the VM webview-mount red-proof; the Mac desktop smoke and
+    `tauri dev`/HMR; the Cargo commands; and the codex Review, where the
+    owner chooses `codereview` or `openreview`.
+  - GitHub CI passed on PR #2 (https://github.com/roethlar/vela/pull/2), run
+    40059537619 at `367bdf6`. Frontend: `npm ci`, `npm audit` (0
+    vulnerabilities), `npm run check` (70 pass; svelte-check 0 errors, 0
+    warnings), and `npm run build` (B1-B6 passed). Rust: the 1.89 MSRV check,
+    and stable check, clippy `-D warnings` and test. cargo audit also passed.
+    After the merge of `main`, run 40061360150 at `af96dc5` passed every job
+    on Node 26.12.1/npm 12.0.2: `npm audit` (0 vulnerabilities), `npm run
+    check` (77 pass, 0 skipped; svelte-check 0 errors, 0 warnings), `npm run
+    build` (B1-B6 passed), the 1.89 MSRV check, stable check, clippy, 364 Rust
+    tests, and cargo audit. `main` keeps failing npm audit until the branch
+    merges.
 - 2026-08-20 macOS AirPlay diagnostics selected an AVFoundation-first production
   path, now drafted at `.agents/plans/macos-airplay-sync.md`; implementation is
   not approved. The affected server-backed MKV/E-AC-3 play was physically about
@@ -201,8 +227,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/show-last-episode-sort.md` (landed sorting baseline)
 - `.agents/plans/library-sort-direction.md` (landed at `c0d1412`, 1.0.59)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
-- `.agents/plans/remove-sveltekit.md` (draft; awaiting owner approval and
-  ruling G1)
+- `.agents/plans/remove-sveltekit.md` (approved; implemented on unmerged
+  branch `remove-sveltekit`; merge blockers in its status and log)
 - `.agents/plans/macos-airplay-sync.md` (implemented for 1.0.61; packaged
   physical acceptance pending)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`
