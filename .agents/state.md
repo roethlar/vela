@@ -20,7 +20,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   changed. The Rust gates can't run on the Windows authoring host (no MSVC build
   tools), so the GitHub CI run on this commit is their verification. The
   remaining red CI gate is npm audit,
-  on two low @sveltejs/kit advisories that need the breaking Kit 3 upgrade
+  on two low @sveltejs/kit advisories, which removing SvelteKit clears
   (plan-gated; see the next-but-one bullet).
 - The Node pin moved from 26.5.0 to 26.12.1 (2026-10-23, owner go), for the
   October 2026 Node security release. `.node-version` and `engines`
@@ -37,12 +37,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   package.json change. It fixed the high advisories in devalue (5.9.4), vite
   (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2). `npm audit` still
   fails on two low advisories: @sveltejs/kit GHSA-pfhg-q3qv-9q6r and
-  GHSA-27mw-82g8-phjj, which also flag @sveltejs/adapter-static. The fix needs
-  @sveltejs/kit 3.x (first fixed release 3.0.0; target 3.1.0), a breaking major
-  upgrade. Its plan is drafted at `.agents/plans/sveltekit-3-upgrade.md`
-  (revision 1, 2026-10-23) and awaits the owner's plan approval. Neither
-  advisory's code path is reachable in Vela's static SPA, but the gate fails
-  closed. No implementation is active.
+  GHSA-27mw-82g8-phjj, which also flag @sveltejs/adapter-static. No 2.x
+  release fixes them. On 2026-10-23 the owner chose to remove SvelteKit
+  rather than upgrade to Kit 3, keeping Svelte 5 and Vite as a plain SPA, with
+  Node staying a build and test tool. The plan is drafted at
+  `.agents/plans/remove-sveltekit.md` (revision 1, 2026-10-23). It awaits the
+  owner's plan approval and one ruling, G1 (rename the root component). The
+  Kit 3 plan, `.agents/plans/sveltekit-3-upgrade.md`, is superseded and was
+  never implemented. Neither advisory's code path is reachable in Vela's
+  static SPA, but the gate fails closed. No implementation is active.
   Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass. The
   same 5 CRLF test failures as above remain, and nothing new fails.
 - The 2026-08-05 README refresh split the old monolith: README.md is now
@@ -108,7 +111,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/show-last-episode-sort.md` (landed sorting baseline)
 - `.agents/plans/library-sort-direction.md` (landed at `c0d1412`, 1.0.59)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
-- `.agents/plans/sveltekit-3-upgrade.md` (draft; awaiting owner approval)
+- `.agents/plans/remove-sveltekit.md` (draft; awaiting owner approval and
+  ruling G1)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`
 - `docs/history/state-archive.md` for superseded state
 

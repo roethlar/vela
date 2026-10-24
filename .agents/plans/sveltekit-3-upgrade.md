@@ -1,9 +1,17 @@
-# Plan: SvelteKit 3 upgrade to clear the npm audit gate
+# Plan: SvelteKit 3 upgrade to clear the npm audit gate (SUPERSEDED)
+
+> **SUPERSEDED 2026-10-23, never approved or implemented:** the owner chose to
+> remove SvelteKit from Vela instead of upgrading it to Kit 3, keeping Svelte 5
+> and Vite as a plain single-page app. The replacement plan is
+> `.agents/plans/remove-sveltekit.md`. It reuses this plan's advisory
+> assessment, the tsconfig/tests coverage hazard, the guard red-proof method,
+> and Slice 0. Retained as research only; do not implement anything below.
 
 ## Status
 
-**DRAFT, revision 1 (2026-10-23). Awaiting the owner's plan approval. No
-implementation is authorized.** The owner asked for this plan on 2026-10-23.
+**SUPERSEDED 2026-10-23 by `.agents/plans/remove-sveltekit.md`.** Original
+status: DRAFT, revision 1 (2026-10-23), awaiting the owner's plan approval; no
+implementation was authorized. The owner asked for this plan on 2026-10-23.
 Approving it also approves two things below: removing the Kit-scoped `cookie`
 override that the 2026-07-15 dependency decision approved, and the
 `version.pollInterval: 0` behavior-preservation setting. Record the owner's
