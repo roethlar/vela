@@ -382,6 +382,21 @@ Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
   12.0.2 baseline) into that tree with its own Node, and prove `bash -lc`
   reports the new pair and the checker passes. Keep the 26.5.0 directory as
   the rollback. Update the baseline above once done.
+  Still pending at 2026-10-24: the VM could not be started (next bullet).
+- How the VM is hosted (observed 2026-10-24): it is the UTM 4.7.5 QEMU guest
+  named `Ubuntu`, bundle `/Volumes/Apps/VMs/Linux.utm`, app
+  `/Volumes/Apps/Applications/UTM.app`. It was suspended, not powered off,
+  and 192.168.64.5 refused SSH. It can't be started from an SSH session on
+  the Mac:
+  - `utmctl` fails with OSStatus -1743 and prints "utmctl does not work from
+    SSH sessions or before logging in". sshd has no Apple Events grant.
+  - `open 'utm://start?name=Ubuntu'` exits 0, but while the console is locked
+    LaunchServices only hands the request to CoreServicesUIAgent, and UTM
+    never receives it. No QEMU process starts.
+
+  Starting it needs the owner at the Mac's desktop: unlock the Mac and start
+  `Ubuntu` in UTM. Requests queued by `open` may then start it on their own
+  (assumption, not observed).
 
 - The fetched E2E driver now uses Ubuntu's SHA-pinned
   `webkitgtk-webdriver` 2.52.3 package, exactly matching this VM's WebKitGTK;
