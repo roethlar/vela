@@ -82,11 +82,26 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     errors, 0 warnings); `npm run build` (B1-B6 passed); `node --test
     tests/`. The lock differs from `main`'s by exactly the 11 removed Kit
     packages.
-  - NOT verified, and blocking the merge: Slice 0 (VM Node re-alignment and the
-    E2E baseline); Slice 1's E2E run and its F1/F2 red-proofs; the full VM
-    `npm run e2e`; the VM webview-mount red-proof; the Mac desktop smoke and
-    `tauri dev`/HMR; the Cargo commands; and the codex Review, where the
-    owner chooses `codereview` or `openreview`.
+  - Verified on the Mac on 2026-10-24, at `2767cbe` (see the plan's
+    2026-10-24 log):
+    - the toolchain check, `npm ci`, and `npm audit` (0 vulnerabilities);
+    - `npm run check` (77 pass; svelte-check 0 errors, 0 warnings) and
+      `npm run build` (B1-B6);
+    - `cargo +stable check --locked`, and `tauri build --debug`;
+    - the automated half of the desktop smoke: the app boots and stays up
+      under WKWebView;
+    - `tauri dev`: Vite on strict port 1420, and an HMR update reached the
+      webview with no reload or restart.
+  - NOT verified, and blocking the merge:
+    - every VM gate: Slice 0 (the Node re-alignment and the E2E baseline),
+      Slice 1's E2E run with its F1/F2 red-proofs, the full `npm run e2e`, and
+      the webview-mount red-proof. The VM is a suspended UTM guest that SSH
+      can't start while the Mac is locked (`.agents/machines.md`);
+    - the owner's visual checks on the Mac: Geist text, no theme flash, a
+      clean Web Inspector console, and the HMR edit seen on screen;
+    - the Review. Codex, which the 2026-07-26 routing names, is unavailable
+      (owner, 2026-10-24), so the owner must decide whether to wait for codex
+      or choose another route.
   - GitHub CI passed on PR #2 (https://github.com/roethlar/vela/pull/2), run
     40059537619 at `367bdf6`. Frontend: `npm ci`, `npm audit` (0
     vulnerabilities), `npm run check` (70 pass; svelte-check 0 errors, 0
