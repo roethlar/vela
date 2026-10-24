@@ -20,8 +20,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   changed. The Rust gates can't run on the Windows authoring host (no MSVC build
   tools), so the GitHub CI run on this commit is their verification. The
   remaining red CI gate is npm audit,
-  on two low @sveltejs/kit advisories that need the breaking kit 3.1.0 upgrade
-  (plan-gated).
+  on two low @sveltejs/kit advisories that need the breaking Kit 3 upgrade
+  (plan-gated; see the next-but-one bullet).
 - The Node pin moved from 26.5.0 to 26.12.1 (2026-10-23, owner go), for the
   October 2026 Node security release. `.node-version` and `engines`
   (`>=26.12.1 <27`) are updated, and npm stays at 12.0.1. Node only builds and
@@ -38,7 +38,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2). `npm audit` still
   fails on two low advisories: @sveltejs/kit GHSA-pfhg-q3qv-9q6r and
   GHSA-27mw-82g8-phjj, which also flag @sveltejs/adapter-static. The fix needs
-  @sveltejs/kit 3.1.0, a breaking major upgrade that waits on an owner go.
+  @sveltejs/kit 3.x (first fixed release 3.0.0; target 3.1.0), a breaking major
+  upgrade. Its plan is drafted at `.agents/plans/sveltekit-3-upgrade.md`
+  (revision 1, 2026-10-23) and awaits the owner's plan approval. Neither
+  advisory's code path is reachable in Vela's static SPA, but the gate fails
+  closed. No implementation is active.
   Verified on Windows: `npm ci`, `npm run build`, and svelte-check pass. The
   same 5 CRLF test failures as above remain, and nothing new fails.
 - The 2026-08-05 README refresh split the old monolith: README.md is now
@@ -104,6 +108,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/plans/show-last-episode-sort.md` (landed sorting baseline)
 - `.agents/plans/library-sort-direction.md` (landed at `c0d1412`, 1.0.59)
 - `.agents/plans/v1-release-readiness.md` (published-release evidence)
+- `.agents/plans/sveltekit-3-upgrade.md` (draft; awaiting owner approval)
 - `README.md`, `RELEASE_NOTES.md`, `ISSUES.md`
 - `docs/history/state-archive.md` for superseded state
 
