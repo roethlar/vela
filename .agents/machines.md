@@ -286,6 +286,24 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     - `github` is `https://github.com/roethlar/vela`.
     Host `q` and its q:3000 Gitea are retired (owner, 2026-10-24). Use
     `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` for unattended Gitea calls.
+- Re-observed locally on 2026-11-02; two of the 2026-10-23 facts above are
+  stale:
+  - Visual Studio Build Tools 2026 (18.11.2, found by `vswhere`) are
+    installed again. `cargo +stable check --locked` compiles and links
+    (rustup 1.29.2, stable 1.99.1), so the Cargo gates run here;
+    1.89.0 is still not installed, so the MSRV check does not. Native
+    packaging works again too: `pwsh scripts/build.ps1` produced
+    `src-tauri\target\release\bundle\nsis\Vela_1.0.61_x64-setup.exe` on
+    2026-11-02 (release Rust build about 5 minutes; NSIS 3.11 fetched by
+    Tauri).
+  - npm 12.0.2 is installed globally into `%APPDATA%\npm` (the owner ran
+    `npm install --global npm@12.0.2`). `C:\Program Files\nodejs\npm.ps1`
+    still resolves first on `PATH`, but it defers to the user-global
+    install, so `npm --version` reports 12.0.2 and the toolchain check
+    passes without `npx -y npm@12.0.2`. The bundled npm 11.20.0 is untouched.
+    Before this install, an `npm install` under npm 11 had rewritten
+    `package-lock.json` with minor bumps (kit 2.70.3, Tauri 2.12.4 and
+    more); that rewrite was discarded, never committed.
 
 ## Linux VM (E2E host)
 
