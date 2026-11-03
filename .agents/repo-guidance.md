@@ -41,7 +41,9 @@ from the retired `.agents/repo-map.json`, 2026-07-08; verified against
   workflows' `npm install --global npm@<version>` are only CI's tested
   baseline.
 - `npm ci` (repo root) — clean, lockfile-exact JavaScript install.
-- `npm audit` (repo root) — fail closed on known npm vulnerabilities.
+- `npm audit --audit-level=moderate` (repo root) — fail closed on known npm
+  vulnerabilities of moderate severity and above; low advisories are reported
+  but do not fail the gate (decision `.agents/decisions.md` 2026-11-02).
 - `npm run check` (repo root) — frontend type and Svelte validation.
 - `npm run build` (repo root) — production frontend build, or any change
   that can affect the Tauri frontend bundle.

@@ -75,7 +75,7 @@ The core verification set is:
 ```bash
 node scripts/check-js-toolchain.mjs
 npm ci
-npm audit
+npm audit --audit-level=moderate
 npm run check
 npm run build
 

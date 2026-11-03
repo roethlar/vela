@@ -9,6 +9,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- npm audit gate moved to `--audit-level=moderate`, 2026-11-02 (decision
+  `.agents/decisions.md` 2026-11-02). `main` had failed npm audit since
+  2026-09-18 on one low advisory, deepmerge GHSA-gcqx-w48m-w2h4
+  (CVE-2026-93753), reported four times up the chain through
+  vite-plugin-svelte, kit and adapter-static. No patched deepmerge exists, the
+  newest vite-plugin-svelte (7.3.1) still depends on it, and so does the
+  `remove-sveltekit` branch, so neither the Kit 3 bump `npm audit fix --force`
+  offers nor the SvelteKit removal clears it. The forced bump was tried on
+  2026-11-02, broke the build (SvelteKit 3 drops `svelte.config.js`), left all
+  four findings, and was reverted. VulnCheck rejected the CVE on 2026-11-02
+  after a maintainer-side dispute; the GitHub advisory is not yet withdrawn.
+  CI, the release workflow, `docs/development.md` and
+  `.agents/repo-guidance.md` now run `npm audit --audit-level=moderate`.
+  Verified on netwatch-01 (Node 26.12.1/npm 12.0.2): that command exits 0 on
+  the committed lock while plain `npm audit` still prints the 4 low findings.
 - GitHub and Gitea histories reconciled, 2026-10-24. GitHub `main` (the
   2026-10-23 Node, npm and Cargo security work and the SvelteKit plans) and the
   Gitea copy at `http://magneto:3001/michael/vela.git` (owner work to
@@ -51,11 +66,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   rustls 0.23.42 -> 0.23.46 (RUSTSEC-2026-0348, -0349 and two more), and
   rustls-webpki 0.103.13 -> 0.103.16, and added syn 3.0.9 for async-trait. Every
   new version's MSRV is <= 1.71, within the 1.89 floor. Only `Cargo.lock`
-  changed. The Rust gates can't run on the Windows authoring host (no MSVC build
-  tools), so the GitHub CI run on this commit is their verification. The
-  remaining red CI gate on `main` is npm audit, on two low @sveltejs/kit
-  advisories. The SvelteKit removal clears them; it is on an unmerged branch
-  (see the SvelteKit removal bullet below).
+  changed. The Rust gates could not run on the Windows authoring host that day
+  (no MSVC build tools then; see `.agents/machines.md`), so the GitHub CI run
+  on this commit is their verification. The npm audit gate that stayed red
+  afterwards is covered by the 2026-11-02 audit-threshold bullet above.
 - The npm lockfile got a non-breaking `npm audit fix` on 2026-10-23, with no
   package.json change. It fixed the high advisories in devalue (5.9.4), vite
   (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2).
@@ -96,8 +110,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     on Node 26.12.1/npm 12.0.2: `npm audit` (0 vulnerabilities), `npm run
     check` (77 pass, 0 skipped; svelte-check 0 errors, 0 warnings), `npm run
     build` (B1-B6 passed), the 1.89 MSRV check, stable check, clippy, 364 Rust
-    tests, and cargo audit. `main` keeps failing npm audit until the branch
-    merges.
+    tests, and cargo audit. (`main`'s npm audit gate is covered by the
+    2026-11-02 audit-threshold bullet above; this branch does not clear the
+    deepmerge advisory either, since it keeps vite-plugin-svelte.)
 - 2026-08-20 macOS AirPlay diagnostics selected an AVFoundation-first production
   path, now drafted at `.agents/plans/macos-airplay-sync.md`; implementation is
   not approved. The affected server-backed MKV/E-AC-3 play was physically about

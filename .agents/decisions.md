@@ -1805,3 +1805,44 @@ compatibility policy and expresses the security move in its terms:
 still no `packageManager` field. `.node-version` (26.12.1) and the workflows'
 npm 12.0.2 remain CI's fixed baseline only. Raise the floor, never the
 baseline alone, when a later Node 26 security release lands.
+
+## 2026-11-02 - npm audit fails CI at moderate severity and above
+
+Status: APPROVED (owner, 2026-11-02).
+
+Decision:
+`npm audit` runs as `npm audit --audit-level=moderate` in CI
+(`.github/workflows/ci.yml`), in the release workflow
+(`.github/workflows/release.yml`), and in the local verification set
+(`.agents/repo-guidance.md`, `docs/development.md`). Known npm advisories of
+moderate, high or critical severity still fail closed. Low-severity advisories
+are printed but do not fail the gate. Nothing else changes: no
+`npm audit fix --force`, no `overrides`, no per-advisory suppression, and
+Cargo audit keeps failing on every advisory.
+
+Reason:
+`main` had failed npm audit since 2026-09-18 on one low advisory, deepmerge
+GHSA-gcqx-w48m-w2h4 (CVE-2026-93753), which npm reports four times up the
+chain (deepmerge, @sveltejs/vite-plugin-svelte, @sveltejs/kit,
+@sveltejs/adapter-static). It has no fix: every deepmerge release from 4.2.0
+through the current 4.3.1 is in range and no newer release exists; the newest
+vite-plugin-svelte (7.3.1) still depends on `deepmerge ^4.3.1`; and the
+`remove-sveltekit` branch depends on vite-plugin-svelte too. So neither the
+Kit 3 major bump that `npm audit fix --force` offers nor the SvelteKit removal
+clears it. The forced bump was tried on 2026-11-02: it broke the build
+(SvelteKit 3 rejects `svelte.config.js` with `config_file_unsupported`) and
+left all four findings in place, and was reverted. The CVE was disputed and
+VulnCheck rejected it on 2026-11-02 (deepmerge issues #273 and #285:
+`Object.prototype` is never modified and nothing crosses a privilege
+boundary); the GitHub advisory is not yet withdrawn, so npm still reports it.
+Vela's exposure is nil regardless: vite-plugin-svelte calls deepmerge once at
+build time to merge its defaults with the repo-authored `svelte.config.js` and
+inline plugin options, and no deepmerge code ships in the app. The owner chose
+the moderate threshold over waiting for the withdrawal with a permanently red
+gate on `main`.
+
+Supersedes:
+Narrows the fail-closed npm audit rule of the 2026-07-15 dependency-baseline
+decision from every severity to moderate and above. Its ban on blanket
+suppression and on `npm audit fix --force` downgrades stands. The Cargo rule
+(2026-07-14) is untouched.

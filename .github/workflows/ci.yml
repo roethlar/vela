@@ -58,7 +58,7 @@ jobs:
           npm install --global npm@12.0.2
           node scripts/check-js-toolchain.mjs
       - run: npm ci
-      - run: npm audit
+      - run: npm audit --audit-level=moderate
       - run: npm run check
       - run: npm run build
 
