@@ -24,6 +24,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `.agents/repo-guidance.md` now run `npm audit --audit-level=moderate`.
   Verified on netwatch-01 (Node 26.12.1/npm 12.0.2): that command exits 0 on
   the committed lock while plain `npm audit` still prints the 4 low findings.
+  GitHub CI run 41564348672 at `f156f14` (pushed 2026-11-02) passed every
+  job, Frontend audit step included: the first green `main` run since the
+  2026-08-08 one noted below.
 - GitHub and Gitea histories reconciled, 2026-10-24. GitHub `main` (the
   2026-10-23 Node, npm and Cargo security work and the SvelteKit plans) and the
   Gitea copy at `http://magneto:3001/michael/vela.git` (owner work to
