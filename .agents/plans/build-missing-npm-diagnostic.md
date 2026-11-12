@@ -4,15 +4,18 @@
 
 **DRAFT 2026-11-12. NOT APPROVED. No implementation may start.**
 
-Open owner ruling, not yet given:
+Owner ruling, given 2026-11-12:
 
-- **D1 (install policy).** Whether `scripts/build.sh` stays a reporter for a
-  missing Node/npm (Option A, this plan's default and the drafting agent's
-  recommendation) or additionally offers to install `npm` through pacman on
-  Arch-family hosts (Option B). Slices 1-2 implement Option A and are valid
-  under either ruling. Slice 3 exists only if the owner rules B.
+- **D1 (install policy): RULED A.** Asked whether `scripts/build.sh` should
+  only report a missing Node/npm (Option A) or additionally offer to install
+  `npm` through pacman on Arch-family hosts (Option B), the owner answered
+  verbatim: "A". `build.sh` stays a reporter; the documented policy "Rust
+  and Node are not installed for you" stands. Slices 1-2 are the whole plan.
+  Slice 3 is NOT to be implemented; it is kept below only as the record of
+  the rejected option.
 
-After D1, the plan as a whole still needs the owner's explicit go.
+No ruling remains open. The plan as a whole still needs the owner's explicit
+go before any implementation.
 
 ## Problem
 
@@ -202,9 +205,9 @@ Node are not installed for you." add one sentence that a missing `node` or
 
 Commit: `build: name a missing node or npm before the toolchain check`.
 
-## Slice 3 — ONLY IF D1 IS RULED B: offer `npm` through pacman
+## Slice 3 — REJECTED (D1 ruled A, 2026-11-12): offer `npm` through pacman
 
-Not part of the default plan. If ruled B:
+Do not implement. Record of what Option B would have been:
 
 - In `ensure_linux_prereqs`, pacman branch only: when
   `command -v npm` fails, append `npm` to `missing` (pacman's `npm` depends
