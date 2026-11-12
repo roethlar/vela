@@ -9,6 +9,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- Server identity marks, 2026-11-12, `343f270` + `62b85e2` (1.0.63; plan
+  `.agents/plans/server-identity-sidebar.md`; decision 2026-11-12). Every
+  place a server name is shown now carries a Plex/Jellyfin/Emby mark or the
+  kind in words; Server Playlists is a flat list that collapses when empty;
+  Emby's Experimental label is in Settings only. 23 red-proofs,
+  `npm run check` (93 pass) and 7 targeted E2E scenarios pass on
+  `continuum`, which is now a working E2E venue (`.agents/machines.md`).
+  Pushed. NOT done: the owner's acceptance in the installed app. See the
+  plan's log for the full-suite E2E and CI results.
 - Push policy is `always` since 2026-11-12 (owner; `.agents/push-policy.md`):
   push after each commit without asking. History rewrites still need a go.
 - Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
@@ -237,11 +246,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
-- `.agents/plans/server-identity-sidebar.md`: APPROVED 2026-11-12 (owner
-  "go"), implementation in progress. Per-kind server marks everywhere a
-  server name is shown, and a flat Server Playlists list that collapses
-  when empty. Slice 1 is at gate G1: the owner has to accept the three
-  drawings before anything is wired in.
 - mpv window geometry (owner request 2026-11-12; no plan drafted yet).
   Rulings so far: asked which plays inherit the previous window size and
   position, the owner answered "all in current session" (this reverses the
@@ -250,8 +254,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   size is readable on every platform; position is not readable from mpv
   and cannot be set on Wayland, but is feasible on Windows through the
   window handle. Next: draft the plan.
-- E2E venue: the owner will install `tauri-driver` and `Xvfb` on
-  `continuum` (2026-11-12) so the suite can run there.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

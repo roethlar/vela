@@ -3,8 +3,10 @@
 ## Status
 
 **APPROVED 2026-11-12; implementation in progress.** Owner go, verbatim, in
-answer to "Server-logo plan: go or not?": "go". Slice 1 is waiting at gate
-G1 (owner's visual acceptance of the drawings).
+answer to "Server-logo plan: go or not?": "go". All four slices are
+implemented and pushed (`343f270`, `62b85e2`); awaiting owner acceptance in
+the installed app. Gate G1 passed: shown the three drawings, the owner
+answered "those logos are fine."
 
 The version bump this plan makes is now 1.0.62 -> 1.0.63: 1.0.62 was taken
 by the Windows mpv idle-exit fix (`bf1b1c3`) after this plan was drafted.
@@ -420,3 +422,75 @@ and repoint `tests/server-identity-ui.test.mjs`. Record that obligation in
   experimental" decision is displayed, not the decision itself.
 - This file: Status line with the owner's go verbatim; implementation log
   with every red-proof result and the G1 outcome.
+
+## Implementation log
+
+2026-11-12, host `continuum` (CachyOS; Node 26.13.1, npm 12.2.2).
+
+- G1: preview rendered with `rsvg-convert` at large size and at 24, 16 and
+  13 px on the app's dark surface and on a light strip, plus an HTML mock of
+  the sidebar and Settings rows. Owner, verbatim: "those logos are fine."
+- Slice 1, `343f270` (1.0.63): `src/lib/ServerLogo.svelte`, the Settings
+  row mark, and the Emby `Experimental` badge. Gradient ids use
+  `$props.id()` (Svelte 5.56.5).
+- Slices 2-4, `62b85e2`, landed as ONE commit, not three: they were
+  implemented together and all touch the same regions of `+page.svelte`.
+  This departs from the plan's one-commit-per-slice layout.
+- Departures from the plan's text, all in `62b85e2`:
+  - Kind labels live in `src/lib/serverPlaylists.ts` (`KIND_LABELS`,
+    `kindLabel`, `serverLabel`), not in a `<script module>` block of
+    `ServerLogo.svelte`, so node tests can import them and there is one
+    table. `ServerLogo` imports `KIND_LABELS`.
+  - The plain-string form is produced by `serverLabel(name, kind)` at each
+    site; no `sourceLabelOf` helper was added to `+page.svelte`.
+    `sourceKindOf(id)` was added as planned.
+  - The Server Playlists `class:active` compares both the playlist key and
+    the source id.
+  - `PlaylistsView` takes a `sourceKindOf` function prop and resolves the
+    kind from `entry.item.sourceId`; an entry whose server is gone has no
+    kind and keeps its bare name. `ServerPlaylistView` takes a `sourceKind`
+    string prop.
+- Existing guards changed, as the plan allowed: `tests/ui-motion.test.mjs`
+  — the `No video playlists` inline assertion now asserts absence, and the
+  exact `EmptyState` hint string for the empty server playlist follows the
+  new `serverLabel(...)` expression. No other existing assertion changed.
+- Tests: `tests/server-identity-ui.test.mjs`, 13 tests, in the `check` list.
+- Red-proofs, each injected separately into the committed files and
+  restored with `git checkout --`; every one failed the named test:
+  - Slice 1 (6): emby branch deleted; an external `<image href>` added; an
+    unknown kind rendering an empty svg; logo removed from the Settings
+    row; `Experimental` made unconditional; `Experimental` removed.
+  - Slices 2-4 (17): availability filter dropped from
+    `flattenServerPlaylists`; empty servers given a placeholder entry;
+    `serverLabel` dropping the kind; heading gated on the unfiltered
+    groups; the derived list not built by `flattenServerPlaylists`;
+    `Experimental` back in the main window; playlist entry without its
+    mark; Sources entry without its mark; Sources `aria-label` without the
+    kind; bare name back in the Quality entry; bare `hub.sourceName`; bare
+    `choice.sourceName`; bare name in the server playlist header; hint
+    without the kind; playlist subtitle without the kind; `ServerName`
+    without the mark; `sourceKind` prop not passed to `ServerPlaylistView`.
+- Verification at `62b85e2`: toolchain check, `npm ci`, `npm run check`
+  (93 pass, 0 fail; svelte-check 306 files, 0 errors, 0 warnings),
+  `npm run build`, `git diff --check`. Rust: `scripts/bump.sh` changed only
+  version strings; the Cargo commands were not re-run locally for this
+  plan (GitHub CI covers them on push).
+- E2E on `continuum`, which became a working venue on 2026-11-12 (owner
+  installed `tauri-driver` and `xorg-server-xvfb`; the pinned 2.52.3 driver
+  works against system WebKitGTK 2.54.2). Run from a disposable worktree:
+  - Baseline at `343f270`, before the layout change: `smoke` and the old
+    `serverplaylists` passed.
+  - At `62b85e2`: `serverplaylists` (rewritten), `mergedview`,
+    `sourcepolicy`, `multiplex`, `playlistplay`, `playlistedit`, `smoke` —
+    7 of 7 passed.
+  - E2E red-proof of the rewritten scenario: re-adding an `Unavailable`
+    line for the failing server made `serverplaylists` FAIL on
+    `offlineInPlaylists: 1` and the extra entry; restored, it passed. A
+    first attempted mutation (dropping the availability filter) did NOT
+    fail it, correctly: the mock's failing server returns no playlists, so
+    that filter is only reachable through the unit test, which does fail.
+- Selectors changed in E2E: only `tests/e2e/scenarios/serverplaylists.mjs`
+  (the nested-layout wait and `Unavailable` assertion replaced; the
+  `Open Server Night from Playlist Server` label now ends ` (Jellyfin)`).
+  Other scenarios match server names by text content, which the marks do
+  not change.

@@ -1846,3 +1846,53 @@ Narrows the fail-closed npm audit rule of the 2026-07-15 dependency-baseline
 decision from every severity to moderate and above. Its ban on blanket
 suppression and on `npm audit fix --force` downgrades stands. The Cargo rule
 (2026-07-14) is untouched.
+## 2026-11-12 - Server names always carry a kind mark; empty servers take no sidebar space
+
+Status: APPROVED (owner, 2026-11-12). Implemented in 1.0.63
+(`.agents/plans/server-identity-sidebar.md`).
+
+Decision:
+Wherever the UI shows a server's name it also shows which kind of server it
+is: a Plex, Jellyfin or Emby mark in rendered markup, and the kind in words
+(`name (Kind)`) in plain strings such as accessible labels. Owner: "yes,
+anywhere a bare server name is used we need to differentiate."
+
+The marks are Vela's own simplified SVG drawings, not vendor artwork. Owner:
+"logos. if you can approximate them with .svg, good. if not, then we can use
+actual icons. I'll take the risk that this won't get me sued, since we
+already use the plex and emby names in the settings." The owner accepted the
+drawings on 2026-11-12 ("those logos are fine"). Using the vendors' actual
+artwork remains an owner-approved fallback that was not needed.
+
+Server Playlists in the sidebar is one flat list under its heading, with no
+per-server sub-heading. Owner: "if there are no available server playlists,
+show nothing for that server". A server with none, or whose playlist request
+failed, renders nothing, and the heading disappears when no server
+contributes a playlist. A failed playlist request is therefore not visible
+in the sidebar; that is the ruled behaviour, not an oversight.
+
+Emby's "Experimental" label appears on the Emby row of the Settings server
+list and nowhere in the main window. Owner: "experimental doesn't need to be
+in the main UI at all. settings is enough."; asked whether that means adding
+the word in Settings: "yes, if we need it anywhere".
+
+Reason:
+The owner runs a Plex and a Jellyfin server with the same name, and the
+sidebar, menus and tags printed only the name. The nested Server Playlists
+layout spent five sidebar lines on two servers with no playlists.
+
+Supersedes:
+Narrows where the 2026-07-15 "Emby support is labeled experimental" decision
+is displayed (Settings only); the decision itself stands.
+
+## 2026-11-12 - Push policy is always
+
+Status: APPROVED (owner, 2026-11-12). Recorded in `.agents/push-policy.md`.
+
+Decision:
+Owner: "change push policy to always." After a commit lands the agent pushes
+without asking. Force-pushes and other history rewrites still need their own
+explicit go.
+
+Supersedes:
+The earlier "Always ask before pushing."

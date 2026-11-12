@@ -765,3 +765,15 @@ no verifiable delta.
 - A future svelte-check or vite-plugin-svelte major may change how
   `svelte.config.js` or tsconfig `paths` are read. The T- and S-guards fail
   loudly if so.
+## Obligation recorded 2026-11-12 (from `main`, not yet merged here)
+
+`main` gained the server-identity work at `343f270` and `62b85e2`
+(`.agents/plans/server-identity-sidebar.md`): new `src/lib/ServerLogo.svelte`,
+`src/lib/ServerName.svelte`, `src/lib/serverPlaylists.ts`, edits to
+`src/lib/Settings.svelte`, `PlaylistsView.svelte`, `ServerPlaylistView.svelte`
+and substantial sidebar/menu edits in `src/routes/+page.svelte`, plus
+`tests/server-identity-ui.test.mjs` and `tests/mpv-lifecycle.test.mjs` in the
+`check` list. This branch's next merge of `main` must carry the
+`+page.svelte` edits into `src/App.svelte` and repoint
+`tests/server-identity-ui.test.mjs` (it reads `src/routes/+page.svelte`) at
+the renamed file. `main` is also at 1.0.63, so this branch must re-bump.

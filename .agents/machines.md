@@ -358,8 +358,15 @@ Recorded and verified 2026-11-12, locally on the host.
   resolves every library and `desktop-file-validate` accepts the desktop
   entry. The app was not launched during that session; first run and server
   sign-in are unverified. Remove with `sudo pacman -R vela`.
-- Only the build and install ran here. The verification set (check, clippy,
-  tests, audits) and E2E have not been run on this host.
+- E2E venue since 2026-11-12: the owner installed `xorg-server-xvfb` and
+  `tauri-driver` (`cargo install tauri-driver --locked`, in
+  `~/.cargo/bin`); `ffmpeg`, `bsdtar`, `curl` and `mpv` were already
+  present. `npm run e2e` works here: the harness's SHA-pinned
+  WebKitWebDriver 2.52.3 drives system WebKitGTK 2.54.2. Unlike the VM this
+  host is x86_64. Run E2E from a disposable `git worktree` (with its own
+  `npm ci`) so a suite run and edits in the main tree do not collide.
+- The JS checks, stable-Rust check/clippy/test and E2E run here. The MSRV
+  check and `cargo audit` do not (see the toolchain bullet).
 - Remotes, as of 2026-11-12: `origin` =
   `https://gitea.internal/michael/vela.git`, which is the canonical Gitea
   of `.agents/repo-guidance.md` (Remotes & Sync) reached over HTTPS (owner,
