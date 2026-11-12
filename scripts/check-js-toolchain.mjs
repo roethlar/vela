@@ -13,6 +13,13 @@ if (!nodeRange || !npmRange) {
   throw new Error("expected package.json engines.node and engines.npm ranges");
 }
 
+// A host condition (no npm, wrong versions) is the builder's to fix, so it gets
+// one actionable line rather than an uncaught-exception stack trace.
+function fail(message) {
+  console.error(`toolchain: ${message}`);
+  process.exit(1);
+}
+
 function parseVersion(text) {
   const match = /^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(text);
   if (!match) {
@@ -47,13 +54,27 @@ function satisfies(version, range) {
     });
 }
 
-const npmVersion = execSync("npm --version", { encoding: "utf8" }).trim();
+// Not found, a non-zero exit, and a spawn error are all the same condition
+// here. stderr is dropped so the shell's own "command not found" is not
+// printed on top of the message below.
+let npmVersion;
+try {
+  npmVersion = execSync("npm --version", {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  }).trim();
+} catch {
+  fail(
+    `npm was not found or could not run; install npm ${npmRange} ` +
+      `(package.json engines) and put it on PATH`,
+  );
+}
 
 if (
   !satisfies(process.version, nodeRange) ||
   !satisfies(npmVersion, npmRange)
 ) {
-  throw new Error(
+  fail(
     `expected Node ${nodeRange}/npm ${npmRange}; got ${process.version}/npm ${npmVersion}`,
   );
 }
