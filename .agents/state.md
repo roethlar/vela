@@ -209,6 +209,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
+- `.agents/plans/build-missing-npm-diagnostic.md` (drafted 2026-11-12, NOT
+  approved): a build host without `npm` gets a Node stack trace from
+  `scripts/check-js-toolchain.mjs` instead of an actionable line. Awaiting
+  the owner's D1 ruling (report only, or also offer `npm` through pacman on
+  Arch-family hosts) and then a go.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
