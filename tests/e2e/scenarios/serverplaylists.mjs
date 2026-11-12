@@ -92,21 +92,51 @@ export default {
     const localStore = path.join(configRoot, 'config', 'vela', 'playlists.json');
     assert.equal(fs.existsSync(localStore), false, 'server discovery must not create Vela storage');
 
+    // One get_server_playlists call returns every server's result together, so
+    // the healthy server's entry appearing means the failing server's result
+    // has arrived too.
     await driver.waitFor(
-      `return document.querySelector('[data-source-id="jf-playlists"]')?.dataset.playlistState === 'available'
-        && document.querySelector('[data-source-id="jf-offline"]')?.dataset.playlistState === 'unavailable'`,
-      'healthy and unavailable server playlist groups',
+      `return document.querySelector(
+        'button.serverplaylistitem[data-source-id="jf-playlists"]'
+      )?.getAttribute('aria-label') === 'Open Server Night from Playlist Server (Jellyfin)'`,
+      'the healthy server playlist entry, named with its server kind',
       { timeoutMs: 25_000 },
     );
-    assert.equal(
+    // Owner ruling 2026-11-12: a server with no available playlists shows
+    // nothing — no sub-heading, no "Unavailable", no placeholder line.
+    assert.deepEqual(
       await driver.exec(
-        `return document.querySelector('[data-source-id="jf-offline"] .serverplayliststate')?.textContent.trim()`,
+        `const nav = document.querySelector('aside nav');
+         const headings = [...nav.querySelectorAll('.sidegroup')].map((el) => el.textContent.trim());
+         return {
+           headings: headings.filter((text) => text === 'Server Playlists' || text === 'Sources'),
+           entries: [...nav.querySelectorAll('.serverplaylistitem')].map((el) => [
+             el.dataset.sourceId,
+             el.textContent.trim(),
+             el.querySelector('svg[role="img"]')?.getAttribute('aria-label') ?? null,
+           ]),
+           offlineInPlaylists: nav.querySelectorAll('.serverplaylistitem[data-source-id="jf-offline"]').length,
+           placeholders: /Unavailable(?! Server)|No video playlists|Experimental/.test(nav.textContent),
+           sources: [...nav.querySelectorAll('.sourceitem:not(.serverplaylistitem)')].map((el) => [
+             el.getAttribute('aria-label'),
+             el.querySelector('svg[role="img"]')?.getAttribute('aria-label') ?? null,
+           ]),
+         };`,
       ),
-      'Unavailable',
+      {
+        headings: ['Server Playlists', 'Sources'],
+        entries: [['jf-playlists', 'Server Night', 'Jellyfin']],
+        offlineInPlaylists: 0,
+        placeholders: false,
+        sources: [
+          ['Playlist Server (Jellyfin)', 'Jellyfin'],
+          ['Unavailable Server (Jellyfin)', 'Jellyfin'],
+        ],
+      },
     );
     const open = await driver.find(
       'css selector',
-      'button[aria-label="Open Server Night from Playlist Server"]',
+      'button[aria-label="Open Server Night from Playlist Server (Jellyfin)"]',
     );
     await driver.click(open);
     await driver.waitFor(

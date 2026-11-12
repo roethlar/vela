@@ -1,22 +1,10 @@
-<script lang="ts" module>
-  const LABELS: Record<string, string> = {
-    plex: "Plex",
-    jellyfin: "Jellyfin",
-    emby: "Emby",
-  };
-
-  // The one place a server kind is turned into words. An unknown kind is
-  // returned as stored, so a future backend degrades to its raw name.
-  export function kindLabel(kind: string): string {
-    return LABELS[kind] ?? kind;
-  }
-</script>
-
 <script lang="ts">
   // Per-kind server marks: Vela's own simplified drawings in each server's
   // colours, so two servers with the same name can be told apart at a glance.
   // Entirely inline — no vendor artwork, no asset files. An unknown kind
   // renders nothing and the caller's plain name stands alone.
+  import { KIND_LABELS } from "$lib/serverPlaylists";
+
   let {
     kind,
     size = 16,
@@ -27,7 +15,7 @@
   // one page: a shared id would resolve to the first instance, which breaks
   // whenever that instance is not displayed.
   const uid = $props.id();
-  const label = $derived(LABELS[kind]);
+  const label = $derived(KIND_LABELS[kind]);
 </script>
 
 {#if label}

@@ -8,6 +8,9 @@
   import ItemDetail from "$lib/ItemDetail.svelte";
   import PlaylistsView from "$lib/PlaylistsView.svelte";
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
+  import ServerLogo from "$lib/ServerLogo.svelte";
+  import ServerName from "$lib/ServerName.svelte";
+  import { flattenServerPlaylists, serverLabel } from "$lib/serverPlaylists";
   import SeasonDetail from "$lib/SeasonDetail.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
@@ -123,6 +126,9 @@
   // Add-to-Playlist mutation changes what it should render.
   let playlistVersion = $state(0);
   let serverPlaylistGroups = $state<ServerPlaylistGroup[]>([]);
+  // What the sidebar lists: a server with nothing available contributes
+  // nothing, and an empty list hides the whole section.
+  const serverPlaylistEntries = $derived(flattenServerPlaylists(serverPlaylistGroups));
   let selectedServerPlaylist = $state<ServerPlaylist | null>(null);
   let serverPlaylistVersion = $state(0);
   let serverPlaylistGen = 0;
@@ -194,6 +200,9 @@
 
   function sourceNameOf(id: string): string {
     return sources.find((s) => s.id === id)?.name ?? "";
+  }
+  function sourceKindOf(id: string): string {
+    return sources.find((s) => s.id === id)?.kind ?? "";
   }
   let crumbs = $state<Crumb[]>([]);
   let items = $state<Item[]>([]);
@@ -3036,10 +3045,12 @@
         {/if}
         {#if activeType && mode === "browse" && item.sourceId}
           <!-- Merged entries: name the source, or the count when several back it. -->
+          {@const cardSourceId = item.backing?.[0]?.sourceId ?? item.sourceId}
           <span class="y srctag"
-            >· {(item.backing?.length ?? 0) > 1
-              ? `${item.backing!.length} sources`
-              : sourceNameOf(item.backing?.[0]?.sourceId ?? item.sourceId)}</span
+            >· {#if (item.backing?.length ?? 0) > 1}{item.backing!.length} sources{:else}<ServerName
+                name={sourceNameOf(cardSourceId)}
+                kind={sourceKindOf(cardSourceId)}
+              />{/if}</span
           >
         {/if}
       </div>
@@ -3116,7 +3127,7 @@
           <span class="y">{center.year}</span>
         {/if}
         {#if activeSource === null && sources.length > 1 && center.sourceId}
-          <span class="y srctag">· {sourceNameOf(center.sourceId)}</span>
+          <span class="y srctag">· <ServerName name={sourceNameOf(center.sourceId)} kind={sourceKindOf(center.sourceId)} /></span>
         {/if}
       </div>
     </section>
@@ -3192,38 +3203,33 @@
                 </button>
               {/each}
             {/if}
-            {#if serverPlaylistGroups.length > 0}
+            {#if serverPlaylistEntries.length > 0}
               <div class="sidegroup">Server Playlists</div>
-              {#each serverPlaylistGroups as group (group.sourceId)}
-                <div class="serverplaylistgroup" data-source-id={group.sourceId} data-playlist-state={group.available ? "available" : "unavailable"}>
-                  <div class="serversourcename">
-                    <span>{group.sourceName}</span>
-                    {#if group.sourceKind === "emby"}<small>Experimental</small>{/if}
-                  </div>
-                  {#if !group.available}
-                    <span class="serverplayliststate">Unavailable</span>
-                  {:else if group.playlists.length === 0}
-                    <span class="serverplayliststate">No video playlists</span>
-                  {:else}
-                    {#each group.playlists as playlist (playlist.key)}
-                      <button
-                        class="sideitem serverplaylistitem"
-                        class:active={selectedServerPlaylist?.key === playlist.key}
-                        aria-label={`Open ${playlist.title} from ${group.sourceName}`}
-                        onclick={() => openServerPlaylist(playlist)}
-                      >
-                        {playlist.title}
-                      </button>
-                    {/each}
-                  {/if}
-                </div>
+              {#each serverPlaylistEntries as entry (`${entry.sourceId}:${entry.playlist.key}`)}
+                <button
+                  class="sideitem sourceitem serverplaylistitem"
+                  class:active={selectedServerPlaylist?.key === entry.playlist.key &&
+                    selectedServerPlaylist?.sourceId === entry.sourceId}
+                  data-source-id={entry.sourceId}
+                  aria-label={`Open ${entry.playlist.title} from ${serverLabel(entry.sourceName, entry.sourceKind)}`}
+                  onclick={() => openServerPlaylist(entry.playlist)}
+                >
+                  <ServerLogo kind={entry.sourceKind} size={15} /><span class="sourcename">{entry.playlist.title}</span>
+                </button>
               {/each}
             {/if}
             {#if sources.length > 1}
               <div class="sidegroup">Sources</div>
               <button class="sideitem" class:active={mode !== "playlists" && activeSource === null} onclick={() => selectSource(null)}>All</button>
               {#each sources as src (src.id)}
-                <button class="sideitem" class:active={mode !== "playlists" && activeSource === src.id} onclick={() => selectSource(src.id)}>{src.name}</button>
+                <button
+                  class="sideitem sourceitem"
+                  class:active={mode !== "playlists" && activeSource === src.id}
+                  aria-label={serverLabel(src.name, src.kind)}
+                  onclick={() => selectSource(src.id)}
+                >
+                  <ServerLogo kind={src.kind} size={15} /><span class="sourcename">{src.name}</span>
+                </button>
               {/each}
             {/if}
           {/if}
@@ -3268,6 +3274,7 @@
   {:else if mode === "playlists" && selectedServerPlaylist}
     <ServerPlaylistView
       playlist={selectedServerPlaylist}
+      sourceKind={sourceKindOf(selectedServerPlaylist.sourceId)}
       refreshVersion={serverPlaylistVersion}
       {posterSrc}
       onBack={openPlaylists}
@@ -3277,6 +3284,7 @@
   {:else if mode === "playlists"}
     <PlaylistsView
       sourceVersion={playlistVersion}
+      {sourceKindOf}
       {posterSrc}
       onManualPlay={invalidateContinuationRun}
       onPlaybackResult={(result) => void handlePlayCommandResult(result)}
@@ -3374,7 +3382,7 @@
         {#each hubs.filter((h) => hubPolicy(h) !== "hero") as hub (hub.sourceId + ":" + hub.hubIdentifier)}
           {@const policy = hubPolicy(hub)}
           <section class="rail">
-            <h2>{hub.title}{#if activeSource === null && sources.length > 1 && hub.sourceName}<span class="srctag"> · {hub.sourceName}</span>{/if}</h2>
+            <h2>{hub.title}{#if activeSource === null && sources.length > 1 && hub.sourceName}<span class="srctag"> · <ServerName name={hub.sourceName} kind={sourceKindOf(hub.sourceId)} /></span>{/if}</h2>
             <div class="row">
               {#each hub.items as item, i (item.ratingKey)}
                 {@render poster(item, i, policy === "landscape" ? "landscape" : "portrait")}
@@ -3522,7 +3530,7 @@
             disabled={sourceChoiceBusy}
             onclick={() => choosePlaybackSource(choice.sourceId)}
           >
-            <span class="choicename">{choice.sourceName}</span>
+            <span class="choicename"><ServerName name={choice.sourceName} kind={sourceKindOf(choice.sourceId)} size={15} /></span>
             <span class="choicefacts">
               {localityLabel(choice.locality)} · {choice.qualityLabel}
             </span>
@@ -3597,14 +3605,14 @@
           {#each mi.backing! as b (b.sourceId + ":" + b.ratingKey)}
             {#if inProgress}
               <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
-                Resume on {sourceNameOf(b.sourceId)}
+                Resume on <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} />
               </button>
               <button role="menuitem" onclick={() => playFrom(mi, b, "beginning")}>
-                Start over on {sourceNameOf(b.sourceId)}
+                Start over on <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} />
               </button>
             {:else}
               <button role="menuitem" onclick={() => playFrom(mi, b, "resume")}>
-                {sourceNameOf(b.sourceId)}
+                <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} />
               </button>
             {/if}
             <button
@@ -3613,7 +3621,7 @@
               aria-expanded={qualityMenuFor === backingKey(b)}
               onclick={() => toggleQualityMenu(mi, b)}
             >
-              Quality on {sourceNameOf(b.sourceId)} <Icon name="chevron" size={13} />
+              Quality on <ServerName name={sourceNameOf(b.sourceId)} kind={sourceKindOf(b.sourceId)} /> <Icon name="chevron" size={13} />
             </button>
             {#if qualityMenuFor === backingKey(b)}
               {@render qualitySubmenu(mi, b)}
@@ -3807,37 +3815,21 @@
     justify-content: space-between;
     gap: 0.4rem;
   }
-  .serverplaylistgroup {
-    margin-bottom: 0.45rem;
-  }
-  .serversourcename {
+  .sourceitem {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.4rem;
-    color: var(--text-dim);
-    font-size: 0.76rem;
-    padding: 0.3rem 0.65rem 0.15rem;
+    align-items: center;
+    gap: 0.45rem;
   }
-  .serversourcename span {
+  .sourceitem :global(svg) {
+    flex: none;
+  }
+  .sourcename {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-  }
-  .serversourcename small {
-    color: var(--accent);
-    font-size: 0.58rem;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-  .serverplayliststate {
-    display: block;
-    color: var(--text-dim);
-    font-size: 0.75rem;
-    padding: 0.22rem 0.65rem 0.4rem 1.15rem;
+    min-width: 0;
   }
   .serverplaylistitem {
-    padding-left: 1.15rem;
     font-size: 0.84rem;
   }
   .refreshbtn {

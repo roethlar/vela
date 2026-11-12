@@ -421,7 +421,7 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
     callFor(
       "src/lib/ServerPlaylistView.svelte",
       'heading="This server playlist is empty"',
-      'hint={`Add videos on ${playlist.sourceName}, then reopen it here.`}',
+      'hint={`Add videos on ${serverLabel(playlist.sourceName, sourceKind)}, then reopen it here.`}',
       "playlist",
     ),
     callFor(
@@ -500,7 +500,9 @@ test("the shared EmptyState owns exact settled-empty structure and excludes load
   );
   assert.doesNotMatch(episodeLoader, /<EmptyState\b/, "episode loader cannot use EmptyState");
   assert.match(page, /class=["']addempty["'][^>]*>No playlists yet[^<]*<\/div>/, "compact add-menu absence stays compact");
-  assert.match(page, /class=["']serverplayliststate["'][^>]*>No video playlists<\/span>/, "sidebar playlist metadata stays inline");
+  // Owner ruling 2026-11-12: a server with no playlists to show takes no
+  // sidebar space at all, so there is no inline "nothing here" line to keep.
+  assert.doesNotMatch(page, /No video playlists/, "an empty server shows nothing in the sidebar");
   assert.match(sources.get("src/lib/Settings.svelte"), /No servers yet\. Add one under Servers\./, "Settings no-server copy stays inline");
 
   const playlistIndex = categories[6];

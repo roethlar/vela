@@ -4,6 +4,7 @@
   import Icon from "$lib/Icon.svelte";
   import { friendlyError } from "$lib/errors";
   import { imageReveal } from "$lib/imageReveal";
+  import { serverLabel } from "$lib/serverPlaylists";
   import type {
     Playlist,
     PlaylistEntry,
@@ -14,10 +15,13 @@
   let {
     sourceVersion = 0,
     posterSrc,
+    sourceKindOf,
     onManualPlay,
     onPlaybackResult,
   }: {
     sourceVersion?: number;
+    // A playlist can mix servers, and two servers can share a name.
+    sourceKindOf: (sourceId: string) => string;
     posterSrc: (poster: string) => string;
     onManualPlay?: () => void;
     onPlaybackResult?: (result: PlayCommandResult) => void;
@@ -242,7 +246,10 @@
       item.parentIndex != null && item.index != null
         ? `S${item.parentIndex} · E${item.index}`
         : null;
-    return [item.grandparentTitle, episode, item.year, entry.sourceName]
+    const server = entry.sourceName
+      ? serverLabel(entry.sourceName, sourceKindOf(item.sourceId ?? ""))
+      : undefined;
+    return [item.grandparentTitle, episode, item.year, server]
       .filter((part) => part != null && String(part).length > 0)
       .join(" · ");
   }
