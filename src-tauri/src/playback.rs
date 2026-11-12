@@ -747,6 +747,19 @@ fn window_state_args(state: PlaybackWindowState) -> Vec<String> {
     args
 }
 
+/// Options Vela's session lifecycle depends on. Asserted after every
+/// user-controlled option so neither Advanced arguments nor the expert's own
+/// mpv.conf can leave mpv running after its file ends.
+///
+/// Windows mpv started without a console or redirected standard handles (which
+/// is how a GUI app starts it) turns idle mode on and then never exits at end
+/// of file. The trackers' `on_end` runs only once mpv's IPC connection drops,
+/// so an idling mpv means no recents stamp, no `playback-ended`, and no
+/// continuation, ever.
+fn lifecycle_args() -> [&'static str; 1] {
+    ["--idle=no"]
+}
+
 fn screen_name_arg(name: Option<&str>) -> Option<String> {
     name.map(str::trim)
         .filter(|name| !name.is_empty())
@@ -1081,6 +1094,9 @@ pub fn play(
         cmd.arg(screen_arg);
     }
 
+    for arg in lifecycle_args() {
+        cmd.arg(arg);
+    }
     cmd.arg(format!("--input-ipc-server={}", ipc_path));
     // Drive mpv's window title and OSD media-title from the human title, NOT the
     // URL. Authenticated media URLs have historically carried tokens, and mpv's
@@ -2217,6 +2233,11 @@ mod tests {
         );
         assert_eq!(screen_name_arg(Some("  ")), None);
         assert_eq!(screen_name_arg(None), None);
+    }
+
+    #[test]
+    fn lifecycle_args_make_mpv_exit_when_its_file_ends() {
+        assert_eq!(lifecycle_args(), ["--idle=no"]);
     }
 
     #[test]

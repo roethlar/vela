@@ -2,6 +2,9 @@
 
 ## Fixes
 
+- On Windows, make mpv exit when a file finishes. It previously stayed open and
+  idle, so Continue Playing and playlists never advanced and the finished
+  item's watched state and resume position were not saved.
 - Keep macOS AirPlay/HomePod video and audio synchronized by preferring mpv's
   AVFoundation audio output, with CoreAudio retained as fallback and expert
   overrides preserved.
