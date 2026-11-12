@@ -9,6 +9,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- Push policy is `always` since 2026-11-12 (owner; `.agents/push-policy.md`):
+  push after each commit without asking. History rewrites still need a go.
 - Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
   `.agents/plans/windows-mpv-idle-exit.md`). On Windows, mpv started by Vela
   idled at end of file instead of exiting, so Continue Playing, playlist
@@ -20,7 +22,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   and five red-proofs pass; a netwatch-01 probe shows the option wins over
   a user `--idle=yes`. NOT done: MSRV check, `cargo audit`, E2E, any
   Windows build, and the owner's acceptance on the affected install.
-  Unpushed. Workaround for older releases: add `--idle=no` to the Advanced
+  Pushed 2026-11-12; see the plan's log for the CI result. Workaround for
+  older releases: add `--idle=no` to the Advanced
   mpv arguments.
 - Missing-npm build diagnostic, 2026-11-12 (`.agents/plans/build-missing-npm-diagnostic.md`;
   owner ruled D1 "A" and gave the go). A build host without `npm` used to
@@ -28,8 +31,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   missing or out-of-range npm in one line (`e58a17e`), and `scripts/build.sh`
   names a missing `node` or `npm` before the toolchain check (`b519083`);
   nothing is installed for the builder. Seven red-proofs, `npm run check`
-  (78 pass) and the manual repro on the CachyOS host pass. Unpushed, so no
-  GitHub CI run yet; Cargo and Windows were not exercised. Awaiting owner
+  (78 pass) and the manual repro on the CachyOS host pass. Pushed to both
+  remotes at `f2c6449`; GitHub CI run 43265242786 passed every job
+  (Frontend, Rust, cargo audit). Windows was not exercised. Awaiting owner
   confirmation.
 - npm audit gate moved to `--audit-level=moderate`, 2026-11-02 (decision
   `.agents/decisions.md` 2026-11-02). `main` had failed npm audit since

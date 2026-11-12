@@ -97,8 +97,8 @@ portable and may at most point here.
   (Ubuntu 26.04 LTS aarch64, 12 CPU; OS re-verified 2026-07-15; provisioned
   with rustup, tauri-driver, Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64
   WebKitWebDriver, debug binary built). See the Linux VM section below.
-- The mac clone has a `vm` remote. **The push policy is ASK, and that includes
-  `vm`** (`.agents/push-policy.md`). Corrected 2026-10-24: the Mac's
+- The mac clone has a `vm` remote. The push policy lives in `.agents/push-policy.md`
+  (`ask` until 2026-11-12, `always` since). Corrected 2026-10-24: the Mac's
   `~/Dev/vela` has only `origin` (magneto Gitea) and `github`, with no `vm`
   remote. Reach the VM with the git-bundle-plus-`scp` route (for example
   `.agents/plans/remove-sveltekit.md`, Host constraints). To run E2E without pushing, `scp` the
