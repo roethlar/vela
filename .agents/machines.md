@@ -305,6 +305,28 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     `package-lock.json` with minor bumps (kit 2.70.3, Tauri 2.12.4 and
     more); that rewrite was discarded, never committed.
 
+- Observed 2026-11-12 over SSH from `continuum` (whose ed25519 key the
+  owner installed that day; Windows needs the key in
+  `%ProgramData%\ssh\administrators_authorized_keys` for an administrator
+  account, and `ssh-copy-id` cannot do it because the remote shell is
+  `cmd.exe`):
+  - The host has two Windows installs. The one booted that day (`C:`) is
+    the build/validation OS above. The other is visible from it as `F:` and
+    is the owner's daily-use install: Vela 1.0.59 at
+    `F:\Users\michael\AppData\Local\Vela\vela.exe`, Vela data under
+    `F:\Users\michael\AppData\Roaming\vela\vela\config\`, and mpv
+    `v0.42.0-5-g55d3feb45` at
+    `F:\Users\michael\AppData\Local\Programs\mpv\mpv.exe`. The `C:` install
+    has mpv `v0.41.0-1421-ga687796d9` at the same relative path.
+  - Vela writes no log file on any platform; the only offline evidence on
+    `F:` is `config.json` (never read `connections.json`: it holds tokens).
+  - mpv started there with no console and no redirected standard handles
+    does not exit at end of file. Evidence and fix:
+    `.agents/plans/windows-mpv-idle-exit.md`.
+  - A long-running owner script (`oc-testing` per-core sensor logging) may
+    be active on this host; do not stop PowerShell processes you did not
+    start.
+
 ## CachyOS desktop (`continuum`, `/home/michael/dev/vela`)
 
 Recorded and verified 2026-11-12, locally on the host.

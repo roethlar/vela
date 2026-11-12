@@ -218,6 +218,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
+- `.agents/plans/windows-mpv-idle-exit.md` (drafted 2026-11-12, NOT
+  approved): on Windows, mpv started by Vela idles at end of file instead of
+  exiting, so Continue Playing, playlist advancement and the final
+  watched-state write never run (owner report on 1.0.59; reproduced with a
+  bare mpv probe on netwatch-01). Fix is `--idle=no` in the protected tail
+  of the mpv command. User workaround meanwhile: add `--idle=no` to the
+  Advanced mpv arguments. Awaiting the owner's go.
 - `.agents/plans/server-identity-sidebar.md` (drafted 2026-11-12, NOT
   approved): per-kind server marks in the sidebar Sources list and Settings,
   and a flat Server Playlists list that collapses when empty. The owner's
