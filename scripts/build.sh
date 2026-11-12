@@ -185,6 +185,16 @@ if [ "$os" = linux ]; then
   }
 fi
 
+# Node and npm are not installed for you on any host. Name a missing one here:
+# without `node` the toolchain check below cannot even start, and bash's bare
+# "command not found" says nothing about which versions are wanted.
+for tool in node npm; do
+  command -v "$tool" >/dev/null 2>&1 || {
+    echo "$tool is not installed (not on PATH); install a Node and npm inside the package.json engines ranges — see docs/development.md" >&2
+    exit 1
+  }
+done
+
 # An incompatible local toolchain (e.g. Node 26's bundled npm 11) can rewrite
 # the lockfile. The accepted ranges live in package.json engines.
 node scripts/check-js-toolchain.mjs

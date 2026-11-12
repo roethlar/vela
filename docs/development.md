@@ -17,7 +17,8 @@ On Linux, `scripts/build.sh` checks those system packages itself on pacman,
 apt, and dnf hosts. When some are missing it lists them with the exact install
 command and offers to run it; `--install-deps` installs without asking, and a
 run with no terminal attached prints the command and stops. Rust and Node are
-not installed for you.
+not installed for you; a missing `cargo`, `node`, or `npm` is named before
+anything builds.
 
 Install a Node and npm inside the `engines` ranges in `package.json` (Node 26
 bundles npm 11, so npm 12 or newer must be installed separately), then run:

@@ -8,8 +8,10 @@ import {
   readFile,
   readdir,
   rm,
+  symlink,
   writeFile,
 } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -134,7 +136,28 @@ async function fakeLinuxPackageTools(fakeBin, { missingPattern = "", callLog = "
   await executable(path.join(fakeBin, "dnf"), `#!/bin/sh\n${log}\n`);
 }
 
-async function linuxPrereqFixture(t) {
+// A directory holding only the real host tools build.sh needs before its
+// Node/npm presence check: `dirname` (the cd to the repo root) and `grep`
+// (the Arch-family probe). Everything else it calls up to that point is a
+// fake in fake-bin or a bash builtin. Used to run with a PATH on which the
+// host's own node and npm cannot be found.
+async function hostToolsOnly(root) {
+  const dir = path.join(root, "host-tools");
+  await mkdir(dir, { recursive: true });
+  for (const tool of ["dirname", "grep"]) {
+    const found = process.env.PATH.split(":")
+      .map((entry) => path.join(entry, tool))
+      .find((candidate) => existsSync(candidate));
+    assert.ok(found, `host has no ${tool} on PATH`);
+    await symlink(found, path.join(dir, tool));
+  }
+  return dir;
+}
+
+// `missingPattern` picks the system packages reported as not installed.
+// `withoutTools` leaves those fakes out of fake-bin AND hides the host's own
+// PATH, so the named tools are genuinely absent.
+async function linuxPrereqFixture(t, { missingPattern = "webkit", withoutTools = [] } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), "vela-build-prereq-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const scripts = path.join(root, "scripts");
@@ -159,15 +182,30 @@ mkdir -p src-tauri/target/release/bundle/deb
 printf 'fresh\\n' > src-tauri/target/release/bundle/deb/Vela_1.0.0_amd64.deb
 `,
   );
-  await fakeLinuxPackageTools(fakeBin, { missingPattern: "webkit", callLog });
+  await fakeLinuxPackageTools(fakeBin, { missingPattern, callLog });
+  await Promise.all(withoutTools.map((tool) => rm(path.join(fakeBin, tool))));
+  const restOfPath = withoutTools.length > 0 ? await hostToolsOnly(root) : process.env.PATH;
   const run = (...args) =>
     spawnSync("/bin/bash", [path.join(scripts, "build.sh"), "--bundles", "deb", ...args], {
       cwd: root,
       encoding: "utf8",
       input: "",
-      env: { ...process.env, PATH: `${fakeBin}:${process.env.PATH}` },
+      env: { ...process.env, PATH: `${fakeBin}:${restOfPath}` },
     });
   return { root, callLog, run };
+}
+
+for (const tool of ["node", "npm"]) {
+  test(`a build without ${tool} on PATH names it and stops before building`, { skip: posixBashUnavailable }, async (t) => {
+    const fixture = await linuxPrereqFixture(t, { missingPattern: "", withoutTools: [tool] });
+    const run = fixture.run();
+    assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+    assert.equal(
+      run.stderr,
+      `${tool} is not installed (not on PATH); install a Node and npm inside the package.json engines ranges — see docs/development.md\n`,
+    );
+    assert.equal(await readFile(fixture.callLog, "utf8"), "");
+  });
 }
 
 test("a Linux build names missing system packages and stops before building", { skip: posixBashUnavailable }, async (t) => {
