@@ -248,14 +248,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
-- mpv window geometry (owner request 2026-11-12; no plan drafted yet).
-  Rulings so far: asked which plays inherit the previous window size and
-  position, the owner answered "all in current session" (this reverses the
-  2026-07-18 rule that manual plays keep configured defaults). The owner
-  also asked for carry-over to new sessions "with an option". Known limits:
-  size is readable on every platform; position is not readable from mpv
-  and cannot be set on Wayland, but is feasible on Windows through the
-  window handle. Next: draft the plan.
+- `.agents/plans/mpv-window-geometry.md` (drafted 2026-11-12, NOT approved):
+  carry the mpv window's size (and, on Windows, position) from one play to
+  the next. Owner ruled D1 "all in current session": manual plays inherit
+  too, reversing the 2026-07-18 rule. A local probe shows `osd-width` /
+  `osd-height` report the window size and `--geometry=WxH` reproduces it
+  exactly. Open: D2 (remember across restarts: default, and what is
+  remembered), D3 (Windows-only position code), then the go.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
