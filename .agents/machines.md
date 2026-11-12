@@ -305,6 +305,41 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     `package-lock.json` with minor bumps (kit 2.70.3, Tauri 2.12.4 and
     more); that rewrite was discarded, never committed.
 
+## CachyOS desktop (`continuum`, `/home/michael/dev/vela`)
+
+Recorded and verified 2026-11-12, locally on the host.
+
+- CachyOS Linux (rolling, Arch family), x86_64, kernel 7.3.4-1-cachyos.
+  Passwordless `sudo` works for the owner account (`sudo -n` succeeds).
+- Toolchain: system `nodejs` 26.13.1 and `npm` 12.2.2 (both pacman packages,
+  inside the `engines` ranges; `node scripts/check-js-toolchain.mjs` passes).
+  rustup has stable 1.99.1 and 1.97.1; **1.89.0 is not installed**, so the
+  MSRV check does not run here until it is added.
+- Arch packages `nodejs` and `npm` separately, and `npm` was absent until
+  2026-11-12 (`pacman -S npm`, which also pulled `node-gyp`, `semver` and
+  `nodejs-nopt`). `scripts/build.sh` does not list `npm` among its pacman
+  prerequisites and runs the toolchain check first, so on an Arch host
+  without `npm` it dies with a raw Node stack trace (`npm: command not
+  found`) instead of its own install prompt. Unfixed; a fix is a code change
+  and needs a plan.
+- Vela 1.0.61-1 is installed system-wide as the native pacman package, built
+  from `be82ca6` with `npm ci` then `scripts/build.sh` (release Rust build
+  about 80 seconds) and installed with `pacman -U
+  packaging/arch/vela-1.0.61-1-x86_64.pkg.tar.zst`. Runtime deps present:
+  webkit2gtk-4.1 2.54.2, libsoup3 3.8.1, mpv 0.41.0. `ldd /usr/bin/vela`
+  resolves every library and `desktop-file-validate` accepts the desktop
+  entry. The app was not launched during that session; first run and server
+  sign-in are unverified. Remove with `sudo pacman -R vela`.
+- Only the build and install ran here. The verification set (check, clippy,
+  tests, audits) and E2E have not been run on this host.
+- This clone's only remote is `origin` =
+  `https://gitea.internal/michael/vela.git`; its `main` matched local `HEAD`
+  on 2026-11-12. That URL differs from the canonical
+  `http://magneto:3001/michael/vela.git` in `.agents/repo-guidance.md`
+  (Remotes & Sync); whether it is the same Gitea under another name is
+  unconfirmed (open question for the owner). There is no `github` remote
+  here, so GitHub CI cannot be reached from this clone as configured.
+
 ## Linux VM (E2E host)
 
 **NOT BROKEN. Diagnosed and cleared 2026-07-25.** The venue works; the binary
