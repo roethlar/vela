@@ -16,8 +16,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Emby's Experimental label is in Settings only. 23 red-proofs,
   `npm run check` (93 pass) and 7 targeted E2E scenarios pass on
   `continuum`, which is now a working E2E venue (`.agents/machines.md`).
-  Pushed. NOT done: the owner's acceptance in the installed app. See the
-  plan's log for the full-suite E2E and CI results.
+  Pushed; CI green. Full E2E on `continuum`: 37/39, with `uimotion` fixed
+  afterwards and `pagefail` failing independently of this work (Blockers).
+  NOT done: the owner's acceptance in the installed app.
 - Push policy is `always` since 2026-11-12 (owner; `.agents/push-policy.md`):
   push after each commit without asking. History rewrites still need a go.
 - Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
@@ -268,6 +269,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Blockers
 
 - No known product blocker.
+- E2E `pagefail` fails on `continuum` (x86_64, WebKitGTK 2.54.2) with
+  "page 2 never arrived" (expected 60), first seen 2026-11-12 on the first
+  full run at that venue. It fails the same way on `2f283a2`, before the
+  server-identity UI work, so it predates that. Not investigated: unknown
+  whether it is a product defect, a harness race, or specific to this host
+  (it passed in the VM's recorded runs). 37 of the other 38 scenarios
+  passed in that run and the 38th was fixed.
 - The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
   They reproduced during the 1.0.59 full Linux run in `continueon`,
   `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.

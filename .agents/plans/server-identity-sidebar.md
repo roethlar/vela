@@ -493,4 +493,20 @@ and repoint `tests/server-identity-ui.test.mjs`. Record that obligation in
   (the nested-layout wait and `Unavailable` assertion replaced; the
   `Open Server Night from Playlist Server` label now ends ` (Jellyfin)`).
   Other scenarios match server names by text content, which the marks do
-  not change.
+  not change.- Full E2E suite on `continuum` at `62b85e2`: 37 of 39 passed.
+  - `uimotion` FAILED because of this change: two selectors and one hint
+    string in `tests/e2e/scenarios/uimotion.mjs` still used the label
+    without the server kind (`Open Empty Server List from Motion Source`).
+    The earlier selector sweep searched for the `serverplaylists` wording
+    only and missed it. Fixed in the following test-only commit; `uimotion`
+    then passed on its own.
+  - `pagefail` FAILED with "precondition: back on the truncated grid, page 2
+    never arrived" (expected 60). It fails identically on `2f283a2`, the
+    commit before any of this plan's UI changes (two runs), so it is not
+    caused by this plan. Cause not investigated; recorded in
+    `.agents/state.md` Blockers. It is not one of the three recorded flakes
+    (`continueon`, `playverbs`, `refresh`), all of which passed in this run.
+  - The suite was not re-run in full after the `uimotion` fix; the other 37
+    results stand from the `62b85e2` run.
+- GitHub CI passed on both code commits: run 43306323727 (`343f270`) and
+  run 43307290556 (`62b85e2`).
