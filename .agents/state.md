@@ -9,6 +9,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
+  `.agents/plans/windows-mpv-idle-exit.md`). On Windows, mpv started by Vela
+  idled at end of file instead of exiting, so Continue Playing, playlist
+  advancement, the final watched-state write and the recents stamp never
+  ran (owner report on 1.0.59; reproduced with a bare mpv probe on
+  netwatch-01). Vela now passes `--idle=no` after every user-controlled
+  option. The plan passed an owner-directed openreview (agy,
+  gemini-4-argon-high: `best_approach`). Local JS and stable-Rust checks
+  and five red-proofs pass; a netwatch-01 probe shows the option wins over
+  a user `--idle=yes`. NOT done: MSRV check, `cargo audit`, E2E, any
+  Windows build, and the owner's acceptance on the affected install.
+  Unpushed. Workaround for older releases: add `--idle=no` to the Advanced
+  mpv arguments.
 - Missing-npm build diagnostic, 2026-11-12 (`.agents/plans/build-missing-npm-diagnostic.md`;
   owner ruled D1 "A" and gave the go). A build host without `npm` used to
   get a Node stack trace. `scripts/check-js-toolchain.mjs` now reports a
@@ -218,13 +231,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
-- `.agents/plans/windows-mpv-idle-exit.md` (drafted 2026-11-12, NOT
-  approved): on Windows, mpv started by Vela idles at end of file instead of
-  exiting, so Continue Playing, playlist advancement and the final
-  watched-state write never run (owner report on 1.0.59; reproduced with a
-  bare mpv probe on netwatch-01). Fix is `--idle=no` in the protected tail
-  of the mpv command. User workaround meanwhile: add `--idle=no` to the
-  Advanced mpv arguments. Awaiting the owner's go.
 - `.agents/plans/server-identity-sidebar.md` (drafted 2026-11-12, NOT
   approved): per-kind server marks in the sidebar Sources list and Settings,
   and a flat Server Playlists list that collapses when empty. The owner's

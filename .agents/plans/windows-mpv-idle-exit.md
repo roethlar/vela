@@ -2,9 +2,14 @@
 
 ## Status
 
-**DRAFT 2026-11-12. NOT APPROVED. No implementation may start.**
+**IMPLEMENTED 2026-11-12 at `bf1b1c3` on `main` (1.0.62), unpushed.
+Windows acceptance steps 1 and 3 are NOT done. Awaiting owner acceptance.**
 
-No owner ruling is open. The plan needs the owner's explicit go.
+Owner go, conditional, verbatim: "you can do a review with agy Gemini 4
+Argon (High) to see if anything looks off. if that's good, then go." The
+review returned `best_approach` with no material changes
+(`.agents/review/openreview-2026-11-12-windows-mpv-idle-exit-plan.md`), so the
+condition was met.
 
 ## Problem
 
@@ -221,3 +226,61 @@ off Windows.
   `--idle=no`).
 - This file: Status with the owner's go verbatim, and an implementation log
   with each red-proof result.
+
+## Implementation log
+
+2026-11-12, host `continuum` (CachyOS; Node 26.13.1, npm 12.2.2, Rust
+stable 1.99.1).
+
+- Slice 1 step 1 (mechanism check): confirmed by reading. Each tracker in
+  `playback.rs` calls `on_end` only after its loop sees `done` or the stop
+  flag; `done` is set by `spawn_position_reader` when its IPC read returns
+  EOF or an error, i.e. when mpv exits. `on_end` (built in `commands.rs`
+  near the `EndNotify` closure) is the only caller of
+  `recents::finish_session`, the tracker-side `playback-ended` emit, and
+  `PlaybackAdvance::mark_ended`. While mpv idles the pipe stays open, so
+  none of them run. The blast-radius paragraph holds as written.
+- Slice 1 steps 2-3: `lifecycle_args()` added beside `window_state_args`;
+  applied in `play` after the screen argument and immediately before
+  `--input-ipc-server`. Advanced arguments are applied inside
+  `base_mpv_command`, so W1 anchors on the `base_mpv_command(` call.
+- Step 4: the other two spawns (`mpv_runs`, and the one near the end of the
+  file) set `Stdio::null()` and are not playback; unchanged.
+- Tests: U1 is `playback::tests::lifecycle_args_make_mpv_exit_when_its_file_ends`.
+  W1 is `tests/mpv-lifecycle.test.mjs` (added to the `check` list), plus a
+  second test there asserting Advanced arguments still live in
+  `base_mpv_command`, since W1's ordering depends on it.
+- Red-proofs, each injected into the committed file and restored with
+  `git checkout --`:
+  - R1 (`--idle=yes`): U1 FAILED; W1 stayed green (it guards wiring only).
+  - R2 (loop deleted): W1 failed, "play must apply lifecycle_args()"; U1
+    alone would have stayed green.
+  - R3 (loop above `window_state_args`): W1 failed, "lifecycle_args() must
+    follow window_state_args(".
+  - R4 (loop below the IPC option): W1 failed, "lifecycle_args() opens the
+    protected tail, before the IPC option".
+  - R5 (extra, Advanced arguments renamed out of `base_mpv_command`): the
+    second test failed on `/mpv_extra_args/`.
+- Verification on `continuum` at `bf1b1c3`: toolchain check; `npm ci`;
+  `npm audit --audit-level=moderate` (exit 0); `npm run check` (80 pass, 0
+  fail, 0 skipped); `npm run build`; `node --test tests/` (80 pass);
+  `cargo +stable check --locked`; clippy `-D warnings`;
+  `cargo +stable test --locked` (365 passed); `git diff --check`.
+- NOT run: the 1.89.0 MSRV check (toolchain absent on this host) and
+  `cargo audit` (not installed on this host) — both left to GitHub CI, which
+  has not run because nothing is pushed. E2E (no venue). Any Windows build
+  or Windows `cargo test`.
+- Windows acceptance step 2, done over SSH on `netwatch-01` with both mpv
+  builds (`v0.42.0-5-g55d3feb45`, `v0.41.0-1421-ga687796d9`), no console,
+  no redirected handles, two-second lavfi clip:
+  - user `--idle=yes` followed by `--idle=no`: exited by itself after about
+    2.1 s, code 0 (both builds).
+  - user `--idle=once` followed by `--idle=no`: same (both builds).
+  - control, `--idle=yes` only: still running after 10 s (both builds).
+  So the last option wins against an explicit user override, as the
+  protected-tail placement requires.
+- Windows acceptance step 1 (build and `cargo test` on `netwatch-01`) and
+  step 3 (owner plays an episode to its end on the affected install) are
+  open. Step 1 was deliberately not started: an owner per-core
+  overclock-test script was logging sensors on that host, and a release
+  build would load every core.
