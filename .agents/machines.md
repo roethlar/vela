@@ -317,11 +317,12 @@ Recorded and verified 2026-11-12, locally on the host.
   MSRV check does not run here until it is added.
 - Arch packages `nodejs` and `npm` separately, and `npm` was absent until
   2026-11-12 (`pacman -S npm`, which also pulled `node-gyp`, `semver` and
-  `nodejs-nopt`). `scripts/build.sh` does not list `npm` among its pacman
-  prerequisites and runs the toolchain check first, so on an Arch host
-  without `npm` it dies with a raw Node stack trace (`npm: command not
-  found`) instead of its own install prompt. Unfixed; a fix is a code change
-  and needs a plan.
+  `nodejs-nopt`). `scripts/build.sh` checks its pacman prerequisites first, but
+  neither that list nor any later step looks for `node` or `npm`, so on an
+  Arch host without `npm` the prerequisite check passes and the toolchain
+  check (`scripts/check-js-toolchain.mjs`) dies with a raw Node stack trace
+  (`npm: command not found`). Unfixed; drafted, not approved, at
+  `.agents/plans/build-missing-npm-diagnostic.md`.
 - Vela 1.0.61-1 is installed system-wide as the native pacman package, built
   from `be82ca6` with `npm ci` then `scripts/build.sh` (release Rust build
   about 80 seconds) and installed with `pacman -U
