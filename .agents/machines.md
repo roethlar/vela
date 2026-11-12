@@ -332,7 +332,11 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
 Recorded and verified 2026-11-12, locally on the host.
 
 - CachyOS Linux (rolling, Arch family), x86_64, kernel 7.3.4-1-cachyos.
-  Passwordless `sudo` works for the owner account (`sudo -n` succeeds).
+  `sudo` needs the owner's password. (Corrected 2026-11-12: an earlier
+  note called it passwordless because `sudo -n` succeeded while the
+  owner's sudo timestamp was still cached; it failed later the same day.)
+  An agent cannot install packages here unattended: hand the owner the
+  exact command.
 - Toolchain: system `nodejs` 26.13.1 and `npm` 12.2.2 (both pacman packages,
   inside the `engines` ranges; `node scripts/check-js-toolchain.mjs` passes).
   rustup has stable 1.99.1 (not updated; rustup reports 1.100.0 available),
@@ -350,6 +354,13 @@ Recorded and verified 2026-11-12, locally on the host.
   (`npm: command not found`). Fixed 2026-11-12 at `e58a17e` and
   `b519083` (`.agents/plans/build-missing-npm-diagnostic.md`): both scripts
   now name the missing tool in one line and exit 1.
+- 1.0.63-1 was built here on 2026-11-12
+  (`packaging/arch/vela-1.0.63-1-x86_64.pkg.tar.zst`) but NOT installed by
+  the agent (sudo, above); whether the owner has installed it is not
+  recorded. `scripts/build.sh` copies every package it finds in
+  `packaging/arch/` to `dist/`, so an older package left there (1.0.61)
+  is republished beside the new one; remove stale packages before relying
+  on `dist/`.
 - Vela 1.0.61-1 is installed system-wide as the native pacman package, built
   from `be82ca6` with `npm ci` then `scripts/build.sh` (release Rust build
   about 80 seconds) and installed with `pacman -U
