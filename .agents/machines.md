@@ -321,8 +321,9 @@ Recorded and verified 2026-11-12, locally on the host.
   neither that list nor any later step looks for `node` or `npm`, so on an
   Arch host without `npm` the prerequisite check passes and the toolchain
   check (`scripts/check-js-toolchain.mjs`) dies with a raw Node stack trace
-  (`npm: command not found`). Unfixed; drafted, not approved, at
-  `.agents/plans/build-missing-npm-diagnostic.md`.
+  (`npm: command not found`). Fixed 2026-11-12 at `e58a17e` and
+  `b519083` (`.agents/plans/build-missing-npm-diagnostic.md`): both scripts
+  now name the missing tool in one line and exit 1.
 - Vela 1.0.61-1 is installed system-wide as the native pacman package, built
   from `be82ca6` with `npm ci` then `scripts/build.sh` (release Rust build
   about 80 seconds) and installed with `pacman -U

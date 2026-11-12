@@ -9,6 +9,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- Missing-npm build diagnostic, 2026-11-12 (`.agents/plans/build-missing-npm-diagnostic.md`;
+  owner ruled D1 "A" and gave the go). A build host without `npm` used to
+  get a Node stack trace. `scripts/check-js-toolchain.mjs` now reports a
+  missing or out-of-range npm in one line (`e58a17e`), and `scripts/build.sh`
+  names a missing `node` or `npm` before the toolchain check (`b519083`);
+  nothing is installed for the builder. Seven red-proofs, `npm run check`
+  (78 pass) and the manual repro on the CachyOS host pass. Unpushed, so no
+  GitHub CI run yet; Cargo and Windows were not exercised. Awaiting owner
+  confirmation.
 - npm audit gate moved to `--audit-level=moderate`, 2026-11-02 (decision
   `.agents/decisions.md` 2026-11-02). `main` had failed npm audit since
   2026-09-18 on one low advisory, deepmerge GHSA-gcqx-w48m-w2h4
@@ -209,11 +218,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
-- `.agents/plans/build-missing-npm-diagnostic.md` (drafted 2026-11-12, NOT
-  approved): a build host without `npm` gets a Node stack trace from
-  `scripts/check-js-toolchain.mjs` instead of an actionable line. The owner
-  ruled D1 "A" on 2026-11-12 (report only; no pacman install offer).
-  Awaiting the owner's go on the plan.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

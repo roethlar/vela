@@ -2,7 +2,12 @@
 
 ## Status
 
-**DRAFT 2026-11-12. NOT APPROVED. No implementation may start.**
+**IMPLEMENTED 2026-11-12 on `main` (unpushed) on the owner's explicit go.
+Awaiting owner confirmation.**
+
+The owner approved the plan after the D1 ruling below, verbatim: "go".
+Slice 1 landed at `e58a17e`, Slice 2 at `b519083`. See the implementation
+log at the end of this file.
 
 Owner ruling, given 2026-11-12:
 
@@ -14,8 +19,7 @@ Owner ruling, given 2026-11-12:
   Slice 3 is NOT to be implemented; it is kept below only as the record of
   the rejected option.
 
-No ruling remains open. The plan as a whole still needs the owner's explicit
-go before any implementation.
+No ruling remains open.
 
 ## Problem
 
@@ -252,3 +256,47 @@ not uninstall the package), the output is the single Slice 2 line and exit 1.
 - `.agents/state.md` "Now": one bullet; remove this plan from the open list
   when the owner confirms.
 - This file's Status line: record the owner's D1 wording and the go verbatim.
+
+## Implementation log
+
+2026-11-12, host `continuum` (CachyOS; Node 26.13.1, npm 12.2.2).
+
+- Slice 1, `e58a17e`. Implemented as written. Red-proofs, each injected into
+  the committed file and restored with `git checkout --`:
+  - R1 (bare `execSync`): T1 failed. It failed on the message-match
+    assertion, which runs before the stack-trace assertion, because stderr
+    was the stack dump; T2 and T3 stayed green.
+  - R2 (mismatch back to `throw`): T2 failed the same way; T1 and T3 green.
+  - R3 (`fail` exits 0): T1 and T2 failed on `0 !== 1`; T3 green.
+  - R4 (success path exits 1): T3 failed on `1 !== 0`; T1 and T2 green.
+- Slice 2, `b519083`. Implemented as written, with these specifics:
+  - `linuxPrereqFixture` takes `{ missingPattern, withoutTools }`. With
+    `withoutTools`, PATH is `fake-bin` plus a `host-tools` directory holding
+    symlinks to the host's `dirname` and `grep` only; that is the complete
+    list the script needs before the new check.
+  - T4/T5 assert exit status 1, the exact full stderr line, and an empty
+    call log.
+  - R5 (loop deleted): both tests failed on `127 !== 1`, i.e. the script ran
+    on to a bare command-not-found.
+  - R6 (`for tool in node`): the npm test failed on `127 !== 1`; the node
+    test stayed green.
+  - R7 (loop moved to the end of the script): both tests failed on
+    `127 !== 1`.
+  - `docs/development.md` gained the clause "a missing `cargo`, `node`, or
+    `npm` is named before anything builds".
+- Verification run after both slices: `node scripts/check-js-toolchain.mjs`
+  (pass), `npm ci` (exit 0), `npm run check` (exit 0; 78 node tests pass, 0
+  fail, 0 skipped), `node --test tests/` (78 pass), `git diff --check`
+  (clean).
+- Manual acceptance on the original repro host, with a PATH holding `node`,
+  `cargo`, `pacman` and coreutils but no `npm`: `bash scripts/build.sh`
+  printed only `npm is not installed (not on PATH); install a Node and npm
+  inside the package.json engines ranges — see docs/development.md` and
+  exited 1; `node scripts/check-js-toolchain.mjs` printed only `toolchain:
+  npm was not found or could not run; install npm >=12 (package.json
+  engines) and put it on PATH` and exited 1.
+- NOT run: every Cargo command (nothing under `src-tauri/` changed), E2E,
+  and GitHub CI (this clone has no `github` remote and nothing was pushed).
+  The win32 branch of T1 (`SystemRoot`/`ComSpec` pass-through) and the
+  win32 skips of T2/T3 are unexercised; `scripts/build.ps1` calls the
+  changed script and was not run.
