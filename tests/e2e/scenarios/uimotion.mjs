@@ -682,19 +682,19 @@ export default {
       );
 
       await driver.waitFor(
-        `return !!document.querySelector('button[aria-label="Open Empty Server List from Motion Source"]')`,
+        `return !!document.querySelector('button[aria-label="Open Empty Server List from Motion Source (Jellyfin)"]')`,
         'empty server playlist navigation',
       );
       await driver.click(
         await driver.find(
           'css selector',
-          'button[aria-label="Open Empty Server List from Motion Source"]',
+          'button[aria-label="Open Empty Server List from Motion Source (Jellyfin)"]',
         ),
       );
       await waitForEmptyState(
         driver,
         'This server playlist is empty',
-        'Add videos on Motion Source, then reopen it here.',
+        'Add videos on Motion Source (Jellyfin), then reopen it here.',
       );
       await captureSettled(
         driver,
