@@ -334,13 +334,11 @@ Recorded and verified 2026-11-12, locally on the host.
   sign-in are unverified. Remove with `sudo pacman -R vela`.
 - Only the build and install ran here. The verification set (check, clippy,
   tests, audits) and E2E have not been run on this host.
-- This clone's only remote is `origin` =
-  `https://gitea.internal/michael/vela.git`; its `main` matched local `HEAD`
-  on 2026-11-12. That URL differs from the canonical
-  `http://magneto:3001/michael/vela.git` in `.agents/repo-guidance.md`
-  (Remotes & Sync); whether it is the same Gitea under another name is
-  unconfirmed (open question for the owner). There is no `github` remote
-  here, so GitHub CI cannot be reached from this clone as configured.
+- Remotes, as of 2026-11-12: `origin` =
+  `https://gitea.internal/michael/vela.git`, which is the canonical Gitea
+  of `.agents/repo-guidance.md` (Remotes & Sync) reached over HTTPS (owner,
+  2026-11-12); and `github` = `https://github.com/roethlar/vela.git`, added
+  by the owner on 2026-11-12. Both answer `git ls-remote` from this host.
 
 ## Linux VM (E2E host)
 

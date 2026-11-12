@@ -80,7 +80,10 @@ Rules the command list doesn't carry on its own:
 ## Remotes & Sync
 
 - `origin`: `http://magneto:3001/michael/vela.git` (Gitea 28.1.0; fetch and
-  push) — the canonical Gitea (owner, 2026-10-24). The former `origin`,
+  push) — the canonical Gitea (owner, 2026-10-24). The same server is also
+  reached over HTTPS as `https://gitea.internal/michael/vela.git` (owner,
+  2026-11-12: "the same as the recorded server, just behind https"); a clone
+  using either URL is correctly aligned. The former `origin`,
   `http://q:3000/michael/vela.git` on host `q`, is retired (owner,
   2026-10-24: "q is gone"); a clone whose `origin` still points there needs
   its remote realigned.
