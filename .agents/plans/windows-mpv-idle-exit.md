@@ -297,3 +297,8 @@ stable 1.99.1).
 - Owner-directed codereview of the implementation (codex, gpt-6-astra @
   max) over `5f90b2a..8a0abbe`: no material issue
   (`.agents/review/codereview-2026-11-12-windows-mpv-idle-exit.md`).
+- GitHub CI run 43302281260 at `6dba9bf` passed every job: Frontend, Rust
+  (1.89 MSRV check, stable 1.100.0 check, clippy `-D warnings`, tests) and
+  cargo audit. This closes the two checks that could not run on
+  `continuum`. Still open: the Windows build, Windows `cargo test`, E2E,
+  and the owner's acceptance.

@@ -22,7 +22,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   and five red-proofs pass; a netwatch-01 probe shows the option wins over
   a user `--idle=yes`. NOT done: MSRV check, `cargo audit`, E2E, any
   Windows build, and the owner's acceptance on the affected install.
-  Pushed 2026-11-12; see the plan's log for the CI result. Workaround for
+  Pushed 2026-11-12; GitHub CI run 43302281260 at `6dba9bf` passed every job
+  (a first run failed on an unrelated Rust 1.100 clippy lint, fixed at
+  `9e76606`; codex codereview of the fix: no material issue). Workaround for
   older releases: add `--idle=no` to the Advanced
   mpv arguments.
 - Missing-npm build diagnostic, 2026-11-12 (`.agents/plans/build-missing-npm-diagnostic.md`;
