@@ -1,5 +1,14 @@
 # Unreleased
 
+## Changes
+
+- Show a Plex, Jellyfin, or Emby mark wherever a server's name appears, so
+  servers that share a name can be told apart.
+- List server playlists directly under their heading, each with its server's
+  mark; a server with no playlists to show takes no space, and the heading
+  disappears when there are none.
+- Emby's experimental status is now shown on its row in Settings.
+
 ## Fixes
 
 - On Windows, make mpv exit when a file finishes. It previously stayed open and

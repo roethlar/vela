@@ -3,6 +3,7 @@
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { onMount, onDestroy } from "svelte";
   import Icon from "$lib/Icon.svelte";
+  import ServerLogo from "$lib/ServerLogo.svelte";
   import type {
     ContinuePlayingMode,
     DisplayProfile,
@@ -507,8 +508,12 @@
       {/if}
       {#each sources as s (s.id)}
         <div class="row">
+          <ServerLogo kind={s.kind} />
           <span class="badge">{s.kind}</span>
           <span class="name">{s.name}</span>
+          <!-- Owner ruling 2026-11-12: Emby's experimental status (decision
+               2026-07-15) is stated here and nowhere in the main window. -->
+          {#if s.kind === "emby"}<span class="badge experimental">Experimental</span>{/if}
           <button class="rm" disabled={busy} onclick={() => removeSource(s.id)}>Remove</button>
         </div>
       {/each}
@@ -1188,6 +1193,12 @@
     color: var(--text-2);
     padding: 0.15rem 0.45rem;
     border-radius: 4px;
+  }
+  .badge.experimental {
+    color: var(--accent);
+  }
+  .row :global(svg[role="img"]) {
+    flex: none;
   }
   .muted {
     color: var(--text-muted);
