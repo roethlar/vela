@@ -335,8 +335,12 @@ Recorded and verified 2026-11-12, locally on the host.
   Passwordless `sudo` works for the owner account (`sudo -n` succeeds).
 - Toolchain: system `nodejs` 26.13.1 and `npm` 12.2.2 (both pacman packages,
   inside the `engines` ranges; `node scripts/check-js-toolchain.mjs` passes).
-  rustup has stable 1.99.1 and 1.97.1; **1.89.0 is not installed**, so the
-  MSRV check does not run here until it is added.
+  rustup has stable 1.99.1 (not updated; rustup reports 1.100.0 available),
+  1.97.1, and 1.100.0 installed side by side on 2026-11-12 to reproduce a
+  CI clippy failure (`cargo +1.100.0 ...`). **1.89.0 is not installed**, so
+  the MSRV check does not run here until it is added. `cargo audit` is not
+  installed either. Local `+stable` therefore lags CI's stable: a green
+  local clippy does not predict CI until `stable` is updated.
 - Arch packages `nodejs` and `npm` separately, and `npm` was absent until
   2026-11-12 (`pacman -S npm`, which also pulled `node-gyp`, `semver` and
   `nodejs-nopt`). `scripts/build.sh` checks its pacman prerequisites first, but

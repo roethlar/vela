@@ -283,4 +283,17 @@ stable 1.99.1).
   step 3 (owner plays an episode to its end on the affected install) are
   open. Step 1 was deliberately not started: an owner per-core
   overclock-test script was logging sensors on that host, and a release
-  build would load every core.
+  build would load every core.- Pushed 2026-11-12 (`8bfd4f8`, after the owner set the push policy to
+  `always`). GitHub CI run 43301071621: Frontend and cargo audit passed, and
+  in the Rust job the 1.89 MSRV check and stable check passed; clippy then
+  FAILED and the test step was skipped. The failure was not in this change:
+  CI's stable had rolled to 1.100.0 (released 2026-11-09), whose clippy
+  errors on a `#[allow(dead_code)]` written twice on
+  `SourceQualityOptions::has_choice` in `src/source/mod.rs` since
+  `e0e5fc7` (2026-07-25). Reproduced on `continuum` with a side-by-side
+  1.100.0 toolchain; fixed in its own commit by deleting the duplicate
+  line. Under 1.100.0, clippy `-D warnings`, check, and all 365 tests then
+  pass, and clippy still passes under 1.99.1.
+- Owner-directed codereview of the implementation (codex, gpt-6-astra @
+  max) over `5f90b2a..8a0abbe`: no material issue
+  (`.agents/review/codereview-2026-11-12-windows-mpv-idle-exit.md`).
