@@ -18,7 +18,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `continuum`, which is now a working E2E venue (`.agents/machines.md`).
   Pushed; CI green. Full E2E on `continuum`: 37/39, with `uimotion` fixed
   afterwards and `pagefail` failing independently of this work (Blockers).
-  NOT done: the owner's acceptance in the installed app.
+  Owner accepted the result in the installed 1.0.63 on 2026-11-12: "logos
+  are good".
 - Push policy is `always` since 2026-11-12 (owner; `.agents/push-policy.md`):
   push after each commit without asking. History rewrites still need a go.
 - Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
@@ -269,13 +270,34 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Blockers
 
 - No known product blocker.
-- E2E `pagefail` fails on `continuum` (x86_64, WebKitGTK 2.54.2) with
-  "page 2 never arrived" (expected 60), first seen 2026-11-12 on the first
-  full run at that venue. It fails the same way on `2f283a2`, before the
-  server-identity UI work, so it predates that. Not investigated: unknown
-  whether it is a product defect, a harness race, or specific to this host
-  (it passed in the VM's recorded runs). 37 of the other 38 scenarios
-  passed in that run and the 38th was fixed.
+- E2E `pagefail` fails on `continuum` (x86_64, WebKitGTK 2.54.2), first seen
+  2026-11-12; it also fails on `2f283a2`, before the server-identity work.
+  Investigated 2026-11-12 with a throwaway probe scenario (not committed);
+  cause is a product race, not the harness or the host:
+  - `onScroll` in `src/routes/+page.svelte` runs
+    `if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) loadMore()`
+    with no check that the grid is still on screen.
+  - Opening a detail removes the grid from the DOM. WebKit can deliver a
+    queued, trusted `scroll` event to that element afterwards. Its
+    `scrollHeight`, `scrollTop` and `clientHeight` are then all 0, so the
+    test `0 < 600` passes and the next page is requested while the detail
+    is open.
+  - Evidence, 8 probe runs: in 6 a scroll event arrived with
+    `isConnected: false`, all three sizes 0 and `.detail` present, and a
+    second `StartIndex=60` request followed; in 2 the event arrived while
+    the grid was still connected (`scrollTop` 20) and no extra request was
+    made. The grid itself scrolls normally (`scrollHeight` 2823,
+    `clientHeight` 694, window 1280x800).
+  - In `pagefail` this refetches the page the scenario deliberately failed,
+    so its precondition "back on the truncated grid" sees 130 cards, not
+    60. The scroll comes from WebDriver scrolling the clicked card into
+    view; a mouse click during inertial scrolling could do the same.
+  - User-visible effect is small: a wasted background page request, and
+    more cards than expected on Back. No data loss.
+  - Unfixed. Proposed fix (needs a plan and a go): make `onScroll` ignore
+    an element that is not connected or has no height, with a guard, then
+    re-run `pagefail`. Whether the VM's older WebKit simply never delivers
+    the late event is an assumption, not verified.
 - The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
   They reproduced during the 1.0.59 full Linux run in `continueon`,
   `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.

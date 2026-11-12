@@ -355,9 +355,8 @@ Recorded and verified 2026-11-12, locally on the host.
   `b519083` (`.agents/plans/build-missing-npm-diagnostic.md`): both scripts
   now name the missing tool in one line and exit 1.
 - 1.0.63-1 was built here on 2026-11-12
-  (`packaging/arch/vela-1.0.63-1-x86_64.pkg.tar.zst`) but NOT installed by
-  the agent (sudo, above); whether the owner has installed it is not
-  recorded. `scripts/build.sh` copies every package it finds in
+  (`packaging/arch/vela-1.0.63-1-x86_64.pkg.tar.zst`) and installed by the
+  owner the same day (the agent cannot: sudo, above). `scripts/build.sh` copies every package it finds in
   `packaging/arch/` to `dist/`, so an older package left there (1.0.61)
   is republished beside the new one; remove stale packages before relying
   on `dist/`.

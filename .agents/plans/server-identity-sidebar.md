@@ -4,8 +4,8 @@
 
 **APPROVED 2026-11-12; implementation in progress.** Owner go, verbatim, in
 answer to "Server-logo plan: go or not?": "go". All four slices are
-implemented and pushed (`343f270`, `62b85e2`); awaiting owner acceptance in
-the installed app. Gate G1 passed: shown the three drawings, the owner
+implemented and pushed (`343f270`, `62b85e2`). **OWNER-CONFIRMED 2026-11-12** in
+the installed 1.0.63 on `continuum`: "logos are good". No gate remains open. Gate G1 passed: shown the three drawings, the owner
 answered "those logos are fine."
 
 The version bump this plan makes is now 1.0.62 -> 1.0.63: 1.0.62 was taken
