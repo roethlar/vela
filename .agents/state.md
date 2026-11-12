@@ -221,8 +221,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - `.agents/plans/server-identity-sidebar.md` (drafted 2026-11-12, NOT
   approved): per-kind server marks in the sidebar Sources list and Settings,
   and a flat Server Playlists list that collapses when empty. The owner's
-  D1-D3 rulings are recorded there verbatim; D4 (marks beside other bare
-  server names) and the go are open.
+  D1-D4 rulings are recorded there verbatim (D4: marks everywhere a bare
+  server name is shown); only the go is open.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

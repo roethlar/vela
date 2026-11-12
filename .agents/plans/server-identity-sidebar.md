@@ -26,11 +26,13 @@ Owner rulings already given (2026-11-12), verbatim:
   `.agents/decisions.md` 2026-07-15 ("Emby support is labeled experimental")
   this plan adds the word to the Emby row of the Settings source list.
 
-Open, not yet ruled:
+- **D4 (scope of the marks): everywhere.** Asked whether the marks should
+  also appear in the other places a bare server name is printed, the owner
+  answered: "yes, anywhere a bare server name is used we need to
+  differentiate." Slice 4 below implements it; it is part of this plan, not
+  a follow-up.
 
-- **D4 (scope of the marks).** Whether the marks also appear beside the
-  other places a bare server name is printed (listed under "Out of scope").
-  Slices 1-3 do not depend on it.
+Open, not yet ruled:
 - **G1 (visual acceptance of the drawings).** A gate inside Slice 1, not a
   pre-approval ruling.
 
@@ -71,16 +73,12 @@ Unchanged: the `get_server_playlists` command and its payload, playlist
 order (server order, then the server's own order), the read-only nature of
 server playlists, opening/playing a server playlist, and every Rust file.
 
-## Out of scope (D4 decides whether a follow-up exists)
+## Out of scope
 
-Other places that print a bare server name and are equally ambiguous for
-same-named servers, all in `src/routes/+page.svelte` unless noted: the card
-source tag (`sourceNameOf(item.backing?.[0]?.sourceId ...)`), the detail
-`srctag`, hub titles (`hub.sourceName`), the version chooser
-(`choice.sourceName`), the context-menu entries "Resume on / Start over on /
-Quality on {sourceNameOf(...)}", `src/lib/PlaylistsView.svelte` entry
-metadata, and the `src/lib/ServerPlaylistView.svelte` header and hint. Do
-not touch them in this plan.
+Any change to the Rust backend or to command payloads. If a site in Slice 4
+turns out to have a server name but no way to reach its kind from data
+already in the frontend, stop and report it instead of adding a payload
+field.
 
 ## Slice 1 — `ServerLogo` component, wired into Settings
 
@@ -301,6 +299,82 @@ nested layout and will fail unmodified):
 
 Commit: `ui: flat Server Playlists that collapse when empty`.
 
+## Slice 4 — every other bare server name (D4)
+
+Rule: wherever the UI prints a server's name, the reader can tell which
+kind of server it is. Rendered markup gets the mark; plain strings
+(`aria-label`, `title`, hint sentences, strings assembled with `.join`) get
+the kind in words, as `name (Kind)`.
+
+Shared pieces:
+
+- `src/lib/ServerName.svelte`: props `name: string`, `kind: string`,
+  `size?: number` (default 13). Renders `<span class="servername">` holding
+  `<ServerLogo {kind} {size} />` and the name, laid out inline
+  (`display: inline-flex; align-items: center; gap: 0.3em; vertical-align:
+  bottom`). With an unknown kind it renders the name alone.
+- In `+page.svelte`, next to `sourceNameOf(id)`, add `sourceKindOf(id)`
+  (`sources.find((s) => s.id === id)?.kind ?? ""`) and
+  `sourceLabelOf(id)` returning `name (Kind)` via `kindLabel`, or the bare
+  name when the kind is unknown.
+
+Sites as of `dd3049c` (re-grep `sourceNameOf\(|sourceName\b` across
+`src/routes/+page.svelte` and `src/lib/*.svelte` at implementation time and
+treat any site not listed here as in scope too):
+
+- `+page.svelte`, card source tag
+  (`sourceNameOf(item.backing?.[0]?.sourceId ?? item.sourceId)`): replace
+  the text with `<ServerName>`. Read the surrounding ternary first; one arm
+  prints something other than a server name and must stay as is.
+- `+page.svelte`, detail `srctag` (`· {sourceNameOf(center.sourceId)}`):
+  `<ServerName>` after the separator.
+- `+page.svelte`, hub heading (`hub.sourceName`): `<ServerName
+  name={hub.sourceName} kind={sourceKindOf(hub.sourceId)} />`.
+- `+page.svelte`, version chooser (`choice.sourceName`): `<ServerName>`;
+  confirm the choice object carries a source id, else resolve the kind from
+  whatever key it does carry.
+- `+page.svelte`, context-menu entries `Resume on …`, `Start over on …`,
+  the bare `{sourceNameOf(b.sourceId)}` entry, and `Quality on …`:
+  `<ServerName>` in place of the name text inside each button.
+- `src/lib/PlaylistsView.svelte`, the entry metadata array ending in
+  `entry.sourceName` joined into one string: use the `name (Kind)` text
+  form. The component needs the kind; read its props/types to see whether
+  an entry or item carries `sourceKind` or a source id plus a source list,
+  and pass a `kindOf(sourceId)` function prop from `+page.svelte` if not.
+- `src/lib/ServerPlaylistView.svelte`, header
+  (`<p class="muted">{playlist.sourceName}</p>`): `<ServerName>`; and the
+  empty-state hint (`Add videos on ${playlist.sourceName}, …`): the text
+  form. Same kind-plumbing note as above.
+- The `Open … from …` label of Slice 3 already uses the text form.
+
+Tests (`tests/server-identity-ui.test.mjs`):
+
+- S4a: `ServerName.svelte` renders `<ServerLogo` and the name.
+- S4b: `+page.svelte` contains no `{sourceNameOf(` expression in rendered
+  markup — every remaining call is inside `sourceLabelOf`, a script block,
+  or an attribute string. Implement by asserting an exact, enumerated count
+  of the allowed occurrences, so a newly added bare use fails the guard.
+- S4c: `+page.svelte` contains no `{hub.sourceName}` and no
+  `{choice.sourceName}` as bare text.
+- S4d: `PlaylistsView.svelte` and `ServerPlaylistView.svelte` contain no
+  `{playlist.sourceName}`/`entry.sourceName` outside a `ServerName` prop or
+  a `name (Kind)` expression.
+
+Red-proof each guard separately by restoring one bare use at one site per
+guard. Existing source-text guards in `tests/ui-foundation.test.mjs`,
+`tests/ui-motion.test.mjs`, `tests/image-reveal.test.mjs` and
+`tests/transcoding-ui.test.mjs` match on markup near several of these
+sites (the Quality menu in particular); run `npm run check` after each site
+and adjust only an assertion whose literal text this slice changed,
+recording each one in the implementation log.
+
+E2E: grep `tests/e2e/scenarios/` for text matched against these sites
+(`Resume on`, `Start over on`, `Quality on`, `srctag`, `choicename`, hub
+titles with a ` · ` suffix). The mock servers are Jellyfin, so a text match
+on `Quality on <name>` still passes if it is a prefix/contains match and
+fails if it is an exact match; fix exact matches.
+
+Commit: `ui: mark the server kind wherever a server name is shown`.
 ## Verification before claiming completion
 
 Frontend-only change, so from the repo root: `node
