@@ -2,7 +2,12 @@
 
 ## Status
 
-**DRAFT 2026-11-12. NOT APPROVED. No implementation may start.**
+**APPROVED 2026-11-12; implementation in progress.** Owner go, verbatim, in
+answer to "Server-logo plan: go or not?": "go". Slice 1 is waiting at gate
+G1 (owner's visual acceptance of the drawings).
+
+The version bump this plan makes is now 1.0.62 -> 1.0.63: 1.0.62 was taken
+by the Windows mpv idle-exit fix (`bf1b1c3`) after this plan was drafted.
 
 Owner rulings already given (2026-11-12), verbatim:
 
@@ -20,11 +25,12 @@ Owner rulings already given (2026-11-12), verbatim:
   failed. Neither renders any sidebar element.
 - **D3 (Emby "Experimental" label): Settings only.** "experimental doesn't
   need to be in the main UI at all. settings is enough." The label leaves
-  the main window. Drafting-agent interpretation, to be confirmed at
-  approval: Settings currently contains no "Experimental" wording at all
-  (only an Emby note about converting), so to keep honouring decision
+  the main window. Settings currently contains no "Experimental"
+  wording at all (only an Emby note about converting), so this plan adds the
+  word to the Emby row of the Settings source list, keeping decision
   `.agents/decisions.md` 2026-07-15 ("Emby support is labeled experimental")
-  this plan adds the word to the Emby row of the Settings source list.
+  honoured. Owner confirmation, 2026-11-12, asked whether "Settings is
+  enough" means adding the word there: "yes, if we need it anywhere".
 
 - **D4 (scope of the marks): everywhere.** Asked whether the marks should
   also appear in the other places a bare server name is printed, the owner
@@ -36,7 +42,6 @@ Open, not yet ruled:
 - **G1 (visual acceptance of the drawings).** A gate inside Slice 1, not a
   pre-approval ruling.
 
-The plan as a whole needs the owner's explicit go.
 
 ## Problem
 

@@ -237,11 +237,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
-- `.agents/plans/server-identity-sidebar.md` (drafted 2026-11-12, NOT
-  approved): per-kind server marks in the sidebar Sources list and Settings,
-  and a flat Server Playlists list that collapses when empty. The owner's
-  D1-D4 rulings are recorded there verbatim (D4: marks everywhere a bare
-  server name is shown); only the go is open.
+- `.agents/plans/server-identity-sidebar.md`: APPROVED 2026-11-12 (owner
+  "go"), implementation in progress. Per-kind server marks everywhere a
+  server name is shown, and a flat Server Playlists list that collapses
+  when empty. Slice 1 is at gate G1: the owner has to accept the three
+  drawings before anything is wired in.
+- mpv window geometry (owner request 2026-11-12; no plan drafted yet).
+  Rulings so far: asked which plays inherit the previous window size and
+  position, the owner answered "all in current session" (this reverses the
+  2026-07-18 rule that manual plays keep configured defaults). The owner
+  also asked for carry-over to new sessions "with an option". Known limits:
+  size is readable on every platform; position is not readable from mpv
+  and cannot be set on Wayland, but is feasible on Windows through the
+  window handle. Next: draft the plan.
+- E2E venue: the owner will install `tauri-driver` and `Xvfb` on
+  `continuum` (2026-11-12) so the suite can run there.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
