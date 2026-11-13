@@ -361,30 +361,51 @@ const libmpvScriptUnavailable =
 
 test("the libmpv build refuses a tarball that does not match its pin", { skip: libmpvScriptUnavailable }, async (t) => {
   const { spawnSync } = await import("node:child_process");
-  const { mkdtemp, mkdir, rm, writeFile } = await import("node:fs/promises");
+  const { existsSync } = await import("node:fs");
+  const { chmod, mkdtemp, mkdir, rm, writeFile } = await import("node:fs/promises");
   const os = await import("node:os");
   const root = await mkdtemp(path.join(os.tmpdir(), "vela-libmpv-pin-"));
   t.after(() => rm(root, { recursive: true, force: true }));
   const lua = (await libmpvPins()).find((pin) => pin.name === "lua");
+
+  // A WELL-FORMED archive with the pinned name and the wrong contents, laid
+  // out so that the lua step would extract and compile it if the checksum
+  // were not enforced. Junk bytes would not do: they fail at extraction
+  // whether or not the checksum is checked.
+  const tree = path.join(root, "tree", `lua-${lua.version}`, "src");
+  await mkdir(tree, { recursive: true });
+  await writeFile(path.join(tree, "sentinel.c"), "int vela_sentinel(void) { return 1; }\n");
+  for (const header of ["lua.h", "luaconf.h", "lualib.h", "lauxlib.h", "lua.hpp"]) {
+    await writeFile(path.join(tree, header), "/* stand-in */\n");
+  }
   await mkdir(path.join(root, "src"), { recursive: true });
-  // A file with the pinned name and the wrong contents: no download happens.
-  await writeFile(path.join(root, "src", `lua-${lua.version}.tar.gz`), "not the pinned tarball\n");
+  const archive = path.join(root, "src", `lua-${lua.version}.tar.gz`);
+  const packed = spawnSync("tar", ["-czf", archive, "-C", path.join(root, "tree"), `lua-${lua.version}`]);
+  assert.equal(packed.status, 0, "the stand-in archive must be a real one");
+
+  // A compiler that leaves a mark if it is ever reached.
+  const bin = path.join(root, "bin");
+  await mkdir(bin);
+  const reached = path.join(root, "compiler-was-run");
+  await writeFile(path.join(bin, "gcc"), `#!/bin/sh\necho reached > "${reached}"\nexit 1\n`);
+  await chmod(path.join(bin, "gcc"), 0o755);
+
   const run = spawnSync("bash", [libmpvScriptPath, "lua"], {
-    env: { ...process.env, LIBMPV_ROOT: root },
+    env: { ...process.env, LIBMPV_ROOT: root, PATH: `${bin}:${process.env.PATH}` },
     encoding: "utf8",
   });
   assert.equal(run.status, 1, "a mismatched tarball must stop the build");
   assert.match(run.stderr, /build-libmpv: checksum mismatch: .*lua-/);
-  assert.doesNotMatch(run.stdout + run.stderr, /liblua|gcc/, "nothing may be built from it");
-  // It must stop AT the mismatch. Carrying on and failing later by accident
-  // (an empty path handed to tar, a missing directory) is not stopping.
+  // It must stop AT the mismatch: nothing after it, nothing extracted,
+  // nothing compiled.
   assert.match(
     run.stderr.trimEnd().split("\n").at(-1),
     /^build-libmpv: checksum mismatch: /,
     `nothing may run after the mismatch:\n${run.stderr}`,
   );
+  assert.ok(!existsSync(path.join(root, "work", "src", "lua")), "the archive must not be extracted");
+  assert.ok(!existsSync(reached), "the compiler must not be reached");
 });
-
 test("the libmpv build falls back to a mirror and keeps only a download that matches", { skip: libmpvScriptUnavailable }, async (t) => {
   const { spawnSync } = await import("node:child_process");
   const { createHash } = await import("node:crypto");
