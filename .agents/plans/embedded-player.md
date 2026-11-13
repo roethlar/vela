@@ -840,6 +840,31 @@ From Slice 3 (the picture exists; SDR only until Slice 4):
   untried), any compositor other than KWin 6.8 and headless weston
   (GNOME in particular), X11 (expected: falls back to mpv and says so).
 
+From Slice 4 (HDR):
+
+- **Look at an HDR film in both players, side by side or one after the
+  other** (the plan's acceptance for this slice: "the spike's stacked
+  comparison rebuilt with the real app"). Everything the agent could
+  measure agrees with the external player: mpv is told PQ, BT.2020 and a
+  peak of 1137 nits on this display at its current brightness, the same
+  figure Mesa sent for the external player in the spike, and KWin accepted
+  the description. Whether highlights, dark scenes and skin look the same
+  is for eyes; a screenshot cannot show it. The two players do not use the
+  same renderer (`gpu-next` outside, `gpu` inside), so "the same" here
+  means "not visibly worse", not identical.
+- Play an ordinary (SDR) film in the embedded player on the HDR display.
+  It is drawn in the HDR container at the desktop's brightness for white.
+  It should look like the same film in the external player, not brighter,
+  not washed out.
+- Move the desktop brightness slider while an HDR film plays, and switch
+  HDR off and on in the display settings. The picture should follow within
+  a frame or two without a flash of wrong colours. The code path is tested
+  against a stand-in for the compositor; the real one was only seen at one
+  setting.
+- Not checked for lack of hardware: a display without HDR (expected:
+  standard range, exactly as before this slice), an HDR display on a
+  compositor other than KWin.
+
 ### 2026-11-12 — approval recorded
 
 The owner's go and the three unattended-run rules are in Status. The owner
@@ -1060,7 +1085,7 @@ admitted (`.agents/review/codereview-2026-11-13-player-selection.md`).
 
 | | Finding | State |
 | --- | --- | --- |
-| sel-1 | a settings read placed after the session is installed returned early past the cleanup | fixed `88c631b` (the read moved before anything is installed); reopened twice on the guard; the second repair changes the code so that leaving early past the cleanup cannot be written; third verification pending |
+| sel-1 | a settings read placed after the session is installed returned early past the cleanup | fixed `88c631b` (the read moved before anything is installed); reopened twice on the guard; the third repair (`320b023`) changes the code so that leaving early past the cleanup cannot be written; codex accepted |
 | sel-2 | an Automatic step-down made the fallback line appear a second time | fixed `12828ca`; codex accepted |
 | sel-3 | a play replaced within 1.5 s used up the fallback line without showing it | fixed `50e57e4`, `db0b8b6`; codex accepted |
 | sel-4 | the test for `play`'s refusal passed with the refusal removed | fixed `47eec9a`, guard repaired `29445f2`; codex accepted |
@@ -1209,3 +1234,95 @@ Each can be overturned; none has shipped to users.
    at it. It is in the approved plan (Slice 3), so the agent does it; it
    is listed here because it changes every Linux download. Until it lands
    the player can be tried only from a development build.
+
+### 2026-11-13 — Slice 3 review: nine findings, all admitted
+
+codex over `053cb36..0a63799` with `a02db80`
+(`.agents/review/codereview-2026-11-13-embedded-core.md`). Two HIGH, five
+MEDIUM, two LOW. None is about what a user sees in normal use today; all
+are about what happens at the edges: a window closed in the instant a play
+starts, a start that takes longer than 20 seconds, a settings path that is
+not a file, an unusual mpv configuration, two things happening in the same
+instant, a start that fails late, a file that cannot be deleted. One of
+them (`ec-3`) reaches users who never chose the embedded player, and one
+(`ec-6`) withdraws a shortcut the agent took against decision D3 (item 6
+under "For the owner" goes away with it).
+
+State is in `.agents/review/index.md`; each is fixed in its own commit and
+verified by codex before it is closed.
+
+### 2026-11-13 — Slice 4 (HDR): landed
+
+Commit: `e8db400`.
+
+What landed:
+
+- **The decision** (`player/embedded/hdr.rs`). The compositor describes
+  the output the video surface is on: its reference white and its darkest
+  and brightest levels. HDR is used when the output is brighter than its
+  own reference white, the window has ten bits per channel, and the
+  compositor offers every request Vela would send. The peak is the
+  output's maximum rescaled from the output's reference white to the 203
+  nits PQ video uses (465 at a reference of 265 is 356; at 83 it is
+  1137), capped at 10000. Anything less is standard range, and then
+  nothing is sent and mpv's targets are left alone, exactly as before.
+- **Both sides together.** mpv is told `target-trc=pq`,
+  `target-prim=bt.2020`, `target-peak`; the surface is tagged PQ, BT.2020,
+  the output's primaries and range as the mastering display, the peak as
+  the content light level, perceptual intent. One function does both
+  (`hdr::carry_out`), the surface first, and when either side refuses both
+  go back to standard range. Both take effect with the next frame.
+- **Following the display.** The compositor is listened to for the whole
+  play. A moved brightness slider, HDR switched off, another monitor: the
+  output is described again and the play re-tags, keeping the old
+  agreement until the new description exists.
+- **Before the first picture.** At the start of a play up to six
+  exchanges with the compositor are waited for (three are needed), after
+  mpv has every other option, so the first frame is already right. If
+  they take longer, the play starts in standard range and switches.
+
+Decided along the way:
+
+- HDR needs the compositor's `set_mastering_display_primaries` feature,
+  not only PQ and BT.2020. The protocol puts the mastering luminance
+  range under that feature too, and a request the compositor has not
+  offered is a protocol error on the connection Vela's whole window lives
+  on. Mesa makes the same demand for the external player. A compositor
+  without it gets standard range. Every request is checked against what
+  was offered at the point it is sent, and a description is put on the
+  surface only after the compositor has said it made it.
+- The colour manager is bound at version 1, the version whose events the
+  code handles. Version 2 renames two of them.
+- In HDR, Vela's three target options override the same options in the
+  user's Advanced list; outside HDR the user's stand. If the display
+  leaves HDR in the middle of a play they are set to `auto`, not back to
+  what the user had.
+- An ordinary (SDR) film on an HDR display is drawn in the HDR container
+  too. The surface's description follows the display, not the film.
+
+Verified:
+
+- Clippy on stable and the 1.89 check; 437 Rust tests (19 new in `hdr.rs`,
+  among them the two readings from the development display and a whole
+  sequence of compositor events against a stand-in for both sides); the
+  node tests with three new wiring tests; `npm run build`.
+  `cargo audit` is not installed on this machine; CI runs it, and the
+  lock file did not change.
+- E2E, `--embedded` (headless weston, which has no colour management):
+  `embeddedplay` now also asserts that mpv's three target options are
+  untouched there.
+- On `continuum`'s own desktop (KDE Wayland, HDR on), an HDR10 test clip:
+  mpv had `target-trc` `pq`, `target-prim` `bt.2020`, `target-peak` 1137
+  before its first frame; `hwdec-current` `vaapi`; no dropped frames; the
+  log line "HDR output, peak 1137 nits". A compositor screenshot shows the
+  test pattern in the window. A screenshot is tone-mapped, so it says
+  nothing about how the HDR looks.
+- Red-proofs from the committed state: 55 mutations (26 of the decision
+  and the agreement, 29 of the wiring), each failing the test that names
+  it.
+
+Not done, and known:
+
+- The owner's by-eye comparison (above, "From Slice 4"). It is the
+  slice's acceptance and the agent cannot do it.
+- codex review of the slice: dispatched, pending.

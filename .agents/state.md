@@ -21,16 +21,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     window on Linux/Wayland, from a development build pointed at a built
     library set, with `"player": "embedded"` in the config file. Proven by
     E2E under a headless Wayland compositor (`npm run e2e -- --embedded`)
-    and by one run on `continuum`'s desktop. SDR only, a Close button and
-    nothing else. NOT yet done in Slice 3: packaging the library into the
-    Linux packages, and the slice's codex review.
-  - Then Slice 4 (HDR), 5 (controls, cropping), 6 (parity). The owner's
-    by-eye checks and the switch-on (Settings control, release notes,
-    version bump) are NOT the agent's to do.
-  - Review findings still open: see `.agents/review/index.md`. Two of
-    them (`ps-2`, `sel-1`) were reopened repeatedly on how complete a
-    source-text guard must be; each record says what happens if it is
-    reopened again.
+    and by runs on `continuum`'s desktop. A Close button and nothing else.
+    Its codex review returned NINE findings (`ec-1` to `ec-9`), all
+    admitted, being fixed one commit each. NOT yet done in Slice 3:
+    packaging the library into the Linux packages.
+  - Slice 4 (HDR) landed at `e8db400`; its codex review is pending. Its
+    acceptance is a by-eye comparison only the owner can make.
+  - Then Slice 5 (controls, cropping), 6 (parity). The owner's by-eye
+    checks and the switch-on (Settings control, release notes, version
+    bump) are NOT the agent's to do.
+  - Active review loop: see `.agents/review/index.md`. One finding
+    (`ps-2`) is with the owner after four reopens
+    (`.agents/review/ps-2.contested.md`).
   Next in the queue after this plan:
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
   Rules the owner set for this run (decision `.agents/decisions.md`
