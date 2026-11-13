@@ -209,3 +209,22 @@ Files: `src-tauri/src/commands.rs`, `tests/player-selection.test.mjs`
 Verified before the guard proof: clippy on stable and the 1.89 check, 418
 Rust tests, 127 node tests, and the full E2E suite in both venues, since
 every play goes through this function.
+
+Guard proof for round 3, run 2026-11-13 at `320b023` in a disposable
+worktree, each injection restored with `git checkout`;
+`node --test tests/player-selection.test.mjs`, and `cargo check` where
+noted, to show the injected code is real Rust that builds:
+
+| Injection | Test | Builds |
+| --- | --- | --- |
+| The original defect: a settings read with `?` between the installation and the launch | FAIL | yes |
+| The reviewer's round-2 form, a `?` between two quote characters, same place | FAIL | yes |
+| The reviewer's `assert!(...)`, same place | FAIL | |
+| The reviewer's `.expect (` with spaces, same place | FAIL | |
+| A fallible step directly before the launch is run | FAIL | yes |
+| The arm no longer clears the session | FAIL | |
+| A `?` inside the arm, before the undoing | FAIL | yes |
+| The launch run before the installation | FAIL | |
+| Another block run before the installation | PASS, rightly: nothing is installed yet | |
+| A `?` inside the block | PASS, rightly, and builds: it can only reach the arm | yes |
+| Unchanged | PASS | yes |
