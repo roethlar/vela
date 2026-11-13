@@ -257,10 +257,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   default), consulted for the first play of a run only, remember-last out
   of the box. D3 (position) withdrawn. Slices 1-3 await the owner's go.
 - Owner direction 2026-11-12: embedded playback through libmpv, with
-  iOS/iPadOS as a porting goal (`.agents/decisions.md`). First step is the
-  drafted, NOT approved spike `.agents/plans/embedded-libmpv-hdr-spike.md`
-  (does HDR survive embedding on KDE Wayland). External mpv stays the
-  shipped player until a plan built on that answer is approved.
+  iOS/iPadOS as a porting goal (`.agents/decisions.md`). The HDR spike ran
+  on 2026-11-12 (`.agents/plans/embedded-libmpv-hdr-spike.md`, Log): on
+  `continuum` (KDE Wayland, AMD/Mesa) HDR survives embedding in a bare
+  window, under GTK3 + WebKitGTK, and inside Tauri 2. Conditions: the
+  library draws with mpv's older renderer (tone-mapping differs from
+  today's above about 265 nits), and Vela must tag the surface itself.
+  Still open: the owner's look at the screen, pointer input over the video,
+  a real film sample. Next is the owner's ruling on whether to plan the
+  embedded player; external mpv stays the shipped player until such a plan
+  is approved.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

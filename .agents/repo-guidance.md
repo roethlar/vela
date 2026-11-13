@@ -12,9 +12,11 @@
   multi-server client; do not resurrect them).
 - Playback is intentionally delegated to the system `mpv` binary in its own
   window for HDR passthrough. The owner's direction since 2026-11-12 is an
-  embedded libmpv player (`.agents/decisions.md`), but it is unproven for
-  HDR and unplanned: do not embed video, or design anything as depending on
-  it, until a plan for it is approved.
+  embedded libmpv player (`.agents/decisions.md`). A 2026-11-12 spike
+  showed HDR surviving embedding on KDE Wayland
+  (`.agents/plans/embedded-libmpv-hdr-spike.md`), but it is unplanned: do
+  not embed video, or design anything as depending on it, until a plan for
+  it is approved.
 - SvelteKit is configured as a static SPA for Tauri. Vite dev uses port `1420`
   with strict port behavior.
 - Linux release packaging lives in `src-tauri/bundle/linux/` for Tauri bundles

@@ -377,6 +377,15 @@ Recorded and verified 2026-11-12, locally on the host.
   `npm ci`) so a suite run and edits in the main tree do not collide.
 - The JS checks, stable-Rust check/clippy/test and E2E run here. The MSRV
   check and `cargo audit` do not (see the toolchain bullet).
+- Embedded-libmpv spike, 2026-11-12: scratch code, clips and evidence are
+  in `~/dev/vela-spike-libmpv/` (not a repo; safe to delete once the plan's
+  log is no longer being checked against it). `wayland-protocols` 1.50 was
+  installed for it (`pacman -S wayland-protocols`). When the agent's session
+  is started under sudo it runs as root: reach the desktop session with
+  `sudo -u michael env XDG_RUNTIME_DIR=/run/user/1000
+  WAYLAND_DISPLAY=wayland-1 ...`, and run git as `michael` so the repo
+  gains no root-owned files. The display is `DP-3`, HDR on, peak 465 nits,
+  SDR white 265 nits, scale 1.7.
 - Remotes, as of 2026-11-12: `origin` =
   `https://gitea.internal/michael/vela.git`, which is the canonical Gitea
   of `.agents/repo-guidance.md` (Remotes & Sync) reached over HTTPS (owner,

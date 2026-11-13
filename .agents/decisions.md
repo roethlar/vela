@@ -1931,3 +1931,13 @@ The stance of 2026-07-14 "Video stays external; embedding mpv is a spike,
 not a plan" that embedding "is not planned". Its technical findings stand,
 and its required first question (does HDR passthrough survive?) is exactly
 the spike now drafted.
+
+Spike result (2026-11-12, evidence not a ruling): on `continuum` (KDE
+Wayland, AMD/Mesa) HDR survives embedding at all three stages, bare
+window, GTK3 + WebKitGTK, and Tauri 2, with conditions; the main one is
+that libmpv's render API uses the older `vo=gpu` renderer, whose
+tone-mapping differs from today's `gpu-next` above about 265 nits. The
+owner's visual check is still open. Record:
+`.agents/plans/embedded-libmpv-hdr-spike.md`, Log. The status above is
+unchanged: external mpv stays the shipped player and no product code is
+authorized until an embedded-player plan is approved.
