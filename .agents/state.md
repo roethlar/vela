@@ -268,8 +268,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   was the agent's missing `profile=gpu-hq`; with Vela's options the greys
   are neutral but brighter than external mpv across the range in every
   configuration measured but one; the two renderers tone-map differently
-  and peak detection moves both. The pattern is a stress case; a real film
-  scene is the test that matters. Clicks
+  and peak detection moves both. On real clips dark scenes match and
+  bright scenes clip more highlight embedded; the owner: "the external
+  looks slightly better on this display." Clicks
   on HTML drawn over the video reach the page. Still open: a real film
   sample. Next is the owner's ruling on whether to plan the
   embedded player; external mpv stays the shipped player until such a plan

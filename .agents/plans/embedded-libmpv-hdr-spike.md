@@ -400,6 +400,35 @@ external player had. Screenshot values (R,G,B of 255) per grey patch:
   declared as 1000 nits, shown on a 465-nit display). How large the
   difference is on real films is not known.
 
+### Real footage — 2026-11-12
+
+Clips from the owner's `/home/michael/dev/hdr-tests` (a checkout of a
+public HDR test-file collection). Both players with Vela's options, paused
+on the same timestamp, 1280x720 window, screenshot statistics out of 255:
+
+| Clip | External mpv | Embedded |
+| --- | --- | --- |
+| `Aquaman_test.mkv` at 2, 5, 8 s (dark) | median 14-15, 99th pct 28-47 | same within 1 |
+| `madmax-explosion.hevc`, first frame | median 51, 99th pct 154 | identical |
+| `brightdoor.mkv` at 1 s | median 71, 90th pct 203, 0.0% at max | median 84, 90th pct 238, 1.4% at max |
+| `brightdoor.mkv` at 4 s | 90th pct 248, 0.6% at max | 90th pct 254, 13.8% at max |
+| `honeydrop.mkv` at 1 s | 99th pct 156 | 99th pct 187 |
+
+- Dark and moderate scenes match. Bright scenes do not: the embedded
+  renderer is brighter and clips far more of the highlight to flat white.
+- `scenechange.mkv` also differed, but the two players may have been
+  paused on different frames either side of a cut; not counted.
+- Owner, after watching `brightdoor.mkv` looping in both players stacked
+  (embedded above, external below): "yeah the external looks slightly
+  better on this display." Earlier, of the grey pattern embedded: "some of
+  those looked half white. no variance between the 3-4 right stripes at
+  all on this display."
+- This closes "A real film sample" under "Not verified". Dolby Vision
+  clips exist in that folder and were not tried.
+- Scope: one display with a 465-nit peak, where every HDR film needs heavy
+  tone-mapping. A brighter display needs less, so the gap may be smaller
+  there (assumption, not tested).
+
 ### What a real implementation must then build
 
 Rough list, unsized: a libmpv binding and render thread; the Wayland
