@@ -204,9 +204,10 @@ session, the NVIDIA proprietary driver (untested, so excluded), a
 compositor without `wl_subcompositor` or `wp_viewporter`, and a
 `WEBKIT_DISABLE_DMABUF_RENDERER` set in your own environment.
 
-What exists so far is the core: the picture, inside the window, with a
-Close button (or Escape). Playback controls, HDR output and black-bar
-cropping are later slices of the plan. With "use my own mpv configuration"
+What exists so far is the core: the picture, inside the window, in HDR on
+a display and compositor that offer it (KDE's does), with a Close button
+(or Escape). Playback controls and black-bar cropping are later slices of
+the plan. With "use my own mpv configuration"
 on, the embedded player applies your `mpv.conf` but not your scripts folder,
 per-script option files or key bindings.
 
