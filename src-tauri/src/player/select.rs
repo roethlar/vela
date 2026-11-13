@@ -91,21 +91,60 @@ pub(crate) struct FallbackNotices {
     told: Option<EmbeddedUnavailable>,
 }
 
+/// What one play does about the explanation of a fallback.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct NoticePlan {
+    /// The reason to explain on this play's display, when there is one and
+    /// the user has not been told it yet.
+    pub(crate) explain: Option<EmbeddedUnavailable>,
+    /// This play has nothing to fall back from. Once it has started, what was
+    /// explained before is forgotten, so that a later fallback is explained
+    /// again rather than silently resumed.
+    pub(crate) forget_when_started: bool,
+}
+
 impl FallbackNotices {
-    /// The line to show for a play that fell back, or `None` when there is no
-    /// fallback or the user has already been told this reason. Changes
-    /// nothing: call [`FallbackNotices::record`] once the play has started.
-    pub(crate) fn due(&self, fallback: Option<&EmbeddedUnavailable>) -> Option<String> {
+    /// Decide what one play does about the explanation. Changes nothing.
+    ///
+    /// `chooses_player` is true for a play that picks its player from the
+    /// user's setting, which is every play the user starts. It is false for
+    /// an automatic relaunch, which continues a running play in the player it
+    /// already has: that play was explained, or not, when it started, and its
+    /// relaunch neither explains anything nor changes what the user has been
+    /// told. (A relaunch is handed its player, so it has no fallback of its
+    /// own to report; taking that for "nothing to fall back from" would
+    /// forget the explanation and repeat it on the next play.)
+    pub(crate) fn plan(
+        &self,
+        chooses_player: bool,
+        fallback: Option<&EmbeddedUnavailable>,
+    ) -> NoticePlan {
+        if !chooses_player {
+            return NoticePlan {
+                explain: None,
+                forget_when_started: false,
+            };
+        }
         match fallback {
-            Some(reason) if self.told.as_ref() != Some(reason) => Some(reason.notice()),
-            _ => None,
+            None => NoticePlan {
+                explain: None,
+                forget_when_started: true,
+            },
+            Some(reason) => NoticePlan {
+                explain: (self.told.as_ref() != Some(reason)).then(|| reason.clone()),
+                forget_when_started: false,
+            },
         }
     }
 
-    /// Remember what a started play was (or was not) falling back from. A
-    /// reason is announced again only after it changed or went away.
-    pub(crate) fn record(&mut self, fallback: Option<&EmbeddedUnavailable>) {
-        self.told = fallback.cloned();
+    /// The user has been told this reason.
+    pub(crate) fn explained(&mut self, reason: &EmbeddedUnavailable) {
+        self.told = Some(reason.clone());
+    }
+
+    /// See [`NoticePlan::forget_when_started`].
+    pub(crate) fn forget(&mut self) {
+        self.told = None;
     }
 }
 
@@ -197,26 +236,76 @@ mod tests {
         }
     }
 
+    fn explain(reason: &EmbeddedUnavailable) -> NoticePlan {
+        NoticePlan {
+            explain: Some(reason.clone()),
+            forget_when_started: false,
+        }
+    }
+
+    const SAY_NOTHING: NoticePlan = NoticePlan {
+        explain: None,
+        forget_when_started: false,
+    };
+
     #[test]
-    fn a_fallback_is_announced_once_until_it_changes_or_goes_away() {
+    fn a_fallback_is_explained_once_until_it_goes_away() {
         let reason = EmbeddedUnavailable::NotBuilt;
         let mut notices = FallbackNotices::default();
-        assert_eq!(notices.due(None), None, "no fallback, nothing to say");
-        assert_eq!(notices.due(Some(&reason)), Some(reason.notice()));
-        // Asking does not count as telling: a play that failed to start has
-        // shown the user nothing.
-        assert_eq!(notices.due(Some(&reason)), Some(reason.notice()));
+        assert_eq!(notices.plan(true, Some(&reason)), explain(&reason));
+        // Asking is not telling: a play that never showed the line leaves it
+        // still to be shown.
+        assert_eq!(notices.plan(true, Some(&reason)), explain(&reason));
 
-        notices.record(Some(&reason));
+        notices.explained(&reason);
         assert_eq!(
-            notices.due(Some(&reason)),
-            None,
+            notices.plan(true, Some(&reason)),
+            SAY_NOTHING,
             "the same reason is not repeated on the next play"
         );
 
-        // A play with no fallback clears it, so a later fallback is explained
-        // again rather than silently resumed.
-        notices.record(None);
-        assert_eq!(notices.due(Some(&reason)), Some(reason.notice()));
+        // A play with nothing to fall back from says nothing and, once it has
+        // started, clears what was told.
+        let nothing_to_explain = notices.plan(true, None);
+        assert_eq!(
+            nothing_to_explain,
+            NoticePlan {
+                explain: None,
+                forget_when_started: true
+            }
+        );
+        assert_eq!(
+            notices.plan(true, Some(&reason)),
+            SAY_NOTHING,
+            "deciding changes nothing; only a started play forgets"
+        );
+        notices.forget();
+        assert_eq!(notices.plan(true, Some(&reason)), explain(&reason));
+    }
+
+    // Review finding sel-2: fallback play, Automatic step-down, next play.
+    #[test]
+    fn an_automatic_relaunch_neither_explains_nor_forgets() {
+        let reason = EmbeddedUnavailable::NotBuilt;
+        let mut notices = FallbackNotices::default();
+        notices.explained(&reason);
+
+        // The relaunch was handed the external player, so its own choice
+        // reports no fallback. That must not read as "nothing to fall back
+        // from".
+        assert_eq!(notices.plan(false, None), SAY_NOTHING);
+        // A relaunch never carries the explanation either, told or not: it
+        // carries the notice that says why it happened.
+        assert_eq!(notices.plan(false, Some(&reason)), SAY_NOTHING);
+        assert_eq!(
+            FallbackNotices::default().plan(false, Some(&reason)),
+            SAY_NOTHING
+        );
+
+        assert_eq!(
+            notices.plan(true, Some(&reason)),
+            SAY_NOTHING,
+            "the play after a step-down is not told again"
+        );
     }
 }

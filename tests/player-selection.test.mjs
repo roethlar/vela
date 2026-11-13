@@ -82,31 +82,40 @@ test('once a play has installed its session, only the launch-failure path ends i
 
 test('a fallback is explained once, and only by a play that started', () => {
   const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
-  // Asked for only when the launch carries no notice of its own.
+  // One decision per play. It is told whether the play chooses its player
+  // (the launch names none) or is an automatic relaunch of a running play,
+  // which neither explains nor forgets (review finding sel-2; the rule itself
+  // is unit-tested in src-tauri/src/player/select.rs).
   assert.match(
     body,
-    /let fallback_notice = if osd_notice\.is_none\(\) \{\s+state\s+\.embedded_fallback_notices[\s\S]{0,120}\.due\(player_choice\.fallback\.as_ref\(\)\)\s+\} else \{\s+None\s+\};/,
+    /let notice_plan = state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.plan\(player\.is_none\(\), player_choice\.fallback\.as_ref\(\)\);/,
+  );
+  // A notice the launch already carries wins, and then nothing is recorded as
+  // explained.
+  assert.match(
+    body,
+    /let explained = notice_plan\s+\.explain\s+\.clone\(\)\s+\.filter\(\|_\| osd_notice\.is_none\(\)\);\s+let fallback_notice = explained\.as_ref\(\)\.map\(\|reason\| reason\.notice\(\)\);/,
   );
   // Recorded inside the success continuation, never before the launch.
   const success = body.slice(body.indexOf('let played = after_successful_play(played, || {'));
   assert.match(
     success,
-    /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,400}if fallback_told \|\| played_fallback\.is_none\(\) \{\s+state\s+\.embedded_fallback_notices[\s\S]{0,120}\.record\(played_fallback\.as_ref\(\)\);/,
+    /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,300}let mut notices = state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+if let Some\(reason\) = &explained \{\s+notices\.explained\(reason\);\s+\} else if notice_plan\.forget_when_started \{\s+notices\.forget\(\);\s+\}/,
   );
   // The notice state is touched in exactly two places in the whole command
-  // layer: asked before the launch, recorded after it succeeded. Anything else
+  // layer: asked before the launch, changed after it succeeded. Anything else
   // (an early record, a second ask) would tell the user at the wrong time.
-  const uses = [...commands.matchAll(/embedded_fallback_notices\s*\.lock\(\)\s*\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s*\.(\w+)\(/g)];
-  assert.deepEqual(uses.map((use) => use[1]), ['due', 'record']);
-  assert.equal(
-    commands.split('embedded_fallback_notices').length - 1,
-    2,
-    'no other code reads or writes the notice state',
-  );
+  const uses = [...commands.matchAll(/embedded_fallback_notices/g)].map((use) => use.index);
+  assert.equal(uses.length, 2, 'no other code reads or writes the notice state');
   const successAt = commands.indexOf('let played = after_successful_play(played, || {');
   const launchAt = commands.indexOf('playback::play(\n');
-  assert.ok(uses[0].index < launchAt, 'the notice is asked for before the launch');
-  assert.ok(uses[1].index > launchAt && uses[1].index > successAt, 'and recorded only after it succeeded');
+  assert.ok(uses[0] < launchAt, 'the plan is made before the launch');
+  assert.ok(uses[1] > launchAt && uses[1] > successAt, 'and acted on only after it succeeded');
+  assert.deepEqual(
+    [...commands.matchAll(/\.(plan|explained|forget)\(/g)].map((call) => call[1]),
+    ['plan', 'explained', 'forget'],
+    'through these three calls and no others',
+  );
 });
 
 test('a relaunch stays in the player it replaces', () => {

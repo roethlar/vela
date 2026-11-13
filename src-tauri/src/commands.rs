@@ -5057,19 +5057,20 @@ async fn play_by_key_locked(
     let player_choice =
         crate::player::choose(wanted_player, &crate::player::embedded_availability());
     *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));
-    // A notice this launch already carries (an Automatic step-down) wins: the
-    // fallback was explained when the play it replaces started.
-    let fallback_notice = if osd_notice.is_none() {
-        state
-            .embedded_fallback_notices
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .due(player_choice.fallback.as_ref())
-    } else {
-        None
-    };
-    let fallback_told = fallback_notice.is_some();
-    let played_fallback = player_choice.fallback.clone();
+    // What this play does about explaining a fallback: once per run of Vela,
+    // and never from an automatic relaunch (`player::FallbackNotices::plan`).
+    let notice_plan = state
+        .embedded_fallback_notices
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .plan(player.is_none(), player_choice.fallback.as_ref());
+    // A notice the launch already carries wins; the explanation then stays
+    // due for a later play.
+    let explained = notice_plan
+        .explain
+        .clone()
+        .filter(|_| osd_notice.is_none());
+    let fallback_notice = explained.as_ref().map(|reason| reason.notice());
     let spec = playback::PlaySpec {
         player: player_choice.kind,
         url: resolved.url,
@@ -5210,14 +5211,18 @@ async fn play_by_key_locked(
         observation: window_observation,
     };
     let played = after_successful_play(played, || {
-        // Only a play that started has shown the user its notice. One that
-        // carried another notice instead leaves the fallback still to be told.
-        if fallback_told || played_fallback.is_none() {
-            state
+        // Only a play that started has shown the user anything, or shown
+        // that there is nothing to fall back from.
+        {
+            let mut notices = state
                 .embedded_fallback_notices
                 .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .record(played_fallback.as_ref());
+                .unwrap_or_else(|e| e.into_inner());
+            if let Some(reason) = &explained {
+                notices.explained(reason);
+            } else if notice_plan.forget_when_started {
+                notices.forget();
+            }
         }
         *state
             .playback_window_session

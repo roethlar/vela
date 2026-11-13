@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — a failed play leaves the new session installed, the playlist position moved and, for a transcoded stream, an encoder running on the user's server with nothing left to stop it. It needs the settings file to become unreadable in the middle of a play start, which is rare.
 **Status**: In progress
 **Branch**: —
-**Commit**: (this commit)
+**Commit**: `88c631b`
 
 ## Evidence
 
