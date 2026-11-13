@@ -135,9 +135,42 @@ fn player_setting_in(settings_file: &str) -> Option<String> {
     value.as_object()?.get("player")?.as_str().map(str::to_string)
 }
 
+/// The most of a settings file that is read here. Vela's own are a few
+/// kilobytes; nothing this large is one.
+const SETTINGS_READ_LIMIT: u64 = 8 * 1024 * 1024;
+
+/// The text of the settings file, when it is an ordinary file of ordinary
+/// size. Anything else is "no text", which makes this start today's.
+///
+/// This read happens on EVERY start on Linux, before the window exists and
+/// before the settings loader has had its say, so it must not be able to
+/// stop a start. The loader refuses a path that is not a regular file and
+/// shows the recovery screen; a plain read of such a path could instead wait
+/// forever (a pipe nobody writes to) or never end (a device), with no window
+/// to show anything in (review finding ec-3). So: open without waiting and
+/// without following a link, look at what was opened, and read no more than
+/// the limit.
+fn settings_text(path: &std::path::Path) -> Option<String> {
+    use std::io::Read;
+    use std::os::unix::fs::OpenOptionsExt;
+    let file = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
+        .open(path)
+        .ok()?;
+    if !file.metadata().ok()?.file_type().is_file() {
+        return None;
+    }
+    let mut text = String::new();
+    file.take(SETTINGS_READ_LIMIT + 1)
+        .read_to_string(&mut text)
+        .ok()?;
+    (text.len() as u64 <= SETTINGS_READ_LIMIT).then_some(text)
+}
+
 fn saved_player_setting() -> Option<String> {
     let path = crate::config::config_path().ok()?;
-    player_setting_in(&std::fs::read_to_string(path).ok()?)
+    player_setting_in(&settings_text(&path)?)
 }
 
 /// Decide how this run starts and do what the decision needs done before
@@ -340,5 +373,104 @@ mod tests {
     fn a_run_that_never_decided_is_in_todays_mode() {
         // Unit tests never call `prepare`.
         assert_eq!(decision(), today(None));
+    }
+
+    /// A directory of its own for one test, removed when the guard drops.
+    struct Scratch(std::path::PathBuf);
+
+    impl Scratch {
+        fn new(name: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "vela-test-{}-startup-{name}",
+                std::process::id()
+            ));
+            let _ = std::fs::remove_dir_all(&dir);
+            std::fs::create_dir_all(&dir).unwrap();
+            Scratch(dir)
+        }
+
+        fn path(&self, name: &str) -> std::path::PathBuf {
+            self.0.join(name)
+        }
+    }
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// `settings_text`, given two seconds. A read that waits on its file
+    /// would hang the test run; this turns that into a failure.
+    fn read_within_two_seconds(path: &std::path::Path) -> Option<String> {
+        let (answer, answered) = std::sync::mpsc::channel();
+        let path = path.to_path_buf();
+        std::thread::spawn(move || {
+            let _ = answer.send(settings_text(&path));
+        });
+        answered
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("the start-up settings read must never wait on its file")
+    }
+
+    #[test]
+    fn an_ordinary_settings_file_is_read() {
+        let scratch = Scratch::new("ordinary");
+        let file = scratch.path("config.json");
+        std::fs::write(&file, r#"{"player":"embedded"}"#).unwrap();
+        let text = read_within_two_seconds(&file).expect("a regular file is read");
+        assert_eq!(player_setting_in(&text).as_deref(), Some("embedded"));
+        assert_eq!(read_within_two_seconds(&scratch.path("absent.json")), None);
+    }
+
+    // The settings loader refuses anything that is not a regular file and
+    // shows the recovery screen. This read runs before the window exists: it
+    // must give up on such a path at once, so that the loader gets its turn.
+    #[test]
+    fn a_settings_path_that_is_not_a_regular_file_is_not_read_and_not_waited_for() {
+        let scratch = Scratch::new("irregular");
+
+        // A pipe nobody writes to: an ordinary open would wait forever.
+        let pipe = scratch.path("pipe.json");
+        let c_pipe = std::ffi::CString::new(pipe.to_str().unwrap()).unwrap();
+        // SAFETY: a valid path string and an ordinary mode.
+        assert_eq!(unsafe { libc::mkfifo(c_pipe.as_ptr(), 0o600) }, 0);
+        assert_eq!(read_within_two_seconds(&pipe), None, "a pipe");
+
+        // A link, even to a perfectly good settings file: the loader does
+        // not follow one either.
+        let real = scratch.path("real.json");
+        std::fs::write(&real, r#"{"player":"embedded"}"#).unwrap();
+        let link = scratch.path("link.json");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        assert_eq!(read_within_two_seconds(&link), None, "a link to a file");
+
+        // A link to something that never ends.
+        let endless = scratch.path("endless.json");
+        std::os::unix::fs::symlink("/dev/zero", &endless).unwrap();
+        assert_eq!(read_within_two_seconds(&endless), None, "a link to a device");
+
+        // The device itself, and a directory.
+        assert_eq!(
+            read_within_two_seconds(std::path::Path::new("/dev/zero")),
+            None,
+            "a device"
+        );
+        assert_eq!(read_within_two_seconds(&scratch.0), None, "a directory");
+    }
+
+    #[test]
+    fn a_settings_file_is_read_up_to_the_limit_and_not_beyond() {
+        let scratch = Scratch::new("limit");
+        let limit = usize::try_from(SETTINGS_READ_LIMIT).unwrap();
+        let at = scratch.path("at.json");
+        std::fs::write(&at, vec![b' '; limit]).unwrap();
+        assert_eq!(
+            read_within_two_seconds(&at).map(|text| text.len()),
+            Some(limit)
+        );
+        let over = scratch.path("over.json");
+        std::fs::write(&over, vec![b' '; limit + 1]).unwrap();
+        assert_eq!(read_within_two_seconds(&over), None);
     }
 }

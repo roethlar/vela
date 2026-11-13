@@ -70,6 +70,24 @@ test("every start is today's unless embedded window mode was decided", () => {
   );
   assert.equal(code(main).split('set_var').length - 1, 1, 'main sets that one variable and no other');
 
+  // The one thing that decision reads from disk, on every Linux start, is
+  // read so that no settings path can make a start wait (review finding
+  // ec-3); the unit tests in startup.rs prove the reader, this proves
+  // nothing else reads.
+  assert.match(
+    startup,
+    /fn saved_player_setting\(\) -> Option<String> \{\s+let path = crate::config::config_path\(\)\.ok\(\)\?;\s+player_setting_in\(&settings_text\(&path\)\?\)\s+\}/,
+  );
+  const shippedStartup = code(startup.slice(0, startup.indexOf('#[cfg(test)]')));
+  assert.equal(count(shippedStartup, 'OpenOptions::new()'), 1, 'one place opens a file');
+  for (const read of ['fs::read', 'File::open', 'read_to_end', 'load_config', 'load_json']) {
+    assert.equal(count(shippedStartup, read), 0, `start-up never calls ${read}`);
+  }
+  assert.match(
+    shippedStartup,
+    /\.custom_flags\(libc::O_NONBLOCK \| libc::O_NOFOLLOW\)\s+\.open\(path\)\s+\.ok\(\)\?;\s+if !file\.metadata\(\)\.ok\(\)\?\.file_type\(\)\.is_file\(\) \{\s+return None;\s+\}/,
+  );
+
   // What "decided" means: the start-up module's answer, on Linux only.
   assert.match(
     functionBody(lib, 'pub fn prepare_startup() -> bool {', 'prepare_startup'),
