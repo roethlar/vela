@@ -31,14 +31,44 @@ function setPlayer(player) {
   fs.writeFileSync(file, JSON.stringify(config));
 }
 
+const stopReports = () =>
+  mock.state.served.filter((r) => r.method === 'POST' && r.path === '/Sessions/Playing/Stopped').length;
+
+// A play is over for Vela only after its last check-in with the server, and the
+// page then reloads what it is showing. This scenario starts several plays in
+// one run of the app; starting the next one before that reload has finished
+// clicks a card that is about to be replaced.
+async function waitForThePlayToSettle(stopReportsBefore) {
+  await pollUntil(
+    () => stopReports() > stopReportsBefore,
+    'the stop report of the play that just ended',
+  );
+  let asked = mock.state.requests.length;
+  let quietSince = Date.now();
+  await pollUntil(
+    () => {
+      if (mock.state.requests.length !== asked) {
+        asked = mock.state.requests.length;
+        quietSince = Date.now();
+        return false;
+      }
+      return Date.now() - quietSince >= 700;
+    },
+    'the page to finish reloading after the play',
+    { intervalMs: 100 },
+  );
+}
+
 // Start a play, let it run long enough for a notice to arrive, report whether
-// one did, and stop it.
+// one did, stop it, and leave the app ready for the next play.
 async function playAndReadNotice(driver) {
+  const stopReportsBefore = stopReports();
   const before = mpvSocketSnapshot();
   await openLibraryGrid(driver);
   await openDetailAndPlay(driver, 'button.poster[aria-label^="Mock Movie"]');
   const socketPath = await waitForNewMpvSocket(before);
   const mpv = await MpvIpc.connect(socketPath);
+  let commands;
   try {
     await pollUntil(() => mpv.getProp('path').catch(() => null), 'mpv to load the stream');
     await pollUntil(
@@ -49,12 +79,13 @@ async function playAndReadNotice(driver) {
     // "no notice" below means none was sent rather than none yet.
     await new Promise((r) => setTimeout(r, 3500));
     const log = fs.readFileSync(logFile, 'utf8');
-    const commands = log.split('\n').filter((line) => line.includes('Run command: show-text'));
+    commands = log.split('\n').filter((line) => line.includes('Run command: show-text'));
     mpv.quit();
-    return commands;
   } finally {
     mpv.close();
   }
+  await waitForThePlayToSettle(stopReportsBefore);
+  return commands;
 }
 
 async function waitForHome(driver) {
