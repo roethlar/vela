@@ -273,12 +273,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
     precondition (120 cards instead of 60). None of those commits touches
     the page; this is the race above, not a regression.
-- E2E `continuetv` fails now and then with "mpv: property unavailable"
-  (2026-11-13: 2 runs of 4 at `31eacad`, and 1 of 6 on a build of
-  `85b38ff`, so it does not come from the work between the two). The
-  scenario's `finishNaturally` seeks as soon as mpv names its file, which
-  can be before the file can be sought in. A race in the scenario, not in
-  Vela; unfixed.
 - The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
   They reproduced during the 1.0.59 full Linux run in `continueon`,
   `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.
