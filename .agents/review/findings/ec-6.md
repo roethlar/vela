@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — the user gets an error instead of a film, once; decision D3 says a play is never failed over the embedded player.
 **Status**: In progress
 **Branch**: —
-**Commit**: `31eacad`
+**Commit**: `31eacad`, `ff147c2`
 
 ## Evidence
 
@@ -93,3 +93,60 @@ and the fallback did it inside the lock. The exit handler takes the same
 lock on the window's thread. The repair looks for mpv and describes the
 launch with the lock released, and takes it again only to check that Vela
 is not exiting, start the player and publish it.
+
+### Repair (round 2), `ff147c2`
+
+`play` now takes the lock on the player slot once per attempt to start a
+player, and does nothing under it but check that Vela is not exiting,
+start the player and publish it. The embedded attempt is one such hold.
+If it fails, the lock is released; the search for the `mpv` program, the
+second socket path and the description of the external launch all happen
+with the lock free; then the lock is taken a second time, the exit check
+is made again, and the external player is started and published. A play
+given the external player is as before: it has looked for mpv before it
+takes the lock at all.
+
+One case had to be told apart for this: a play that comes to start the
+embedded player and finds Vela exiting. That is not the embedded player
+failing, and the external player must not be started in its place.
+`start_player`'s embedded side now says which it was (`NotStarted::CouldNot`
+or `MustNot`).
+
+Three new tests drive the whole of `play` down the fallback path, which
+the first version could only pin by source text. They use stand-ins at
+both ends: an embedded launcher whose start fails, and a small program in
+place of mpv that writes down its arguments (a test-only hook replaces the
+search for mpv on the calling thread, so no test depends on, or starts, a
+real player).
+
+Files: `src-tauri/src/playback.rs`, `tests/player-selection.test.mjs`,
+`tests/mpv-lifecycle.test.mjs`.
+
+Guard proof for round 2, run 2026-11-13 at `ff147c2` in a disposable
+worktree; `cargo +stable test --locked --lib playback::tests` and
+`node --test tests/player-selection.test.mjs tests/mpv-lifecycle.test.mjs`:
+
+| Injection | Rust | Node |
+| --- | --- | --- |
+| The first repair, which was reopened: mpv is looked for with the player slot locked | FAIL `looking_for_mpv_after_a_failed_embedded_start_does_not_hold_the_player_slot` | FAIL `a play the embedded player cannot start goes on in the external player` |
+| The fallback starts a player without checking again that Vela is not exiting | FAIL `a_fallback_is_not_started_once_vela_has_begun_to_exit_during_the_search` | FAIL |
+| A play that must not start is tried in the external player all the same | FAIL `a_play_that_must_not_start_is_not_started_in_the_other_player_either` | |
+| Vela exiting is taken for the embedded player failing | FAIL `an_embedded_play_is_not_started_once_vela_is_shutting_down` | FAIL |
+| The embedded player failing is taken for a play that must not start (the original defect) | FAIL, three tests | FAIL |
+| The fallback is described for the embedded player | FAIL `a_play_the_embedded_player_cannot_start_is_started_in_the_external_one_by_play` | FAIL |
+| The fallback uses the socket of the player that failed | FAIL, the same test | FAIL |
+| A play given the external player no longer checks that Vela is not exiting | (not run) | FAIL, two tests |
+| Unchanged | PASS (26) | PASS |
+
+Also run: `embeddedlatestart`, `embeddedplay` and `playback` in the embedded
+venue, and seven scenarios in the ordinary venue (`playback`, `resume`,
+`playerfallback`, `playverbs`, `markers`, `continueon`, `continueoff`): all
+pass.
+
+Still true, and not changed here: the embedded start itself runs under the
+lock on the player slot, as every start does, and it can take as long as
+the wait for a start (20 seconds) plus the wait for its thread to stop (5).
+Quitting Vela in that time waits for it. That is deliberate: the exit
+handler must not pass a player that is in the middle of starting, because
+that player draws on the window's connection. It is slow only when an
+embedded start is already going wrong.
