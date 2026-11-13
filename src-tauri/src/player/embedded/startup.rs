@@ -144,18 +144,50 @@ const SETTINGS_READ_LIMIT: u64 = 8 * 1024 * 1024;
 ///
 /// This read happens on EVERY start on Linux, before the window exists and
 /// before the settings loader has had its say, so it must not be able to
-/// stop a start. The loader refuses a path that is not a regular file and
-/// shows the recovery screen; a plain read of such a path could instead wait
-/// forever (a pipe nobody writes to) or never end (a device), with no window
-/// to show anything in (review finding ec-3). So: open without waiting and
-/// without following a link, look at what was opened, and read no more than
-/// the limit.
+/// stop a start or to touch anything. The loader refuses a path that is not
+/// a regular file and shows the recovery screen; a plain read of such a path
+/// could instead wait forever (a pipe nobody writes to) or never end (a
+/// device), with no window to show anything in (review finding ec-3).
+///
+/// Nor may the path be opened for reading just to find out what it is:
+/// opening is itself an act on some things. A terminal opened by a process
+/// that has none becomes its controlling terminal, and hangs the process up
+/// when it goes; a writer waiting on a pipe is woken, and then finds nobody
+/// reading (the first repair did this, and was reopened for it). So:
+///
+/// 1. Take a handle on whatever is at the path WITHOUT opening it
+///    (`O_PATH`), and without following a link.
+/// 2. Ask the handle what it is. Only a regular file goes further.
+/// 3. Open that same file, through the handle rather than through the path,
+///    so that whatever is put at the path in the meantime is not what gets
+///    read. Opening a regular file does nothing to anyone.
+/// 4. Read no more than the limit.
 fn settings_text(path: &std::path::Path) -> Option<String> {
+    text_of(&regular_file_at(path)?)
+}
+
+/// Steps 1 and 2 of [`settings_text`]: a handle on the regular file at
+/// `path`, which has not been opened for reading. Nothing when what is there
+/// is anything else, a link included.
+fn regular_file_at(path: &std::path::Path) -> Option<std::fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    let held = std::fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_PATH | libc::O_NOFOLLOW)
+        .open(path)
+        .ok()?;
+    held.metadata().ok()?.file_type().is_file().then_some(held)
+}
+
+/// Steps 3 and 4 of [`settings_text`]: the text of the file `held` is a
+/// handle on. It is given no path, so it cannot read anything else.
+fn text_of(held: &std::fs::File) -> Option<String> {
+    use std::os::fd::AsRawFd;
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
         .read(true)
-        .custom_flags(libc::O_NONBLOCK | libc::O_NOFOLLOW)
-        .open(path)
+        .custom_flags(libc::O_NONBLOCK | libc::O_NOCTTY)
+        .open(format!("/proc/self/fd/{}", held.as_raw_fd()))
         .ok()?;
     if !file.metadata().ok()?.file_type().is_file() {
         return None;
@@ -243,6 +275,7 @@ pub(crate) fn prepare() -> WindowMode {
 mod tests {
     use super::*;
     use std::ffi::OsStr;
+    use std::os::unix::fs::OpenOptionsExt;
 
     /// Everything in favour of embedded window mode.
     const WILLING: Facts<'static> = Facts {
@@ -465,6 +498,80 @@ mod tests {
             "a device"
         );
         assert_eq!(read_within_two_seconds(&scratch.0), None, "a directory");
+    }
+
+    // Finding out that a path is not a settings file must not touch what is
+    // there. A writer waiting on a pipe is woken by anyone who opens the pipe
+    // for reading, and then fails for want of a reader; the same open would
+    // adopt a terminal as the process's own. Nothing is opened for reading
+    // unless it is a regular file, and this shows it on the pipe: the writer
+    // is still waiting afterwards.
+    #[test]
+    fn looking_at_a_settings_path_does_not_wake_a_writer_waiting_on_a_pipe() {
+        let scratch = Scratch::new("pipe-writer");
+        let pipe = scratch.path("pipe.json");
+        let c_pipe = std::ffi::CString::new(pipe.to_str().unwrap()).unwrap();
+        // SAFETY: a valid path string and an ordinary mode.
+        assert_eq!(unsafe { libc::mkfifo(c_pipe.as_ptr(), 0o600) }, 0);
+        let (opened, was_opened) = std::sync::mpsc::channel();
+        let writer_path = pipe.clone();
+        let writer = std::thread::spawn(move || {
+            // Waits here until something opens the pipe for reading.
+            let end = std::fs::OpenOptions::new().write(true).open(&writer_path);
+            let _ = opened.send(());
+            drop(end);
+        });
+        // Let the writer reach its wait.
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        assert_eq!(read_within_two_seconds(&pipe), None);
+        assert!(
+            was_opened
+                .recv_timeout(std::time::Duration::from_millis(300))
+                .is_err(),
+            "the writer was woken: the pipe was opened for reading"
+        );
+        // Let the writer go: now a reader does appear.
+        let reader = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&pipe)
+            .unwrap();
+        was_opened
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("the writer wakes for a real reader");
+        writer.join().unwrap();
+        drop(reader);
+    }
+
+    // What is read is the file that was looked at, not whatever is at the
+    // path by the time of the read.
+    #[test]
+    fn the_file_that_was_checked_is_the_file_that_is_read() {
+        let scratch = Scratch::new("same-file");
+        let file = scratch.path("config.json");
+        std::fs::write(&file, r#"{"player":"embedded"}"#).unwrap();
+        // The file is looked at, and then the path is given to something
+        // else before the read: first another file, then a pipe.
+        let held = regular_file_at(&file).expect("a regular file");
+        std::fs::rename(&file, scratch.path("moved.json")).unwrap();
+        std::fs::write(&file, r#"{"player":"external"}"#).unwrap();
+        assert_eq!(
+            player_setting_in(&text_of(&held).unwrap()).as_deref(),
+            Some("embedded"),
+            "what was looked at is what is read"
+        );
+        std::fs::remove_file(&file).unwrap();
+        let c_path = std::ffi::CString::new(file.to_str().unwrap()).unwrap();
+        // SAFETY: a valid path string and an ordinary mode.
+        assert_eq!(unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) }, 0);
+        assert_eq!(
+            player_setting_in(&text_of(&held).unwrap()).as_deref(),
+            Some("embedded"),
+            "a pipe put at the path afterwards is never opened"
+        );
+        // A handle on something that is not a regular file is never made.
+        assert!(regular_file_at(&file).is_none(), "the pipe");
+        assert!(regular_file_at(&scratch.0).is_none(), "a directory");
     }
 
     // A huge regular file passes every check on the path. Without a bound

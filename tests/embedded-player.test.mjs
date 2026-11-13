@@ -79,18 +79,30 @@ test("every start is today's unless embedded window mode was decided", () => {
     /fn saved_player_setting\(\) -> Option<String> \{\s+let path = crate::config::config_path\(\)\.ok\(\)\?;\s+player_setting_in\(&settings_text\(&path\)\?\)\s+\}/,
   );
   const shippedStartup = code(startup.slice(0, startup.indexOf('#[cfg(test)]')));
-  assert.equal(count(shippedStartup, 'OpenOptions::new()'), 1, 'one place opens a file');
-  // What it opened is read through the bounded reader and no other way.
-  assert.match(shippedStartup, /if !file\.metadata\(\)\.ok\(\)\?\.file_type\(\)\.is_file\(\) \{\s+return None;\s+\}\s+bounded_text\(file\)\s+\}/);
+  // The path is never opened for reading to find out what it is (that is
+  // an act on a pipe or a terminal). A handle is taken without opening,
+  // asked what it is, and only a regular file is then opened, through the
+  // handle. These are the only two opens start-up makes, in this order.
+  assert.match(
+    functionBody(shippedStartup, 'fn settings_text(path: &std::path::Path) -> Option<String> {', 'settings_text'),
+    /\{\s+text_of\(&regular_file_at\(path\)\?\)$/,
+  );
+  assert.match(
+    functionBody(shippedStartup, 'fn regular_file_at(path: &std::path::Path) -> Option<std::fs::File> {', 'regular_file_at'),
+    /let held = std::fs::OpenOptions::new\(\)\s+\.read\(true\)\s+\.custom_flags\(libc::O_PATH \| libc::O_NOFOLLOW\)\s+\.open\(path\)\s+\.ok\(\)\?;\s+held\.metadata\(\)\.ok\(\)\?\.file_type\(\)\.is_file\(\)\.then_some\(held\)$/,
+  );
+  // The second half is given the handle and no path.
+  assert.match(
+    functionBody(shippedStartup, 'fn text_of(held: &std::fs::File) -> Option<String> {', 'text_of'),
+    /let file = std::fs::OpenOptions::new\(\)\s+\.read\(true\)\s+\.custom_flags\(libc::O_NONBLOCK \| libc::O_NOCTTY\)\s+\.open\(format!\("\/proc\/self\/fd\/\{\}", held\.as_raw_fd\(\)\)\)\s+\.ok\(\)\?;\s+if !file\.metadata\(\)\.ok\(\)\?\.file_type\(\)\.is_file\(\) \{\s+return None;\s+\}\s+bounded_text\(file\)$/,
+  );
+  assert.equal(count(shippedStartup, 'OpenOptions::new()'), 2, 'those two opens and no other');
+  assert.equal(count(shippedStartup, '.open(path)'), 1, 'the path itself is opened once, without reading');
   assert.equal(count(shippedStartup, 'read_to_string'), 1, 'one read, inside the bounded reader');
   assert.match(shippedStartup, /source\s+\.take\(SETTINGS_READ_LIMIT \+ 1\)\s+\.read_to_string\(&mut text\)/);
   for (const read of ['fs::read', 'File::open', 'read_to_end', 'load_config', 'load_json']) {
     assert.equal(count(shippedStartup, read), 0, `start-up never calls ${read}`);
   }
-  assert.match(
-    shippedStartup,
-    /\.custom_flags\(libc::O_NONBLOCK \| libc::O_NOFOLLOW\)\s+\.open\(path\)\s+\.ok\(\)\?;\s+if !file\.metadata\(\)\.ok\(\)\?\.file_type\(\)\.is_file\(\) \{\s+return None;\s+\}/,
-  );
 
   // What "decided" means: the start-up module's answer, on Linux only.
   assert.match(
