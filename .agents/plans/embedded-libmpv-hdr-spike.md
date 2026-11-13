@@ -333,9 +333,9 @@ players on their default tone-mapping, as Vela launches mpv).
   mpv window in tone. brightness is close, but the external mpv window is a
   touch less bright in the last white strip." This agrees with the measured
   difference between the two renderers under "Conditions and differences
-  found". Agent's reading, not confirmed: "tone" may also mean a colour
-  cast; the embedded greys read back about 2-3 codes high in green
-  (449/452/449).
+  found". The owner then clarified: "gray in one isn't the same gray in the
+  other". See "Grey mismatch" below: part of what the owner saw was the
+  agent's faulty comparison.
 - Pointer input: the page received the owner's clicks, 12 in all, on the
   button in the HTML band over the video surface and on the sidebar button
   (counts per button are in the scratch log `owner-compare-stage2.log`).
@@ -344,6 +344,34 @@ players on their default tone-mapping, as Vela launches mpv).
 - The commands under "Not verified" assume the owner's own terminal. From
   a root session, prefix `./run.sh` and use the full path
   `/home/michael/dev/vela-spike-libmpv`.
+
+### Grey mismatch — measured after the owner's check, 2026-11-12
+
+The comparison shown to the owner was unfair: the embedded window was
+launched without `profile=gpu-hq` and `hdr-compute-peak=yes`, which the
+external player had. Screenshot values (R,G,B of 255) per grey patch:
+
+| Patch, nits | external, Vela's arguments | embedded as shown to the owner | embedded with Vela's options |
+| --- | --- | --- | --- |
+| 50 | 77,77,77 | 76,77,76 | 77,77,77 |
+| 100 | 103,103,104 | 101,103,102 | 103,103,103 |
+| 203 | 137,137,138 | 136,138,136 | 138,138,138 |
+| 265 | 150,150,150 | 150,152,151 | 152,152,152 |
+| 400 | 170,170,170 | 174,178,175 | 177,177,177 |
+| 600 | 187,187,187 | 201,204,202 | 203,203,203 |
+| 1000 | 207,207,207 | 229,233,230 | 231,231,231 |
+
+- **Green cast: an artefact of the test.** Without `profile=gpu-hq` the
+  embedded greys carry 2-4 more green than red; with it they are neutral.
+  Software decoding changes nothing, so it is not the decoder. Which
+  setting inside the profile removes the cast was not isolated.
+- **Brightness above about 265 nits: real.** With identical options the
+  embedded greys are neutral and match external mpv within 2 up to 265
+  nits, then run brighter (7 at 400 nits, 16 at 600, 24 at 1000). Forcing
+  the same named curve on both (`tone-mapping=bt.2390`, no peak detection)
+  narrows the gap to 4-8 between 203 and 600 nits but does not close it:
+  the two renderers implement the curve differently.
+- The owner has not seen the corrected comparison.
 
 ### What a real implementation must then build
 

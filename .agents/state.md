@@ -263,8 +263,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   window, under GTK3 + WebKitGTK, and inside Tauri 2. Conditions: the
   library draws with mpv's older renderer (tone-mapping differs from
   today's above about 265 nits), and Vela must tag the surface itself.
-  The owner confirmed by eye that it is HDR and that it does not match
-  external mpv: the last white patch is a touch brighter embedded. Clicks
+  The owner confirmed by eye that it is HDR and that its greys do not
+  match external mpv. Measured afterwards: a green cast in that comparison
+  was the agent's missing `profile=gpu-hq`; with Vela's options the greys
+  match up to about 265 nits and are brighter above. The owner has not
+  seen the corrected comparison. Clicks
   on HTML drawn over the video reach the page. Still open: a real film
   sample. Next is the owner's ruling on whether to plan the
   embedded player; external mpv stays the shipped player until such a plan
