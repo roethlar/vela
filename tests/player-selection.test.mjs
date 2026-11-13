@@ -52,48 +52,83 @@ test('every play chooses its player from the setting and what can run', () => {
 });
 
 test('once a play has installed its session, only the launch-failure path ends it early', () => {
-  // Installing the session, moving the playlist position, stopping the
+  // Moving the playlist position, installing the session, stopping the
   // previous player and registering a transcode are undone in one place: the
-  // launch-failure arm at the end of the function. An early return between
-  // the installation and that arm skips all of it (review finding sel-1).
+  // `Err` arm after the launch. A failure that left the function between the
+  // installation and that arm would skip all of it (review finding sel-1).
+  //
+  // Earlier versions of this test listed the ways a line of Rust can leave a
+  // function early and looked for them in that stretch. No such list is
+  // complete, and a pattern that reads Rust can be fooled. So the code was
+  // reshaped instead: everything that starts the play is written as one
+  // block, `launch`, BEFORE the installation, and run by a single line after
+  // it. Inside the block a `?` or a `return` leaves the block, with a message
+  // the arm receives; it cannot leave the function. What this test holds is
+  // that the stretch from the installation to the arm is exactly these lines,
+  // none of which can fail. (A panic is not an early return: release builds
+  // abort on one, `panic = "abort"`, so no half-started Vela is left running.)
   const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
-  const installed = body.indexOf(
+  const statements = (text) =>
+    text
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line && !line.startsWith('//'));
+
+  const installing = '    let previous_cursor = {\n';
+  const undoing = '    let stop = match launched {\n';
+  const from = body.indexOf(installing);
+  const to = body.indexOf(undoing);
+  assert.notEqual(from, -1, 'the play must still install its playlist position and session');
+  assert.ok(to > from, 'and must still end in the arm that undoes them');
+  assert.equal(body.indexOf(installing, from + 1), -1);
+  assert.equal(body.indexOf(undoing, to + 1), -1);
+  assert.deepEqual(statements(body.slice(from, to)), [
+    'let previous_cursor = {',
+    'let mut cursor = state.playlist_cursor.lock().await;',
+    'std::mem::replace(&mut *cursor, new_cursor)',
+    '};',
     'install_playback_session(state, session_id, item, run_kind, next_affinity).await;',
-  );
-  const undone = body.indexOf('let stop = match played {');
-  assert.notEqual(installed, -1, 'the play must still install its session');
-  assert.ok(undone > installed, 'and must still end in the launch-failure arm');
-  // Every line in that stretch that can leave early, however it is written:
-  // the `?` operator wherever it stands (`x?;`, `x?,`, `x?.y`, `f(x?)`), a
-  // `return`, and the calls and macros that panic. Literals are emptied first
-  // so that a `?` in a message is not one. The first version of this test
-  // looked for `?` only before `;`, a line end or `.`, and `drop(x?,)` got
-  // past it (review finding sel-1, round 1).
-  const codeOf = (line) =>
-    line.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'(?:[^'\\]|\\.)'/g, "''");
-  const leaves = /\?|\breturn\b|\.unwrap\(\)|\.expect\(|\b(panic|unreachable|todo|unimplemented)!/;
-  const leaving = body
-    .slice(installed, undone)
-    .split('\n')
-    .filter((line) => !/^\s*\/\//.test(line) && leaves.test(codeOf(line)));
-  assert.deepEqual(leaving, [
-    // Known, older than the embedded player and recorded for the owner in
-    // .agents/state.md (Blockers): the settings read for Vela's own resume
-    // position.
-    '            .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?;',
-    // Inside the end-of-play callback. It leaves that callback, later and on
-    // the tracker's thread; it cannot leave this function.
-    '                return;',
-    // Nothing may be added to this list. A step that can fail belongs before
-    // the installation, or its failure belongs in the launch-failure arm.
+    'let launched: Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String> = launch.await;',
   ]);
+
+  // `launch` is the block, defined once, before anything is installed.
+  const defined = body.indexOf('    let launch = async {\n');
+  assert.notEqual(defined, -1, 'the steps that start the play are one block');
+  assert.ok(defined < from, 'written before the installation');
+  assert.equal(body.split('let launch =').length - 1, 1, 'written once');
+  assert.equal(body.split('launch.await').length - 1, 1, 'and run once, by the line above');
+
+  // The arm, whole: stop the transcode, clear the session, put the playlist
+  // position back, and only then report the failure.
+  const arm = body.slice(to);
+  const reported = arm.indexOf('            return Err(PlayFailure::fatal(message));\n        }\n    };\n');
+  assert.notEqual(reported, -1, 'the arm ends by reporting the failure');
+  assert.deepEqual(statements(arm.slice(0, reported)), [
+    'let stop = match launched {',
+    'Ok(stop) => stop,',
+    'Err(message) => {',
+    'if let Some(session) = transcode_session.as_deref() {',
+    'if let Some(record) = take_active_transcode(&state.active_transcode, session) {',
+    'stop_transcode_record(record).await;',
+    '}',
+    '}',
+    'clear_playback_session_if(state, session_id).await;',
+    'let mut cursor = state.playlist_cursor.lock().await;',
+    'if cursor',
+    '.as_ref()',
+    '.is_none_or(|current| current.session_id == session_id)',
+    '{',
+    '*cursor = previous_cursor;',
+    '}',
+  ]);
+
   // The player setting is read before anything is resolved or installed.
   const read = body.indexOf('let wanted_player = match player {');
   const resolved = body.indexOf('let resolved = match selection.version_id.as_deref() {');
   assert.notEqual(read, -1, 'the play must read which player is wanted');
   assert.notEqual(resolved, -1, 'the play must still resolve its stream');
   assert.ok(read < resolved, 'the player setting is read before the stream is resolved');
-  assert.ok(read < installed, 'and before the session is installed');
+  assert.ok(read < from, 'and before anything is installed');
   assert.equal(body.indexOf('let wanted_player', read + 1), -1, 'and only once');
 });
 

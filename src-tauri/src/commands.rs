@@ -4937,6 +4937,337 @@ async fn play_by_key_locked(
     };
     let window_observation = playback::WindowStateObservation::default();
 
+    // Grab the teardown handle before `resolved` is consumed below. Whatever
+    // started a transcode is obliged to stop it: neither server has a
+    // keep-alive, and how an abandoned session expires is unknown.
+    let transcode_session = resolved.transcode_session.clone();
+    // The tracker can observe a very fast mpv exit before this async command
+    // resumes from spawn_blocking. Hold its final recents stamp until the
+    // post-launch record attempt has completed, or finish() could run first
+    // and leave a permanently unstamped open entry behind.
+    let recents_ready = std::sync::Arc::new(PlayStartGate::default());
+    let playback_started_at_ms = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let _release_recents_on_return = OpenPlayStartGateOnDrop(recents_ready.clone());
+
+    // What starting the play consists of, once its session is installed:
+    // stop the previous player, register a transcode, start the player.
+    // WRITTEN here, RUN below. It is a block of its own, built before the
+    // installation and awaited right after it, for one reason: ONE place
+    // undoes the installation when the play does not start (the `Err` arm
+    // below), and a failure must not be able to leave this function between
+    // the two. Inside this block a `?` or a `return` leaves the block, with
+    // a message that arm receives. Between the installation and the arm
+    // there is then a single line, which cannot fail (review finding sel-1).
+    let launch = async {
+        // Cancel the prior tracker and terminate the prior mpv so we never run two
+        // players. The kill is a non-blocking syscall; the reap is handed to the
+        // periodic reaper via reap_queue.
+        if let Some(prev) = state
+            .tracking_stop
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        {
+            prev.store(true, Ordering::Relaxed);
+        }
+        let prev_child = state
+            .current_child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        let mut prior_include_error = None;
+        if let Some(mut child) = prev_child {
+            if let Err(error) = child.remove_consumed_header_include() {
+                prior_include_error = Some(error);
+            }
+            let _ = child.kill();
+            state
+                .reap_queue
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(child);
+        }
+
+        // Sources that keep no server-side progress (the local family) resolve
+        // resume_ms 0 — fall back to Vela's own stamped position so a Continue
+        // Watching click actually continues (2026-07-04 hero decision). A server
+        // that supplies a position still wins: it is the watch-state authority.
+        let local_resume_ms = if !start_from_beginning && resolved.resume_ms == 0 {
+            let cfg = config::load_config()
+                .map_err(|_| "could not read Vela settings".to_string())?;
+            crate::recents::resume_stamp_ms(&cfg, &item.rating_key)
+        } else {
+            0
+        };
+        // An Automatic step-down resumes at the position the replaced player had
+        // actually reached — the server's stamp lags it by up to a report interval,
+        // and resuming even a few seconds back is a visible stutter in what should
+        // look like the picture quality changing.
+        let resume_ms = match resume_override_ms {
+            Some(exact) => exact,
+            None => playback_start_ms(start_from_beginning, resolved.resume_ms, local_resume_ms),
+        };
+        // Resolve the bundled mpv autocrop script here (the command layer holds the
+        // AppHandle; `playback::play` does not). Whether it's injected depends on the
+        // `mpv_autocrop` config mode, decided when the launch is described
+        // (`player::launch::build_launch`). `resolve` only computes the
+        // path; `play` existence-checks before use.
+        let resolve_resource = |name: &str| {
+            state.app_handle.get().and_then(|app| {
+                use tauri::Manager;
+                app.path()
+                    .resolve(
+                        format!("mpv-scripts/{name}"),
+                        tauri::path::BaseDirectory::Resource,
+                    )
+                    .ok()
+                    .map(|p| p.to_string_lossy().into_owned())
+            })
+        };
+        let autocrop_script = resolve_resource("autocrop.lua");
+        // Vela's trigger shim rides next to the stock script (auto mode disables
+        // the stock trigger and lets the shim fire detection after a settle
+        // delay — the stock trigger breaks on --start resumes; see the shim).
+        let autocrop_shim = resolve_resource("vela-autocrop.lua");
+        // Own the session in app state from here on. The end callback alone is not
+        // enough: app exit kills mpv and returns without waiting for any tracker
+        // tail, so a teardown that only exists inside that callback — or in a task
+        // detached from it — can be lost with the runtime and leave an encoder
+        // running on the user's server (finding `tr-4`). Registering here also
+        // covers the launch-failure path below, which never reaches the callback.
+        if let Some(session) = transcode_session.clone() {
+            if let Some(replaced) = register_active_transcode(&state.active_transcode, &src, session) {
+                // A play that supersedes another must stop the encoder it
+                // supersedes; the old tracker's tail can no longer claim it.
+                stop_transcode_record(replaced).await;
+            }
+        }
+        let markers_script = resolve_resource("vela-markers.lua");
+        // Keep only the kinds the user actually enabled: the script must never be
+        // handed a range it is not allowed to act on.
+        let markers: Vec<crate::source::MediaMarker> = resolved
+            .markers
+            .into_iter()
+            .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
+            .collect();
+        // Which player runs this play (decisions D1 and D3 of
+        // `.agents/plans/embedded-player.md`): what was asked for above, and the
+        // external player whenever the embedded one cannot run. A fallback never
+        // fails the play; it is explained once, in one line, on the player that
+        // did start.
+        let embedded_available = match wanted_player {
+            // Nothing is asked of the window for a play that does not want it.
+            crate::player::PlayerKind::External => Ok(()),
+            crate::player::PlayerKind::Embedded => {
+                crate::player::embedded_availability(&state.embedded, state.app_handle.get()).await
+            }
+        };
+        let player_choice = crate::player::choose(wanted_player, &embedded_available);
+        *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));
+        // What this play does about explaining a fallback: once per run of Vela,
+        // and never from an automatic relaunch (`player::FallbackNotices::plan`).
+        let notice_plan = state
+            .embedded_fallback_notices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .plan(player.is_none(), player_choice.fallback.as_ref());
+        // A notice the launch already carries wins; the explanation then stays
+        // due for a later play.
+        if let Some(reason) = &notice_plan.explain {
+            // Once per reason, like the line on screen: the on-screen line is
+            // short and gone in two seconds, and this is where to look later.
+            eprintln!(
+                "vela: playing in the external player: {}",
+                reason.notice()
+            );
+        }
+        let explained = notice_plan.explain.filter(|_| osd_notice.is_none());
+        let fallback_notice = explained.as_ref().map(|reason| reason.notice());
+        // The user has been told only once the line has really reached the
+        // player. It is sent a moment after the player starts, and a play that is
+        // replaced before then never shows it: that explanation stays due.
+        let on_notice_shown = explained.map(|reason| {
+            let notices = state.embedded_fallback_notices.clone();
+            std::sync::Arc::new(move || {
+                notices
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .explained(&reason);
+            }) as playback::NoticeShown
+        });
+        let spec = playback::PlaySpec {
+            player: player_choice.kind,
+            url: resolved.url,
+            title: item.title.clone(),
+            http_headers: resolved.http_headers,
+            start_seconds: resume_ms as f64 / 1000.0,
+            autocrop_script,
+            autocrop_shim,
+            inherited_window_state,
+            screen_name,
+            window_observation: window_observation.clone(),
+            markers_script,
+            markers,
+            intro_policy: skip_policies.intro,
+            credits_policy: skip_policies.credits,
+            commercial_policy: skip_policies.commercial,
+            // Automatic only. Whether a lower tier actually exists is NOT checked
+            // here: that needs a decision round trip per play, and a verdict is
+            // rare — `apply_step_down` resolves the ladder when one actually
+            // arrives, and declines if there is nowhere to go.
+            step_down: automatic_manages(continues_automatic, &quality).then(|| {
+                let queue = state.step_down.clone();
+                let session = session_id.to_string();
+                let already = steps_taken;
+                let running_quality = quality.clone();
+                std::sync::Arc::new(move |position_ms: u64, reason| {
+                    queue.request(StepDownRequest {
+                        session_id: session.clone(),
+                        position_ms,
+                        reason,
+                        steps_taken: already,
+                        current_quality: running_quality.clone(),
+                    });
+                }) as playback::StepDownNotify
+            }),
+            duration: item.duration_ms.map(Duration::from_millis),
+            osd_notice: osd_notice.or(fallback_notice),
+            on_notice_shown,
+            steps_taken,
+        };
+        // Every tracker tail publishes a refresh after its final sampled server
+        // check-in. That keeps quit/error progress current; a joined clean EOF gets
+        // a second, authoritative refresh from the async dispatcher after exact-
+        // session completion curation and any backend-owned successor start.
+        // Payloads carry ids only — never URLs or tokens.
+        let on_end: Option<playback::EndNotify> = {
+            use tauri::Emitter;
+            let app = state.app_handle.get().cloned();
+            let source_id = src.id().to_string();
+            let item_key = item.rating_key.clone();
+            let watch_key = item.watch_key.clone();
+            let watch_backings = watched_state_backings(item);
+            let media_type = item.media_type.clone();
+            let session_id = session_id.to_string();
+            let recents_ready = recents_ready.clone();
+            let playback_started_at_ms = playback_started_at_ms.clone();
+            let advance = state.playback_advance.clone();
+            let transcode_slot = state.active_transcode.clone();
+            let transcode_session = transcode_session.clone();
+            Some(std::sync::Arc::new(move |position_ms: u64| {
+                // Stop the server-side transcode first: it costs the user's server
+                // real work, and the recents/event bookkeeping below must not be
+                // able to skip it by returning early. This runs on the tracker's
+                // own thread, outside any runtime, so it BLOCKS until the DELETE
+                // lands or its deadline expires rather than detaching a task the
+                // process may outlive.
+                if let Some(session) = transcode_session.as_deref() {
+                    if let Some(record) = take_active_transcode(&transcode_slot, session) {
+                        stop_transcode_record_blocking(record);
+                    }
+                }
+                if !recents_ready.wait_succeeded() {
+                    return;
+                }
+                // Stamp Vela's recents BEFORE emitting, so the refresh the event
+                // triggers reads the updated list. Runs on the tracker thread —
+                // synchronous config I/O is fine there.
+                let now_ms = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .map(|d| d.as_millis() as u64)
+                    .unwrap_or(0);
+                let key = item_key.clone();
+                let finishing_session = session_id.clone();
+                let _ = config::update(move |cfg| {
+                    crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
+                    Ok(())
+                });
+                if let Some(app) = &app {
+                    let _ = app.emit(
+                        "playback-ended",
+                        serde_json::json!({ "sourceId": source_id, "itemKey": item_key.clone() }),
+                    );
+                }
+                advance.mark_ended(PlaybackCompletion {
+                    session_id: session_id.clone(),
+                    item_key: item_key.clone(),
+                    watch_key: watch_key.clone(),
+                    started_at_ms: playback_started_at_ms.load(Ordering::SeqCst),
+                    watch_backings: watch_backings.clone(),
+                    media_type: media_type.clone(),
+                });
+            }) as playback::EndNotify)
+        };
+        let progress = resolved.progress;
+        let child_slot = state.current_child.clone();
+        let shutting_down = state.shutting_down.clone();
+        let advance = state.playback_advance.clone();
+        let playback_session = session_id.to_string();
+        let embedded_launcher =
+            crate::player::embedded_launcher(&state.embedded, state.app_handle.get());
+        let played = if let Some(error) = prior_include_error {
+            Err(error)
+        } else {
+            tauri::async_runtime::spawn_blocking(move || {
+                playback::play(
+                    &spec,
+                    progress,
+                    playback::Players {
+                        slot: &child_slot,
+                        shutting_down: &shutting_down,
+                        embedded: embedded_launcher.as_deref(),
+                    },
+                    &advance,
+                    playback_session,
+                    on_end,
+                )
+            })
+            .await
+            .map_err(|e| format!("playback task failed: {e}"))
+            .and_then(|r| r)
+        };
+        let recent = item.clone();
+        let recent_session = session_id.to_string();
+        let completion_started_at_ms = playback_started_at_ms.clone();
+        let launched_window_session = PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            observation: window_observation,
+        };
+        let played = after_successful_play(played, || {
+            // Only a play that started has shown that there is nothing to fall
+            // back from. (An explanation is recorded when it is shown, above.)
+            if notice_plan.forget_when_started {
+                state
+                    .embedded_fallback_notices
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .forget();
+            }
+            *state
+                .playback_window_session
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = Some(launched_window_session);
+            let started_at_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|duration| duration.as_millis() as u64)
+                .unwrap_or(0);
+            completion_started_at_ms.store(started_at_ms, Ordering::SeqCst);
+            if let Err(e) = config::update(move |cfg| {
+                crate::recents::record_play_start(
+                    cfg,
+                    recent,
+                    start_from_beginning,
+                    recent_session,
+                    started_at_ms,
+                );
+                Ok(())
+            }) {
+                eprintln!("vela: couldn't record started playback: {e}");
+            }
+        });
+        played
+    };
+
     // A failed resolve leaves the currently-playing context intact. Only once
     // the replacement has a real stream do we provisionally install its
     // context. The play lock keeps the expected session valid between the
@@ -4953,325 +5284,8 @@ async fn play_by_key_locked(
         std::mem::replace(&mut *cursor, new_cursor)
     };
     install_playback_session(state, session_id, item, run_kind, next_affinity).await;
-
-    // Cancel the prior tracker and terminate the prior mpv so we never run two
-    // players. The kill is a non-blocking syscall; the reap is handed to the
-    // periodic reaper via reap_queue.
-    if let Some(prev) = state
-        .tracking_stop
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take()
-    {
-        prev.store(true, Ordering::Relaxed);
-    }
-    let prev_child = state
-        .current_child
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .take();
-    let mut prior_include_error = None;
-    if let Some(mut child) = prev_child {
-        if let Err(error) = child.remove_consumed_header_include() {
-            prior_include_error = Some(error);
-        }
-        let _ = child.kill();
-        state
-            .reap_queue
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(child);
-    }
-
-    // Sources that keep no server-side progress (the local family) resolve
-    // resume_ms 0 — fall back to Vela's own stamped position so a Continue
-    // Watching click actually continues (2026-07-04 hero decision). A server
-    // that supplies a position still wins: it is the watch-state authority.
-    let local_resume_ms = if !start_from_beginning && resolved.resume_ms == 0 {
-        let cfg = config::load_config()
-            .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?;
-        crate::recents::resume_stamp_ms(&cfg, &item.rating_key)
-    } else {
-        0
-    };
-    // An Automatic step-down resumes at the position the replaced player had
-    // actually reached — the server's stamp lags it by up to a report interval,
-    // and resuming even a few seconds back is a visible stutter in what should
-    // look like the picture quality changing.
-    let resume_ms = match resume_override_ms {
-        Some(exact) => exact,
-        None => playback_start_ms(start_from_beginning, resolved.resume_ms, local_resume_ms),
-    };
-    // Resolve the bundled mpv autocrop script here (the command layer holds the
-    // AppHandle; `playback::play` does not). Whether it's injected depends on the
-    // `mpv_autocrop` config mode, decided when the launch is described
-    // (`player::launch::build_launch`). `resolve` only computes the
-    // path; `play` existence-checks before use.
-    let resolve_resource = |name: &str| {
-        state.app_handle.get().and_then(|app| {
-            use tauri::Manager;
-            app.path()
-                .resolve(
-                    format!("mpv-scripts/{name}"),
-                    tauri::path::BaseDirectory::Resource,
-                )
-                .ok()
-                .map(|p| p.to_string_lossy().into_owned())
-        })
-    };
-    let autocrop_script = resolve_resource("autocrop.lua");
-    // Vela's trigger shim rides next to the stock script (auto mode disables
-    // the stock trigger and lets the shim fire detection after a settle
-    // delay — the stock trigger breaks on --start resumes; see the shim).
-    let autocrop_shim = resolve_resource("vela-autocrop.lua");
-    // Grab the teardown handle before `resolved` is consumed below. Whatever
-    // started a transcode is obliged to stop it: neither server has a
-    // keep-alive, and how an abandoned session expires is unknown.
-    let transcode_session = resolved.transcode_session.clone();
-    // Own the session in app state from here on. The end callback alone is not
-    // enough: app exit kills mpv and returns without waiting for any tracker
-    // tail, so a teardown that only exists inside that callback — or in a task
-    // detached from it — can be lost with the runtime and leave an encoder
-    // running on the user's server (finding `tr-4`). Registering here also
-    // covers the launch-failure path below, which never reaches the callback.
-    if let Some(session) = transcode_session.clone() {
-        if let Some(replaced) = register_active_transcode(&state.active_transcode, &src, session) {
-            // A play that supersedes another must stop the encoder it
-            // supersedes; the old tracker's tail can no longer claim it.
-            stop_transcode_record(replaced).await;
-        }
-    }
-    let markers_script = resolve_resource("vela-markers.lua");
-    // Keep only the kinds the user actually enabled: the script must never be
-    // handed a range it is not allowed to act on.
-    let markers: Vec<crate::source::MediaMarker> = resolved
-        .markers
-        .into_iter()
-        .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
-        .collect();
-    // Which player runs this play (decisions D1 and D3 of
-    // `.agents/plans/embedded-player.md`): what was asked for above, and the
-    // external player whenever the embedded one cannot run. A fallback never
-    // fails the play; it is explained once, in one line, on the player that
-    // did start.
-    let embedded_available = match wanted_player {
-        // Nothing is asked of the window for a play that does not want it.
-        crate::player::PlayerKind::External => Ok(()),
-        crate::player::PlayerKind::Embedded => {
-            crate::player::embedded_availability(&state.embedded, state.app_handle.get()).await
-        }
-    };
-    let player_choice = crate::player::choose(wanted_player, &embedded_available);
-    *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));
-    // What this play does about explaining a fallback: once per run of Vela,
-    // and never from an automatic relaunch (`player::FallbackNotices::plan`).
-    let notice_plan = state
-        .embedded_fallback_notices
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .plan(player.is_none(), player_choice.fallback.as_ref());
-    // A notice the launch already carries wins; the explanation then stays
-    // due for a later play.
-    if let Some(reason) = &notice_plan.explain {
-        // Once per reason, like the line on screen: the on-screen line is
-        // short and gone in two seconds, and this is where to look later.
-        eprintln!(
-            "vela: playing in the external player: {}",
-            reason.notice()
-        );
-    }
-    let explained = notice_plan.explain.filter(|_| osd_notice.is_none());
-    let fallback_notice = explained.as_ref().map(|reason| reason.notice());
-    // The user has been told only once the line has really reached the
-    // player. It is sent a moment after the player starts, and a play that is
-    // replaced before then never shows it: that explanation stays due.
-    let on_notice_shown = explained.map(|reason| {
-        let notices = state.embedded_fallback_notices.clone();
-        std::sync::Arc::new(move || {
-            notices
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .explained(&reason);
-        }) as playback::NoticeShown
-    });
-    let spec = playback::PlaySpec {
-        player: player_choice.kind,
-        url: resolved.url,
-        title: item.title.clone(),
-        http_headers: resolved.http_headers,
-        start_seconds: resume_ms as f64 / 1000.0,
-        autocrop_script,
-        autocrop_shim,
-        inherited_window_state,
-        screen_name,
-        window_observation: window_observation.clone(),
-        markers_script,
-        markers,
-        intro_policy: skip_policies.intro,
-        credits_policy: skip_policies.credits,
-        commercial_policy: skip_policies.commercial,
-        // Automatic only. Whether a lower tier actually exists is NOT checked
-        // here: that needs a decision round trip per play, and a verdict is
-        // rare — `apply_step_down` resolves the ladder when one actually
-        // arrives, and declines if there is nowhere to go.
-        step_down: automatic_manages(continues_automatic, &quality).then(|| {
-            let queue = state.step_down.clone();
-            let session = session_id.to_string();
-            let already = steps_taken;
-            let running_quality = quality.clone();
-            std::sync::Arc::new(move |position_ms: u64, reason| {
-                queue.request(StepDownRequest {
-                    session_id: session.clone(),
-                    position_ms,
-                    reason,
-                    steps_taken: already,
-                    current_quality: running_quality.clone(),
-                });
-            }) as playback::StepDownNotify
-        }),
-        duration: item.duration_ms.map(Duration::from_millis),
-        osd_notice: osd_notice.or(fallback_notice),
-        on_notice_shown,
-        steps_taken,
-    };
-    // The tracker can observe a very fast mpv exit before this async command
-    // resumes from spawn_blocking. Hold its final recents stamp until the
-    // post-launch record attempt has completed, or finish() could run first
-    // and leave a permanently unstamped open entry behind.
-    let recents_ready = std::sync::Arc::new(PlayStartGate::default());
-    let playback_started_at_ms = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
-    let _release_recents_on_return = OpenPlayStartGateOnDrop(recents_ready.clone());
-    // Every tracker tail publishes a refresh after its final sampled server
-    // check-in. That keeps quit/error progress current; a joined clean EOF gets
-    // a second, authoritative refresh from the async dispatcher after exact-
-    // session completion curation and any backend-owned successor start.
-    // Payloads carry ids only — never URLs or tokens.
-    let on_end: Option<playback::EndNotify> = {
-        use tauri::Emitter;
-        let app = state.app_handle.get().cloned();
-        let source_id = src.id().to_string();
-        let item_key = item.rating_key.clone();
-        let watch_key = item.watch_key.clone();
-        let watch_backings = watched_state_backings(item);
-        let media_type = item.media_type.clone();
-        let session_id = session_id.to_string();
-        let recents_ready = recents_ready.clone();
-        let playback_started_at_ms = playback_started_at_ms.clone();
-        let advance = state.playback_advance.clone();
-        let transcode_slot = state.active_transcode.clone();
-        let transcode_session = transcode_session.clone();
-        Some(std::sync::Arc::new(move |position_ms: u64| {
-            // Stop the server-side transcode first: it costs the user's server
-            // real work, and the recents/event bookkeeping below must not be
-            // able to skip it by returning early. This runs on the tracker's
-            // own thread, outside any runtime, so it BLOCKS until the DELETE
-            // lands or its deadline expires rather than detaching a task the
-            // process may outlive.
-            if let Some(session) = transcode_session.as_deref() {
-                if let Some(record) = take_active_transcode(&transcode_slot, session) {
-                    stop_transcode_record_blocking(record);
-                }
-            }
-            if !recents_ready.wait_succeeded() {
-                return;
-            }
-            // Stamp Vela's recents BEFORE emitting, so the refresh the event
-            // triggers reads the updated list. Runs on the tracker thread —
-            // synchronous config I/O is fine there.
-            let now_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
-            let key = item_key.clone();
-            let finishing_session = session_id.clone();
-            let _ = config::update(move |cfg| {
-                crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
-                Ok(())
-            });
-            if let Some(app) = &app {
-                let _ = app.emit(
-                    "playback-ended",
-                    serde_json::json!({ "sourceId": source_id, "itemKey": item_key.clone() }),
-                );
-            }
-            advance.mark_ended(PlaybackCompletion {
-                session_id: session_id.clone(),
-                item_key: item_key.clone(),
-                watch_key: watch_key.clone(),
-                started_at_ms: playback_started_at_ms.load(Ordering::SeqCst),
-                watch_backings: watch_backings.clone(),
-                media_type: media_type.clone(),
-            });
-        }) as playback::EndNotify)
-    };
-    let progress = resolved.progress;
-    let child_slot = state.current_child.clone();
-    let shutting_down = state.shutting_down.clone();
-    let advance = state.playback_advance.clone();
-    let playback_session = session_id.to_string();
-    let embedded_launcher =
-        crate::player::embedded_launcher(&state.embedded, state.app_handle.get());
-    let played = if let Some(error) = prior_include_error {
-        Err(error)
-    } else {
-        tauri::async_runtime::spawn_blocking(move || {
-            playback::play(
-                &spec,
-                progress,
-                playback::Players {
-                    slot: &child_slot,
-                    shutting_down: &shutting_down,
-                    embedded: embedded_launcher.as_deref(),
-                },
-                &advance,
-                playback_session,
-                on_end,
-            )
-        })
-        .await
-        .map_err(|e| format!("playback task failed: {e}"))
-        .and_then(|r| r)
-    };
-    let recent = item.clone();
-    let recent_session = session_id.to_string();
-    let completion_started_at_ms = playback_started_at_ms.clone();
-    let launched_window_session = PlaybackWindowSession {
-        session_id: session_id.to_string(),
-        observation: window_observation,
-    };
-    let played = after_successful_play(played, || {
-        // Only a play that started has shown that there is nothing to fall
-        // back from. (An explanation is recorded when it is shown, above.)
-        if notice_plan.forget_when_started {
-            state
-                .embedded_fallback_notices
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .forget();
-        }
-        *state
-            .playback_window_session
-            .lock()
-            .unwrap_or_else(|e| e.into_inner()) = Some(launched_window_session);
-        let started_at_ms = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|duration| duration.as_millis() as u64)
-            .unwrap_or(0);
-        completion_started_at_ms.store(started_at_ms, Ordering::SeqCst);
-        if let Err(e) = config::update(move |cfg| {
-            crate::recents::record_play_start(
-                cfg,
-                recent,
-                start_from_beginning,
-                recent_session,
-                started_at_ms,
-            );
-            Ok(())
-        }) {
-            eprintln!("vela: couldn't record started playback: {e}");
-        }
-    });
-    let stop = match played {
+    let launched: Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String> = launch.await;
+    let stop = match launched {
         Ok(stop) => stop,
         Err(message) => {
             // mpv never started, so no tracker tail will ever run: this is the

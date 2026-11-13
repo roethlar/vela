@@ -156,3 +156,56 @@ where its line stands. Patching the list again would invite a fourth
 round on the same ground (as happened with ps-2). The next repair changes
 the code instead, so that leaving early past the cleanup cannot be
 written.
+
+### Repair (round 3)
+
+The code changed this time, not the test's list.
+
+`play_by_key_locked` commits a play in stages and has one arm that undoes
+them. Everything between the two used to be plain statements of the
+function, so anything among them that could fail could also leave the
+function, past the arm. Now the steps that start the play (stop the
+previous player, register the transcode, describe and start the launch)
+are written as ONE block, `launch`, placed before the installation and
+run by a single line after it:
+
+```rust
+let launch = async { /* ...the steps... */ played };
+// ...
+let previous_cursor = { /* swap the playlist position in */ };
+install_playback_session(state, session_id, item, run_kind, next_affinity).await;
+let launched: Result<Arc<AtomicBool>, String> = launch.await;
+let stop = match launched { Ok(stop) => stop, Err(message) => { /* undo */ } };
+```
+
+Inside the block a `?` or a `return` leaves the block, with a message the
+arm receives. It cannot leave the function: that is how the language
+works, not something a test has to notice. Between the installation and
+the arm there is one line, and it cannot fail.
+
+This answers the three comments in kind. (1) and (2): there is no list of
+early exits any more, so nothing to slip past it; `?`, `r#try!` and
+`return` in any spelling end in the arm. `.expect`, `assert!` and the
+like panic, and a panic is not an early return here: release builds are
+built with `panic = "abort"` (`src-tauri/Cargo.toml`), so the process is
+gone, not left half-started. (3): there is no exempt line. The older
+settings read that used to leave the function from this stretch (noted
+under Blockers in `.agents/state.md` when round 1 found it) is inside the
+block like everything else, so its failure now reaches the arm too. That
+closes that older defect as a consequence; the Blockers entry is removed.
+What it changes for a user: a play that fails because the settings file
+cannot be read no longer leaves the previous play's session and playlist
+position replaced by one that never started.
+
+The test (`tests/player-selection.test.mjs`) holds the shape with exact
+text and nothing that reads Rust: the statements from the playlist-position
+swap to the arm are exactly six lines; `launch` is written once, before
+them, and run once, by the last of them; and the arm is exactly its
+sixteen statements.
+
+Files: `src-tauri/src/commands.rs`, `tests/player-selection.test.mjs`
+(the finding's declared two).
+
+Verified before the guard proof: clippy on stable and the 1.89 check, 418
+Rust tests, 127 node tests, and the full E2E suite in both venues, since
+every play goes through this function.
