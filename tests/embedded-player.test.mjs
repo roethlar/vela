@@ -80,6 +80,10 @@ test("every start is today's unless embedded window mode was decided", () => {
   );
   const shippedStartup = code(startup.slice(0, startup.indexOf('#[cfg(test)]')));
   assert.equal(count(shippedStartup, 'OpenOptions::new()'), 1, 'one place opens a file');
+  // What it opened is read through the bounded reader and no other way.
+  assert.match(shippedStartup, /if !file\.metadata\(\)\.ok\(\)\?\.file_type\(\)\.is_file\(\) \{\s+return None;\s+\}\s+bounded_text\(file\)\s+\}/);
+  assert.equal(count(shippedStartup, 'read_to_string'), 1, 'one read, inside the bounded reader');
+  assert.match(shippedStartup, /source\s+\.take\(SETTINGS_READ_LIMIT \+ 1\)\s+\.read_to_string\(&mut text\)/);
   for (const read of ['fs::read', 'File::open', 'read_to_end', 'load_config', 'load_json']) {
     assert.equal(count(shippedStartup, read), 0, `start-up never calls ${read}`);
   }

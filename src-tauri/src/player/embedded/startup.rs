@@ -151,7 +151,6 @@ const SETTINGS_READ_LIMIT: u64 = 8 * 1024 * 1024;
 /// without following a link, look at what was opened, and read no more than
 /// the limit.
 fn settings_text(path: &std::path::Path) -> Option<String> {
-    use std::io::Read;
     use std::os::unix::fs::OpenOptionsExt;
     let file = std::fs::OpenOptions::new()
         .read(true)
@@ -161,8 +160,17 @@ fn settings_text(path: &std::path::Path) -> Option<String> {
     if !file.metadata().ok()?.file_type().is_file() {
         return None;
     }
+    bounded_text(file)
+}
+
+/// The text `source` holds when that is no more than the limit; nothing when
+/// there is more. Never takes more than one byte past the limit from it,
+/// however much it has.
+fn bounded_text(source: impl std::io::Read) -> Option<String> {
+    use std::io::Read;
     let mut text = String::new();
-    file.take(SETTINGS_READ_LIMIT + 1)
+    source
+        .take(SETTINGS_READ_LIMIT + 1)
         .read_to_string(&mut text)
         .ok()?;
     (text.len() as u64 <= SETTINGS_READ_LIMIT).then_some(text)
@@ -457,6 +465,33 @@ mod tests {
             "a device"
         );
         assert_eq!(read_within_two_seconds(&scratch.0), None, "a directory");
+    }
+
+    // A huge regular file passes every check on the path. Without a bound
+    // the start would read all of it into memory before throwing it away;
+    // the answer would be the same, so only the amount taken shows it.
+    #[test]
+    fn no_more_than_one_byte_past_the_limit_is_ever_taken() {
+        /// A source that never ends, and counts what was taken from it.
+        struct Endless {
+            taken: u64,
+        }
+        impl std::io::Read for Endless {
+            fn read(&mut self, buffer: &mut [u8]) -> std::io::Result<usize> {
+                // A reader that has taken this much has lost its bound.
+                // Stop it here rather than let a failing test fill the
+                // machine's memory.
+                if self.taken > SETTINGS_READ_LIMIT * 2 {
+                    return Err(std::io::Error::other("read far past the limit"));
+                }
+                buffer.fill(b' ');
+                self.taken += buffer.len() as u64;
+                Ok(buffer.len())
+            }
+        }
+        let mut source = Endless { taken: 0 };
+        assert_eq!(bounded_text(&mut source), None);
+        assert_eq!(source.taken, SETTINGS_READ_LIMIT + 1);
     }
 
     #[test]
