@@ -569,7 +569,41 @@ test("nothing is sent to the compositor's colour manager that it did not offer",
     /let \(Some\(feedback\), true\) = \(&self\.feedback, self\.guest\.colour\.parametric\) else \{\s+return;\s+\};/,
   );
   assert.equal(count(code(surface), '.get_information('), 1);
-  assert.match(surface, /\(Described::Output, Event::Ready \{ \.\. \}\) => \{[\s\S]{0,400}description\.get_information\(qh, \(\)\);/);
+  assert.match(surface, /\(Described::Output\(question\), Event::Ready \{ \.\. \}\) => \{[\s\S]{0,400}description\.get_information\(qh, \*question\);/);
+});
+
+test("every piece of the output's description is matched to the question it answers", () => {
+  // `OutputAnswers` (hdr.rs, with its tests) puts a description together
+  // from its pieces and hands on only the answer to the latest question.
+  // This proves the surface gives it every piece with the right number: the
+  // number travels on the protocol objects themselves, from the question to
+  // the object that delivers its contents (review finding hd-1: one shared
+  // slot let the tail of an old answer replace a new one).
+  assert.match(
+    surface,
+    /let question = self\.state\.answers\.ask\(\);\s+self\.output_query = Some\(\s+feedback\.get_preferred_parametric\(&self\.queue\.handle\(\), Described::Output\(question\)\),\s+\);/,
+  );
+  assert.match(
+    surface,
+    /\(Described::Output\(question\), Event::Ready \{ \.\. \}\) => \{\s+(?:\/\/[^\n]*\n\s+)*if state\.answers\.ready\(\*question\) \{\s+description\.get_information\(qh, \*question\);\s+\}\s+\}/,
+  );
+  const from = surface.indexOf('impl Dispatch<WpImageDescriptionInfoV1, u32> for State {');
+  assert.notEqual(from, -1, 'the object that delivers the contents carries the number');
+  const contents = code(surface.slice(from, surface.indexOf('\n}\n', from)));
+  assert.match(contents, /question: &u32,/);
+  assert.match(contents, /state\.answers\.piece\(\*question, Piece::Reference\(reference_lum\)\)/);
+  assert.match(contents, /state\.answers\.piece\(\s+\*question,\s+Piece::Range \{/);
+  assert.match(contents, /state\.answers\.piece\(\s+\*question,\s+Piece::Primaries\(/);
+  assert.match(contents, /Event::Done => state\.answers\.done\(\*question\),/);
+  assert.equal(count(contents, 'state.answers.'), 4, 'three pieces and the end, nothing else');
+  // Nothing else in the module keeps or collects a description.
+  const shippedSurface = code(surface.slice(0, surface.indexOf('#[cfg(test)]\nmod tests')));
+  assert.equal(count(shippedSurface, 'answers.'), 7, 'ask, ready, three pieces, done, take');
+  assert.match(
+    surface,
+    /pub\(crate\) fn output_described\(&mut self\) -> Option<OutputDescription> \{\s+self\.state\.answers\.take\(\)\s+\}/,
+  );
+  assert.doesNotMatch(shippedSurface, /\barriving\b/);
 });
 
 test("what the compositor says about the display is followed from a play's start to its end", () => {

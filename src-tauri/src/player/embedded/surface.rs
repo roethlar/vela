@@ -57,7 +57,7 @@ use wayland_protocols::wp::fractional_scale::v1::client::{
 };
 use wayland_protocols::wp::viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter};
 
-use super::hdr::{Describable, HdrTarget, OutputDescription};
+use super::hdr::{Describable, HdrTarget, OutputAnswers, OutputDescription, Piece};
 
 // Values of the colour-management protocol's enumerations that are used
 // here, as the protocol numbers them.
@@ -70,8 +70,9 @@ const INTENT_PERCEPTUAL: u32 = 0;
 /// Which image description an event is about.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Described {
-    /// The compositor's own description of the output the surface is on.
-    Output,
+    /// The compositor's own description of the output the surface is on,
+    /// in answer to the question with this number (`OutputAnswers`).
+    Output(u32),
     /// The description Vela asked for, to put on the surface.
     Surface,
 }
@@ -112,10 +113,8 @@ struct State {
     scale_120: Option<u32>,
     /// The compositor said its description of the output has changed.
     output_changed: bool,
-    /// The output's description while its parts are still arriving.
-    arriving: Option<OutputDescription>,
-    /// A complete description of the output that nobody has collected yet.
-    output: Option<OutputDescription>,
+    /// What the compositor has said about the output, question by question.
+    answers: OutputAnswers,
     /// The answer to the last description Vela asked for: made, or refused.
     answer: Option<bool>,
     /// The description last asked for has been made. Only then may it be
@@ -228,15 +227,12 @@ impl Dispatch<WpImageDescriptionV1, Described> for State {
     ) {
         use wp_image_description_v1::Event;
         match (which, event) {
-            (Described::Output, Event::Ready { .. }) => {
-                // Its contents arrive as events on the object this creates.
-                state.arriving = Some(OutputDescription {
-                    reference: 0,
-                    min_e4: 0,
-                    max: 0,
-                    primaries: None,
-                });
-                description.get_information(qh, ());
+            (Described::Output(question), Event::Ready { .. }) => {
+                // Its contents arrive as events on the object this creates,
+                // which carries the question's number with it.
+                if state.answers.ready(*question) {
+                    description.get_information(qh, *question);
+                }
             }
             (Described::Surface, Event::Ready { .. }) => {
                 state.answer = Some(true);
@@ -250,25 +246,27 @@ impl Dispatch<WpImageDescriptionV1, Described> for State {
     }
 }
 
-impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
+impl Dispatch<WpImageDescriptionInfoV1, u32> for State {
     fn event(
         state: &mut Self,
         _: &WpImageDescriptionInfoV1,
         event: wp_image_description_info_v1::Event,
-        _: &(),
+        question: &u32,
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
         use wp_image_description_info_v1::Event;
-        let Some(arriving) = state.arriving.as_mut() else {
-            return;
-        };
         match event {
-            Event::Luminances { reference_lum, .. } => arriving.reference = reference_lum,
-            Event::TargetLuminance { min_lum, max_lum } => {
-                arriving.min_e4 = min_lum;
-                arriving.max = max_lum;
+            Event::Luminances { reference_lum, .. } => {
+                state.answers.piece(*question, Piece::Reference(reference_lum))
             }
+            Event::TargetLuminance { min_lum, max_lum } => state.answers.piece(
+                *question,
+                Piece::Range {
+                    min_e4: min_lum,
+                    max: max_lum,
+                },
+            ),
             Event::TargetPrimaries {
                 r_x,
                 r_y,
@@ -278,8 +276,11 @@ impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
                 b_y,
                 w_x,
                 w_y,
-            } => arriving.primaries = Some([r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y]),
-            Event::Done => state.output = state.arriving.take(),
+            } => state.answers.piece(
+                *question,
+                Piece::Primaries([r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y]),
+            ),
+            Event::Done => state.answers.done(*question),
             // A colour profile file, when one is sent, is closed by being
             // dropped here.
             _ => {}
@@ -685,9 +686,10 @@ impl VideoSurface {
         if let Some(previous) = self.output_query.take() {
             previous.destroy();
         }
-        self.state.arriving = None;
-        self.output_query =
-            Some(feedback.get_preferred_parametric(&self.queue.handle(), Described::Output));
+        let question = self.state.answers.ask();
+        self.output_query = Some(
+            feedback.get_preferred_parametric(&self.queue.handle(), Described::Output(question)),
+        );
     }
 
     /// Whether the compositor has said, since the last call, that its
@@ -699,7 +701,7 @@ impl VideoSurface {
     /// A description of the output that has arrived in full since the last
     /// call.
     pub(crate) fn output_described(&mut self) -> Option<OutputDescription> {
-        self.state.output.take()
+        self.state.answers.take()
     }
 
     /// The compositor's answer to the last [`VideoSurface::describe`], once:

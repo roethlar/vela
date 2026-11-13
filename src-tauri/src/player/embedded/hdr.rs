@@ -45,6 +45,99 @@ pub(crate) struct OutputDescription {
     pub(crate) primaries: Option<[i32; 8]>,
 }
 
+/// One piece of the compositor's description of an output, as it arrives.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Piece {
+    /// The reference white, in nits.
+    Reference(u32),
+    /// The darkest level in ten-thousandths of a nit, and the brightest in
+    /// nits.
+    Range { min_e4: u32, max: u32 },
+    /// The output's own primaries and white point.
+    Primaries([i32; 8]),
+}
+
+/// The compositor's descriptions of the output, put together from the
+/// pieces they arrive in.
+///
+/// Vela asks; the compositor says it is ready; Vela asks for the contents;
+/// they arrive as several events and then "done". Vela may ask again before
+/// an earlier answer has finished arriving, because the display changed
+/// again. The protocol does not promise that the rest of an earlier answer
+/// arrives before a later question is acknowledged. So every piece is
+/// handed in with the number of the question it answers, and only the
+/// latest question's answer is put together and handed on. One shared slot
+/// filled by whoever spoke let the tail of an old answer overwrite a new one
+/// and lose it (review finding hd-1).
+#[derive(Debug, Default)]
+pub(crate) struct OutputAnswers {
+    /// The number of the latest question. Zero before the first.
+    asked: u32,
+    /// The latest question's answer while its pieces arrive.
+    arriving: Option<OutputDescription>,
+    /// A complete answer to the latest question that nobody has collected.
+    complete: Option<OutputDescription>,
+}
+
+impl OutputAnswers {
+    /// A new question is being asked; this is its number. Whatever was
+    /// known or arriving about earlier questions is about a display that has
+    /// changed since, and is dropped.
+    pub(crate) fn ask(&mut self) -> u32 {
+        self.asked += 1;
+        self.arriving = None;
+        self.complete = None;
+        self.asked
+    }
+
+    /// The compositor is ready to answer `question`. `true` when its
+    /// contents are wanted, which is when it is the latest question.
+    pub(crate) fn ready(&mut self, question: u32) -> bool {
+        if question != self.asked {
+            return false;
+        }
+        self.arriving = Some(OutputDescription {
+            reference: 0,
+            min_e4: 0,
+            max: 0,
+            primaries: None,
+        });
+        true
+    }
+
+    /// A piece of the answer to `question` has arrived.
+    pub(crate) fn piece(&mut self, question: u32, piece: Piece) {
+        if question != self.asked {
+            return;
+        }
+        let Some(arriving) = self.arriving.as_mut() else {
+            return;
+        };
+        match piece {
+            Piece::Reference(reference) => arriving.reference = reference,
+            Piece::Range { min_e4, max } => {
+                arriving.min_e4 = min_e4;
+                arriving.max = max;
+            }
+            Piece::Primaries(primaries) => arriving.primaries = Some(primaries),
+        }
+    }
+
+    /// The answer to `question` has arrived in full.
+    pub(crate) fn done(&mut self, question: u32) {
+        if question == self.asked {
+            if let Some(answer) = self.arriving.take() {
+                self.complete = Some(answer);
+            }
+        }
+    }
+
+    /// A complete answer to the latest question, once.
+    pub(crate) fn take(&mut self) -> Option<OutputDescription> {
+        self.complete.take()
+    }
+}
+
 /// What Vela can do about HDR on this machine, apart from the output.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Capabilities {
@@ -446,6 +539,108 @@ mod tests {
                 primaries: None
             })
         );
+    }
+
+    // ---- the output's description, put together (review finding hd-1)
+
+    fn described(reference: u32, max: u32) -> OutputDescription {
+        OutputDescription {
+            reference,
+            min_e4: 0,
+            max,
+            primaries: Some(PRIMARIES),
+        }
+    }
+
+    /// Everything the compositor says in answer to one question.
+    fn tell(answers: &mut OutputAnswers, question: u32, reference: u32, max: u32) {
+        answers.piece(question, Piece::Primaries(PRIMARIES));
+        answers.piece(question, Piece::Reference(reference));
+        answers.piece(question, Piece::Range { min_e4: 0, max });
+        answers.done(question);
+    }
+
+    #[test]
+    fn an_answer_is_handed_on_once_it_is_complete() {
+        let mut answers = OutputAnswers::default();
+        assert_eq!(answers.take(), None);
+        let question = answers.ask();
+        assert!(answers.ready(question));
+        answers.piece(question, Piece::Reference(265));
+        answers.piece(question, Piece::Range { min_e4: 0, max: 465 });
+        assert_eq!(answers.take(), None, "not before the compositor says that is all");
+        answers.piece(question, Piece::Primaries(PRIMARIES));
+        answers.done(question);
+        assert_eq!(answers.take(), Some(described(265, 465)));
+        assert_eq!(answers.take(), None, "and once only");
+    }
+
+    // The order the reviewer produced: the display changes twice quickly;
+    // the compositor acknowledges the second question and only then sends
+    // the contents of the first answer.
+    #[test]
+    fn the_late_tail_of_an_old_answer_does_not_replace_the_new_one() {
+        let mut answers = OutputAnswers::default();
+        let first = answers.ask();
+        assert!(answers.ready(first), "the first answer's contents are asked for");
+        let second = answers.ask();
+        assert!(answers.ready(second));
+        // The first answer's contents, late.
+        tell(&mut answers, first, 265, 465);
+        assert_eq!(answers.take(), None, "that is about the display as it was");
+        // The second answer's contents.
+        tell(&mut answers, second, 203, 203);
+        assert_eq!(
+            answers.take(),
+            Some(described(203, 203)),
+            "the display as it is now is not lost"
+        );
+    }
+
+    #[test]
+    fn two_answers_arriving_in_turns_do_not_mix() {
+        let mut answers = OutputAnswers::default();
+        let first = answers.ask();
+        answers.ready(first);
+        let second = answers.ask();
+        answers.ready(second);
+        answers.piece(second, Piece::Reference(203));
+        answers.piece(first, Piece::Reference(265));
+        answers.piece(first, Piece::Range { min_e4: 9, max: 465 });
+        answers.piece(second, Piece::Range { min_e4: 0, max: 203 });
+        answers.piece(second, Piece::Primaries(PRIMARIES));
+        answers.done(first);
+        assert_eq!(answers.take(), None);
+        answers.done(second);
+        assert_eq!(answers.take(), Some(described(203, 203)));
+    }
+
+    #[test]
+    fn only_the_latest_question_has_its_contents_asked_for() {
+        let mut answers = OutputAnswers::default();
+        let first = answers.ask();
+        let second = answers.ask();
+        assert!(!answers.ready(first), "an answer to a question since replaced");
+        assert!(answers.ready(second));
+        // Pieces before "ready", or with no question asked, go nowhere.
+        let mut unasked = OutputAnswers::default();
+        tell(&mut unasked, 0, 265, 465);
+        tell(&mut unasked, 1, 265, 465);
+        assert_eq!(unasked.take(), None);
+    }
+
+    #[test]
+    fn asking_again_drops_an_answer_nobody_collected() {
+        let mut answers = OutputAnswers::default();
+        let first = answers.ask();
+        answers.ready(first);
+        tell(&mut answers, first, 265, 465);
+        // Complete, but the display has changed again before it was used.
+        let second = answers.ask();
+        assert_eq!(answers.take(), None);
+        answers.ready(second);
+        tell(&mut answers, second, 83, 465);
+        assert_eq!(answers.take(), Some(described(83, 465)));
     }
 
     fn target(peak: u32) -> HdrTarget {
