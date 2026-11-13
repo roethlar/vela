@@ -1,0 +1,42 @@
+Vela: build mpv's VA-API support without mpv's DRM/KMS video output.
+
+mpv ties `vaapi-drm` (VA-API given a DRM render node, which is how Vela's
+embedded player hands the GPU to the decoder) to its `drm` feature, the
+DRM/KMS video output. That output needs libdrm >= 2.4.114 and
+libdisplay-info. Ubuntu 22.04, the baseline the shipped set is built on,
+has libdrm 2.4.113 and no libdisplay-info, and a set built against newer
+libdrm headers does not load there (undefined symbol:
+drmModeCreateDumbBuffer). The embedded player never uses that video
+output, so this leaves it out and lets `vaapi-drm` and the dmabuf interop
+depend on the libdrm dependency alone.
+
+Only meson.build changes; no mpv source file is touched. Applies to
+mpv 0.42.0. Re-check both hunks on every mpv bump
+(docs/development.md, "Bumping a component").
+--- a/meson.build
++++ b/meson.build
+@@ -998,10 +998,11 @@
+     sources += files('video/out/vo_direct3d.c')
+ endif
+ 
+-drm = dependency('libdrm', version: '>= 2.4.114', required: get_option('drm'))
+-libdisplay_info = dependency('libdisplay-info', version: '>= 0.1.1', required: get_option('drm'))
+-features += {'drm': drm.found() and libdisplay_info.found() and
+-             (features['vt.h'] or features['consio.h'] or features['wsdisplay-usl-io.h'])}
++# Vela: libdrm is wanted only for VA-API (vaapi-drm and the dmabuf interop).
++# mpv's DRM/KMS video output is not built, so its newer libdrm and its
++# libdisplay-info requirement do not apply to this build.
++drm = dependency('libdrm', version: '>= 2.4.113', required: get_option('drm'))
++features += {'drm': false}
+ if features['drm']
+     dependencies += [drm, libdisplay_info]
+     sources += files('video/drmprime.c',
+@@ -1485,7 +1486,7 @@
+ libva = dependency('libva', version: '>= 1.1.0', required: get_option('vaapi'))
+ 
+ vaapi_drm = dependency('libva-drm', version: '>= 1.1.0', required:
+-    get_option('vaapi-drm').require(libva.found() and features['drm']))
++    get_option('vaapi-drm').require(libva.found() and drm.found()))
+ features += {'vaapi-drm': vaapi_drm.found()}
+ if features['vaapi-drm']
+     dependencies += vaapi_drm

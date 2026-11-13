@@ -103,6 +103,87 @@ first run downloads the pinned WebKitWebDriver described in
 [tests/e2e/README.md](../tests/e2e/README.md); artifacts land under
 `tests/e2e/artifacts/`.
 
+## The shipped libmpv set
+
+This is build infrastructure for an embedded player that is still in
+development. No released Vela loads it yet; playback today runs the system's
+`mpv` program as described under Architecture.
+
+The embedded player will not use whichever mpv library a machine happens to
+have. Vela builds one pinned set of libraries (mpv, FFmpeg, libplacebo,
+libass, FreeType, HarfBuzz, FriBidi, dav1d, Lua and uchardet) and ships it
+inside its Linux packages. The set is always an LGPL build, and every library
+in it is a separate shared object.
+
+```bash
+scripts/build-libmpv.sh --container     # needs podman or docker; several minutes
+```
+
+The result lands in `.libmpv/out/libmpv/` (ignored by git): the libraries,
+`licenses/` with each component's licence text, and a `MANIFEST` listing the
+component versions, every file with its checksum, the glibc version the set
+needs, and the system libraries it loads from the machine. `.libmpv/` also
+keeps the downloaded sources and the build tree, so a second run only redoes
+the steps you name (`scripts/build-libmpv.sh --container mpv collect`).
+CI builds the same set in its `libmpv` job and uploads it as the
+`libmpv-linux-x86_64` artifact; `gh run download --name libmpv-linux-x86_64`
+fetches it without building.
+
+How the set is put together:
+
+- **Pins.** `packaging/libmpv/versions.txt` is the only place a version or
+  checksum is written. A download that does not match its checksum stops the
+  build.
+- **Baseline.** The build runs in `packaging/libmpv/Containerfile`, Ubuntu
+  22.04, the distribution Vela's own Linux bundles are built on. The set then
+  runs on that release and anything newer; the build fails if a library needs
+  a newer glibc.
+- **Private names.** Vela's process already has the system's FreeType,
+  HarfBuzz, FriBidi and dav1d loaded, because WebKitGTK uses them. So every
+  library in the set except `libmpv.so.2` is renamed (`libvela-avcodec.so.63`
+  and so on) and finds its neighbours through an `$ORIGIN` run path. Load
+  `libmpv.so.2` by absolute path with `RTLD_NOW | RTLD_DEEPBIND`; anything
+  else lets the system's copies take over.
+- **System libraries.** The set still loads the C and C++ runtimes, `libEGL`,
+  `libva`, `libva-drm`, `libdrm`, `libpulse`, `libasound`, `libfontconfig`,
+  `libgnutls` and `libz` from the machine: they have to match its GPU driver,
+  sound server, fonts and certificate store. The build fails if the set needs
+  any other system library.
+- **One patch.** `packaging/libmpv/patches/` holds a change to mpv's
+  `meson.build` (no mpv source file) that keeps VA-API hardware decoding
+  without mpv's DRM/KMS video output. Its header explains why.
+
+Check a built set with the script the CI job uses. It loads the library the
+way Vela will, compares every file with the manifest, decodes three small
+clips in software and makes one HTTPS request:
+
+```bash
+packaging/libmpv/check-in-container.sh docker.io/library/ubuntu:22.04
+packaging/libmpv/check-in-container.sh docker.io/library/debian:12
+packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
+```
+
+### Bumping a component
+
+1. Edit the component's line in `packaging/libmpv/versions.txt`: version, URL,
+   and the SHA-256 of the new tarball (download it and run `sha256sum`).
+2. For an mpv bump, check that both hunks of the patch still apply and still
+   mean what the patch header says. Read mpv's `meson.build` changes for new
+   dependencies; the build names every feature it wants and turns the rest
+   off.
+3. `scripts/build-libmpv.sh --container`, then the three container checks
+   above.
+4. `npm run check`. `tests/dependency-policy.test.mjs` compares the pins with
+   the build script and guards the LGPL configuration, the list of system
+   libraries and the CI job.
+
+Shipping these libraries means Vela owns their security updates. Before a
+release, read the security notices of FFmpeg, mpv, dav1d, FreeType and
+HarfBuzz since the pinned versions. A known vulnerability in a pinned
+component that Vela's use can reach blocks the release until the pin is
+bumped, exactly as an `npm audit` or `cargo audit` failure does. This check
+is manual: nothing automated compares the pins with an advisory database.
+
 ## Architecture
 
 - **Desktop shell:** Tauri 2 with a static SvelteKit/Svelte 5 frontend in

@@ -15,6 +15,10 @@ packaging/arch/*.pkg.tar*
 .env.*
 vite.config.js.timestamp-*
 
+# The libmpv set for the embedded player: downloads, build tree and output of
+# scripts/build-libmpv.sh. Built, never committed.
+/.libmpv/
+
 # E2E harness (vendored WebKitWebDriver + run artifacts)
 tests/e2e/vendor/
 tests/e2e/artifacts/

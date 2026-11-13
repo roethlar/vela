@@ -136,3 +136,249 @@ test("Ask source choices stay one-shot, session-safe, and credential-free", asyn
   assert.match(lib, /commands::cancel_playback_source_choice/);
   assert.match(lib, /commands::finish_playback_run/);
 });
+
+// ---------------------------------------------------------------------------
+// The libmpv set Vela ships for the embedded player
+// (.agents/plans/embedded-player.md, "libmpv is shipped with Vela").
+// ---------------------------------------------------------------------------
+
+const libmpvRecipe = path.join(repoRoot, "packaging", "libmpv");
+const libmpvScriptPath = path.join(repoRoot, "scripts", "build-libmpv.sh");
+
+async function libmpvPins() {
+  const text = await readText(path.join(libmpvRecipe, "versions.txt"), "utf8");
+  return text
+    .split("\n")
+    .filter((line) => line.trim() !== "" && !line.startsWith("#"))
+    .map((line) => {
+      const fields = line.trim().split(/\s+/);
+      const [name, version, role, sha256, url] = fields;
+      return { name, version, role, sha256, url, fieldCount: fields.length };
+    });
+}
+
+// The system libraries the shipped set may load from the machine. Changing
+// this list is a decision about what Vela ships and what it leaves to the
+// distribution, so it is written twice on purpose: here and in the script.
+const libmpvAllowedSystem = [
+  "ld-linux-aarch64.so.1",
+  "ld-linux-x86-64.so.2",
+  "libEGL.so.1",
+  "libasound.so.2",
+  "libc.so.6",
+  "libdl.so.2",
+  "libdrm.so.2",
+  "libfontconfig.so.1",
+  "libgcc_s.so.1",
+  "libgnutls.so.30",
+  "libm.so.6",
+  "libpthread.so.0",
+  "libpulse.so.0",
+  "librt.so.1",
+  "libstdc++.so.6",
+  "libva-drm.so.2",
+  "libva.so.2",
+  "libz.so.1",
+];
+
+test("every component of the shipped libmpv set is pinned by version, checksum and URL", async () => {
+  const pins = await libmpvPins();
+  assert.ok(pins.length >= 10, "the pinned-versions file must list the set");
+  const names = new Set();
+  for (const pin of pins) {
+    assert.equal(pin.fieldCount, 5, `${pin.name}: name, version, role, sha256, url`);
+    assert.ok(!names.has(pin.name), `${pin.name} is pinned twice`);
+    names.add(pin.name);
+    assert.match(pin.version, /^\d+(\.\d+)+$/, `${pin.name}: version`);
+    assert.match(pin.role, /^(ship|build)$/, `${pin.name}: role`);
+    assert.match(pin.sha256, /^[0-9a-f]{64}$/, `${pin.name}: sha256`);
+    assert.match(pin.url, /^https:\/\/\S+\.tar\.(gz|xz)$/, `${pin.name}: an https tarball`);
+    assert.ok(
+      pin.url.includes(pin.version),
+      `${pin.name}: the URL must name the pinned version ${pin.version}`,
+    );
+  }
+  for (const required of ["mpv", "ffmpeg"]) {
+    assert.equal(pins.find((pin) => pin.name === required)?.role, "ship");
+  }
+});
+
+test("the libmpv build script builds exactly the pinned components", async () => {
+  const pins = await libmpvPins();
+  const script = await readText(libmpvScriptPath, "utf8");
+  const shipped = pins.filter((pin) => pin.role === "ship").map((pin) => pin.name).sort();
+
+  const defaultSteps = script.match(/^steps="\$\{\*:-(?<steps>[^}]+)\}"$/m)?.groups?.steps;
+  assert.ok(defaultSteps, "the default step list must stay one readable line");
+  const steps = defaultSteps.trim().split(/\s+/);
+  assert.equal(steps.at(-1), "collect", "collect must run last");
+  assert.deepEqual(
+    steps.slice(0, -1).sort(),
+    shipped,
+    "the default steps must be exactly the shipped components",
+  );
+  const builders = [...script.matchAll(/^build_([a-z0-9_]+)\(\) \{$/gm)].map((m) => m[1]).sort();
+  assert.deepEqual(builders, shipped, "one build function per shipped component");
+
+  // Nothing is downloaded that is not pinned, and nothing bypasses fetch().
+  const fetched = [...script.matchAll(/"\$\((?:unpack|fetch) ([a-z0-9-]+)\)"/g)].map((m) => m[1]);
+  const pinned = new Set(pins.map((pin) => pin.name));
+  assert.ok(fetched.length >= shipped.length);
+  for (const name of fetched) assert.ok(pinned.has(name), `${name} is fetched but not pinned`);
+  for (const pin of pins) {
+    assert.ok(fetched.includes(pin.name), `${pin.name} is pinned but never fetched`);
+  }
+  assert.equal(script.match(/\bcurl\b/g)?.length, 1, "fetch() is the only download");
+  assert.doesNotMatch(script, /\b(wget|git clone|pip3? install)\b/);
+  assert.match(script, /sha256sum -c --quiet - >&2 \|\| die "checksum mismatch/);
+  assert.match(script, /--wrap-mode=nodownload/);
+});
+
+test("the shipped libmpv set is an LGPL build with its licence texts", async () => {
+  const pins = await libmpvPins();
+  const script = await readText(libmpvScriptPath, "utf8");
+
+  const mpv = script.match(/^build_mpv\(\) \{\n(?<body>[\s\S]*?)\n\}$/m)?.groups?.body;
+  assert.ok(mpv, "build_mpv must remain a recognisable function");
+  assert.match(mpv, /-Dgpl=false/);
+  assert.match(mpv, /-Dlibmpv=true -Dcplayer=false/);
+  assert.doesNotMatch(mpv, /-Dgpl=true/);
+
+  const ffmpeg = script.match(/^build_ffmpeg\(\) \{\n(?<body>[\s\S]*?)\n\}$/m)?.groups?.body;
+  assert.ok(ffmpeg, "build_ffmpeg must remain a recognisable function");
+  assert.doesNotMatch(ffmpeg, /--enable-(gpl|nonfree|version3)/);
+  assert.match(ffmpeg, /--enable-shared --disable-static/);
+  assert.match(ffmpeg, /--disable-autodetect/);
+  assert.match(
+    ffmpeg,
+    /grep -qx '#define FFMPEG_LICENSE "LGPL version 2\.1 or later"' config\.h\s*\\\n\s*\|\| die/,
+    "the build must stop if FFmpeg itself reports another licence",
+  );
+
+  // Shared libraries only: nothing is linked statically into anything.
+  assert.match(script, /-Ddefault_library=shared/);
+
+  const collect = script.match(/^collect\(\) \{\n(?<body>[\s\S]*?)\n\}$/m)?.groups?.body;
+  assert.ok(collect, "collect must remain a recognisable function");
+  for (const pin of pins.filter((entry) => entry.role === "ship")) {
+    assert.match(
+      collect,
+      new RegExp(`(lic ${pin.name} \\S|licenses/${pin.name}/LICENSE)`),
+      `${pin.name}: its licence text must be collected`,
+    );
+  }
+  assert.match(collect, /\|\| die "no licence text collected for shipped component/);
+  assert.match(collect, /install -m644 "\$PATCHES"\/\*\.patch "\$dest\/licenses\/mpv\/"/);
+});
+
+test("the shipped libmpv set is isolated and leans only on the listed system libraries", async () => {
+  const script = await readText(libmpvScriptPath, "utf8");
+  const allowed = script
+    .match(/^ALLOWED_SYSTEM="\n(?<body>[\s\S]*?)\n"$/m)
+    ?.groups?.body.trim()
+    .split(/\s+/)
+    .sort();
+  assert.deepEqual(allowed, [...libmpvAllowedSystem].sort());
+
+  const collect = script.match(/^collect\(\) \{\n(?<body>[\s\S]*?)\n\}$/m)?.groups?.body ?? "";
+  assert.match(collect, /\|\| die "the set needs system library/);
+  assert.match(collect, /new="libvela-\$\{lib#lib\}"/, "private sonames");
+  assert.match(collect, /patchelf --set-soname "\$new"/);
+  assert.match(collect, /patchelf --replace-needed "\$old" "\$new"/);
+  assert.match(collect, /patchelf --set-rpath '\$ORIGIN'/);
+  assert.match(collect, /die "\$\(basename "\$lib"\) still needs/);
+  assert.match(collect, /die "the set needs glibc \$max, above the baseline/);
+});
+
+test("the libmpv set is built on the distribution the Linux bundles are built on", async () => {
+  const script = await readText(libmpvScriptPath, "utf8");
+  const containerfile = await readText(path.join(libmpvRecipe, "Containerfile"), "utf8");
+  const release = await readText(
+    path.join(repoRoot, ".github", "workflows", "release.yml"),
+    "utf8",
+  );
+  assert.match(release, /^\s+- os: ubuntu-22\.04$/m, "the release builds Linux bundles on 22.04");
+  assert.match(containerfile, /^FROM docker\.io\/library\/ubuntu:22\.04$/m);
+  // Ubuntu 22.04 ships glibc 2.35.
+  assert.match(script, /^GLIBC_MAX="\$\{GLIBC_MAX:-2\.35\}"$/m);
+  // The image pins the two tools it does not take from the distribution.
+  assert.match(containerfile, /meson==\d+\.\d+\.\d+ patchelf==\d+(\.\d+)+/);
+});
+
+test("the mpv patch changes the build description only", async () => {
+  const patch = await readText(
+    path.join(libmpvRecipe, "patches", "mpv-vaapi-without-drm-output.patch"),
+    "utf8",
+  );
+  const files = [...patch.matchAll(/^\+\+\+ b\/(\S+)$/gm)].map((m) => m[1]);
+  assert.deepEqual(files, ["meson.build"]);
+  assert.match(patch, /^\+features \+= \{'drm': false\}$/m);
+  assert.match(patch, /^\+\s+get_option\('vaapi-drm'\)\.require\(libva\.found\(\) and drm\.found\(\)\)\)$/m);
+});
+
+test("CI builds the libmpv set from the pinned inputs and always checks it", async () => {
+  const ci = await readText(path.join(repoRoot, ".github", "workflows", "ci.yml"), "utf8");
+  const job = ci.match(/^  libmpv:\n(?<body>[\s\S]*?)(?=\n  [a-z][a-z0-9_-]*:\n|(?![\s\S]))/m)?.groups?.body;
+  assert.ok(job, "CI must keep a libmpv job");
+  assert.match(job, /^    runs-on: ubuntu-22\.04$/m);
+  const key = job.match(/key: libmpv-linux-x86_64-\$\{\{ hashFiles\((?<files>[^)]*)\) \}\}/)?.groups
+    ?.files;
+  assert.ok(key, "the cache key must hash the inputs");
+  for (const input of [
+    "scripts/build-libmpv.sh",
+    "packaging/libmpv/versions.txt",
+    "packaging/libmpv/Containerfile",
+    "packaging/libmpv/patches/**",
+  ]) {
+    assert.ok(key.includes(`'${input}'`), `the cache key must cover ${input}`);
+  }
+  assert.match(
+    job,
+    /- name: Build the set\n\s+if: steps\.cache\.outputs\.cache-hit != 'true'\n\s+run: scripts\/build-libmpv\.sh --container/,
+  );
+  // The check runs on every image, on the baseline first, cached or not.
+  const check = job.match(/- name: Load and decode on clean distributions\n(?<body>[\s\S]*?)(?=\n      - |$)/)
+    ?.groups?.body;
+  assert.ok(check, "the load check must stay a step of its own");
+  assert.doesNotMatch(check, /^\s+if:/m, "a cached set is checked too");
+  const images = [...check.matchAll(/check-in-container\.sh (\S+)/g)].map((m) => m[1]);
+  assert.equal(images[0], "docker.io/library/ubuntu:22.04", "the baseline itself comes first");
+  assert.ok(images.length >= 3, "the baseline and at least two newer distributions");
+  assert.match(job, /uses: actions\/upload-artifact@v7\n\s+with:\n\s+name: libmpv-linux-x86_64\n\s+if-no-files-found: error\n\s+path: \.libmpv\/out\/libmpv/);
+});
+
+const libmpvScriptUnavailable =
+  process.platform === "linux" ? false : "the libmpv set is built on Linux only";
+
+test("the libmpv build refuses a tarball that does not match its pin", { skip: libmpvScriptUnavailable }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, mkdir, rm, writeFile } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const root = await mkdtemp(path.join(os.tmpdir(), "vela-libmpv-pin-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const lua = (await libmpvPins()).find((pin) => pin.name === "lua");
+  await mkdir(path.join(root, "src"), { recursive: true });
+  // A file with the pinned name and the wrong contents: no download happens.
+  await writeFile(path.join(root, "src", `lua-${lua.version}.tar.gz`), "not the pinned tarball\n");
+  const run = spawnSync("bash", [libmpvScriptPath, "lua"], {
+    env: { ...process.env, LIBMPV_ROOT: root },
+    encoding: "utf8",
+  });
+  assert.notEqual(run.status, 0, "a mismatched tarball must stop the build");
+  assert.match(run.stderr, /build-libmpv: checksum mismatch: .*lua-/);
+  assert.doesNotMatch(run.stdout + run.stderr, /liblua|gcc/, "nothing may be built from it");
+});
+
+test("the libmpv build names an unknown step instead of ignoring it", { skip: libmpvScriptUnavailable }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { mkdtemp, rm } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const root = await mkdtemp(path.join(os.tmpdir(), "vela-libmpv-step-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const run = spawnSync("bash", [libmpvScriptPath, "ffmpeg-gpl"], {
+    env: { ...process.env, LIBMPV_ROOT: root },
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 1);
+  assert.match(run.stderr, /build-libmpv: unknown step 'ffmpeg-gpl'/);
+});

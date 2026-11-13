@@ -62,6 +62,45 @@ jobs:
       - run: npm run check
       - run: npm run build
 
+  libmpv:
+    name: Shipped libmpv set (Linux x86_64)
+    # The library set the embedded player loads (.agents/plans/embedded-player.md).
+    # Built inside packaging/libmpv/Containerfile, so the runner only has to match
+    # the release's Linux runner for the checks that follow.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      # The build takes several minutes and its inputs change rarely. The key
+      # hashes every input, so a cached set is exactly what a fresh build of
+      # this commit would produce from the pins.
+      - name: Restore the built set
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: .libmpv/out
+          key: libmpv-linux-x86_64-${{ hashFiles('scripts/build-libmpv.sh', 'packaging/libmpv/versions.txt', 'packaging/libmpv/Containerfile', 'packaging/libmpv/patches/**') }}
+
+      - name: Build the set
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: scripts/build-libmpv.sh --container
+
+      # Cached or freshly built, the set is proved every time: it must match
+      # its manifest, load, and decode on the build baseline itself and on two
+      # newer distributions, in images with no development packages.
+      - name: Load and decode on clean distributions
+        run: |
+          packaging/libmpv/check-in-container.sh docker.io/library/ubuntu:22.04
+          packaging/libmpv/check-in-container.sh docker.io/library/debian:12
+          packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
+
+      - name: Upload the set
+        uses: actions/upload-artifact@v7
+        with:
+          name: libmpv-linux-x86_64
+          if-no-files-found: error
+          path: .libmpv/out/libmpv
+
   audit:
     name: cargo audit
     runs-on: ubuntu-latest
