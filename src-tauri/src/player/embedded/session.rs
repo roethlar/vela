@@ -56,6 +56,27 @@ pub(crate) enum Lifecycle {
     Closed,
 }
 
+/// The file of marker ranges a launch wrote for mpv's script to read once
+/// and delete. The script deletes it when it has read it; this deletes it
+/// when the play's start request goes, which is when the play has failed to
+/// start or has ended. So no play leaves one behind, whether or not the
+/// script ever ran (review finding ec-8: a start that failed before mpv
+/// existed left it).
+pub(crate) struct MarkerPayload(PathBuf);
+
+impl MarkerPayload {
+    pub(crate) fn new(path: PathBuf) -> Self {
+        MarkerPayload(path)
+    }
+}
+
+impl Drop for MarkerPayload {
+    fn drop(&mut self) {
+        // Usually gone already. A path of marker times, never a secret.
+        let _ = std::fs::remove_file(&self.0);
+    }
+}
+
 /// Everything a play needs to start.
 pub(crate) struct Start {
     pub(crate) lib: Arc<LibMpv>,
@@ -79,6 +100,8 @@ pub(crate) struct Start {
     /// and a test can only show that with a gap worth the name.
     pub(crate) load_delay: Duration,
     pub(crate) header_include: Option<HeaderInclude>,
+    /// Held, not read: see [`MarkerPayload`].
+    pub(crate) _marker_payload: Option<MarkerPayload>,
     pub(crate) on_lifecycle: Arc<dyn Fn(Lifecycle) + Send + Sync>,
 }
 
@@ -606,6 +629,22 @@ mod tests {
             "the play still owned the file and removed it when it was reaped"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_marker_payload_goes_when_what_holds_it_goes() {
+        let path = std::env::temp_dir().join(format!(
+            "vela-test-{}-embedded-marker-payload.json",
+            std::process::id()
+        ));
+        std::fs::write(&path, b"[]").unwrap();
+        let held = Some(MarkerPayload::new(path.clone()));
+        assert!(path.exists(), "holding it does not touch it");
+        drop(held);
+        assert!(!path.exists());
+        // The script got there first: nothing to remove, and no complaint.
+        drop(MarkerPayload::new(path.clone()));
+        assert!(!path.exists());
     }
 
     #[test]

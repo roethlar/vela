@@ -17,7 +17,7 @@ use tauri::{Emitter, Manager};
 
 use super::libmpv::{self, LibMpv};
 use super::options;
-use super::session::{Lifecycle, Rect, Session, Start, WindowHandles};
+use super::session::{Lifecycle, MarkerPayload, Rect, Session, Start, WindowHandles};
 use super::startup::{self, WindowMode};
 use super::{egl, surface};
 use crate::player::launch::LaunchPlan;
@@ -344,11 +344,15 @@ impl Prepared {
                 });
             }) as Arc<dyn Fn(Lifecycle) + Send + Sync>
         };
+        // Every part of the plan is named: a part added later has to be
+        // given an owner here before this compiles. The environment is for a
+        // player that is a process of its own.
         let LaunchPlan {
             args,
+            env: _,
             url,
             header_include,
-            ..
+            marker_payload,
         } = plan;
         let started = Session::start(Start {
             lib,
@@ -372,6 +376,7 @@ impl Prepared {
                 std::env::var_os(DEVELOPMENT_LOAD_DELAY_VARIABLE).as_deref(),
             ),
             header_include,
+            _marker_payload: marker_payload.map(MarkerPayload::new),
             on_lifecycle,
         });
         started.map_err(|reason| {

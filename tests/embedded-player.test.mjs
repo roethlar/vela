@@ -222,6 +222,31 @@ test('both players give up a consumed stream-auth file the same way', () => {
   );
 });
 
+test('everything a launch wrote to disk has an owner in an embedded play', () => {
+  // A launch may write two files: the stream-auth include and the marker
+  // payload. The external launcher removes the payload itself when it cannot
+  // start; the embedded one used to take the plan apart and drop the
+  // payload's path (review finding ec-8). The plan is now taken apart by
+  // name, with no "and the rest", and both files go into the start request.
+  assert.match(
+    host,
+    /let LaunchPlan \{\s+args,\s+env: _,\s+url,\s+header_include,\s+marker_payload,\s+\} = plan;/,
+  );
+  const start = host.slice(host.indexOf('let started = Session::start(Start {'));
+  const request = start.slice(0, start.indexOf('});'));
+  assert.match(request, /\n            header_include,\n            _marker_payload: marker_payload\.map\(MarkerPayload::new\),\n/);
+  // The request lives exactly as long as the play, or as its failed start:
+  // the play's thread owns it, and it is nowhere copied or kept.
+  assert.match(session, /\.spawn\(move \|\| \{\s+let shared = thread_shared;\s+match set_up\(&start, &shared\) \{/);
+  assert.match(
+    session,
+    /impl Drop for MarkerPayload \{\s+fn drop\(&mut self\) \{[\s\S]{0,120}let _ = std::fs::remove_file\(&self\.0\);\s+\}\s+\}/,
+  );
+  const shippedSession = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
+  assert.equal(count(shippedSession, 'std::mem::forget'), 0);
+  assert.equal(count(code(host), 'std::mem::forget'), 0);
+});
+
 // ---- Slice 4: HDR
 
 test('mpv is told what it draws for in one place, together with the surface', () => {
