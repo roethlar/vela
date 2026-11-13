@@ -1,7 +1,7 @@
 # ec-3: the settings read at start-up waits forever on a settings path that is not a regular file
 
 **Severity**: MEDIUM — Vela never opens its window, not even its recovery screen, and this is on every Linux start whether or not the embedded player was chosen. It needs a settings path that is a pipe, a device or a link to one.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `d804fc8`, `867a694`, `d66bb7b`
 
@@ -127,3 +127,21 @@ It needs a process in a session of its own. It is closed by the same
 means as the pipe case, which is tested: nothing but a regular file is
 opened for reading. The reopen also passes `O_NOCTTY`.
 
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 09:38 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d43a-1225-7921-b405-9cdb372b2ced`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:25 UTC, finished 09:32 UTC.
+- Reviewed head `d66bb7b86d1da30a546012e2581ae4a765fd81e5`, base
+  `f829cf732450be7e4ce079383d852654262b928b` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
