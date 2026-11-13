@@ -58,11 +58,20 @@ test('a fallback is explained once, and only by a play that started', () => {
     success,
     /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,400}if fallback_told \|\| played_fallback\.is_none\(\) \{\s+state\s+\.embedded_fallback_notices[\s\S]{0,120}\.record\(played_fallback\.as_ref\(\)\);/,
   );
+  // The notice state is touched in exactly two places in the whole command
+  // layer: asked before the launch, recorded after it succeeded. Anything else
+  // (an early record, a second ask) would tell the user at the wrong time.
+  const uses = [...commands.matchAll(/embedded_fallback_notices\s*\.lock\(\)\s*\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s*\.(\w+)\(/g)];
+  assert.deepEqual(uses.map((use) => use[1]), ['due', 'record']);
   assert.equal(
-    body.split('.record(played_fallback.as_ref())').length - 1,
-    1,
-    'recorded in exactly one place',
+    commands.split('embedded_fallback_notices').length - 1,
+    2,
+    'no other code reads or writes the notice state',
   );
+  const successAt = commands.indexOf('let played = after_successful_play(played, || {');
+  const launchAt = commands.indexOf('playback::play(\n');
+  assert.ok(uses[0].index < launchAt, 'the notice is asked for before the launch');
+  assert.ok(uses[1].index > launchAt && uses[1].index > successAt, 'and recorded only after it succeeded');
 });
 
 test('a relaunch stays in the player it replaces', () => {
