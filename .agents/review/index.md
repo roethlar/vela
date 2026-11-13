@@ -9,8 +9,8 @@ changes what the external player does. Record:
 
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
-| ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[~]`  |        |          |
-| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[~]`  |        |          |
+| ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[~]`  | `4fbff87`, `1d7c405` |          |
+| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[~]`  | `94d067e` |          |
 
 **Embedded player Slice 0b review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

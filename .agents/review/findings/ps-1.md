@@ -6,7 +6,7 @@ that is how a real failure gets waved through. Nothing the app ships
 changes.
 **Status**: In progress
 **Branch**: —
-**Commit**: (this commit)
+**Commit**: `4fbff87` (the lock and the refusal), `1d7c405` (a test that the lock excludes)
 
 ## Evidence
 
@@ -72,7 +72,23 @@ is that the app chooses it; the lock changes nothing the app runs.
 
 ## Guard proof
 
-(pending)
+Run 2026-11-13 at `1d7c405` in a disposable worktree; each injection
+restored with `git checkout` from the commit, then
+`cargo +stable test --locked --lib`.
+
+Each behaviour the fix claims, separately:
+
+| Injection | Result |
+| --- | --- |
+| The recorded-command test does not take the lock | FAIL, every run: that test, "a test that writes a marker payload must hold payload_test_lock::hold()" |
+| The payload test does not take the lock | FAIL, every run: that test, same message |
+| The writer refuses nothing | FAIL: `a_test_that_writes_a_marker_payload_without_the_lock_is_refused` ("did not panic as expected") |
+| Dropping the guard leaves the thread marked | FAIL: `the_payload_test_lock_is_held_only_while_its_guard_lives` |
+| `hold()` marks the thread and excludes nobody | FAIL: `the_payload_test_lock_keeps_a_second_test_out_until_the_first_is_done` |
+| No refusal and no lock in one test (the state the finding reported) | the two tests side by side, 150 runs: 27 failed, first at `external.rs:461`, the payload read, `NotFound` |
+| Restored | PASS, 378 tests; the two tests side by side, 300 runs: 0 failed |
+
+Before the fix (`90db1a6`), the same side-by-side run failed 2 of 60.
 
 ## Coder dispute (if any)
 
@@ -80,7 +96,13 @@ None.
 
 ## Known gaps
 
-(pending)
+- The refusal covers `try_write_marker_payload`, the one function that
+  sweeps. A test that removed payload files some other way would not be
+  caught; none does.
+- The auth include has no such sweep (each launch removes only its own
+  file), so its tests need no lock. Checked by reading
+  `HeaderInclude::remove_now` and `write_header_include`, and by the
+  300 clean runs above, which include a test that writes both.
 
 ## Reviewer comments
 

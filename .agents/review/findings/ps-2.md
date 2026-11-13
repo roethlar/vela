@@ -5,7 +5,7 @@ authentication in the owner-only include; what broke is one of the checks
 that would notice if that stopped being true.
 **Status**: In progress
 **Branch**: —
-**Commit**: (this commit)
+**Commit**: `94d067e`
 
 ## Evidence
 
@@ -76,7 +76,33 @@ exist.
 
 ## Guard proof
 
-(pending)
+Run 2026-11-13 in a disposable worktree; each injection restored with
+`git checkout` from the commit, then
+`node --test tests/config-integrity.test.mjs` and
+`cargo +stable test --locked --lib player::`. All injections are in
+`build_launch` (`src-tauri/src/player/launch.rs`) unless noted. "JS" is
+"mpv authentication stays in a private include until its exact child is
+reaped"; "rendered" is the new Rust test; "recorded" is
+`the_full_external_command_line_is_exactly_the_recorded_one`.
+
+| Injection | JS | Rust |
+| --- | --- | --- |
+| The reviewer's mutation, on the commit BEFORE the fix (`1d7c405`) | pass (the finding) | recorded FAILS |
+| The reviewer's mutation, on the fix | FAIL | rendered FAILS ("a stream header reached the player outside the include"); recorded FAILS |
+| A second reader of the headers that sets no option | FAIL at the `http_headers` list (line 338) | pass |
+| The header option set as `LaunchArg::set`, from a fixed value | FAIL at the option-name list (line 345) | rendered FAILS ("must be set by the include, never by an argument") |
+| The header option as raw text, `--HTTP-Header-Fields=` | FAIL | rendered FAILS, same message |
+| The Rust test renamed away (`external.rs`) | FAIL at the name check (line 349) | pass |
+| A header value in the player's environment | FAIL | rendered FAILS |
+| A header under another option name (`stream-lavf-o`) | FAIL | rendered FAILS |
+| The include is written and not passed | FAIL (the existing include check) | rendered FAILS ("the include is named once") |
+| The include is passed twice | pass | rendered FAILS, same message |
+| An include option on a launch with no headers | pass | rendered FAILS; the minimal recorded test FAILS |
+| Restored | PASS | PASS, 33 of 33 in `player::` |
+
+The first row is worth keeping in mind when reading the severity: on the
+commit the reviewer examined, the Rust recorded-command test did fail
+under the reviewer's own mutation. The JavaScript check alone was blind.
 
 ## Coder dispute (if any)
 
@@ -84,7 +110,16 @@ None.
 
 ## Known gaps
 
-(pending)
+- The two source-text lists are exact, so an innocent edit to one of those
+  lines (a rename, a reformat) fails the test and has to update it. That
+  is intended: those are the lines a reviewer should be made to look at.
+- The check covers the code that describes and starts a launch
+  (`playback.rs` and `player/`). What `commands.rs` puts into
+  `PlaySpec.url` and `PlaySpec.http_headers` is covered by "Plex
+  credentials never enter query strings or frontend artwork URLs", which
+  this finding did not touch.
+- Jellyfin and Emby stream URLs carry their token in the URL by the
+  standing decision of 2026-05-23; this guard is about headers only.
 
 ## Reviewer comments
 
