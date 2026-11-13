@@ -271,8 +271,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   and peak detection moves both. On real clips dark scenes match and
   bright scenes clip more highlight embedded; the owner: "the external
   looks slightly better on this display." Clicks
-  on HTML drawn over the video reach the page. Still open: a real film
-  sample. Next is the owner's ruling on whether to plan the
+  on HTML drawn over the video reach the page. Next is the owner's ruling on whether to plan the
   embedded player; external mpv stays the shipped player until such a plan
   is approved.
 - Launch marketing drafts are in-repo: GitHub social preview
