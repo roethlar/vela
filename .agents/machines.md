@@ -406,7 +406,32 @@ Recorded and verified 2026-11-12, locally on the host.
   in-session yes from the owner, or the push stays refused (do not route
   around it).
 - Shell commands in a Claude Code session here go through the `ptk` MCP
-  tool (PowerShell 7); a hook blocks the built-in shell.
+  tool (PowerShell 7); a hook blocks the built-in shell. A command that
+  prints thousands of error lines can kill the ptk worker
+  (`worker_exited_unexpectedly`): redirect bulk output to a file.
+- Embedded-player Slice 0 leftovers, 2026-11-12 (all disposable):
+  - `~/dev/vela-spike-libmpv/`: the probe programs (`probe1`, `probe2`,
+    `pbuild.sh` rebuilds them), `p0/` (probe scripts, screenshots, clips)
+    and `libset/` (the library-set recipe, its downloaded sources, the
+    build tree `work22/` and the built set `out22/libmpv/`).
+    `VELA_LIBMPV=<path to libmpv.so.2>` makes a probe use that library.
+    Files under `libset/work22` belong to container sub-ids: remove them
+    with `podman unshare rm -rf`.
+  - podman images: `localhost/vela-libmpv-build:22.04` (the build
+    environment), plus `ubuntu:22.04`, `debian:12` and `fedora:latest`
+    used for load tests.
+  - `~/dev/vela-probe-wt`: a detached `git worktree` of this clone with
+    its own `npm ci` and debug build, for E2E runs. Refresh with
+    `git -C ~/dev/vela-probe-wt checkout --detach <sha>`; remove with
+    `git worktree remove`.
+  - Headless Wayland for E2E: `weston --backend=headless --renderer=gl
+    --socket=<name>` (weston 15.0.1), then run the harness with
+    `VELA_E2E_HEADED=1 GDK_BACKEND=wayland WAYLAND_DISPLAY=<name>` and an
+    empty `DISPLAY`. It offers no colour management and no fractional
+    scale.
+  - Compositor screenshots of the active window: `spectacle -b -n -a -o
+    <file>`. The display's reference white read 83 nits that evening (265
+    during the spike): the KDE brightness slider moves it.
 
 ## Linux VM (E2E host)
 

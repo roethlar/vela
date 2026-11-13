@@ -12,7 +12,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - IN FLIGHT since 2026-11-12: the embedded player plan
   `.agents/plans/embedded-player.md`, APPROVED that day, running
   unattended (the owner is away). Where it stands is in that file's
-  "Implementation log"; read it before doing anything. Next in the queue:
+  "Implementation log"; read it before doing anything. As of 2026-11-12:
+  Slice 0 (probes) is done and changed the design in four places (the
+  log's "For the owner" lists them); Slice 0b (the library build in the
+  repo) is next. Next in the queue after this plan:
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a

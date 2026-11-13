@@ -231,6 +231,19 @@ Options that differ per player are decided in `build_launch` by a
 | `mpv_path` | used | ignored |
 | user `mpv_extra_args` / own config | applied | applied, then the embedded-only options above are re-asserted |
 
+**How the embedded launcher applies the list (decided in Slice 0, A1).**
+Through the library API mpv rejects command-line-only spellings: `script`
+is such an alias ("option not found"), and so are the `-append` forms Vela
+already emits (`script-opts-append`). A config file IS parsed with
+command-line semantics, and `include` works through the API. So the
+embedded launcher writes the plan's ordered options to a private,
+owner-only file in mpv's config syntax, one
+`name=%<byte length>%<value>` line per option (that form needs no
+quoting), and sets `include` to it through the API. The user's
+`mpv_extra_args` go through the same file, so they mean exactly what they
+mean for the external player. Paths are always absolute: mpv 0.42
+resolves a relative path against `$PWD`, not the working directory.
+
 `VELA_MARKERS_PAYLOAD` reaches the external player through the child
 environment. In-process there is no child environment; setting the
 variable on Vela's own process is racy and leaks to later children. Pass
@@ -316,6 +329,65 @@ What that requires:
 `setlocale(LC_NUMERIC, "C")` must be in effect before `mpv_create`
 (spike finding: libmpv refuses to start after GTK initialises otherwise).
 
+#### The set as decided in Slice 0 (supersedes the bullets above where they differ)
+
+Built and proved on 2026-11-12 (log, "Slice 0"); the recipe is the
+prototype for Slice 0b.
+
+- **Contents (15 libraries, 33.5 MB with licence texts):** mpv 0.42.0;
+  FFmpeg 9.0.2 (configure reports "LGPL version 2.1 or later";
+  `--disable-autodetect`, then zlib, iconv, GnuTLS, dav1d, VA-API and
+  libdrm named explicitly); libplacebo 7.387.0 with no GPU backend (mpv
+  requires the library, the embedded renderer does not draw with it);
+  libass 0.17.5; FreeType 2.15.0; FriBidi 1.0.18; HarfBuzz 15.1.0; dav1d
+  1.5.4; Lua 5.2.4; uchardet 0.0.8 (subtitle encoding detection, as
+  distribution builds of mpv have). Every optional mpv feature is off
+  unless named (`-Dauto_features=disabled`), so the result does not depend
+  on what the build machine has installed. Build-only inputs, not shipped:
+  Vulkan headers (libplacebo compiles stubs against them).
+- **Private names, and why.** Vela's own process already has the system's
+  FreeType, HarfBuzz, FriBidi and dav1d loaded (WebKitGTK needs them). The
+  dynamic loader reuses an already-loaded library of the same name, and
+  resolves symbols from the process's global list first. Left alone, the
+  shipped copies would be silently replaced by the machine's. So every
+  shipped library except `libmpv.so.2` gets a Vela-private soname
+  (`libvela-avcodec.so.63`, `libvela-freetype.so.6`, ...), references are
+  rewritten with `patchelf`, each has an `$ORIGIN` run path, and Vela
+  opens `libmpv.so.2` by absolute path with
+  `RTLD_NOW | RTLD_LOCAL | RTLD_DEEPBIND`. Checked with the loader's own
+  binding trace inside a GTK + WebKitGTK process: the set binds only to
+  itself, and GTK keeps binding to the system's FreeType.
+- **Loaded from the machine, not shipped** (the build fails if the set
+  needs anything outside this list): glibc and the C++ runtime
+  (`libstdc++`, `libgcc_s`), `libEGL`, `libva` and `libva-drm`, `libdrm`,
+  `libpulse` and `libasound`, `libfontconfig` (font discovery must follow
+  the machine's font configuration), `libgnutls` (TLS uses the machine's
+  trust store and gets the distribution's security updates; WebKitGTK's
+  own networking already requires it), `libz`.
+- **Baseline: Ubuntu 22.04 (glibc 2.35)**, the distribution Vela's own
+  Linux bundles are built on (`release.yml`). Built there in a container,
+  the set loads, decodes (H.264, HEVC 10-bit, AV1) and fetches over HTTPS
+  on clean Ubuntu 22.04, Debian 12 and Fedora 45 images, and plays 4K60
+  HDR with VA-API on `continuum` (CachyOS).
+- **Two consequences of that baseline.** (1) Its PipeWire is too old for
+  mpv's native PipeWire output, so audio goes through the PulseAudio
+  client (PipeWire's own PulseAudio server on current desktops) or ALSA.
+  (2) Its libwayland is too old for mpv's Wayland support, which the
+  embedded player does not need: mpv is built without it, and VA-API is
+  given the GPU through a DRM render node instead (next section).
+- **One build-file patch to mpv**
+  (`mpv-vaapi-without-drm-output.patch`, 2 hunks of `meson.build`): mpv
+  ties VA-API-over-DRM to its DRM/KMS video output, which needs a newer
+  libdrm than the baseline has and a library the baseline lacks. Built
+  that way the set did not load on Ubuntu 22.04 itself
+  (`undefined symbol: drmModeCreateDumbBuffer`). The patch keeps VA-API and
+  leaves that video output out; no mpv source file is changed. It ships in
+  the repo next to the build script, which is also how the LGPL's
+  "provide your modifications" is met.
+- **Not included, on purpose:** NVIDIA's decoder headers (see
+  "Availability" below: untested hardware), Dolby Vision helper libraries,
+  ICC colour management, DVD/Blu-ray, JavaScript scripting.
+
 ### Linux/Wayland video surface (the spike's Stage 2/3 design)
 
 Reference implementation, C, outside the repo:
@@ -343,8 +415,21 @@ Slice 3 and record it):
 - A dedicated render thread owns the EGL context: wait on mpv's update
   callback, `mpv_render_context_render` into FBO 0 with
   `MPV_RENDER_PARAM_FLIP_Y`, `MPV_RENDER_PARAM_DEPTH`, swap with swap
-  interval 0, `report_swap`. Pass `MPV_RENDER_PARAM_WL_DISPLAY` at context
-  creation for VA-API decoding.
+  interval 0, `report_swap`. For VA-API decoding pass
+  `MPV_RENDER_PARAM_DRM_DISPLAY_V2` with `render_fd` set to the DRM render
+  node of the GPU that EGL draws with (`EGL_EXT_device_query`:
+  `eglQueryDisplayAttribEXT(EGL_DEVICE_EXT)`, then
+  `eglQueryDeviceStringEXT(EGL_DRM_RENDER_NODE_FILE_EXT)`, opened
+  read-write). The spike passed `MPV_RENDER_PARAM_WL_DISPLAY`; the shipped
+  mpv has no Wayland support compiled in, and Slice 0 showed the DRM node
+  gives the same `hwdec=vaapi`. Never call `eglTerminate`: the EGL display
+  is shared with GTK and WebKit in the same process.
+- The render thread owns every Wayland object it creates on a private
+  event queue (registry obtained through a display wrapper). The UI thread
+  sends only `wl_subsurface.set_position` and then asks GTK to redraw,
+  because that state applies on the parent's next commit; the render
+  thread applies size changes (viewport, buffer, opaque region). Proved in
+  Slice 0, A5.
 - Colour: bind `wp_color_manager_v1` (bind at the lowest version that has
   what is used; the spike used v1). Get the surface feedback's preferred
   description. When it describes an HDR output (target max luminance
@@ -358,14 +443,40 @@ Slice 3 and record it):
   re-tag. When the output is SDR or the protocol is missing: leave mpv's
   targets unset and do not tag.
 - The main window must be transparent on Linux for the video to show
-  through (`"transparent": true`, or the builder equivalent). Its effect
-  on the rest of the app and on the `WEBKIT_DISABLE_DMABUF_RENDERER=1`
-  setting is ASSUMPTION A2, probed in Slice 0.
+  through. Slice 0 (A2) found this works ONLY with WebKitGTK's DMABUF
+  renderer: with it, the transparent build is pixel-identical to today's;
+  with `WEBKIT_DISABLE_DMABUF_RENDERER=1`, which `main.rs` sets on every
+  Linux start, a transparent window stops repainting after its first
+  frame. Both are process-start choices. So (ASSUMED, the owner being
+  away; see the log):
+  - **Embedded window mode** is decided once at startup, from the saved
+    `player` setting: only then is the window created transparent and the
+    DMABUF renderer left on. With `player` absent or `external`, startup
+    is exactly today's (opaque window, renderer disabled); nothing changes
+    for anyone who has not chosen the embedded player.
+  - Changing the setting therefore takes effect at the next start of Vela.
+    Until then an embedded choice plays externally with a notice (D3).
+  - `main.rs` cannot read the config after GTK starts, so the startup
+    decision reads the config file before `vela_lib::run()`.
+  - **Safety net:** embedded window mode changes how the whole window is
+    drawn, and a failure there would leave the user unable to reach
+    Settings. Before entering it Vela writes a marker file; the page
+    removes it once the UI has loaded. A marker found at startup means the
+    previous embedded-mode start did not get that far: start in today's
+    mode and show a notice.
 
 Embedded is **available** only when all hold: Linux; a Wayland GDK
-display; `wl_subcompositor` and `wp_viewporter` present; the shipped
-libmpv loads; an EGL config exists. `wp_color_manager_v1` is not required (SDR-only
-without it). Otherwise it is unavailable and D3 applies.
+display; Vela started in embedded window mode; `wl_subcompositor` and
+`wp_viewporter` present; the shipped libmpv loads; an EGL config exists;
+and the NVIDIA proprietary kernel driver is NOT loaded.
+`wp_color_manager_v1` is not required (SDR-only without it). Otherwise it
+is unavailable and D3 applies.
+
+The NVIDIA exclusion (ASSUMED): `WEBKIT_DISABLE_DMABUF_RENDERER=1` exists
+because WebKitGTK's DMABUF renderer crashed under Wayland on that driver,
+and embedded window mode needs that renderer. Nothing here was run on
+NVIDIA hardware, so embedded stays unavailable there (detected by
+`/proc/driver/nvidia/version`) until someone tests it; the notice says so.
 
 ### Frontend: the player view
 
@@ -414,9 +525,29 @@ video rectangle, and HTML controls sit on top. New backend surface:
   DRAWING when embedded; its marker state, its Space-to-skip binding and
   the state it publishes for `player-state` stay active. Manual autocrop
   is reached the same way, through an allow-listed `toggle-autocrop` that
-  invokes the stock script's binding.
+  invokes the crop script's binding (next section).
 
 External plays are untouched: no player view, mpv's own window.
+
+### Autocrop in the embedded player (decided in Slice 0, A7)
+
+The stock `autocrop.lua` that Vela bundles finds black bars with FFmpeg's
+`cropdetect` filter. FFmpeg licenses that filter under the GPL only, so it
+does not exist in the LGPL FFmpeg Vela ships (D4), and the stock script
+reports "No crop data" in the embedded player. FFmpeg's `bbox` filter is
+LGPL, is in the shipped build, and reports the same rectangle per frame.
+
+So the embedded player loads a Vela-authored, MIT-licensed script instead
+(`vela-crop.lua`, new in Slice 5): it does what the stock script does
+(pause hardware decoding for the measurement, insert the filter, gather
+for about a second, check the result is plausible, set `video-crop`,
+restore), with `bbox` as the filter and the union of the per-frame boxes
+as the result. It offers the same three modes (off, manual, auto) and the
+same settle delay as `vela-autocrop.lua`. Probe result on a letterboxed
+clip: `1280x536+0+92`, exactly what the stock script gives on a GPL build.
+The external player keeps the stock script unchanged. The GPL script is
+never loaded in-process, which also keeps the embedded player clear of the
+existing GPL note for that file.
 
 ### Selection
 
@@ -427,7 +558,19 @@ configured choice → availability check → D3 fallback. The choice is
 recorded on the session so `apply_step_down` relaunches in the same
 player.
 
+Memory (decided in Slice 0, A8): each in-process play starts a set of
+threads, and glibc keeps freed memory in per-thread arenas, up to eight
+per CPU core. Over 150 stop/start cycles the process grew by a few
+megabytes per play on a 32-core machine, while with the arena count capped
+it stayed flat (so nothing leaks; the allocator hoards). When Vela starts
+in embedded window mode it calls `mallopt(M_ARENA_MAX, 4)` before any
+thread exists. External-mode starts are untouched.
+
 ## Assumptions to probe before any product code (Slice 0)
+
+All eleven were probed on 2026-11-12; the answers are in the
+Implementation log ("Slice 0"), and the design sections above already
+carry the changes they forced.
 
 - A1. libmpv honours `input-ipc-server`, `script=`, `script-opts=` and
   `include=` when used with `vo=libmpv`.
@@ -506,7 +649,10 @@ Lands the build of the shipped library set before any player code uses
 it: `scripts/build-libmpv.sh` (pinned versions and checksums in one data
 file), the CI job, the dependency-policy guard for the pins, and
 `docs/development.md` on how a developer gets the set. Nothing in the app
-loads it yet. Guard: a test that the pinned-versions file, the script and
+loads it yet. It starts from the recipe Slice 0 proved (build script,
+versions file, container file, the mpv build-file patch, and the
+load-and-decode check used in the distribution containers), moved into the
+repo and given tests. Guard: a test that the pinned-versions file, the script and
 the workflow name the same versions (source-text pattern), red-proved by
 changing one of them.
 
@@ -550,8 +696,17 @@ changing one of them.
 - `embedded::launch`: handle creation, options from the plan, private IPC
   socket, `loadfile`; shutdown path; `PlayerHandle::Embedded`.
 - Wayland subsurface, EGL, render thread, fractional scale, resize.
-- Transparent main window on Linux; `player_set_rect`; a minimal player
-  view (video rectangle and a Close control).
+- Embedded window mode as designed after Slice 0 ("The main window must
+  be transparent"): the startup decision read from the config before GTK
+  starts, the transparent window and DMABUF renderer only in that mode,
+  the startup marker and its notice, the NVIDIA exclusion, the arena cap.
+  Guards: a test that an absent or `external` setting yields exactly
+  today's startup (window opaque, renderer variable set); a test that a
+  leftover marker forces today's mode. Red-prove each.
+- `player_set_rect`; a minimal player view (video rectangle and a Close
+  control).
+- Check and record how the transparent window looks in the first moments
+  of startup (not probed in Slice 0).
 - App-exit and new-play teardown (inventory 12).
 - Acceptance tests named by ep-1, both required: a launch with a
   deliberate delay before `loadfile` still plays; a file that ends makes
@@ -580,6 +735,11 @@ changing one of them.
 
 - `player_command` allow-list, `player-state`, keyboard map, tracks,
   volume, seek bar, fullscreen, skip button, notice line.
+- `vela-crop.lua` ("Autocrop in the embedded player"): the three modes,
+  loaded only by the embedded launcher. Tests: the launcher never names
+  the stock `autocrop.lua` for an embedded play (red-proof by restoring
+  it); E2E on a letterboxed clip under the headless Wayland venue,
+  asserting `video-crop`.
 - Tests: allow-list rejects unknown names (red-proof by adding a
   passthrough); source-text guard that every control calls an
   allow-listed name; E2E for pause/seek/stop through the page; a skip test
@@ -656,3 +816,79 @@ and removes nothing from it.
 The owner's go and the three unattended-run rules are in Status. The owner
 installed `podman` and `patchelf` on `continuum` for the library build
 (`.agents/machines.md`). Nothing in the app has changed yet.
+
+### 2026-11-12 — Slice 0 (probes): done, no repo code
+
+Run on `continuum` in the owner's KDE Wayland session (display `DP-3`,
+HDR on, scale 1.7), with throwaway code outside the repo:
+`~/dev/vela-spike-libmpv/` (`probe1.c`, `probe2.c`, `pcore.h`, `mpvdl.h`,
+`p0/` scripts and evidence, `libset/` library recipe). Every probe was run
+against the system's libmpv 0.41.0 and against the shipped set (mpv
+0.42.0) unless noted. No codereview: the slice landed no repo code.
+
+| | Assumption | Answer | Evidence |
+| --- | --- | --- | --- |
+| A1 | IPC socket, scripts, script options, `include` with `vo=libmpv` | **Yes, with a condition** | The private socket answers; a script loads, sees its option and can draw; `include` applies. Condition: the name `script` is a command-line-only alias the library API rejects ("option not found"); it works from an included config file, as does `scripts`. Design: "How the embedded launcher applies the list". |
+| A2 | Transparent main window, no visible change | **Yes only with WebKit's DMABUF renderer; No with Vela's current setting** | Real app, mock server, compositor screenshots of three states (home dark, home light, Settings dialog). Renderer on: opaque and transparent builds are byte-identical. `WEBKIT_DISABLE_DMABUF_RENDERER=1` (today's default): the transparent build paints its first frame and then shows a white page with one small repainted patch. Design: "embedded window mode". |
+| A3 | Script key bindings need forwarding | **Yes** | Nothing delivers keys to an embedded mpv; `keypress SPACE` and `script-binding` over IPC both fire the script's binding. |
+| A4 | The render API draws mpv's OSD | **Yes** | Framebuffer read back before and after: `show-text` changed 20,768 pixels in the top-left text box; a script `ass-events` box changed exactly the 60%-90% rectangle it drew. `osd-dimensions` reports the buffer size. |
+| A5 | Dedicated render thread with its own Wayland queue | **Yes** | Under GTK3 + WebKitGTK: 36 s of 4K60 HDR through fullscreen, back and a resize; then 332 window resizes in 20 s while playing. No Wayland error, 13 frames dropped in the first 5 s and none after (same as the spike's single-thread figure), HDR tag set, screenshot correct. |
+| A6 | Headless Wayland compositor for E2E | **Yes** | `weston --backend=headless --renderer=gl`: the E2E harness's `smoke` and `playback` pass with `VELA_E2E_HEADED=1`, `GDK_BACKEND=wayland` and weston's socket; the embedded probe renders 357 frames in 6 s there with VA-API. Weston offers no colour management and no fractional scale, so only the SDR path can be exercised in it. |
+| A7 | `autocrop.lua` in-process | **No with the shipped set; Yes by another route** | On the system (GPL) library the stock scripts crop to `1280x536+0+92` in 2.3 s and toggle off. On the shipped LGPL set: "No crop data", because FFmpeg's `cropdetect` filter is GPL-only and absent. The LGPL `bbox` filter gives the same rectangle (19 samples in 1 s). Design: "Autocrop in the embedded player". |
+| A8 | Stop one play, start the next | **Yes, with a condition** | 150 cycles of create, play 4K60, quit, destroy: about 6 ms to start, 17 ms from quit to shutdown, 0.2 s to destroy; file descriptors constant. Memory: flat (200 to 206 MB) with glibc's arena count capped at 2; with the default it climbed to 430-670 MB late in the run, so it is allocator hoarding, not a leak. Design: "Memory". |
+| A9 | `idle=once` | **Yes** | Handle idle for 5 s, then `loadfile`: plays, `end-file` reason `eof`, then `shutdown`. Controls: `idle=no` shuts down before the file is loaded; `idle=yes` never shuts down. |
+| A10 | The shipped set builds and plays here | **Yes** | See "The set as decided in Slice 0". 4K60 HDR10: `hwdec=vaapi`, HDR tag set, Lua scripts, IPC socket, all 15 libraries mapped from the set's directory. VA-API needs the DRM render node, not the Wayland display. |
+| A11 | Same binaries on another distribution | **Yes** | Built in an Ubuntu 22.04 container (x86_64); loaded, decoded H.264, HEVC 10-bit and AV1 and fetched over HTTPS in clean Ubuntu 22.04, Debian 12 and Fedora 45 containers (no GPU there, so software decoding only), and played with VA-API on `continuum` (CachyOS). aarch64 was not built. |
+
+Stop rules. A1 is a yes for what the design depends on (the trackers and
+the E2E harness reach an embedded player through the same socket), so no
+re-plan. **A2's rule says "No: stop and ask the owner", and A2 is a No
+under Vela's current WebKit setting.** The owner is away and said to
+assume no decision that makes the work pointless, so the agent did not
+stop. It chose the one arrangement in which the probe found no visible
+change at all (transparent window and DMABUF renderer together, and only
+for a user who selected the embedded player) and marked it ASSUMED. That
+choice is the owner's to overturn; it is the first item under "For the
+owner" below.
+
+Also found:
+
+- The display's reference white is not fixed: the compositor reported 83
+  nits during these probes and 265 during the spike (the desktop
+  brightness slider moves it), so `target-peak` was 1137 here and 356
+  there. Re-tagging on `preferred_changed` (Slice 4) is needed in
+  ordinary use, not only when a monitor is swapped.
+- First attempt at the set did not load on its own baseline; see the mpv
+  build-file patch in "The set as decided in Slice 0".
+- The transparent window's appearance during the first moments of startup
+  was not probed. Check it in Slice 3 with the real implementation.
+
+Not verified in Slice 0: NVIDIA or Intel GPUs, GNOME or any compositor
+other than KWin 6.8 and headless weston, aarch64, audio output (probes ran
+with audio off except the container decode test, which used a null
+output), and anything about picture quality.
+
+### For the owner (decisions the agent assumed while you were away)
+
+Each can be overturned; none has shipped to users.
+
+1. **The embedded player needs a restart to switch on, and uses a
+   different WebKit drawing mode.** (A2.) Selecting it takes effect the
+   next time Vela starts. In that mode Vela's window is transparent and
+   WebKit draws with its GPU renderer, which today's Vela turns off for
+   everyone. Measured side effect on the rest of the app: text and
+   gradients differ by at most 24 of 255 in places; nothing structural.
+   Users who do not select the embedded player get exactly today's Vela.
+2. **Not offered on the NVIDIA proprietary driver yet.** (A2.) Today's
+   WebKit setting exists because of a crash on that driver, and nothing
+   here could be tested on NVIDIA hardware. Those users keep the external
+   player and are told why.
+3. **Automatic black-bar cropping is reimplemented for the embedded
+   player.** (A7.) The bundled mpv script depends on a GPL-only FFmpeg
+   filter that an LGPL build cannot contain. A Vela-written script does
+   the same job with an LGPL filter. No licensing question arises from
+   this; it is recorded because the two players now crop with different
+   code.
+4. **Ubuntu 22.04 is the oldest system the embedded player supports**, the
+   same as Vela itself. Audio goes through PulseAudio (which PipeWire
+   provides) or ALSA.
