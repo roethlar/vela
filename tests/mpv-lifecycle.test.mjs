@@ -38,18 +38,28 @@ test('the play path starts exactly the launch that was described', () => {
   // One place starts the player, from the one described launch, with the
   // launcher of the player the play was given: the external program, or the
   // step the embedded launcher prepared.
+  // The external player, chosen: under the lock on the player slot, after
+  // the check that Vela is not exiting, the described launch is started and
+  // published in one statement.
   assert.match(
     play,
-    /let \(player, kind\) = match \(embedded_start, mpv_bin\) \{\s+\(None, Some\(mpv_bin\)\) => \(\s+crate::player::external::launch\(&mpv_bin, plan\)\?,\s+crate::player::PlayerKind::External,\s+\),\s+\(None, None\) => return Err\(NO_EMBEDDED_PLAYER\.to_string\(\)\),\s+\(Some\(prepared\), _\) => start_player\(\s+Some\(\|\| match prepared \{\s+Ok\(start\) => start\(plan, cfg\.mpv_use_own_config\.unwrap_or\(false\), &ipc_path\),/,
+    /let started_player = match \(embedded_start, mpv_bin\) \{\s+\(None, None\) => return Err\(NO_EMBEDDED_PLAYER\.to_string\(\)\),\s+\(None, Some\(mpv_bin\)\) => \{\s+let mut slot = player_slot\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+if shutting_down\.load\(Ordering::SeqCst\) \{\s+plan\.discard_marker_payload\(\);\s+return Err\(SHUTTING_DOWN\.to_string\(\)\);\s+\}\s+\*slot = Some\(crate::player::external::launch\(&mpv_bin, plan\)\?\);\s+crate::player::PlayerKind::External\s+\}/,
     'play must start the described launch',
   );
-  assert.match(play, /\*slot = Some\(player\);\s+\(kind, external_ipc_path\)\s+\};/);
+  // The embedded player: the same lock, the same check, then the step the
+  // embedded launcher prepared, given the same described launch.
+  assert.match(
+    play,
+    /let player = match prepared \{\s+Ok\(start\) => start\(plan, own_config, &ipc_path\),/,
+  );
+  assert.match(play, /let own_config = cfg\.mpv_use_own_config\.unwrap_or\(false\);/);
   // The described launch is handed over whole, to one player or the other;
   // all play itself ever does with one is throw its marker payload away
   // when it will not be started.
   assert.doesNotMatch(play, /\bplan\.(?!discard_marker_payload\(\);)/, 'play must not alter a described launch');
   assert.equal(play.split('external::launch(&mpv_bin, plan)').length - 1, 2, 'the external player, chosen or fallen back to');
   assert.equal(play.split('start(plan, ').length - 1, 1, 'the embedded player');
+  assert.match(playback, /^const SHUTTING_DOWN: &str = "Vela is shutting down\.";$/m);
 
   const start = functionBody(external, 'pub(crate) fn launch(', 'external::launch');
   assert.match(start, /let child = command\(mpv_bin, &plan\)\.spawn\(\)/, 'launch must start the plan');

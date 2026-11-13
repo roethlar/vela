@@ -307,9 +307,11 @@ pub struct PlayStarted {
 /// only if the external player cannot start it either.
 ///
 /// `embedded` fails only after putting back everything it did, so `external`
-/// starts as if it had been the first choice.
+/// starts as if it had been the first choice. One failure is different:
+/// when nothing may be started any more because Vela is exiting, the play
+/// ends there and the external player is not tried.
 fn start_player<P>(
-    embedded: Option<impl FnOnce() -> Result<P, String>>,
+    embedded: Option<impl FnOnce() -> Result<P, NotStarted>>,
     external: impl FnOnce() -> Result<P, String>,
 ) -> Result<(P, crate::player::PlayerKind), String> {
     use crate::player::PlayerKind;
@@ -318,7 +320,8 @@ fn start_player<P>(
     };
     match embedded() {
         Ok(player) => Ok((player, PlayerKind::Embedded)),
-        Err(reason) => {
+        Err(NotStarted::MustNot(reason)) => Err(reason),
+        Err(NotStarted::CouldNot(reason)) => {
             // The reason is the launcher's own words about its own failure:
             // never a URL, a title or a credential.
             eprintln!("vela: playing in the external player: {reason}");
@@ -327,6 +330,31 @@ fn start_player<P>(
                 .map_err(|other| format!("{reason} The external player could not start either: {other}"))
         }
     }
+}
+
+/// Why the embedded player did not start a play.
+#[derive(Debug, PartialEq, Eq)]
+enum NotStarted {
+    /// It could not. The play goes to the external player.
+    CouldNot(String),
+    /// Nothing may be started any more. The play ends here.
+    MustNot(String),
+}
+
+/// What `play` answers once Vela has begun to exit.
+const SHUTTING_DOWN: &str = "Vela is shutting down.";
+
+/// A test's stand-in for the search for the `mpv` program.
+#[cfg(test)]
+type FindMpv = Box<dyn Fn() -> Result<String, String>>;
+
+#[cfg(test)]
+thread_local! {
+    /// In effect on the thread that calls `play`. A test cannot depend on
+    /// what is installed on the machine it runs on, and must not start a
+    /// real player on it.
+    static MPV_FOR_THIS_TEST: std::cell::RefCell<Option<FindMpv>> =
+        const { std::cell::RefCell::new(None) };
 }
 
 /// A socket path for a second launch of the same play, never the first
@@ -416,6 +444,10 @@ pub fn play(
     // The external player is a program on the machine; the embedded one is
     // not, and needs none unless it fails.
     let find_mpv = || {
+        #[cfg(test)]
+        if let Some(found) = MPV_FOR_THIS_TEST.with(|find| find.borrow().as_ref().map(|find| find())) {
+            return found;
+        }
         crate::player::external::resolve_mpv()?
             .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())
     };
@@ -433,35 +465,54 @@ pub fn play(
     // the lock, so launch+register is atomic w.r.t. the app-exit handler: it can
     // never observe a launched-but-unregistered player and orphan it. The caller
     // has already killed any prior player, so the slot is expected to be empty.
-    let (started_player, external_ipc_path) = {
-        let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
-        // Don't launch into a shutting-down app. The exit handler sets this flag
-        // and sweeps the slot under THIS lock, so checking it here (still holding
-        // the lock) closes the race where a play starting during exit would
-        // register an mpv the sweep had already passed.
-        if shutting_down.load(Ordering::SeqCst) {
-            plan.discard_marker_payload();
-            return Err("Vela is shutting down.".to_string());
+    //
+    // Don't launch into a shutting-down app. The exit handler sets this flag
+    // and sweeps the slot under THIS lock, so checking it under the lock, each
+    // time the lock is taken to start a player, closes the race where a play
+    // starting during exit would register an mpv the sweep had already passed.
+    //
+    // The lock is the one the exit handler waits for on the window's thread, so
+    // nothing is done under it but that check and the start itself. Looking for
+    // the `mpv` program is not: it runs programs and waits for them. A play
+    // given the external player has looked already, above. A play that has to
+    // fall back to it looks, and describes its launch, between two holds of the
+    // lock (review finding ec-6, reopened for looking inside the first).
+    let mut external_ipc_path = None;
+    let started_player = match (embedded_start, mpv_bin) {
+        (None, None) => return Err(NO_EMBEDDED_PLAYER.to_string()),
+        (None, Some(mpv_bin)) => {
+            let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
+            if shutting_down.load(Ordering::SeqCst) {
+                plan.discard_marker_payload();
+                return Err(SHUTTING_DOWN.to_string());
+            }
+            *slot = Some(crate::player::external::launch(&mpv_bin, plan)?);
+            crate::player::PlayerKind::External
         }
-        let mut external_ipc_path = None;
-        let (player, kind) = match (embedded_start, mpv_bin) {
-            (None, Some(mpv_bin)) => (
-                crate::player::external::launch(&mpv_bin, plan)?,
-                crate::player::PlayerKind::External,
-            ),
-            (None, None) => return Err(NO_EMBEDDED_PLAYER.to_string()),
-            (Some(prepared), _) => start_player(
-                Some(|| match prepared {
-                    Ok(start) => start(plan, cfg.mpv_use_own_config.unwrap_or(false), &ipc_path),
-                    Err(reason) => {
-                        // Nothing will read what this launch wrote.
+        (Some(prepared), _) => {
+            let own_config = cfg.mpv_use_own_config.unwrap_or(false);
+            let ((), kind) = start_player(
+                Some(|| {
+                    let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
+                    if shutting_down.load(Ordering::SeqCst) {
                         plan.discard_marker_payload();
-                        Err(reason)
+                        return Err(NotStarted::MustNot(SHUTTING_DOWN.to_string()));
                     }
+                    let player = match prepared {
+                        Ok(start) => start(plan, own_config, &ipc_path),
+                        Err(reason) => {
+                            // Nothing will read what this launch wrote.
+                            plan.discard_marker_payload();
+                            Err(reason)
+                        }
+                    }
+                    .map_err(NotStarted::CouldNot)?;
+                    *slot = Some(player);
+                    Ok(())
                 }),
                 || {
-                    // The same play, described again for the other player,
-                    // on a socket of its own.
+                    // The lock is not held here. The same play, described
+                    // again for the other player, on a socket of its own.
                     let mpv_bin = find_mpv()?;
                     let path = another_ipc_path(&ipc_path)?;
                     let plan = crate::player::launch::build_launch_for(
@@ -470,14 +521,19 @@ pub fn play(
                         &cfg,
                         &path,
                     )?;
-                    let player = crate::player::external::launch(&mpv_bin, plan)?;
+                    let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
+                    // Vela may have begun to exit while mpv was looked for.
+                    if shutting_down.load(Ordering::SeqCst) {
+                        plan.discard_marker_payload();
+                        return Err(SHUTTING_DOWN.to_string());
+                    }
+                    *slot = Some(crate::player::external::launch(&mpv_bin, plan)?);
                     external_ipc_path = Some(path);
-                    Ok(player)
+                    Ok(())
                 },
-            )?,
-        };
-        *slot = Some(player);
-        (kind, external_ipc_path)
+            )?;
+            kind
+        }
     };
     // The trackers below follow the player that started, on its socket.
     let ipc_path = external_ipc_path.unwrap_or(ipc_path);
@@ -1320,7 +1376,10 @@ mod tests {
     // ---- an embedded player that cannot start a play (review finding ec-6;
     // decision D3: a play is never failed over the embedded player)
 
-    type Never = fn() -> Result<&'static str, String>;
+    type Never = fn() -> Result<&'static str, NotStarted>;
+    fn could_not(reason: &str) -> Result<&'static str, NotStarted> {
+        Err(NotStarted::CouldNot(reason.to_string()))
+    }
 
     #[test]
     fn a_play_given_the_external_player_starts_there() {
@@ -1348,7 +1407,7 @@ mod tests {
         let started = start_player(
             Some(|| {
                 order.borrow_mut().push("embedded");
-                Err::<&str, _>("The embedded player could not start: no window.".to_string())
+                could_not("The embedded player could not start: no window.")
             }),
             || {
                 order.borrow_mut().push("external");
@@ -1370,13 +1429,252 @@ mod tests {
     #[test]
     fn a_play_neither_player_can_start_fails_and_says_why_for_both() {
         let failed = start_player(
-            Some(|| Err::<&str, _>("The embedded player could not start: no window.".to_string())),
+            Some(|| could_not("The embedded player could not start: no window.")),
             || Err("mpv was not found.".to_string()),
         );
         assert_eq!(
             failed,
             Err("The embedded player could not start: no window. The external player could not start either: mpv was not found.".to_string())
         );
+    }
+
+    #[test]
+    fn a_play_that_must_not_start_is_not_started_in_the_other_player_either() {
+        // Vela is exiting. That is not the embedded player failing, and the
+        // external player must not be started in its place.
+        let mut external_asked = false;
+        let ended = start_player(
+            Some(|| Err::<&str, _>(NotStarted::MustNot(SHUTTING_DOWN.to_string()))),
+            || {
+                external_asked = true;
+                Ok("mpv")
+            },
+        );
+        assert_eq!(ended, Err(SHUTTING_DOWN.to_string()), "said plainly, nothing added");
+        assert!(!external_asked);
+    }
+
+    /// Stands in for an embedded launcher whose player will not start.
+    #[cfg(unix)]
+    struct FailingLauncher {
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[cfg(unix)]
+    impl crate::player::EmbeddedLauncher for FailingLauncher {
+        fn prepare(&self, session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+            let asked = self.asked.clone();
+            asked.lock().unwrap().push(format!("prepare {session_id}"));
+            Ok(Box::new(move |plan, _own_config, ipc_path: &str| {
+                asked.lock().unwrap().push(format!("start {ipc_path}"));
+                // As the real launcher does on failure: nothing is left of
+                // what the launch wrote.
+                plan.discard_marker_payload();
+                Err("The embedded player could not start: no window in this test.".to_string())
+            }))
+        }
+    }
+
+    /// Have `play`, on this thread, find `found` when it looks for mpv, for
+    /// as long as the returned guard lives.
+    #[cfg(unix)]
+    fn mpv_is(found: impl Fn() -> Result<String, String> + 'static) -> impl Drop {
+        struct Restore;
+        impl Drop for Restore {
+            fn drop(&mut self) {
+                MPV_FOR_THIS_TEST.with(|find| find.borrow_mut().take());
+            }
+        }
+        MPV_FOR_THIS_TEST.with(|find| *find.borrow_mut() = Some(Box::new(found)));
+        Restore
+    }
+
+    /// A program that stands in for mpv: it writes down the arguments it was
+    /// started with and then stays alive until it is killed.
+    #[cfg(unix)]
+    fn stand_in_for_mpv(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let program = dir.join("mpv-stand-in");
+        let arguments = dir.join("arguments");
+        std::fs::write(
+            &program,
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\nexec sleep 30\n",
+                arguments.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o755)).unwrap();
+        (program, arguments)
+    }
+
+    // The whole path through `play`, with stand-ins at both ends: an embedded
+    // launcher that fails, and a program in place of mpv.
+    #[cfg(unix)]
+    #[test]
+    fn a_play_the_embedded_player_cannot_start_is_started_in_the_external_one_by_play() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = FailingLauncher {
+            asked: asked.clone(),
+        };
+        let (program, arguments) = stand_in_for_mpv("fallback-starts");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "fallback-session".to_string(),
+            None,
+        );
+        // The stand-in writes its arguments as it starts.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        // Whatever happened, leave nothing running.
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let published_external = matches!(published, Some(crate::player::PlayerHandle::External(_)));
+        if let Some(mut player) = published {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play is not failed: {reason}"));
+        started.stop.store(true, Ordering::Relaxed);
+
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert!(published_external, "the external player is the one published");
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(asked[0], "prepare fallback-session");
+        let embedded_socket = asked[1]
+            .strip_prefix("start ")
+            .expect("the embedded player was tried first")
+            .to_string();
+        assert_eq!(asked.len(), 2);
+        // The external launch is the external player's own, not the embedded
+        // one's handed on: its lifecycle option, its own socket, no library
+        // output.
+        let arguments: Vec<&str> = started_with.lines().collect();
+        let last = |name: &str| {
+            arguments
+                .iter()
+                .rev()
+                .find(|argument| argument.starts_with(&format!("--{name}=")))
+                .copied()
+        };
+        assert_eq!(last("idle"), Some("--idle=no"), "arguments: {arguments:?}");
+        assert!(!arguments.contains(&"--vo=libmpv"));
+        let socket = last("input-ipc-server")
+            .and_then(|argument| argument.strip_prefix("--input-ipc-server="))
+            .expect("the external player is given a socket");
+        assert_ne!(socket, embedded_socket, "a socket of its own");
+        assert_eq!(
+            &arguments[arguments.len() - 2..],
+            ["--", "https://media.invalid/never-played"]
+        );
+    }
+
+    // The lock on the player slot is the one the exit handler waits for on
+    // the window's thread. Looking for mpv runs programs and waits for them.
+    #[cfg(unix)]
+    #[test]
+    fn looking_for_mpv_after_a_failed_embedded_start_does_not_hold_the_player_slot() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = FailingLauncher {
+            asked: asked.clone(),
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let slot_was_free = Arc::new(Mutex::new(None));
+        let _mpv = mpv_is({
+            let (slot, slot_was_free) = (slot.clone(), slot_was_free.clone());
+            move || {
+                *slot_was_free.lock().unwrap() = Some(slot.try_lock().is_ok());
+                Err("no mpv in this test".to_string())
+            }
+        });
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "looking-session".to_string(),
+            None,
+        );
+        assert_eq!(
+            result.err().as_deref(),
+            Some("The embedded player could not start: no window in this test. The external player could not start either: no mpv in this test")
+        );
+        assert_eq!(
+            *slot_was_free.lock().unwrap(),
+            Some(true),
+            "mpv was looked for, and the player slot was not locked meanwhile"
+        );
+        assert!(slot.lock().unwrap().is_none(), "nothing was published");
+        assert_eq!(asked.lock().unwrap().len(), 2, "the embedded player was tried first");
+    }
+
+    // Vela begins to exit while mpv is being looked for. The exit handler has
+    // swept the slot by the time the search is over; a player started now
+    // would be one nobody stops.
+    #[cfg(unix)]
+    #[test]
+    fn a_fallback_is_not_started_once_vela_has_begun_to_exit_during_the_search() {
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let (program, arguments) = stand_in_for_mpv("fallback-during-exit");
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let _mpv = mpv_is({
+            let (shutting_down, found) = (shutting_down.clone(), program.to_string_lossy().into_owned());
+            move || {
+                shutting_down.store(true, Ordering::SeqCst);
+                Ok(found.clone())
+            }
+        });
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &shutting_down,
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "exit-session".to_string(),
+            None,
+        );
+        std::thread::sleep(Duration::from_millis(200));
+        let was_started = arguments.exists();
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let was_published = published.is_some();
+        if let Some(mut player) = published {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        if let Ok(started) = &result {
+            started.stop.store(true, Ordering::Relaxed);
+        }
+        assert_eq!(
+            result.err().as_deref(),
+            Some("The embedded player could not start: no window in this test. The external player could not start either: Vela is shutting down.")
+        );
+        assert!(!was_started, "no player was started");
+        assert!(!was_published);
     }
 
     #[cfg(unix)]
