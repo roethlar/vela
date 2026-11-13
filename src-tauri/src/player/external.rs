@@ -381,6 +381,32 @@ mod tests {
             .collect()
     }
 
+    /// The environment a started command really gets. A child inherits all of
+    /// Vela's own environment (`own`, as it stands when the child is started)
+    /// unless the command says otherwise, so what the command adds
+    /// (`command_envs`) is only part of it.
+    fn effective_env(
+        cmd: &Command,
+        own: &[(std::ffi::OsString, std::ffi::OsString)],
+    ) -> Vec<(String, String)> {
+        let mut env: std::collections::BTreeMap<std::ffi::OsString, std::ffi::OsString> =
+            own.iter().cloned().collect();
+        for (key, value) in cmd.get_envs() {
+            match value {
+                Some(value) => env.insert(key.to_owned(), value.to_owned()),
+                None => env.remove(key),
+            };
+        }
+        env.into_iter()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.to_string_lossy().into_owned(),
+                )
+            })
+            .collect()
+    }
+
     // The auth include and the marker payload live in the process-private
     // runtime directory, which on Windows is the user's real config directory.
     #[cfg(not(windows))]
@@ -568,12 +594,29 @@ mod tests {
             );
         }
 
-        // Everything the player is started with: its arguments, and the
-        // environment Vela adds for it.
+        // Everything the player is started with: its arguments, and its whole
+        // environment. That is Vela's own environment as it stands after the
+        // launch was described, plus what the command adds: describing a
+        // launch must not leave a header behind in either.
+        let own: Vec<_> = std::env::vars_os().collect();
         let mut started_with = command_args(&cmd);
-        for (key, value) in command_envs(&cmd) {
+        for (key, value) in effective_env(&cmd, &own) {
             started_with.push(key);
-            started_with.extend(value);
+            started_with.push(value);
+        }
+        // The check below is only as good as what it looks at.
+        for (key, _) in command_envs(&cmd) {
+            assert!(
+                started_with.contains(&key),
+                "what the command adds must be part of what is checked"
+            );
+        }
+        assert!(!own.is_empty(), "a test run has an environment");
+        for (key, _) in &own {
+            assert!(
+                started_with.contains(&key.to_string_lossy().into_owned()),
+                "Vela's own environment must be part of what is checked"
+            );
         }
         for text in &started_with {
             for (name, value) in secrets {

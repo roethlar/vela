@@ -147,3 +147,38 @@ Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
 SHAs equal the pins, both booleans literally true. A valid `reopened`: not
 accepted. Both comments are correct and were reproduced before repair (see
 "Repair" below).
+
+### Repair (round 2)
+
+Both comments reproduced at `94d067e` before the repair: with the
+reviewer's first mutation (`std::env::set_var` of the joined headers inside
+the include writer), with the same through a copied variable, with a
+function that reads `spec.http_headers` appended after `external.rs`'s test
+module, and with that file's test module moved above its code, the
+JavaScript file and all 33 `player::` tests passed.
+
+What changed:
+
+1. **The environment the player really gets.** The Rust test compared only
+   what the command ADDS to the environment. A started program inherits
+   all of Vela's own environment as well. The test now builds the effective
+   environment (Vela's own as it stands after the launch was described,
+   with the command's additions and removals applied) and looks for the
+   header names, values and option name in every key and value of it. It
+   also checks that what it looks at contains every one of Vela's own
+   variables and every one the command adds, so the check cannot quietly
+   shrink.
+2. **Where shipped code is.** `shippedCode` took everything before a file's
+   test module and assumed the module was last. It now requires that: after
+   `mod tests {`, the only line starting in the first column is the closing
+   brace. Code after the tests, or tests moved above the code, fail the
+   test instead of going unread. It also requires the part before the tests
+   to contain code.
+3. Two further source checks, not asked for, in the same test: no code that
+   describes or starts a launch calls `set_var` or `remove_var`; and inside
+   `player/launch.rs` every line that names the header list, the text it is
+   joined into, or the include's content is one of nine recorded lines, so
+   a copy of the credentials to anywhere else changes the list.
+
+Files: `tests/config-integrity.test.mjs`, `src-tauri/src/player/external.rs`
+(the same two files the finding already declared).

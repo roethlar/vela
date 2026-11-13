@@ -28,13 +28,27 @@ const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
 
 // The part of a Rust file that is compiled into the app: everything before its
 // test module, without comment lines.
-function shippedCode(source) {
+//
+// That is only "everything" if the test module is the last thing in the file.
+// So it must be: from the line after `mod tests {` to the end of the file, the
+// one line that starts in the first column is the brace that closes the
+// module. Code placed after the tests, or tests moved above the code, would
+// otherwise be compiled into the app and never looked at here.
+function shippedCode(source, file) {
   const parts = source.replace(/\r\n/g, "\n").split("\n#[cfg(test)]\nmod tests {\n");
-  assert.equal(parts.length, 2, "each of these files ends in exactly one test module");
-  return parts[0]
+  assert.equal(parts.length, 2, `${file} must have exactly one test module`);
+  const [head, tests] = parts;
+  assert.deepEqual(
+    tests.split("\n").filter((line) => /^\S/.test(line)),
+    ["}"],
+    `${file}: the test module must end the file, with nothing after it`,
+  );
+  const code = head
     .split("\n")
     .filter((line) => !/^\s*\/\//.test(line))
     .join("\n");
+  assert.match(code, /\bfn \w+\(/, `${file} must have code compiled into the app to check`);
+  return code;
 }
 
 function linesMentioning(code, pattern) {
@@ -330,9 +344,13 @@ test("mpv authentication stays in a private include until its exact child is rea
   // be command-line text, and this test looked for that text; an option is now
   // data (`LaunchArg`), which that text never matched. So the check is made on
   // what cannot be respelled, over the code that describes and starts a launch:
-  const shipped = [playbackSupervision, playerLaunch, playerExternal, playerHandle]
-    .map(shippedCode)
-    .join("\n");
+  const launchCode = shippedCode(playerLaunch, "player/launch.rs");
+  const shipped = [
+    shippedCode(playbackSupervision, "playback.rs"),
+    launchCode,
+    shippedCode(playerExternal, "player/external.rs"),
+    shippedCode(playerHandle, "player/mod.rs"),
+  ].join("\n");
   // 1. a play's headers are declared once and read in two places, the test for
   //    "are there any" and the call that writes the include;
   assert.deepEqual(linesMentioning(shipped, /http_headers/), [
@@ -345,10 +363,29 @@ test("mpv authentication stays in a private include until its exact child is rea
   assert.deepEqual(linesMentioning(shipped, /http-header-fields/i), [
     'let content = format!("http-header-fields=\\"{joined}\\"\\n");',
   ]);
-  // 3. and what the player is really started with is checked as well, in Rust.
+  // 3. inside the code that writes the include, every line that names the
+  //    headers, the text they are joined into or the file's content is one of
+  //    these: nothing copies them anywhere else;
+  assert.deepEqual(linesMentioning(launchCode, /(?<![\w-])(headers|joined|content)(?![\w-])/), [
+    "fn write_header_include(headers: &[(String, String)]) -> Result<HeaderInclude, String> {",
+    "write_header_include_at(&path, headers)",
+    "headers: &[(String, String)],",
+    "write_header_include_at_with(path, headers, |file, content| file.write_all(content))",
+    "headers: &[(String, String)],",
+    "for (name, value) in headers {",
+    "let joined = headers",
+    'let content = format!("http-header-fields=\\"{joined}\\"\\n");',
+    "if let Err(error) = write_content(&mut f, content.as_bytes()) {",
+  ]);
+  // 4. none of this code changes Vela's own environment, which every program
+  //    Vela starts inherits in full;
+  assert.doesNotMatch(shipped, /\b(set_var|remove_var)\b/);
+  // 5. and what the player is really started with, arguments and whole
+  //    environment, is checked as well, in Rust.
   assert.match(
     playerExternal,
     /fn stream_auth_reaches_the_player_only_through_the_private_include\(\) \{/,
   );
+  assert.match(playerExternal, /for \(key, value\) in effective_env\(&cmd, &own\) \{/);
   assert.doesNotMatch(plexSource, /X-Plex-Token=.*auth_token/);
 });
