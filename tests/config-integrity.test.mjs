@@ -532,7 +532,14 @@ test("the reader of shipped Rust code takes everything but the test module", () 
 });
 
 test("mpv authentication stays in a private include until its exact child is reaped", () => {
-  assert.match(playback, /struct HeaderInclude[\s\S]{0,800}impl Drop for HeaderInclude/);
+  // The include is removed when what owns it goes. (This used to be held by
+  // how close the two stood in the file, which broke when a method was added
+  // between them; it is now held by what the `Drop` does.)
+  assert.match(playback, /pub\(crate\) struct HeaderInclude \{\s+path: std::path::PathBuf,\s+\}/);
+  assert.match(
+    playback,
+    /impl Drop for HeaderInclude \{\s+fn drop\(&mut self\) \{\s+if self\.remove_now\(\)\.is_err\(\) \{/,
+  );
   assert.match(playback, /struct ManagedChild[\s\S]{0,180}_header_include: Option<HeaderInclude>/);
   assert.match(playback, /mpv-headers-\{\}-\{nonce\}\.conf/);
   assert.match(playback, /opts\.mode\(0o600\)/);
