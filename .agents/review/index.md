@@ -1,5 +1,12 @@
 # Review status
 
+**Embedded player PLAN review recorded 2026-11-12:** openreview codex
+(gpt-6-astra @ max, grade not declared) over `c692305..cf35ddf`:
+`acceptable_with_changes`. Three plan findings admitted (ep-1 HIGH, ep-2
+HIGH, ep-3 MEDIUM); the three material changes await owner rulings and
+none is adopted. Record:
+`.agents/review/openreview-2026-11-12-embedded-player-plan.md`.
+
 **macOS AirPlay PLAN review recorded 2026-08-20:** owner-directed
 `openreview claude` used Claude Code 2.1.237 / `claude-opus-5` / `xhigh` over
 `32ef827f..9a79bb3`. Two completed verdicts are retained: first

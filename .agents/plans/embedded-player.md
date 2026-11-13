@@ -6,6 +6,14 @@
 Slice 0's probes.** Open owner decisions D1-D6 below are asked in chat one
 at a time; this plan needs the owner's explicit go after them.
 
+Reviewed 2026-11-12: openreview codex, `acceptable_with_changes`, three
+admitted findings against this text (ep-1 embedded `idle=no` kills the
+player before `loadfile`; ep-2 `playback-ended` cannot bracket the player
+view; ep-3 the HTML skip button must call the marker script's handler).
+**This text still contains those three defects**; the revisions wait for
+the owner's rulings. Record:
+`.agents/review/openreview-2026-11-12-embedded-player-plan.md`.
+
 Owner rulings already given (2026-11-12), verbatim:
 
 - **Direction.** "right, so mpv as a library it is." (`.agents/decisions.md`,
