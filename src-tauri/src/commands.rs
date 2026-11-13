@@ -4866,6 +4866,22 @@ async fn play_by_key_locked(
     // the server is never asked for markers at all.
     let skip_policies = SkipPolicies::load()?;
     let include_markers = skip_policies.any_enabled();
+    // Which player this play asks for: the one it replaces when it is an
+    // automatic relaunch, otherwise the user's setting. Read HERE, before
+    // anything is resolved or installed: a settings file that cannot be read
+    // then fails the play while there is still nothing to undo. Past the point
+    // where the session is installed, the only way out is the launch-failure
+    // path at the end of this function, which undoes it (review finding
+    // sel-1).
+    let wanted_player = match player {
+        Some(kind) => kind,
+        None => crate::player::PlayerKind::from_setting(
+            config::load_config()
+                .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?
+                .player
+                .as_deref(),
+        ),
+    };
     // The quality for this play, resolved once here so the sources never read
     // config themselves. A one-off menu choice wins for this launch only; it is
     // validated against the same closed set the setting uses, so a value the
@@ -5034,19 +5050,10 @@ async fn play_by_key_locked(
         .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
         .collect();
     // Which player runs this play (decisions D1 and D3 of
-    // `.agents/plans/embedded-player.md`): what the user's setting asks for,
-    // unless this launch replaces a running play, and the external player
-    // whenever the embedded one cannot run. A fallback never fails the play;
-    // it is explained once, in one line, on the player that did start.
-    let wanted_player = match player {
-        Some(kind) => kind,
-        None => crate::player::PlayerKind::from_setting(
-            config::load_config()
-                .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?
-                .player
-                .as_deref(),
-        ),
-    };
+    // `.agents/plans/embedded-player.md`): what was asked for above, and the
+    // external player whenever the embedded one cannot run. A fallback never
+    // fails the play; it is explained once, in one line, on the player that
+    // did start.
     let player_choice =
         crate::player::choose(wanted_player, &crate::player::embedded_availability());
     *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));

@@ -45,6 +45,41 @@ test('every play chooses its player from the setting and what can run', () => {
   assert.ok(at < body.indexOf('let spec = playback::PlaySpec {'), 'chosen before the launch is described');
 });
 
+test('once a play has installed its session, only the launch-failure path ends it early', () => {
+  // Installing the session, moving the playlist position, stopping the
+  // previous player and registering a transcode are undone in one place: the
+  // launch-failure arm at the end of the function. An early return between
+  // the installation and that arm skips all of it (review finding sel-1).
+  const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
+  const installed = body.indexOf(
+    'install_playback_session(state, session_id, item, run_kind, next_affinity).await;',
+  );
+  const undone = body.indexOf('let stop = match played {');
+  assert.notEqual(installed, -1, 'the play must still install its session');
+  assert.ok(undone > installed, 'and must still end in the launch-failure arm');
+  const stretch = body
+    .slice(installed, undone)
+    .split('\n')
+    .filter((line) => !/^\s*\/\//.test(line));
+  const earlyReturns = stretch
+    .filter((line) => /\?\s*(;|$)|\)\?\./.test(line) || /^ {4}(return\b|.*\breturn (Err|Ok)\()/.test(line))
+    .map((line) => line.trim());
+  assert.deepEqual(earlyReturns, [
+    // Known, older than the embedded player and recorded for the owner in
+    // .agents/state.md (Blockers): the settings read for Vela's own resume
+    // position. Nothing may be added to this list.
+    '.map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?;',
+  ]);
+  // The player setting is read before anything is resolved or installed.
+  const read = body.indexOf('let wanted_player = match player {');
+  const resolved = body.indexOf('let resolved = match selection.version_id.as_deref() {');
+  assert.notEqual(read, -1, 'the play must read which player is wanted');
+  assert.notEqual(resolved, -1, 'the play must still resolve its stream');
+  assert.ok(read < resolved, 'the player setting is read before the stream is resolved');
+  assert.ok(read < installed, 'and before the session is installed');
+  assert.equal(body.indexOf('let wanted_player', read + 1), -1, 'and only once');
+});
+
 test('a fallback is explained once, and only by a play that started', () => {
   const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
   // Asked for only when the launch carries no notice of its own.
