@@ -529,6 +529,84 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    // Stream authentication reaches mpv through the owner-only include and
+    // nowhere else. Another program can read a process's argument list, so no
+    // argument may carry a header's name or value, under any option name; the
+    // only trace of the headers in what the player is started with is the path
+    // of the include.
+    #[cfg(not(windows))]
+    #[test]
+    fn stream_auth_reaches_the_player_only_through_the_private_include() {
+        let secrets = [
+            ("X-Synthetic-Auth", "synthetic-credential-one"),
+            ("X-Synthetic-Session", "synthetic-credential-two"),
+        ];
+        let spec = PlaySpec {
+            title: "A Title".to_string(),
+            http_headers: secrets
+                .iter()
+                .map(|(name, value)| (name.to_string(), value.to_string()))
+                .collect(),
+            ..recorded_spec("https://media.invalid/video/stream.mkv")
+        };
+        let cfg = crate::config::AppConfig::default();
+        let plan = build_launch(&spec, &cfg, "/tmp/vela-recorded/auth.sock")
+            .expect("the launch is described");
+        let cmd = command("mpv", &plan);
+
+        let include_path = plan
+            .header_include
+            .as_ref()
+            .expect("stream headers produce an include")
+            .path()
+            .to_path_buf();
+        let include = std::fs::read_to_string(&include_path).expect("include is readable");
+        for (name, value) in secrets {
+            assert!(
+                include.contains(&format!("{name}: {value}")),
+                "the include must carry every header"
+            );
+        }
+
+        // Everything the player is started with: its arguments, and the
+        // environment Vela adds for it.
+        let mut started_with = command_args(&cmd);
+        for (key, value) in command_envs(&cmd) {
+            started_with.push(key);
+            started_with.extend(value);
+        }
+        for text in &started_with {
+            for (name, value) in secrets {
+                assert!(
+                    !text.contains(name) && !text.contains(value),
+                    "a stream header reached the player outside the include"
+                );
+            }
+            assert!(
+                !text.to_ascii_lowercase().contains("http-header-fields"),
+                "the header option must be set by the include, never by an argument"
+            );
+        }
+        let include_arg = format!("--include={}", include_path.to_string_lossy());
+        assert_eq!(
+            started_with
+                .iter()
+                .filter(|text| text.contains(&*include_path.to_string_lossy()))
+                .collect::<Vec<_>>(),
+            vec![&include_arg],
+            "the include is named once, by the option that points mpv at it"
+        );
+
+        // Without headers there is no include and nothing pointing at one.
+        let bare = recorded_spec("https://media.invalid/video/stream.mkv");
+        let bare_plan =
+            build_launch(&bare, &cfg, "/tmp/vela-recorded/auth.sock").expect("described");
+        assert!(bare_plan.header_include.is_none());
+        assert!(!command_args(&command("mpv", &bare_plan))
+            .iter()
+            .any(|arg| arg.starts_with("--include")));
+    }
+
     #[test]
     fn the_minimal_external_command_line_is_exactly_the_recorded_one() {
         // Nothing optional: the expert's own mpv config, no Advanced options,

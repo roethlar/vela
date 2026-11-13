@@ -14,12 +14,8 @@ const lib = fs.readFileSync("src-tauri/src/lib.rs", "utf8");
 const playerLaunch = fs.readFileSync("src-tauri/src/player/launch.rs", "utf8");
 const playerExternal = fs.readFileSync("src-tauri/src/player/external.rs", "utf8");
 const playerHandle = fs.readFileSync("src-tauri/src/player/mod.rs", "utf8");
-const playback = [
-  fs.readFileSync("src-tauri/src/playback.rs", "utf8"),
-  playerLaunch,
-  playerExternal,
-  playerHandle,
-].join("\n");
+const playbackSupervision = fs.readFileSync("src-tauri/src/playback.rs", "utf8");
+const playback = [playbackSupervision, playerLaunch, playerExternal, playerHandle].join("\n");
 const playlists = fs.readFileSync("src-tauri/src/playlists.rs", "utf8");
 const plexApi = fs.readFileSync("src-tauri/src/plex_api.rs", "utf8");
 const plexLibrary = fs.readFileSync("src-tauri/src/plex_library.rs", "utf8");
@@ -29,6 +25,24 @@ const tauriConfig = fs.readFileSync("src-tauri/tauri.conf.json", "utf8");
 const backend = `${commands}\n${playback}`;
 const page = fs.readFileSync("src/routes/+page.svelte", "utf8");
 const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
+
+// The part of a Rust file that is compiled into the app: everything before its
+// test module, without comment lines.
+function shippedCode(source) {
+  const parts = source.replace(/\r\n/g, "\n").split("\n#[cfg(test)]\nmod tests {\n");
+  assert.equal(parts.length, 2, "each of these files ends in exactly one test module");
+  return parts[0]
+    .split("\n")
+    .filter((line) => !/^\s*\/\//.test(line))
+    .join("\n");
+}
+
+function linesMentioning(code, pattern) {
+  return code
+    .split("\n")
+    .filter((line) => pattern.test(line))
+    .map((line) => line.trim());
+}
 
 function attributesBefore(source, declaration) {
   const at = source.indexOf(declaration);
@@ -312,6 +326,29 @@ test("mpv authentication stays in a private include until its exact child is rea
   // external player renders as `--include=<path>`.
   assert.match(playerLaunch, /LaunchArg::set\("include", include\.path\.to_string_lossy\(\)\)/);
   assert.match(playerExternal, /cmd\.arg\(arg\.to_cli\(\)\);/);
-  assert.doesNotMatch(playback, /--http-header-fields=/);
+  // Stream authentication must not reach mpv as an option. An option used to
+  // be command-line text, and this test looked for that text; an option is now
+  // data (`LaunchArg`), which that text never matched. So the check is made on
+  // what cannot be respelled, over the code that describes and starts a launch:
+  const shipped = [playbackSupervision, playerLaunch, playerExternal, playerHandle]
+    .map(shippedCode)
+    .join("\n");
+  // 1. a play's headers are declared once and read in two places, the test for
+  //    "are there any" and the call that writes the include;
+  assert.deepEqual(linesMentioning(shipped, /http_headers/), [
+    "pub http_headers: Vec<(String, String)>,",
+    "let header_include = if spec.http_headers.is_empty() {",
+    "let include = write_header_include(&spec.http_headers)?;",
+  ]);
+  // 2. mpv's header option is named once, as the content of that include, under
+  //    any spelling or option constructor;
+  assert.deepEqual(linesMentioning(shipped, /http-header-fields/i), [
+    'let content = format!("http-header-fields=\\"{joined}\\"\\n");',
+  ]);
+  // 3. and what the player is really started with is checked as well, in Rust.
+  assert.match(
+    playerExternal,
+    /fn stream_auth_reaches_the_player_only_through_the_private_include\(\) \{/,
+  );
   assert.doesNotMatch(plexSource, /X-Plex-Token=.*auth_token/);
 });

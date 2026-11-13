@@ -3,9 +3,9 @@
 **Severity**: LOW — the shipped code is correct and keeps stream
 authentication in the owner-only include; what broke is one of the checks
 that would notice if that stopped being true.
-**Status**: Open
+**Status**: In progress
 **Branch**: —
-**Commit**: —
+**Commit**: (this commit)
 
 ## Evidence
 
@@ -39,11 +39,40 @@ and left as it was for the header option.
 
 ## Approach
 
-(pending)
+The old assertion matched one spelling of the regression. Respelling the
+assertion (`LaunchArg::set("http-header-fields"`) would repeat the mistake
+for the next way an option can be written, so the check now rests on two
+things that cannot be respelled, and on what the player is really started
+with.
+
+In `tests/config-integrity.test.mjs`, over the code compiled into the app
+(each file up to its test module, comment lines removed) of `playback.rs`
+and the three files of the player module:
+
+1. every line that mentions `http_headers` is one of exactly three: the
+   field's declaration, the "are there any" test, and the call that writes
+   the include. A play's headers can therefore go nowhere else;
+2. every line that mentions `http-header-fields`, in any letter case, is
+   exactly one: the line that formats the include's content. mpv's header
+   option can therefore not be set through `LaunchArg::set`,
+   `LaunchArg::Option { .. }`, `LaunchArg::User` or text.
+
+In Rust, `stream_auth_reaches_the_player_only_through_the_private_include`
+(`src-tauri/src/player/external.rs`) builds a launch with two synthetic
+headers, renders it with the external launcher, and requires that no
+argument and no environment entry contains a header name, a header value
+or the option name; that the include holds both headers; that the include's
+path appears once, as `--include=<path>`; and that a launch without
+headers names no include. The JavaScript test requires that Rust test to
+exist.
 
 ## Files changed
 
-(pending)
+- `tests/config-integrity.test.mjs` — `shippedCode`, `linesMentioning`;
+  the three checks above replace the `--http-header-fields=` text match in
+  "mpv authentication stays in a private include until its exact child is
+  reaped"
+- `src-tauri/src/player/external.rs` — the new test
 
 ## Guard proof
 
