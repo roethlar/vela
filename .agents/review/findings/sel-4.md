@@ -1,9 +1,9 @@
 # sel-4: the test that play refuses a player it cannot start passes with the refusal removed
 
 **Severity**: LOW — the shipped refusal is correct; its test is not a test.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
-**Commit**: `47eec9a`
+**Commit**: `47eec9a`, `29445f2` (the guard, after the reopen)
 
 ## Evidence
 
@@ -110,3 +110,27 @@ disposable worktree, each injection restored with `git checkout`:
 | A step done before the refusal | FAIL | passes |
 | The refusal weakened by a second condition | FAIL | FAILS |
 | Unchanged | PASS | PASS |
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 07:45 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d3d6-88a1-7181-885a-6709563d546b`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 07:36 UTC, finished 07:41 UTC.
+- Reviewed head `29445f240ce163e4c8df9fd88d18b4ee84090f76`, base
+  `47eec9a4064e4727ae7b0fbb9d310ee7458ab6e0` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted; the finding is
+closed.
+
+Note for a later reader: Slice 3 of the plan (`0a63799`) changed how `play`
+decides its player, so the refusal is now a `?` inside the function's
+first statement and its text is different. The same test pins that
+statement the same way.
