@@ -929,8 +929,12 @@ mod tests {
         let release = Arc::new(AtomicBool::new(false));
         let stuck = release.clone();
         // A play stuck somewhere that does not look at the request to stop.
+        // (It frees itself after ten seconds whatever happens, so that a
+        // mistake here that waits for it fails this test instead of hanging
+        // the whole run.)
         let play = Session::for_test_running(Duration::from_millis(50), kept, move |_stop| {
-            while !stuck.load(Ordering::SeqCst) {
+            let began = Instant::now();
+            while !stuck.load(Ordering::SeqCst) && began.elapsed() < Duration::from_secs(10) {
                 std::thread::sleep(Duration::from_millis(5));
             }
         });
@@ -942,6 +946,10 @@ mod tests {
         );
         assert_eq!(kept.still_running(), 1, "its thread is still known");
         assert!(!kept.wait(Duration::from_millis(50)), "and still running");
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "asking about it does not wait for it"
+        );
         // It comes unstuck.
         release.store(true, Ordering::SeqCst);
         assert!(kept.wait(Duration::from_secs(5)));
