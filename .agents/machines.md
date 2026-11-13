@@ -386,6 +386,13 @@ Recorded and verified 2026-11-12, locally on the host.
   WAYLAND_DISPLAY=wayland-1 ...`, and run git as `michael` so the repo
   gains no root-owned files. The display is `DP-3`, HDR on, peak 465 nits,
   SDR white 265 nits, scale 1.7.
+- 2026-11-12, installed by the agent while the session was root, for the
+  embedded-player probes: `meson`, `cmake`, `weston` (pacman). `ninja`,
+  `nasm` and `autoconf` were already present. The owner's HDR test clips
+  are in `~/dev/hdr-tests`. codex runs as `michael` only (its config is in
+  that home directory): from a root session use `sudo -u michael bash -lc`.
+  The review dispatch files of that day are in
+  `/tmp/vela-openreview-embedded-player/` (disposable).
 - Remotes, as of 2026-11-12: `origin` =
   `https://gitea.internal/michael/vela.git`, which is the canonical Gitea
   of `.agents/repo-guidance.md` (Remotes & Sync) reached over HTTPS (owner,

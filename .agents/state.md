@@ -9,6 +9,24 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- HANDOFF 2026-11-12 (as of `e6b4596`). In flight: the embedded player
+  plan `.agents/plans/embedded-player.md`. Every decision in it is ruled
+  or assumed (D1-D7, see its Status); it is NOT approved: the owner has
+  not said "go". Resume by waiting for that go, then start Slice 0
+  (probes A1-A11, throwaway code in the spike directory named in
+  `.agents/machines.md`; no change to Vela). The plan text was revised
+  after its codex openreview and after D4/D7 and has not been re-reviewed.
+  The HDR spike that preceded it is complete
+  (`.agents/plans/embedded-libmpv-hdr-spike.md`, Log).
+  Working rule from the owner this session: settle implementation,
+  failure-mode and licensing details yourself and record them here; bring
+  the owner only what changes Vela for its users, briefly, and do not
+  repeat a pending ask. Licensing is closed (`.agents/decisions.md`).
+- NOT PUSHED as of this handoff: `main` is ahead of both remotes by every
+  commit after `baeb8c2`. The agent's push was refused by the harness's
+  permission system on 2026-11-12 and was not retried; push with
+  `git push origin main && git push github main` before trusting the
+  remotes.
 - Server identity marks, 2026-11-12, `343f270` + `62b85e2` (1.0.63; plan
   `.agents/plans/server-identity-sidebar.md`; decision 2026-11-12). Every
   place a server name is shown now carries a Plex/Jellyfin/Emby mark or the
