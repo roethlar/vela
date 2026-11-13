@@ -11,12 +11,15 @@
   REMOVED (decision `.agents/decisions.md` 2026-07-08 — Vela is a
   multi-server client; do not resurrect them).
 - Playback is intentionally delegated to the system `mpv` binary in its own
-  window for HDR passthrough. The owner's direction since 2026-11-12 is an
-  embedded libmpv player (`.agents/decisions.md`). A 2026-11-12 spike
-  showed HDR surviving embedding on KDE Wayland
-  (`.agents/plans/embedded-libmpv-hdr-spike.md`), but it is unplanned: do
-  not embed video, or design anything as depending on it, until a plan for
-  it is approved.
+  window for HDR passthrough, and that external player stays the default
+  and is never removed. Since 2026-11-12 an embedded libmpv player is being
+  added next to it under the approved plan
+  `.agents/plans/embedded-player.md` (decisions `.agents/decisions.md`
+  2026-11-12): Linux on Wayland first, experimental, off by default, using
+  a libmpv that Vela ships. Embed video only as that plan describes; its
+  Status and log say how far it has landed. Do not show the player choice
+  to users (Settings, docs, release notes) until the owner has done the
+  by-eye checks the plan lists.
 - SvelteKit is configured as a static SPA for Tauri. Vite dev uses port `1420`
   with strict port behavior.
 - Linux release packaging lives in `src-tauri/bundle/linux/` for Tauri bundles

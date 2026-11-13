@@ -394,6 +394,19 @@ Recorded and verified 2026-11-12, locally on the host.
   of `.agents/repo-guidance.md` (Remotes & Sync) reached over HTTPS (owner,
   2026-11-12); and `github` = `https://github.com/roethlar/vela.git`, added
   by the owner on 2026-11-12. Both answer `git ls-remote` from this host.
+- 2026-11-12 (later session, running as `michael` inside the KDE Wayland
+  session, `WAYLAND_DISPLAY=wayland-1`): the owner installed `podman`
+  6.2.0 (rootless, overlay, `crun`) and `patchelf` for the shipped-library
+  build (`sudo pacman -S --needed podman patchelf`). Screen auto-lock is
+  off, so `spectacle` screenshots work unattended.
+- Claude Code here runs in a permission mode whose safety classifier
+  refused `git push` twice on 2026-11-12, although the repo's push policy
+  is `always`. It allowed the push once the owner had said in that session
+  to push each commit. A fresh session should expect the same: an
+  in-session yes from the owner, or the push stays refused (do not route
+  around it).
+- Shell commands in a Claude Code session here go through the `ptk` MCP
+  tool (PowerShell 7); a hook blocks the built-in shell.
 
 ## Linux VM (E2E host)
 

@@ -2,10 +2,34 @@
 
 ## Status
 
-**DRAFT 2026-11-12. NOT APPROVED. No implementation may start, including
-Slice 0's probes.** Every decision is ruled (D1, D4, D7) or ASSUMED under the
-owner's standing instruction (D2, D3, D5, D6; see below). The plan now
-needs only the owner's explicit go.
+**APPROVED 2026-11-12. Implementation in progress; see "Implementation
+log" at the end of this file for what has landed.** Decisions are ruled
+(D1, D4, D7) or ASSUMED under the owner's standing instruction (D2, D3,
+D5, D6; see below).
+
+The go, verbatim (owner, 2026-11-12, given as the session's goal):
+"when the sweep finishes, continue with the next steps. implement the
+plan, codereview slices with codex. ask any questions upfront. I won't be
+here after you start." Asked up front which plan that covers, the owner
+chose "Both, embedded first": this plan, then
+`.agents/plans/mpv-window-geometry.md` Slices 1-3.
+
+Rules for the unattended run (owner's choices 2026-11-12 from options the
+agent wrote; the option text is the agent's, the choice is the owner's):
+
+- **Owner-only steps wait; the work does not.** Chosen: "Build on, keep
+  hidden". The agent finishes everything tests can prove and leaves the
+  owner's by-eye checks as a list ("Owner checks outstanding" in the log).
+  Until the owner has done them there is no Settings control, no version
+  bump and no release note for the embedded player; it can be tried only
+  by setting `player` in the config file. So Slice 4's "owner present"
+  acceptance and Slice 6's switch-on (Settings control, default, release
+  notes, docs, bump) are NOT performed by the agent.
+- **Review.** Each slice that lands repo code gets a `codereview codex`
+  defect hunt over its pinned range (`.agents/playbooks/codereview.md`),
+  codex called plainly per `.agents/machines.md`.
+- **Push.** Chosen: "Yes, push each commit", to `origin` and `github`,
+  never forced.
 
 Reviewed 2026-11-12: openreview codex, `acceptable_with_changes`, three
 admitted findings (ep-1, ep-2, ep-3). The owner adopted the fixes
@@ -613,4 +637,22 @@ the `continuum` desktop and the owner's eye for anything about picture.
 - `.agents/state.md`; this file's Status and an implementation log.
 - `.agents/repo-guidance.md` Mission Detail: replace "do not embed video
   until a plan for it is approved" with a pointer to this plan once
-  approved.
+  approved. (Done 2026-11-12 with the approval.)
+
+## Implementation log
+
+Newest entry last. Each entry: what landed, the commits, what was
+verified and what was not.
+
+### Owner checks outstanding
+
+Steps only the owner can do. The agent adds to this list as slices land
+and removes nothing from it.
+
+- (none yet)
+
+### 2026-11-12 — approval recorded
+
+The owner's go and the three unattended-run rules are in Status. The owner
+installed `podman` and `patchelf` on `continuum` for the library build
+(`.agents/machines.md`). Nothing in the app has changed yet.

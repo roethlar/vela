@@ -2054,3 +2054,41 @@ Agent's reading (not the owner's words):
   are shipped.
 - Vela thereby takes on security updates for the shipped decoders; the
   plan adds that to the release gates.
+
+## 2026-11-12 - The embedded player and player window-size plans are approved; owner-only checks wait and the embedded setting stays hidden
+
+Status: OWNER RULING (2026-11-12). Approves
+`.agents/plans/embedded-player.md` (all slices) and
+`.agents/plans/mpv-window-geometry.md` (Slices 1-3), in that order.
+
+Decision:
+The owner gave the go as the session's goal, verbatim: "when the sweep
+finishes, continue with the next steps. implement the plan, codereview
+slices with codex. ask any questions upfront. I won't be here after you
+start." Four questions were asked up front; the option texts were written
+by the agent and the choices are the owner's:
+
+- Which plan the go covers: "Both, embedded first".
+- What to do at steps only the owner can do (judging the HDR picture by
+  eye; the last by-eye checks before the Experimental setting appears):
+  "Build on, keep hidden". The agent finishes everything tests can prove
+  and leaves those checks as a list. Until the owner has done them the
+  embedded player gets no Settings control, no version bump and no release
+  note; it can be tried only through the config file.
+- Pushing: "Yes, push each commit", to `origin` and `github`, never
+  forced. (Consistent with `.agents/push-policy.md`.)
+- Whether to install `podman` and `patchelf` on `continuum` for the
+  library build: the owner ran the install.
+
+Agent's reading (not the owner's words):
+- "codereview slices with codex" means one `codereview codex` defect hunt
+  per slice that lands repo code, over that slice's pinned range, with
+  codex called plainly (`.agents/machines.md`).
+- "Keep hidden" binds the embedded player plan. The window-size plan
+  follows its own text for its version bump and release notes; its
+  "owner present" acceptance steps are likewise left as a list.
+- Nothing is tagged or released by the agent under this go.
+
+Updates:
+`.agents/repo-guidance.md` (Mission Detail) no longer says embedding is
+unplanned; it points at the approved plan.

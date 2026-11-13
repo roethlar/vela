@@ -9,19 +9,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- HANDOFF 2026-11-12 (as of `e6b4596`). In flight: the embedded player
-  plan `.agents/plans/embedded-player.md`. Every decision in it is ruled
-  or assumed (D1-D7, see its Status); it is NOT approved: the owner has
-  not said "go". Resume by waiting for that go, then start Slice 0
-  (probes A1-A11, throwaway code in the spike directory named in
-  `.agents/machines.md`; no change to Vela). The plan text was revised
-  after its codex openreview and after D4/D7 and has not been re-reviewed.
-  The HDR spike that preceded it is complete
-  (`.agents/plans/embedded-libmpv-hdr-spike.md`, Log).
-  Working rule from the owner this session: settle implementation,
-  failure-mode and licensing details yourself and record them here; bring
-  the owner only what changes Vela for its users, briefly, and do not
-  repeat a pending ask. Licensing is closed (`.agents/decisions.md`).
+- IN FLIGHT since 2026-11-12: the embedded player plan
+  `.agents/plans/embedded-player.md`, APPROVED that day, running
+  unattended (the owner is away). Where it stands is in that file's
+  "Implementation log"; read it before doing anything. Next in the queue:
+  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
+  Rules the owner set for this run (decision `.agents/decisions.md`
+  2026-11-12, "plans are approved"): every slice with repo code gets a
+  `codereview codex` pass; push each commit; steps only the owner can do
+  (by-eye picture checks) are left as a list in the plan's log, and until
+  the owner has done them the embedded player gets no Settings control, no
+  version bump and no release note.
+  Standing working rule from the owner (2026-11-12): settle
+  implementation, failure-mode and licensing details yourself and record
+  them; bring the owner only what changes Vela for its users, briefly, and
+  do not repeat a pending ask. Licensing is closed (`.agents/decisions.md`).
 - Windows mpv idle-exit fix, 2026-11-12, `bf1b1c3` (1.0.62; plan
   `.agents/plans/windows-mpv-idle-exit.md`). On Windows, mpv started by Vela
   idled at end of file instead of exiting, so Continue Playing, playlist
@@ -150,14 +152,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
-- `.agents/plans/mpv-window-geometry.md` (drafted 2026-11-12, NOT approved):
-  carry the mpv window's size (and, on Windows, position) from one play to
-  the next. Owner ruled D1 "all in current session": manual plays inherit
-  too, reversing the 2026-07-18 rule. A local probe shows `osd-width` /
-  `osd-height` report the window size and `--geometry=WxH` reproduces it
-  exactly. D2 ruled: a three-way setting (remember last / full screen /
-  default), consulted for the first play of a run only, remember-last out
-  of the box. D3 (position) withdrawn. Slices 1-3 await the owner's go.
+- `.agents/plans/mpv-window-geometry.md` (APPROVED 2026-11-12 for Slices
+  1-3; queued behind the embedded player plan, not started): carry the mpv
+  window's size from one play to the next. Owner ruled D1 "all in current
+  session": manual plays inherit too, reversing the 2026-07-18 rule. A
+  local probe shows `osd-width` / `osd-height` report the window size and
+  `--geometry=WxH` reproduces it exactly. D2 ruled: a three-way setting
+  (remember last / full screen / default), consulted for the first play of
+  a run only, remember-last out of the box. D3 (position) withdrawn.
 - Owner direction 2026-11-12: embedded playback through libmpv, with
   iOS/iPadOS as a porting goal (`.agents/decisions.md`). The HDR spike ran
   on 2026-11-12 (`.agents/plans/embedded-libmpv-hdr-spike.md`, Log): on
@@ -173,11 +175,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   and peak detection moves both. On real clips dark scenes match and
   bright scenes clip more highlight embedded; the owner: "the external
   looks slightly better on this display." Clicks
-  on HTML drawn over the video reach the page. External mpv stays the shipped player until the plan in the next
-  bullet is approved.
+  on HTML drawn over the video reach the page. External mpv stays the
+  shipped default player; the plan in the next bullet adds the embedded
+  one beside it.
 - Owner ruling 2026-11-12: keep both players; the embedded libmpv player
-  is added next to external mpv (`.agents/decisions.md`). Plan drafted,
-  NOT approved: `.agents/plans/embedded-player.md`. It reuses the existing
+  is added next to external mpv (`.agents/decisions.md`). Plan APPROVED
+  2026-11-12 and in flight (`## Now`): `.agents/plans/embedded-player.md`.
+  It reuses the existing
   IPC-based trackers through one launch description and two launchers, and
   starts with probes. D1 is ruled: external is the default on every
   desktop OS and embedded is offered as experimental; iOS is embedded
@@ -189,8 +193,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (`.agents/decisions.md`, "Licensing is settled"); do not raise licensing
   with the owner again. D7 is ruled: Vela ships its own pinned libmpv
   on every platform, Linux included; the plan gained a library-build
-  slice and two probes for it. The plan now
-  waits only for the owner's go.
+  slice and two probes for it.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

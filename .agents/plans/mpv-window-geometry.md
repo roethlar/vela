@@ -2,7 +2,16 @@
 
 ## Status
 
-**DRAFT 2026-11-12. NOT APPROVED. No implementation may start.**
+**APPROVED 2026-11-12 for Slices 1-3. Not started: it is queued behind
+the embedded player plan.** The go, verbatim (owner, 2026-11-12, given as
+the session's goal): "when the sweep finishes, continue with the next
+steps. implement the plan, codereview slices with codex. ask any questions
+upfront. I won't be here after you start." Asked up front which plan that
+covers, the owner chose "Both, embedded first" (option text written by the
+agent): `.agents/plans/embedded-player.md` first, then Slices 1-3 here.
+Slice 4 stays withdrawn (D3). Each slice gets a `codereview codex` defect
+hunt, and the acceptance steps marked "owner present" below are left for
+the owner as a list in this file's log; the agent does not perform them.
 
 Owner rulings already given (2026-11-12), verbatim:
 
@@ -41,7 +50,7 @@ Open, not yet ruled (each is asked in chat, one at a time):
   position here is the agent's reading of that ruling, not the owner's
   words. Slice 4 below is kept only as a record; do not implement it.
 
-The plan needs the owner's explicit go after those rulings.
+The go for Slices 1-3 was given on 2026-11-12 (top of this section).
 
 ## What exists today
 
