@@ -1,7 +1,7 @@
 # ec-1: a window closed while a play is starting leaves that play a pointer to a surface that is gone
 
 **Severity**: HIGH — a use of freed memory in Vela's own process, which can crash it. It needs the window to be closed in the short time between a play being asked for and its video surface being created.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `fffc3bd`
 
@@ -61,3 +61,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "Native window close can invalidate a starting player's Wayland pointer". Reviewer's severity: HIGH.
+
+### Verification round 1, recorded 2026-11-13 09:45 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d440-ca36-7101-8c52-281db9d4688c`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:32 UTC, finished 09:40 UTC.
+- Reviewed head `fffc3bdd44aa44b2264e55cdce9a6be4c56cd459`, base
+  `68778ec1fc5ce8912dcf20ecf91298742f8b229a` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
