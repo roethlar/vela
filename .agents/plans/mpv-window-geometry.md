@@ -19,10 +19,17 @@ Owner rulings already given (2026-11-12), verbatim:
 
 Open, not yet ruled (each is asked in chat, one at a time):
 
-- **D2 (across app restarts).** The owner asked for it "with an option".
-  Open: the setting's default (on or off), and whether it remembers size
-  and position only (this plan's default) or fullscreen/maximized too.
-  Slice 3 depends on it.
+- **D2 (across app restarts): RULED IN PART 2026-11-12.** Offered an
+  on/off setting that would remember size and position only, the owner
+  answered: "full screen is usually the goal for me, so how about options?
+  remember last, full screen, default? if last is full screen, then restore
+  full screen next time." So the setting is a three-way choice, not a
+  checkbox, and "remember last" includes fullscreen (the agent's reading:
+  maximized and screen too, since they are the same kind of state).
+  Still open, asked in chat: (a) which of the three a fresh install starts
+  with; (b) whether the setting governs only the FIRST play of a run, with
+  later plays following the previous window per D1 (the agent's proposal,
+  written into Slice 3 below as an assumption), or every play.
 - **D3 (window position on Windows).** Whether to add the Windows-only code
   that position needs. Slice 4 depends on it; Slices 1-3 do not.
 
@@ -86,8 +93,9 @@ NOT probed, and each is an assumption until its acceptance step:
 1. Within one run of Vela, every play (manual or automatic) opens its mpv
    window as the previous play left it: fullscreen, maximized, screen, and
    the windowed size.
-2. If D2 is ruled in: the windowed size (and position where available) also
-   survives a restart of Vela, behind a setting.
+2. A three-way setting (D2) decides how the first player window of a run
+   opens: as the last run left it (fullscreen included), always fullscreen,
+   or mpv's default.
 3. If D3 is ruled in: on Windows the windowed position is carried the same
    way.
 
@@ -210,34 +218,62 @@ Acceptance on real desktops (owner present; nothing automated proves these):
 
 Commit: `feat: keep the player window size between plays`.
 
-## Slice 3 — ONLY IF D2 IS RULED IN: remember across restarts
+## Slice 3 — how the player window opens: a three-way setting (D2)
+
+The setting, "Player window opens" (final wording at implementation), has
+three values:
+
+- **Remember last** — the first play of a run opens as the last play of
+  the previous run left its window: fullscreen, maximized, screen, windowed
+  size (and position where Slice 4 provides it). Quit from fullscreen →
+  next run opens fullscreen.
+- **Full screen** — the first play of a run opens fullscreen.
+- **Default** — the first play of a run gets nothing from Vela: mpv's own
+  default, or whatever the user's Advanced arguments or own config say
+  (today's behaviour).
+
+ASSUMPTION pending D2(b): in all three modes, later plays in the same run
+follow the previous play's window (D1). If the owner rules "every play"
+instead, "Full screen" forces `--fullscreen=yes` on every play and
+"Default" disables Slice 1's inheritance; rewrite this slice before
+implementing.
 
 - `src-tauri/src/config.rs`: two new optional fields on `AppConfig`,
   following the existing `Option` + validation pattern (unknown or
   malformed values invalidate the document, as for `continue_playing`):
-  `mpv_remember_window: Option<bool>` (absent = the default D2 rules) and
-  `mpv_window: Option<{ width: u32, height: u32, x: Option<i32>, y:
-  Option<i32> }>`. It is one bounded value, so it belongs in `config.json`
-  by the 2026-07-14 storage criterion.
+  `mpv_window_mode: Option<"remember" | "fullscreen" | "default">` (absent
+  = the out-of-box value D2(a) rules) and `mpv_window: Option<{ fullscreen:
+  Option<bool>, maximized: Option<bool>, screen: Option<String>, width:
+  Option<u32>, height: Option<u32>, x: Option<i32>, y: Option<i32> }>`. It
+  is one bounded value, so it belongs in `config.json` by the 2026-07-14
+  storage criterion.
 - Written through the existing `config::update` path when a play ends
-  (the `on_end` closure already performs config I/O there), only when the
-  setting is on and the confirmed size differs from the stored one. Never
-  on a timer.
+  (the `on_end` closure already performs config I/O there), only in
+  "remember" mode and only when the final snapshot differs from the stored
+  value. Never on a timer.
 - Read once per launch as the fallback when nothing has been published in
   this run. An in-run observation always wins over the stored value.
-- Turning the setting off stops reads and writes and removes the stored
-  value on the next config write.
+- "fullscreen" mode: when nothing has been published in this run, the
+  inherited state is `fullscreen: Some(true)` and nothing else.
+- A stored screen name that no longer exists must not break the launch:
+  check how `screen_name_arg` already treats an unknown name and keep that
+  behaviour; add a test.
+- Leaving "remember" stops reads and writes and removes the stored value
+  on the next config write.
 - Old-config compatibility: both fields absent must load exactly as today
   (round-trip test), and a config written with them must still load in the
   previous release — check how unknown fields are treated by the previous
   release's `AppConfig` (strict or tolerant) and record it; if strict, say
   so plainly in the release note.
-- `src/lib/Settings.svelte`, player tab: one checkbox, label per D2's
-  wording, with the commands `get_/set_mpv_remember_window` beside the
+- `src/lib/Settings.svelte`, player tab: one three-way control (select or
+  radio group) with the commands `get_/set_mpv_window_mode` beside the
   existing `get_/set_continue_playing` pair.
 
-Tests: config round-trip with and without the fields; invalid shapes
-rejected; the in-run-wins-over-stored rule; a source-text guard that the
+Tests: config round-trip with and without the fields; invalid shapes and
+unknown mode strings rejected; each mode's first-play arguments (remember
+with a stored fullscreen → `--fullscreen=yes`; fullscreen mode with nothing
+stored → `--fullscreen=yes`; default → no window arguments); the
+in-run-wins-over-stored rule; a source-text guard that the
 Settings control exists only while the launch path reads the setting (the
 pattern of `tests/transcoding-ui.test.mjs`). Red-proof each.
 
