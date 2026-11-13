@@ -150,4 +150,3 @@ End to end, with the real players (run 2026-11-13 at `7fa009b` for finding
 whatever the caller has done, the scenario `embeddedlatestart` FAILS with
 "the player view never opened for a play that was given up on"; unchanged
 it passes.
-
