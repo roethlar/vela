@@ -277,8 +277,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   is added next to external mpv (`.agents/decisions.md`). Plan drafted,
   NOT approved: `.agents/plans/embedded-player.md`. It reuses the existing
   IPC-based trackers through one launch description and two launchers, and
-  starts with probes. Open owner decisions D1-D6 (default player per
-  platform first) are asked one at a time.
+  starts with probes. D1 is ruled: external is the default on every
+  desktop OS and embedded is offered as experimental; iOS is embedded
+  only. A codex openreview returned `acceptable_with_changes` with three
+  admitted plan defects whose revisions await owner rulings
+  (`.agents/review/index.md`). D3-D6 remain open.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

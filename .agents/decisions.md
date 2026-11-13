@@ -1973,3 +1973,23 @@ Refines:
 2026-11-12 "Embedded playback through libmpv is the direction". Its
 fallback (embedded elsewhere, external kept on Linux) is now one case of a
 general rule rather than a retreat.
+
+## 2026-11-12 - External mpv is the default player on every desktop OS; embedded is experimental there
+
+Status: OWNER RULING (2026-11-12), decision D1 of
+`.agents/plans/embedded-player.md`. The plan itself is not yet approved.
+
+Decision:
+Asked which player a fresh Linux install should use, the owner ruled for
+every platform: "external by default for all OSes, embedded marked
+experimental/beta/whatever and kept that way until the library matches.
+embedded by default on ios, obviously. no experimental tag in ios."
+
+Agent's reading (not the owner's words):
+- "Until the library matches" means until libmpv's embedding interface can
+  draw with the renderer the external player uses (`gpu-next`), or
+  otherwise produces a matching picture. Lifting the label is a later
+  owner decision, not something an agent infers from an mpv release.
+- An experimental option must be visible to be chosen, so the plan's D2
+  (user-visible control) is treated as implied; the label's exact word is
+  not settled.

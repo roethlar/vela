@@ -3,7 +3,7 @@
 ## Status
 
 **DRAFT 2026-11-12. NOT APPROVED. No implementation may start, including
-Slice 0's probes.** Open owner decisions D1-D6 below are asked in chat one
+Slice 0's probes.** Open owner decisions D2-D6 below are asked in chat one
 at a time; this plan needs the owner's explicit go after them.
 
 Reviewed 2026-11-12: openreview codex, `acceptable_with_changes`, three
@@ -26,15 +26,18 @@ Owner rulings already given (2026-11-12), verbatim:
 
 Open, not yet ruled:
 
-- **D1. Default player per platform.** Which player a fresh install uses on
-  Linux. Evidence: on the owner's 465-nit display the embedded picture
-  clips more highlight on bright scenes; the owner judged "the external
-  looks slightly better on this display". Agent's recommendation: external
-  stays the default on Linux; embedded is opt-in.
-- **D2. Is the choice user-visible?** A Settings control to pick the
-  player, or a hidden/expert switch only. Recommendation: a visible
-  two-way control, since on Linux the two differ in picture and in
-  windowing and the user is the judge.
+- **D1. Default player per platform: RULED 2026-11-12.** Owner, verbatim:
+  "external by default for all OSes, embedded marked
+  experimental/beta/whatever and kept that way until the library matches.
+  embedded by default on ios, obviously. no experimental tag in ios." So:
+  external is the default on every desktop OS; embedded is offered there
+  under an experimental label, and the label stays until libmpv's
+  embedding renderer matches the external player's picture; on iOS/iPadOS
+  embedded is the only player and carries no label.
+- **D2. Is the choice user-visible?** Agent's reading of the D1 ruling,
+  not the owner's words: yes, a visible Settings control, since an option
+  "marked experimental" has to be seen to be chosen. The exact label word
+  ("Experimental" is what Settings already uses for Emby) is unconfirmed.
 - **D3. What happens when embedded is selected but cannot start** (libmpv
   missing, X11 session, compositor lacks the needed protocols).
   Recommendation: play with the external player and show one notice line
@@ -291,8 +294,8 @@ External plays are untouched: no player view, mpv's own window.
 ### Selection
 
 New optional `AppConfig.player: Option<String>`, values `"external"` and
-`"embedded"`, validated like `mpv_autocrop`; absent means the platform
-default (D1). `play_by_key_locked` picks the player once per play:
+`"embedded"`, validated like `mpv_autocrop`; absent means `"external"` on every desktop OS (D1). iOS/iPadOS has no
+external player and ignores the field. `play_by_key_locked` picks the player once per play:
 configured choice → availability check → D3 fallback. The choice is
 recorded on the session so `apply_step_down` relaunches in the same
 player.
