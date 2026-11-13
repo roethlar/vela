@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — a set missing every licence text passes the check
 that is documented as covering every file; shipping the texts is a
 licensing requirement.
-**Status**: In progress (fix landed; verification pending)
+**Status**: Reopened (round 1); repair in progress
 **Branch**: —
 **Commit**: `7ca7e75`
 
@@ -81,4 +81,28 @@ build script names each file explicitly.
 ## Reviewer comments
 
 Generation pass: `.agents/review/codereview-2026-11-13-libmpv-set.md`.
-Verification pass: pending.
+Verification pass, round 1, recorded 2026-11-13 05:45 UTC (this record is
+committed):
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly (gpt-6-astra @ max per the
+  host's codex config). Thread `01a1d369-f24b-7650-a747-e835ce3789d3`, in
+  the disposable worktree at the head SHA; ends in `turn.completed`; 16
+  tool calls; finished 05:43 UTC.
+- Reviewed head `7ca7e75745655af38eafbb02b36f16eed74cce48`, base
+  `29026c24b65dd233bf6cf0b431f8443a57b8b701` (both equal the pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  1. "packaging/libmpv/check-libmpv.py:65 — The mpv build patch counts as
+     its required licence. Removing LICENSE.LGPL and Copyright plus their
+     MANIFEST entries from the real set still produces RESULT PASS. Require
+     an actual licence entry distinct from the patch, and guard this case."
+  2. "packaging/libmpv/check-libmpv.py:72 — islink checks only the final
+     path component. Replacing licenses/ with a symlink to an external
+     licence directory, without changing MANIFEST, still produces RESULT
+     PASS. Reject symlinked parents or validate resolved containment, and
+     add a regression case."
+
+Orchestrator: schema-valid, pins match. Both comments are correct and
+reproduce; the finding is reopened and the repair follows as its own
+commit.

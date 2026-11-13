@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — the regression test for the pin check stayed green
 under a mutation that let an unverified archive reach the compiler.
-**Status**: In progress (fix landed; verification pending)
+**Status**: Verified
 **Branch**: —
 **Commit**: `1e2b953` (propagation) and `29026c2` (the test)
 
@@ -76,4 +76,20 @@ None known.
 ## Reviewer comments
 
 Generation pass: `.agents/review/codereview-2026-11-13-libmpv-set.md`.
-Verification pass: pending.
+Verification pass, recorded 2026-11-13 05:45 UTC (this record is committed):
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly; the host's codex config
+  resolves to gpt-6-astra @ max. Thread
+  `01a1d366-cc09-7251-a614-670aab47c791`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; 16 tool calls; finished 05:38 UTC.
+- Reviewed head `29026c24b65dd233bf6cf0b431f8443a57b8b701`, base
+  `38cb850d8d46dca0c1bab25be6f7395d42c6247f` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted; the finding is
+closed.
