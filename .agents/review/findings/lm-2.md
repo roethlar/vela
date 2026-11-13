@@ -106,3 +106,33 @@ committed):
 Orchestrator: schema-valid, pins match. Both comments are correct and
 reproduce; the finding is reopened and the repair follows as its own
 commit.
+
+### Repair after round 1
+
+Both comments are fixed in one follow-up commit (they are two holes in the
+same comparison):
+
+1. The manifest now names roles. The build writes a `licence <component>
+   <path>` line for every licence text and a `patch mpv <path>` line for
+   the build patch; the check requires a `licence` line for every
+   component and that every such line points at a listed file. A patch, or
+   any other file kept beside a licence, no longer satisfies the rule. The
+   build's own guard uses the same lines.
+2. Nothing in the set may be a symbolic link. The check walks the whole
+   directory and reports any link, and separately refuses a listed file
+   whose real path is not the path the manifest names, so a file reached
+   through a linked parent directory is not accepted.
+
+The reviewer's two reproductions on the real set, 2026-11-13: mpv's
+licence texts and their manifest entries removed, patch kept: "no licence
+text listed for component: mpv", `RESULT FAIL`. `licenses/` replaced by a
+symlink to a copy elsewhere, manifest untouched: "symbolic link in the
+set: licenses" and "reached through a symbolic link" for each file,
+`RESULT FAIL`. The intact, regenerated set passes on `continuum` and in
+the three images.
+
+Guards: four new cases in "the libmpv integrity check covers every file
+of the set, licence texts included" (only the patch left; a licence line
+naming no listed file; the licences directory symlinked away; a library
+symlinked away) and three static assertions on the build's role lines in
+"the shipped libmpv set is an LGPL build with its licence texts".

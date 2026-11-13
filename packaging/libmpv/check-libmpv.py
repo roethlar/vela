@@ -6,7 +6,8 @@ without a GPU:
 
   * the directory is exactly what its MANIFEST lists: every listed file
     (libraries, licence texts, the build patch) present and unmodified,
-    nothing unlisted, and a licence text for every shipped component;
+    nothing unlisted, no symbolic link, and a file named as its licence
+    text for every shipped component;
   * the library loads and reports the pinned mpv version;
   * every loaded library of the set really comes from the set's directory;
   * each given clip DECODES to what was recorded for it: the same number of
@@ -65,12 +66,17 @@ def check_manifest(libdir):
     """Compare the directory with its MANIFEST, in both directions.
 
     Every listed file must be present and unmodified; no file may exist that
-    is not listed (libraries, licence texts, anything); and every shipped
-    component must have at least one licence text listed. Returns a list of
-    problems, empty when the set is exactly what was built."""
+    is not listed (libraries, licence texts, anything); nothing in the set may
+    be a symbolic link, so every listed file really is inside the set; and
+    every shipped component must have at least one file the manifest names as
+    its licence text (a `licence` line), which a build patch or any other file
+    beside it does not satisfy. Returns a list of problems, empty when the set
+    is exactly what was built."""
     problems = []
     listed = {}
     components = []
+    licences = {}
+    roles = []
     try:
         with open(os.path.join(libdir, "MANIFEST")) as f:
             for line in f:
@@ -79,6 +85,11 @@ def check_manifest(libdir):
                     listed[parts[3].rstrip("\n")] = (parts[1], int(parts[2]))
                 elif len(parts) >= 2 and parts[0] == "component":
                     components.append(parts[1])
+                elif len(parts) >= 3 and parts[0] in ("licence", "patch"):
+                    name = line.split(None, 2)[2].rstrip("\n")
+                    roles.append((parts[0], parts[1], name))
+                    if parts[0] == "licence":
+                        licences.setdefault(parts[1], []).append(name)
     except OSError as e:
         return [f"no MANIFEST: {e}"]
     if "libmpv.so.2" not in listed:
@@ -86,27 +97,43 @@ def check_manifest(libdir):
     if not components:
         problems.append("MANIFEST names no component")
     for name in components:
-        if not any(path.startswith(f"licenses/{name}/") for path in listed):
+        if not licences.get(name):
             problems.append(f"no licence text listed for component: {name}")
+    for role, component, name in roles:
+        if component not in components:
+            problems.append(f"{role} for an unknown component: {component}")
+        if name not in listed:
+            problems.append(f"{role} of {component} is not a listed file: {name}")
+    root = os.path.realpath(libdir)
     for name, (sha, size) in sorted(listed.items()):
         if os.path.isabs(name) or ".." in name.split("/"):
             problems.append(f"MANIFEST entry leaves the set: {name}")
             continue
-        path = os.path.join(libdir, name)
-        if not os.path.isfile(path) or os.path.islink(path):
+        path = os.path.join(root, name)
+        # A file reached through a symbolic link is not in the set, whatever
+        # its contents: the real path must be the path the manifest names.
+        if os.path.realpath(path) != path:
+            if os.path.lexists(path) or os.path.exists(os.path.dirname(path)):
+                problems.append(f"reached through a symbolic link: {name}")
+            else:
+                problems.append(f"missing: {name}")
+            continue
+        if not os.path.isfile(path):
             problems.append(f"missing: {name}")
             continue
         with open(path, "rb") as f:
             data = f.read()
         if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
             problems.append(f"modified: {name}")
-    for root, _dirs, files in os.walk(libdir):
-        for filename in files:
-            name = os.path.relpath(os.path.join(root, filename), libdir)
-            if name != "MANIFEST" and name not in listed:
+    for folder, dirs, files in os.walk(root):
+        for entry in dirs + files:
+            path = os.path.join(folder, entry)
+            name = os.path.relpath(path, root)
+            if os.path.islink(path):
+                problems.append(f"symbolic link in the set: {name}")
+            elif entry in files and name != "MANIFEST" and name not in listed:
                 problems.append(f"not in MANIFEST: {name}")
-    return sorted(problems)
-
+    return sorted(set(problems))
 
 def judge_decode(expected, measured):
     """Compare what a clip decoded to with what was recorded for it.

@@ -281,7 +281,15 @@ test("the shipped libmpv set is an LGPL build with its licence texts", async () 
   // integrity check can then notice a missing licence text.
   assert.match(collect, /find \. -type f ! -name MANIFEST -printf '%P\\n' \| LC_ALL=C sort/);
   assert.doesNotMatch(collect, /for lib in \*\.so\*; do\n\s+printf 'file /);
-  assert.match(collect, /install -m644 "\$PATCHES"\/\*\.patch "\$dest\/licenses\/mpv\/"/);
+  // ...and names which of them are licence texts, so that a build patch (or
+  // anything else kept beside a licence) cannot stand in for one.
+  assert.match(collect, /roles="\$roles"\$'\\n'"licence \$name licenses\/\$name\/\$\(basename "\$f"\)"/);
+  assert.match(collect, /roles="\$roles"\$'\\n'"patch mpv licenses\/mpv\/\$\(basename "\$patch_file"\)"/);
+  assert.match(collect, /grep -q "\^licence \$name " \\\n\s+\|\| die "no licence text collected for shipped component/);
+  assert.match(
+    collect,
+    /for patch_file in "\$PATCHES"\/\*\.patch; do\n\s+install -m644 "\$patch_file" "\$dest\/licenses\/mpv\/"/,
+  );
 });
 
 test("the shipped libmpv set is isolated and leans only on the listed system libraries", async () => {
@@ -535,6 +543,12 @@ test("the libmpv integrity check covers every file of the set, licence texts inc
   }
   const manifestFor = async (names) => {
     const lines = ["# test set", "arch x86_64", "component mpv 0.0.0", "component ffmpeg 0.0.0"];
+    // The roles the build script writes: which listed files are a
+    // component's licence text, and which is the build patch.
+    for (const name of names) {
+      const [, component, file] = name.match(/^licenses\/([^/]+)\/(.+)$/) ?? [];
+      if (component) lines.push(`${file.endsWith(".patch") ? "patch" : "licence"} ${component} ${name}`);
+    }
     for (const name of names) {
       const body = await readBytes(path.join(pristine, name));
       lines.push(`file ${createHash("sha256").update(body).digest("hex")} ${body.length} ${name}`);
@@ -605,6 +619,52 @@ test("the libmpv integrity check covers every file of the set, licence texts inc
     ["MANIFEST entry leaves the set: ../outside"],
   );
   assert.deepEqual(await variant("no-manifest", (dir) => rm(path.join(dir, "MANIFEST"))).then((p) => p.length), 1);
+
+  // Review round 1 on lm-2. A component's build patch is not its licence: a
+  // set that keeps mpv's patch but lost its licence text, manifest entries
+  // and all, is missing a licence.
+  assert.deepEqual(
+    await variant("only-the-patch-left", async (dir) => {
+      await rm(path.join(dir, "licenses/mpv/LICENSE.LGPL"));
+      await writeFile(
+        path.join(dir, "MANIFEST"),
+        await manifestFor(Object.keys(files).filter((name) => name !== "licenses/mpv/LICENSE.LGPL")),
+      );
+    }),
+    ["no licence text listed for component: mpv"],
+  );
+  // A licence line must point at a file the manifest lists.
+  assert.deepEqual(
+    await variant("licence-names-no-file", (dir) =>
+      appendFile(path.join(dir, "MANIFEST"), "licence ffmpeg licenses/ffmpeg/NOT-THERE\n"),
+    ),
+    ["licence of ffmpeg is not a listed file: licenses/ffmpeg/NOT-THERE"],
+  );
+  // Nothing in the set may be a symbolic link: files reached through one are
+  // not in the set, whatever they contain.
+  const { rename, symlink } = await import("node:fs/promises");
+  assert.deepEqual(
+    await variant("licences-symlinked-away", async (dir) => {
+      await rename(path.join(dir, "licenses"), path.join(root, "licences-elsewhere"));
+      await symlink(path.join(root, "licences-elsewhere"), path.join(dir, "licenses"));
+    }),
+    [
+      "reached through a symbolic link: licenses/ffmpeg/COPYING.LGPLv2.1",
+      "reached through a symbolic link: licenses/mpv/LICENSE.LGPL",
+      "reached through a symbolic link: licenses/mpv/mpv-vaapi-without-drm-output.patch",
+      "symbolic link in the set: licenses",
+    ],
+  );
+  assert.deepEqual(
+    await variant("library-symlinked-away", async (dir) => {
+      await rename(path.join(dir, "libvela-avcodec.so.63"), path.join(root, "library-elsewhere"));
+      await symlink(path.join(root, "library-elsewhere"), path.join(dir, "libvela-avcodec.so.63"));
+    }),
+    [
+      "reached through a symbolic link: libvela-avcodec.so.63",
+      "symbolic link in the set: libvela-avcodec.so.63",
+    ],
+  );
 });
 
 test("the libmpv decode check compares what was decoded with what was recorded", { skip: libmpvScriptUnavailable }, async () => {
