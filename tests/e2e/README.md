@@ -51,4 +51,7 @@ A scenario can belong to one player with `onlyPlayer: 'embedded'` or
 `onlyPlayer: 'external'`. In a run of the other player it is reported as
 `SKIP` and not counted; named explicitly, it fails instead.
 `embeddedplay` is the scenario that proves a play really is embedded;
-`playerfallback` is about what happens where it cannot be.
+`playerfallback` is about what happens where it cannot be;
+`embeddedlatestart` stages an embedded play that does not start in time
+and checks that the same play carries on in the external player while the
+late one stays out of it.

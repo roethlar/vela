@@ -154,7 +154,7 @@ test('a fallback is explained once, and only by a play that started', () => {
   // to the notice itself.
   assert.match(
     body,
-    /let on_notice_shown = explained\.map\(\|reason\| \{\s+let notices = state\.embedded_fallback_notices\.clone\(\);\s+std::sync::Arc::new\(move \|\| \{\s+notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.explained\(&reason\);\s+\}\) as playback::NoticeShown\s+\}\);/,
+    /let told_when_shown = \|reason: crate::player::EmbeddedUnavailable\| \{\s+let notices = state\.embedded_fallback_notices\.clone\(\);\s+std::sync::Arc::new\(move \|\| \{\s+notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.explained\(&reason\);\s+\}\) as playback::NoticeShown\s+\};\s+let on_notice_shown = explained\.map\(told_when_shown\);/,
   );
   const spec = body.slice(body.indexOf('let spec = playback::PlaySpec {'));
   assert.match(spec, /osd_notice: osd_notice\.or\(fallback_notice\),\n\s+on_notice_shown,/);
@@ -163,7 +163,7 @@ test('a fallback is explained once, and only by a play that started', () => {
   // successful write (the behaviour is unit-tested in playback.rs).
   assert.match(
     functionBody(playback, 'pub fn play(', 'playback::play'),
-    /spawn_osd_notice\(\s+ipc_path\.clone\(\),\s+stop_flag\.clone\(\),\s+notice,\s+OSD_NOTICE_DELAY,\s+spec\.on_notice_shown\.clone\(\),\s+\)/,
+    /spawn_osd_notice\(\s+ipc_path\.clone\(\),\s+stop_flag\.clone\(\),\s+notice,\s+OSD_NOTICE_DELAY,\s+on_notice_shown,\s+\)/,
   );
   const notice = functionBody(playback, 'fn spawn_osd_notice(', 'spawn_osd_notice');
   assert.match(
@@ -176,21 +176,23 @@ test('a fallback is explained once, and only by a play that started', () => {
   const success = body.slice(body.indexOf('let played = after_successful_play(played, || {'));
   assert.match(
     success,
-    /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,300}if notice_plan\.forget_when_started \{\s+state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.forget\(\);\s+\}/,
+    /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,400}if notice_plan\.forget_when_started && !fell_back \{\s+state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.forget\(\);\s+\}/,
   );
-  // The notice state is touched in exactly three places in the whole command
-  // layer: the plan and the shown-callback before the launch, the forgetting
-  // after it succeeded. Anything else would tell the user at the wrong time.
+  // The notice state is touched in exactly four places in the whole command
+  // layer: the plan and the shown-callback before the launch, a second plan
+  // for the case that the embedded player cannot start the play after all
+  // (review finding ec-6; the test below), and the forgetting after the
+  // launch succeeded. Anything else would tell the user at the wrong time.
   const uses = [...commands.matchAll(/embedded_fallback_notices/g)].map((use) => use.index);
-  assert.equal(uses.length, 3, 'no other code reads or writes the notice state');
+  assert.equal(uses.length, 4, 'no other code reads or writes the notice state');
   const successAt = commands.indexOf('let played = after_successful_play(played, || {');
   const launchAt = commands.indexOf('playback::play(\n');
-  assert.ok(uses[0] < launchAt && uses[1] < launchAt, 'planned before the launch');
-  assert.ok(uses[2] > launchAt && uses[2] > successAt, 'forgotten only after it succeeded');
+  assert.ok(uses.slice(0, 3).every((use) => use < launchAt), 'planned before the launch');
+  assert.ok(uses[3] > launchAt && uses[3] > successAt, 'forgotten only after it succeeded');
   assert.deepEqual(
     [...commands.matchAll(/\.(plan|explained|forget)\(/g)].map((call) => call[1]),
-    ['plan', 'explained', 'forget'],
-    'through these three calls and no others',
+    ['plan', 'explained', 'plan', 'forget'],
+    'through these calls and no others',
   );
 });
 
@@ -239,7 +241,7 @@ test('play refuses a player it cannot start before it starts anything', () => {
   // `mpv --version` ran first and both tests passed (review finding sel-4).
   assert.match(
     body,
-    /^\npub fn play\([^{]*\) -> Result<Arc<AtomicBool>, String> \{\n[ \t]*let Players \{\n[ \t]*slot: player_slot,\n[ \t]*shutting_down,\n[ \t]*embedded,\n[ \t]*\} = players;\n(?:[ \t]*\/\/[^\n]*\n)*[ \t]*let embedded_start = match spec\.player \{\n[ \t]*crate::player::PlayerKind::External => None,\n[ \t]*crate::player::PlayerKind::Embedded => Some\(\n[ \t]*embedded\n[ \t]*\.ok_or_else\(\|\| NO_EMBEDDED_PLAYER\.to_string\(\)\)\?\n[ \t]*\.prepare\(&session_id\)\?,\n[ \t]*\),\n[ \t]*\};\n/,
+    /^\npub fn play\([^{]*\) -> Result<PlayStarted, String> \{\n[ \t]*let Players \{\n[ \t]*slot: player_slot,\n[ \t]*shutting_down,\n[ \t]*embedded,\n[ \t]*\} = players;\n(?:[ \t]*\/\/[^\n]*\n)*[ \t]*let embedded_start = match spec\.player \{\n[ \t]*crate::player::PlayerKind::External => None,\n[ \t]*crate::player::PlayerKind::Embedded => Some\(\n[ \t]*embedded\n[ \t]*\.ok_or_else\(\|\| NO_EMBEDDED_PLAYER\.to_string\(\)\)\?\n[ \t]*\.prepare\(&session_id\),\n[ \t]*\),\n[ \t]*\};\n/,
     'the first statement of play decides the player, and refuses there',
   );
   const guard = body.indexOf('let embedded_start = match spec.player {');
@@ -249,6 +251,60 @@ test('play refuses a player it cannot start before it starts anything', () => {
     assert.notEqual(at, -1, `play must still call ${later}`);
     assert.ok(guard < at, `the player check must come before ${later}`);
   }
+});
+
+test('a play the embedded player cannot start goes on in the external player', () => {
+  // Decision D3: a play is never failed over the embedded player. The
+  // decision is `start_player`, proven in playback.rs with stand-ins for both
+  // players. This proves that every embedded play goes through it and no
+  // external play does, that the external launch after a failure is
+  // described afresh and on a socket of its own, that everything after it
+  // follows the player that started, and that the command layer records
+  // that player and not the one it chose (review finding ec-6).
+  const play = functionBody(playback, 'pub fn play(', 'playback::play');
+  assert.equal(play.split('start_player(').length - 1, 1);
+  assert.match(
+    play,
+    /\(Some\(prepared\), _\) => start_player\(\s+Some\(\|\| match prepared \{\s+Ok\(start\) => start\(plan, cfg\.mpv_use_own_config\.unwrap_or\(false\), &ipc_path\),\s+Err\(reason\) => \{\s+(?:\/\/[^\n]*\n\s+)*plan\.discard_marker_payload\(\);\s+Err\(reason\)\s+\}\s+\}\),\s+\|\| \{\s+(?:\/\/[^\n]*\n\s+)*let mpv_bin = find_mpv\(\)\?;\s+let path = another_ipc_path\(&ipc_path\)\?;\s+let plan = crate::player::launch::build_launch_for\(\s+spec,\s+crate::player::PlayerKind::External,\s+&cfg,\s+&path,\s+\)\?;\s+let player = crate::player::external::launch\(&mpv_bin, plan\)\?;\s+external_ipc_path = Some\(path\);\s+Ok\(player\)\s+\},\s+\)\?,/,
+  );
+  // A launcher that cannot even prepare the play is the embedded player
+  // failing too: its answer is kept for `start_player`, not returned.
+  assert.doesNotMatch(play, /\.prepare\(&session_id\)\?/);
+  // The trackers, the watchers and the notice all take the socket of the
+  // player that started.
+  assert.match(
+    play,
+    /let ipc_path = external_ipc_path\.unwrap_or\(ipc_path\);\s+let fell_back = started_player != spec\.player;/,
+  );
+  const settled = 'let ipc_path = external_ipc_path.unwrap_or(ipc_path);';
+  const after = play.slice(play.indexOf(settled) + settled.length);
+  assert.doesNotMatch(after, /external_ipc_path/, 'nothing later can pick the other socket');
+  // A play that fell back explains it, unless it already carries a notice.
+  assert.match(
+    play,
+    /let \(notice, on_notice_shown\) = match &spec\.osd_notice \{\s+None if fell_back => \(\s+spec\.if_embedded_cannot_start\.notice\.clone\(\),\s+spec\.if_embedded_cannot_start\.on_notice_shown\.clone\(\),\s+\),\s+carried => \(carried\.clone\(\), spec\.on_notice_shown\.clone\(\)\),\s+\};/,
+  );
+  assert.match(play, /Ok\(PlayStarted \{\s+stop: stop_flag,\s+player: started_player,\s+\}\)$/);
+
+  // The command layer: what such a play says is planned under the same
+  // once-per-run rule as any other fallback...
+  const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
+  assert.match(
+    body,
+    /let if_embedded_cannot_start = match player_choice\.kind \{\s+crate::player::PlayerKind::External => playback::EmbeddedFallback::default\(\),\s+crate::player::PlayerKind::Embedded => \{\s+let explain = state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.plan\(\s+player\.is_none\(\),\s+Some\(&crate::player::EmbeddedUnavailable::StartFailed\),\s+\)\s+\.explain;\s+playback::EmbeddedFallback \{\s+notice: explain\.as_ref\(\)\.map\(\|reason\| reason\.notice\(\)\),\s+on_notice_shown: explain\.map\(told_when_shown\),\s+\}\s+\}\s+\};/,
+  );
+  const spec = body.slice(body.indexOf('let spec = playback::PlaySpec {'));
+  assert.match(spec, /on_notice_shown,\n\s+if_embedded_cannot_start,\n/);
+  // ...and once the play has started, the player it runs in is the one
+  // recorded for it (a relaunch stays in that player), and a play that fell
+  // back does not count as proof that nothing needs explaining.
+  assert.match(
+    body,
+    /let fell_back = played\s+\.as_ref\(\)\s+\.is_ok_and\(\|started\| started\.player != player_choice\.kind\);\s+if fell_back \{\s+\*state\.active_playback_player\.lock\(\)\.await =\s+Some\(\(session_id\.to_string\(\), crate::player::PlayerKind::External\)\);\s+\}\s+let played = played\.map\(\|started\| started\.stop\);/,
+  );
+  assert.ok(
+    body.indexOf('let fell_back = played') < body.indexOf('let played = after_successful_play(played, || {'),
+  );
 });
 
 test('the player setting is validated, and not yet shown to users', () => {

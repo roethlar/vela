@@ -279,9 +279,16 @@ test('a play that outlasts the wait for it neither starts unannounced nor goes u
   // if it won; if the play won in the same instant, it is a started play.
   assert.match(
     session,
-    /match started\.recv_timeout\(START_LIMIT\) \{\s+Ok\(Ok\(\(\)\)\) => Ok\(session\),\s+Ok\(Err\(reason\)\) => Err\(reason\),\s+Err\(_\) if session\.shared\.race\.give_up\(\) => late\(\),/,
+    /match started\.recv_timeout\(start_limit\) \{\s+Ok\(Ok\(\(\)\)\) => Ok\(session\),\s+Ok\(Err\(reason\)\) => Err\(reason\),\s+Err\(_\) if session\.shared\.race\.give_up\(\) => late\(\),/,
   );
   assert.equal(count(shippedSession, '.give_up()'), 1);
+  // How long that wait is: twenty seconds, in every build a user gets.
+  assert.match(session, /^pub\(crate\) const START_LIMIT: Duration = Duration::from_secs\(20\);$/m);
+  assert.match(session, /let start_limit = start\.start_limit;/);
+  assert.match(
+    host,
+    /start_limit: start_limit\(\s+cfg!\(debug_assertions\),\s+std::env::var_os\(DEVELOPMENT_START_LIMIT_VARIABLE\)\.as_deref\(\),\s+\),/,
+  );
   assert.equal(count(shippedSession, '.claim_started()'), 1, 'claimed in finish_start only');
   // A thread's handle leaves a play in two ways only: joined once the play
   // has ended, or kept when it has not ended in time. Never just dropped.

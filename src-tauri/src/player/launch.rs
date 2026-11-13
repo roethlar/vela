@@ -727,10 +727,22 @@ pub(crate) fn build_launch(
     cfg: &crate::config::AppConfig,
     ipc_path: &str,
 ) -> Result<LaunchPlan, String> {
+    build_launch_for(spec, spec.player, cfg, ipc_path)
+}
+
+/// The launch of `spec` in `player`, which is the player the play was given
+/// except in one case: a play given the embedded player that it could not
+/// start is launched in the external one instead (`crate::playback::play`).
+pub(crate) fn build_launch_for(
+    spec: &PlaySpec,
+    player: PlayerKind,
+    cfg: &crate::config::AppConfig,
+    ipc_path: &str,
+) -> Result<LaunchPlan, String> {
     // Which player this launch is for decides a handful of options, here and
     // in `base_args`. The list is never edited afterwards, by either player.
-    let embedded = spec.player == PlayerKind::Embedded;
-    let (mut args, mut env) = base_args(cfg, spec.player);
+    let embedded = player == PlayerKind::Embedded;
+    let (mut args, mut env) = base_args(cfg, player);
 
     // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
     // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
@@ -827,7 +839,7 @@ pub(crate) fn build_launch(
         }
     }
 
-    args.extend(lifecycle_args(spec.player));
+    args.extend(lifecycle_args(player));
     args.push(LaunchArg::set("input-ipc-server", ipc_path));
     // Drive mpv's window title and OSD media-title from the human title, NOT the
     // URL. Authenticated media URLs have historically carried tokens, and mpv's
@@ -897,6 +909,7 @@ mod tests {
             duration: None,
             osd_notice: None,
             on_notice_shown: None,
+            if_embedded_cannot_start: Default::default(),
             steps_taken: 0,
         }
     }

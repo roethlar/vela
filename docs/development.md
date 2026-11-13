@@ -197,7 +197,10 @@ directory and the page removes it once it has loaded; if a start does not
 get that far, the next one starts the ordinary way.
 
 Whenever the embedded player cannot be used, the play goes to the external
-player and says why in one line on its display. Vela's standard error has
+player and says why in one line on its display. That includes a play the
+embedded player was given and then could not start: the same play carries
+on in the external player, and the embedded one is not tried again until
+Vela is restarted. Vela's standard error has
 the detail (`vela: playing in the external player: ...`, and for a library
 that did not load, the loader's own message). Reasons include an X11
 session, the NVIDIA proprietary driver (untested, so excluded), a

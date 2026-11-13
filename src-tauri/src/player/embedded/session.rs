@@ -88,6 +88,9 @@ pub(crate) struct Start {
     /// later has to survive that gap whatever its length (plan review ep-1),
     /// and a test can only show that with a gap worth the name.
     pub(crate) load_delay: Duration,
+    /// How long the caller waits for this play to start: [`START_LIMIT`],
+    /// except where a test has asked for less.
+    pub(crate) start_limit: Duration,
     pub(crate) header_include: Option<HeaderInclude>,
     /// Held, not read: see [`MarkerPayload`].
     pub(crate) _marker_payload: Option<MarkerPayload>,
@@ -96,7 +99,7 @@ pub(crate) struct Start {
 
 /// How long the caller waits for a play to start before reporting that it
 /// did not.
-const START_LIMIT: Duration = Duration::from_secs(20);
+pub(crate) const START_LIMIT: Duration = Duration::from_secs(20);
 
 /// How long a play that is being let go of is waited for, having been asked
 /// to stop, before it is handed to [`Leftovers`] instead.
@@ -575,6 +578,7 @@ impl Session {
         let shared = Shared::new()?;
         let header_include = start.header_include.take();
         let session_id = std::mem::take(&mut start.session_id);
+        let start_limit = start.start_limit;
         let (ready, started) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
         let thread_shared = shared.clone();
         let thread = std::thread::Builder::new()
@@ -636,7 +640,7 @@ impl Session {
         // On every failure below the session is dropped, which stops the
         // play, waits for it, and keeps it if it will not end (`Drop`).
         let late = || Err("the embedded player did not start in time".to_string());
-        match started.recv_timeout(START_LIMIT) {
+        match started.recv_timeout(start_limit) {
             Ok(Ok(())) => Ok(session),
             Ok(Err(reason)) => Err(reason),
             Err(_) if session.shared.race.give_up() => late(),

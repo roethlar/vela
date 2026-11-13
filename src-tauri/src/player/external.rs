@@ -353,6 +353,7 @@ mod tests {
             duration: None,
             osd_notice: None,
             on_notice_shown: None,
+            if_embedded_cannot_start: Default::default(),
             steps_taken: 0,
         }
     }

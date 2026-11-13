@@ -40,11 +40,16 @@ test('the play path starts exactly the launch that was described', () => {
   // step the embedded launcher prepared.
   assert.match(
     play,
-    /\*slot = Some\(match \(embedded_start, mpv_bin\) \{\s+\(Some\(start\), _\) => \{\s+start\(plan, cfg\.mpv_use_own_config\.unwrap_or\(false\), &ipc_path\)\?\s+\}\s+\(None, Some\(mpv_bin\)\) => crate::player::external::launch\(&mpv_bin, plan\)\?,\s+\(None, None\) => return Err\(NO_EMBEDDED_PLAYER\.to_string\(\)\),\s+\}\);/,
+    /let \(player, kind\) = match \(embedded_start, mpv_bin\) \{\s+\(None, Some\(mpv_bin\)\) => \(\s+crate::player::external::launch\(&mpv_bin, plan\)\?,\s+crate::player::PlayerKind::External,\s+\),\s+\(None, None\) => return Err\(NO_EMBEDDED_PLAYER\.to_string\(\)\),\s+\(Some\(prepared\), _\) => start_player\(\s+Some\(\|\| match prepared \{\s+Ok\(start\) => start\(plan, cfg\.mpv_use_own_config\.unwrap_or\(false\), &ipc_path\),/,
     'play must start the described launch',
   );
-  assert.equal(play.split('plan').length - 1, 4, 'the launch is described once and handed over once per player');
-  assert.doesNotMatch(play, /plan\.(args|env)\b/, 'play must not alter the described launch');
+  assert.match(play, /\*slot = Some\(player\);\s+\(kind, external_ipc_path\)\s+\};/);
+  // The described launch is handed over whole, to one player or the other;
+  // all play itself ever does with one is throw its marker payload away
+  // when it will not be started.
+  assert.doesNotMatch(play, /\bplan\.(?!discard_marker_payload\(\);)/, 'play must not alter a described launch');
+  assert.equal(play.split('external::launch(&mpv_bin, plan)').length - 1, 2, 'the external player, chosen or fallen back to');
+  assert.equal(play.split('start(plan, ').length - 1, 1, 'the embedded player');
 
   const start = functionBody(external, 'pub(crate) fn launch(', 'external::launch');
   assert.match(start, /let child = command\(mpv_bin, &plan\)\.spawn\(\)/, 'launch must start the plan');
@@ -62,10 +67,17 @@ test('the play path starts exactly the launch that was described', () => {
 });
 
 test('the launch asserts the lifecycle options after every user-controlled option', () => {
-  const body = functionBody(launch, 'pub(crate) fn build_launch(', 'launch::build_launch');
+  // A launch is described for the player the play was given...
+  assert.match(
+    functionBody(launch, 'pub(crate) fn build_launch(', 'launch::build_launch'),
+    /\) -> Result<LaunchPlan, String> \{\n    build_launch_for\(spec, spec\.player, cfg, ipc_path\)$/,
+  );
+  // ...by the one function that describes a launch for either.
+  const body = functionBody(launch, 'pub(crate) fn build_launch_for(', 'launch::build_launch_for');
+  assert.doesNotMatch(body, /spec\.player/, 'the player is the one named, nothing else decides');
   // One call serves both players: the external one gets `idle=no`, the
   // embedded one `idle=once` (the Rust unit tests hold the two values).
-  const loop = 'args.extend(lifecycle_args(spec.player))';
+  const loop = 'args.extend(lifecycle_args(player))';
   const at = body.indexOf(loop);
   assert.notEqual(at, -1, 'the launch must apply lifecycle_args()');
   assert.equal(body.indexOf(loop, at + 1), -1, 'lifecycle_args() is applied exactly once');
@@ -105,12 +117,12 @@ test('Advanced arguments are still applied inside base_args', () => {
 test("the embedded player's required options follow everything the user controls", () => {
   // `vo=libmpv` is what makes an embedded play draw into Vela's surface. A
   // user option that came later would win and break the player.
-  const body = functionBody(launch, 'pub(crate) fn build_launch(', 'launch::build_launch');
+  const body = functionBody(launch, 'pub(crate) fn build_launch_for(', 'launch::build_launch_for');
   const required = 'args.extend(embedded_required_args())';
   const at = body.indexOf(required);
   assert.notEqual(at, -1, 'the launch must apply embedded_required_args()');
   assert.equal(body.indexOf(required, at + 1), -1, 'exactly once');
-  for (const earlier of ['base_args(', 'markers_args(', 'args.extend(lifecycle_args(spec.player))']) {
+  for (const earlier of ['base_args(', 'markers_args(', 'args.extend(lifecycle_args(player))']) {
     const last = body.lastIndexOf(earlier);
     assert.notEqual(last, -1, `the launch must still call ${earlier}`);
     assert.ok(last < at, `embedded_required_args() must follow ${earlier}`);

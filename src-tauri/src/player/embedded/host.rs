@@ -33,6 +33,27 @@ const DEVELOPMENT_SET_VARIABLE: &str = "VELA_LIBMPV_DIR";
 /// E2E suite uses it to show that the player survives the wait.
 const DEVELOPMENT_LOAD_DELAY_VARIABLE: &str = "VELA_EMBEDDED_LOAD_DELAY_MS";
 
+/// Environment variable, read by development builds only, that shortens how
+/// long the caller waits for an embedded play to start. With the load delay
+/// above, the E2E suite uses it to stage a play that outlasts its caller's
+/// patience, which otherwise takes a machine in trouble.
+const DEVELOPMENT_START_LIMIT_VARIABLE: &str = "VELA_EMBEDDED_START_LIMIT_MS";
+
+/// How long to wait for a play to start: the usual limit, or less where a
+/// development build was asked for less. Never more, and never anything but
+/// the usual limit in a release build.
+pub(crate) fn start_limit(development_build: bool, asked: Option<&std::ffi::OsStr>) -> Duration {
+    let usual = session::START_LIMIT;
+    if !development_build {
+        return usual;
+    }
+    asked
+        .and_then(|value| value.to_str())
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(|milliseconds| Duration::from_millis(milliseconds).min(usual))
+        .unwrap_or(usual)
+}
+
 /// The wait a development build was asked for; none in a release build,
 /// whatever the environment says, and never more than ten seconds.
 pub(crate) fn load_delay(development_build: bool, asked: Option<&std::ffi::OsStr>) -> Duration {
@@ -432,6 +453,10 @@ impl Prepared {
                 cfg!(debug_assertions),
                 std::env::var_os(DEVELOPMENT_LOAD_DELAY_VARIABLE).as_deref(),
             ),
+            start_limit: start_limit(
+                cfg!(debug_assertions),
+                std::env::var_os(DEVELOPMENT_START_LIMIT_VARIABLE).as_deref(),
+            ),
             header_include,
             _marker_payload: marker_payload.map(MarkerPayload::new),
             on_lifecycle,
@@ -517,6 +542,21 @@ mod tests {
         );
         // A released Vela never waits, whatever its environment says.
         assert_eq!(load_delay(false, asked("2500")), Duration::ZERO);
+    }
+
+    #[test]
+    fn only_a_development_build_can_shorten_the_wait_for_a_start() {
+        use std::ffi::OsStr;
+        let asked = |text: &'static str| Some(OsStr::new(text));
+        let usual = session::START_LIMIT;
+        assert_eq!(usual, Duration::from_secs(20));
+        assert_eq!(start_limit(true, asked("500")), Duration::from_millis(500));
+        assert_eq!(start_limit(true, None), usual);
+        assert_eq!(start_limit(true, asked("soon")), usual);
+        assert_eq!(start_limit(true, asked("999999999")), usual, "never longer");
+        // A released Vela waits the usual time whatever its environment says.
+        assert_eq!(start_limit(false, asked("500")), usual);
+        assert_eq!(start_limit(false, asked("0")), usual);
     }
 
     #[test]

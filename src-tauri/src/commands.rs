@@ -5086,7 +5086,7 @@ async fn play_by_key_locked(
         // The user has been told only once the line has really reached the
         // player. It is sent a moment after the player starts, and a play that is
         // replaced before then never shows it: that explanation stays due.
-        let on_notice_shown = explained.map(|reason| {
+        let told_when_shown = |reason: crate::player::EmbeddedUnavailable| {
             let notices = state.embedded_fallback_notices.clone();
             std::sync::Arc::new(move || {
                 notices
@@ -5094,7 +5094,32 @@ async fn play_by_key_locked(
                     .unwrap_or_else(|e| e.into_inner())
                     .explained(&reason);
             }) as playback::NoticeShown
-        });
+        };
+        let on_notice_shown = explained.map(told_when_shown);
+        // D3, the last case: the embedded player could run when asked, a
+        // moment ago, and cannot start this play after all. `playback::play`
+        // then starts the play in the external player, and this is what the
+        // play says about it: the same one line, under the same once-per-run
+        // rule, as for a play that was given the external player to begin
+        // with.
+        let if_embedded_cannot_start = match player_choice.kind {
+            crate::player::PlayerKind::External => playback::EmbeddedFallback::default(),
+            crate::player::PlayerKind::Embedded => {
+                let explain = state
+                    .embedded_fallback_notices
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .plan(
+                        player.is_none(),
+                        Some(&crate::player::EmbeddedUnavailable::StartFailed),
+                    )
+                    .explain;
+                playback::EmbeddedFallback {
+                    notice: explain.as_ref().map(|reason| reason.notice()),
+                    on_notice_shown: explain.map(told_when_shown),
+                }
+            }
+        };
         let spec = playback::PlaySpec {
             player: player_choice.kind,
             url: resolved.url,
@@ -5133,6 +5158,7 @@ async fn play_by_key_locked(
             duration: item.duration_ms.map(Duration::from_millis),
             osd_notice: osd_notice.or(fallback_notice),
             on_notice_shown,
+            if_embedded_cannot_start,
             steps_taken,
         };
         // Every tracker tail publishes a refresh after its final sampled server
@@ -5226,6 +5252,17 @@ async fn play_by_key_locked(
             .map_err(|e| format!("playback task failed: {e}"))
             .and_then(|r| r)
         };
+        // Which player is running the play. Not always the one chosen: see
+        // `if_embedded_cannot_start` above. What is recorded about the play
+        // follows the player that started.
+        let fell_back = played
+            .as_ref()
+            .is_ok_and(|started| started.player != player_choice.kind);
+        if fell_back {
+            *state.active_playback_player.lock().await =
+                Some((session_id.to_string(), crate::player::PlayerKind::External));
+        }
+        let played = played.map(|started| started.stop);
         let recent = item.clone();
         let recent_session = session_id.to_string();
         let completion_started_at_ms = playback_started_at_ms.clone();
@@ -5234,9 +5271,10 @@ async fn play_by_key_locked(
             observation: window_observation,
         };
         let played = after_successful_play(played, || {
-            // Only a play that started has shown that there is nothing to fall
-            // back from. (An explanation is recorded when it is shown, above.)
-            if notice_plan.forget_when_started {
+            // Only a play that started, in the player it was given, has shown
+            // that there is nothing to fall back from. (An explanation is
+            // recorded when it is shown, above.)
+            if notice_plan.forget_when_started && !fell_back {
                 state
                     .embedded_fallback_notices
                     .lock()
