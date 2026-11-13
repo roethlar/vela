@@ -346,9 +346,12 @@ collect() {
     awk '$1 !~ /^#/ && $3 == "ship" { print "component", $1, $2 }' "$VERSIONS"
     echo "glibc $max"
     for dep in $system; do echo "system $dep"; done | sort
-    ( cd "$dest" && for lib in *.so*; do
-        printf 'file %s %s %s\n' "$(sha256sum "$lib" | cut -d' ' -f1)" "$(stat -c %s "$lib")" "$lib"
-      done )
+    # Every file of the set, licence texts and the build patch included: the
+    # check compares the directory with this list in both directions.
+    ( cd "$dest" && find . -type f ! -name MANIFEST -printf '%P\n' | LC_ALL=C sort \
+        | while IFS= read -r f; do
+            printf 'file %s %s %s\n' "$(sha256sum "$f" | cut -d' ' -f1)" "$(stat -c %s "$f")" "$f"
+          done )
   } > "$dest/MANIFEST"
 
   log "result"

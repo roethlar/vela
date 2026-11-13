@@ -277,6 +277,10 @@ test("the shipped libmpv set is an LGPL build with its licence texts", async () 
     );
   }
   assert.match(collect, /\|\| die "no licence text collected for shipped component/);
+  // The manifest lists every file of the set, not only the libraries: the
+  // integrity check can then notice a missing licence text.
+  assert.match(collect, /find \. -type f ! -name MANIFEST -printf '%P\\n' \| LC_ALL=C sort/);
+  assert.doesNotMatch(collect, /for lib in \*\.so\*; do\n\s+printf 'file /);
   assert.match(collect, /install -m644 "\$PATCHES"\/\*\.patch "\$dest\/licenses\/mpv\/"/);
 });
 
@@ -487,4 +491,117 @@ test("the libmpv build names an unknown step instead of ignoring it", { skip: li
   });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /build-libmpv: unknown step 'ffmpeg-gpl'/);
+});
+
+// check-libmpv.py's manifest comparison, driven directly: it needs no built
+// library, only Python.
+async function libmpvManifestProblems(dir) {
+  const { spawnSync } = await import("node:child_process");
+  const code = [
+    "import importlib.util, json, sys",
+    "spec = importlib.util.spec_from_file_location('check_libmpv', sys.argv[1])",
+    "module = importlib.util.module_from_spec(spec)",
+    "spec.loader.exec_module(module)",
+    "print(json.dumps(module.check_manifest(sys.argv[2])))",
+  ].join("\n");
+  const run = spawnSync(
+    "python3",
+    ["-B", "-c", code, path.join(libmpvRecipe, "check-libmpv.py"), dir],
+    { encoding: "utf8" },
+  );
+  assert.equal(run.status, 0, run.stderr);
+  return JSON.parse(run.stdout);
+}
+
+test("the libmpv integrity check covers every file of the set, licence texts included", { skip: libmpvScriptUnavailable }, async (t) => {
+  const { createHash } = await import("node:crypto");
+  const { appendFile, cp, mkdtemp, mkdir, readFile: readBytes, rm, writeFile } = await import("node:fs/promises");
+  const os = await import("node:os");
+  const root = await mkdtemp(path.join(os.tmpdir(), "vela-libmpv-manifest-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const files = {
+    "libmpv.so.2": "library one\n",
+    "libvela-avcodec.so.63": "library two\n",
+    "licenses/mpv/LICENSE.LGPL": "lgpl\n",
+    "licenses/mpv/mpv-vaapi-without-drm-output.patch": "patch\n",
+    "licenses/ffmpeg/COPYING.LGPLv2.1": "lgpl\n",
+  };
+  const pristine = path.join(root, "pristine");
+  for (const [name, body] of Object.entries(files)) {
+    await mkdir(path.dirname(path.join(pristine, name)), { recursive: true });
+    await writeFile(path.join(pristine, name), body);
+  }
+  const manifestFor = async (names) => {
+    const lines = ["# test set", "arch x86_64", "component mpv 0.0.0", "component ffmpeg 0.0.0"];
+    for (const name of names) {
+      const body = await readBytes(path.join(pristine, name));
+      lines.push(`file ${createHash("sha256").update(body).digest("hex")} ${body.length} ${name}`);
+    }
+    return `${lines.join("\n")}\n`;
+  };
+  await writeFile(path.join(pristine, "MANIFEST"), await manifestFor(Object.keys(files)));
+
+  // Each case starts from an intact copy and breaks exactly one thing.
+  const variant = async (name, breakIt) => {
+    const dir = path.join(root, name);
+    await cp(pristine, dir, { recursive: true });
+    await breakIt(dir);
+    return libmpvManifestProblems(dir);
+  };
+
+  assert.deepEqual(await variant("intact", async () => {}), []);
+  assert.deepEqual(
+    await variant("licence-removed", (dir) => rm(path.join(dir, "licenses/ffmpeg/COPYING.LGPLv2.1"))),
+    ["missing: licenses/ffmpeg/COPYING.LGPLv2.1"],
+  );
+  assert.deepEqual(
+    await variant("licences-gone", (dir) => rm(path.join(dir, "licenses"), { recursive: true })),
+    [
+      "missing: licenses/ffmpeg/COPYING.LGPLv2.1",
+      "missing: licenses/mpv/LICENSE.LGPL",
+      "missing: licenses/mpv/mpv-vaapi-without-drm-output.patch",
+    ],
+  );
+  assert.deepEqual(
+    await variant("patch-removed", (dir) =>
+      rm(path.join(dir, "licenses/mpv/mpv-vaapi-without-drm-output.patch")),
+    ),
+    ["missing: licenses/mpv/mpv-vaapi-without-drm-output.patch"],
+  );
+  assert.deepEqual(
+    await variant("licence-edited", (dir) => appendFile(path.join(dir, "licenses/mpv/LICENSE.LGPL"), "x")),
+    ["modified: licenses/mpv/LICENSE.LGPL"],
+  );
+  assert.deepEqual(
+    await variant("library-removed", (dir) => rm(path.join(dir, "libvela-avcodec.so.63"))),
+    ["missing: libvela-avcodec.so.63"],
+  );
+  assert.deepEqual(
+    await variant("stray-licence", (dir) => writeFile(path.join(dir, "licenses/mpv/EXTRA"), "?")),
+    ["not in MANIFEST: licenses/mpv/EXTRA"],
+  );
+  assert.deepEqual(
+    await variant("stray-library", (dir) => writeFile(path.join(dir, "libextra.so.1"), "?")),
+    ["not in MANIFEST: libextra.so.1"],
+  );
+  // A manifest that simply never listed a component's licence is as bad as a
+  // set that lost it.
+  assert.deepEqual(
+    await variant("licence-never-listed", async (dir) => {
+      await rm(path.join(dir, "licenses/ffmpeg"), { recursive: true });
+      await writeFile(
+        path.join(dir, "MANIFEST"),
+        await manifestFor(Object.keys(files).filter((name) => !name.startsWith("licenses/ffmpeg/"))),
+      );
+    }),
+    ["no licence text listed for component: ffmpeg"],
+  );
+  assert.deepEqual(
+    await variant("entry-outside", (dir) =>
+      appendFile(path.join(dir, "MANIFEST"), `file ${"0".repeat(64)} 1 ../outside\n`),
+    ),
+    ["MANIFEST entry leaves the set: ../outside"],
+  );
+  assert.deepEqual(await variant("no-manifest", (dir) => rm(path.join(dir, "MANIFEST"))).then((p) => p.length), 1);
 });

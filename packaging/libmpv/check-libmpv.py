@@ -4,8 +4,9 @@
 Loads libmpv.so.2 by absolute path with RTLD_NOW | RTLD_DEEPBIND and proves,
 without a GPU:
 
-  * every file the MANIFEST lists is present and unmodified, and the
-    directory holds no library the MANIFEST does not list;
+  * the directory is exactly what its MANIFEST lists: every listed file
+    (libraries, licence texts, the build patch) present and unmodified,
+    nothing unlisted, and a licence text for every shipped component;
   * the library loads and reports the pinned mpv version;
   * every loaded library of the set really comes from the set's directory;
   * the given clips decode in software to end of file;
@@ -37,33 +38,50 @@ HTTPS_ATTEMPTS = 3
 
 
 def check_manifest(libdir):
-    """Compare the directory with its MANIFEST. Returns a list of problems."""
+    """Compare the directory with its MANIFEST, in both directions.
+
+    Every listed file must be present and unmodified; no file may exist that
+    is not listed (libraries, licence texts, anything); and every shipped
+    component must have at least one licence text listed. Returns a list of
+    problems, empty when the set is exactly what was built."""
     problems = []
     listed = {}
+    components = []
     try:
         with open(os.path.join(libdir, "MANIFEST")) as f:
             for line in f:
-                parts = line.split()
-                if parts and parts[0] == "file":
-                    listed[parts[3]] = (parts[1], int(parts[2]))
+                parts = line.split(None, 3)
+                if len(parts) == 4 and parts[0] == "file":
+                    listed[parts[3].rstrip("\n")] = (parts[1], int(parts[2]))
+                elif len(parts) >= 2 and parts[0] == "component":
+                    components.append(parts[1])
     except OSError as e:
         return [f"no MANIFEST: {e}"]
     if "libmpv.so.2" not in listed:
         problems.append("MANIFEST does not list libmpv.so.2")
+    if not components:
+        problems.append("MANIFEST names no component")
+    for name in components:
+        if not any(path.startswith(f"licenses/{name}/") for path in listed):
+            problems.append(f"no licence text listed for component: {name}")
     for name, (sha, size) in sorted(listed.items()):
+        if os.path.isabs(name) or ".." in name.split("/"):
+            problems.append(f"MANIFEST entry leaves the set: {name}")
+            continue
         path = os.path.join(libdir, name)
-        if not os.path.isfile(path):
+        if not os.path.isfile(path) or os.path.islink(path):
             problems.append(f"missing: {name}")
             continue
         with open(path, "rb") as f:
             data = f.read()
         if len(data) != size or hashlib.sha256(data).hexdigest() != sha:
             problems.append(f"modified: {name}")
-    for name in sorted(os.listdir(libdir)):
-        if ".so" in name and name not in listed:
-            problems.append(f"not in MANIFEST: {name}")
-    return problems
-
+    for root, _dirs, files in os.walk(libdir):
+        for filename in files:
+            name = os.path.relpath(os.path.join(root, filename), libdir)
+            if name != "MANIFEST" and name not in listed:
+                problems.append(f"not in MANIFEST: {name}")
+    return sorted(problems)
 
 def main():
     args = sys.argv[1:]
@@ -88,7 +106,8 @@ def main():
     if problems:
         ok = False
     else:
-        print("ok   manifest: every listed file present and unmodified, nothing unlisted")
+        print("ok   manifest: every listed file present and unmodified, nothing unlisted, "
+              "a licence text for every component")
 
     path = os.path.join(libdir, "libmpv.so.2")
     try:
