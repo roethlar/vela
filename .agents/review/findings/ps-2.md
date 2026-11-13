@@ -192,4 +192,24 @@ What changed:
 Files: `tests/config-integrity.test.mjs`, `src-tauri/src/player/external.rs`
 (the same two files the finding already declared). Commits: `bdecf65`,
 `b84baeb` (removes one assertion of `bdecf65` that could not be shown to
-bite), and the commit that adds item 4.
+bite), `2c50ae5` (item 4).
+
+Guard proof for the repair, run 2026-11-13 at `2c50ae5` in a disposable
+worktree, each injection restored with `git checkout` from the commit;
+`node --test tests/config-integrity.test.mjs` ("JS") and
+`cargo +stable test --locked --lib player::` ("Rust"):
+
+| Injection | JS | Rust |
+| --- | --- | --- |
+| Reviewer's first mutation: `set_var` of the joined headers in the include writer | FAIL | the rendered test FAILS, 5 runs of 5 ("a stream header reached the player outside the include") |
+| The same through a copied variable | FAIL | FAILS, 3 runs of 3 |
+| Reviewer's second mutation, smallest form: a function reading `spec.http_headers` after `external.rs`'s test module | FAIL ("the test module must end the file, with nothing after it") | pass |
+| `external.rs`'s test module moved above its code | FAIL, same message | pass |
+| The effective environment leaves out Vela's own | pass | FAILS ("Vela's own environment must be part of what is checked") |
+| The effective environment leaves out what the command adds | pass | FAILS ("what the command adds must be part of what is checked") |
+| Launch code sets an unrelated environment variable | FAIL (the `set_var` rule alone) | pass |
+| The joined header text copied and dropped | FAIL (the recorded-lines list alone) | pass |
+| The outer test selects a test that does not exist | pass | FAILS ("run alone, the check must run once and pass": 0 passed) |
+| That, and the outer test checks only the exit status | pass | passes: this is why the count is checked |
+| The check not run alone, with the first mutation in place | n/a | 10 runs: caught in 7, missed in 3. The race item 4 removes |
+| Unchanged | PASS | PASS, 3 runs of 3 (33 tests) |
