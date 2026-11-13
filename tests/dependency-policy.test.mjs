@@ -493,25 +493,26 @@ test("the libmpv build names an unknown step instead of ignoring it", { skip: li
   assert.match(run.stderr, /build-libmpv: unknown step 'ffmpeg-gpl'/);
 });
 
-// check-libmpv.py's manifest comparison, driven directly: it needs no built
-// library, only Python.
-async function libmpvManifestProblems(dir) {
+// The pure parts of check-libmpv.py, driven directly: they need no built
+// library, only Python. `args` are passed to the named function as JSON.
+async function libmpvCheckCall(name, ...args) {
   const { spawnSync } = await import("node:child_process");
   const code = [
     "import importlib.util, json, sys",
     "spec = importlib.util.spec_from_file_location('check_libmpv', sys.argv[1])",
     "module = importlib.util.module_from_spec(spec)",
     "spec.loader.exec_module(module)",
-    "print(json.dumps(module.check_manifest(sys.argv[2])))",
+    "print(json.dumps(getattr(module, sys.argv[2])(*json.loads(sys.argv[3]))))",
   ].join("\n");
   const run = spawnSync(
     "python3",
-    ["-B", "-c", code, path.join(libmpvRecipe, "check-libmpv.py"), dir],
+    ["-B", "-c", code, path.join(libmpvRecipe, "check-libmpv.py"), name, JSON.stringify(args)],
     { encoding: "utf8" },
   );
   assert.equal(run.status, 0, run.stderr);
   return JSON.parse(run.stdout);
 }
+const libmpvManifestProblems = (dir) => libmpvCheckCall("check_manifest", dir);
 
 test("the libmpv integrity check covers every file of the set, licence texts included", { skip: libmpvScriptUnavailable }, async (t) => {
   const { createHash } = await import("node:crypto");
@@ -604,4 +605,91 @@ test("the libmpv integrity check covers every file of the set, licence texts inc
     ["MANIFEST entry leaves the set: ../outside"],
   );
   assert.deepEqual(await variant("no-manifest", (dir) => rm(path.join(dir, "MANIFEST"))).then((p) => p.length), 1);
+});
+
+test("the libmpv decode check compares what was decoded with what was recorded", { skip: libmpvScriptUnavailable }, async () => {
+  const expected = {
+    video_frames: 12,
+    frame_bytes: 21600,
+    video_sha256: "a".repeat(64),
+    audio_samples: 49152,
+    audio_level: 2716.7,
+  };
+  const decoded = { ...expected, video_ended: "eof", audio_ended: "eof" };
+  const judge = (changes) => libmpvCheckCall("judge_decode", expected, { ...decoded, ...changes });
+
+  assert.deepEqual(await judge({}), []);
+  // Audio decoders are not bit-exact: a level a few percent off still passes.
+  assert.deepEqual(await judge({ audio_level: 2716.7 * 1.03, audio_samples: 49152 + 400 }), []);
+
+  // The reviewer's two cases: one track produced nothing while the file
+  // still played to its end on the other.
+  assert.deepEqual(await judge({ video_frames: 0, frame_bytes: null, video_sha256: null }), [
+    "video: 0 frames decoded, 12 recorded",
+  ]);
+  assert.deepEqual(await judge({ audio_samples: 0, audio_level: 0 }), [
+    "audio: 0 samples decoded, 49152 recorded",
+  ]);
+  // Frames that came out, but wrong.
+  assert.deepEqual(await judge({ video_sha256: "b".repeat(64) }), [
+    "video: decoded frames differ from the recorded ones",
+  ]);
+  assert.deepEqual(await judge({ frame_bytes: 43200 }), [
+    "video: frames of 43200 bytes, 21600 recorded",
+  ]);
+  assert.deepEqual(await judge({ video_frames: 11 }), ["video: 11 frames decoded, 12 recorded"]);
+  // Sound of the right length that is silence, or far too quiet or loud.
+  assert.deepEqual(await judge({ audio_level: 0 }), ["audio: level 0.0, 2716.7 recorded"]);
+  assert.deepEqual(await judge({ audio_level: 2716.7 * 1.2 }), ["audio: level 3260.0, 2716.7 recorded"]);
+  // A track whose decoding never finished.
+  assert.deepEqual(await judge({ video_ended: "reason 4" }), [
+    "video: decoding did not reach end of file (reason 4)",
+  ]);
+  assert.deepEqual(await judge({ audio_ended: "no end within the time allowed" }), [
+    "audio: decoding did not reach end of file (no end within the time allowed)",
+  ]);
+
+  // A deliberately damaged clip must fail on the track that was damaged; one
+  // that passes, or fails only on the other track, means the check went blind.
+  assert.equal(await libmpvCheckCall("judge_broken", "video", ["video: 0 frames decoded, 12 recorded"]), null);
+  assert.match(await libmpvCheckCall("judge_broken", "video", []), /was not noticed/);
+  assert.match(
+    await libmpvCheckCall("judge_broken", "audio", ["video: 0 frames decoded, 12 recorded"]),
+    /the audio of a damaged clip was not noticed/,
+  );
+});
+
+test("every libmpv fixture clip has a recorded result, and both tracks have a damaged clip", async () => {
+  const { readdir } = await import("node:fs/promises");
+  const fixtures = path.join(libmpvRecipe, "fixtures");
+  const recorded = JSON.parse(await readText(path.join(fixtures, "expected.json"), "utf8"));
+  const clips = (await readdir(fixtures)).filter((name) => /\.(mp4|mkv)$/.test(name)).sort();
+  assert.ok(clips.length >= 3);
+  assert.deepEqual(Object.keys(recorded.clips).sort(), clips, "one recorded result per clip");
+  for (const [name, result] of Object.entries(recorded.clips)) {
+    assert.ok(result.video_frames > 0, `${name}: video frames`);
+    assert.ok(result.frame_bytes > 0, `${name}: frame size`);
+    assert.match(result.video_sha256, /^[0-9a-f]{64}$/, `${name}: frame checksum`);
+    assert.ok(result.audio_samples > 0 && result.audio_level > 100, `${name}: audible audio`);
+  }
+  const broken = (await readdir(path.join(fixtures, "broken"))).sort();
+  assert.deepEqual(Object.keys(recorded.broken).sort(), broken, "one entry per damaged clip");
+  for (const [name, entry] of Object.entries(recorded.broken)) {
+    assert.ok(recorded.clips[entry.of], `${name}: made from a recorded clip`);
+    assert.match(entry.must_fail, /^(video|audio)$/, `${name}: which track was damaged`);
+  }
+  assert.deepEqual(
+    [...new Set(Object.values(recorded.broken).map((entry) => entry.must_fail))].sort(),
+    ["audio", "video"],
+    "the check is proved able to fail on each track",
+  );
+
+  // The container check hands the damaged clips to the check as damaged,
+  // every time it runs.
+  const runner = await readText(path.join(libmpvRecipe, "check-in-container.sh"), "utf8");
+  assert.match(
+    runner,
+    /for clip in \/recipe\/fixtures\/broken\/\*; do broken=\\"\\\$broken --broken \\\$clip\\"; done/,
+  );
+  assert.match(runner, /\\\$broken \/recipe\/fixtures\/\*\.mp4 \/recipe\/fixtures\/\*\.mkv/);
 });

@@ -1,0 +1,30 @@
+{
+  "_comment": "What a trusted libmpv set decodes each clip to. Written by check-libmpv.py --record (see make-fixtures.sh); video is compared exactly, audio within a tolerance.",
+  "clips": {
+    "av1-opus.mkv": {
+      "audio_level": 2863.2,
+      "audio_samples": 49152,
+      "frame_bytes": 21600,
+      "video_frames": 12,
+      "video_sha256": "c7754184587295905269fb9a5287a873bda1751ad09ab4a6425543c955fcb380"
+    },
+    "h264-aac.mp4": {
+      "audio_level": 2716.7,
+      "audio_samples": 49152,
+      "frame_bytes": 21600,
+      "video_frames": 12,
+      "video_sha256": "6e8305fbdc9e7c28d45dee68f2caa210e9ceb92a8cdae76435afcc6885a7de34"
+    },
+    "hevc10-ac3.mkv": {
+      "audio_level": 2742.8,
+      "audio_samples": 49152,
+      "frame_bytes": 43200,
+      "video_frames": 12,
+      "video_sha256": "5dc902f853f5fe7480b8a0b085b230267edbe22194413504322499bca78fec50"
+    }
+  },
+  "broken": {
+    "video-zeroed.mp4": { "of": "h264-aac.mp4", "must_fail": "video" },
+    "audio-zeroed.mp4": { "of": "h264-aac.mp4", "must_fail": "audio" }
+  }
+}

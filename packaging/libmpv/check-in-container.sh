@@ -34,5 +34,9 @@ expect="$(awk '$1 == "mpv" { print $2 }' "$here/versions.txt")"
     $setup
     . /etc/os-release
     echo \"== \$PRETTY_NAME, glibc \$(ldd --version | head -1 | awk '{print \$NF}')\"
-    python3 /recipe/check-libmpv.py /set --expect-mpv $expect --https https://example.com/ /recipe/fixtures/*
+    # The damaged clips must FAIL their comparison; see check-libmpv.py.
+    broken=
+    for clip in /recipe/fixtures/broken/*; do broken=\"\$broken --broken \$clip\"; done
+    python3 -B /recipe/check-libmpv.py /set --expect-mpv $expect --https https://example.com/ \
+      \$broken /recipe/fixtures/*.mp4 /recipe/fixtures/*.mkv
   "

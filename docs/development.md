@@ -155,8 +155,14 @@ How the set is put together:
   without mpv's DRM/KMS video output. Its header explains why.
 
 Check a built set with the script the CI job uses. It loads the library the
-way Vela will, compares every file with the manifest, decodes three small
-clips in software and makes one HTTPS request:
+way Vela will, compares every file with the manifest, makes one HTTPS
+request, and decodes three small clips in software. Each clip must decode
+to what `packaging/libmpv/fixtures/expected.json` records for it: the same
+video frames exactly, and the same amount of audio at the same level within
+a small tolerance. Two deliberately damaged clips (one with dead video, one
+with dead audio) must fail that comparison, so a comparison that has
+stopped noticing is caught on every run. `packaging/libmpv/make-fixtures.sh`
+says how the clips were made and how to record new results:
 
 ```bash
 packaging/libmpv/check-in-container.sh docker.io/library/ubuntu:22.04

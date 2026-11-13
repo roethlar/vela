@@ -9,17 +9,34 @@ without a GPU:
     nothing unlisted, and a licence text for every shipped component;
   * the library loads and reports the pinned mpv version;
   * every loaded library of the set really comes from the set's directory;
-  * the given clips decode in software to end of file;
+  * each given clip DECODES to what was recorded for it: the same number of
+    video frames with the same contents (the decoders are bit-exact, so the
+    per-frame checksums must match exactly) and the same amount of audio at
+    the same level (audio decoders are not bit-exact; a tolerance applies);
+  * each clip given with --broken does NOT pass that comparison, so a
+    comparison that can no longer fail is itself a failure;
   * (with --https URL) a fetch over HTTPS works through the machine's GnuTLS
     and trust store.
 
-usage: check-libmpv.py LIBMPV_DIR [--expect-mpv VERSION] [--https URL] [CLIP...]
+usage: check-libmpv.py LIBMPV_DIR [--expect-mpv VERSION] [--https URL]
+                       [--broken CLIP]... [--record] [CLIP...]
+
+Recorded results live in expected.json next to the clips. --record prints
+that file's contents for the given clips instead of comparing; use it, with a
+set you trust, after changing a fixture.
+
 Exit status 0 only if every check passed. Needs nothing but Python 3.
 """
+import array
 import ctypes
 import hashlib
+import json
+import math
 import os
 import sys
+import tempfile
+import time
+import wave
 
 
 class Event(ctypes.Structure):
@@ -31,10 +48,17 @@ class EndFile(ctypes.Structure):
     _fields_ = [("reason", ctypes.c_int), ("error", ctypes.c_int)]
 
 
-EVENT_NONE, EVENT_SHUTDOWN, EVENT_END_FILE, EVENT_FILE_LOADED = 0, 1, 7, 8
+EVENT_NONE, EVENT_SHUTDOWN, EVENT_END_FILE = 0, 1, 7
 REASON_EOF = 0
 ERROR_UNKNOWN_FORMAT = -17
 HTTPS_ATTEMPTS = 3
+# The clips are a second long and decode in a fraction of that. A track that
+# cannot be decoded can leave mpv waiting for it; that is a failure, not a wait.
+RUN_SECONDS = 25
+# Audio decoders work in floating point: the same decoder on another CPU may
+# differ in the last bit. Lost or silent audio differs by far more than this.
+AUDIO_SAMPLES_TOLERANCE = 0.02
+AUDIO_LEVEL_TOLERANCE = 0.05
 
 
 def check_manifest(libdir):
@@ -83,19 +107,67 @@ def check_manifest(libdir):
                 problems.append(f"not in MANIFEST: {name}")
     return sorted(problems)
 
+
+def judge_decode(expected, measured):
+    """Compare what a clip decoded to with what was recorded for it.
+
+    `expected` has video_frames, frame_bytes, video_sha256, audio_samples and
+    audio_level; `measured` has those and how each track's decoding ended. Returns a list of problems, each starting
+    with "video" or "audio"; empty when the clip decoded as recorded."""
+    problems = []
+    if measured.get("video_ended") != "eof":
+        problems.append(f"video: decoding did not reach end of file ({measured.get('video_ended')})")
+    if measured.get("audio_ended") != "eof":
+        problems.append(f"audio: decoding did not reach end of file ({measured.get('audio_ended')})")
+    if measured.get("video_frames") != expected["video_frames"]:
+        problems.append(f"video: {measured.get('video_frames')} frames decoded, {expected['video_frames']} recorded")
+    elif measured.get("frame_bytes") != expected["frame_bytes"]:
+        problems.append(f"video: frames of {measured.get('frame_bytes')} bytes, {expected['frame_bytes']} recorded")
+    elif measured.get("video_sha256") != expected["video_sha256"]:
+        problems.append("video: decoded frames differ from the recorded ones")
+    samples, want = measured.get("audio_samples") or 0, expected["audio_samples"]
+    level, want_level = measured.get("audio_level") or 0.0, expected["audio_level"]
+    if abs(samples - want) > want * AUDIO_SAMPLES_TOLERANCE:
+        problems.append(f"audio: {samples} samples decoded, {want} recorded")
+    elif abs(level - want_level) > want_level * AUDIO_LEVEL_TOLERANCE:
+        problems.append(f"audio: level {level:.1f}, {want_level:.1f} recorded")
+    return problems
+
+
+def judge_broken(must_fail, problems):
+    """A deliberately damaged clip must fail the comparison on the track that
+    was damaged. Returns a problem string, or None when it failed as it must."""
+    if any(p.startswith(must_fail) for p in problems):
+        return None
+    return f"the {must_fail} of a damaged clip was not noticed (problems found: {problems or 'none'})"
+
+
+def load_expectations(directory):
+    """The recorded results kept beside the clips, or {} when there are none."""
+    try:
+        with open(os.path.join(directory, "expected.json")) as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
 def main():
     args = sys.argv[1:]
     if not args:
         print(__doc__)
         return 2
     libdir = os.path.realpath(args.pop(0))
-    expect, https, clips = None, None, []
+    expect, https, clips, broken, record = None, None, [], [], False
     while args:
         a = args.pop(0)
         if a == "--expect-mpv":
             expect = args.pop(0)
         elif a == "--https":
             https = args.pop(0)
+        elif a == "--broken":
+            broken.append(os.path.abspath(args.pop(0)))
+        elif a == "--record":
+            record = True
         else:
             clips.append(os.path.abspath(a))
     ok = True
@@ -140,30 +212,71 @@ def main():
         lib.mpv_free(p)
         return s
 
-    def play(url):
-        """Play one item with null outputs. Returns (reason, error, video codec)."""
+    def run(url, options):
+        """Play one item to its end with the given options. Returns (reason, error)."""
         h = lib.mpv_create()
-        for k, val in (("config", "no"), ("vo", "null"), ("ao", "null"), ("hwdec", "no"),
-                       ("untimed", "yes"), ("idle", "once"), ("terminal", "no"),
-                       ("network-timeout", "20")):
-            lib.mpv_set_option_string(h, k.encode(), val.encode())
+        for k, val in (("config", "no"), ("terminal", "no"), ("hwdec", "no"), ("idle", "once"),
+                       ("network-timeout", "20")) + tuple(options):
+            if lib.mpv_set_option_string(h, k.encode(), val.encode()) < 0:
+                lib.mpv_terminate_destroy(h)
+                return None, None
         if lib.mpv_initialize(h) < 0:
-            return None
+            lib.mpv_terminate_destroy(h)
+            return None, None
         cmd = (ctypes.c_char_p * 3)(b"loadfile", url.encode(), None)
         lib.mpv_command(h, cmd)
-        reason = error = codec = None
-        while True:
-            ev = lib.mpv_wait_event(h, 60.0).contents
-            if ev.event_id in (EVENT_NONE, EVENT_SHUTDOWN):
+        reason = error = None
+        deadline = time.monotonic() + RUN_SECONDS
+        while time.monotonic() < deadline:
+            ev = lib.mpv_wait_event(h, 0.5).contents
+            if ev.event_id == EVENT_SHUTDOWN:
                 break
-            if ev.event_id == EVENT_FILE_LOADED:
-                codec = prop(h, "video-codec")
             if ev.event_id == EVENT_END_FILE:
                 ef = ctypes.cast(ev.data, ctypes.POINTER(EndFile)).contents
                 reason, error = ef.reason, ef.error
         lib.mpv_terminate_destroy(h)
-        return reason, error, codec
+        return reason, error
 
+    def ended(reason):
+        return "eof" if reason == REASON_EOF else ("no end within the time allowed" if reason is None
+                                                   else f"reason {reason}")
+
+    def measure(clip):
+        """Decode a clip in software, one track at a time, and describe what came out."""
+        out = {"video_ended": None, "video_frames": 0, "frame_bytes": None, "video_sha256": None,
+               "audio_ended": None, "audio_samples": 0, "audio_level": 0.0}
+        with tempfile.TemporaryDirectory() as tmp:
+            # Video alone: every decoded frame, unconverted, as one checksum
+            # line (FFmpeg's framecrc writer).
+            crc = os.path.join(tmp, "frames.crc")
+            reason, _ = run(clip, (("o", crc), ("of", "framecrc"), ("ovc", "rawvideo"), ("aid", "no")))
+            out["video_ended"] = ended(reason)
+            frames = []
+            if os.path.exists(crc):
+                with open(crc) as f:
+                    for line in f:
+                        fields = [x.strip() for x in line.split(",")]
+                        if len(fields) == 6 and fields[0] == "0":
+                            frames.append((fields[4], fields[5]))
+            out["video_frames"] = len(frames)
+            sizes = {size for size, _ in frames}
+            out["frame_bytes"] = int(sizes.pop()) if len(sizes) == 1 else None
+            out["video_sha256"] = hashlib.sha256(
+                "\n".join(c for _, c in frames).encode()).hexdigest() if frames else None
+            # Audio alone: the decoded sound as PCM, to count it and measure its level.
+            wav = os.path.join(tmp, "audio.wav")
+            reason, _ = run(clip, (("o", wav), ("of", "wav"), ("oac", "pcm_s16le"), ("vid", "no")))
+            out["audio_ended"] = ended(reason)
+            try:
+                with wave.open(wav, "rb") as w:
+                    pcm = array.array("h")
+                    pcm.frombytes(w.readframes(w.getnframes()))
+                    out["audio_samples"] = len(pcm)
+                    if pcm:
+                        out["audio_level"] = math.sqrt(sum(x * x for x in pcm) / len(pcm))
+            except (OSError, EOFError, wave.Error):
+                pass
+        return out
     h = lib.mpv_create()
     for k, val in (("config", "no"), ("vo", "null"), ("terminal", "no")):
         lib.mpv_set_option_string(h, k.encode(), val.encode())
@@ -188,32 +301,60 @@ def main():
             if base.startswith("libvela-") or base == "libmpv.so.2":
                 mapped.add(os.path.realpath(p))
     outside = sorted(p for p in mapped if os.path.dirname(p) != libdir)
-    expected = {os.path.join(libdir, n) for n in os.listdir(libdir) if ".so" in n}
-    not_loaded = sorted(os.path.basename(p) for p in expected - mapped)
+    expected_libs = {os.path.join(libdir, n) for n in os.listdir(libdir) if ".so" in n}
+    not_loaded = sorted(os.path.basename(p) for p in expected_libs - mapped)
     good = not outside and not not_loaded
     print(f"{'ok  ' if good else 'FAIL'} isolation: {len(mapped)} libraries mapped from the set"
           + (f"; from elsewhere: {outside}" if outside else "")
           + (f"; never loaded: {not_loaded}" if not_loaded else ""))
     ok = ok and good
 
+    if record:
+        recorded = {os.path.basename(clip): {k: v for k, v in measure(clip).items() if not k.endswith("_ended")}
+                    for clip in clips}
+        print(json.dumps(recorded, indent=2, sort_keys=True))
+        return 0 if ok else 1
+
     for clip in clips:
-        r = play(clip)
-        good = r is not None and r[0] == REASON_EOF and r[2] is not None
-        print(f"{'ok  ' if good else 'FAIL'} decode {os.path.basename(clip)}: "
-              f"end-file reason={r and r[0]} error={r and r[1]} codec={r and r[2]!r}")
-        ok = ok and good
+        name = os.path.basename(clip)
+        expected = load_expectations(os.path.dirname(clip)).get("clips", {}).get(name)
+        if expected is None:
+            print(f"FAIL decode {name}: nothing is recorded for it in expected.json")
+            ok = False
+            continue
+        problems = judge_decode(expected, measure(clip))
+        for p in problems:
+            print(f"FAIL decode {name}: {p}")
+        if not problems:
+            print(f"ok   decode {name}: {expected['video_frames']} video frames identical to the "
+                  f"recorded ones, {expected['audio_samples']} audio samples at the recorded level")
+        ok = ok and not problems
+
+    for clip in broken:
+        name = os.path.basename(clip)
+        # Damaged clips live in a subdirectory of the clips they were made from.
+        recorded = load_expectations(os.path.dirname(os.path.dirname(clip)))
+        entry = recorded.get("broken", {}).get(name)
+        expected = recorded.get("clips", {}).get(entry["of"]) if entry else None
+        if not entry or not expected:
+            print(f"FAIL broken {name}: nothing is recorded for it in expected.json")
+            ok = False
+            continue
+        problem = judge_broken(entry["must_fail"], judge_decode(expected, measure(clip)))
+        print(f"FAIL broken {name}: {problem}" if problem
+              else f"ok   broken {name}: its damaged {entry['must_fail']} fails the comparison, as it must")
+        ok = ok and problem is None
 
     if https:
-        good, r = False, None
+        good, r = False, (None, None)
         for _ in range(HTTPS_ATTEMPTS):
-            r = play(https)
+            r = run(https, (("vo", "null"), ("ao", "null"), ("untimed", "yes")))
             # A page that is not media still proves the handshake and the fetch.
-            good = r is not None and (r[0] == REASON_EOF or r[1] == ERROR_UNKNOWN_FORMAT)
+            good = r[0] == REASON_EOF or r[1] == ERROR_UNKNOWN_FORMAT
             if good:
                 break
-        detail = lib.mpv_error_string(r[1]).decode() if r and r[1] is not None else "?"
-        print(f"{'ok  ' if good else 'FAIL'} https {https}: end-file reason={r and r[0]} "
-              f"error={r and r[1]} ({detail})")
+        detail = lib.mpv_error_string(r[1]).decode() if r[1] is not None else "?"
+        print(f"{'ok  ' if good else 'FAIL'} https {https}: end-file reason={r[0]} error={r[1]} ({detail})")
         ok = ok and good
 
     print("RESULT", "PASS" if ok else "FAIL")
