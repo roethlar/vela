@@ -18,6 +18,13 @@
 // `no` the library shuts down during the wait and nothing plays; with `yes`
 // it never shuts down at the end. Both halves are checked here (plan review
 // ep-1).
+//
+// The user's Advanced options here also try to take `idle` away from Vela by
+// the one route that once worked: a profile of the user's that contains an
+// include (review finding ec-4). mpv applies such an include after the rest
+// of the options file the profile was selected in, so the profile must never
+// share a file with Vela's own options. Only the real library can show
+// whether it does.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -115,7 +122,15 @@ export default {
         mediaFile: path.join(mediaDir, 'stream.mp4'),
       }],
     });
-    seedConfig(configRoot, [mockSource(mock)]);
+    // A profile whose include sets `idle=yes`, defined in a file the
+    // Advanced options include, and then selected.
+    const override = path.join(configRoot, 'idle-yes.conf');
+    fs.writeFileSync(override, 'idle=yes\n');
+    const profiles = path.join(configRoot, 'profiles.conf');
+    fs.writeFileSync(profiles, `[trouble]\ninclude=${override}\n`);
+    seedConfig(configRoot, [mockSource(mock)], {
+      mpv_extra_args: `--vo=null\n--ao=null\n--include=${profiles}\n--profile=trouble`,
+    });
   },
 
   environment() {
@@ -153,8 +168,14 @@ export default {
         'vela',
         'the player runs inside Vela, not as a program of its own',
       );
-      // The seeded --vo=null is a user option; it must not have won.
-      assert.equal(await mpv.getProp('options/idle'), 'once');
+      // The seeded --vo=null is a user option; it must not have won. Nor has
+      // the seeded profile, whose include says `idle=yes`: with that mpv
+      // would never end at the end of a file.
+      assert.equal(
+        await mpv.getProp('options/idle'),
+        'once',
+        "Vela's own idle setting stands after everything the user's options bring in",
+      );
       // The venue's compositor offers no colour management, so nothing can
       // be agreed with it about HDR: the surface stays as it is and mpv is
       // left to choose what it draws for (the plan, "Colour"). On a real
