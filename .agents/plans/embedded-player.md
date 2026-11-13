@@ -809,7 +809,36 @@ verified and what was not.
 Steps only the owner can do. The agent adds to this list as slices land
 and removes nothing from it.
 
-- (none yet)
+How to try it (nothing in the app offers it): build the library set or
+download CI's, put `"player": "embedded"` in `~/.config/vela/config.json`,
+and start a development build with `VELA_LIBMPV_DIR` naming the set
+(`docs/development.md`, "Trying the embedded player"). Restart after
+changing the setting.
+
+From Slice 3 (the picture exists; SDR only until Slice 4):
+
+- Watch a film you know in the embedded player on the main display. The
+  agent has seen only a test pattern, in a screenshot: right place, right
+  size, hardware decoding, no dropped frames in ten seconds. Whether
+  motion is smooth, whether the picture is sharp at 1.7 scale, and whether
+  sound and picture stay together are for eyes and ears.
+- Listen. The sound path was checked at volume 0 (mpv reports PulseAudio
+  running); nobody has heard it.
+- Watch a cold start with the setting on. For the first instant the
+  window is transparent with nothing drawn in it. The first screenshot the
+  agent could take, 0.3 s after start, already showed the finished page;
+  anything shorter than that was not measured.
+- Use the rest of the app for a while with the setting on. In that mode
+  the whole window is drawn by WebKit's GPU renderer, which Vela otherwise
+  turns off. Slice 0 compared three screens pixel by pixel; daily use is
+  a different test.
+- Resize, maximise and move the window between monitors while a film
+  plays. Headless tests covered a fixed size, and Slice 0 covered resizing
+  with a probe program, not with Vela.
+- Not checked at all, for lack of the hardware or software: any GPU other
+  than this AMD one (NVIDIA is excluded on purpose; Intel is simply
+  untried), any compositor other than KWin 6.8 and headless weston
+  (GNOME in particular), X11 (expected: falls back to mpv and says so).
 
 ### 2026-11-12 — approval recorded
 
@@ -971,6 +1000,178 @@ Unit tests moved with the code and were not edited: where a function now
 returns options as data, a test-only wrapper of the same name renders
 them to the command-line text the assertions were written against.
 
+### 2026-11-13 — Slice 1 review: two findings, both about tests
+
+`codereview codex` over `b19d7d1..b719a65`, Slice 1 paths only
+(`.agents/review/codereview-2026-11-13-player-seam.md`). Nothing in it
+changes what the external player does.
+
+| | Finding | State |
+| --- | --- | --- |
+| ps-1 | two tests that write a marker payload deleted each other's file (2 runs in 60) | fixed `4fbff87`, `1d7c405`; codex accepted |
+| ps-2 | the check that stream credentials stay off mpv's command line did not see options as the refactor writes them | fixed `94d067e`; reopened three times on the guard, never on the shipped code; repairs `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242`, `053cb36`; fourth verification pending at the time of writing. A fourth reopen goes to the owner as contested (`.agents/review/findings/ps-2.md` says why) |
+
+What the reopens were about, because the same thing came up again in
+Slice 2: a test that reads Rust source as text can be got round by code
+written to get round it, and each repair that patched the test invited
+the next. ps-2's last repair makes its reader refuse what it does not
+understand instead of guessing.
+
+### 2026-11-13 — Slice 2 (selection and fallback): landed and reviewed
+
+Commits: `599c539` (the slice), `90db1a6` (one wiring test tightened after
+its own red-proof found it vacuous).
+
+What landed:
+
+- `AppConfig.player`: optional, `"external"` or `"embedded"`, validated
+  like the other closed settings, written only when set. The plan asked
+  whether the previous release tolerates the field: it does not
+  (`deny_unknown_fields`), as for every setting added before it. A config
+  that carries `player` is refused by 1.0.63 and earlier as an invalid
+  settings file, which is the existing recovery path and overwrites
+  nothing. Only someone who sets the field by hand and then installs an
+  older release meets this. Read from the code; not tried against an old
+  build.
+- `player::choose(wanted, &availability)`: external unless embedded was
+  wanted and can run; a fallback carries its reason.
+- The reason is shown as one line on the player's display, once per run
+  of Vela per reason, and only when the line was really handed to the
+  player. A play with nothing to fall back from forgets what was told, so
+  a later fallback is explained again. An automatic relaunch neither
+  explains nor forgets.
+- The session records its player; an Automatic step-down relaunch stays
+  in it whatever the setting says by then.
+- No command, Settings control, document or release note exposes the
+  setting; `tests/player-selection.test.mjs` holds that until Slice 6.
+
+Verified: clippy (stable, and the 1.89 check on GitHub), `cargo test`,
+`npm run check`, `npm run build`; GitHub CI green at `599c539` (run
+43376150672) and `90db1a6` (43376273069). E2E `playerfallback` (notice
+once, not on the next play, again after a restart, none without the
+setting). Full E2E at `bc6e8a1`: 39 of 41; one failure was a race in the
+new scenario itself, fixed at `1b72dd4` (6 runs of 6 afterwards); the
+other is `pagefail`, the race already recorded in `.agents/state.md`
+(Blockers), which failed 15 runs of 15 at commits from before and after
+this slice.
+
+Review: `codereview codex` over `1cedb48..90db1a6`, four findings, all
+admitted (`.agents/review/codereview-2026-11-13-player-selection.md`).
+
+| | Finding | State |
+| --- | --- | --- |
+| sel-1 | a settings read placed after the session is installed returned early past the cleanup | fixed `88c631b` (the read moved before anything is installed); reopened twice on the guard; the second repair changes the code so that leaving early past the cleanup cannot be written; third verification pending |
+| sel-2 | an Automatic step-down made the fallback line appear a second time | fixed `12828ca`; codex accepted |
+| sel-3 | a play replaced within 1.5 s used up the fallback line without showing it | fixed `50e57e4`, `db0b8b6`; codex accepted |
+| sel-4 | the test for `play`'s refusal passed with the refusal removed | fixed `47eec9a`, guard repaired `29445f2`; codex accepted |
+
+One staging mistake, recorded because it is in the history: `50e57e4`
+also carried four unfinished files of Slice 3. Nothing referenced them;
+`fb64072` took them out again. No history was rewritten.
+
+### 2026-11-13 — Slice 3 (embedded core on Linux/Wayland): the core landed; packaging has not
+
+Commits: `a02db80` (what an embedded launch is made of), `0a63799` (the
+player).
+
+What landed:
+
+- **The start-up decision** (`player/embedded/startup.rs`). `main` decides
+  first thing how the window is created. Only with `player` set to
+  `embedded`, a Wayland session, no NVIDIA proprietary driver, WebKit's
+  GPU renderer not turned off in the user's own environment, and no
+  marker left by a failed earlier start, is the window made transparent
+  and that renderer left on. Every other start is the old one, unchanged.
+  The marker is written before entering that mode and removed by the page
+  once it has loaded; a start that finds one starts the old way and
+  removes it, so the start after that tries again. The setting is read
+  straight from the settings file, not through the settings loader: at
+  that point the loader has not yet migrated an old-format file and would
+  refuse it.
+- **The player** (`player/embedded/`). One thread per play owns a Wayland
+  subsurface below the window, an OpenGL window on it and an mpv player
+  from the shipped library. The library is loaded by absolute path with
+  `RTLD_DEEPBIND`, from Vela's resource directory only (a development
+  build may name another directory in `VELA_LIBMPV_DIR`; a release build
+  ignores it). Hardware decoding is given the GPU's DRM render node. The
+  rest of Vela reaches the player through mpv's IPC socket, as it reaches
+  the external one, so the trackers are untouched.
+- **Options.** The launch's ordered options are written as mpv
+  configuration text and included, because the library rejects
+  command-line spellings through its API. Two things were measured
+  against the shipped library and shaped this: `include` reports success
+  for a file with lines mpv could not use, so the launcher reads back two
+  options after start-up as proof the list arrived; and an `include`
+  written INSIDE an included file takes effect after the rest of that
+  file, so each include is applied as a step of its own, in order.
+- **The page.** While a play is open the page shows a player view (a
+  Close button; Escape) and paints nothing else. The view is keyed to the
+  play's session (ep-2).
+- **Fallback reasons** now name the cause (restart needed, not Wayland,
+  NVIDIA, library did not load, and so on), each with its own short line
+  and the detail on standard error.
+- **E2E.** `npm run e2e -- --embedded` runs the suite in the embedded
+  player under a private headless Wayland compositor. `embeddedplay` is
+  the scenario that proves a play is really embedded; it also makes every
+  play wait two seconds before its file arrives (ep-1).
+
+Decided along the way (implementation details; the ones that change what
+a user gets are also under "For the owner"):
+
+- Loading uses `libc::dlopen` directly, not the `libloading` crate the
+  plan named: no new dependency, and the exact flags.
+- `wayland-client` now runs on the machine's libwayland (its `system`
+  feature), for all its uses including the existing HDR-state query: the
+  video surface has to be created on the connection GTK already holds,
+  and only libwayland can share one. New crates in the lock: `dlib`,
+  `scoped-tls`. `gtk` became a direct dependency (the version Tauri
+  uses).
+- GDK's Wayland functions, `libEGL` and `libwayland-egl` are looked up at
+  run time, so a system without them still starts Vela.
+- A play that cannot start after the checks passed (EGL or mpv refusing at
+  the last step) fails that one play with a message, and every later play
+  in the run goes to mpv with a notice. D3 says a play is never failed
+  over this; redoing a half-started play in the other player from inside
+  the launch was judged riskier than one failed play.
+- The embedded player has no autocrop yet (Slice 5) and, with "use my own
+  mpv configuration" on, applies the user's `mpv.conf` but not their
+  scripts folder, per-script option files or key bindings: mpv would load
+  those after Vela's options and override them, where the external player
+  applies Vela's last.
+
+Verified:
+
+- Clippy on stable and the 1.89 check; 418 Rust tests; 127 node tests;
+  `npm run build`.
+- E2E, ordinary venue: 40 of 41, `embeddedplay` skipped as designed; the
+  one failure is `pagefail` (Blockers).
+- E2E, `--embedded`: `playback`, `resume`, `playverbs`, `markers`,
+  `markerpayload`, `embeddedplay`: 6 of 6. `continueon` fails there on a
+  timing assumption in the scenario (it seeks before the file has
+  loaded); left for Slice 6, which is where the rest of the suite is
+  brought across.
+- On `continuum`'s own desktop (KDE Wayland, 1.7 scale), through the same
+  harness: `current-vo` `libmpv`, `hwdec-current` `vaapi`, the picture
+  2176x1280 for a 1280x753 page, no dropped frames, `current-ao` `pulse`.
+  Compositor screenshots show the test pattern inside the window under
+  the Close button, and the app intact after closing. They are in the
+  session's scratch directory, not in the repo.
+- Red-proofs from the committed state: 11 mutations of the launch
+  description, 34 of the core (start-up decision, loader, options, which
+  player starts a play, geometry, teardown, the page), each failing the
+  test that names it.
+
+Not done in this slice, and known:
+
+- **Packaging.** No package contains the library set yet, so only a
+  development build can run the embedded player. The plan puts the bundle
+  configuration, the Arch package and the release-time check in this
+  slice; they follow as their own commits.
+- The E2E red-proofs of `embeddedplay` (idle `no`, idle `yes`, Close that
+  does nothing) are still to run.
+- GitHub CI for `0a63799`, including `cargo audit` on the two new crates.
+- codex review of the slice.
+
 ### For the owner (decisions the agent assumed while you were away)
 
 Each can be overturned; none has shipped to users.
@@ -995,3 +1196,16 @@ Each can be overturned; none has shipped to users.
 4. **Ubuntu 22.04 is the oldest system the embedded player supports**, the
    same as Vela itself. Audio goes through PulseAudio (which PipeWire
    provides) or ALSA.
+5. **"Use my own mpv configuration" means less in the embedded player.**
+   (Slice 3.) It applies your `mpv.conf`. It does not load your mpv
+   scripts folder, per-script option files or key bindings, which the
+   external player does.
+6. **If the embedded player fails to start a film, that one play fails**
+   with a message, and the rest of the session plays in mpv. (Slice 3.)
+   The agreed rule was "never fail the play"; this is the one case where
+   it does, once.
+7. **Packaging the embedded player's library adds about 33 MB to every
+   Linux package**, for a player that stays hidden until you have looked
+   at it. It is in the approved plan (Slice 3), so the agent does it; it
+   is listed here because it changes every Linux download. Until it lands
+   the player can be tried only from a development build.

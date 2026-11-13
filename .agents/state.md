@@ -12,14 +12,25 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 - IN FLIGHT since 2026-11-12: the embedded player plan
   `.agents/plans/embedded-player.md`, APPROVED that day, running
   unattended (the owner is away). Where it stands is in that file's
-  "Implementation log"; read it before doing anything. As of 2026-11-12:
-  Slice 0 (probes) is done and changed the design in four places (the
-  log's "For the owner" lists them); Slice 0b (the library build in the
-  repo) landed at `b19d7d1`, was reviewed by codex and its three findings
-  are fixed and verified; Slice 1 (the launch seam) landed at `b719a65`
-  with no behaviour change (full E2E 39/39) and its codex review is
-  running; Slice 2 (selection and fallback) is next. Active review loop:
-  see `.agents/review/index.md`.
+  "Implementation log"; read it before doing anything, and its "Owner
+  checks outstanding" and "For the owner" lists before telling the owner
+  anything. As of 2026-11-13:
+  - Slice 0 (probes), 0b (the library build), 1 (the launch seam) and 2
+    (selection and fallback) have landed and been reviewed by codex.
+  - Slice 3's core landed at `0a63799`: a play can run inside Vela's
+    window on Linux/Wayland, from a development build pointed at a built
+    library set, with `"player": "embedded"` in the config file. Proven by
+    E2E under a headless Wayland compositor (`npm run e2e -- --embedded`)
+    and by one run on `continuum`'s desktop. SDR only, a Close button and
+    nothing else. NOT yet done in Slice 3: packaging the library into the
+    Linux packages, and the slice's codex review.
+  - Then Slice 4 (HDR), 5 (controls, cropping), 6 (parity). The owner's
+    by-eye checks and the switch-on (Settings control, release notes,
+    version bump) are NOT the agent's to do.
+  - Review findings still open: see `.agents/review/index.md`. Two of
+    them (`ps-2`, `sel-1`) were reopened repeatedly on how complete a
+    source-text guard must be; each record says what happens if it is
+    reopened again.
   Next in the queue after this plan:
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
   Rules the owner set for this run (decision `.agents/decisions.md`
