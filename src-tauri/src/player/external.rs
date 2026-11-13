@@ -21,7 +21,7 @@ pub(crate) struct ManagedChild {
 impl ManagedChild {
     /// A child with no credential include, for tests of the handle around it.
     #[cfg(test)]
-    pub(super) fn for_test(child: std::process::Child) -> Self {
+    pub(crate) fn for_test(child: std::process::Child) -> Self {
         Self::new(child, None)
     }
 

@@ -35,11 +35,15 @@ test('the play path starts exactly the launch that was described', () => {
   const at = play.indexOf(describe);
   assert.notEqual(at, -1, 'play must describe its launch with build_launch');
   assert.equal(play.indexOf('build_launch(', at + describe.length), -1, 'described exactly once');
+  // One place starts the player, from the one described launch, with the
+  // launcher of the player the play was given: the external program, or the
+  // step the embedded launcher prepared.
   assert.match(
     play,
-    /\*slot = Some\(crate::player::external::launch\(&mpv_bin, plan\)\?\);/,
+    /\*slot = Some\(match \(embedded_start, mpv_bin\) \{\s+\(Some\(start\), _\) => \{\s+start\(plan, cfg\.mpv_use_own_config\.unwrap_or\(false\), &ipc_path\)\?\s+\}\s+\(None, Some\(mpv_bin\)\) => crate::player::external::launch\(&mpv_bin, plan\)\?,\s+\(None, None\) => return Err\(NO_EMBEDDED_PLAYER\.to_string\(\)\),\s+\}\);/,
     'play must start the described launch',
   );
+  assert.equal(play.split('plan').length - 1, 4, 'the launch is described once and handed over once per player');
   assert.doesNotMatch(play, /plan\.(args|env)\b/, 'play must not alter the described launch');
 
   const start = functionBody(external, 'pub(crate) fn launch(', 'external::launch');

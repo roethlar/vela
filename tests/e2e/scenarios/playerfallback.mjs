@@ -1,10 +1,14 @@
-// The player setting, before the embedded player exists
+// The player setting where the embedded player cannot run
 // (.agents/plans/embedded-player.md, Slice 2; decisions D1 and D3).
 //
 // A config that asks for the embedded player must still play: in the external
 // player, with one line on its on-screen display saying why, shown once per run
 // rather than at the start of every play. A config that does not ask for it
 // gets no such line.
+//
+// "Cannot run" here is the suite's ordinary venue, an X11 display: the
+// embedded player needs Wayland. In a run of the embedded player itself
+// there is nothing to fall back from, so this scenario is not part of it.
 //
 // mpv runs with `--vo=null` here, so nothing is drawn. The notice is observed
 // where it arrives: Vela sends it as a `show-text` command over mpv's IPC, and
@@ -16,7 +20,7 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
-const NOTICE = 'Embedded player: not in this build';
+const NOTICE = 'Embedded player: needs a Wayland session';
 let mock;
 let logFile;
 let configRootPath;
@@ -97,6 +101,7 @@ async function waitForHome(driver) {
 
 export default {
   name: 'playerfallback',
+  onlyPlayer: 'external',
 
   async seed({ configRoot }) {
     configRootPath = configRoot;

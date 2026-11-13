@@ -6,6 +6,8 @@
   import Settings from "$lib/Settings.svelte";
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
+  import PlayerView from "$lib/PlayerView.svelte";
+  import { nextPlayerSession } from "$lib/playerView";
   import PlaylistsView from "$lib/PlaylistsView.svelte";
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
   import ServerLogo from "$lib/ServerLogo.svelte";
@@ -36,7 +38,14 @@
   let unlistenContinuePlaying: (() => void) | undefined;
   let unlistenSourceChoice: (() => void) | undefined;
   let unlistenDurableFault: (() => void) | undefined;
+  let unlistenPlayerOpened: (() => void) | undefined;
+  let unlistenPlayerClosed: (() => void) | undefined;
+  // The playback session whose picture is showing inside this window, when a
+  // play runs in the window instead of in a player window of its own.
+  let playerSession = $state<string | null>(null);
   onDestroy(() => {
+    unlistenPlayerOpened?.();
+    unlistenPlayerClosed?.();
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     unlistenPlaybackEnded?.();
@@ -445,6 +454,23 @@
       durableHeading?.focus();
     }).then((un) => (unlistenDurableFault = un));
     listen("playback-ended", refreshWatchState).then((un) => (unlistenPlaybackEnded = un));
+    // The in-window player's own lifecycle, each event naming its session
+    // (the rule for them is in $lib/playerView). `playback-ended` is not used
+    // for this; it names no session and can fire twice.
+    listen<{ sessionId: string }>("player-opened", ({ payload }) => {
+      playerSession = nextPlayerSession(playerSession, {
+        kind: "opened",
+        sessionId: payload.sessionId,
+      });
+    }).then((un) => (unlistenPlayerOpened = un));
+    listen<{ sessionId: string }>("player-closed", ({ payload }) => {
+      playerSession = nextPlayerSession(playerSession, {
+        kind: "closed",
+        sessionId: payload.sessionId,
+      });
+    }).then((un) => (unlistenPlayerClosed = un));
+    // Tells the backend the page has loaded; see `player_window_ready` there.
+    invoke("player_window_ready").catch(() => {});
     listen<PlaybackContinuation>("continue-playing", handlePlaybackContinuation).then(
       (un) => (unlistenContinuePlaying = un),
     );
@@ -3683,6 +3709,12 @@
          the per-section generation in scanSection. -->
     <button role="menuitem" disabled={scanning[sm.key]} onclick={() => scanSection(sm)}>Scan Library</button>
   </div>
+{/if}
+
+{#if playerSession}
+  {#key playerSession}
+    <PlayerView sessionId={playerSession} />
+  {/key}
 {/if}
 
 <style>

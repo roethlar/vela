@@ -33,8 +33,14 @@ test('every play chooses its player from the setting and what can run', () => {
     body,
     /let wanted_player = match player \{\s+Some\(kind\) => kind,\s+None => crate::player::PlayerKind::from_setting\(\s+config::load_config\(\)[\s\S]{0,160}\.player\s+\.as_deref\(\),\s+\),\s+\};/,
   );
-  // The choice: one call, with the real availability, made once.
-  const choose = 'crate::player::choose(wanted_player, &crate::player::embedded_availability())';
+  // Whether the embedded player can run is asked only for a play that wants
+  // it (the answer comes from the window), and asked of the real host.
+  assert.match(
+    body,
+    /let embedded_available = match wanted_player \{[\s\S]{0,120}crate::player::PlayerKind::External => Ok\(\(\)\),\s+crate::player::PlayerKind::Embedded => \{\s+crate::player::embedded_availability\(&state\.embedded, state\.app_handle\.get\(\)\)\.await\s+\}\s+\};/,
+  );
+  // The choice: one call, with that availability, made once.
+  const choose = 'crate::player::choose(wanted_player, &embedded_available)';
   const at = body.indexOf(choose);
   assert.notEqual(at, -1, 'the play path must choose its player with player::choose');
   assert.equal(body.indexOf('player::choose(', at + choose.length), -1, 'chosen exactly once');
@@ -105,7 +111,7 @@ test('a fallback is explained once, and only by a play that started', () => {
   // record as explained.
   assert.match(
     body,
-    /let explained = notice_plan\s+\.explain\s+\.clone\(\)\s+\.filter\(\|_\| osd_notice\.is_none\(\)\);\s+let fallback_notice = explained\.as_ref\(\)\.map\(\|reason\| reason\.notice\(\)\);/,
+    /let explained = notice_plan\.explain\.filter\(\|_\| osd_notice\.is_none\(\)\);\s+let fallback_notice = explained\.as_ref\(\)\.map\(\|reason\| reason\.notice\(\)\);/,
   );
   // The user has been told when the line reached the player, not when the
   // player started: a play replaced during the wait never shows it (review
@@ -186,21 +192,22 @@ test('a relaunch stays in the player it replaces', () => {
 
 test('play refuses a player it cannot start before it starts anything', () => {
   // That the refusal refuses is tested by calling play (review finding
-  // sel-4): src-tauri/src/playback.rs, the test named below. This test only
-  // adds that the check is the first thing play does.
+  // sel-4): src-tauri/src/playback.rs, the test named below. This test adds
+  // what that one cannot see: that nothing is done before it.
   assert.match(playback, /fn play_refuses_a_player_it_cannot_start_and_starts_nothing\(\) \{/);
   const body = functionBody(playback, 'pub fn play(', 'playback::play');
-  // The refusal, whole: the check with its `return` inside it, as the first
-  // statement of play. The first version of this test pinned only where the
-  // `if` stands; with the `if` emptied and the `return` moved below the search
-  // for the mpv program, `mpv --version` ran before the refusal and both
-  // tests passed (review finding sel-4, round 1).
+  // The refusal, whole, as the first thing play does once it has taken its
+  // arguments apart: an embedded play with nothing to start it is turned
+  // away inside this one statement, by the `?` on the missing launcher. An
+  // earlier shape of this test pinned only where the check stood; with the
+  // check emptied and the refusal moved below the search for the mpv program,
+  // `mpv --version` ran first and both tests passed (review finding sel-4).
   assert.match(
     body,
-    /^\npub fn play\([^{]*\) -> Result<Arc<AtomicBool>, String> \{\n(?:[ \t]*\/\/[^\n]*\n)*[ \t]*if spec\.player != crate::player::PlayerKind::External \{\n[ \t]*return Err\("the embedded player is not part of this build"\.to_string\(\)\);\n[ \t]*\}\n/,
-    'the first statement of play is the refusal, with its return',
+    /^\npub fn play\([^{]*\) -> Result<Arc<AtomicBool>, String> \{\n[ \t]*let Players \{\n[ \t]*slot: player_slot,\n[ \t]*shutting_down,\n[ \t]*embedded,\n[ \t]*\} = players;\n(?:[ \t]*\/\/[^\n]*\n)*[ \t]*let embedded_start = match spec\.player \{\n[ \t]*crate::player::PlayerKind::External => None,\n[ \t]*crate::player::PlayerKind::Embedded => Some\(\n[ \t]*embedded\n[ \t]*\.ok_or_else\(\|\| NO_EMBEDDED_PLAYER\.to_string\(\)\)\?\n[ \t]*\.prepare\(&session_id\)\?,\n[ \t]*\),\n[ \t]*\};\n/,
+    'the first statement of play decides the player, and refuses there',
   );
-  const guard = body.indexOf('if spec.player != crate::player::PlayerKind::External {');
+  const guard = body.indexOf('let embedded_start = match spec.player {');
   assert.notEqual(guard, -1, 'play must check which player it was asked for');
   for (const later of ['new_ipc_path()', 'resolve_mpv()', 'build_launch(', 'external::launch(']) {
     const at = body.indexOf(later);

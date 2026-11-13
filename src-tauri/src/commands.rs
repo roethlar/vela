@@ -5054,8 +5054,14 @@ async fn play_by_key_locked(
     // external player whenever the embedded one cannot run. A fallback never
     // fails the play; it is explained once, in one line, on the player that
     // did start.
-    let player_choice =
-        crate::player::choose(wanted_player, &crate::player::embedded_availability());
+    let embedded_available = match wanted_player {
+        // Nothing is asked of the window for a play that does not want it.
+        crate::player::PlayerKind::External => Ok(()),
+        crate::player::PlayerKind::Embedded => {
+            crate::player::embedded_availability(&state.embedded, state.app_handle.get()).await
+        }
+    };
+    let player_choice = crate::player::choose(wanted_player, &embedded_available);
     *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));
     // What this play does about explaining a fallback: once per run of Vela,
     // and never from an automatic relaunch (`player::FallbackNotices::plan`).
@@ -5066,10 +5072,15 @@ async fn play_by_key_locked(
         .plan(player.is_none(), player_choice.fallback.as_ref());
     // A notice the launch already carries wins; the explanation then stays
     // due for a later play.
-    let explained = notice_plan
-        .explain
-        .clone()
-        .filter(|_| osd_notice.is_none());
+    if let Some(reason) = &notice_plan.explain {
+        // Once per reason, like the line on screen: the on-screen line is
+        // short and gone in two seconds, and this is where to look later.
+        eprintln!(
+            "vela: playing in the external player: {}",
+            reason.notice()
+        );
+    }
+    let explained = notice_plan.explain.filter(|_| osd_notice.is_none());
     let fallback_notice = explained.as_ref().map(|reason| reason.notice());
     // The user has been told only once the line has really reached the
     // player. It is sent a moment after the player starts, and a play that is
@@ -5198,6 +5209,8 @@ async fn play_by_key_locked(
     let shutting_down = state.shutting_down.clone();
     let advance = state.playback_advance.clone();
     let playback_session = session_id.to_string();
+    let embedded_launcher =
+        crate::player::embedded_launcher(&state.embedded, state.app_handle.get());
     let played = if let Some(error) = prior_include_error {
         Err(error)
     } else {
@@ -5205,8 +5218,11 @@ async fn play_by_key_locked(
             playback::play(
                 &spec,
                 progress,
-                &child_slot,
-                &shutting_down,
+                playback::Players {
+                    slot: &child_slot,
+                    shutting_down: &shutting_down,
+                    embedded: embedded_launcher.as_deref(),
+                },
                 &advance,
                 playback_session,
                 on_end,
@@ -5287,6 +5303,81 @@ async fn play_by_key_locked(
     Ok(PlayCommandResult::Started {
         session_id: session_id.to_string(),
     })
+}
+
+/// The page says where it has put the video, in CSS pixels relative to the
+/// page. Kept even when nothing is playing: the next embedded play starts
+/// there. Not `async` on purpose, so that it runs on the window's own thread,
+/// the only one that may move the video surface.
+#[tauri::command]
+pub fn player_set_rect(
+    x: f64,
+    y: f64,
+    width: f64,
+    height: f64,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) {
+    #[cfg(target_os = "linux")]
+    {
+        // `as` saturates and turns a NaN into 0; the host cuts the result to
+        // the page.
+        let reported = crate::player::embedded::Rect {
+            x: x.round() as i32,
+            y: y.round() as i32,
+            width: width.round() as i32,
+            height: height.round() as i32,
+        };
+        let slot = state
+            .current_child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        let session = match slot.as_ref() {
+            Some(crate::player::PlayerHandle::Embedded(session)) => Some(session),
+            _ => None,
+        };
+        state.embedded.place(&app, reported, session);
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        let _ = (x, y, width, height, app, state);
+    }
+}
+
+/// The page has loaded. In embedded window mode this is the proof that the
+/// window came up well enough for the user to reach Settings (see
+/// `player::embedded::startup`); otherwise it means nothing.
+#[tauri::command]
+pub fn player_window_ready() {
+    #[cfg(target_os = "linux")]
+    crate::player::embedded::startup::window_came_up();
+}
+
+/// The player view's Close control: stop the embedded play it belongs to. A
+/// view left over from an earlier play cannot stop its successor, and this
+/// never touches an external player, which has a window of its own to close.
+#[tauri::command]
+pub async fn player_close(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let is_current = state
+        .active_playback_session
+        .lock()
+        .await
+        .as_deref()
+        .is_some_and(|current| current == session_id);
+    if !is_current {
+        return Ok(());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        let mut slot = state
+            .current_child
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if let Some(player @ crate::player::PlayerHandle::Embedded(_)) = slot.as_mut() {
+            let _ = player.kill();
+        }
+    }
+    Ok(())
 }
 
 /// Play one item, either resuming its resolved position or explicitly starting

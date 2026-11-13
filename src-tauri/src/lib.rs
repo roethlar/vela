@@ -101,6 +101,9 @@ pub struct AppState {
     pub(crate) active_playback_player: AsyncMutex<Option<(String, player::PlayerKind)>>,
     /// Which embedded-player fallback the user has already been told about.
     pub(crate) embedded_fallback_notices: Arc<Mutex<player::FallbackNotices>>,
+    /// The embedded player's side of the app: whether it can run here, and
+    /// where the page has put the video.
+    pub(crate) embedded: Arc<player::EmbeddedHost>,
     /// Exact in-memory Ask-mode run state. Affinity is tied to one active
     /// series/Vela-playlist session and is never persisted.
     pub(crate) playback_run: AsyncMutex<Option<commands::PlaybackRunState>>,
@@ -120,6 +123,23 @@ pub struct AppState {
     /// Materialized merged children for the currently-open show or season.
     /// Continuation pages window the same source set and ordering as page 0.
     pub merged_children_snapshot: AsyncMutex<Option<commands::MergedChildrenSnapshot>>,
+}
+
+/// Decide, before any window exists, how this run of Vela creates its window,
+/// and do what that decision needs done first. Call once, first thing in
+/// `main`. Returns whether this run is in embedded window mode, in which
+/// WebKit's GPU renderer must be left on; every other run is started exactly
+/// as it always was. The reasoning is in `player::embedded::startup`.
+pub fn prepare_startup() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        use player::embedded::startup;
+        startup::prepare() == startup::WindowMode::Embedded
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -149,6 +169,7 @@ pub fn run() {
         active_playback_item: AsyncMutex::new(None),
         active_playback_player: AsyncMutex::new(None),
         embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
+        embedded: Arc::new(player::EmbeddedHost::new()),
         playback_run: AsyncMutex::new(None),
         playback_choices: AsyncMutex::new(Default::default()),
         playback_window_session: Mutex::new(None),
@@ -181,6 +202,21 @@ pub fn run() {
             .unwrap_or_else(|e| e.into_inner())
             .retain_mut(|child| player::retain_after_poll(&child.has_ended()));
     });
+
+    #[cfg_attr(not(target_os = "linux"), allow(unused_mut))]
+    let mut context = tauri::generate_context!();
+    #[cfg(target_os = "linux")]
+    {
+        use player::embedded::startup;
+        if startup::decision().mode == startup::WindowMode::Embedded {
+            // The video is drawn on a surface under the window and shows
+            // wherever the page is transparent. Everywhere else the page is
+            // opaque, so the window looks as it always did.
+            for window in &mut context.config_mut().app.windows {
+                window.transparent = true;
+            }
+        }
+    }
 
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
@@ -341,6 +377,9 @@ pub fn run() {
             commands::get_person_items,
             commands::set_watched,
             commands::play_item,
+            commands::player_set_rect,
+            commands::player_window_ready,
+            commands::player_close,
             commands::get_playback_source_choice,
             commands::resolve_playback_source_choice,
             commands::cancel_playback_source_choice,
@@ -359,7 +398,7 @@ pub fn run() {
             commands::playlist_reorder,
             commands::playlist_play,
         ])
-        .build(tauri::generate_context!())
+        .build(context)
         .expect("error while building the tauri application")
         .run(|app_handle, event| {
             // On quit, stop the progress tracker and kill the player mpv we

@@ -28,28 +28,61 @@ impl PlayerKind {
 }
 
 /// Why the embedded player cannot run a play right now.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Every reason but the first can only arise on Linux, the one system that
+/// has an embedded player so far.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
 pub(crate) enum EmbeddedUnavailable {
-    /// This build of Vela does not contain the embedded player.
-    NotBuilt,
+    /// Vela has no embedded player for this operating system yet. (On
+    /// Linux, which has one, nothing reports this.)
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    NotOnThisSystem,
+    /// It was chosen after this run of Vela started. How the window is
+    /// created is decided at start-up, so the choice takes effect next time.
+    NeedsRestart,
+    /// The previous start in embedded window mode did not get as far as
+    /// showing the page, so this one started the ordinary way.
+    FailedLastStart,
+    /// The session is X11, or GTK was told to use X11.
+    NotWayland,
+    /// The NVIDIA proprietary driver is in use; untested there.
+    NvidiaDriver,
+    /// The user's environment turns off the WebKit renderer it depends on.
+    RendererOff,
+    /// The mpv library Vela ships could not be loaded.
+    LibraryMissing,
+    /// The compositor lacks a protocol the video surface needs.
+    CompositorLacks,
+    /// The GPU offers no OpenGL window format the video can use.
+    NoGpuFormat,
+    /// Vela's window has no Wayland surface to attach the video to.
+    WindowNotReady,
+    /// An embedded play failed to start earlier in this run.
+    StartFailed,
 }
 
 impl EmbeddedUnavailable {
     /// One line for the player's on-screen display. Short on purpose: mpv's
     /// OSD is large, and this explains a fallback rather than announcing one.
+    /// The detail behind a reason (a loader error, a missing protocol's name)
+    /// goes to Vela's log, not here.
     pub(crate) fn notice(&self) -> String {
-        match self {
-            EmbeddedUnavailable::NotBuilt => "Embedded player: not in this build".to_string(),
-        }
+        let why = match self {
+            EmbeddedUnavailable::NotOnThisSystem => "Linux only for now",
+            EmbeddedUnavailable::NeedsRestart => "restart Vela to use it",
+            EmbeddedUnavailable::FailedLastStart => "off after a failed start",
+            EmbeddedUnavailable::NotWayland => "needs a Wayland session",
+            EmbeddedUnavailable::NvidiaDriver => "not on NVIDIA drivers yet",
+            EmbeddedUnavailable::RendererOff => "WebKit GPU drawing is off",
+            EmbeddedUnavailable::LibraryMissing => "its mpv library did not load",
+            EmbeddedUnavailable::CompositorLacks => "compositor lacks a protocol",
+            EmbeddedUnavailable::NoGpuFormat => "no usable OpenGL format",
+            EmbeddedUnavailable::WindowNotReady => "window not ready",
+            EmbeddedUnavailable::StartFailed => "could not start",
+        };
+        format!("Embedded player: {why}")
     }
-}
-
-/// Whether the embedded player can run a play right now.
-///
-/// It cannot yet: the launcher arrives with Slice 3 of the plan. Until then
-/// every play goes to the external player, whatever the setting says.
-pub(crate) fn embedded_availability() -> Result<(), EmbeddedUnavailable> {
-    Err(EmbeddedUnavailable::NotBuilt)
 }
 
 /// The player one play will use.
@@ -79,7 +112,7 @@ pub(crate) fn choose(
         },
         (PlayerKind::Embedded, Err(reason)) => PlayerChoice {
             kind: PlayerKind::External,
-            fallback: Some(reason.clone()),
+            fallback: Some(*reason),
         },
     }
 }
@@ -131,7 +164,7 @@ impl FallbackNotices {
                 forget_when_started: true,
             },
             Some(reason) => NoticePlan {
-                explain: (self.told.as_ref() != Some(reason)).then(|| reason.clone()),
+                explain: (self.told.as_ref() != Some(reason)).then_some(*reason),
                 forget_when_started: false,
             },
         }
@@ -139,7 +172,7 @@ impl FallbackNotices {
 
     /// The user has been told this reason.
     pub(crate) fn explained(&mut self, reason: &EmbeddedUnavailable) {
-        self.told = Some(reason.clone());
+        self.told = Some(*reason);
     }
 
     /// See [`NoticePlan::forget_when_started`].
@@ -173,7 +206,7 @@ mod tests {
     // Every combination of what was wanted and whether embedded can run.
     #[test]
     fn the_external_player_is_chosen_unless_embedded_was_wanted_and_can_run() {
-        let unavailable = Err(EmbeddedUnavailable::NotBuilt);
+        let unavailable = Err(EmbeddedUnavailable::NeedsRestart);
         assert_eq!(
             choose(PlayerKind::External, &Ok(())),
             PlayerChoice {
@@ -201,23 +234,38 @@ mod tests {
             choose(PlayerKind::Embedded, &unavailable),
             PlayerChoice {
                 kind: PlayerKind::External,
-                fallback: Some(EmbeddedUnavailable::NotBuilt)
+                fallback: Some(EmbeddedUnavailable::NeedsRestart)
             },
             "an embedded choice that cannot run still plays, externally, and says why"
         );
     }
 
-    #[test]
-    fn this_build_cannot_run_the_embedded_player() {
-        // `playback::play` has no embedded launcher yet and refuses the kind
-        // outright. That refusal is unreachable only while this stays true.
-        assert_eq!(embedded_availability(), Err(EmbeddedUnavailable::NotBuilt));
-    }
-
-    /// Every reason there is. A new variant must be added here, which is what
-    /// puts it under the notice test below.
+    /// Every reason there is. The `match` does not compile until a new
+    /// variant is added to it, and that is the reminder to add it to the list,
+    /// which is what puts it under the notice test below.
     fn every_reason() -> Vec<EmbeddedUnavailable> {
-        vec![EmbeddedUnavailable::NotBuilt]
+        use EmbeddedUnavailable::*;
+        let all = vec![
+            NotOnThisSystem,
+            NeedsRestart,
+            FailedLastStart,
+            NotWayland,
+            NvidiaDriver,
+            RendererOff,
+            LibraryMissing,
+            CompositorLacks,
+            NoGpuFormat,
+            WindowNotReady,
+            StartFailed,
+        ];
+        for reason in &all {
+            match reason {
+                NotOnThisSystem | NeedsRestart | FailedLastStart | NotWayland | NvidiaDriver
+                | RendererOff | LibraryMissing | CompositorLacks | NoGpuFormat | WindowNotReady
+                | StartFailed => {}
+            }
+        }
+        all
     }
 
     #[test]
@@ -234,11 +282,26 @@ mod tests {
             );
             assert!(!notice.contains('\n'));
         }
+        // Two reasons with one line would be told once between them.
+        let mut lines: Vec<String> = every_reason().iter().map(|r| r.notice()).collect();
+        lines.sort();
+        lines.dedup();
+        assert_eq!(lines.len(), every_reason().len(), "every reason has its own line");
+    }
+
+    #[test]
+    fn a_different_reason_is_explained_even_after_another_was() {
+        let mut notices = FallbackNotices::default();
+        notices.explained(&EmbeddedUnavailable::NeedsRestart);
+        assert_eq!(
+            notices.plan(true, Some(&EmbeddedUnavailable::StartFailed)),
+            explain(&EmbeddedUnavailable::StartFailed)
+        );
     }
 
     fn explain(reason: &EmbeddedUnavailable) -> NoticePlan {
         NoticePlan {
-            explain: Some(reason.clone()),
+            explain: Some(*reason),
             forget_when_started: false,
         }
     }
@@ -250,7 +313,7 @@ mod tests {
 
     #[test]
     fn a_fallback_is_explained_once_until_it_goes_away() {
-        let reason = EmbeddedUnavailable::NotBuilt;
+        let reason = EmbeddedUnavailable::NeedsRestart;
         let mut notices = FallbackNotices::default();
         assert_eq!(notices.plan(true, Some(&reason)), explain(&reason));
         // Asking is not telling: a play that never showed the line leaves it
@@ -286,7 +349,7 @@ mod tests {
     // Review finding sel-2: fallback play, Automatic step-down, next play.
     #[test]
     fn an_automatic_relaunch_neither_explains_nor_forgets() {
-        let reason = EmbeddedUnavailable::NotBuilt;
+        let reason = EmbeddedUnavailable::NeedsRestart;
         let mut notices = FallbackNotices::default();
         notices.explained(&reason);
 

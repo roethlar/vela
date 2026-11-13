@@ -45,11 +45,19 @@ export function mockSource(
 export function seedConfig(configRoot, sources, extra = {}) {
   const configDir = path.join(configRoot, 'config', 'vela');
   fs.mkdirSync(configDir, { recursive: true });
+  // A run of the suite can put every scenario in the embedded player
+  // (`npm run e2e -- --embedded`, which sets this variable; see
+  // tests/e2e/README.md). A scenario that names a player itself keeps its own.
+  const player = process.env.VELA_E2E_PLAYER ? { player: process.env.VELA_E2E_PLAYER } : {};
   fs.writeFileSync(
     path.join(configDir, 'config.json'),
     JSON.stringify({
       sources,
+      // For the external player: no window, no sound. The embedded player
+      // keeps drawing whatever this says (it asserts its own output after
+      // the user's options) and takes the silence.
       mpv_extra_args: '--vo=null\n--ao=null',
+      ...player,
       ...extra,
     }),
   );

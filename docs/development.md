@@ -106,8 +106,9 @@ first run downloads the pinned WebKitWebDriver described in
 ## The shipped libmpv set
 
 This is build infrastructure for an embedded player that is still in
-development. No released Vela loads it yet; playback today runs the system's
-`mpv` program as described under Architecture.
+development. No released Vela loads it; playback runs the system's `mpv`
+program as described under Architecture. A development build can try the
+embedded player: see "Trying the embedded player" below.
 
 The embedded player will not use whichever mpv library a machine happens to
 have. Vela builds one pinned set of libraries (mpv, FFmpeg, libplacebo,
@@ -169,6 +170,48 @@ packaging/libmpv/check-in-container.sh docker.io/library/ubuntu:22.04
 packaging/libmpv/check-in-container.sh docker.io/library/debian:12
 packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
 ```
+
+### Trying the embedded player
+
+Experimental, Linux on Wayland only, and not offered anywhere in the app:
+there is no Settings control for it and no package ships its library yet.
+The plan and its state are in `.agents/plans/embedded-player.md`.
+
+1. Build the set (above), or download CI's.
+2. Add `"player": "embedded"` to `~/.config/vela/config.json`.
+3. Start a development build with the set's directory named:
+
+   ```bash
+   VELA_LIBMPV_DIR="$PWD/.libmpv/out/libmpv" npm run tauri dev
+   ```
+
+   Only a development build reads that variable. A release build loads the
+   library from its own resource directory and nowhere else.
+
+The setting is read when Vela starts, because it decides how the window is
+created: with `"player": "embedded"` the window is transparent, so that video
+on a surface underneath it can show through, and WebKitGTK's GPU renderer
+is left on, which every other start turns off. Change the setting and
+restart. Before starting that way Vela leaves a marker file in its config
+directory and the page removes it once it has loaded; if a start does not
+get that far, the next one starts the ordinary way.
+
+Whenever the embedded player cannot be used, the play goes to the external
+player and says why in one line on its display. Vela's standard error has
+the detail (`vela: playing in the external player: ...`, and for a library
+that did not load, the loader's own message). Reasons include an X11
+session, the NVIDIA proprietary driver (untested, so excluded), a
+compositor without `wl_subcompositor` or `wp_viewporter`, and a
+`WEBKIT_DISABLE_DMABUF_RENDERER` set in your own environment.
+
+What exists so far is the core: the picture, inside the window, with a
+Close button (or Escape). Playback controls, HDR output and black-bar
+cropping are later slices of the plan. With "use my own mpv configuration"
+on, the embedded player applies your `mpv.conf` but not your scripts folder,
+per-script option files or key bindings.
+
+`npm run e2e -- --embedded` runs the E2E suite in this player; see
+[tests/e2e/README.md](../tests/e2e/README.md).
 
 ### Bumping a component
 

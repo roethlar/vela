@@ -61,8 +61,17 @@ windows = { version = "0.61", features = [
 ] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-wayland-client = "0.31"
+# `system` makes wayland-client talk through the machine's libwayland-client
+# instead of its own implementation. The embedded player needs that: its video
+# surface has to be created on the connection GTK already holds, and only
+# libwayland can share one (`.agents/plans/embedded-player.md`, "Linux/Wayland
+# video surface"). GTK itself links the same library, so it is always there.
+wayland-client = { version = "0.31", features = ["system"] }
 wayland-protocols = { version = "0.32", features = ["client", "staging"] }
+# The window Tauri creates is a GTK window; the embedded player asks it for
+# its Wayland surface and where the web view sits in it. Same version Tauri
+# itself uses.
+gtk = "0.18"
 
 # crates.io's wayland-scanner 0.31.10 still pins vulnerable quick-xml 0.39.
 # The vendored crate is that exact release with only its compatible quick-xml

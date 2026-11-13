@@ -9,6 +9,7 @@ Design and deviations: `.agents/plans/e2e-harness.md`.
 npm run e2e                    # build debug app, run all scenarios
 npm run e2e -- --skip-build    # reuse the existing debug binary
 npm run e2e -- smoke           # run one scenario by name
+npm run e2e -- --embedded      # the same suite, played in the embedded player
 ```
 
 - Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
@@ -28,3 +29,26 @@ npm run e2e -- smoke           # run one scenario by name
 - Scenarios live in `scenarios/*.mjs`: `export default { name, async run(ctx) }`
   with `ctx = { driver, screenshot(name), repoRoot, configRoot }`; assert
   with `node:assert/strict`.
+
+## The embedded player
+
+`--embedded` runs the suite with the embedded player instead of the external
+one (`.agents/plans/embedded-player.md`). Two things change:
+
+- Every seeded config gets `"player": "embedded"`. A scenario plays the way
+  it always did, through mpv's IPC socket; the mpv on the other end is the
+  library inside Vela's own process.
+- The venue is a private headless Wayland compositor (`weston
+  --backend=headless --renderer=gl`) instead of Xvfb, because that player
+  needs Wayland. Weston has no colour management and no fractional scaling,
+  so nothing about HDR or scaled displays is exercised here.
+
+It additionally needs `weston` and a built libmpv set: by default the one
+`scripts/build-libmpv.sh --container` leaves in `.libmpv/out/libmpv`, or
+wherever `VELA_LIBMPV_DIR` points.
+
+A scenario can belong to one player with `onlyPlayer: 'embedded'` or
+`onlyPlayer: 'external'`. In a run of the other player it is reported as
+`SKIP` and not counted; named explicitly, it fails instead.
+`embeddedplay` is the scenario that proves a play really is embedded;
+`playerfallback` is about what happens where it cannot be.

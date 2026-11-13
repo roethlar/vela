@@ -290,6 +290,24 @@ pub type NoticeShown = Arc<dyn Fn() + Send + Sync>;
 /// explains nothing.
 const OSD_NOTICE_DELAY: Duration = Duration::from_millis(1500);
 
+/// Where `play` publishes the player it starts, and what it can start one
+/// with.
+pub struct Players<'a> {
+    /// The app's current-player slot. The player is put here the instant it
+    /// is started, under the slot's lock.
+    pub(crate) slot: &'a Arc<Mutex<Option<crate::player::PlayerHandle>>>,
+    /// Set as the app exits, and checked under the slot's lock, so a play
+    /// that races the exit either does not start or is found by its sweep.
+    pub(crate) shutting_down: &'a Arc<AtomicBool>,
+    /// Starts embedded plays. `None` where there is no embedded player; the
+    /// external one needs nothing but the `mpv` program.
+    pub(crate) embedded: Option<&'a dyn crate::player::EmbeddedLauncher>,
+}
+
+/// What `play` answers when handed an embedded play and nothing to start it
+/// with.
+const NO_EMBEDDED_PLAYER: &str = "No embedded player is available here.";
+
 /// Start a player for `spec.url`, optionally seeking to `spec.start_seconds`,
 /// and start background progress reporting that runs until the player ends.
 /// Publishes the player into `player_slot` the instant it's launched (so an
@@ -299,24 +317,40 @@ const OSD_NOTICE_DELAY: Duration = Duration::from_millis(1500);
 pub fn play(
     spec: &PlaySpec,
     progress: ProgressTarget,
-    player_slot: &Arc<Mutex<Option<crate::player::PlayerHandle>>>,
-    shutting_down: &Arc<AtomicBool>,
+    players: Players<'_>,
     advance: &Arc<crate::commands::PlaybackAdvance>,
     session_id: String,
     on_end: Option<EndNotify>,
 ) -> Result<Arc<AtomicBool>, String> {
-    // Only the external player can be started here so far. A play is given the
-    // embedded kind only when `player::embedded_availability` says it can run,
-    // and it does not yet, so this refuses nothing a user can reach; it is here
-    // so that an embedded play can never be started as an external one by
-    // accident once that changes.
-    if spec.player != crate::player::PlayerKind::External {
-        return Err("the embedded player is not part of this build".to_string());
-    }
+    let Players {
+        slot: player_slot,
+        shutting_down,
+        embedded,
+    } = players;
+    // Each player has its own way to be started, and neither may be started
+    // as the other: an embedded play is given an embedded launcher or is
+    // refused here, before anything has been done. A play is given the
+    // embedded kind only when `player::embedded_availability` said it can
+    // run, so a user does not reach the refusal.
+    let embedded_start = match spec.player {
+        crate::player::PlayerKind::External => None,
+        crate::player::PlayerKind::Embedded => Some(
+            embedded
+                .ok_or_else(|| NO_EMBEDDED_PLAYER.to_string())?
+                .prepare(&session_id)?,
+        ),
+    };
     let ipc_path = crate::player::launch::new_ipc_path()?;
 
-    let mpv_bin = crate::player::external::resolve_mpv()?
-        .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
+    // The external player is a program on the machine; the embedded one is
+    // not, and needs none.
+    let mpv_bin = match embedded_start {
+        Some(_) => None,
+        None => Some(
+            crate::player::external::resolve_mpv()?
+                .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?,
+        ),
+    };
 
     // Advanced/user mpv config (Settings → Advanced mpv options), loaded once here.
     let cfg =
@@ -337,7 +371,13 @@ pub fn play(
             plan.discard_marker_payload();
             return Err("Vela is shutting down.".to_string());
         }
-        *slot = Some(crate::player::external::launch(&mpv_bin, plan)?);
+        *slot = Some(match (embedded_start, mpv_bin) {
+            (Some(start), _) => {
+                start(plan, cfg.mpv_use_own_config.unwrap_or(false), &ipc_path)?
+            }
+            (None, Some(mpv_bin)) => crate::player::external::launch(&mpv_bin, plan)?,
+            (None, None) => return Err(NO_EMBEDDED_PLAYER.to_string()),
+        });
     }
     // Seed the tracked position with the resume point, so if mpv exits before
     // IPC reports a time-pos the final check-in reports the resume position
@@ -988,13 +1028,55 @@ fn spawn_end_watcher(
 mod tests {
     use super::*;
 
-    // Review finding sel-4. `play` can start one player today, the external
-    // one. Handed any other it must refuse, and refuse before it has done
-    // anything: without the refusal an embedded play would be started as an
-    // external one, with the options of neither.
+    // Review finding sel-4. Handed an embedded play and nothing to start it
+    // with, `play` must refuse, and refuse before it has done anything:
+    // without the refusal an embedded play would be started as an external
+    // one, with the options of neither.
     #[test]
     fn play_refuses_a_player_it_cannot_start_and_starts_nothing() {
-        let spec = PlaySpec {
+        let spec = embedded_spec();
+        let slot = Arc::new(Mutex::new(None));
+        let ended = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let on_end: EndNotify = {
+            let ended = ended.clone();
+            Arc::new(move |_position_ms| {
+                ended.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        let result = play(
+            &spec,
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: None,
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "refused-session".to_string(),
+            Some(on_end),
+        );
+        // If the refusal is ever lost, this test has just started a real
+        // player on a machine that has one. Stop it before judging anything.
+        let started = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let started_a_player = started.is_some();
+        if let Some(mut player) = started {
+            let _ = player.kill();
+        }
+        if let Ok(stop) = &result {
+            stop.store(true, Ordering::Relaxed);
+        }
+        assert_eq!(result.err().as_deref(), Some(NO_EMBEDDED_PLAYER));
+        assert!(!started_a_player, "a refused play must not start a player");
+        assert_eq!(
+            ended.load(Ordering::SeqCst),
+            0,
+            "a play that never started has no end to report"
+        );
+    }
+
+    /// A play for the embedded player with nothing optional.
+    fn embedded_spec() -> PlaySpec {
+        PlaySpec {
             player: crate::player::PlayerKind::Embedded,
             url: "https://media.invalid/never-played".to_string(),
             title: String::new(),
@@ -1015,43 +1097,140 @@ mod tests {
             osd_notice: None,
             on_notice_shown: None,
             steps_taken: 0,
+        }
+    }
+
+    /// Stands in for the embedded launcher: writes down what it is asked, in
+    /// order, and hands back a handle to something that really runs.
+    #[cfg(unix)]
+    struct RecordingLauncher {
+        asked: Arc<Mutex<Vec<String>>>,
+    }
+
+    #[cfg(unix)]
+    impl crate::player::EmbeddedLauncher for RecordingLauncher {
+        fn prepare(&self, session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+            let asked = self.asked.clone();
+            asked
+                .lock()
+                .unwrap()
+                .push(format!("prepare {session_id}"));
+            Ok(Box::new(move |plan, _own_config, ipc_path: &str| {
+                let mut asked = asked.lock().unwrap();
+                asked.push(format!("start {ipc_path}"));
+                asked.extend(plan.args.iter().map(|arg| arg.to_cli()));
+                asked.push(format!("url {}", plan.url));
+                let stand_in = std::process::Command::new("sleep")
+                    .arg("30")
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+                Ok(crate::player::PlayerHandle::External(
+                    crate::player::external::ManagedChild::for_test(stand_in),
+                ))
+            }))
+        }
+    }
+
+    // The wiring the unit tests of the embedded launch cannot see: that `play`
+    // hands an embedded play to the embedded launcher, complete, and to
+    // nothing else. It needs no `mpv` program on the machine, which is itself
+    // part of the point.
+    #[cfg(unix)]
+    #[test]
+    fn an_embedded_play_is_started_by_the_embedded_launcher_from_its_described_launch() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = RecordingLauncher {
+            asked: asked.clone(),
         };
         let slot = Arc::new(Mutex::new(None));
-        let ended = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-        let on_end: EndNotify = {
-            let ended = ended.clone();
-            Arc::new(move |_position_ms| {
-                ended.fetch_add(1, Ordering::SeqCst);
-            })
-        };
         let result = play(
-            &spec,
+            &embedded_spec(),
             ProgressTarget::None,
-            &slot,
-            &Arc::new(AtomicBool::new(false)),
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
             &Arc::new(crate::commands::PlaybackAdvance::default()),
-            "refused-session".to_string(),
-            Some(on_end),
+            "embedded-session".to_string(),
+            None,
         );
-        // If the refusal is ever lost, this test has just started a real
-        // player on a machine that has one. Stop it before judging anything.
-        let started = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
-        let started_a_player = started.is_some();
-        if let Some(mut player) = started {
+        // Whatever happened, leave nothing running.
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let was_published = published.is_some();
+        if let Some(mut player) = published {
             let _ = player.kill();
         }
-        if let Ok(stop) = &result {
-            stop.store(true, Ordering::Relaxed);
-        }
+        let stop = result.expect("an embedded play starts through its launcher");
+        stop.store(true, Ordering::Relaxed);
+        assert!(was_published, "the launcher's player is the one published");
+
+        let asked = asked.lock().unwrap().clone();
+        assert_eq!(asked[0], "prepare embedded-session");
+        let ipc_path = asked[1]
+            .strip_prefix("start ")
+            .expect("the launch is started second, after the window was asked")
+            .to_string();
+        let options = &asked[2..asked.len() - 1];
+        // The user's own settings on the machine running this test may add
+        // options of theirs; what Vela asserts after them is fixed.
+        let last = |name: &str| {
+            options
+                .iter()
+                .rev()
+                .find(|option| option.starts_with(&format!("--{name}=")))
+                .cloned()
+        };
+        assert_eq!(last("vo").as_deref(), Some("--vo=libmpv"));
+        assert_eq!(last("idle").as_deref(), Some("--idle=once"));
         assert_eq!(
-            result.err().as_deref(),
-            Some("the embedded player is not part of this build")
+            last("input-ipc-server"),
+            Some(format!("--input-ipc-server={ipc_path}")),
+            "the socket the launch names is the one the trackers are given"
         );
-        assert!(!started_a_player, "a refused play must not start a player");
+        assert!(
+            !options.iter().any(|option| option.starts_with("--title=")
+                || option.starts_with("--gpu-api=")
+                || option.starts_with("--target-colorspace-hint=")),
+            "nothing of the external player's launch: {options:?}"
+        );
         assert_eq!(
-            ended.load(Ordering::SeqCst),
-            0,
-            "a play that never started has no end to report"
+            asked.last().map(String::as_str),
+            Some("url https://media.invalid/never-played")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn an_embedded_play_is_not_started_once_vela_is_shutting_down() {
+        let asked = Arc::new(Mutex::new(Vec::new()));
+        let launcher = RecordingLauncher {
+            asked: asked.clone(),
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(true)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "late-session".to_string(),
+            None,
+        );
+        let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let was_published = published.is_some();
+        if let Some(mut player) = published {
+            let _ = player.kill();
+        }
+        assert_eq!(result.err().as_deref(), Some("Vela is shutting down."));
+        assert!(!was_published);
+        assert_eq!(
+            asked.lock().unwrap().clone(),
+            ["prepare late-session"],
+            "the window may have been asked; nothing was started"
         );
     }
 

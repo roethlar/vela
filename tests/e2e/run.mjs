@@ -4,7 +4,7 @@
 // WebDriver session against the debug binary → screenshots into
 // tests/e2e/artifacts/ → pass/fail summary.
 //
-// Usage: npm run e2e [-- --skip-build] [scenario-name ...]
+// Usage: npm run e2e [-- --skip-build] [--embedded] [scenario-name ...]
 import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -22,6 +22,15 @@ const driverUrl = `http://127.0.0.1:${driverPort}`;
 const argv = process.argv.slice(2);
 const skipBuild = argv.includes('--skip-build');
 const nameFilter = argv.filter((a) => !a.startsWith('--'));
+// `--embedded` runs the suite in the embedded player instead of the external
+// one: every seeded config asks for it (helpers.mjs reads this variable), and
+// the venue below is a Wayland compositor, which that player needs.
+if (argv.includes('--embedded')) process.env.VELA_E2E_PLAYER = 'embedded';
+const runPlayer = process.env.VELA_E2E_PLAYER || 'external';
+if (!['external', 'embedded'].includes(runPlayer)) {
+  console.error(`e2e: unknown player "${runPlayer}" (VELA_E2E_PLAYER is external or embedded)`);
+  process.exit(1);
+}
 
 // Node skips 'exit' handlers when dying to a default signal disposition,
 // and the detached driver group never sees the terminal's SIGINT — so an
@@ -217,7 +226,43 @@ if (scenarios.length === 0) {
 // nothing contends for visibility. VELA_E2E_HEADED=1 runs on the real
 // desktop instead (watchable, but screenshot timing depends on focus).
 let displayEnv = {};
-if (!process.env.VELA_E2E_HEADED) {
+if (runPlayer === 'embedded') {
+  // The embedded player loads the mpv library Vela ships. A debug build takes
+  // it from wherever this variable points; by default, where
+  // scripts/build-libmpv.sh leaves it.
+  const set = process.env.VELA_LIBMPV_DIR ?? path.join(repoRoot, '.libmpv/out/libmpv');
+  if (!fs.existsSync(path.join(set, 'libmpv.so.2'))) {
+    console.error(
+      `e2e: no libmpv set at ${set} — build one with scripts/build-libmpv.sh --container, or point VELA_LIBMPV_DIR at one`,
+    );
+    process.exit(1);
+  }
+  displayEnv = { VELA_LIBMPV_DIR: set };
+}
+if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
+  // A private, headless Wayland compositor: Xvfb is X11, where the embedded
+  // player cannot run. It draws with the GPU (the web view and the video
+  // both need that) and shows nothing on any screen.
+  const socket = `vela-e2e-${process.pid}`;
+  const runtimeDir = process.env.XDG_RUNTIME_DIR;
+  if (!runtimeDir) {
+    console.error('e2e: XDG_RUNTIME_DIR is not set; a Wayland compositor needs it');
+    process.exit(1);
+  }
+  const weston = spawn(
+    'weston',
+    ['--backend=headless', '--renderer=gl', `--socket=${socket}`, '--width=1280', '--height=800'],
+    { stdio: 'ignore' },
+  );
+  weston.on('error', () => {
+    console.error('e2e: weston not found — install it, or set VELA_E2E_HEADED=1 to use the desktop');
+    process.exit(1);
+  });
+  process.on('exit', () => weston.kill());
+  activeKills.add(() => weston.kill());
+  await waitUntil(() => fs.existsSync(path.join(runtimeDir, socket)), `weston on ${socket}`);
+  displayEnv = { ...displayEnv, GDK_BACKEND: 'wayland', WAYLAND_DISPLAY: socket, DISPLAY: '' };
+} else if (!process.env.VELA_E2E_HEADED) {
   const display = process.env.VELA_E2E_DISPLAY ?? ':97';
   if (fs.existsSync(`/tmp/.X${display.slice(1)}-lock`)) {
     console.error(`e2e: display ${display} is taken — set VELA_E2E_DISPLAY or remove the stale lock`);
@@ -231,13 +276,33 @@ if (!process.env.VELA_E2E_HEADED) {
   process.on('exit', () => xvfb.kill());
   activeKills.add(() => xvfb.kill());
   await waitUntil(() => fs.existsSync(`/tmp/.X11-unix/X${display.slice(1)}`), `Xvfb on ${display}`);
-  displayEnv = { GDK_BACKEND: 'x11', DISPLAY: display, WAYLAND_DISPLAY: '' };
+  displayEnv = { ...displayEnv, GDK_BACKEND: 'x11', DISPLAY: display, WAYLAND_DISPLAY: '' };
 }
 
 const tauriDriverBin = resolveTauriDriver();
 let failures = 0;
+let skipped = 0;
 for (const scenario of scenarios) {
   process.stdout.write(`e2e: ${scenario.name} … `);
+  // A scenario may be about one player (`onlyPlayer`). The whole run is in
+  // one player: the external one unless it was started with `--embedded`
+  // (see README.md). In a run of the other player the scenario is skipped by
+  // name, never silently; asked for by name, it fails.
+  if (scenario.onlyPlayer && scenario.onlyPlayer !== runPlayer) {
+    const needs =
+      scenario.onlyPlayer === 'external'
+        ? 'needs a run of the external player (without --embedded)'
+        : 'needs a run of the embedded player (--embedded)';
+    if (nameFilter.includes(scenario.name)) {
+      failures += 1;
+      console.log('FAIL');
+      console.error(`e2e: ${scenario.name} ${needs}`);
+    } else {
+      skipped += 1;
+      console.log(`SKIP (${needs})`);
+    }
+    continue;
+  }
   const err = await runScenario(scenario, tauriDriverBin);
   if (err) {
     failures += 1;
@@ -248,5 +313,8 @@ for (const scenario of scenarios) {
   }
 }
 
-console.log(`e2e: ${scenarios.length - failures}/${scenarios.length} passed; artifacts in ${path.relative(repoRoot, artifactsDir)}/`);
+const ran = scenarios.length - skipped;
+console.log(
+  `e2e: ${ran - failures}/${ran} passed${skipped ? `, ${skipped} skipped` : ''}; artifacts in ${path.relative(repoRoot, artifactsDir)}/`,
+);
 process.exit(failures === 0 ? 0 : 1);
