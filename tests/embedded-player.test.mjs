@@ -1,9 +1,11 @@
-// The embedded player's wiring (.agents/plans/embedded-player.md, Slice 3).
+// The embedded player's wiring (.agents/plans/embedded-player.md, Slices 3
+// and 4).
 //
 // The Rust unit tests prove the pieces: the start-up decision for every
 // combination of facts (player/embedded/startup.rs), the loader's refusals
 // (libmpv.rs), the launch description (player/launch.rs), the option files
-// (options.rs). These prove the pieces are connected the way the plan
+// (options.rs), the HDR arithmetic and the agreement between mpv and the
+// surface (hdr.rs). These prove the pieces are connected the way the plan
 // promises, above all its first promise: a user who has not chosen the
 // embedded player gets exactly the Vela they had.
 import assert from 'node:assert/strict';
@@ -21,6 +23,9 @@ const startup = read('src-tauri/src/player/embedded/startup.rs');
 const host = read('src-tauri/src/player/embedded/host.rs');
 const libmpv = read('src-tauri/src/player/embedded/libmpv.rs');
 const session = read('src-tauri/src/player/embedded/session.rs');
+const surface = read('src-tauri/src/player/embedded/surface.rs');
+const hdr = read('src-tauri/src/player/embedded/hdr.rs');
+const embeddedMod = read('src-tauri/src/player/embedded/mod.rs');
 const cargo = read('src-tauri/Cargo.toml');
 const tauriConf = JSON.parse(read('src-tauri/tauri.conf.json'));
 const page = read('src/routes/+page.svelte');
@@ -30,6 +35,17 @@ const code = (source) =>
     .split('\n')
     .filter((line) => !/^\s*\/\//.test(line))
     .join('\n');
+
+// A method of an `impl` block: from its signature to its own closing brace.
+function methodBody(source, signature, what) {
+  const start = source.indexOf(`\n${signature}`);
+  assert.notEqual(start, -1, `${what} must exist`);
+  const end = source.indexOf('\n    }\n', start);
+  assert.notEqual(end, -1, `${what} must have a closing brace`);
+  return source.slice(start, end);
+}
+
+const count = (source, text) => source.split(text).length - 1;
 
 function functionBody(source, signature, what) {
   const start = source.indexOf(`\n${signature}`);
@@ -151,5 +167,160 @@ test('a running embedded play is asked to stop, and waited for, before its windo
   assert.match(
     session,
     /struct Live \{\s+renderer: Renderer,\s+player: Player,\s+window: egl::Window,\s+surface: VideoSurface,/,
+  );
+});
+
+// ---- Slice 4: HDR
+
+test('mpv is told what it draws for in one place, together with the surface', () => {
+  // The unit tests in hdr.rs prove that `hdr::carry_out` changes mpv and
+  // the surface together or not at all. This proves it is the only way
+  // either of them is changed.
+  const rust = fs
+    .readdirSync(path.join(repoRoot, 'src-tauri/src'), { recursive: true })
+    .map(String)
+    .filter((file) => file.endsWith('.rs'));
+  assert.ok(rust.includes('player/embedded/hdr.rs') && rust.length > 20);
+  for (const file of rust) {
+    if (file === 'player/embedded/hdr.rs') continue;
+    assert.doesNotMatch(
+      code(read(path.join('src-tauri/src', file))),
+      /target-(trc|prim|peak)/,
+      `${file} must not name an mpv target option`,
+    );
+  }
+  // mpv: the one call that changes an option of the running player is the
+  // one `hdr` drives.
+  assert.equal(count(code(libmpv), '(self.lib.set_property_string)('), 1);
+  assert.match(
+    libmpv,
+    /impl super::hdr::Targetable for Player \{[\s\S]{0,300}fn set_target\(&self, option: &str, value: &str\) -> bool \{[\s\S]{0,500}\(self\.lib\.set_property_string\)\(self\.raw, c_option\.as_ptr\(\), c_value\.as_ptr\(\)\)[\s\S]{0,40}self\.lib\.check\(code\)\.is_ok\(\)\s+\}\s+\}/,
+  );
+  // The surface: a description is asked for, put on and taken off only
+  // through the same trait.
+  const describable = surface.slice(surface.indexOf('\nimpl Describable for VideoSurface {'));
+  assert.ok(describable.length > 0 && describable.startsWith('\nimpl Describable for VideoSurface {'));
+  const ends = describable.indexOf('\n}\n');
+  for (const request of [
+    'create_parametric_creator(',
+    'set_mastering_luminance(',
+    '.set_image_description(',
+    '.unset_image_description(',
+  ]) {
+    assert.equal(count(code(surface), request), 1, `${request} is sent from one place`);
+    const at = describable.indexOf(request);
+    assert.ok(at !== -1 && at < ends, `${request} is sent from the Describable implementation`);
+  }
+  // And the session reaches both through `hdr::carry_out`, once.
+  assert.equal(count(code(session), 'hdr::carry_out('), 1);
+  assert.match(
+    session,
+    /fn carry_out\(\s+player: &Player,\s+surface: &mut VideoSurface,\s+tagging: &mut Tagging,\s+step: hdr::Step,\s+\) -> bool \{\s+let change = hdr::carry_out\(step, tagging, player, surface\);[\s\S]{0,600}change\.needs_a_frame\(\)\s+\}/,
+  );
+  for (const direct of ['.describe(', '.tag(', '.untag(', '.set_target(']) {
+    assert.equal(count(code(session), direct), 0, `the session never calls ${direct} itself`);
+  }
+  // Nothing in the module is switched off from the compiler's view: a part
+  // of this that nothing calls fails the build.
+  for (const [name, source] of [['hdr.rs', hdr], ['mod.rs', embeddedMod], ['surface.rs', surface]]) {
+    assert.doesNotMatch(source, /allow\(dead_code\)/, `${name} hides no unused code`);
+  }
+  assert.match(embeddedMod, /^mod hdr;$/m);
+});
+
+test("nothing is sent to the compositor's colour manager that it did not offer", () => {
+  // A request the compositor did not offer is a protocol error; it ends the
+  // connection, and the connection is the one Vela's window lives on.
+  assert.match(
+    methodBody(surface, '    pub(crate) fn colour_support(&self) -> bool {', 'colour_support'),
+    /let colour = self\.state\.colour;\s+self\.state\.colour_manager\.is_some\(\)\s+&& self\.feedback\.is_some\(\)\s+&& colour\.parametric\s+&& colour\.mastering\s+&& colour\.pq\s+&& colour\.bt2020\s+&& colour\.perceptual$/,
+  );
+  // Each of those is what the compositor announced, under the protocol's
+  // own numbers.
+  for (const [constant, value] of [
+    ['FEATURE_PARAMETRIC', 1],
+    ['FEATURE_MASTERING_DISPLAY', 5],
+    ['TRANSFER_PQ', 11],
+    ['PRIMARIES_BT2020', 6],
+    ['INTENT_PERCEPTUAL', 0],
+  ]) {
+    assert.match(surface, new RegExp(`^const ${constant}: u32 = ${value};$`, 'm'));
+  }
+  assert.match(surface, /FEATURE_PARAMETRIC => state\.colour\.parametric = true,\s+FEATURE_MASTERING_DISPLAY => state\.colour\.mastering = true,/);
+  assert.match(surface, /state\.colour\.pq \|= u32::from\(tf\) == TRANSFER_PQ;/);
+  assert.match(surface, /state\.colour\.bt2020 \|= u32::from\(primaries\) == PRIMARIES_BT2020;/);
+  assert.match(surface, /state\.colour\.perceptual \|= u32::from\(render_intent\) == INTENT_PERCEPTUAL;/);
+  // The version whose events this code handles (`ready`, `preferred_changed`).
+  assert.match(
+    surface,
+    /"wp_color_manager_v1" => state\.colour_manager = Some\(registry\.bind\(name, 1, qh, \(\)\)\),/,
+  );
+
+  // Asking for a description, and putting one on the surface, each begin by
+  // checking; a description is put on the surface only once it was made.
+  assert.match(
+    methodBody(surface, '    fn describe(&mut self, target: &HdrTarget) {', 'describe'),
+    /^\n    fn describe\(&mut self, target: &HdrTarget\) \{\n        if !self\.colour_support\(\) \{\n            return;\n        \}/,
+  );
+  assert.match(
+    methodBody(surface, '    fn tag(&mut self) -> bool {', 'tag'),
+    /^\n    fn tag\(&mut self\) -> bool \{\n        if !self\.colour_support\(\) \|\| !self\.state\.made \{\n            return false;\n        \}/,
+  );
+  assert.match(surface, /\(Described::Surface, Event::Ready \{ \.\. \}\) => \{\s+state\.answer = Some\(true\);\s+state\.made = true;\s+\}/);
+  assert.match(surface, /self\.state\.answer = None;\s+self\.state\.made = false;\s+\/\/ Creating the description consumes the parameters object\.\s+self\.described = Some\(parameters\.create\(&qh, Described::Surface\)\);/);
+  assert.equal(count(code(surface), 'made = true'), 1);
+  // The output's description is asked for in its readable form only where
+  // that form exists, and read only once it is ready.
+  assert.match(
+    methodBody(surface, '    pub(crate) fn ask_about_output(&mut self) {', 'ask_about_output'),
+    /let \(Some\(feedback\), true\) = \(&self\.feedback, self\.state\.colour\.parametric\) else \{\s+return;\s+\};/,
+  );
+  assert.equal(count(code(surface), '.get_information('), 1);
+  assert.match(surface, /\(Described::Output, Event::Ready \{ \.\. \}\) => \{[\s\S]{0,400}description\.get_information\(qh, \(\)\);/);
+});
+
+test("what the compositor says about the display is followed from a play's start to its end", () => {
+  // One function acts on it...
+  const follow = functionBody(session, 'fn follow_colour(', 'follow_colour');
+  assert.match(
+    follow,
+    /if surface\.output_changed\(\) && capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+\}\s+if let Some\(output\) = surface\.output_described\(\) \{\s+let step = tagging\.output_described\(hdr::presentation\(Some\(output\), capabilities\)\);\s+redraw \|= carry_out\(player, surface, tagging, step\);\s+\}\s+if let Some\(made\) = surface\.description_answer\(\) \{\s+let step = if made \{\s+tagging\.description_ready\(\)\s+\} else \{\s+tagging\.description_failed\(\)\s+\};\s+redraw \|= carry_out\(player, surface, tagging, step\);\s+\}\s+redraw$/,
+  );
+  assert.equal(count(code(session), 'hdr::presentation('), 1);
+  assert.equal(count(code(session), 'follow_colour('), 3, 'its definition and its two uses');
+
+  // ...before the first picture, once mpv has every other option, with what
+  // this machine can do...
+  const setUp = functionBody(session, 'fn set_up(', 'set_up');
+  assert.match(
+    setUp,
+    /let capabilities = Capabilities \{\s+can_describe: surface\.colour_support\(\),\s+ten_bit_window: window\.depth == 10,\s+\};\s+let mut tagging = Tagging::new\(\);/,
+  );
+  const settle = setUp.search(
+    /if capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+for _ in 0\.\.COLOUR_EXCHANGES_AT_START \{\s+surface\.roundtrip\(\)\?;\s+follow_colour\(&player, &mut surface, capabilities, &mut tagging\);\s+if tagging\.settled\(\) \{\s+break;\s+\}\s+\}\s+\}/,
+  );
+  assert.notEqual(settle, -1);
+  const optionsChecked = setUp.indexOf('return Err("mpv did not take the player\'s options".to_string());');
+  const fileGiven = setUp.indexOf('.command(&["loadfile", &start.url])');
+  assert.ok(optionsChecked !== -1 && fileGiven !== -1);
+  assert.ok(optionsChecked < settle, "after the user's options and Vela's own");
+  assert.ok(settle < fileGiven, 'before mpv has anything to draw');
+  assert.equal(count(code(setUp), 'Capabilities {'), 1);
+  assert.match(setUp, /capabilities,\s+tagging,\s+\}\)$/, 'and the running play keeps both');
+
+  // ...and on every turn of the running play, drawing a frame when it
+  // changed something.
+  const run = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
+  assert.match(
+    run,
+    /redraw \|= follow_colour\(\s+&self\.player,\s+&mut self\.surface,\s+self\.capabilities,\s+&mut self\.tagging,\s+\);/,
+  );
+  assert.ok(
+    run.indexOf('redraw |= follow_colour(') < run.indexOf('if self.renderer.has_new_frame() || redraw {'),
+  );
+  // The compositor's change of mind is what sets it off.
+  assert.match(
+    surface,
+    /if let wp_color_management_surface_feedback_v1::Event::PreferredChanged \{ \.\. \} = event \{\s+state\.output_changed = true;\s+\}/,
   );
 });

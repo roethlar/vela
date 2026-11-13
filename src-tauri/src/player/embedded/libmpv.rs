@@ -100,6 +100,8 @@ pub(crate) struct LibMpv {
     set_option_string:
         unsafe extern "C" fn(*mut RawHandle, *const c_char, *const c_char) -> c_int,
     initialize: unsafe extern "C" fn(*mut RawHandle) -> c_int,
+    set_property_string:
+        unsafe extern "C" fn(*mut RawHandle, *const c_char, *const c_char) -> c_int,
     command: unsafe extern "C" fn(*mut RawHandle, *mut *const c_char) -> c_int,
     get_property_string: unsafe extern "C" fn(*mut RawHandle, *const c_char) -> *mut c_char,
     wait_event: unsafe extern "C" fn(*mut RawHandle, c_double) -> *mut RawEvent,
@@ -211,6 +213,7 @@ impl LibMpv {
             create: symbol!("mpv_create"),
             set_option_string: symbol!("mpv_set_option_string"),
             initialize: symbol!("mpv_initialize"),
+            set_property_string: symbol!("mpv_set_property_string"),
             command: symbol!("mpv_command"),
             get_property_string: symbol!("mpv_get_property_string"),
             wait_event: symbol!("mpv_wait_event"),
@@ -402,6 +405,24 @@ impl Player {
 
     pub(crate) fn raw(&self) -> *mut RawHandle {
         self.raw
+    }
+}
+
+impl super::hdr::Targetable for Player {
+    /// Change, on the running player, one of the options that say what it
+    /// draws for.
+    fn set_target(&self, option: &str, value: &str) -> bool {
+        let (Ok(c_option), Ok(c_value)) = (
+            c_string("an option name", option),
+            c_string("an option value", value),
+        ) else {
+            return false;
+        };
+        // SAFETY: a live handle and two valid C strings.
+        let code = unsafe {
+            (self.lib.set_property_string)(self.raw, c_option.as_ptr(), c_value.as_ptr())
+        };
+        self.lib.check(code).is_ok()
     }
 }
 

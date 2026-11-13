@@ -9,9 +9,11 @@
 //! embedded play can run and starts one. A play is a `session`: one thread
 //! owning a `surface` under the window, an OpenGL window on it (`egl`), and
 //! an mpv player from the shipped library (`libmpv`) configured through
-//! `options`.
+//! `options`. `hdr` decides what mpv and the compositor are told about the
+//! display's range.
 
 mod egl;
+mod hdr;
 mod host;
 mod libmpv;
 mod options;

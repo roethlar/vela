@@ -155,6 +155,15 @@ export default {
       );
       // The seeded --vo=null is a user option; it must not have won.
       assert.equal(await mpv.getProp('options/idle'), 'once');
+      // The venue's compositor offers no colour management, so nothing can
+      // be agreed with it about HDR: the surface stays as it is and mpv is
+      // left to choose what it draws for (the plan, "Colour"). On a real
+      // desktop the display decides, so there is nothing to assert there.
+      if (!process.env.VELA_E2E_HEADED) {
+        for (const option of ['target-trc', 'target-prim', 'target-peak']) {
+          assert.equal(await mpv.getProp(option), 'auto', `${option} is left to mpv`);
+        }
+      }
 
       // The page has become the player view, and nothing of the app is
       // painted over the picture.

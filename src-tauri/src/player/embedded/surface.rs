@@ -24,11 +24,50 @@ use wayland_client::protocol::{
     wl_subsurface::WlSubsurface, wl_surface::WlSurface,
 };
 use wayland_client::{delegate_noop, Connection, Dispatch, EventQueue, Proxy, QueueHandle};
+use wayland_protocols::wp::color_management::v1::client::{
+    wp_color_management_surface_feedback_v1::{self, WpColorManagementSurfaceFeedbackV1},
+    wp_color_management_surface_v1::WpColorManagementSurfaceV1,
+    wp_color_manager_v1::{self, WpColorManagerV1},
+    wp_image_description_creator_params_v1::WpImageDescriptionCreatorParamsV1,
+    wp_image_description_info_v1::{self, WpImageDescriptionInfoV1},
+    wp_image_description_v1::{self, WpImageDescriptionV1},
+};
 use wayland_protocols::wp::fractional_scale::v1::client::{
     wp_fractional_scale_manager_v1::WpFractionalScaleManagerV1,
     wp_fractional_scale_v1::{self, WpFractionalScaleV1},
 };
 use wayland_protocols::wp::viewporter::client::{wp_viewport::WpViewport, wp_viewporter::WpViewporter};
+
+use super::hdr::{Describable, HdrTarget, OutputDescription};
+
+// Values of the colour-management protocol's enumerations that are used
+// here, as the protocol numbers them.
+const FEATURE_PARAMETRIC: u32 = 1;
+const FEATURE_MASTERING_DISPLAY: u32 = 5;
+const TRANSFER_PQ: u32 = 11;
+const PRIMARIES_BT2020: u32 = 6;
+const INTENT_PERCEPTUAL: u32 = 0;
+
+/// Which image description an event is about.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Described {
+    /// The compositor's own description of the output the surface is on.
+    Output,
+    /// The description Vela asked for, to put on the surface.
+    Surface,
+}
+
+/// What the compositor's colour manager says it supports.
+#[derive(Debug, Default, Clone, Copy)]
+struct ColourSupport {
+    parametric: bool,
+    /// The mastering display's primaries AND its luminance range: the
+    /// protocol puts both requests under this one feature.
+    mastering: bool,
+    pq: bool,
+    bt2020: bool,
+    perceptual: bool,
+}
 
 /// The compositor's scale for a surface, in 120ths: 120 is 1.0, 204 is 1.7.
 const SCALE_ONE: u32 = 120;
@@ -41,6 +80,19 @@ struct State {
     fractional_scale: Option<WpFractionalScaleManagerV1>,
     /// The scale the compositor last asked this surface to be drawn at.
     scale_120: Option<u32>,
+    colour_manager: Option<WpColorManagerV1>,
+    colour: ColourSupport,
+    /// The compositor said its description of the output has changed.
+    output_changed: bool,
+    /// The output's description while its parts are still arriving.
+    arriving: Option<OutputDescription>,
+    /// A complete description of the output that nobody has collected yet.
+    output: Option<OutputDescription>,
+    /// The answer to the last description Vela asked for: made, or refused.
+    answer: Option<bool>,
+    /// The description last asked for has been made. Only then may it be
+    /// put on a surface; before, that is a protocol error.
+    made: bool,
 }
 
 impl Dispatch<wl_registry::WlRegistry, ()> for State {
@@ -68,6 +120,7 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
             "wp_fractional_scale_manager_v1" => {
                 state.fractional_scale = Some(registry.bind(name, 1, qh, ()))
             }
+            "wp_color_manager_v1" => state.colour_manager = Some(registry.bind(name, 1, qh, ())),
             _ => {}
         }
     }
@@ -88,8 +141,125 @@ impl Dispatch<WpFractionalScaleV1, ()> for State {
     }
 }
 
+impl Dispatch<WpColorManagerV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &WpColorManagerV1,
+        event: wp_color_manager_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use wp_color_manager_v1::Event;
+        match event {
+            Event::SupportedFeature { feature } => match u32::from(feature) {
+                FEATURE_PARAMETRIC => state.colour.parametric = true,
+                FEATURE_MASTERING_DISPLAY => state.colour.mastering = true,
+                _ => {}
+            },
+            Event::SupportedTfNamed { tf } => {
+                state.colour.pq |= u32::from(tf) == TRANSFER_PQ;
+            }
+            Event::SupportedPrimariesNamed { primaries } => {
+                state.colour.bt2020 |= u32::from(primaries) == PRIMARIES_BT2020;
+            }
+            Event::SupportedIntent { render_intent } => {
+                state.colour.perceptual |= u32::from(render_intent) == INTENT_PERCEPTUAL;
+            }
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WpColorManagementSurfaceFeedbackV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &WpColorManagementSurfaceFeedbackV1,
+        event: wp_color_management_surface_feedback_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        if let wp_color_management_surface_feedback_v1::Event::PreferredChanged { .. } = event {
+            state.output_changed = true;
+        }
+    }
+}
+
+impl Dispatch<WpImageDescriptionV1, Described> for State {
+    fn event(
+        state: &mut Self,
+        description: &WpImageDescriptionV1,
+        event: wp_image_description_v1::Event,
+        which: &Described,
+        _: &Connection,
+        qh: &QueueHandle<Self>,
+    ) {
+        use wp_image_description_v1::Event;
+        match (which, event) {
+            (Described::Output, Event::Ready { .. }) => {
+                // Its contents arrive as events on the object this creates.
+                state.arriving = Some(OutputDescription {
+                    reference: 0,
+                    min_e4: 0,
+                    max: 0,
+                    primaries: None,
+                });
+                description.get_information(qh, ());
+            }
+            (Described::Surface, Event::Ready { .. }) => {
+                state.answer = Some(true);
+                state.made = true;
+            }
+            (Described::Surface, Event::Failed { .. }) => state.answer = Some(false),
+            // A description of the output that could not be made: nothing
+            // new is known, and what was known stands.
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &WpImageDescriptionInfoV1,
+        event: wp_image_description_info_v1::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use wp_image_description_info_v1::Event;
+        let Some(arriving) = state.arriving.as_mut() else {
+            return;
+        };
+        match event {
+            Event::Luminances { reference_lum, .. } => arriving.reference = reference_lum,
+            Event::TargetLuminance { min_lum, max_lum } => {
+                arriving.min_e4 = min_lum;
+                arriving.max = max_lum;
+            }
+            Event::TargetPrimaries {
+                r_x,
+                r_y,
+                g_x,
+                g_y,
+                b_x,
+                b_y,
+                w_x,
+                w_y,
+            } => arriving.primaries = Some([r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y]),
+            Event::Done => state.output = state.arriving.take(),
+            // A colour profile file, when one is sent, is closed by being
+            // dropped here.
+            _ => {}
+        }
+    }
+}
+
 // These send nothing this module acts on. The surface's own events say which
 // outputs it is on, which is not needed to draw into it.
+delegate_noop!(State: WpColorManagementSurfaceV1);
+delegate_noop!(State: WpImageDescriptionCreatorParamsV1);
 delegate_noop!(State: ignore WlSurface);
 delegate_noop!(State: WlCompositor);
 delegate_noop!(State: WlSubcompositor);
@@ -157,6 +327,9 @@ fn release_globals(state: &State) {
     if let Some(fractional_scale) = &state.fractional_scale {
         fractional_scale.destroy();
     }
+    if let Some(colour_manager) = &state.colour_manager {
+        colour_manager.destroy();
+    }
 }
 
 /// The pixel size of a surface that is `logical` units wide at `scale_120`.
@@ -174,6 +347,14 @@ pub(crate) struct VideoSurface {
     subsurface: WlSubsurface,
     viewport: WpViewport,
     fractional: Option<WpFractionalScaleV1>,
+    /// Tells this surface when the output it is on changes character.
+    feedback: Option<WpColorManagementSurfaceFeedbackV1>,
+    /// Where an image description is put on this surface. Made on first use.
+    colour_surface: Option<WpColorManagementSurfaceV1>,
+    /// The compositor's description of the output, while it is being read.
+    output_query: Option<WpImageDescriptionV1>,
+    /// The description last asked for, to put on the surface.
+    described: Option<WpImageDescriptionV1>,
     /// The size in the window's own units, which is what the page reports.
     logical: (i32, i32),
     /// The scale the current buffers were sized for.
@@ -225,6 +406,10 @@ impl VideoSurface {
         // Not tied to the window's own redraws: a video frame is shown when
         // it is ready, whether or not the page has anything new.
         subsurface.set_desync();
+        let feedback = state
+            .colour_manager
+            .as_ref()
+            .map(|manager| manager.get_surface_feedback(&surface, &qh, ()));
         // Learn the scale before the first buffer is sized.
         queue.roundtrip(&mut state).map_err(describe)?;
 
@@ -236,6 +421,10 @@ impl VideoSurface {
             subsurface,
             viewport,
             fractional,
+            feedback,
+            colour_surface: None,
+            output_query: None,
+            described: None,
             logical: (width.max(1), height.max(1)),
             applied_scale_120: SCALE_ONE,
         };
@@ -360,10 +549,144 @@ impl VideoSurface {
     pub(crate) fn flush(&self) {
         let _ = self.conn.flush();
     }
+
+    /// Send what is queued and handle everything the compositor has to say
+    /// in answer. Blocks for one exchange.
+    pub(crate) fn roundtrip(&mut self) -> Result<(), String> {
+        self.queue.roundtrip(&mut self.state).map(|_| ()).map_err(describe)
+    }
+
+    /// Whether the compositor can be told everything [`VideoSurface::describe`]
+    /// and [`VideoSurface::tag`] say: every request and every value they
+    /// send is one the compositor has offered. Sending one it has not
+    /// offered is a protocol error, which ends the connection, and the
+    /// connection is the one Vela's window lives on.
+    pub(crate) fn colour_support(&self) -> bool {
+        let colour = self.state.colour;
+        self.state.colour_manager.is_some()
+            && self.feedback.is_some()
+            && colour.parametric
+            && colour.mastering
+            && colour.pq
+            && colour.bt2020
+            && colour.perceptual
+    }
+
+    /// Ask the compositor to describe the output this surface is on. The
+    /// answer is collected with [`VideoSurface::output_described`].
+    pub(crate) fn ask_about_output(&mut self) {
+        // The parametric form is the one whose numbers can be read; it may
+        // only be asked for where the compositor says it has it.
+        let (Some(feedback), true) = (&self.feedback, self.state.colour.parametric) else {
+            return;
+        };
+        if let Some(previous) = self.output_query.take() {
+            previous.destroy();
+        }
+        self.state.arriving = None;
+        self.output_query =
+            Some(feedback.get_preferred_parametric(&self.queue.handle(), Described::Output));
+    }
+
+    /// Whether the compositor has said, since the last call, that its
+    /// description of the output changed.
+    pub(crate) fn output_changed(&mut self) -> bool {
+        std::mem::take(&mut self.state.output_changed)
+    }
+
+    /// A description of the output that has arrived in full since the last
+    /// call.
+    pub(crate) fn output_described(&mut self) -> Option<OutputDescription> {
+        self.state.output.take()
+    }
+
+    /// The compositor's answer to the last [`VideoSurface::describe`], once:
+    /// `true` when the description was made, `false` when it was refused.
+    pub(crate) fn description_answer(&mut self) -> Option<bool> {
+        self.state.answer.take()
+    }
+}
+
+impl Describable for VideoSurface {
+    /// Ask the compositor for an image description of `target`: PQ, BT.2020,
+    /// with the output's own range as the mastering display. An earlier
+    /// request that has not been answered is dropped. The answer is
+    /// collected with [`VideoSurface::description_answer`].
+    fn describe(&mut self, target: &HdrTarget) {
+        if !self.colour_support() {
+            return;
+        }
+        let Some(manager) = self.state.colour_manager.clone() else {
+            return;
+        };
+        let (Ok(pq), Ok(bt2020)) = (
+            wp_color_manager_v1::TransferFunction::try_from(TRANSFER_PQ),
+            wp_color_manager_v1::Primaries::try_from(PRIMARIES_BT2020),
+        ) else {
+            return;
+        };
+        let qh = self.queue.handle();
+        let parameters = manager.create_parametric_creator(&qh, ());
+        parameters.set_tf_named(pq);
+        parameters.set_primaries_named(bt2020);
+        if let Some([r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y]) = target.primaries {
+            parameters.set_mastering_display_primaries(r_x, r_y, g_x, g_y, b_x, b_y, w_x, w_y);
+        }
+        parameters.set_mastering_luminance(target.min_e4, target.peak);
+        parameters.set_max_cll(target.peak);
+        if let Some(previous) = self.described.take() {
+            previous.destroy();
+        }
+        self.state.answer = None;
+        self.state.made = false;
+        // Creating the description consumes the parameters object.
+        self.described = Some(parameters.create(&qh, Described::Surface));
+    }
+
+    /// Put the description that was made on the surface. It takes effect
+    /// with the next frame drawn. Returns whether it was put there.
+    fn tag(&mut self) -> bool {
+        if !self.colour_support() || !self.state.made {
+            return false;
+        }
+        let (Some(manager), Some(description)) = (&self.state.colour_manager, &self.described)
+        else {
+            return false;
+        };
+        let Ok(perceptual) = wp_color_manager_v1::RenderIntent::try_from(INTENT_PERCEPTUAL) else {
+            return false;
+        };
+        let qh = self.queue.handle();
+        let colour_surface = self
+            .colour_surface
+            .get_or_insert_with(|| manager.get_surface(&self.surface, &qh, ()));
+        colour_surface.set_image_description(description, perceptual);
+        true
+    }
+
+    /// Take the description off the surface again. It takes effect with the
+    /// next frame drawn.
+    fn untag(&mut self) {
+        if let Some(colour_surface) = &self.colour_surface {
+            colour_surface.unset_image_description();
+        }
+    }
 }
 
 impl Drop for VideoSurface {
     fn drop(&mut self) {
+        for description in [self.described.take(), self.output_query.take()]
+            .into_iter()
+            .flatten()
+        {
+            description.destroy();
+        }
+        if let Some(colour_surface) = &self.colour_surface {
+            colour_surface.destroy();
+        }
+        if let Some(feedback) = &self.feedback {
+            feedback.destroy();
+        }
         // Removing the subsurface takes the video off screen at once.
         self.viewport.destroy();
         if let Some(fractional) = &self.fractional {

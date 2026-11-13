@@ -21,6 +21,7 @@ use std::time::Duration;
 use wayland_client::protocol::wl_subsurface::WlSubsurface;
 
 use super::egl;
+use super::hdr::{self, Capabilities, Tagging};
 use super::libmpv::{LibMpv, Player, Renderer, EVENT_NONE, EVENT_SHUTDOWN};
 use super::options::Step;
 use super::surface::VideoSurface;
@@ -121,6 +122,66 @@ struct Live {
     surface: VideoSurface,
     /// Kept open for as long as mpv decodes with it.
     _render_node: Option<OwnedFd>,
+    /// What can be done about HDR here, and what is in effect.
+    capabilities: Capabilities,
+    tagging: Tagging,
+}
+
+/// How many exchanges with the compositor to wait, when a play starts, for
+/// its description of the output and its answer to Vela's. Normally three:
+/// the description is announced, its contents arrive, the answer arrives.
+/// If they take longer the play starts in standard range and switches when
+/// they arrive.
+const COLOUR_EXCHANGES_AT_START: usize = 6;
+
+/// Act on whatever the compositor has said about colour since the last call:
+/// the one way, at the start of a play and during it, by which mpv and the
+/// surface are told what the display can do (see `hdr`). Returns whether a
+/// frame has to be drawn for it to be seen.
+fn follow_colour(
+    player: &Player,
+    surface: &mut VideoSurface,
+    capabilities: Capabilities,
+    tagging: &mut Tagging,
+) -> bool {
+    let mut redraw = false;
+    // The display can change under a running play: another monitor, HDR
+    // switched off, the brightness slider (which moves the reference white
+    // and so the peak).
+    if surface.output_changed() && capabilities.hdr_possible() {
+        surface.ask_about_output();
+    }
+    if let Some(output) = surface.output_described() {
+        let step = tagging.output_described(hdr::presentation(Some(output), capabilities));
+        redraw |= carry_out(player, surface, tagging, step);
+    }
+    if let Some(made) = surface.description_answer() {
+        let step = if made {
+            tagging.description_ready()
+        } else {
+            tagging.description_failed()
+        };
+        redraw |= carry_out(player, surface, tagging, step);
+    }
+    redraw
+}
+
+fn carry_out(
+    player: &Player,
+    surface: &mut VideoSurface,
+    tagging: &mut Tagging,
+    step: hdr::Step,
+) -> bool {
+    let change = hdr::carry_out(step, tagging, player, surface);
+    match change {
+        hdr::Change::Nothing => {}
+        hdr::Change::Hdr(peak) => eprintln!("vela: embedded player: HDR output, peak {peak} nits"),
+        hdr::Change::Sdr => eprintln!("vela: embedded player: standard-range output"),
+        hdr::Change::HdrRefused => {
+            eprintln!("vela: embedded player: HDR could not be set up; standard range")
+        }
+    }
+    change.needs_a_frame()
 }
 
 fn private_options_file(text: &str) -> Result<PathBuf, String> {
@@ -179,7 +240,7 @@ fn configure(player: &Player, start: &Start) -> Result<(), String> {
 fn set_up(start: &Start, shared: &Arc<Shared>) -> Result<Live, String> {
     // SAFETY: `start.window` holds the live display and surface of Vela's
     // window, which outlives this play (`Session::stop_and_wait`).
-    let surface = unsafe {
+    let mut surface = unsafe {
         VideoSurface::create(
             start.window.wl_display,
             start.window.wl_surface,
@@ -197,6 +258,12 @@ fn set_up(start: &Start, shared: &Arc<Shared>) -> Result<Live, String> {
     window.show_black();
     surface.flush();
 
+    let capabilities = Capabilities {
+        can_describe: surface.colour_support(),
+        ten_bit_window: window.depth == 10,
+    };
+    let mut tagging = Tagging::new();
+
     let player = Player::create(start.lib.clone())?;
     configure(&player, start)?;
     player
@@ -209,6 +276,20 @@ fn set_up(start: &Start, shared: &Arc<Shared>) -> Result<Live, String> {
         || player.property("vo").as_deref() != Some("libmpv")
     {
         return Err("mpv did not take the player's options".to_string());
+    }
+    // What the display can do, settled before the first picture so that the
+    // first picture is already right, and after the user's options and
+    // Vela's own, so that in HDR this is what mpv draws for whatever either
+    // of them said.
+    if capabilities.hdr_possible() {
+        surface.ask_about_output();
+        for _ in 0..COLOUR_EXCHANGES_AT_START {
+            surface.roundtrip()?;
+            follow_colour(&player, &mut surface, capabilities, &mut tagging);
+            if tagging.settled() {
+                break;
+            }
+        }
     }
 
     let render_node = window.render_node();
@@ -239,6 +320,8 @@ fn set_up(start: &Start, shared: &Arc<Shared>) -> Result<Live, String> {
         window,
         surface,
         _render_node: render_node,
+        capabilities,
+        tagging,
     })
 }
 
@@ -271,6 +354,12 @@ impl Live {
                 self.window.resize(width, height);
                 redraw = true;
             }
+            redraw |= follow_colour(
+                &self.player,
+                &mut self.surface,
+                self.capabilities,
+                &mut self.tagging,
+            );
             loop {
                 match self.player.next_event() {
                     EVENT_NONE => break,
