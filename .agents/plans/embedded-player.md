@@ -51,23 +51,25 @@ Decisions:
   missing, X11 session, compositor lacks the needed protocols).
   ASSUMED: play with the external player and show one notice line
   saying why; never fail the play.
-- **D4. Licence: RULED 2026-11-12.** Owner, verbatim, in order: "so the
-  first version with embedded mpv gets the correct license. is that an
-  issue?"; "I don't care about the license. whatever causes the least
-  friction."; and, when the agent chose to keep MIT and forbid shipping
-  the library, "that's not the least friction option." So: **the first
-  release that contains the embedded player changes Vela's licence to the
-  GPL.** Agent's choices within that (not the owner's words, no legal
-  opinion): `GPL-3.0-or-later`, because it is compatible both with mpv's
-  "GPL 2 or later" and with Apache-2.0 dependencies, which GPL 2 alone is
-  not; the change lands in Slice 6 with the first user-visible embedded
-  option, not earlier; releases already published stay MIT. With that
-  licence nothing forbids shipping libmpv with Vela where a platform has
-  no system copy (Windows, macOS); the Linux backend in this plan still
-  loads the system library at run time, because the distributions provide
-  it. iOS/iPadOS distribution has its own constraints (App Store terms
-  versus mpv's and FFmpeg's licences) and is settled in that platform's
-  plan.
+- **D4. Licence: RULED 2026-11-12, CLOSED.** Owner, final word,
+  verbatim: "can you just pick the correct license that means I don't
+  need to think about it or care about what's what on any platform? if
+  that's lgpl, fine. I don't want to hear about licensing again after
+  this decision." The agent's pick, which stands as the rule on every
+  platform (full record: `.agents/decisions.md`, 2026-11-12, "Licensing
+  is settled"):
+  1. Vela's own code stays MIT. No relicensing, now or for any platform.
+  2. mpv's library is only ever loaded as a separate dynamic library,
+     never statically linked into Vela.
+  3. Where Vela ships that library itself (any platform with no system
+     copy: Windows, macOS, iOS/iPadOS), it ships an LGPL build of mpv and
+     of FFmpeg, as separate dynamic libraries, with their licence texts.
+     Never a GPL build.
+  4. Where the system provides the library (Linux), Vela loads it at run
+     time and ships nothing.
+  **Do not raise licensing with the owner again.** An agent that meets a
+  licensing question applies rules 1-4; only a case those rules cannot
+  cover is escalated, and then with the specific blocker, not the topic.
 - **D5. Scope of the first embedded release.** ASSUMED: Linux on
   Wayland only (the one platform the spike proved). macOS, Windows and iOS
   each get their own later plan on top of the seam this plan builds.
@@ -487,14 +489,9 @@ end-to-end proof, only unit tests and manual acceptance.
   `docs/usage.md`, `docs/development.md` (build needs nothing new at link
   time; run-time needs `libmpv.so.2`), PKGBUILD/deb/rpm metadata
   (`libmpv2` where the distribution splits it), one `scripts/bump.sh`.
-- The licence change of D4, in one commit: `LICENSE` (GPL 3 text),
-  `README.md` licence section, `license` in `src-tauri/Cargo.toml` and
-  `package.json`, `packaging/arch/PKGBUILD` `license=`, the deb/rpm
-  metadata, `src-tauri/resources/mpv-scripts/PROVENANCE.md` (it currently
-  calls the Vela-authored scripts MIT), and any test that pins the licence
-  string (grep `MIT`). First run a dependency licence check
-  (`cargo metadata` licence fields and `npm ls` licences) and record that
-  nothing is GPL-incompatible; stop and ask if something is.
+- One paragraph in `README.md`'s licence section and `docs/usage.md`: the
+  experimental embedded player loads the mpv library installed on the
+  system. No licence file or licence field changes (D4).
 
 ## Non-goals
 
@@ -516,8 +513,7 @@ end-to-end proof, only unit tests and manual acceptance.
 - Two players double the acceptance surface for every later playback
   feature (owner accepted, 2026-11-12).
 - In-process playback means an mpv crash is a Vela crash.
-- Licence: settled by D4 for desktop; iOS/iPadOS distribution terms are
-  open and belong to that platform's plan.
+- Licence: closed by D4; later platform plans apply its rules 1-4.
 
 ## Verification before claiming completion
 

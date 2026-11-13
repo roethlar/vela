@@ -1994,31 +1994,44 @@ Agent's reading (not the owner's words):
   (user-visible control) is treated as implied; the label's exact word is
   not settled.
 
-## 2026-11-12 - Vela becomes GPL with the first release that contains the embedded player
+## 2026-11-12 - Licensing is settled: Vela stays MIT; mpv is only ever a separate dynamic library, LGPL build when Vela ships it
 
-Status: OWNER RULING (2026-11-12), decision D4 of
-`.agents/plans/embedded-player.md`. Not yet in effect: `LICENSE` is still
-MIT and changes only in the slice that first ships the embedded option.
+Status: OWNER RULING (2026-11-12), CLOSED. Decision D4 of
+`.agents/plans/embedded-player.md`, binding on every later platform plan.
+**Do not raise licensing with the owner again.**
 
 Decision:
-Told that Vela is MIT, that mpv's library is GPL in the Arch build, and
-that loading it in-process differs from starting mpv as a program, the
-owner said: "so the first version with embedded mpv gets the correct
-license. is that an issue?" and, told it was not, "I don't care about the
-license. whatever causes the least friction." The agent then recorded the
-opposite (stay MIT, never ship the library); the owner corrected it:
-"that's not the least friction option." That mistaken entry existed only
-in commit `dc19cd2` and is replaced by this one.
+The agent went through two wrong answers the same day: "stay MIT and never
+ship the library" (it left iOS open and blocked platforms with no system
+library) and "relicense Vela to the GPL" (the GPL conflicts with App Store
+distribution); the owner rejected each as "not the least friction option".
+The owner's final word: "can you just pick the correct license that means
+I don't need to think about it or care about what's what on any platform?
+if that's lgpl, fine. I don't want to hear about licensing again after
+this decision."
 
-So Vela is relicensed to the GPL when the embedded player first ships.
-The owner is the sole author of every commit, so no one else's consent is
-needed, and published releases stay MIT.
+The agent's pick, which is the rule:
+1. Vela's own code stays MIT, on every platform, with no relicensing.
+2. mpv's library is only ever loaded as a separate dynamic library, never
+   statically linked into Vela.
+3. Where Vela ships the library itself (platforms with no system copy:
+   Windows, macOS, iOS/iPadOS), it ships an LGPL build of mpv and FFmpeg
+   as separate dynamic libraries, with their licence texts; never a GPL
+   build.
+4. Where the system provides the library (Linux), Vela loads it at run
+   time and ships nothing.
 
-Agent's choices within the ruling (not the owner's words, no legal
-opinion):
-- `GPL-3.0-or-later`: compatible with mpv's "GPL 2 or later" and with
-  Apache-2.0 dependencies.
-- The change is one commit in the plan's last slice, preceded by a
-  dependency licence check.
-- iOS/iPadOS distribution terms are a separate question for that
-  platform's plan.
+Why this one: MIT code may be combined with an LGPL library that stays a
+separate, replaceable dynamic library, and that is the arrangement apps
+already ship on every desktop OS and in the App Store; it needs no
+per-platform licence and no change to anything Vela has published. This is
+the agent's judgment, not legal advice, and the owner has accepted it as
+final.
+
+How to apply: an agent that meets a licensing question applies rules 1-4
+without asking. Only a concrete case the rules cannot cover is escalated,
+naming the specific blocker. The existing GPL note for the bundled stock
+`autocrop.lua` (loaded by mpv, not linked into Vela) is unaffected.
+
+Supersedes:
+The two same-day entries this replaces (commits `dc19cd2`, `2eb8abd`).

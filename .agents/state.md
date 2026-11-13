@@ -283,8 +283,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   admitted plan defects; the owner adopted the fixes and the plan is
   revised, not re-reviewed (`.agents/review/index.md`). D3, D5 and D6 are
   assumed under the owner's standing instruction, not ruled. D4 is
-  ruled: Vela becomes GPL with the first release that contains the
-  embedded player (`LICENSE` is unchanged until then). The plan now
+  closed: Vela stays MIT and mpv is only ever a separate dynamic library
+  (`.agents/decisions.md`, "Licensing is settled"); do not raise licensing
+  with the owner again. The plan now
   waits only for the owner's go.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
