@@ -560,9 +560,37 @@ mod tests {
     // argument may carry a header's name or value, under any option name; the
     // only trace of the headers in what the player is started with is the path
     // of the include.
+    //
+    // The player's environment is part of that, and a started program inherits
+    // Vela's own. A test process has one environment for all its tests, which
+    // run side by side: a header leaked into it by this launch could be
+    // overwritten by another test's launch before it is looked for here. So
+    // the check runs in a process of its own, where it is the only test.
     #[cfg(not(windows))]
     #[test]
     fn stream_auth_reaches_the_player_only_through_the_private_include() {
+        const ALONE: &str = "VELA_TEST_RUNS_ALONE";
+        if std::env::var_os(ALONE).is_none() {
+            let name = format!(
+                "{}::stream_auth_reaches_the_player_only_through_the_private_include",
+                module_path!()
+                    .split_once("::")
+                    .expect("a module inside the crate")
+                    .1
+            );
+            let run = Command::new(std::env::current_exe().expect("the test program"))
+                .args(["--exact", &name, "--test-threads=1"])
+                .env(ALONE, "1")
+                .output()
+                .expect("the test program can be started again");
+            let report = String::from_utf8_lossy(&run.stdout);
+            assert!(
+                run.status.success() && report.contains("test result: ok. 1 passed"),
+                "run alone, the check must run once and pass:\n{report}{}",
+                String::from_utf8_lossy(&run.stderr)
+            );
+            return;
+        }
         let secrets = [
             ("X-Synthetic-Auth", "synthetic-credential-one"),
             ("X-Synthetic-Session", "synthetic-credential-two"),

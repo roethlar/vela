@@ -179,5 +179,17 @@ What changed:
    joined into, or the include's content is one of nine recorded lines, so
    a copy of the credentials to anywhere else changes the list.
 
+4. **The environment check runs alone.** Proving item 1 showed a hole in
+   it: with the reviewer's mutation in place the Rust test still passed in
+   one run of two. A test process has one environment for all of its
+   tests, the mutation makes every test that describes a launch export its
+   own headers into it under the same name, and another test's export
+   could replace this test's before this test looked. The test now starts
+   the test program again with only itself selected and does the check
+   there, where nothing else runs; the outer test requires that exactly one
+   test ran and passed.
+
 Files: `tests/config-integrity.test.mjs`, `src-tauri/src/player/external.rs`
-(the same two files the finding already declared).
+(the same two files the finding already declared). Commits: `bdecf65`,
+`b84baeb` (removes one assertion of `bdecf65` that could not be shown to
+bite), and the commit that adds item 4.
