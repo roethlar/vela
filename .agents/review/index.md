@@ -1,5 +1,17 @@
 # Review status
 
+**Embedded player Slice 1 review, 2026-11-13 (open):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `b19d7d1..b719a65`, Slice 1 paths only: `findings`. Two
+candidates, two admitted, none declined; both are about tests, neither
+changes what the external player does. Record:
+`.agents/review/codereview-2026-11-13-player-seam.md`.
+
+| ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
+|------|----------|-----------------------------------------------------------------------|--------|--------|----------|
+| ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[ ]`  |        |          |
+| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[ ]`  |        |          |
+
 **Embedded player Slice 0b review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `5f1d9b6..b19d7d1`: `findings`. Three candidates, three
