@@ -1,7 +1,7 @@
 # sel-2: an Automatic quality step-down makes the fallback explanation appear again
 
 **Severity**: LOW — one extra line on screen; playback is unaffected.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `12828ca`
 
@@ -70,3 +70,23 @@ None.
 
 Generation pass: `.agents/review/codereview-2026-11-13-player-selection.md`.
 Reviewer's suggested approach, verbatim: "Preserve fallback notice history across automatic relaunches of the same logical play. Add coverage for fallback followed by step-down followed by another play."
+
+### Verification round 1, recorded 2026-11-13 07:14 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly; the host's codex config
+  resolves to gpt-6-astra @ max. Thread `01a1d3bb-4965-7a30-8c40-83ea2cb1c933`, run
+  in the disposable worktree `~/dev/vela-probe-wt` at the head SHA; the
+  stream ends in `turn.completed`; dispatched 07:07 UTC, finished
+  07:11 UTC. Routing: T1 no sensitive path in the diff, T2 severity
+  below HIGH, T3 the recorded proof re-run by the orchestrator agrees.
+- Reviewed head `12828caaa3d4fc809ce8abc8cec014418ab11de8`, base
+  `88c631b719e108032decbe5aa7c1a403f1555271` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  (none)
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted; the finding is
+closed.

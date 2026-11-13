@@ -73,3 +73,25 @@ None.
 
 Generation pass: `.agents/review/codereview-2026-11-13-player-selection.md`.
 Reviewer's suggested approach, verbatim: "Read the player setting before stream resolution and provisional session installation, or route this error through the existing launch-failure cleanup."
+
+### Verification round 1, recorded 2026-11-13 07:14 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly; the host's codex config
+  resolves to gpt-6-astra @ max. Thread `01a1d3b6-a811-7470-b193-4cdbbf92144f`, run
+  in the disposable worktree `~/dev/vela-probe-wt` at the head SHA; the
+  stream ends in `turn.completed`; dispatched 07:02 UTC, finished
+  07:07 UTC. Routing: T1 no sensitive path in the diff, T2 severity
+  below HIGH, T3 the recorded proof re-run by the orchestrator agrees.
+- Reviewed head `88c631b719e108032decbe5aa7c1a403f1555271`, base
+  `e3b288eaddb72c43cba55ee96c4160f341c6e199` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/player-selection.test.mjs:65 — The guard misses `?` followed by a comma. Immediately before `let player_choice`, I injected a settings reread using `drop(config::load_config().map_err(...)?,);`. This reproduces the cleanup-skipping return after session/transcode installation, yet all 6 Node tests and 382 Rust tests passed. Cover this equivalent regression. Reverting the original fix did fail the named guard; restoring the pinned head passed. All mutations were restored.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. The comment is correct: the fix stands, and the test that guards
+it recognises an early return only when `?` is followed by `;`, a line end
+or `.`.

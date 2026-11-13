@@ -9,7 +9,7 @@ admitted, none declined. Record:
 | ID    | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |-------|----------|------------------------------------------------------------------------|--------|--------|----------|
 | sel-1 | MEDIUM   | A play that fails on an unreadable settings file leaves its session and transcode behind | `[~]`  | `88c631b` |          |
-| sel-2 | LOW      | A quality step-down makes the fallback explanation appear a second time | `[~]`  | `12828ca` |          |
+| sel-2 | LOW      | A quality step-down makes the fallback explanation appear a second time | `[x]`  | `12828ca` | codex/default/standard |
 | sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[~]`  | `50e57e4`, `db0b8b6` |          |
 | sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[~]`  | `47eec9a` |          |
 
