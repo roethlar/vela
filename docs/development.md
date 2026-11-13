@@ -132,8 +132,9 @@ fetches it without building.
 How the set is put together:
 
 - **Pins.** `packaging/libmpv/versions.txt` is the only place a version or
-  checksum is written. A download that does not match its checksum stops the
-  build.
+  checksum is written. A line may name mirror URLs after the first; a source
+  that fails or serves other bytes is skipped, and the build stops if none
+  has the pinned bytes.
 - **Baseline.** The build runs in `packaging/libmpv/Containerfile`, Ubuntu
   22.04, the distribution Vela's own Linux bundles are built on. The set then
   runs on that release and anything newer; the build fails if a library needs

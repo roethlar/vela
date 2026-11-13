@@ -1,9 +1,11 @@
 # The libmpv set Vela ships for its embedded player. One component per line:
 #
-#   name  version  role  sha256  url
+#   name  version  role  sha256  url  [mirror-url ...]
 #
 # role: ship  = built by scripts/build-libmpv.sh and shipped in libmpv/
 #       build = needed only to build (headers); never shipped
+# A mirror is tried when the first URL fails. It must serve the same bytes: a
+# download is kept only if it matches the checksum.
 #
 # This file is the only place a version or checksum is written. Bump
 # procedure and the security rule: docs/development.md, "The shipped libmpv
@@ -13,10 +15,10 @@ mpv              0.42.0    ship   bcfebbfa2b65a6d88dc97ea18117831072373e38b5785a
 ffmpeg           9.0.2     ship   8c3850283eb25fa026482078a04051e0be17347b09ef81a0849bec15a96e002e  https://ffmpeg.org/releases/ffmpeg-9.0.2.tar.xz
 libplacebo       7.387.0   ship   f9e62d3774a9c4cfd198ec3abaa88294aaade2e31c04d5ab02bcf4abc98b1df5  https://github.com/haasn/libplacebo/archive/refs/tags/v7.387.0.tar.gz
 libass           0.17.5    ship   2dca25c0e0c837ddf00b52011b3f82cac1e4ddd3ad018227806b0c2288864acc  https://github.com/libass/libass/releases/download/0.17.5/libass-0.17.5.tar.xz
-freetype         2.15.0    ship   93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5  https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz
+freetype         2.15.0    ship   93cd47eb719c325107f2d3cf087d06299e944c3b48a40b55537302304dea1dd5  https://download.savannah.gnu.org/releases/freetype/freetype-2.15.0.tar.xz  https://downloads.sourceforge.net/project/freetype/freetype2/2.15.0/freetype-2.15.0.tar.xz
 harfbuzz         15.1.0    ship   0fc7c565443a5f4be7da65ac5ee5bd737d9b158dc908708b7689a0a5796b0c8d  https://github.com/harfbuzz/harfbuzz/releases/download/15.1.0/harfbuzz-15.1.0.tar.xz
 fribidi          1.0.18    ship   1de5e8073d035388b71d0b2d452b1da1f8caeea8a7702997b401fe1b6250727f  https://github.com/fribidi/fribidi/releases/download/v1.0.18/fribidi-1.0.18.tar.xz
 dav1d            1.5.4     ship   686616b7c69eb88d44459391ab25cac13b6647a3b288835c5784e71c1514a5c5  https://downloads.videolan.org/pub/videolan/dav1d/1.5.4/dav1d-1.5.4.tar.xz
-lua              5.2.4     ship   b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b  https://www.lua.org/ftp/lua-5.2.4.tar.gz
+lua              5.2.4     ship   b9e2e4aad6789b3b63a056d442f7b39f0ecfca3ae0f1fc0ae4e9614401b69f4b  https://www.lua.org/ftp/lua-5.2.4.tar.gz  https://www.tecgraf.puc-rio.br/lua/mirror/ftp/lua-5.2.4.tar.gz
 uchardet         0.0.8     ship   e97a60cfc00a1c147a674b097bb1422abd9fa78a2d9ce3f3fdcc2e78a34ac5f0  https://www.freedesktop.org/software/uchardet/releases/uchardet-0.0.8.tar.xz
 vulkan-headers   1.4.368   build  5c5c6f64fcce28a24cc934143a048707af036a858e4ed11d7f71fe016006ecda  https://github.com/KhronosGroup/Vulkan-Headers/archive/refs/tags/v1.4.368.tar.gz

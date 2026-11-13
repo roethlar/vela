@@ -152,8 +152,8 @@ async function libmpvPins() {
     .filter((line) => line.trim() !== "" && !line.startsWith("#"))
     .map((line) => {
       const fields = line.trim().split(/\s+/);
-      const [name, version, role, sha256, url] = fields;
-      return { name, version, role, sha256, url, fieldCount: fields.length };
+      const [name, version, role, sha256, url, ...mirrors] = fields;
+      return { name, version, role, sha256, url, mirrors, fieldCount: fields.length };
     });
 }
 
@@ -186,17 +186,23 @@ test("every component of the shipped libmpv set is pinned by version, checksum a
   assert.ok(pins.length >= 10, "the pinned-versions file must list the set");
   const names = new Set();
   for (const pin of pins) {
-    assert.equal(pin.fieldCount, 5, `${pin.name}: name, version, role, sha256, url`);
+    assert.ok(pin.fieldCount >= 5, `${pin.name}: name, version, role, sha256, url [mirror ...]`);
     assert.ok(!names.has(pin.name), `${pin.name} is pinned twice`);
     names.add(pin.name);
     assert.match(pin.version, /^\d+(\.\d+)+$/, `${pin.name}: version`);
     assert.match(pin.role, /^(ship|build)$/, `${pin.name}: role`);
     assert.match(pin.sha256, /^[0-9a-f]{64}$/, `${pin.name}: sha256`);
-    assert.match(pin.url, /^https:\/\/\S+\.tar\.(gz|xz)$/, `${pin.name}: an https tarball`);
-    assert.ok(
-      pin.url.includes(pin.version),
-      `${pin.name}: the URL must name the pinned version ${pin.version}`,
-    );
+    const extension = pin.url.match(/\.tar\.(gz|xz)$/)?.[0];
+    for (const source of [pin.url, ...pin.mirrors]) {
+      assert.match(source, /^https:\/\/\S+\.tar\.(gz|xz)$/, `${pin.name}: an https tarball`);
+      assert.ok(
+        source.includes(pin.version),
+        `${pin.name}: the URL must name the pinned version ${pin.version}`,
+      );
+      // One cache file per component, named from the first URL.
+      assert.ok(source.endsWith(extension), `${pin.name}: every source is the same archive type`);
+    }
+    assert.equal(new Set([pin.url, ...pin.mirrors]).size, 1 + pin.mirrors.length);
   }
   for (const required of ["mpv", "ffmpeg"]) {
     assert.equal(pins.find((pin) => pin.name === required)?.role, "ship");
@@ -232,6 +238,9 @@ test("the libmpv build script builds exactly the pinned components", async () =>
   assert.doesNotMatch(script, /\b(wget|git clone|pip3? install)\b/);
   assert.match(script, /sha256sum -c --quiet - >&2 \|\| die "checksum mismatch/);
   assert.match(script, /--wrap-mode=nodownload/);
+  // bash does not carry `set -e` into $(...) on its own; without this a failed
+  // fetch inside unpack() would not stop the build.
+  assert.match(script, /^set -euo pipefail\n(#.*\n)*shopt -s inherit_errexit$/m);
 });
 
 test("the shipped libmpv set is an LGPL build with its licence texts", async () => {
@@ -364,9 +373,85 @@ test("the libmpv build refuses a tarball that does not match its pin", { skip: l
     env: { ...process.env, LIBMPV_ROOT: root },
     encoding: "utf8",
   });
-  assert.notEqual(run.status, 0, "a mismatched tarball must stop the build");
+  assert.equal(run.status, 1, "a mismatched tarball must stop the build");
   assert.match(run.stderr, /build-libmpv: checksum mismatch: .*lua-/);
   assert.doesNotMatch(run.stdout + run.stderr, /liblua|gcc/, "nothing may be built from it");
+  // It must stop AT the mismatch. Carrying on and failing later by accident
+  // (an empty path handed to tar, a missing directory) is not stopping.
+  assert.match(
+    run.stderr.trimEnd().split("\n").at(-1),
+    /^build-libmpv: checksum mismatch: /,
+    `nothing may run after the mismatch:\n${run.stderr}`,
+  );
+});
+
+test("the libmpv build falls back to a mirror and keeps only a download that matches", { skip: libmpvScriptUnavailable }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { createHash } = await import("node:crypto");
+  const { copyFile, mkdtemp, mkdir, readFile: readBytes, rm, writeFile } = await import("node:fs/promises");
+  const os = await import("node:os");
+  // A scratch copy of the repo layout the script expects, with its own pins:
+  // one component whose first source is missing, whose second serves the wrong
+  // bytes, and whose third is right.
+  const root = await mkdtemp(path.join(os.tmpdir(), "vela-libmpv-mirror-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "scripts"), { recursive: true });
+  await mkdir(path.join(root, "packaging", "libmpv"), { recursive: true });
+  await copyFile(libmpvScriptPath, path.join(root, "scripts", "build-libmpv.sh"));
+  const good = path.join(root, "good-lua-9.9.9.tar.gz");
+  const bad = path.join(root, "bad-lua-9.9.9.tar.gz");
+  await writeFile(good, "the pinned bytes\n");
+  await writeFile(bad, "other bytes\n");
+  const sha = createHash("sha256").update(await readBytes(good)).digest("hex");
+  await writeFile(
+    path.join(root, "packaging", "libmpv", "versions.txt"),
+    `lua 9.9.9 ship ${sha} file://${root}/missing-lua-9.9.9.tar.gz file://${bad} file://${good}\n`,
+  );
+  const run = spawnSync("bash", [path.join(root, "scripts", "build-libmpv.sh"), "lua"], {
+    env: { ...process.env, LIBMPV_ROOT: path.join(root, "out"), LIBMPV_DOWNLOAD_RETRIES: "0" },
+    encoding: "utf8",
+  });
+  // The stand-in is not a tarball, so the step fails after the download; what
+  // matters is which bytes were kept.
+  assert.notEqual(run.status, 0);
+  assert.match(run.stderr, /no good download from file:\/\/\S+missing-lua-9\.9\.9\.tar\.gz/);
+  assert.match(run.stderr, /no good download from file:\/\/\S+bad-lua-9\.9\.9\.tar\.gz/);
+  assert.doesNotMatch(run.stderr, /could not download 'lua'|checksum mismatch/);
+  assert.equal(
+    await readBytes(path.join(root, "out", "src", "lua-9.9.9.tar.gz"), "utf8"),
+    "the pinned bytes\n",
+    "only the matching download may be kept",
+  );
+});
+
+test("the libmpv build stops when no source has the pinned bytes", { skip: libmpvScriptUnavailable }, async (t) => {
+  const { spawnSync } = await import("node:child_process");
+  const { copyFile, mkdtemp, mkdir, rm, writeFile } = await import("node:fs/promises");
+  const { existsSync } = await import("node:fs");
+  const os = await import("node:os");
+  const root = await mkdtemp(path.join(os.tmpdir(), "vela-libmpv-nosource-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await mkdir(path.join(root, "scripts"), { recursive: true });
+  await mkdir(path.join(root, "packaging", "libmpv"), { recursive: true });
+  await copyFile(libmpvScriptPath, path.join(root, "scripts", "build-libmpv.sh"));
+  const bad = path.join(root, "bad-lua-9.9.9.tar.gz");
+  await writeFile(bad, "other bytes\n");
+  await writeFile(
+    path.join(root, "packaging", "libmpv", "versions.txt"),
+    `lua 9.9.9 ship ${"0".repeat(64)} file://${root}/missing-lua-9.9.9.tar.gz file://${bad}\n`,
+  );
+  const run = spawnSync("bash", [path.join(root, "scripts", "build-libmpv.sh"), "lua"], {
+    env: { ...process.env, LIBMPV_ROOT: path.join(root, "out"), LIBMPV_DOWNLOAD_RETRIES: "0" },
+    encoding: "utf8",
+  });
+  assert.equal(run.status, 1);
+  assert.equal(
+    run.stderr.trimEnd().split("\n").at(-1),
+    "build-libmpv: could not download 'lua' from any of its sources",
+    `the build must stop there:\n${run.stderr}`,
+  );
+  assert.ok(!existsSync(path.join(root, "out", "src", "lua-9.9.9.tar.gz")), "nothing is kept");
+  assert.ok(!existsSync(path.join(root, "out", "src", "lua-9.9.9.tar.gz.part")), "no partial file");
 });
 
 test("the libmpv build names an unknown step instead of ignoring it", { skip: libmpvScriptUnavailable }, async (t) => {

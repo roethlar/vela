@@ -23,6 +23,9 @@
 # and the build tree (work/). Steps default to everything; naming steps re-runs
 # just those, in the order given (see `steps=` at the end).
 set -euo pipefail
+# Without this, `set -e` stops at the edge of every $(...): a failed download
+# or checksum inside fetch() would let the caller carry on with an empty path.
+shopt -s inherit_errexit
 
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="$(cd "$here/.." && pwd)"
@@ -50,6 +53,9 @@ SRC_DIR="$LIBMPV_ROOT/src"
 WORK="$LIBMPV_ROOT/work"
 OUT="$LIBMPV_ROOT/out"
 JOBS="${JOBS:-$(nproc)}"
+# How often one source is retried before the next is tried. A download is only
+# ever kept if it matches its pinned checksum, whatever this is set to.
+DOWNLOAD_RETRIES="${LIBMPV_DOWNLOAD_RETRIES:-4}"
 # Highest glibc symbol version the set may need: the build baseline's.
 GLIBC_MAX="${GLIBC_MAX:-2.35}"
 
@@ -59,15 +65,31 @@ mkdir -p "$SRC_DIR" "$WORK/src" "$PREFIX/lib/pkgconfig" "$OUT"
 # field NAME N: the Nth whitespace-separated field of NAME's line.
 field() { awk -v n="$1" -v i="$2" '$1 == n { print $i }' "$VERSIONS"; }
 
+# sources NAME: the URLs NAME may be downloaded from, the preferred one first.
+sources() { awk -v n="$1" '$1 == n { for (i = 5; i <= NF; i++) print $i }' "$VERSIONS"; }
+
 # fetch NAME: make sure the pinned tarball is present and matches; print its path.
+# Every source must serve the same bytes: a download is kept only if it matches
+# the pinned checksum, so a mirror can fail or lie without consequence.
 fetch() {
-  local name="$1" ver sha url file
-  ver="$(field "$name" 2)"; sha="$(field "$name" 4)"; url="$(field "$name" 5)"
-  [ -n "$url" ] || die "no entry for '$name' in $VERSIONS"
+  local name="$1" ver sha urls url file got=""
+  ver="$(field "$name" 2)"; sha="$(field "$name" 4)"; urls="$(sources "$name")"
+  [ -n "$urls" ] || die "no entry for '$name' in $VERSIONS"
+  url="${urls%%$'\n'*}"
   file="$SRC_DIR/$name-$ver.tar.${url##*.tar.}"
   if [ ! -f "$file" ]; then
-    curl -fsSL --retry 3 -o "$file.part" "$url" || die "download failed: $url"
-    mv "$file.part" "$file"
+    for url in $urls; do
+      if curl -fsSL --retry "$DOWNLOAD_RETRIES" --retry-all-errors --retry-delay 2 --connect-timeout 20 \
+           -o "$file.part" "$url" \
+         && echo "$sha  $file.part" | sha256sum -c --quiet - >/dev/null 2>&1; then
+        mv "$file.part" "$file"
+        got=1
+        break
+      fi
+      rm -f "$file.part"
+      echo "build-libmpv: no good download from $url" >&2
+    done
+    [ -n "$got" ] || die "could not download '$name' from any of its sources"
   fi
   echo "$sha  $file" | sha256sum -c --quiet - >&2 || die "checksum mismatch: $file"
   printf '%s' "$file"
