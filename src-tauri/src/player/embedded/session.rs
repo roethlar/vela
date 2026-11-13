@@ -59,6 +59,8 @@ pub(crate) enum Lifecycle {
 /// Everything a play needs to start.
 pub(crate) struct Start {
     pub(crate) lib: Arc<LibMpv>,
+    /// The playback session this play belongs to.
+    pub(crate) session_id: String,
     pub(crate) window: WindowHandles,
     pub(crate) rect: Rect,
     /// The user's own mpv configuration files, when they asked for them.
@@ -93,6 +95,22 @@ struct Shared {
 }
 
 impl Shared {
+    fn new() -> Result<Arc<Self>, String> {
+        // SAFETY: plain flags; a negative result is an error.
+        let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
+        if wake < 0 {
+            return Err("couldn't create the player's wake-up channel".to_string());
+        }
+        Ok(Arc::new(Shared {
+            // SAFETY: a descriptor just created and owned by nothing else.
+            wake: unsafe { OwnedFd::from_raw_fd(wake) },
+            stop: AtomicBool::new(false),
+            ended: AtomicBool::new(false),
+            resize_to: Mutex::new(None),
+            subsurface: Mutex::new(None),
+        }))
+    }
+
     fn wake(&self) {
         let one: u64 = 1;
         // SAFETY: a valid eventfd and eight readable bytes. A full counter
@@ -380,6 +398,9 @@ impl Live {
 
 /// A started embedded play, as the rest of the app holds it.
 pub(crate) struct Session {
+    /// The playback session this play belongs to. A player is told apart
+    /// from the one that replaced it by this and nothing else.
+    session_id: String,
     shared: Arc<Shared>,
     thread: Option<std::thread::JoinHandle<()>>,
     header_include: Option<HeaderInclude>,
@@ -389,20 +410,9 @@ impl Session {
     /// Start a play and wait until mpv has been given its file, or until
     /// something on the way there failed.
     pub(crate) fn start(mut start: Start) -> Result<Self, String> {
-        // SAFETY: plain flags; a negative result is an error.
-        let wake = unsafe { libc::eventfd(0, libc::EFD_NONBLOCK | libc::EFD_CLOEXEC) };
-        if wake < 0 {
-            return Err("couldn't create the player's wake-up channel".to_string());
-        }
-        let shared = Arc::new(Shared {
-            // SAFETY: a descriptor just created and owned by nothing else.
-            wake: unsafe { OwnedFd::from_raw_fd(wake) },
-            stop: AtomicBool::new(false),
-            ended: AtomicBool::new(false),
-            resize_to: Mutex::new(None),
-            subsurface: Mutex::new(None),
-        });
+        let shared = Shared::new()?;
         let header_include = start.header_include.take();
+        let session_id = std::mem::take(&mut start.session_id);
         let (ready, started) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
         let thread_shared = shared.clone();
         let thread = std::thread::Builder::new()
@@ -440,6 +450,7 @@ impl Session {
             })
             .map_err(|e| format!("couldn't start the embedded player's thread: {e}"))?;
         let mut session = Session {
+            session_id,
             shared,
             thread: Some(thread),
             header_include,
@@ -457,10 +468,31 @@ impl Session {
         }
     }
 
+    /// A play that was never started, for tests of what holds one.
+    #[cfg(test)]
+    pub(crate) fn for_test(session_id: &str) -> Self {
+        Session {
+            session_id: session_id.to_string(),
+            shared: Shared::new().expect("an eventfd"),
+            thread: None,
+            header_include: None,
+        }
+    }
+
+    /// Whether this is the play of that playback session.
+    pub(crate) fn is_play(&self, session_id: &str) -> bool {
+        self.session_id == session_id
+    }
+
     /// Ask the play to stop. Does not wait.
     pub(crate) fn stop(&self) {
         self.shared.stop.store(true, Ordering::SeqCst);
         self.shared.wake();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn stop_requested(&self) -> bool {
+        self.shared.stop.load(Ordering::SeqCst)
     }
 
     /// Whether the play has ended and released everything it held.

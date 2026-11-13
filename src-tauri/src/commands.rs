@@ -5370,26 +5370,19 @@ pub fn player_window_ready() {
 /// The player view's Close control: stop the embedded play it belongs to. A
 /// view left over from an earlier play cannot stop its successor, and this
 /// never touches an external player, which has a window of its own to close.
+///
+/// Whose play it is, is asked of the player in the slot, under the slot's
+/// lock, and of nothing else. Checking the active session first and the slot
+/// afterwards left a gap in which a replacement play could be installed and
+/// then stopped by its predecessor's Close (review finding ec-5).
 #[tauri::command]
 pub async fn player_close(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let is_current = state
-        .active_playback_session
+    let mut slot = state
+        .current_child
         .lock()
-        .await
-        .as_deref()
-        .is_some_and(|current| current == session_id);
-    if !is_current {
-        return Ok(());
-    }
-    #[cfg(target_os = "linux")]
-    {
-        let mut slot = state
-            .current_child
-            .lock()
-            .unwrap_or_else(|e| e.into_inner());
-        if let Some(player @ crate::player::PlayerHandle::Embedded(_)) = slot.as_mut() {
-            let _ = player.kill();
-        }
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(player) = slot.as_mut() {
+        player.close_embedded_play(&session_id);
     }
     Ok(())
 }

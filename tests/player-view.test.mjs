@@ -14,6 +14,10 @@ const read = (file) => fs.readFileSync(path.join(repoRoot, file), 'utf8').replac
 const page = read('src/routes/+page.svelte');
 const view = read('src/lib/PlayerView.svelte');
 const css = read('src/app.css');
+const commands = read('src-tauri/src/commands.rs');
+const playerMod = read('src-tauri/src/player/mod.rs');
+const session = read('src-tauri/src/player/embedded/session.rs');
+const host = read('src-tauri/src/player/embedded/host.rs');
 
 const opened = (sessionId) => ({ kind: 'opened', sessionId });
 const closed = (sessionId) => ({ kind: 'closed', sessionId });
@@ -72,6 +76,43 @@ test('the player view tells the backend where it is and closes only its own play
   assert.match(view, /onMount\(\(\) => \{[\s\S]{0,200}reportRect\(\);\s+const observer = new ResizeObserver\(reportRect\);\s+observer\.observe\(root\);/);
   assert.match(view, /invoke\("player_close", \{ sessionId \}\)/);
   assert.equal(view.split('invoke(').length - 1, 2, 'the view calls those two commands and no others');
+});
+
+test("Close asks the player itself whose play it is, under the player's own lock", () => {
+  // Whether a Close stops a play is decided by `close_embedded_play`, which
+  // the Rust tests in player/mod.rs prove: only the embedded play of that
+  // session, never an external player. This proves the command does nothing
+  // but that, so there is no check made in one place and acted on in another
+  // (review finding ec-5: the active session was read, its lock released,
+  // and then whatever player was current was stopped).
+  const start = commands.indexOf('\npub async fn player_close(');
+  assert.notEqual(start, -1);
+  const body = commands.slice(start, commands.indexOf('\n}\n', start) + 3);
+  assert.equal(
+    body,
+    `
+pub async fn player_close(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
+    let mut slot = state
+        .current_child
+        .lock()
+        .unwrap_or_else(|e| e.into_inner());
+    if let Some(player) = slot.as_mut() {
+        player.close_embedded_play(&session_id);
+    }
+    Ok(())
+}
+`,
+  );
+  // The one decision, in the one place.
+  assert.match(
+    playerMod,
+    /pub\(crate\) fn close_embedded_play\(&mut self, session_id: &str\) -> bool \{\s+match self \{\s+PlayerHandle::External\(_\) => \{\s+let _ = session_id;\s+false\s+\}\s+#\[cfg\(target_os = "linux"\)\]\s+PlayerHandle::Embedded\(session\) => \{\s+if !session\.is_play\(session_id\) \{\s+return false;\s+\}\s+session\.stop\(\);\s+true\s+\}\s+\}\s+\}/,
+  );
+  assert.equal(commands.split('close_embedded_play(').length - 1, 1);
+  // A play's identity is what it was started with.
+  assert.match(session, /pub\(crate\) fn is_play\(&self, session_id: &str\) -> bool \{\s+self\.session_id == session_id\s+\}/);
+  assert.match(session, /let session_id = std::mem::take\(&mut start\.session_id\);/);
+  assert.match(host, /let started = Session::start\(Start \{\s+lib,\s+session_id,/);
 });
 
 test('the page gets out of the way of the picture only while the view is mounted', () => {

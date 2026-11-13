@@ -324,6 +324,7 @@ impl Prepared {
         } = self;
         let on_lifecycle = {
             let app = app.clone();
+            let session_id = session_id.clone();
             Arc::new(move |event: Lifecycle| {
                 let name = match event {
                     Lifecycle::Opened => "player-opened",
@@ -351,6 +352,7 @@ impl Prepared {
         } = plan;
         let started = Session::start(Start {
             lib,
+            session_id,
             window,
             rect,
             own_config: if own_config {

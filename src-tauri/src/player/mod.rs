@@ -115,6 +115,30 @@ impl PlayerHandle {
         }
     }
 
+    /// The player view's Close: stop this player if it is the EMBEDDED play
+    /// of `session_id`, and say whether it was. The identity compared is the
+    /// player's own, so the caller needs nothing but the lock that holds the
+    /// player, and a Close left over from an earlier play cannot stop the
+    /// play that replaced it however the two are timed (review finding
+    /// ec-5). An external player is never stopped this way: it has a window
+    /// of its own to close.
+    pub(crate) fn close_embedded_play(&mut self, session_id: &str) -> bool {
+        match self {
+            PlayerHandle::External(_) => {
+                let _ = session_id;
+                false
+            }
+            #[cfg(target_os = "linux")]
+            PlayerHandle::Embedded(session) => {
+                if !session.is_play(session_id) {
+                    return false;
+                }
+                session.stop();
+                true
+            }
+        }
+    }
+
     /// Non-blocking: has the player ended? `Ok(true)` only once its end is
     /// confirmed; a player that is still running is `Ok(false)`.
     pub(crate) fn has_ended(&mut self) -> std::io::Result<bool> {
@@ -156,6 +180,44 @@ mod tests {
             "synthetic process-query error"
         ))));
         assert!(!retain_after_poll(&Ok(true)));
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_close_stops_the_embedded_play_it_names_and_no_other() {
+        let stop_requested = |player: &PlayerHandle| match player {
+            PlayerHandle::Embedded(session) => session.stop_requested(),
+            PlayerHandle::External(_) => unreachable!(),
+        };
+        // Play B has replaced play A; A's Close arrives late.
+        let mut player = PlayerHandle::Embedded(embedded::Session::for_test("play-b"));
+        assert!(!player.close_embedded_play("play-a"));
+        assert!(!stop_requested(&player), "the successor plays on");
+        assert!(!player.close_embedded_play(""));
+        assert!(!player.close_embedded_play("play-b "));
+        assert!(!stop_requested(&player));
+        // B's own Close stops it.
+        assert!(player.close_embedded_play("play-b"));
+        assert!(stop_requested(&player));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_close_never_stops_an_external_player() {
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .expect("sleep is available");
+        let mut player = PlayerHandle::External(external::ManagedChild::for_test(child));
+        assert!(!player.close_embedded_play("any-session"));
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        assert!(
+            matches!(player.has_ended(), Ok(false)),
+            "the external player is still running"
+        );
+        player.kill().expect("the player can be stopped");
     }
 
     // A real child process that stays alive until it is told to stop.
