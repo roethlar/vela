@@ -865,6 +865,24 @@ From Slice 4 (HDR):
   standard range, exactly as before this slice), an HDR display on a
   compositor other than KWin.
 
+From Slice 5 (controls and cropping; listed when the slice was designed,
+2026-11-13, so that they are not lost; they apply once it has landed):
+
+- Look at the control bar over a bright HDR film and in a light theme,
+  open the audio and subtitle lists over the picture and in fullscreen,
+  and check the picture's edges right after entering and leaving
+  fullscreen.
+- Crop a standard-range film with black bars, several times on and off,
+  and watch that it keeps playing. Changing the crop on a playing film
+  stalled playback in the agent's measurements until the script was made
+  to follow every crop with a nudge; 24 runs of 24 then played on.
+- **The HDR crop trial, with the agent's notes at hand:** the embedded
+  player refuses to crop HDR video. To lift that, the refusal has to be
+  switched off in a development build and a film with baked-in bars
+  cropped while playing and while paused, several times. Be ready for
+  Vela to freeze: on mpv's own window this once left a process that could
+  not be killed.
+
 ### 2026-11-12 — approval recorded
 
 The owner's go and the three unattended-run rules are in Status. The owner
@@ -1219,7 +1237,12 @@ Each can be overturned; none has shipped to users.
    filter that an LGPL build cannot contain. A Vela-written script does
    the same job with an LGPL filter. No licensing question arises from
    this; it is recorded because the two players now crop with different
-   code.
+   code. Still unanswered on 2026-11-13, and it matters more than this
+   item first said: `.agents/decisions.md` (2026-07-05) keeps the rule
+   that Vela "does not re-implement video-geometry processing", and this
+   script is exactly that. Slice 5 builds it under this assumption, hidden
+   with the rest of the embedded player; a "no" removes one script and
+   leaves the embedded player without cropping.
 4. **Ubuntu 22.04 is the oldest system the embedded player supports**, the
    same as Vela itself. Audio goes through PulseAudio (which PipeWire
    provides) or ALSA.
@@ -1236,6 +1259,19 @@ Each can be overturned; none has shipped to users.
    at it. It is in the approved plan (Slice 3), so the agent does it; it
    is listed here because it changes every Linux download. Until it lands
    the player can be tried only from a development build.
+8. **Escape closes the embedded player when the window is not
+   fullscreen.** (Slice 5 design.) In fullscreen it leaves fullscreen
+   first, as in mpv. mpv's own Escape never closes its window; `q` does,
+   and does here too.
+9. **The embedded player will not crop HDR video until you have tried it
+   with me.** (Slice 5 design.) The record of 2026-06-28 says changing the
+   crop on a playing HDR film wedged mpv so hard it could not be killed.
+   That was mpv's own window; inside Vela the same wedge would freeze
+   Vela. It has not been tried, on purpose. Standard-range video is
+   cropped. The trial is in the checks list above.
+10. **In fullscreen, the library shows for a moment between two episodes.**
+    (Slice 5 design.) Vela's window stays fullscreen from one play to the
+    next, and the page behind the player is the library.
 
 ### 2026-11-13 — Slice 3 review: nine findings, all admitted
 
@@ -1376,3 +1412,33 @@ From this point the work also uses several agents at once (the owner
 switched that on for the session on 2026-11-13): to measure mpv's
 behaviour before a design depends on it, and to attack a change before
 it goes to codex. The review of record is still codex.
+
+### 2026-11-13 — the review loop of Slice 3 is closed; Slice 5 is designed
+
+- `ec-6`: codex accepted the second repair (`ff147c2`) with its guard
+  confirmed. All nine findings of the Slice 3 review are verified. `hd-1`
+  is verified too. `hd-3` and `hd-2` have a design
+  (`.agents/review/hd-3-hd-2.design.md`) and `hd-3` is being written.
+- Slice 5 has a design: `.agents/plans/embedded-player.slice5-design.md`.
+  It was checked before any code by two probers (in the app under the
+  headless venue; against the shipped library) and three critics. What
+  that changed, in short:
+  - changing the crop on a playing film can stall playback in the shipped
+    library, on ordinary video; the script now follows every crop with a
+    filter or decoder change or a zero seek, which played on 24 times of
+    24;
+  - `bbox` needs its threshold scaled to the bit depth, fails silently
+    under hardware decoding, and reports per frame, so the result has to
+    be a union;
+  - Tauri's "is the window fullscreen" answers with the last request, not
+    with what the compositor did; the real state is taken from GDK;
+  - a timer for leaving fullscreen between plays would have dropped
+    fullscreen during ordinary episode changes; it leaves on events;
+  - keeping focus off controls by preventing `mousedown` breaks range
+    inputs and selects in WebKitGTK; only buttons get it;
+  - commands from the page are limited to one in flight per play, so a
+    player that stops answering cannot pile up threads inside Vela.
+  Three of its decisions are for the owner and are items 8 to 10 of "For
+  the owner"; item 3 has a note.
+- The slice is written after `hd-3` and `hd-2` have landed: both change
+  the files it builds on.

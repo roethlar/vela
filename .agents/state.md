@@ -37,9 +37,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `hd-3` is being written on the local branch `hd-3` (a worktree beside
     the clone) and nothing of it is on `main` yet. The slice's acceptance
     is a by-eye comparison only the owner can make.
-  - Then Slice 5 (controls, cropping), 6 (parity). The owner's by-eye
-    checks and the switch-on (Settings control, release notes, version
-    bump) are NOT the agent's to do.
+  - Slice 5 (controls, cropping) is designed, not written:
+    `.agents/plans/embedded-player.slice5-design.md`. It is written after
+    `hd-3` and `hd-2` land. Its cropping script is built under an
+    assumption the owner has not ruled on (the plan's "For the owner",
+    item 3, which conflicts with a 2026-07-05 rule in
+    `.agents/decisions.md`); it stays hidden with the rest.
+  - Then Slice 6 (parity). The owner's by-eye checks and the switch-on
+    (Settings control, release notes, version bump) are NOT the agent's
+    to do.
   - Active review loop: see `.agents/review/index.md`. One finding
     (`ps-2`) is with the owner after four reopens
     (`.agents/review/ps-2.contested.md`).
