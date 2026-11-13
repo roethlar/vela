@@ -559,6 +559,51 @@ fn prune_marker_payloads(dir: &std::path::Path) {
     }
 }
 
+/// One at a time, for tests that write a marker payload.
+///
+/// Every test runs in the same process, and writing a payload first removes
+/// every payload that process wrote before ([`prune_marker_payloads`]). In the
+/// app that is right: plays are started one at a time. Between two tests
+/// running side by side it deletes the file the other is about to read. A test
+/// holds this from before its payload is written until it has finished with the
+/// file, and [`try_write_marker_payload`] refuses to write for a test that does
+/// not, so forgetting it fails every run instead of one run in thirty.
+#[cfg(test)]
+pub(crate) mod payload_test_lock {
+    use std::cell::Cell;
+    use std::sync::{Mutex, MutexGuard};
+
+    static LOCK: Mutex<()> = Mutex::new(());
+    thread_local! {
+        static HELD: Cell<bool> = const { Cell::new(false) };
+    }
+
+    /// The lock, held until dropped.
+    pub(crate) struct Held {
+        _guard: MutexGuard<'static, ()>,
+    }
+
+    /// Wait for the other payload-writing tests to finish, then keep them out.
+    pub(crate) fn hold() -> Held {
+        // A test that failed while holding it has already reported; the lock
+        // guards files, not data, so a poisoned one is still usable.
+        let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        HELD.with(|held| held.set(true));
+        Held { _guard: guard }
+    }
+
+    impl Drop for Held {
+        fn drop(&mut self) {
+            HELD.with(|held| held.set(false));
+        }
+    }
+
+    /// Whether the calling test holds the lock right now.
+    pub(crate) fn is_held() -> bool {
+        HELD.with(Cell::get)
+    }
+}
+
 /// Write the marker payload for one launch. Non-fatal by construction: every
 /// failure returns `None` and playback proceeds without skipping. Never `?` this
 /// into the play path.
@@ -566,6 +611,12 @@ fn try_write_marker_payload(markers: &[crate::source::MediaMarker]) -> Option<st
     if markers.is_empty() {
         return None;
     }
+    #[cfg(test)]
+    assert!(
+        payload_test_lock::is_held(),
+        "a test that writes a marker payload must hold payload_test_lock::hold() \
+         until it is done with the file: the next write removes it"
+    );
     #[derive(serde::Serialize)]
     struct Payload<'a> {
         markers: &'a [crate::source::MediaMarker],
@@ -1029,6 +1080,7 @@ mod tests {
     #[test]
     fn marker_payload_is_written_owner_only_and_absent_for_no_markers() {
         use crate::source::MarkerKind;
+        let _payloads = payload_test_lock::hold();
         assert!(
             try_write_marker_payload(&[]).is_none(),
             "no markers means no payload at all"
@@ -1045,6 +1097,28 @@ mod tests {
             assert_eq!(mode, 0o600, "payload must be owner-only from creation");
         }
         let _ = std::fs::remove_file(&path);
+    }
+
+    // The two tests below keep the payload tests from deleting each other's
+    // files (see `payload_test_lock`). Without the refusal, a test that forgot
+    // the lock would fail only now and then, in whichever test lost the race.
+    #[test]
+    #[should_panic(expected = "must hold payload_test_lock::hold()")]
+    fn a_test_that_writes_a_marker_payload_without_the_lock_is_refused() {
+        use crate::source::MarkerKind;
+        let _ = try_write_marker_payload(&[marker(MarkerKind::Intro)]);
+    }
+
+    #[test]
+    fn the_payload_test_lock_is_held_only_while_its_guard_lives() {
+        assert!(!payload_test_lock::is_held());
+        let held = payload_test_lock::hold();
+        assert!(payload_test_lock::is_held());
+        drop(held);
+        assert!(
+            !payload_test_lock::is_held(),
+            "a finished test must not leave the next one on its thread covered"
+        );
     }
 
     #[test]

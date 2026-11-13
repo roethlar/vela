@@ -276,7 +276,7 @@ fn scan_winget_packages(root: &str) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::super::launch::{build_launch, write_header_include_at};
+    use super::super::launch::{build_launch, payload_test_lock, write_header_include_at};
     use super::*;
     use crate::playback::{PlaySpec, PlaybackWindowState, WindowStateObservation};
 
@@ -434,6 +434,9 @@ mod tests {
             ..recorded_spec("https://media.invalid/video/stream.mkv?x=1")
         };
 
+        // Held to the end of the test: the payload this launch writes is read
+        // back below, and another test's write would remove it.
+        let _payloads = payload_test_lock::hold();
         let plan = build_launch(&spec, &cfg, "/tmp/vela-recorded/mpv.sock")
             .expect("the launch is described");
         let cmd = command("mpv", &plan);

@@ -4,9 +4,9 @@
 at random; a gate that fails at random gets re-run until it is green, and
 that is how a real failure gets waved through. Nothing the app ships
 changes.
-**Status**: Open
+**Status**: In progress
 **Branch**: —
-**Commit**: —
+**Commit**: (this commit)
 
 ## Evidence
 
@@ -38,11 +38,37 @@ break that assumption, and neither knew about the other.
 
 ## Approach
 
-(pending)
+A lock for tests that write a payload, and a refusal for tests that write
+one without it.
+
+`player::launch::payload_test_lock` (test builds only) is one process-wide
+mutex. `hold()` takes it and marks the calling thread; the mark is cleared
+when the guard is dropped. Both tests take it before their payload is
+written and keep it until they have finished with the file.
+
+A lock on its own leaves the next person to add such a test exactly where
+this slice was: nothing says the lock exists, and forgetting it fails one
+run in thirty. So, in test builds, `try_write_marker_payload` panics when
+the calling thread does not hold the lock ("a test that writes a marker
+payload must hold payload_test_lock::hold()"). Forgetting it now fails
+every run, in the test that forgot, with a message that says what to do.
+The app's build contains none of this.
+
+Independent runtime directories per test, the reviewer's other suggestion,
+would have meant a test-only way to redirect a directory whose whole point
+is that the app chooses it; the lock changes nothing the app runs.
 
 ## Files changed
 
-(pending)
+- `src-tauri/src/player/launch.rs` — `payload_test_lock` (test builds
+  only); the refusal at the top of `try_write_marker_payload` (test builds
+  only); `marker_payload_is_written_owner_only_and_absent_for_no_markers`
+  holds the lock; two new tests,
+  `a_test_that_writes_a_marker_payload_without_the_lock_is_refused` and
+  `the_payload_test_lock_is_held_only_while_its_guard_lives`
+- `src-tauri/src/player/external.rs` —
+  `the_full_external_command_line_is_exactly_the_recorded_one` holds the
+  lock from before `build_launch` to the end of the test
 
 ## Guard proof
 
