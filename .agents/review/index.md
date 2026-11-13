@@ -1,5 +1,18 @@
 # Review status
 
+**Embedded player Slice 2 review, 2026-11-13 (open):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `1cedb48..90db1a6`: `findings`. Four candidates, four
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-13-player-selection.md`.
+
+| ID    | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|-------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| sel-1 | MEDIUM   | A play that fails on an unreadable settings file leaves its session and transcode behind | `[ ]`  |        |          |
+| sel-2 | LOW      | A quality step-down makes the fallback explanation appear a second time | `[ ]`  |        |          |
+| sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[ ]`  |        |          |
+| sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[ ]`  |        |          |
+
 **Embedded player Slice 1 review, 2026-11-13 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `b19d7d1..b719a65`, Slice 1 paths only: `findings`. Two

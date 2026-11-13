@@ -245,6 +245,25 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `onScroll` ignore an element that is not connected or has no height,
     with a guard, then re-run `pagefail`. Whether the VM's older WebKit
     simply never delivers the late event is an assumption, not verified.
+  - Seen again 2026-11-13 during the embedded-player run: `pagefail` passed
+    once (the full run at `3e91c63`, 39 of 39) and then failed 15 runs of 15
+    at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
+    precondition (120 cards instead of 60). None of those commits touches
+    the page; this is the race above, not a regression.
+- A failed settings read leaves a play half started. Seen 2026-11-13 while
+  fixing review finding `sel-1`; NOT changed, it predates that work and is
+  outside the approved plan. In `play_by_key_locked`
+  (`src-tauri/src/commands.rs`) the settings read for Vela's own resume
+  position (`config::load_config()` feeding `recents::resume_stamp_ms`)
+  returns early AFTER the new play's session and playlist position are
+  installed and the previous player is stopped, and skips what the
+  launch-failure path undoes. It runs only for a play that resumes and has
+  no server-side position, and before any transcode is registered, so what
+  is left behind is a session and a playlist position for a play that never
+  started. It needs the settings file to become unreadable at that moment.
+  Proposed fix (needs a go): read the settings once, before anything is
+  installed, and reuse them. A test now pins that this is the only early
+  return in that stretch (`tests/player-selection.test.mjs`).
 - The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
   They reproduced during the 1.0.59 full Linux run in `continueon`,
   `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.
