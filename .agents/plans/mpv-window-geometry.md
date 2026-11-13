@@ -26,10 +26,13 @@ Open, not yet ruled (each is asked in chat, one at a time):
   full screen next time." So the setting is a three-way choice, not a
   checkbox, and "remember last" includes fullscreen (the agent's reading:
   maximized and screen too, since they are the same kind of state).
+  **D2(b) RULED 2026-11-12:** asked whether the setting governs the first
+  play of a run or every play, the owner answered: "yes, first run only,
+  follow the setting on a new Vela launch session". So the setting decides
+  only how the first player window of a Vela run opens; later plays in
+  that run follow the previous window per D1, in all three modes.
   Still open, asked in chat: (a) which of the three a fresh install starts
-  with; (b) whether the setting governs only the FIRST play of a run, with
-  later plays following the previous window per D1 (the agent's proposal,
-  written into Slice 3 below as an assumption), or every play.
+  with.
 - **D3 (window position on Windows).** Whether to add the Windows-only code
   that position needs. Slice 4 depends on it; Slices 1-3 do not.
 
@@ -232,11 +235,9 @@ three values:
   default, or whatever the user's Advanced arguments or own config say
   (today's behaviour).
 
-ASSUMPTION pending D2(b): in all three modes, later plays in the same run
-follow the previous play's window (D1). If the owner rules "every play"
-instead, "Full screen" forces `--fullscreen=yes` on every play and
-"Default" disables Slice 1's inheritance; rewrite this slice before
-implementing.
+Per D2(b): in all three modes, later plays in the same run follow the
+previous play's window (D1). The setting is consulted only when nothing
+has been published in this run.
 
 - `src-tauri/src/config.rs`: two new optional fields on `AppConfig`,
   following the existing `Option` + validation pattern (unknown or
