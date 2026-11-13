@@ -128,3 +128,31 @@ restored with `git checkout`:
 | A question mark inside a string only | PASS, rightly: it is not code |
 | A `'?'` character literal only | PASS, rightly |
 | Unchanged | PASS |
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 07:41 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d3d1-01d2-7ba0-bb30-7e6564499012`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 07:30 UTC, finished 07:36 UTC.
+- Reviewed head `51652d9e287d90f066ab13eb267ec5dd179162b3`, base
+  `88c631b719e108032decbe5aa7c1a403f1555271` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/player-selection.test.mjs:67 — Literal stripping hides a real propagation: injecting `drop(('"', config::load_config().map_err(|e| PlayFailure::fatal(e.to_string()))?, '"'));` before `let player_choice` passes all six tests and compiles offline. The regex treats the double quotes inside character literals as string delimiters, erasing the intervening `?`. A failed read still skips cleanup.
+  - tests/player-selection.test.mjs:68 — The matcher also misses error propagation through `r#try!(...)`, `.expect (...)` with whitespace, and `assert!(config::load_config().is_ok(), "guard probe")`. Injected before player selection, each passes all six tests; offline compilation also succeeds. These permit returning or panicking after transcode registration without cleanup.
+  - tests/player-selection.test.mjs:73 — The exemption checks text without its context. Moving the unchanged `local_resume_ms` and `resume_ms` calculations after transcode registration passes all six tests and compiles, although the exempt settings failure now strands a registered transcode. Bind the exemption to its original location and branch. The original comma-form mutation did fail the named guard; restoration passed. All mutations were restored.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. All three comments are correct, and together they say one
+thing: a test that reads the source cannot list every way Rust code can
+leave a function early, and an exemption written as text cannot know
+where its line stands. Patching the list again would invite a fourth
+round on the same ground (as happened with ps-2). The next repair changes
+the code instead, so that leaving early past the cleanup cannot be
+written.
