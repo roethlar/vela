@@ -1,7 +1,7 @@
 # sel-3: a play replaced within a second and a half uses up the fallback explanation without showing it
 
 **Severity**: LOW — the user is never told why the embedded player was not used; playback is unaffected.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `50e57e4` (which also carried four unrelated files by mistake; `fb64072` takes them out again), `db0b8b6` (a fourth test)
 
@@ -87,3 +87,23 @@ None.
 
 Generation pass: `.agents/review/codereview-2026-11-13-player-selection.md`.
 Reviewer's suggested approach, verbatim: "Record successful notice delivery instead of successful process launch. Keep canceled or failed deliveries due, with session-scoped pending state to prevent duplicate delivery."
+
+### Verification round 1, recorded 2026-11-13 07:29 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly; the host's codex config
+  resolves to gpt-6-astra @ max. Thread `01a1d3bf-1850-7c42-8ed7-3f38f583cb01`, run
+  in the disposable worktree `~/dev/vela-probe-wt` at the head SHA; the
+  stream ends in `turn.completed`; dispatched 07:11 UTC, finished
+  07:18 UTC. Routing: T1 no sensitive path in the diff, T2 severity
+  LOW, T3 the recorded proof re-run by the orchestrator agrees.
+- Reviewed head `db0b8b639705c39cf868e18b79a1612d7567c40a`, base
+  `12828caaa3d4fc809ce8abc8cec014418ab11de8` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  (none)
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted; the finding is
+closed.

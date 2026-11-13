@@ -64,3 +64,26 @@ None.
 
 Generation pass: `.agents/review/codereview-2026-11-13-player-selection.md`.
 Reviewer's suggested approach, verbatim: "Exercise playback::play with an Embedded PlaySpec and assert the expected refusal and absence of side effects. Prove that removing the return makes that test fail."
+
+### Verification round 1, recorded 2026-11-13 07:29 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly; the host's codex config
+  resolves to gpt-6-astra @ max. Thread `01a1d3c5-c977-73d3-a8e6-8e954f2b7e24`, run
+  in the disposable worktree `~/dev/vela-probe-wt` at the head SHA; the
+  stream ends in `turn.completed`; dispatched 07:18 UTC, finished
+  07:25 UTC. Routing: T1 no sensitive path in the diff, T2 severity
+  LOW, T3 the recorded proof re-run by the orchestrator agrees.
+- Reviewed head `47eec9a4064e4727ae7b0fbb9d310ee7458ab6e0`, base
+  `fb64072a3336e3cfdd196dceedf201e28b910526` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/playback.rs:1046 — A weakened refusal still escapes both guards: leave the original conditional empty and place the guarded return after resolve_mpv(). Both verification commands pass, while an instrumented executable confirms mpv --version starts before refusal. The Rust assertions miss side effects before slot registration; the Node test checks only the conditional's position. Guard that refusal returns before startup calls. Removing the refusal failed as expected; restoring the pinned head passed. No mpv process remained.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. The comment is correct. The Rust test sees that a player was
+not started; it cannot see that `mpv --version` was run on the way to
+finding that out, and the source-text test pinned where the `if` stands,
+not that the `return` is inside it.
