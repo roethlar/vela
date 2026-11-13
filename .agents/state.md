@@ -30,13 +30,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `embedded-packaging` (a worktree beside the clone); nothing of it is on
     `main` yet, and the release workflow is not touched.
   - Slice 4 (HDR) landed at `e8db400`. Its codex review returned THREE
-    findings (`hd-1` to `hd-3`): `hd-1` is fixed and verified; `hd-3`
-    then `hd-2` are being fixed (both are about how the drawing thread
-    tells mpv its HDR target). Their design, with what was measured
-    against the shipped library, is `.agents/review/hd-3-hd-2.design.md`;
-    `hd-3` is being written on the local branch `hd-3` (a worktree beside
-    the clone) and nothing of it is on `main` yet. The slice's acceptance
-    is a by-eye comparison only the owner can make.
+    findings (`hd-1` to `hd-3`): `hd-1` is fixed and verified; `hd-3` is
+    fixed at `0e7adca` and with codex; `hd-2` is written on the local
+    branch `hd-2` (a worktree beside the clone, on top of the `hd-3` fix)
+    and is not on `main` yet: the agent still has to verify it. Their
+    design, with what was measured against the shipped library, is
+    `.agents/review/hd-3-hd-2.design.md`. The slice's acceptance is a
+    by-eye comparison only the owner can make.
   - Slice 5 (controls, cropping) is designed
     (`.agents/plans/embedded-player.slice5-design.md`) and is being written
     on the local branches `slice5` and `slice5-page` (worktrees beside the

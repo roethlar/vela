@@ -1442,3 +1442,34 @@ it goes to codex. The review of record is still codex.
   the owner"; item 3 has a note.
 - The slice is written after `hd-3` and `hd-2` have landed: both change
   the files it builds on.
+
+### 2026-11-13 — `hd-3` fixed (`0e7adca`); what was run
+
+The fix and its record: `.agents/review/findings/hd-3.md`. Verified by the
+agent at the fix's content before it was committed:
+
+- The full check on `main` with the fix: JS, Rust 1.89, stable and 1.100
+  clippy, 494 Rust tests, and the five tests against the shipped library.
+  `cargo audit` is not installed on this machine; GitHub CI runs it.
+- The whole embedded E2E suite, which now starts with the real-library
+  tests: 32 of 43. The failures are the ten known ones of the embedded
+  venue plus `continueon`, which failed once with "mpv: property
+  unavailable": the scenario sought in the file before mpv could seek.
+  That is a race in the scenarios, fixed in the harness (`dc864f3`);
+  `continueon` then passed 3 runs of 3 on the fix's build.
+- Four scenarios in the external player on the same build: 4 of 4.
+- One play of an HDR clip on `continuum`'s desktop (KDE, HDR on, a scripted
+  run): mpv had `pq` / `bt.2020` / 1137 two milliseconds after it started,
+  before the file; "HDR output, peak 1137 nits" was logged; hardware
+  decoding; no dropped frame.
+- Seen in that run's mpv log and not followed up: one line "mpv_render_
+  context_render() not being called or stuck", 240 ms after Close, while
+  mpv was shutting down. Nothing like it during the play. The play's
+  thread stops drawing the moment it is told to stop, and mpv then waits
+  out one of its limits; whether closing was already a quarter second
+  slower than it need be before this fix was not checked.
+
+Not run, and why: a change of the display in the middle of a play on a
+real HDR desktop (it needs the display to change; the owner's checks for
+Slice 4 cover it).
+
