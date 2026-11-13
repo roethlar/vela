@@ -7,7 +7,19 @@ const connections = fs.readFileSync("src-tauri/src/connections.rs", "utf8");
 const commands = fs.readFileSync("src-tauri/src/commands.rs", "utf8");
 const durable = fs.readFileSync("src-tauri/src/durable.rs", "utf8");
 const lib = fs.readFileSync("src-tauri/src/lib.rs", "utf8");
-const playback = fs.readFileSync("src-tauri/src/playback.rs", "utf8");
+// One play's supervision lives in playback.rs; how a launch is described and
+// started lives in the player module (.agents/plans/embedded-player.md, Slice
+// 1). The assertions below that were written against playback.rs now read all
+// of it together, so a property may not hide by moving between those files.
+const playerLaunch = fs.readFileSync("src-tauri/src/player/launch.rs", "utf8");
+const playerExternal = fs.readFileSync("src-tauri/src/player/external.rs", "utf8");
+const playerHandle = fs.readFileSync("src-tauri/src/player/mod.rs", "utf8");
+const playback = [
+  fs.readFileSync("src-tauri/src/playback.rs", "utf8"),
+  playerLaunch,
+  playerExternal,
+  playerHandle,
+].join("\n");
 const playlists = fs.readFileSync("src-tauri/src/playlists.rs", "utf8");
 const plexApi = fs.readFileSync("src-tauri/src/plex_api.rs", "utf8");
 const plexLibrary = fs.readFileSync("src-tauri/src/plex_library.rs", "utf8");
@@ -270,12 +282,24 @@ test("mpv authentication stays in a private include until its exact child is rea
     playback,
     /harden_existing_regular\(path\)[\s\S]{0,500}write_content\(&mut f, content\.as_bytes\(\)\)/,
   );
+  // The reaper keeps a player until its end is confirmed. That is three links:
+  // the reaper asks the handle, the handle asks the process, and only a
+  // confirmed end releases the player (and the include it owns).
   assert.match(
     lib,
-    /retain_mut\(\|child\|[\s\S]{0,120}retain_child_after_try_wait\(&child\.try_wait\(\)\)/,
+    /retain_mut\(\|child\|[\s\S]{0,120}retain_after_poll\(&child\.has_ended\(\)\)/,
+  );
+  assert.match(
+    playerHandle,
+    /PlayerHandle::External\(child\) => child\.try_wait\(\)\.map\(\|status\| status\.is_some\(\)\)/,
+  );
+  assert.match(
+    playerHandle,
+    /fn retain_after_poll\(ended: &std::io::Result<bool>\) -> bool \{\s+!matches!\(ended, Ok\(true\)\)\s+\}/,
   );
   assert.match(playback, /partial_header_include_write_removes_the_credential_file/);
-  assert.match(playback, /process_query_result_reaps_only_a_confirmed_exit/);
+  assert.match(playback, /the_reaper_drops_a_player_only_on_a_confirmed_end/);
+  assert.match(playback, /an_external_player_reports_its_end_only_after_the_process_exits/);
   assert.match(
     commands,
     /remove_consumed_header_include\(\)[\s\S]{0,180}child\.kill\(\)/,
@@ -284,7 +308,10 @@ test("mpv authentication stays in a private include until its exact child is rea
     lib,
     /reap_queue[\s\S]{0,500}remove_consumed_header_include\(\)[\s\S]{0,200}queue\.clear\(\)/,
   );
-  assert.match(playback, /cmd\.arg\(format!\("--include=\{\}"/);
+  // The include reaches mpv as one option of the described launch, which the
+  // external player renders as `--include=<path>`.
+  assert.match(playerLaunch, /LaunchArg::set\("include", include\.path\.to_string_lossy\(\)\)/);
+  assert.match(playerExternal, /cmd\.arg\(arg\.to_cli\(\)\);/);
   assert.doesNotMatch(playback, /--http-header-fields=/);
   assert.doesNotMatch(plexSource, /X-Plex-Token=.*auth_token/);
 });

@@ -636,7 +636,7 @@ impl CommandInstaller {
 #[tauri::command]
 pub fn check_mpv() -> Result<MpvInfo, String> {
     let install = mpv_install_info();
-    let resolved = playback::resolve_mpv()?;
+    let resolved = crate::player::external::resolve_mpv()?;
     let configured_path = config::load_config()
         .map_err(|_| "could not read Vela settings".to_string())?
         .mpv_path
@@ -873,7 +873,7 @@ pub fn set_mpv_path(path: Option<String>) -> Result<MpvInfo, String> {
                 "No file exists at that path: {p}\nPick the mpv executable (mpv.exe on Windows)."
             ));
         }
-        if !playback::mpv_usable(p) {
+        if !crate::player::external::mpv_usable(p) {
             // The Windows community builds ship as CPU-specific variants, so a
             // crash-on-launch there is usually a too-new build; elsewhere it's a
             // wrong file or a non-executable bit. Keep the hint platform-apt.
@@ -1336,7 +1336,7 @@ async fn install_mpv_windows() -> Result<(), String> {
         let _ = std::fs::remove_file(&archive); // best-effort temp cleanup
         res?;
         let exe = dest2.join("mpv.exe");
-        if !playback::mpv_usable(&exe.to_string_lossy()) {
+        if !crate::player::external::mpv_usable(&exe.to_string_lossy()) {
             return Err("mpv was installed but doesn't run on this PC.".to_string());
         }
         Ok(exe.to_string_lossy().into_owned())
@@ -4964,7 +4964,8 @@ async fn play_by_key_locked(
     };
     // Resolve the bundled mpv autocrop script here (the command layer holds the
     // AppHandle; `playback::play` does not). Whether it's injected depends on the
-    // `mpv_autocrop` config mode, decided in `play`. `resolve` only computes the
+    // `mpv_autocrop` config mode, decided when the launch is described
+    // (`player::launch::build_launch`). `resolve` only computes the
     // path; `play` existence-checks before use.
     let resolve_resource = |name: &str| {
         state.app_handle.get().and_then(|app| {

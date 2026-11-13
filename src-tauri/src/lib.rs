@@ -7,6 +7,7 @@ mod durable;
 mod display;
 mod locality;
 mod playback;
+mod player;
 mod playlists;
 mod plex_api;
 mod plex_library;
@@ -44,7 +45,7 @@ pub struct AppState {
     /// The currently-running mpv process, so a new play can terminate the old one.
     /// `Arc` so a background reaper can also try_wait() it (non-blocking) and clear
     /// the slot once it exits on its own, instead of leaving a zombie.
-    pub(crate) current_child: Arc<Mutex<Option<playback::ManagedChild>>>,
+    pub(crate) current_child: Arc<Mutex<Option<player::PlayerHandle>>>,
     /// Set as the app exits. Checked under `current_child`'s lock before launching
     /// mpv, so a play that races shutdown either sees this (and doesn't launch) or
     /// has already registered its child for the exit sweep to kill — no orphan.
@@ -63,7 +64,7 @@ pub struct AppState {
     /// spawn a per-child waiter thread (which could fail under thread exhaustion
     /// and drop the child unreaped) nor block on wait() (which could hang on a
     /// wedged player).
-    pub(crate) reap_queue: Arc<Mutex<Vec<playback::ManagedChild>>>,
+    pub(crate) reap_queue: Arc<Mutex<Vec<player::PlayerHandle>>>,
     /// Serializes play_item so overlapping clicks can't both spawn and orphan an mpv.
     pub play_lock: AsyncMutex<()>,
     /// Serializes explicit watched edits with clean-completion fan-out so
@@ -160,7 +161,7 @@ pub fn run() {
         {
             let mut guard = child_slot.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(child) = guard.as_mut() {
-                if matches!(child.try_wait(), Ok(Some(_))) {
+                if matches!(child.has_ended(), Ok(true)) {
                     *guard = None;
                 }
             }
@@ -170,9 +171,7 @@ pub fn run() {
         reap_queue
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .retain_mut(|child| {
-                playback::retain_child_after_try_wait(&child.try_wait())
-            });
+            .retain_mut(|child| player::retain_after_poll(&child.has_ended()));
     });
 
     let builder = tauri::Builder::default()
