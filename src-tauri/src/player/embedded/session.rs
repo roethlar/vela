@@ -14,9 +14,9 @@
 use std::ffi::c_void;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use wayland_client::protocol::wl_subsurface::WlSubsurface;
 
@@ -94,12 +94,160 @@ pub(crate) struct Start {
     pub(crate) on_lifecycle: Arc<dyn Fn(Lifecycle) + Send + Sync>,
 }
 
+/// How long the caller waits for a play to start before reporting that it
+/// did not.
+const START_LIMIT: Duration = Duration::from_secs(20);
+
+/// How long a play that is being let go of is waited for, having been asked
+/// to stop, before it is handed to [`Leftovers`] instead.
+const STOP_PATIENCE: Duration = Duration::from_secs(5);
+
+/// Who decides whether a starting play has started: the play's own thread,
+/// once mpv has its file, or the caller that is waiting for it, when it
+/// stops waiting. Exactly one of them wins, and the other finds out.
+///
+/// Without this a play that outlasted its caller's patience could come back
+/// later, hand mpv its file and announce itself, for a play that had already
+/// been reported as failed (review finding ec-2).
+struct StartRace(AtomicU8);
+
+impl StartRace {
+    const STARTING: u8 = 0;
+    const STARTED: u8 = 1;
+    const GIVEN_UP: u8 = 2;
+
+    fn new() -> Self {
+        StartRace(AtomicU8::new(Self::STARTING))
+    }
+
+    fn settle(&self, as_what: u8) -> bool {
+        self.0
+            .compare_exchange(Self::STARTING, as_what, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+    }
+
+    /// The play's thread: "I have started." `false` when the caller had
+    /// already stopped waiting; the play must then go without a trace.
+    fn claim_started(&self) -> bool {
+        self.settle(Self::STARTED)
+    }
+
+    /// The caller: "I am not waiting any longer." `false` when the play had
+    /// started in the meantime; it is then a started play like any other.
+    fn give_up(&self) -> bool {
+        self.settle(Self::GIVEN_UP)
+    }
+
+    /// Whether the caller has stopped waiting.
+    fn given_up(&self) -> bool {
+        self.0.load(Ordering::SeqCst) == Self::GIVEN_UP
+    }
+}
+
+/// How the last step of a start ended, on the play's thread.
+#[derive(Debug, PartialEq, Eq)]
+enum Started {
+    Yes,
+    /// The caller had stopped waiting. The play was reported as failed: it
+    /// must not announce itself or draw, and goes away at once.
+    TooLate,
+}
+
+/// The last step of a start, with everything built: hand mpv its file
+/// (`load`) and claim the start. A play its caller has given up on is not
+/// loaded when that is already known, and does not count as started when it
+/// becomes known a moment later.
+fn finish_start(
+    race: &StartRace,
+    load: impl FnOnce() -> Result<(), String>,
+) -> Result<Started, String> {
+    if race.given_up() {
+        return Ok(Started::TooLate);
+    }
+    load()?;
+    Ok(if race.claim_started() {
+        Started::Yes
+    } else {
+        Started::TooLate
+    })
+}
+
+/// Plays whose thread was still running when Vela stopped waiting for it.
+///
+/// A thread cannot be made to stop from outside. One that is stuck (in mpv,
+/// in the graphics driver) still holds its surface and its player, and may
+/// still come back. Letting go of its handle would leave it with nothing
+/// that knows it exists (review finding ec-2). So it is kept here until it
+/// has ended: while any is kept no new embedded play starts, and Vela gives
+/// them one more moment as it exits.
+struct Leftovers(Mutex<Vec<(Arc<Shared>, std::thread::JoinHandle<()>)>>);
+
+/// The leftovers of this run of Vela.
+static LEFTOVERS: Leftovers = Leftovers::new();
+
+impl Leftovers {
+    const fn new() -> Self {
+        Leftovers(Mutex::new(Vec::new()))
+    }
+
+    fn keep(&self, shared: Arc<Shared>, thread: std::thread::JoinHandle<()>) {
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .push((shared, thread));
+    }
+
+    /// How many are still running. Those that have ended since the last
+    /// call are let go of.
+    fn still_running(&self) -> usize {
+        let ended: Vec<_>;
+        let running = {
+            let mut kept = self.0.lock().unwrap_or_else(|e| e.into_inner());
+            let (done, running): (Vec<_>, Vec<_>) = std::mem::take(&mut *kept)
+                .into_iter()
+                .partition(|(shared, _)| shared.ended.load(Ordering::SeqCst));
+            ended = done;
+            *kept = running;
+            kept.len()
+        };
+        for (_, thread) in ended {
+            let _ = thread.join();
+        }
+        running
+    }
+
+    /// Wait until none is running, for at most `limit`.
+    fn wait(&self, limit: Duration) -> bool {
+        let deadline = Instant::now() + limit;
+        while self.still_running() > 0 {
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        true
+    }
+}
+
+/// How many embedded plays Vela has stopped waiting for are still running.
+pub(crate) fn unfinished_plays() -> usize {
+    LEFTOVERS.still_running()
+}
+
+/// As Vela exits: give plays it had stopped waiting for one more moment to
+/// end, since they draw on the window's connection.
+pub(crate) fn wait_for_unfinished_plays(limit: Duration) -> bool {
+    LEFTOVERS.wait(limit)
+}
+
 struct Shared {
     /// Written to wake the thread: by mpv (a frame or an event is waiting)
     /// and by Vela (stop, or the rectangle changed).
     wake: OwnedFd,
     stop: AtomicBool,
     ended: AtomicBool,
+    /// Whether the play started, or its caller stopped waiting first.
+    race: StartRace,
     /// The size the page last reported, when the thread has not applied it.
     resize_to: Mutex<Option<(i32, i32)>>,
     /// Set once the surface exists. Used from the window's thread only.
@@ -118,6 +266,7 @@ impl Shared {
             wake: unsafe { OwnedFd::from_raw_fd(wake) },
             stop: AtomicBool::new(false),
             ended: AtomicBool::new(false),
+            race: StartRace::new(),
             resize_to: Mutex::new(None),
             subsurface: Mutex::new(None),
         }))
@@ -334,12 +483,6 @@ fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Res
     }
 
     *shared.subsurface.lock().unwrap_or_else(|e| e.into_inner()) = Some(surface.subsurface());
-    if !start.load_delay.is_zero() {
-        std::thread::sleep(start.load_delay);
-    }
-    player
-        .command(&["loadfile", &start.url])
-        .map_err(|reason| format!("mpv would not load the stream ({reason})"))?;
     Ok(Live {
         renderer,
         player,
@@ -352,6 +495,13 @@ fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Res
 }
 
 impl Live {
+    /// Hand mpv its file.
+    fn load(&self, url: &str) -> Result<(), String> {
+        self.player
+            .command(&["loadfile", url])
+            .map_err(|reason| format!("mpv would not load the stream ({reason})"))
+    }
+
     /// Draw frames and follow the rectangle until the player shuts down by
     /// itself or the play is stopped.
     fn run(&mut self, shared: &Shared) {
@@ -412,6 +562,10 @@ pub(crate) struct Session {
     shared: Arc<Shared>,
     thread: Option<std::thread::JoinHandle<()>>,
     header_include: Option<HeaderInclude>,
+    /// How long to wait for the thread when this is dropped, and where the
+    /// thread goes if it has not ended by then.
+    patience: Duration,
+    leftovers: &'static Leftovers,
 }
 
 impl Session {
@@ -427,52 +581,72 @@ impl Session {
             .name("vela-embedded-player".into())
             .spawn(move || {
                 let shared = thread_shared;
+                // The window's thread must not keep a handle to a surface
+                // that is about to go; this takes it away first.
+                let forget_surface = || {
+                    shared
+                        .subsurface
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner())
+                        .take();
+                };
                 match set_up(&start, surface, &shared) {
                     Err(reason) => {
-                        // Whatever was built on the way has been dropped
-                        // again; the window's thread must not keep a handle
-                        // to a surface that is gone.
-                        shared
-                            .subsurface
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .take();
+                        forget_surface();
                         let _ = ready.send(Err(reason));
                     }
                     Ok(mut live) => {
-                        let _ = ready.send(Ok(()));
-                        (start.on_lifecycle)(Lifecycle::Opened);
-                        live.run(&shared);
-                        // The window's thread must not use the surface after
-                        // this point; take its handle away first.
-                        shared
-                            .subsurface
-                            .lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .take();
-                        drop(live);
-                        (start.on_lifecycle)(Lifecycle::Closed);
+                        if !start.load_delay.is_zero() {
+                            std::thread::sleep(start.load_delay);
+                        }
+                        match finish_start(&shared.race, || live.load(&start.url)) {
+                            Ok(Started::Yes) => {
+                                let _ = ready.send(Ok(()));
+                                (start.on_lifecycle)(Lifecycle::Opened);
+                                live.run(&shared);
+                                forget_surface();
+                                drop(live);
+                                (start.on_lifecycle)(Lifecycle::Closed);
+                            }
+                            // Nobody is waiting for this play any more, and
+                            // nobody was told it opened: it goes unannounced.
+                            Ok(Started::TooLate) => {
+                                forget_surface();
+                                drop(live);
+                            }
+                            Err(reason) => {
+                                forget_surface();
+                                drop(live);
+                                let _ = ready.send(Err(reason));
+                            }
+                        }
                     }
                 }
                 shared.ended.store(true, Ordering::SeqCst);
             })
             .map_err(|e| format!("couldn't start the embedded player's thread: {e}"))?;
-        let mut session = Session {
+        let session = Session {
             session_id,
             shared,
             thread: Some(thread),
             header_include,
+            patience: STOP_PATIENCE,
+            leftovers: &LEFTOVERS,
         };
-        match started.recv_timeout(Duration::from_secs(20)) {
+        // On every failure below the session is dropped, which stops the
+        // play, waits for it, and keeps it if it will not end (`Drop`).
+        let late = || Err("the embedded player did not start in time".to_string());
+        match started.recv_timeout(START_LIMIT) {
             Ok(Ok(())) => Ok(session),
-            Ok(Err(reason)) => {
-                session.stop_and_wait(Duration::from_secs(5));
-                Err(reason)
-            }
-            Err(_) => {
-                session.stop_and_wait(Duration::from_secs(5));
-                Err("the embedded player did not start in time".to_string())
-            }
+            Ok(Err(reason)) => Err(reason),
+            Err(_) if session.shared.race.give_up() => late(),
+            // It started in the instant the wait ran out; its word that it
+            // did is on its way.
+            Err(_) => match started.recv_timeout(STOP_PATIENCE) {
+                Ok(Ok(())) => Ok(session),
+                Ok(Err(reason)) => Err(reason),
+                Err(_) => late(),
+            },
         }
     }
 
@@ -490,6 +664,33 @@ impl Session {
             shared: Shared::new().expect("an eventfd"),
             thread: None,
             header_include,
+            patience: STOP_PATIENCE,
+            leftovers: &LEFTOVERS,
+        }
+    }
+
+    /// A play whose thread runs `body`, for tests of what happens to a
+    /// thread that does or does not end. `body` is given a way to ask
+    /// whether the play has been told to stop.
+    #[cfg(test)]
+    fn for_test_running(
+        patience: Duration,
+        leftovers: &'static Leftovers,
+        body: impl FnOnce(&dyn Fn() -> bool) + Send + 'static,
+    ) -> Self {
+        let shared = Shared::new().expect("an eventfd");
+        let thread_shared = shared.clone();
+        let thread = std::thread::spawn(move || {
+            body(&|| thread_shared.stop.load(Ordering::SeqCst));
+            thread_shared.ended.store(true, Ordering::SeqCst);
+        });
+        Session {
+            session_id: "test".to_string(),
+            shared,
+            thread: Some(thread),
+            header_include: None,
+            patience,
+            leftovers,
         }
     }
 
@@ -564,9 +765,14 @@ impl Session {
 impl Drop for Session {
     fn drop(&mut self) {
         // A play is normally reaped after it has ended. If it is dropped
-        // while running, it must still let go of the window.
-        if self.thread.is_some() {
-            self.stop_and_wait(Duration::from_secs(5));
+        // while running, it must still let go of the window: it is told to
+        // stop and waited for. One that has not ended by then is not let go
+        // of either; its thread is kept (`Leftovers`).
+        if self.thread.is_some() && !self.stop_and_wait(self.patience) {
+            if let Some(thread) = self.thread.take() {
+                eprintln!("vela: an embedded play did not stop in time and is kept until it does");
+                self.leftovers.keep(self.shared.clone(), thread);
+            }
         }
     }
 }
@@ -614,6 +820,146 @@ mod tests {
             "the play still owned the file and removed it when it was reaped"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // ---- a start that outlasts its caller (review finding ec-2)
+
+    #[test]
+    fn a_start_is_settled_once_by_whoever_gets_there_first() {
+        // The play starts; the caller's wait runs out a moment later.
+        let race = StartRace::new();
+        assert!(!race.given_up());
+        assert!(race.claim_started());
+        assert!(!race.give_up(), "a started play is not given up on");
+        assert!(!race.given_up());
+        // The caller stops waiting; the play comes back later.
+        let race = StartRace::new();
+        assert!(race.give_up());
+        assert!(race.given_up());
+        assert!(
+            !race.claim_started(),
+            "a play given up on never counts as started"
+        );
+        assert!(race.given_up());
+    }
+
+    #[test]
+    fn of_a_play_and_its_caller_racing_exactly_one_wins() {
+        for _ in 0..300 {
+            let race = Arc::new(StartRace::new());
+            let together = Arc::new(std::sync::Barrier::new(2));
+            let play = std::thread::spawn({
+                let (race, together) = (race.clone(), together.clone());
+                move || {
+                    together.wait();
+                    race.claim_started()
+                }
+            });
+            let caller = std::thread::spawn({
+                let (race, together) = (race.clone(), together.clone());
+                move || {
+                    together.wait();
+                    race.give_up()
+                }
+            });
+            let (started, gave_up) = (play.join().unwrap(), caller.join().unwrap());
+            assert_ne!(started, gave_up, "one of them, never both and never neither");
+            assert_eq!(race.given_up(), gave_up);
+        }
+    }
+
+    #[test]
+    fn a_play_that_is_built_in_time_is_loaded_and_started() {
+        let race = StartRace::new();
+        let mut loaded = false;
+        let finished = finish_start(&race, || {
+            loaded = true;
+            Ok(())
+        });
+        assert_eq!(finished, Ok(Started::Yes));
+        assert!(loaded);
+        assert!(!race.give_up(), "the caller's wait running out now changes nothing");
+    }
+
+    #[test]
+    fn a_play_its_caller_gave_up_on_is_not_loaded() {
+        let race = StartRace::new();
+        assert!(race.give_up());
+        let mut loaded = false;
+        let finished = finish_start(&race, || {
+            loaded = true;
+            Ok(())
+        });
+        assert_eq!(finished, Ok(Started::TooLate));
+        assert!(
+            !loaded,
+            "mpv is not handed the file of a play already reported as failed"
+        );
+    }
+
+    #[test]
+    fn a_play_given_up_on_while_it_loads_does_not_count_as_started() {
+        let race = StartRace::new();
+        let finished = finish_start(&race, || {
+            // The caller's wait runs out in the middle of the load.
+            assert!(race.give_up());
+            Ok(())
+        });
+        assert_eq!(finished, Ok(Started::TooLate));
+    }
+
+    #[test]
+    fn a_play_whose_file_mpv_refuses_says_so_and_claims_nothing() {
+        let race = StartRace::new();
+        assert_eq!(
+            finish_start(&race, || Err("refused".to_string())),
+            Err("refused".to_string())
+        );
+        assert!(race.give_up(), "the start is still the caller's to end");
+    }
+
+    /// A list of leftovers of a test's own, so tests cannot see each other's.
+    fn leftovers() -> &'static Leftovers {
+        Box::leak(Box::new(Leftovers::new()))
+    }
+
+    #[test]
+    fn a_play_that_will_not_stop_is_kept_not_let_go_of() {
+        let kept = leftovers();
+        let release = Arc::new(AtomicBool::new(false));
+        let stuck = release.clone();
+        // A play stuck somewhere that does not look at the request to stop.
+        let play = Session::for_test_running(Duration::from_millis(50), kept, move |_stop| {
+            while !stuck.load(Ordering::SeqCst) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let began = Instant::now();
+        drop(play);
+        assert!(
+            began.elapsed() < Duration::from_secs(2),
+            "dropping it waits its patience, not for ever"
+        );
+        assert_eq!(kept.still_running(), 1, "its thread is still known");
+        assert!(!kept.wait(Duration::from_millis(50)), "and still running");
+        // It comes unstuck.
+        release.store(true, Ordering::SeqCst);
+        assert!(kept.wait(Duration::from_secs(5)));
+        assert_eq!(kept.still_running(), 0, "and is let go of once it has ended");
+    }
+
+    #[test]
+    fn a_play_that_stops_when_asked_is_not_kept() {
+        let kept = leftovers();
+        let play = Session::for_test_running(Duration::from_secs(5), kept, |stop| {
+            while !stop() {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        });
+        let began = Instant::now();
+        drop(play);
+        assert!(began.elapsed() < Duration::from_secs(2));
+        assert_eq!(kept.still_running(), 0);
     }
 
     #[test]

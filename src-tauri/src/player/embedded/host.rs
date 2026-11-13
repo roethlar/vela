@@ -17,7 +17,7 @@ use tauri::{Emitter, Manager};
 
 use super::libmpv::{self, LibMpv};
 use super::options;
-use super::session::{Lifecycle, MarkerPayload, Rect, Session, Start};
+use super::session::{self, Lifecycle, MarkerPayload, Rect, Session, Start};
 use super::startup::{self, WindowMode};
 use super::egl;
 use super::surface::{Guest, VideoSurface, WlDisplay};
@@ -270,6 +270,11 @@ impl Host {
             return Err(decided.refused.unwrap_or(EmbeddedUnavailable::NeedsRestart));
         }
         if self.start_failed.load(std::sync::atomic::Ordering::SeqCst) {
+            return Err(EmbeddedUnavailable::StartFailed);
+        }
+        // A play Vela stopped waiting for and that has still not ended holds
+        // its surface and its player. No other is started next to it.
+        if session::unfinished_plays() > 0 {
             return Err(EmbeddedUnavailable::StartFailed);
         }
         self.checked.get_or_init(|| Self::check(app)).clone()

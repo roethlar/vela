@@ -439,6 +439,12 @@ pub fn run() {
                     }
                     queue.clear();
                 }
+                // An embedded play draws on the window's own connection.
+                // Dropping one above waited for it; any that would not end
+                // when Vela stopped waiting for it earlier gets one more
+                // moment here, bounded, before the process goes.
+                #[cfg(target_os = "linux")]
+                player::embedded::wait_for_unfinished_plays(std::time::Duration::from_secs(2));
                 let stop = state
                     .tracking_stop
                     .lock()

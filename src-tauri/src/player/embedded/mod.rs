@@ -22,7 +22,7 @@ pub(crate) mod startup;
 mod surface;
 
 pub(crate) use host::{Host, Launcher};
-pub(crate) use session::{Rect, Session};
+pub(crate) use session::{wait_for_unfinished_plays, Rect, Session};
 
 /// Turn an address the system's loader returned into a function pointer of
 /// type `F`. Refuses, at compile time, an `F` that is not pointer-sized.

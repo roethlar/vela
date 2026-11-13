@@ -194,8 +194,10 @@ test('a running embedded play is asked to stop, and waited for, before its windo
   // play still holds that surface.
   assert.match(
     session,
-    /impl Drop for Session \{\s+fn drop\(&mut self\) \{[\s\S]{0,300}if self\.thread\.is_some\(\) \{\s+self\.stop_and_wait\(Duration::from_secs\(5\)\);/,
+    /impl Drop for Session \{\s+fn drop\(&mut self\) \{[\s\S]{0,400}if self\.thread\.is_some\(\) && !self\.stop_and_wait\(self\.patience\) \{/,
   );
+  assert.match(session, /^const STOP_PATIENCE: Duration = Duration::from_secs\(5\);$/m);
+  assert.match(session, /thread: Some\(thread\),\s+header_include,\s+patience: STOP_PATIENCE,\s+leftovers: &LEFTOVERS,\s+\};/);
   // Teardown order is field order: what draws goes before what it draws
   // with, and the surface last.
   assert.match(
@@ -251,6 +253,54 @@ test("the window's Wayland connection is joined once for the whole run, never pe
     );
   }
   assert.match(dropBody, /for description in \[self\.described\.take\(\), self\.output_query\.take\(\)\]\s+\.into_iter\(\)\s+\.flatten\(\)\s+\{\s+description\.destroy\(\);/);
+});
+
+test('a play that outlasts the wait for it neither starts unannounced nor goes untracked', () => {
+  // The pieces are proven in session.rs: who settles a start
+  // (`StartRace`), the last step of one (`finish_start`), and where a thread
+  // goes that will not end (`Leftovers`). This proves a real play uses them
+  // (review finding ec-2).
+  const shippedSession = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
+  // Building a play does not hand mpv its file; the last step does, and
+  // only a play that won its start is announced and drawn.
+  const setUp = functionBody(session, 'fn set_up(', 'set_up');
+  assert.equal(count(setUp, 'loadfile'), 0);
+  assert.equal(count(setUp, 'live.load('), 0);
+  assert.equal(count(shippedSession, '"loadfile"'), 1);
+  assert.equal(count(shippedSession, 'live.load('), 1);
+  assert.match(
+    session,
+    /match finish_start\(&shared\.race, \|\| live\.load\(&start\.url\)\) \{\s+Ok\(Started::Yes\) => \{\s+let _ = ready\.send\(Ok\(\(\)\)\);\s+\(start\.on_lifecycle\)\(Lifecycle::Opened\);\s+live\.run\(&shared\);\s+forget_surface\(\);\s+drop\(live\);\s+\(start\.on_lifecycle\)\(Lifecycle::Closed\);\s+\}\s+(?:\/\/[^\n]*\n\s+)*Ok\(Started::TooLate\) => \{\s+forget_surface\(\);\s+drop\(live\);\s+\}\s+Err\(reason\) => \{\s+forget_surface\(\);\s+drop\(live\);\s+let _ = ready\.send\(Err\(reason\)\);\s+\}\s+\}/,
+  );
+  for (const once of ['Lifecycle::Opened)', 'Lifecycle::Closed)', 'live.run(', 'ready.send(Ok(']) {
+    assert.equal(count(shippedSession, once), 1, `${once} in that one arm`);
+  }
+  // The caller's side of the same decision: it reports "not in time" only
+  // if it won; if the play won in the same instant, it is a started play.
+  assert.match(
+    session,
+    /match started\.recv_timeout\(START_LIMIT\) \{\s+Ok\(Ok\(\(\)\)\) => Ok\(session\),\s+Ok\(Err\(reason\)\) => Err\(reason\),\s+Err\(_\) if session\.shared\.race\.give_up\(\) => late\(\),/,
+  );
+  assert.equal(count(shippedSession, '.give_up()'), 1);
+  assert.equal(count(shippedSession, '.claim_started()'), 1, 'claimed in finish_start only');
+  // A thread's handle leaves a play in two ways only: joined once the play
+  // has ended, or kept when it has not ended in time. Never just dropped.
+  assert.equal(count(shippedSession, 'self.thread.take()'), 2);
+  assert.match(session, /if let Some\(thread\) = self\.thread\.take\(\) \{\s+let _ = thread\.join\(\);\s+\}/);
+  assert.match(
+    session,
+    /if self\.thread\.is_some\(\) && !self\.stop_and_wait\(self\.patience\) \{\s+if let Some\(thread\) = self\.thread\.take\(\) \{\s+eprintln!\([^)]*\);\s+self\.leftovers\.keep\(self\.shared\.clone\(\), thread\);/,
+  );
+  // While one is kept, no embedded play is started next to it; and Vela
+  // gives them one more moment as it exits.
+  const library = methodBody(host, '    fn library(', 'Host::library');
+  const refusal = library.indexOf('if session::unfinished_plays() > 0 {\n            return Err(EmbeddedUnavailable::StartFailed);\n        }');
+  assert.notEqual(refusal, -1);
+  assert.ok(refusal < library.indexOf('self.checked.get_or_init'));
+  assert.match(
+    lib,
+    /queue\.clear\(\);\s+\}\s+(?:\/\/[^\n]*\n\s+)*#\[cfg\(target_os = "linux"\)\]\s+player::embedded::wait_for_unfinished_plays\(std::time::Duration::from_secs\(2\)\);/,
+  );
 });
 
 test("the window's own surface is used on the window's thread, at once, and never carried away", () => {
@@ -359,7 +409,7 @@ test('everything a launch wrote to disk has an owner in an embedded play', () =>
   assert.match(request, /\n            header_include,\n            _marker_payload: marker_payload\.map\(MarkerPayload::new\),\n/);
   // The request lives exactly as long as the play, or as its failed start:
   // the play's thread owns it, and it is nowhere copied or kept.
-  assert.match(session, /\.spawn\(move \|\| \{\s+let shared = thread_shared;\s+match set_up\(&start, surface, &shared\) \{/);
+  assert.match(session, /\.spawn\(move \|\| \{\s+let shared = thread_shared;[\s\S]{0,500}?match set_up\(&start, surface, &shared\) \{/);
   assert.match(
     session,
     /impl Drop for MarkerPayload \{\s+fn drop\(&mut self\) \{[\s\S]{0,120}let _ = std::fs::remove_file\(&self\.0\);\s+\}\s+\}/,
@@ -500,10 +550,14 @@ test("what the compositor says about the display is followed from a play's start
   );
   assert.notEqual(settle, -1);
   const optionsChecked = setUp.indexOf('return Err("mpv did not take the player\'s options".to_string());');
-  const fileGiven = setUp.indexOf('.command(&["loadfile", &start.url])');
-  assert.ok(optionsChecked !== -1 && fileGiven !== -1);
+  assert.notEqual(optionsChecked, -1);
   assert.ok(optionsChecked < settle, "after the user's options and Vela's own");
-  assert.ok(settle < fileGiven, 'before mpv has anything to draw');
+  // Before mpv has anything to draw: building a play gives mpv no file,
+  // and the file is handed over only once the play is built.
+  assert.equal(count(setUp, 'loadfile'), 0);
+  const built = session.indexOf('match set_up(&start, surface, &shared) {');
+  const fileGiven = session.indexOf('match finish_start(&shared.race, || live.load(&start.url)) {');
+  assert.ok(built !== -1 && built < fileGiven);
   assert.equal(count(code(setUp), 'Capabilities {'), 1);
   assert.match(setUp, /capabilities,\s+tagging,\s+\}\)$/, 'and the running play keeps both');
 
