@@ -3,7 +3,7 @@
 **Severity**: LOW — memory in the compositor grows by a small amount with every embedded play and is only given back when Vela exits.
 **Status**: In progress
 **Branch**: —
-**Commit**: `2f65c44`
+**Commit**: `2f65c44`, `2e3ad7e`
 
 ## Evidence
 
@@ -92,3 +92,56 @@ behind. The finding only asked for one registry per process; it did not
 need the plays to share a queue. The repair keeps the registry and the
 globals bound once, and gives each play a connection object and queue of
 its own again, on which it uses those same globals.
+
+### Repair (round 2), `2e3ad7e`
+
+What the finding asked for is kept: the compositor's registry is asked for
+once per run, in `Guest::join`, and the globals bound from it are kept in
+`Guest` for the life of the process. What the first repair added on its
+own is taken back: plays no longer share the connection object those
+globals were bound on. `VideoSurface::create` makes a guest connection
+object for the play (`Backend::from_foreign_display` on the same display),
+with one event queue that only the thread holding the play ever dispatches,
+and reaches the process's globals from it (`from_id` on the play's
+connection, the same objects on the wire). libwayland attaches whatever is
+created through them to the queue of the connection object that sent the
+request, so the play's surface and everything on it lands on the play's
+own queue. Both reopen comments follow from the sharing and go with it: no
+other thread can consume the answer to a play's round trip, and when a
+play ends its connection object and queue are dropped with whatever was
+still in flight, as before the first repair. The process's own queue (the
+globals') is still emptied at each play, from the window's thread only.
+
+Files: `src-tauri/src/player/embedded/surface.rs`,
+`tests/embedded-player.test.mjs`.
+
+Measured again, 2026-11-13, from the protocol log of `embeddedplay` (two
+plays in one run): three `wl_display.get_registry` requests, as after the
+first repair (five before the finding was fixed), and no "queue destroyed
+while proxies still attached" warning from libwayland.
+
+Guard proof for round 2, run at `2e3ad7e` in a disposable worktree;
+`node --test tests/embedded-player.test.mjs` (`cargo +stable test --locked
+--lib player::` passes throughout, 107: nothing here can run without a
+compositor, so the Rust tests cannot see it):
+
+| Injection | Node |
+| --- | --- |
+| The first repair, which was reopened: a play uses the process's connection object, and so its queue | FAIL `the window's Wayland connection is joined once for the whole run, never per play` |
+| The original defect: a play asks for a registry of its own | FAIL |
+| The availability check, and with it the join, repeated for every play | FAIL |
+| The check's answer is not kept | FAIL |
+| A play does not tell the compositor to let go of its subsurface / its viewport / its output query | FAIL (each) |
+| A play touches the process's globals as it ends | FAIL |
+| A play destroys one of the process's globals | FAIL |
+| A play makes its surface through the process's connection object | FAIL |
+| Unchanged | PASS |
+
+Also run: seven E2E scenarios in the embedded player under the headless
+compositor, PASS; and on `continuum`'s desktop the HDR clip as before (2176
+x 1280 at 1.7 scale, HDR target 1137, no dropped frames).
+
+Not proven by a test in the repo: the stall itself. The reviewer showed it
+with a headless probe; the repo's guard is that a play has its own
+connection object, held by source text.
+
