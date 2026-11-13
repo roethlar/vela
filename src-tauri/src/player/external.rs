@@ -342,6 +342,7 @@ mod tests {
 
     fn recorded_spec(url: &str) -> PlaySpec {
         PlaySpec {
+            player: crate::player::PlayerKind::External,
             url: url.to_string(),
             title: String::new(),
             http_headers: Vec::new(),

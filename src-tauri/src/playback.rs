@@ -212,6 +212,8 @@ fn display_property_change(value: &serde_json::Value) -> Option<DisplayPropertyC
 /// stream needs (written to a private include; see `crate::player::launch`),
 /// and the resume offset.
 pub struct PlaySpec {
+    /// The player chosen for this play (`crate::player::choose`).
+    pub(crate) player: crate::player::PlayerKind,
     pub url: String,
     pub title: String,
     pub http_headers: Vec<(String, String)>,
@@ -290,6 +292,14 @@ pub fn play(
     session_id: String,
     on_end: Option<EndNotify>,
 ) -> Result<Arc<AtomicBool>, String> {
+    // Only the external player can be started here so far. A play is given the
+    // embedded kind only when `player::embedded_availability` says it can run,
+    // and it does not yet, so this refuses nothing a user can reach; it is here
+    // so that an embedded play can never be started as an external one by
+    // accident once that changes.
+    if spec.player != crate::player::PlayerKind::External {
+        return Err("the embedded player is not part of this build".to_string());
+    }
     let ipc_path = crate::player::launch::new_ipc_path()?;
 
     let mpv_bin = crate::player::external::resolve_mpv()?

@@ -4,10 +4,14 @@
 //! something that starts it and a handle to what it started. Today there is
 //! one player: mpv as a separate program ([`external`]). The trackers in
 //! `crate::playback` reach whichever player is running through mpv's JSON
-//! IPC socket and do not care which one it is.
+//! IPC socket and do not care which one it is. [`select`] decides which
+//! player a play uses.
 
 pub(crate) mod external;
 pub(crate) mod launch;
+mod select;
+
+pub(crate) use select::{choose, embedded_availability, FallbackNotices, PlayerKind};
 
 /// A started player, as the rest of the app holds it: the current player, and
 /// replaced players waiting to be reaped.

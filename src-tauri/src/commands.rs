@@ -3872,6 +3872,17 @@ pub(crate) async fn apply_step_down(
     // user, so `persist_explicit_choice` stays false below.
     let explicit_source = Some(item.source_id.clone()).filter(|id| !id.is_empty()).or(affinity);
 
+    // The replacement plays in the player it replaces, whatever the setting
+    // says by now: switching players in the middle of a title is not what a
+    // drop in quality means.
+    let replaced_player = state
+        .active_playback_player
+        .lock()
+        .await
+        .as_ref()
+        .filter(|(session, _)| session == &request.session_id)
+        .map(|(_, kind)| *kind);
+
     let session_id = uuid::Uuid::new_v4().to_string();
     let outcome = play_by_key(
         state,
@@ -3891,6 +3902,7 @@ pub(crate) async fn apply_step_down(
             osd_notice: Some(short_quality_notice(next)),
             steps_taken: request.steps_taken + 1,
             continues_automatic: true,
+            player: replaced_player,
         },
     )
     .await;
@@ -4195,6 +4207,13 @@ async fn clear_playback_session_if(state: &AppState, expected_session: &str) {
             .is_some_and(|(session, _)| session == expected_session)
         {
             *item = None;
+        }
+        let mut player = state.active_playback_player.lock().await;
+        if player
+            .as_ref()
+            .is_some_and(|(session, _)| session == expected_session)
+        {
+            *player = None;
         }
         let mut run = state.playback_run.lock().await;
         if run
@@ -4709,6 +4728,10 @@ struct PlayLaunchRequest<'a> {
     /// cap, the cooldown and the step count were all unreachable (finding
     /// `or-1`, codex openreview 2026-07-26).
     continues_automatic: bool,
+    /// The player this launch must use because it replaces a running play: a
+    /// replacement stays in the player it replaces. `None` chooses from the
+    /// user's setting, which is every play the user starts.
+    player: Option<crate::player::PlayerKind>,
 }
 
 /// Whether Automatic manages this launch, and therefore whether it is watched.
@@ -4756,6 +4779,7 @@ async fn play_by_key_locked(
         osd_notice,
         steps_taken,
         continues_automatic,
+        player,
     } = request;
     if !validate_playback_session(state, replace_session).await {
         return Err(PlayFailure::superseded());
@@ -5009,7 +5033,38 @@ async fn play_by_key_locked(
         .into_iter()
         .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
         .collect();
+    // Which player runs this play (decisions D1 and D3 of
+    // `.agents/plans/embedded-player.md`): what the user's setting asks for,
+    // unless this launch replaces a running play, and the external player
+    // whenever the embedded one cannot run. A fallback never fails the play;
+    // it is explained once, in one line, on the player that did start.
+    let wanted_player = match player {
+        Some(kind) => kind,
+        None => crate::player::PlayerKind::from_setting(
+            config::load_config()
+                .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?
+                .player
+                .as_deref(),
+        ),
+    };
+    let player_choice =
+        crate::player::choose(wanted_player, &crate::player::embedded_availability());
+    *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));
+    // A notice this launch already carries (an Automatic step-down) wins: the
+    // fallback was explained when the play it replaces started.
+    let fallback_notice = if osd_notice.is_none() {
+        state
+            .embedded_fallback_notices
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .due(player_choice.fallback.as_ref())
+    } else {
+        None
+    };
+    let fallback_told = fallback_notice.is_some();
+    let played_fallback = player_choice.fallback.clone();
     let spec = playback::PlaySpec {
+        player: player_choice.kind,
         url: resolved.url,
         title: item.title.clone(),
         http_headers: resolved.http_headers,
@@ -5044,7 +5099,7 @@ async fn play_by_key_locked(
             }) as playback::StepDownNotify
         }),
         duration: item.duration_ms.map(Duration::from_millis),
-        osd_notice,
+        osd_notice: osd_notice.or(fallback_notice),
         steps_taken,
     };
     // The tracker can observe a very fast mpv exit before this async command
@@ -5148,6 +5203,15 @@ async fn play_by_key_locked(
         observation: window_observation,
     };
     let played = after_successful_play(played, || {
+        // Only a play that started has shown the user its notice. One that
+        // carried another notice instead leaves the fallback still to be told.
+        if fallback_told || played_fallback.is_none() {
+            state
+                .embedded_fallback_notices
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .record(played_fallback.as_ref());
+        }
         *state
             .playback_window_session
             .lock()
@@ -5237,6 +5301,7 @@ pub async fn play_item(
             osd_notice: None,
             steps_taken: 0,
             continues_automatic: false,
+            player: None,
         },
     )
     .await
@@ -5299,6 +5364,7 @@ pub async fn resolve_playback_source_choice(
             osd_notice: None,
             steps_taken: 0,
             continues_automatic: false,
+            player: None,
         },
     )
     .await
@@ -5899,6 +5965,7 @@ async fn play_playlist_entries(
                 osd_notice: None,
                 steps_taken: 0,
                 continues_automatic: false,
+            player: None,
             },
         )
         .await
@@ -5983,6 +6050,7 @@ async fn play_server_playlist_entries(
                 osd_notice: None,
                 steps_taken: 0,
                 continues_automatic: false,
+            player: None,
             },
         )
         .await

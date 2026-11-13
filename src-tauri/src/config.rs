@@ -50,6 +50,16 @@ pub struct AppConfig {
     /// `"auto"` auto-fires mpv's live `video-crop`, which can hang mpv on some
     /// HDR/Wayland stacks — the Settings UI carries that warning.
     pub mpv_autocrop: Option<String>,
+    /// Which player plays video: `"external"` (mpv in its own window) or
+    /// `"embedded"` (mpv's library drawing inside Vela's window; experimental,
+    /// Linux on Wayland only). Missing means external on every desktop OS
+    /// (decision 2026-11-12); unknown values invalidate the document.
+    ///
+    /// Written only when set, so a config that never chose a player stays
+    /// readable by releases that predate this field. A config that DOES carry
+    /// it is rejected by those releases, like any setting they do not know.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player: Option<String>,
     /// What to do after a clean EOF once a single item or named playlist has
     /// genuinely ended: `"off"`, `"on"`, or `"only-tv"`. Missing means the
     /// product default (`"only-tv"`); unknown values invalidate the document.
@@ -411,6 +421,7 @@ impl AppConfig {
             self.mpv_autocrop.as_deref(),
             &["off", "manual", "auto"],
         )?;
+        validate_optional_closed("player", self.player.as_deref(), &["external", "embedded"])?;
         validate_optional_closed(
             "Continue Playing",
             self.continue_playing.as_deref(),
@@ -1343,6 +1354,51 @@ mod tests {
     }
 
     #[test]
+    fn the_player_setting_loads_only_its_two_values_and_is_written_only_when_set() {
+        let root =
+            std::env::temp_dir().join(format!("vela-config-player-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("config.json");
+
+        // A config from before the field existed: loads, and the player is unset.
+        fs::write(&path, br#"{"continue_playing":"on"}"#).unwrap();
+        assert_eq!(load_unmigrated_at(&path).unwrap().player, None);
+
+        for value in ["external", "embedded"] {
+            fs::write(&path, format!(r#"{{"player":"{value}"}}"#)).unwrap();
+            assert_eq!(
+                load_unmigrated_at(&path).unwrap().player.as_deref(),
+                Some(value)
+            );
+        }
+
+        // Unset: the key is not written at all, so a release that predates the
+        // field (which rejects keys it does not know) still reads the file.
+        let unset = serde_json::to_string(&AppConfig::default()).unwrap();
+        assert!(
+            !unset.contains("\"player\""),
+            "an unset player must not be serialized: {unset}"
+        );
+        // Set: it round-trips.
+        let chosen = AppConfig {
+            player: Some("embedded".to_string()),
+            ..Default::default()
+        };
+        let written = serde_json::to_string(&chosen).unwrap();
+        assert!(written.contains(r#""player":"embedded""#), "{written}");
+        assert_eq!(
+            serde_json::from_str::<AppConfig>(&written)
+                .unwrap()
+                .player
+                .as_deref(),
+            Some("embedded")
+        );
+        chosen.validate().expect("a known player value is valid");
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn strict_settings_reject_unknown_keys_values_and_incomplete_legacy_credentials() {
         let root =
             std::env::temp_dir().join(format!("vela-config-strict-{}", uuid::Uuid::new_v4()));
@@ -1357,6 +1413,10 @@ mod tests {
             r#"{"watched_threshold_percent":0}"#,
             r#"{"watched_threshold_percent":101}"#,
             r#"{"mpv_autocrop":"future"}"#,
+            r#"{"player":"future"}"#,
+            r#"{"player":"Embedded"}"#,
+            r#"{"player":true}"#,
+            r#"{"player":""}"#,
             r#"{"playback_source_policy":"future"}"#,
             r#"{"playback_display_resolution":"16k"}"#,
             r#"{"playback_display_hdr":"maybe"}"#,
