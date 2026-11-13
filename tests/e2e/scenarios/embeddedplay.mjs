@@ -23,10 +23,10 @@
 // the route that once worked: a profile that contains an include (review
 // finding ec-4). mpv applies such an include after the rest of the options
 // file the profile was selected in, so a profile must never share a file
-// with the options after it. Two profiles try it: one the user selects in
-// the Advanced options, and one that Vela itself selects (`gpu-hq`), which
-// the user's own mpv.conf has redefined. Only the real library can show
-// whether either gets through.
+// with the options after it. Here it is a profile the user selects in the
+// Advanced options; `embeddedownconfig` has the other case, the profile Vela
+// itself selects, redefined in the user's own mpv.conf. Only the real
+// library can show whether either gets through.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -130,23 +130,13 @@ export default {
     fs.writeFileSync(override, 'idle=yes\n');
     const profiles = path.join(configRoot, 'profiles.conf');
     fs.writeFileSync(profiles, `[trouble]\ninclude=${override}\n`);
-    // And the user's own mpv.conf, which Vela is told to honour, giving the
-    // profile Vela selects by itself the same include.
-    const mpvHome = path.join(configRoot, 'mpv-home');
-    fs.mkdirSync(mpvHome);
-    fs.writeFileSync(path.join(mpvHome, 'mpv.conf'), `[gpu-hq]\ninclude=${override}\n`);
     seedConfig(configRoot, [mockSource(mock)], {
       mpv_extra_args: `--vo=null\n--ao=null\n--include=${profiles}\n--profile=trouble`,
-      mpv_use_own_config: true,
     });
   },
 
-  environment({ configRoot }) {
-    return {
-      VELA_EMBEDDED_LOAD_DELAY_MS: '2000',
-      // Where mpv, and so Vela, looks for the user's mpv.conf.
-      MPV_HOME: path.join(configRoot, 'mpv-home'),
-    };
+  environment() {
+    return { VELA_EMBEDDED_LOAD_DELAY_MS: '2000' };
   },
 
   async cleanup() {
@@ -180,9 +170,9 @@ export default {
         'vela',
         'the player runs inside Vela, not as a program of its own',
       );
-      // The seeded --vo=null is a user option; it must not have won. Nor
-      // have the seeded profiles, whose include says `idle=yes`: with that
-      // mpv would never end at the end of a file.
+      // The seeded --vo=null is a user option; it must not have won. Nor has
+      // the seeded profile, whose include says `idle=yes`: with that mpv
+      // would never end at the end of a file.
       assert.equal(
         await mpv.getProp('options/idle'),
         'once',

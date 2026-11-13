@@ -52,6 +52,8 @@ A scenario can belong to one player with `onlyPlayer: 'embedded'` or
 `SKIP` and not counted; named explicitly, it fails instead.
 `embeddedplay` is the scenario that proves a play really is embedded;
 `playerfallback` is about what happens where it cannot be;
+`embeddedownconfig` plays with a user's mpv.conf that tries to override
+Vela's own options;
 `embeddedlatestart` stages an embedded play that does not start in time
 and checks that the same play carries on in the external player while the
 late one stays out of it.
