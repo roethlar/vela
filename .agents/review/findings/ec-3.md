@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — Vela never opens its window, not even its recovery screen, and this is on every Linux start whether or not the embedded player was chosen. It needs a settings path that is a pipe, a device or a link to one.
 **Status**: In progress
 **Branch**: —
-**Commit**: `d804fc8`, `867a694`
+**Commit**: `d804fc8`, `867a694`, `d66bb7b`
 
 ## Evidence
 
@@ -85,3 +85,45 @@ process's controlling terminal, a writer waiting on a pipe is woken and
 then finds nobody reading. The repair must find out what is at the path
 without opening it for reading, and still read the file it looked at
 rather than whatever is at the path a moment later.
+
+### Repair (round 2), `d66bb7b`
+
+`settings_text` is now two steps, each a function. `regular_file_at` takes
+a handle on whatever is at the path without opening it (`O_PATH`) and
+without following a link, asks the handle what it is, and returns it only
+for a regular file. `text_of` is given that handle and no path: it opens
+the same file through the handle (`/proc/self/fd/N`) and reads it with the
+limit as before. Nothing but a regular file is ever opened for reading, so
+nothing at the other end of a pipe or a terminal is touched; and what is
+read is the file that was looked at, whatever has been put at the path in
+between. If `/proc` is not there the reopen fails, which is "no setting":
+today's start.
+
+Files: `src-tauri/src/player/embedded/startup.rs`,
+`tests/embedded-player.test.mjs` (the finding's declared two).
+
+Guard proof for round 2, run 2026-11-13 at `d66bb7b` in a disposable
+worktree; `cargo +stable test --locked --lib startup` and
+`node --test tests/embedded-player.test.mjs`:
+
+| Injection | Rust | Node |
+| --- | --- | --- |
+| The original defect: a plain read of the path | FAIL, three tests | FAIL |
+| The first repair, which the reviewer reopened: the path opened for reading, then checked | FAIL `looking_at_a_settings_path_does_not_wake_a_writer_waiting_on_a_pipe` | FAIL |
+| The first open is a real open (waits on a pipe) | FAIL, that test and the two-second limit | FAIL |
+| The first open is a real open that does not wait (wakes the writer) | FAIL, that test | FAIL |
+| The handle follows a link | FAIL `a_settings_path_that_is_not_a_regular_file_is_not_read_and_not_waited_for` | FAIL |
+| The handle is not asked what it is | FAIL `the_file_that_was_checked_is_the_file_that_is_read` and the writer test | FAIL |
+| What was opened through the handle is not checked a second time | PASS: it is a second check of something the first already established; only the source-text test holds it | FAIL |
+| The read has no limit | FAIL `no_more_than_one_byte_past_the_limit_is_ever_taken` | FAIL |
+| An over-long file is returned cut short | FAIL, both limit tests | |
+| A file exactly at the limit is refused | FAIL | |
+| A second read appears in the start-up module | | FAIL |
+| Unchanged | PASS (14) | PASS |
+
+Not proven by a test: the terminal case the reviewer demonstrated (a
+terminal opened by a process with none becomes its controlling terminal).
+It needs a process in a session of its own. It is closed by the same
+means as the pipe case, which is tested: nothing but a regular file is
+opened for reading. The reopen also passes `O_NOCTTY`.
+

@@ -1,7 +1,7 @@
 # ec-8: a failed embedded start leaves the marker payload file behind
 
 **Severity**: LOW — a small file of marker times (no credentials) stays in the runtime directory until a later play with markers clears it.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `e66a928`
 
@@ -56,3 +56,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "Failed embedded starts abandon marker payload files". Reviewer's severity: LOW.
+
+### Verification round 1, recorded 2026-11-13 09:03 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d41c-30f1-7eb1-b0d5-0cf2454795c5`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 08:52 UTC, finished 08:57 UTC.
+- Reviewed head `e66a928eda55b107743487560d35468b395f5a2a`, base
+  `9026b4f79b79bd956c4fc0bdbae120781b9309f8` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
