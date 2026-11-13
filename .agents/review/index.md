@@ -23,7 +23,7 @@ candidates, nine admitted, none declined. Record:
 | ec-1 | HIGH     | A window closed while a play is starting leaves that play a pointer to a surface that is gone | `[~]`  | `fffc3bd` | codex/default/standard |
 | ec-2 | HIGH     | A start that times out lets go of a worker that is still running       | `[~]`  | `af4f142`, `d7d850a` | codex/default/standard |
 | ec-3 | MEDIUM   | The settings read at start-up waits forever on a settings path that is not a regular file | `[x]`  | `d804fc8`, `867a694`, `d66bb7b` | codex/default/standard esc:T5(ceiling) |
-| ec-4 | MEDIUM   | An include inside a profile the user selects is applied after Vela's protected options | `[~]`  | `85b38ff` | codex/default/standard |
+| ec-4 | MEDIUM   | An include inside a profile the user selects is applied after Vela's protected options | `[~]`  | `85b38ff`, `f80bf0c`, `1b7b6b4` | codex/default/standard |
 | ec-5 | MEDIUM   | Close can stop the play that replaced the one it was for               | `[x]`  | `2a04402` | codex/default/standard |
 | ec-6 | MEDIUM   | An embedded start that fails after the checks passed fails the play instead of falling back | `[ ]`  |        | codex/default/standard |
 | ec-7 | MEDIUM   | A stream-auth file whose removal fails once is never removed           | `[x]`  | `9026b4f` | codex/default/standard |

@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — the user's file can then set `idle`, after which mpv never ends at the end of a file and the play's final bookkeeping and Continue Playing never run. It needs own-configuration mode, a profile containing an include, and that profile selected in the Advanced options.
 **Status**: In progress
 **Branch**: —
-**Commit**: `85b38ff`
+**Commit**: `85b38ff`, `f80bf0c`, `1b7b6b4`
 
 ## Evidence
 
@@ -81,3 +81,34 @@ own `profile=gpu-hq` can too: a profile of that name in the user's own
 `mpv.conf` is the same profile to mpv, and Vela's line selecting it sits in
 one file with Vela's protected options. No rule about whose line it is can
 be right; the repair makes every option a step of its own.
+
+### Repair (round 2), `f80bf0c` and `1b7b6b4`
+
+`options::steps` now makes every option of a launch a step of its own,
+Vela's as well as the user's, in the order of the list; an option that
+includes a file is that inclusion, as before. There is no longer a rule
+about whose line it is, because none can be right: a profile is whatever
+the user's configuration says it is, whoever selects it. Each step is
+applied by its own call into mpv (`session.rs::configure`, unchanged), so
+whatever an option brings in has been applied before the next one is.
+
+Files: `src-tauri/src/player/embedded/options.rs`; and the E2E scenarios
+`tests/e2e/scenarios/embeddedownconfig.mjs` (new: the reviewer's case),
+`tests/e2e/scenarios/embeddedplay.mjs`, `tests/e2e/README.md`.
+
+Guard proof for round 2, run 2026-11-13 at `ddf475f` in a disposable
+worktree: `cargo +stable test --locked --lib embedded::options`, and the two
+E2E scenarios under the headless compositor against the built library set.
+
+| Injection | Rust | `embeddedownconfig` (the reviewer's case) | `embeddedplay` (a profile the user selects) |
+| --- | --- | --- | --- |
+| The original defect: options share files, split only at an include | FAIL, four tests | FAIL: "Vela's own idle setting stands, whatever the profile Vela selects has been made to include" | FAIL |
+| The first repair, which was reopened: only the user's lines are steps of their own | FAIL: `a_profile_is_never_in_one_file_with_the_options_after_it`, `no_step_holds_more_than_one_option_and_none_is_lost_or_moved`, and the order test | FAIL, the same assertion | PASS, rightly: that case it had closed |
+| Unchanged | PASS (10) | PASS | PASS |
+
+The E2E check committed with `f80bf0c` did not bite for the reopened case:
+with user options standing between Vela's defaults and Vela's protected
+options, the first repair's code passed it. The reviewer's case has nothing
+in the Advanced options. `1b7b6b4` adds that case as its own scenario, and
+the table above is from after it.
+
