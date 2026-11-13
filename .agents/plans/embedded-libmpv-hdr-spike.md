@@ -5,8 +5,9 @@
 **RUN 2026-11-12 on the owner's go** ("perform whatever you need to to do
 the spike"). **Answer: Yes-with-conditions at all three stages** on
 `continuum` (KDE Wayland, AMD/Mesa). Evidence and conditions are in the
-Log at the end of this file. One check is still the owner's: looking at the
-screen (Log, "Not verified"). This was a SPIKE: throwaway prototype code
+Log at the end of this file. The owner confirmed by eye that the embedded
+picture is HDR and that it does not match external mpv's tone-mapping
+(Log, "Owner's visual check"). This was a SPIKE: throwaway prototype code
 outside the shipped app. It changed nothing Vela ships, and it authorizes no
 product work; an embedded player still needs its own approved plan.
 
@@ -316,6 +317,31 @@ reference white.
   AMD/Mesa. NVIDIA, GNOME and X11 are untested.
 - Rendering on a thread of its own. The prototype draws on the UI thread
   and saves/restores the toolkit's EGL state around each frame.
+
+### Owner's visual check — 2026-11-12
+
+Layout: an HTML white band, the embedded player's grey patches directly
+below it, and external mpv's same patches directly below those, column for
+column (`stage2 --compare`, external mpv placed by a KWin script; both
+players on their default tone-mapping, as Vela launches mpv).
+
+- HDR reaches the panel: **yes.** Owner: "yes it seems to be hdr. if I cap
+  the window with spectacle, the brightness of the right strip matches the
+  top, but in the window the right is brighter." (The right-hand patches
+  equal HTML white in an SDR screenshot and exceed it on the display, which
+  is what HDR looks like.)
+- Match with external mpv: **no.** Owner: "it does not match the external
+  mpv window in tone. brightness is close, but the external mpv window is a
+  touch less bright in the last white strip." This agrees with the measured
+  difference between the two renderers under "Conditions and differences
+  found". Agent's reading, not confirmed: "tone" may also mean a colour
+  cast; the embedded greys read back about 2-3 codes high in green
+  (449/452/449).
+- Pointer input over the video: still not verified. No click was logged
+  during this check, and whether one was attempted is not known.
+- The commands under "Not verified" assume the owner's own terminal. From
+  a root session, prefix `./run.sh` and use the full path
+  `/home/michael/dev/vela-spike-libmpv`.
 
 ### What a real implementation must then build
 

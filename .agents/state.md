@@ -263,8 +263,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   window, under GTK3 + WebKitGTK, and inside Tauri 2. Conditions: the
   library draws with mpv's older renderer (tone-mapping differs from
   today's above about 265 nits), and Vela must tag the surface itself.
-  Still open: the owner's look at the screen, pointer input over the video,
-  a real film sample. Next is the owner's ruling on whether to plan the
+  The owner confirmed by eye that it is HDR and that it does not match
+  external mpv: the last white patch is a touch brighter embedded. Still
+  open: pointer input over the video, a real film sample. Next is the owner's ruling on whether to plan the
   embedded player; external mpv stays the shipped player until such a plan
   is approved.
 - Launch marketing drafts are in-repo: GitHub social preview
