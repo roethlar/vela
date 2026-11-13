@@ -175,15 +175,35 @@ fn finish_start(
     })
 }
 
+/// The caller's wait for a play to start has run out. `Err` when that
+/// settles it: the play is given up on. `Ok` when the play had already won
+/// the start: then it IS a started play, whether or not its word that it
+/// started has reached the caller yet, and must be treated as one. (Waiting
+/// a second time for that word, and reporting failure when it was slow,
+/// reported a failed start for a play that then announced itself: the first
+/// repair of ec-2 did that, and was reopened for it.)
+fn waited_out(race: &StartRace) -> Result<(), String> {
+    if race.give_up() {
+        Err("the embedded player did not start in time".to_string())
+    } else {
+        Ok(())
+    }
+}
+
 /// Plays whose thread was still running when Vela stopped waiting for it.
 ///
 /// A thread cannot be made to stop from outside. One that is stuck (in mpv,
 /// in the graphics driver) still holds its surface and its player, and may
 /// still come back. Letting go of its handle would leave it with nothing
 /// that knows it exists (review finding ec-2). So it is kept here until it
-/// has ended: while any is kept no new embedded play starts, and Vela gives
-/// them one more moment as it exits.
-struct Leftovers(Mutex<Vec<(Arc<Shared>, std::thread::JoinHandle<()>)>>);
+/// has finished: while any is kept no new embedded play starts, and Vela
+/// gives them one more moment as it exits.
+///
+/// "Finished" is asked of the thread itself. A flag the thread sets as its
+/// last statement is set before the thread has let go of what it holds
+/// (dropping a play's start request removes files), so joining on the
+/// strength of it can wait, in checks that must not.
+struct Leftovers(Mutex<Vec<std::thread::JoinHandle<()>>>);
 
 /// The leftovers of this run of Vela.
 static LEFTOVERS: Leftovers = Leftovers::new();
@@ -193,30 +213,26 @@ impl Leftovers {
         Leftovers(Mutex::new(Vec::new()))
     }
 
-    fn keep(&self, shared: Arc<Shared>, thread: std::thread::JoinHandle<()>) {
+    fn keep(&self, thread: std::thread::JoinHandle<()>) {
         self.0
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .push((shared, thread));
+            .push(thread);
     }
 
-    /// How many are still running. Those that have ended since the last
-    /// call are let go of.
+    /// How many are still running. Those that have finished since the last
+    /// call are let go of. Never waits for a thread.
     fn still_running(&self) -> usize {
-        let ended: Vec<_>;
-        let running = {
-            let mut kept = self.0.lock().unwrap_or_else(|e| e.into_inner());
-            let (done, running): (Vec<_>, Vec<_>) = std::mem::take(&mut *kept)
-                .into_iter()
-                .partition(|(shared, _)| shared.ended.load(Ordering::SeqCst));
-            ended = done;
-            *kept = running;
-            kept.len()
-        };
-        for (_, thread) in ended {
+        let mut kept = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        let (finished, running): (Vec<_>, Vec<_>) = std::mem::take(&mut *kept)
+            .into_iter()
+            .partition(|thread| thread.is_finished());
+        *kept = running;
+        for thread in finished {
+            // Returns at once: the thread has finished.
             let _ = thread.join();
         }
-        running
+        kept.len()
     }
 
     /// Wait until none is running, for at most `limit`.
@@ -248,7 +264,6 @@ struct Shared {
     /// and by Vela (stop, or the rectangle changed).
     wake: OwnedFd,
     stop: AtomicBool,
-    ended: AtomicBool,
     /// Whether the play started, or its caller stopped waiting first.
     race: StartRace,
     /// The size the page last reported, when the thread has not applied it.
@@ -268,7 +283,6 @@ impl Shared {
             // SAFETY: a descriptor just created and owned by nothing else.
             wake: unsafe { OwnedFd::from_raw_fd(wake) },
             stop: AtomicBool::new(false),
-            ended: AtomicBool::new(false),
             race: StartRace::new(),
             resize_to: Mutex::new(None),
             subsurface: Mutex::new(None),
@@ -626,7 +640,6 @@ impl Session {
                         }
                     }
                 }
-                shared.ended.store(true, Ordering::SeqCst);
             })
             .map_err(|e| format!("couldn't start the embedded player's thread: {e}"))?;
         let session = Session {
@@ -639,18 +652,12 @@ impl Session {
         };
         // On every failure below the session is dropped, which stops the
         // play, waits for it, and keeps it if it will not end (`Drop`).
-        let late = || Err("the embedded player did not start in time".to_string());
         match started.recv_timeout(start_limit) {
             Ok(Ok(())) => Ok(session),
             Ok(Err(reason)) => Err(reason),
-            Err(_) if session.shared.race.give_up() => late(),
-            // It started in the instant the wait ran out; its word that it
-            // did is on its way.
-            Err(_) => match started.recv_timeout(STOP_PATIENCE) {
-                Ok(Ok(())) => Ok(session),
-                Ok(Err(reason)) => Err(reason),
-                Err(_) => late(),
-            },
+            // The wait is over, and whoever settled the start first decides
+            // what the play is. Nothing more is waited for.
+            Err(_) => waited_out(&session.shared.race).map(|()| session),
         }
     }
 
@@ -686,7 +693,6 @@ impl Session {
         let thread_shared = shared.clone();
         let thread = std::thread::spawn(move || {
             body(&|| thread_shared.stop.load(Ordering::SeqCst));
-            thread_shared.ended.store(true, Ordering::SeqCst);
         });
         Session {
             session_id: "test".to_string(),
@@ -714,12 +720,14 @@ impl Session {
         self.shared.stop.load(Ordering::SeqCst)
     }
 
-    /// Whether the play has ended and released everything it held.
+    /// Whether the play has ended and released everything it held: whether
+    /// its thread has finished. Never waits for the thread.
     pub(crate) fn has_ended(&mut self) -> bool {
-        if !self.shared.ended.load(Ordering::SeqCst) {
+        if self.thread.as_ref().is_some_and(|thread| !thread.is_finished()) {
             return false;
         }
         if let Some(thread) = self.thread.take() {
+            // Returns at once: the thread has finished.
             let _ = thread.join();
         }
         true
@@ -775,7 +783,7 @@ impl Drop for Session {
         if self.thread.is_some() && !self.stop_and_wait(self.patience) {
             if let Some(thread) = self.thread.take() {
                 eprintln!("vela: an embedded play did not stop in time and is kept until it does");
-                self.leftovers.keep(self.shared.clone(), thread);
+                self.leftovers.keep(thread);
             }
         }
     }
@@ -958,6 +966,88 @@ mod tests {
         release.store(true, Ordering::SeqCst);
         assert!(kept.wait(Duration::from_secs(5)));
         assert_eq!(kept.still_running(), 0, "and is let go of once it has ended");
+    }
+
+    /// Something a thread holds that takes a while to let go of, as a play's
+    /// start request does (it removes files as it is dropped).
+    struct SlowToLetGo(Duration);
+
+    impl Drop for SlowToLetGo {
+        fn drop(&mut self) {
+            std::thread::sleep(self.0);
+        }
+    }
+
+    // A play's thread has done its last piece of work and is still letting
+    // go of what it held. It has not finished, and asking whether it has
+    // must say so at once rather than wait for it.
+    #[test]
+    fn asking_whether_a_play_has_finished_never_waits_for_it() {
+        let kept = leftovers();
+        let (worked, has_worked) = std::sync::mpsc::channel();
+        let held = SlowToLetGo(Duration::from_millis(600));
+        let play = Session::for_test_running(Duration::ZERO, kept, move |_stop| {
+            let _held = held;
+            let _ = worked.send(());
+            // `_held` is let go of here, slowly, with the work already done.
+        });
+        has_worked.recv().unwrap();
+        // Dropped with no patience at all: the thread goes to the list.
+        drop(play);
+        let began = Instant::now();
+        assert_eq!(kept.still_running(), 1, "still letting go is still running");
+        assert!(!kept.wait(Duration::from_millis(5)));
+        assert!(
+            began.elapsed() < Duration::from_millis(300),
+            "neither question waited for the thread ({:?})",
+            began.elapsed()
+        );
+        assert!(kept.wait(Duration::from_secs(5)), "it does finish");
+        assert_eq!(kept.still_running(), 0);
+    }
+
+    #[test]
+    fn a_play_has_ended_only_once_its_thread_has_finished_and_asking_does_not_wait() {
+        let (worked, has_worked) = std::sync::mpsc::channel();
+        let held = SlowToLetGo(Duration::from_millis(600));
+        let mut play =
+            Session::for_test_running(Duration::from_secs(5), leftovers(), move |_stop| {
+                let _held = held;
+                let _ = worked.send(());
+            });
+        has_worked.recv().unwrap();
+        let began = Instant::now();
+        assert!(!play.has_ended(), "its thread is still letting go");
+        assert!(
+            began.elapsed() < Duration::from_millis(300),
+            "asking did not wait ({:?})",
+            began.elapsed()
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !play.has_ended() {
+            assert!(Instant::now() < deadline, "it does end");
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        assert!(play.has_ended(), "and stays ended");
+    }
+
+    // The caller's wait runs out. Whoever settled the start first decides.
+    #[test]
+    fn a_start_that_was_won_before_the_wait_ran_out_is_a_started_play() {
+        // The play claimed the start; its word has not reached the caller.
+        let race = StartRace::new();
+        assert!(race.claim_started());
+        assert_eq!(waited_out(&race), Ok(()), "a started play, not a failed start");
+        assert!(!race.given_up());
+        // Nobody had claimed anything: the caller gives up, and the play
+        // can no longer start.
+        let race = StartRace::new();
+        assert_eq!(
+            waited_out(&race),
+            Err("the embedded player did not start in time".to_string())
+        );
+        assert!(race.given_up());
+        assert!(!race.claim_started());
     }
 
     #[test]

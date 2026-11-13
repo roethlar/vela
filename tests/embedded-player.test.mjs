@@ -314,9 +314,20 @@ test('a play that outlasts the wait for it neither starts unannounced nor goes u
   }
   // The caller's side of the same decision: it reports "not in time" only
   // if it won; if the play won in the same instant, it is a started play.
+  // It waits once. When that wait runs out, `waited_out` (tested in
+  // session.rs) reads the outcome off the race and nothing else is waited
+  // for: a second wait for the play's word turned a start that had been won
+  // into a reported failure when the word was slow (the first repair;
+  // reopened).
   assert.match(
     session,
-    /match started\.recv_timeout\(start_limit\) \{\s+Ok\(Ok\(\(\)\)\) => Ok\(session\),\s+Ok\(Err\(reason\)\) => Err\(reason\),\s+Err\(_\) if session\.shared\.race\.give_up\(\) => late\(\),/,
+    /match started\.recv_timeout\(start_limit\) \{\s+Ok\(Ok\(\(\)\)\) => Ok\(session\),\s+Ok\(Err\(reason\)\) => Err\(reason\),\s+(?:\/\/[^\n]*\n\s+)*Err\(_\) => waited_out\(&session\.shared\.race\)\.map\(\|\(\)\| session\),\s+\}\s+\}/,
+  );
+  assert.equal(count(shippedSession, 'recv_timeout('), 1, 'one wait for a start, and no second');
+  assert.equal(count(shippedSession, 'waited_out('), 2, 'its definition and that one use');
+  assert.match(
+    session,
+    /fn waited_out\(race: &StartRace\) -> Result<\(\), String> \{\s+if race\.give_up\(\) \{\s+Err\("the embedded player did not start in time"\.to_string\(\)\)\s+\} else \{\s+Ok\(\(\)\)\s+\}\s+\}/,
   );
   assert.equal(count(shippedSession, '.give_up()'), 1);
   // How long that wait is: twenty seconds, in every build a user gets.
@@ -330,10 +341,24 @@ test('a play that outlasts the wait for it neither starts unannounced nor goes u
   // A thread's handle leaves a play in two ways only: joined once the play
   // has ended, or kept when it has not ended in time. Never just dropped.
   assert.equal(count(shippedSession, 'self.thread.take()'), 2);
-  assert.match(session, /if let Some\(thread\) = self\.thread\.take\(\) \{\s+let _ = thread\.join\(\);\s+\}/);
+  // And a thread is only ever joined once it says itself that it has
+  // finished, so that asking about a play never waits for it. (A flag the
+  // thread set as its last statement was set before it had let go of what
+  // it held; the first repair joined on that, and was reopened.)
   assert.match(
     session,
-    /if self\.thread\.is_some\(\) && !self\.stop_and_wait\(self\.patience\) \{\s+if let Some\(thread\) = self\.thread\.take\(\) \{\s+eprintln!\([^)]*\);\s+self\.leftovers\.keep\(self\.shared\.clone\(\), thread\);/,
+    /pub\(crate\) fn has_ended\(&mut self\) -> bool \{\s+if self\.thread\.as_ref\(\)\.is_some_and\(\|thread\| !thread\.is_finished\(\)\) \{\s+return false;\s+\}\s+if let Some\(thread\) = self\.thread\.take\(\) \{\s+(?:\/\/[^\n]*\n\s+)*let _ = thread\.join\(\);\s+\}\s+true\s+\}/,
+  );
+  assert.match(
+    session,
+    /\.partition\(\|thread\| thread\.is_finished\(\)\);\s+\*kept = running;\s+for thread in finished \{\s+(?:\/\/[^\n]*\n\s+)*let _ = thread\.join\(\);\s+\}\s+kept\.len\(\)/,
+  );
+  assert.equal(count(shippedSession, '.join()'), 2, 'those two joins and no other');
+  assert.equal(count(shippedSession, '.is_finished()'), 2);
+  assert.doesNotMatch(shippedSession, /\bended\b\s*[:.]/, 'no flag stands in for the thread having finished');
+  assert.match(
+    session,
+    /if self\.thread\.is_some\(\) && !self\.stop_and_wait\(self\.patience\) \{\s+if let Some\(thread\) = self\.thread\.take\(\) \{\s+eprintln!\([^)]*\);\s+self\.leftovers\.keep\(thread\);/,
   );
   // While one is kept, no embedded play is started next to it; and Vela
   // gives them one more moment as it exits.
