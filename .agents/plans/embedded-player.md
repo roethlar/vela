@@ -1157,7 +1157,9 @@ a user gets are also under "For the owner"):
   the last step) fails that one play with a message, and every later play
   in the run goes to mpv with a notice. D3 says a play is never failed
   over this; redoing a half-started play in the other player from inside
-  the launch was judged riskier than one failed play.
+  the launch was judged riskier than one failed play. (Overturned by the
+  review, finding `ec-6`, fixed at `31eacad`: the play now carries on in
+  mpv from inside the same launch.)
 - The embedded player has no autocrop yet (Slice 5) and, with "use my own
   mpv configuration" on, applies the user's `mpv.conf` but not their
   scripts folder, per-script option files or key bindings: mpv would load
@@ -1225,10 +1227,10 @@ Each can be overturned; none has shipped to users.
    (Slice 3.) It applies your `mpv.conf`. It does not load your mpv
    scripts folder, per-script option files or key bindings, which the
    external player does.
-6. **If the embedded player fails to start a film, that one play fails**
-   with a message, and the rest of the session plays in mpv. (Slice 3.)
-   The agreed rule was "never fail the play"; this is the one case where
-   it does, once.
+6. (Withdrawn 2026-11-13.) This item said that a film the embedded player
+   failed to start would fail once, against the rule "never fail the
+   play". The Slice 3 review did not accept that (`ec-6`), and it is
+   fixed: the film now carries on in mpv, with the one line that says why.
 7. **Packaging the embedded player's library adds about 33 MB to every
    Linux package**, for a player that stays hidden until you have looked
    at it. It is in the approved plan (Slice 3), so the agent does it; it
@@ -1326,3 +1328,52 @@ Not done, and known:
 - The owner's by-eye comparison (above, "From Slice 4"). It is the
   slice's acceptance and the agent cannot do it.
 - codex review of the slice: dispatched, pending.
+
+### 2026-11-13 — the review findings of Slices 3 and 4, as fixed so far
+
+State of each is in `.agents/review/index.md`; what was done and how it
+was proven is in `.agents/review/findings/<id>.md`. In short:
+
+- `ec-1` (a window closed while a play starts): the play's surface is
+  now made on the window's own thread, in the call that fetches the
+  window's surface; the pointer cannot leave that thread, and the build
+  fails if that is changed. Verified by codex.
+- `ec-2` (a start that outlasts the wait for it): the start is settled
+  once by whoever gets there first; a play that lost is never loaded or
+  announced; a thread that will not end is kept, not dropped. Reopened
+  once (a second wait; a thread joined before it had finished); second
+  repair `7fa009b`, with codex.
+- `ec-3` (the settings read at start-up): the path is looked at without
+  being opened, and only a regular file is read, up to 8 MiB. Reopened
+  once (opening a pipe or a terminal is itself an act); verified.
+- `ec-4` (a profile's include applied after Vela's options): every
+  option of a launch is applied on its own. Reopened once (Vela's own
+  `gpu-hq` line is the user's profile too); verified.
+- `ec-5` (a late Close stopping the next play), `ec-7` (a stream-auth
+  file forgotten after a failed removal), `ec-8` (a marker file left by a
+  failed start): fixed and verified.
+- `ec-6` (a failed embedded start failing the play): the play carries on
+  in mpv. With codex.
+- `ec-9` (one registry per play): the compositor's globals are bound once
+  per run. Reopened once (plays must not share an event queue); verified.
+- `hd-1` (an old description of the display replacing a newer one):
+  every piece is matched to the question it answers. With codex.
+- `hd-3`, `hd-2`: in progress.
+
+New E2E scenarios, all for the embedded venue: `embeddedlatestart` (a
+play that does not start in time carries on in mpv, and the late one
+stays out of it) and `embeddedownconfig` (a user's mpv.conf against
+Vela's own options).
+
+One mistake to record: `9026b4f` (`ec-7`) broke an unrelated source-text
+test, and `main` had one failing check on GitHub from that commit until
+`9878129` (seven commits, 2026-11-13 08:50 to 09:09 UTC). The agent had
+run only the tests it had changed. The code was not wrong; the test held
+two things together by their distance in a file. Since then the whole
+check is run before every commit.
+
+From this point the work also uses several agents at once (the owner
+switched that on for the session on 2026-11-13): to measure mpv's
+behaviour before a design depends on it, and to attack a change before
+it goes to codex. The review of record is still codex.
+

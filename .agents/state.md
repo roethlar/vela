@@ -23,16 +23,25 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     E2E under a headless Wayland compositor (`npm run e2e -- --embedded`)
     and by runs on `continuum`'s desktop. A Close button and nothing else.
     Its codex review returned NINE findings (`ec-1` to `ec-9`), all
-    admitted, being fixed one commit each. NOT yet done in Slice 3:
-    packaging the library into the Linux packages.
-  - Slice 4 (HDR) landed at `e8db400`; its codex review is pending. Its
-    acceptance is a by-eye comparison only the owner can make.
+    admitted and all fixed, one commit each; codex has verified seven, and
+    `ec-2` (second repair) and `ec-6` are waiting for their verification.
+    NOT yet done in Slice 3: packaging the library into the Linux packages.
+  - Slice 4 (HDR) landed at `e8db400`. Its codex review returned THREE
+    findings (`hd-1` to `hd-3`): `hd-1` is fixed and with codex; `hd-3`
+    then `hd-2` are being fixed (both are about how the drawing thread
+    tells mpv its HDR target). The slice's acceptance is a by-eye
+    comparison only the owner can make.
   - Then Slice 5 (controls, cropping), 6 (parity). The owner's by-eye
     checks and the switch-on (Settings control, release notes, version
     bump) are NOT the agent's to do.
   - Active review loop: see `.agents/review/index.md`. One finding
     (`ps-2`) is with the owner after four reopens
     (`.agents/review/ps-2.contested.md`).
+  - On 2026-11-13 the owner switched on multi-agent workflows for the
+    session that is doing this work. The agent reads that as the approval
+    the 2026-08-20 constraint below asks for before more than one Claude
+    session is started, for that session only. Reviews of record still go
+    to codex, and no agent is cut short.
   Next in the queue after this plan:
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
   Rules the owner set for this run (decision `.agents/decisions.md`
@@ -263,6 +272,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
     precondition (120 cards instead of 60). None of those commits touches
     the page; this is the race above, not a regression.
+- E2E `continuetv` fails now and then with "mpv: property unavailable"
+  (2026-11-13: 2 runs of 4 at `31eacad`, and 1 of 6 on a build of
+  `85b38ff`, so it does not come from the work between the two). The
+  scenario's `finishNaturally` seeks as soon as mpv names its file, which
+  can be before the file can be sought in. A race in the scenario, not in
+  Vela; unfixed.
 - The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
   They reproduced during the 1.0.59 full Linux run in `continueon`,
   `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.
