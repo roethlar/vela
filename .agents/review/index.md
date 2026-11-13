@@ -8,8 +8,8 @@ admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
-| lm-1 | MEDIUM   | The CI decode check passes when a decoder produces nothing            | `[~]`  | `ec97d6e` | codex/default/standard |
-| lm-2 | MEDIUM   | A set missing its licence texts passes the "every file" integrity check | `[~]` reopened r1 | `7ca7e75` | codex/default/standard |
+| lm-1 | MEDIUM   | The CI decode check passes when a decoder produces nothing            | `[x]`  | `ec97d6e` | codex/default/standard |
+| lm-2 | MEDIUM   | A set missing its licence texts passes the "every file" integrity check | `[~]` reopened r1, repaired | `7ca7e75`, `9cb85ea` | codex/default/standard |
 | lm-3 | MEDIUM   | The pin test stays green when an unverified archive reaches the compiler | `[x]`  | `1e2b953`, `29026c2` | codex/default/standard |
 
 **Embedded player PLAN review recorded 2026-11-12:** openreview codex

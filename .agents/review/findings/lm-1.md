@@ -2,7 +2,7 @@
 
 **Severity**: MEDIUM — the CI job's proof that the shipped decoders work can
 pass while a decoder produces nothing.
-**Status**: In progress (fix landed; verification pending)
+**Status**: Verified
 **Branch**: —
 **Commit**: `ec97d6e`
 
@@ -103,4 +103,18 @@ None.
 ## Reviewer comments
 
 Generation pass: `.agents/review/codereview-2026-11-13-libmpv-set.md`.
-Verification pass: pending.
+Verification pass, recorded 2026-11-13 05:50 UTC (this record is committed):
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly (gpt-6-astra @ max per the
+  host's codex config). Thread `01a1d36e-8e85-7370-b9e6-8fb608c2bc47`, in
+  the disposable worktree at the head SHA, with the built set available
+  read-only; ends in `turn.completed`; 15 tool calls; finished 05:47 UTC.
+- Reviewed head `ec97d6ea1309d3fff7adb161a0c082da69710f06`, base
+  `7ca7e75745655af38eafbb02b36f16eed74cce48` (both equal the pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted; the finding is
+closed.
