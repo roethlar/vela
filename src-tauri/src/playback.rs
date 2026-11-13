@@ -1134,6 +1134,37 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
+    fn a_notice_the_player_did_not_take_is_not_reported_shown() {
+        let (listener, socket) = notice_listener("notice-refused");
+        let (count, on_shown) = counting();
+        let (closed, when_closed) = std::sync::mpsc::channel();
+        // A player that goes away during the wait: it accepts the connection
+        // and closes it at once.
+        let player = std::thread::spawn(move || {
+            drop(listener.accept().expect("the notice thread connects"));
+            drop(listener);
+            let _ = closed.send(());
+        });
+        spawn_osd_notice(
+            socket.clone(),
+            Arc::new(AtomicBool::new(false)),
+            "A line".to_string(),
+            Duration::from_millis(150),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        when_closed
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the player closes its side");
+        player.join().expect("the stand-in player ends");
+        // Well past the wait: the write has been tried, and failed.
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(count.load(Ordering::SeqCst), 0, "a failed write tells nobody");
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[cfg(unix)]
+    #[test]
     fn a_notice_for_a_player_that_cannot_be_reached_is_not_reported_shown() {
         let dir = crate::player::launch::private_runtime_dir().expect("the private directory");
         let nowhere = dir.join(format!("notice-nowhere-{}.sock", std::process::id()));
