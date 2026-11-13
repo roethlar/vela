@@ -26,24 +26,103 @@ const backend = `${commands}\n${playback}`;
 const page = fs.readFileSync("src/routes/+page.svelte", "utf8");
 const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
 
-// The part of a Rust file that is compiled into the app: everything before its
+// The index of the brace that closes the one at `open`. Reads Rust well enough
+// to ignore the braces that are not code: those in comments, in string
+// literals (plain, byte and raw) and in character literals.
+function matchingBrace(text, open) {
+  assert.equal(text[open], "{", "matching starts at an opening brace");
+  const isWord = (c) => c !== undefined && /[A-Za-z0-9_]/.test(c);
+  let depth = 0;
+  let i = open;
+  while (i < text.length) {
+    const c = text[i];
+    if (text.startsWith("//", i)) {
+      const end = text.indexOf("\n", i);
+      if (end === -1) break;
+      i = end + 1;
+    } else if (text.startsWith("/*", i)) {
+      // Block comments nest in Rust.
+      let level = 1;
+      i += 2;
+      while (i < text.length && level > 0) {
+        if (text.startsWith("/*", i)) {
+          level += 1;
+          i += 2;
+        } else if (text.startsWith("*/", i)) {
+          level -= 1;
+          i += 2;
+        } else {
+          i += 1;
+        }
+      }
+    } else if (c === '"') {
+      // A plain or byte string: a backslash takes the next character with it.
+      i += 1;
+      while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
+      i += 1;
+    } else if (
+      c === "r" &&
+      /^r#*"/.test(text.slice(i, i + 64)) &&
+      !isWord(text[i - 1] === "b" ? text[i - 2] : text[i - 1])
+    ) {
+      // A raw string ends at a quote followed by as many `#` as opened it;
+      // nothing inside it is an escape.
+      const hashes = /^r(#*)"/.exec(text.slice(i, i + 64))[1];
+      const end = text.indexOf(`"${hashes}`, i + 2 + hashes.length);
+      assert.notEqual(end, -1, "a raw string must end");
+      i = end + 1 + hashes.length;
+    } else if (c === "'") {
+      if (text[i + 1] === "\\") {
+        // An escaped character: '\n', '\'', '\\', '\u{7f}'.
+        const end = text.indexOf("'", i + 3);
+        assert.notEqual(end, -1, "a character literal must end");
+        i = end + 1;
+      } else if (text[i + 2] === "'") {
+        i += 3; // 'x', including '{' and '"'
+      } else if (text[i + 3] === "'" && text.codePointAt(i + 1) > 0xffff) {
+        i += 4; // one character outside the basic plane
+      } else {
+        i += 1; // a lifetime or a loop label, not a literal
+      }
+    } else {
+      if (c === "{") depth += 1;
+      if (c === "}") {
+        depth -= 1;
+        if (depth === 0) return i;
+      }
+      i += 1;
+    }
+  }
+  assert.fail("no closing brace");
+}
+
+// The part of a Rust file that is compiled into the app: all of it except its
 // test module, without comment lines.
 //
-// That is only "everything" if the test module is the last thing in the file.
-// So it must be: from the line after `mod tests {` to the end of the file, the
-// one line that starts in the first column is the brace that closes the
-// module. Code placed after the tests, or tests moved above the code, would
-// otherwise be compiled into the app and never looked at here.
+// Where the module sits and how the code around it is laid out do not matter:
+// the module is cut out from its `mod tests {` to the brace that closes it,
+// and everything else is returned, before it and after it. (An earlier version
+// took what came before the module and required the module to be last, judged
+// by indentation. Indented code after the module was compiled into the app and
+// read by nothing: review finding ps-2, twice.)
 function shippedCode(source, file) {
-  const parts = source.replace(/\r\n/g, "\n").split("\n#[cfg(test)]\nmod tests {\n");
-  assert.equal(parts.length, 2, `${file} must have exactly one test module`);
-  const [head, tests] = parts;
-  assert.deepEqual(
-    tests.split("\n").filter((line) => /^\S/.test(line)),
-    ["}"],
-    `${file}: the test module must end the file, with nothing after it`,
+  const text = source.replace(/\r\n/g, "\n");
+  const marker = "\n#[cfg(test)]\nmod tests {";
+  const at = text.indexOf(marker);
+  assert.notEqual(at, -1, `${file} must have a test module`);
+  assert.equal(text.indexOf(marker, at + 1), -1, `${file} must have exactly one test module`);
+  const close = matchingBrace(text, at + marker.length - 1);
+  const code = `${text.slice(0, at)}\n${text.slice(close + 1)}`;
+  // Two checks that the module ends where it was taken to end. A test left
+  // outside it means the end was put too early; no function left at all means
+  // the module took the code with it.
+  assert.doesNotMatch(
+    code,
+    /^\s*#\[(tokio::)?test\b/m,
+    `${file}: a test was found outside the test module`,
   );
-  return head
+  assert.match(code, /\bfn \w+\s*[(<]/, `${file}: no code compiled into the app was found`);
+  return code
     .split("\n")
     .filter((line) => !/^\s*\/\//.test(line))
     .join("\n");
@@ -297,6 +376,84 @@ test("Tauri emits a Windows-compatible artwork protocol origin", async () => {
     clearMocks();
     delete globalThis.window;
   }
+});
+
+test("brace matching reads Rust strings, characters and comments", () => {
+  // `shippedCode` below depends on finding where a test module ends. Each
+  // case is one way a brace can appear in Rust without being code; `z }` is a
+  // later brace the match must not run on to.
+  const matched = (rust) => {
+    const open = rust.indexOf("{");
+    return rust.slice(open, matchingBrace(rust, open) + 1);
+  };
+  assert.equal(matched("m { a { b } c } z }"), "{ a { b } c }");
+  assert.equal(matched('m { "}" } z }'), '{ "}" }', "a brace in a string");
+  assert.equal(matched('m { "\\"}" } z }'), '{ "\\"}" }', "after an escaped quote in a string");
+  assert.equal(matched('m { "\\\\" } z }'), '{ "\\\\" }', "a string that ends in a backslash");
+  assert.equal(matched("m { '}' } z }"), "{ '}' }", "a brace character");
+  assert.equal(matched("m { '\\'' '}' } z }"), "{ '\\'' '}' }", "after an escaped quote character");
+  assert.equal(matched("m { '\\u{7d}' } z }"), "{ '\\u{7d}' }", "braces of a unicode escape");
+  assert.equal(matched("m { '\"' } z }"), "{ '\"' }", "a quote character opens no string");
+  assert.equal(matched("m { // }\n } z }"), "{ // }\n }", "a brace in a line comment");
+  assert.equal(
+    matched("m { /* } /* } */ } */ } z }"),
+    "{ /* } /* } */ } */ }",
+    "braces in nested block comments",
+  );
+  assert.equal(matched('m { r"}" } z }'), '{ r"}" }', "a raw string");
+  assert.equal(matched('m { r#"a"}"# } z }'), '{ r#"a"}"# }', "a raw string with a quote in it");
+  assert.equal(matched('m { r"\\" } z }'), '{ r"\\" }', "a raw string has no escapes");
+  assert.equal(matched('m { br#"}"# b"}" } z }'), '{ br#"}"# b"}" }', "byte strings");
+  assert.equal(
+    matched("m { fn f<'a>(x: &'a str) -> &'a str { x } } z }"),
+    "{ fn f<'a>(x: &'a str) -> &'a str { x } }",
+    "a lifetime is not a character",
+  );
+  assert.throws(() => matched("m { a "), /no closing brace/);
+  assert.throws(() => matched("m { // }"), /no closing brace/);
+});
+
+test("the reader of shipped Rust code takes everything but the test module", () => {
+  const tests = [
+    "",
+    "#[cfg(test)]",
+    "mod tests {",
+    "    use super::*;",
+    "    #[test]",
+    "    fn inside_the_tests() {",
+    '        assert_eq!(format!("{{}}"), "}");',
+    "        let _closing = '}'; // }",
+    "    }",
+    "}",
+    "",
+  ].join("\n");
+  const before = "fn before() -> &'static str {\n    \"a\"\n}\n";
+  const read = (source) => shippedCode(source, "sample.rs");
+
+  // Code before the module, and code after it in the first column.
+  const around = read(`${before}${tests}fn after() {}\n`);
+  assert.match(around, /fn before\(\)/);
+  assert.match(around, /fn after\(\)/);
+  assert.doesNotMatch(around, /inside_the_tests/, "the module itself is left out");
+  // Code after the module that does not start in the first column. This is
+  // the layout that went unread (review finding ps-2).
+  const indented = read(`${before}${tests}    fn indented_after(spec: &PlaySpec) {\n        spec.http_headers.len();\n    }\n`);
+  assert.match(indented, /fn indented_after/);
+  assert.match(indented, /spec\.http_headers\.len\(\);/);
+  // A module above the code it tests.
+  assert.match(read(`use std::io;\n${tests}fn below() {}\n`), /fn below\(\)/);
+  // Comment lines are dropped; code lines are not.
+  const commented = read(`${before}// fn in_a_comment() {}\n${tests}`);
+  assert.doesNotMatch(commented, /in_a_comment/);
+
+  // What must be refused rather than read as "nothing to check".
+  assert.throws(() => read(`use std::io;\n${tests}`), /no code compiled into the app was found/);
+  assert.throws(() => read(before), /must have a test module/);
+  assert.throws(() => read(`${before}${tests}${tests}`), /exactly one test module/);
+  assert.throws(
+    () => read(`${before}${tests}#[test]\nfn outside() {}\n`),
+    /a test was found outside the test module/,
+  );
 });
 
 test("mpv authentication stays in a private include until its exact child is reaped", () => {

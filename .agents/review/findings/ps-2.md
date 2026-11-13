@@ -241,3 +241,26 @@ commit `b84baeb` removed the "shipped part must not be empty" check on the
 argument that no layout could reach it. Indenting the code that follows
 the test module reaches it. The reviewer had asked for that check in
 round 1.
+
+### Repair (round 3)
+
+`shippedCode` no longer depends on how a file is laid out. It finds the
+test module's opening brace, finds the brace that closes it, cuts that
+span out and returns everything else, whether it stands before the module
+or after it and however it is indented. Finding the closing brace means
+reading Rust well enough to skip the braces that are not code, so the test
+file now has `matchingBrace`, which skips line comments, nested block
+comments, plain, byte and raw strings, and character literals (and does
+not take a lifetime for one).
+
+Two checks guard the cut itself: a `#[test]` left outside the module means
+its end was put too early, and no function left at all means the module
+took the code with it. The second is the check `b84baeb` wrongly removed.
+
+Both helpers have tests of their own in the same file, on small samples:
+one case per way a brace can appear without being code, and for
+`shippedCode` code before the module, after it in the first column, after
+it indented (the layout that went unread), a module above its code, and
+the four things it must refuse.
+
+File: `tests/config-integrity.test.mjs` only.
