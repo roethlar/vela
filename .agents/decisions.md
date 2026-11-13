@@ -2014,12 +2014,9 @@ The agent's pick, which is the rule:
 1. Vela's own code stays MIT, on every platform, with no relicensing.
 2. mpv's library is only ever loaded as a separate dynamic library, never
    statically linked into Vela.
-3. Where Vela ships the library itself (platforms with no system copy:
-   Windows, macOS, iOS/iPadOS), it ships an LGPL build of mpv and FFmpeg
-   as separate dynamic libraries, with their licence texts; never a GPL
-   build.
-4. Where the system provides the library (Linux), Vela loads it at run
-   time and ships nothing.
+3. Vela ships the library itself on every platform (see the next entry),
+   always as an LGPL build of mpv and FFmpeg, as separate dynamic
+   libraries, with their licence texts; never a GPL build.
 
 Why this one: MIT code may be combined with an LGPL library that stays a
 separate, replaceable dynamic library, and that is the arrangement apps
@@ -2028,10 +2025,32 @@ per-platform licence and no change to anything Vela has published. This is
 the agent's judgment, not legal advice, and the owner has accepted it as
 final.
 
-How to apply: an agent that meets a licensing question applies rules 1-4
+How to apply: an agent that meets a licensing question applies rules 1-3
 without asking. Only a concrete case the rules cannot cover is escalated,
 naming the specific blocker. The existing GPL note for the bundled stock
 `autocrop.lua` (loaded by mpv, not linked into Vela) is unaffected.
 
 Supersedes:
 The two same-day entries this replaces (commits `dc19cd2`, `2eb8abd`).
+
+## 2026-11-12 - The embedded player uses a libmpv that Vela ships, on every platform
+
+Status: OWNER RULING (2026-11-12), decision D7 of
+`.agents/plans/embedded-player.md`.
+
+Decision:
+Told the Linux embedded player would load whichever mpv library the
+system had installed, the owner ruled: "no. that means vela will work
+differently on linux machines with different mpv libraries. what do we
+need to do to ship the library with the code on all platforms".
+
+So Vela builds one pinned library set and ships it in every package,
+Linux included; the embedded player never falls back to a system libmpv.
+The external player is unaffected and keeps using the machine's `mpv`.
+
+Agent's reading (not the owner's words):
+- GPU drivers, the compositor's libraries and the audio client library
+  are still the machine's own; only the player library and its decoders
+  are shipped.
+- Vela thereby takes on security updates for the shipped decoders; the
+  plan adds that to the release gates.

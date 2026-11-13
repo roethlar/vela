@@ -61,15 +61,18 @@ Decisions:
   1. Vela's own code stays MIT. No relicensing, now or for any platform.
   2. mpv's library is only ever loaded as a separate dynamic library,
      never statically linked into Vela.
-  3. Where Vela ships that library itself (any platform with no system
-     copy: Windows, macOS, iOS/iPadOS), it ships an LGPL build of mpv and
-     of FFmpeg, as separate dynamic libraries, with their licence texts.
-     Never a GPL build.
-  4. Where the system provides the library (Linux), Vela loads it at run
-     time and ships nothing.
+  3. Vela ships that library itself on every platform (D7), always as an
+     LGPL build of mpv and of FFmpeg, as separate dynamic libraries, with
+     their licence texts. Never a GPL build.
   **Do not raise licensing with the owner again.** An agent that meets a
-  licensing question applies rules 1-4; only a case those rules cannot
+  licensing question applies rules 1-3; only a case those rules cannot
   cover is escalated, and then with the specific blocker, not the topic.
+- **D7. Ship the library: RULED 2026-11-12.** Told the Linux backend would
+  load the system's library, the owner answered: "no. that means vela will
+  work differently on linux machines with different mpv libraries. what do
+  we need to do to ship the library with the code on all platforms". So
+  Vela ships its own pinned libmpv on every platform, Linux included (see
+  "libmpv is shipped with Vela on every platform").
 - **D5. Scope of the first embedded release.** ASSUMED: Linux on
   Wayland only (the one platform the spike proved). macOS, Windows and iOS
   each get their own later plan on top of the seam this plan builds.
@@ -211,19 +214,71 @@ the path as a script option instead (`script-opts=vela_markers-payload=`)
 and have `vela-markers.lua` read the script option first and the
 environment variable second. That keeps one script for both players.
 
-### Loading libmpv
+### libmpv is shipped with Vela on every platform (D7)
 
-Load the system library at run time (`libloading`, new dependency; soname
-`libmpv.so.2`), with a hand-written FFI table for the functions used:
-`mpv_create`, `mpv_set_option_string`, `mpv_initialize`,
-`mpv_command`, `mpv_set_property_string`, `mpv_get_property`,
-`mpv_wait_event`, `mpv_set_wakeup_callback`, `mpv_terminate_destroy`,
-`mpv_error_string`, `mpv_free`, `mpv_client_api_version`,
-`mpv_render_context_create`, `_set_update_callback`, `_update`,
-`_render`, `_report_swap`, `_free`. No bindgen, no link-time dependency:
-Vela must still start, and the external player must still work, on a
-machine without the library. Refuse a library whose
-`mpv_client_api_version` major is not 2.
+Owner ruling 2026-11-12 (D7, below): the embedded player must not depend
+on whichever mpv library a machine happens to have. Vela builds one pinned
+libmpv and ships it inside every package, Linux included. The EXTERNAL
+player is unchanged and still uses the machine's `mpv` program.
+
+What that requires:
+
+- **A reproducible build of the library set**, per target (Linux x86_64
+  first; later Windows x64, macOS universal, iOS), from pinned, checksummed
+  source releases: mpv (configured `-Dgpl=false -Dlibmpv=true
+  -Dcplayer=false`), FFmpeg (default configuration, i.e. without
+  `--enable-gpl` and without `--enable-nonfree`), libplacebo, libass with
+  FreeType/FriBidi/HarfBuzz, a Lua that mpv supports (the bundled scripts
+  need it), and the decoders FFmpeg needs that are not in its tree (dav1d
+  for AV1). All as separate shared libraries with an `$ORIGIN` run path so
+  they find each other; none statically linked into Vela. Licence texts of
+  each ship alongside (rule of `.agents/decisions.md`, "Licensing is
+  settled").
+- Verified 2026-11-12 against mpv v0.41.0's `meson.build`: `gpl=false`
+  removes only CD audio, DVB, DVD navigation, JACK, OSS, libcaca, the old
+  Direct3D 9 output and mpv's own X11 window code. Wayland, EGL/OpenGL,
+  VA-API, Lua, Direct3D 11 and the render API are unaffected. Nothing the
+  embedded player uses is lost (ASSUMPTION A10 confirms by building it).
+- **System pieces that are NOT shipped** and are loaded from the machine,
+  because they must match its GPU driver and compositor: libc, libEGL /
+  libGL (Mesa or the vendor driver), libva and its driver, libwayland,
+  libdrm, the audio client library (PipeWire/PulseAudio/ALSA). Hardware
+  decoding therefore still depends on the machine's drivers; everything
+  else about decoding and rendering is identical everywhere.
+- **Portability on Linux:** build on the oldest distribution Vela supports
+  so the libraries run on newer ones (glibc baseline). Decide the baseline
+  in Slice 0 and record it; the Tauri Linux bundles and the Arch package
+  must both carry the same binaries.
+- **Where it lives:** a `libmpv/` directory under Tauri's resource
+  directory (next to `mpv-scripts/`), installed by the deb/rpm/AppImage
+  bundles and by `packaging/arch/PKGBUILD`.
+- **Loading:** `libloading` (new dependency) opens the shipped
+  `libmpv.so.2` by absolute path from the resource directory, with a
+  hand-written FFI table for the functions used: `mpv_create`,
+  `mpv_set_option_string`, `mpv_initialize`, `mpv_command`,
+  `mpv_set_property_string`, `mpv_get_property`, `mpv_wait_event`,
+  `mpv_set_wakeup_callback`, `mpv_terminate_destroy`,
+  `mpv_error_string`, `mpv_free`, `mpv_client_api_version`,
+  `mpv_render_context_create`, `_set_update_callback`, `_update`,
+  `_render`, `_report_swap`, `_free`. No bindgen and no link-time
+  dependency. **There is no fallback to a system libmpv**: if the shipped
+  library is missing or fails to load, embedded is unavailable and D3
+  applies. A debug/development build may point at another library through
+  an environment variable so developers need not build the set locally;
+  release builds ignore it.
+- **CI and release:** a workflow job per target builds the set, caches it
+  by the hash of the pinned versions, and publishes it as a build input;
+  the release workflow consumes that artifact. macOS and Windows sign the
+  shipped libraries with the existing signing setup when those platforms
+  get their backends.
+- **Upkeep (the standing cost):** Vela now owns security updates for
+  FFmpeg and the rest of the set. Add the pinned versions to the
+  dependency-policy checks (`tests/dependency-policy.test.mjs` is the
+  existing pattern) and a documented bump procedure; a known-vulnerable
+  pinned decoder is a release blocker in the same way the npm and Cargo
+  audits are.
+- Size: expect tens of megabytes per package (the system's libavcodec
+  alone is 21 MB on `continuum`); measure in Slice 0.
 
 `setlocale(LC_NUMERIC, "C")` must be in effect before `mpv_create`
 (spike finding: libmpv refuses to start after GTK initialises otherwise).
@@ -275,8 +330,8 @@ Slice 3 and record it):
   setting is ASSUMPTION A2, probed in Slice 0.
 
 Embedded is **available** only when all hold: Linux; a Wayland GDK
-display; `wl_subcompositor` and `wp_viewporter` present; libmpv loads; an
-EGL config exists. `wp_color_manager_v1` is not required (SDR-only
+display; `wl_subcompositor` and `wp_viewporter` present; the shipped
+libmpv loads; an EGL config exists. `wp_color_manager_v1` is not required (SDR-only
 without it). Otherwise it is unavailable and D3 applies.
 
 ### Frontend: the player view
@@ -358,6 +413,14 @@ player.
   first `loadfile`, and after the file ends it emits `end-file` with
   `reason: eof` and then shuts down (the orchestrator's 2026-11-12 probe
   showed the first half; the second half is the reviewer's report).
+- A10. The library set builds with `gpl=false` / default-configured
+  FFmpeg and, loaded by the spike program in place of the system library,
+  plays the test clips with VA-API hardware decoding, HDR tagging, Lua
+  scripts and the IPC socket, on `continuum`.
+- A11. The same binaries, built on the chosen baseline distribution, load
+  and play on a second, different distribution (the Ubuntu E2E VM is the
+  available one; it is aarch64, so this needs an aarch64 build or another
+  x86_64 host: say which was used).
 - A8. Stopping one in-process play and starting the next (quit, destroy,
   create) is leak-free and takes well under a second; needed for
   auto-advance and step-down.
@@ -397,12 +460,22 @@ then.
 
 ### Slice 0 — probes (throwaway code outside the repo; log results here)
 
-Extend the spike programs in `~/dev/vela-spike-libmpv/` to answer A1-A9.
+Extend the spike programs in `~/dev/vela-spike-libmpv/` to answer A1-A11.
 For each: what was run, the observed result, Yes/No. A1 No changes the
 whole design (the trackers would need a second, in-process event source):
 stop and re-plan. A2 No: stop and ask the owner. A6 No: the plan
 continues, and the log states that embedded behaviour has no automated
 end-to-end proof, only unit tests and manual acceptance.
+
+### Slice 0b — the library build (repo code: build scripts and CI only)
+
+Lands the build of the shipped library set before any player code uses
+it: `scripts/build-libmpv.sh` (pinned versions and checksums in one data
+file), the CI job, the dependency-policy guard for the pins, and
+`docs/development.md` on how a developer gets the set. Nothing in the app
+loads it yet. Guard: a test that the pinned-versions file, the script and
+the workflow name the same versions (source-text pattern), red-proved by
+changing one of them.
 
 ### Slice 1 — the seam, no behaviour change
 
@@ -436,7 +509,11 @@ end-to-end proof, only unit tests and manual acceptance.
 
 ### Slice 3 — embedded core on Linux/Wayland (SDR, no controls)
 
-- libmpv loader and FFI table; version check; locale.
+- libmpv loader (shipped library only, by absolute resource path) and
+  FFI table; version check; locale. Bundle configuration:
+  `tauri.conf.json` resources and `packaging/arch/PKGBUILD` install the
+  `libmpv/` set. Test: the loader refuses a path outside the resource
+  directory in a release build (red-proof by allowing a system fallback).
 - `embedded::launch`: handle creation, options from the plan, private IPC
   socket, `loadfile`; shutdown path; `PlayerHandle::Embedded`.
 - Wayland subsurface, EGL, render thread, fractional scale, resize.
@@ -486,12 +563,11 @@ end-to-end proof, only unit tests and manual acceptance.
   scenario listed for one player has no counterpart for the other and no
   recorded exemption.
 - Only now: the Settings control (D2), the default (D1), release notes,
-  `docs/usage.md`, `docs/development.md` (build needs nothing new at link
-  time; run-time needs `libmpv.so.2`), PKGBUILD/deb/rpm metadata
-  (`libmpv2` where the distribution splits it), one `scripts/bump.sh`.
+  `docs/usage.md`, `docs/development.md`, one `scripts/bump.sh`.
 - One paragraph in `README.md`'s licence section and `docs/usage.md`: the
-  experimental embedded player loads the mpv library installed on the
-  system. No licence file or licence field changes (D4).
+  experimental embedded player uses the mpv library shipped with Vela;
+  the licence texts of the shipped libraries are included in the package.
+  No change to Vela's own licence file or fields (D4).
 
 ## Non-goals
 
@@ -513,7 +589,7 @@ end-to-end proof, only unit tests and manual acceptance.
 - Two players double the acceptance surface for every later playback
   feature (owner accepted, 2026-11-12).
 - In-process playback means an mpv crash is a Vela crash.
-- Licence: closed by D4; later platform plans apply its rules 1-4.
+- Licence: closed by D4; later platform plans apply its rules 1-3.
 
 ## Verification before claiming completion
 

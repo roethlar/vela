@@ -285,7 +285,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   assumed under the owner's standing instruction, not ruled. D4 is
   closed: Vela stays MIT and mpv is only ever a separate dynamic library
   (`.agents/decisions.md`, "Licensing is settled"); do not raise licensing
-  with the owner again. The plan now
+  with the owner again. D7 is ruled: Vela ships its own pinned libmpv
+  on every platform, Linux included; the plan gained a library-build
+  slice and two probes for it. The plan now
   waits only for the owner's go.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
