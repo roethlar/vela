@@ -1,5 +1,17 @@
 # Review status
 
+**Embedded player Slice 4 review, 2026-11-13 (open):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `74f44b6..e8db400`: `findings`. Three candidates, three
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-13-embedded-hdr.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| hd-1 | MEDIUM   | An old description of the output can replace a newer one               | `[ ]`  |        | codex/default/standard |
+| hd-2 | MEDIUM   | A profile mpv applies by itself when a file loads can undo the HDR target | `[ ]`  |        | codex/default/standard |
+| hd-3 | MEDIUM   | The drawing thread waits for mpv each time it sets the HDR target      | `[ ]`  |        | codex/default/standard |
+
 **Embedded player Slice 3 review, 2026-11-13 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `053cb36..0a63799` with `a02db80`: `findings`. Nine
@@ -11,7 +23,7 @@ candidates, nine admitted, none declined. Record:
 | ec-1 | HIGH     | A window closed while a play is starting leaves that play a pointer to a surface that is gone | `[ ]`  |        | codex/default/standard |
 | ec-2 | HIGH     | A start that times out lets go of a worker that is still running       | `[ ]`  |        | codex/default/standard |
 | ec-3 | MEDIUM   | The settings read at start-up waits forever on a settings path that is not a regular file | `[~]`  | `d804fc8`, `867a694` | codex/default/standard |
-| ec-4 | MEDIUM   | An include inside a profile the user selects is applied after Vela's protected options | `[ ]`  |        | codex/default/standard |
+| ec-4 | MEDIUM   | An include inside a profile the user selects is applied after Vela's protected options | `[~]`  | `85b38ff` | codex/default/standard |
 | ec-5 | MEDIUM   | Close can stop the play that replaced the one it was for               | `[~]`  | `2a04402` | codex/default/standard |
 | ec-6 | MEDIUM   | An embedded start that fails after the checks passed fails the play instead of falling back | `[ ]`  |        | codex/default/standard |
 | ec-7 | MEDIUM   | A stream-auth file whose removal fails once is never removed           | `[~]`  | `9026b4f` | codex/default/standard |
