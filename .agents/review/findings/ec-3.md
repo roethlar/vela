@@ -60,3 +60,28 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "The new startup read bypasses nonregular-file protection". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-13 08:49 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d40e-a3bc-7f42-b99b-6047d5fbb660`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 08:38 UTC, finished 08:46 UTC.
+- Reviewed head `867a694837b09f5ffcbc708bc8acd916b65752a8`, base
+  `5ef4b5366a9346667930be77b123a2ef59196cfe` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/player/embedded/startup.rs:158 — Nonregular paths are rejected only after opening them. Probing the exact reader against a terminal device in a fresh session acquired a controlling terminal; its subsequent hangup terminated the process with SIGHUP. Checking the type before opening prevented both effects. A FIFO with a waiting writer also produced EPIPE when this reader opened and immediately closed it. These effects occur before player selection, including for external-player users. Reject nonregular objects without a data open, retain protection against path replacement, and guard these cases. The recorded guards failed under injection and passed after restoration, but do not cover this remaining defect.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. The comment is correct. The fix opened the path for reading and
+only then asked what it had opened; for a regular file that is free, but
+for other things the open itself does something: a terminal becomes the
+process's controlling terminal, a writer waiting on a pipe is woken and
+then finds nobody reading. The repair must find out what is at the path
+without opening it for reading, and still read the file it looked at
+rather than whatever is at the path a moment later.
