@@ -1472,4 +1472,3 @@ agent at the fix's content before it was committed:
 Not run, and why: a change of the display in the middle of a play on a
 real HDR desktop (it needs the display to change; the owner's checks for
 Slice 4 cover it).
-
