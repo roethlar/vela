@@ -124,3 +124,26 @@ None.
 ## Reviewer comments
 
 Generation pass: `.agents/review/codereview-2026-11-13-player-seam.md`.
+
+### Verification round 1, recorded 2026-11-13 06:37 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly; the host's codex config
+  resolves to gpt-6-astra @ max. Thread
+  `01a1d396-5ee8-74c2-9d30-04ac4f39db6b`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 06:26 UTC, finished 06:33 UTC. Routing: T1
+  no sensitive path in the diff, T2 severity LOW, T3 the recorded proof
+  re-run by the orchestrator agrees.
+- Reviewed head `94d067ed1344f1dd840f9354d177ac5204fbfc13`, base
+  `1d7c405ae2ef88d5b46ef497e27375e005e3e96b` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/player/external.rs:574 — command_envs omits inherited environment variables. Exporting the joined headers using std::env::set_var inside write_header_include left all 11 JavaScript checks and 33 Rust tests passing; a stub player confirmed it inherited the synthetic header. The JavaScript lists miss this because that helper uses the headers parameter. Check the child's effective environment.
+  - tests/config-integrity.test.mjs:33 — The split assertion does not establish that the test module ends the file. Moving external.rs production items after its test module made shippedCode return an empty section while both suites passed. Other files supply every expected match, hiding the lost coverage. Reject empty production sections and ensure production code after test modules is scanned.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. Both comments are correct and were reproduced before repair (see
+"Repair" below).
