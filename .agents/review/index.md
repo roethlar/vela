@@ -14,8 +14,8 @@ candidates, nine admitted, none declined. Record:
 | ec-4 | MEDIUM   | An include inside a profile the user selects is applied after Vela's protected options | `[ ]`  |        | codex/default/standard |
 | ec-5 | MEDIUM   | Close can stop the play that replaced the one it was for               | `[~]`  | `2a04402` | codex/default/standard |
 | ec-6 | MEDIUM   | An embedded start that fails after the checks passed fails the play instead of falling back | `[ ]`  |        | codex/default/standard |
-| ec-7 | MEDIUM   | A stream-auth file whose removal fails once is never removed           | `[ ]`  |        | codex/default/standard |
-| ec-8 | LOW      | A failed embedded start leaves the marker payload file behind          | `[ ]`  |        | codex/default/standard |
+| ec-7 | MEDIUM   | A stream-auth file whose removal fails once is never removed           | `[~]`  | `9026b4f` | codex/default/standard |
+| ec-8 | LOW      | A failed embedded start leaves the marker payload file behind          | `[~]`  | `e66a928` | codex/default/standard |
 | ec-9 | LOW      | Every embedded play adds a registry the compositor keeps for the life of Vela | `[ ]`  |        | codex/default/standard |
 
 **Embedded player Slice 2 review, 2026-11-13 (closed):** codereview codex
