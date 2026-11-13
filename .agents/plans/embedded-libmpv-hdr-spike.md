@@ -429,6 +429,15 @@ on the same timestamp, 1280x720 window, screenshot statistics out of 255:
   tone-mapping. A brighter display needs less, so the gap may be smaller
   there (assumption, not tested).
 
+### Is there a newer library that fixes this? — checked 2026-11-12
+
+No. `continuum` has mpv 0.41.0, the newest Arch package. Upstream's newest
+release is 0.42.0 (2026-11-05); its one render-API change is a Direct3D 11
+backend, which is Windows-only. Upstream `master`'s `render.h` lists
+exactly three backends: Direct3D 11, OpenGL, software. There is no Vulkan,
+libplacebo or `gpu-next` render API in any release or on `master`. Whether
+the new Direct3D 11 backend draws with the newer renderer was not checked.
+
 ### What a real implementation must then build
 
 Rough list, unsized: a libmpv binding and render thread; the Wayland
