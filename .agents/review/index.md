@@ -914,12 +914,12 @@ dispatches pinned (base = ec94715, head = a055556) for the batch pass, and
 
 | ID | Severity | Impact (one line) | Status | Fix commit |
 |----|----------|-------------------|--------|------------|
-| cir-1 | MEDIUM | Pre-split recovery can promise preserved connections, then require every server to be reauthorized | `[ ]` | pending |
+| cir-1 | MEDIUM | Pre-split recovery can promise preserved connections, then require every server to be reauthorized | resolved by owner; review waived | `e08ce44` |
 | dlr-s8-4 | MEDIUM | Package collection can republish stale installers | `[x]` | `bff2905` |
 | dlr-s8-3 | MEDIUM | Live Jellyfin can fail on Home before a real library renders | `[x]` | `5532e93`, guard `8366b4f` |
 | dlr-s8-2 | MEDIUM | E2E reuses a skewed WebKit driver despite an exact packaged match | `[x]` | `ec7c43e` |
 | dlr-s8-1 | MEDIUM | Local package scripts can install/build with an unpinned Node/npm pair | `[x]` | `4cba5db` |
-| fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[~]` | pending |
+| fwer-1 | HIGH | Failed watch edit can blank/lose the loaded grid and manufacture a view failure | `[x]` | `b5c170a` |
 | dlr-s1-1 | MEDIUM | Windows release cannot run the direct npm.cmd version assertion | `[x]` | `adc0104` |
 | lrs-1 | MEDIUM | Empty-Home redirect's navEpoch bump suppresses the refresh failure banner; user lands in a stale library silently | `[x]` | see log |
 | lrs-2 | MEDIUM | Refresh case 5 passes with the content-leg navEpoch gate removed (loadMore reads live state) | `[x]` | see log |

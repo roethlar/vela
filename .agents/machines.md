@@ -97,10 +97,11 @@ portable and may at most point here.
   (Ubuntu 26.04 LTS aarch64, 12 CPU; OS re-verified 2026-07-15; provisioned
   with rustup, tauri-driver, Xvfb, bsdtar, webkit2gtk-4.1-dev, vendored arm64
   WebKitWebDriver, debug binary built). See the Linux VM section below.
-- The mac clone has a `vm` remote. The push policy lives in `.agents/push-policy.md`
-  (`ask` until 2026-11-12, `always` since). Corrected 2026-10-24: the Mac's
-  `~/Dev/vela` has only `origin` (magneto Gitea) and `github`, with no `vm`
-  remote. Reach the VM with the git-bundle-plus-`scp` route (for example
+- The Mac's `~/Dev/vela` has only `origin` (magneto Gitea) and `github`, with
+  no `vm` remote (observed 2026-10-24; the older note that it had one was
+  pruned 2026-11-12). The push policy lives in `.agents/push-policy.md`
+  (`ask` until 2026-11-12, `always` since). Reach the VM with the
+  git-bundle-plus-`scp` route (for example
   `.agents/plans/remove-sveltekit.md`, Host constraints). To run E2E without pushing, `scp` the
   changed files into `~/dev/vela` and verify by checksum before running — no
   `git push`, no `git checkout -- .` on the VM's tree (that has silently
@@ -256,18 +257,12 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
   installer exited successfully, and both file metadata and the uninstall
   registration report 1.0.0. Vela was not running before the silent upgrade,
   so no process needed to be stopped or relaunched.
-- Re-observed locally on 2026-10-23. The toolchain has changed since the
-  2026-07-20 record, so the native-build claim above no longer holds:
+- Re-observed locally on 2026-10-23; the toolchain had changed since the
+  2026-07-20 record:
   - Windows Server 2025 Standard, build 26100, PowerShell 7.6.7.
-  - **No Visual Studio Build Tools:** no `vswhere`, and no Visual Studio
-    install directory. Cargo check, clippy and test, and native packaging,
-    cannot link here until the Build Tools are reinstalled. The per-user
-    Vela at the path above is still present.
+  - The per-user Vela at the path above is still present.
   - Node 26.12.1 is installed host-wide from the official MSI
-    (`winget install OpenJS.NodeJS`), with its bundled npm 11.20.0. No
-    npm 12 is installed globally, so the toolchain check (`engines.npm`
-    `>=12`) fails here. Run npm through `npx -y npm@12.0.2` (CI's baseline)
-    instead, or put a scratch-prefix npm 12 first on `PATH` for the check.
+    (`winget install OpenJS.NodeJS`), with its bundled npm 11.20.0.
   - rustup is installed (`winget install Rustlang.Rustup`) with
     stable-x86_64-pc-windows-msvc only; 1.89.0 is not installed.
   - This clone has `core.autocrlf=true`, from the system gitconfig
@@ -286,8 +281,9 @@ Recorded and verified 2026-07-20 through `ssh michael@netwatch-01`.
     - `github` is `https://github.com/roethlar/vela`.
     Host `q` and its q:3000 Gitea are retired (owner, 2026-10-24). Use
     `GIT_TERMINAL_PROMPT=0 GCM_INTERACTIVE=never` for unattended Gitea calls.
-- Re-observed locally on 2026-11-02; two of the 2026-10-23 facts above are
-  stale:
+- Re-observed locally on 2026-11-02. These two observations replace the
+  2026-10-23 ones they made stale (no Build Tools; no global npm 12), which
+  were pruned on 2026-11-12:
   - Visual Studio Build Tools 2026 (18.11.2, found by `vswhere`) are
     installed again. `cargo +stable check --locked` compiles and links
     (rustup 1.29.2, stable 1.99.1), so the Cargo gates run here;
@@ -360,14 +356,14 @@ Recorded and verified 2026-11-12, locally on the host.
   `packaging/arch/` to `dist/`, so an older package left there (1.0.61)
   is republished beside the new one; remove stale packages before relying
   on `dist/`.
-- Vela 1.0.61-1 is installed system-wide as the native pacman package, built
-  from `be82ca6` with `npm ci` then `scripts/build.sh` (release Rust build
-  about 80 seconds) and installed with `pacman -U
-  packaging/arch/vela-1.0.61-1-x86_64.pkg.tar.zst`. Runtime deps present:
+- Vela is installed system-wide as the native pacman package: 1.0.63-1 as of
+  `aaa01c1` (`pacman -Q vela`), which replaced the 1.0.61-1 built from
+  `be82ca6`. The recipe is `npm ci`, then `scripts/build.sh` (release Rust
+  build about 80 seconds), then `pacman -U
+  packaging/arch/vela-<version>-1-x86_64.pkg.tar.zst`. Runtime deps present:
   webkit2gtk-4.1 2.54.2, libsoup3 3.8.1, mpv 0.41.0. `ldd /usr/bin/vela`
   resolves every library and `desktop-file-validate` accepts the desktop
-  entry. The app was not launched during that session; first run and server
-  sign-in are unverified. Remove with `sudo pacman -R vela`.
+  entry (both re-run against 1.0.63-1). Remove with `sudo pacman -R vela`.
 - E2E venue since 2026-11-12: the owner installed `xorg-server-xvfb` and
   `tauri-driver` (`cargo install tauri-driver --locked`, in
   `~/.cargo/bin`); `ffmpeg`, `bsdtar`, `curl` and `mpv` were already
@@ -518,9 +514,10 @@ Recorded 2026-07-13; OS/toolchain re-verified 2026-07-15.
   but no current AMD64 runtime venue was available.
 
 - The E2E suite (`npm run e2e`) is Linux-only and runs here, not on the macOS
-  dev box: `michael@192.168.64.5`, clone at `~/dev/vela`, reachable from the
-  dev box as the `vm` git remote (`receive.denyCurrentBranch=updateInstead`, so
-  a plain `git push vm main` updates its working tree).
+  dev box: `michael@192.168.64.5`, clone at `~/dev/vela`. That clone accepts
+  a push into its checked-out branch
+  (`receive.denyCurrentBranch=updateInstead`), but the Mac no longer has the
+  `vm` git remote that used it (macOS dev host section, 2026-10-24).
 - **`cargo` is on the LOGIN shell PATH only** (`~/.cargo/bin`). A plain
   `ssh michael@192.168.64.5 'cd ~/dev/vela && npm run e2e'` gets a non-login
   shell and dies in the Tauri build with `failed to run 'cargo metadata'

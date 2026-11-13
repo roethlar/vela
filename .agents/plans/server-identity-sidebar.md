@@ -2,9 +2,9 @@
 
 ## Status
 
-**APPROVED 2026-11-12; implementation in progress.** Owner go, verbatim, in
+**APPROVED 2026-11-12; IMPLEMENTED in 1.0.63.** Owner go, verbatim, in
 answer to "Server-logo plan: go or not?": "go". All four slices are
-implemented and pushed (`343f270`, `62b85e2`). **OWNER-CONFIRMED 2026-11-12** in
+implemented (`343f270`, `62b85e2`). **OWNER-CONFIRMED 2026-11-12** in
 the installed 1.0.63 on `continuum`: "logos are good". No gate remains open. Gate G1 passed: shown the three drawings, the owner
 answered "those logos are fine."
 
@@ -40,9 +40,9 @@ Owner rulings already given (2026-11-12), verbatim:
   differentiate." Slice 4 below implements it; it is part of this plan, not
   a follow-up.
 
-Open, not yet ruled:
+No ruling remains open:
 - **G1 (visual acceptance of the drawings).** A gate inside Slice 1, not a
-  pre-approval ruling.
+  pre-approval ruling. Passed 2026-11-12 (above; implementation log).
 
 
 ## Problem

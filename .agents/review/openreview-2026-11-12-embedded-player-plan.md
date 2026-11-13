@@ -4,8 +4,8 @@ Outcome: openreview codex (gpt-6-astra @ max, grade not declared; inline,
 session-only) over `c692305..cf35ddf`: **acceptable_with_changes**.
 Material changes: a startup-safe idle policy for the embedded player;
 session-scoped player-view lifecycle events; allow-listed bundled-script
-actions for skip and manual autocrop. None is adopted yet: each waits for
-the owner's ruling.
+actions for skip and manual autocrop. All three were adopted on 2026-11-12
+(Disposition, below).
 
 ## Dispatch record
 

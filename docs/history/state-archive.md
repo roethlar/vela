@@ -4,6 +4,134 @@ Entries rotated verbatim out of `.agents/state.md` when they stopped being
 live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-11-12 (drift pass — twelve landed entries, v1.0.63)
+
+Context for readers: twelve `## Now` entries had landed and had no queued work
+left of their own. They rotate here verbatim, in their original `## Now`
+order, and the caveats they state (for example the untested dnf package list)
+travel with them. Two exceptions to verbatim, per the 2026-07-11 ruling that
+push state is never recorded in these files: one push-status phrase in the
+server identity marks entry and one in the npm audit gate entry were deleted
+rather than copied. The two pending items these entries mention stay tracked
+where they live: the E2E VM's Node re-alignment in `.agents/machines.md`, and
+the `pagefail` failure in `.agents/state.md` (Blockers). Checked before
+rotation, at `aaa01c1`: GitHub CI run 41564348672 and the runs on `343f270`
+and `62b85e2` concluded `success`. The last entry's closing claim was
+falsified by then: `git ls-remote github` lists no `ci/release-code-signing`
+branch, and the clone this sweep ran in has no local one (other clones were
+not checked).
+
+- Server identity marks, 2026-11-12, `343f270` + `62b85e2` (1.0.63; plan
+  `.agents/plans/server-identity-sidebar.md`; decision 2026-11-12). Every
+  place a server name is shown now carries a Plex/Jellyfin/Emby mark or the
+  kind in words; Server Playlists is a flat list that collapses when empty;
+  Emby's Experimental label is in Settings only. 23 red-proofs,
+  `npm run check` (93 pass) and 7 targeted E2E scenarios pass on
+  `continuum`, which is now a working E2E venue (`.agents/machines.md`).
+  CI green. Full E2E on `continuum`: 37/39, with `uimotion` fixed
+  afterwards and `pagefail` failing independently of this work (Blockers).
+  Owner accepted the result in the installed 1.0.63 on 2026-11-12: "logos
+  are good".
+- Push policy is `always` since 2026-11-12 (owner; `.agents/push-policy.md`):
+  push after each commit without asking. History rewrites still need a go.
+- npm audit gate moved to `--audit-level=moderate`, 2026-11-02 (decision
+  `.agents/decisions.md` 2026-11-02). `main` had failed npm audit since
+  2026-09-18 on one low advisory, deepmerge GHSA-gcqx-w48m-w2h4
+  (CVE-2026-93753), reported four times up the chain through
+  vite-plugin-svelte, kit and adapter-static. No patched deepmerge exists, the
+  newest vite-plugin-svelte (7.3.1) still depends on it, and so does the
+  `remove-sveltekit` branch, so neither the Kit 3 bump `npm audit fix --force`
+  offers nor the SvelteKit removal clears it. The forced bump was tried on
+  2026-11-02, broke the build (SvelteKit 3 drops `svelte.config.js`), left all
+  four findings, and was reverted. VulnCheck rejected the CVE on 2026-11-02
+  after a maintainer-side dispute; the GitHub advisory is not yet withdrawn.
+  CI, the release workflow, `docs/development.md` and
+  `.agents/repo-guidance.md` now run `npm audit --audit-level=moderate`.
+  Verified on netwatch-01 (Node 26.12.1/npm 12.0.2): that command exits 0 on
+  the committed lock while plain `npm audit` still prints the 4 low findings.
+  GitHub CI run 41564348672 at `f156f14` passed every
+  job, Frontend audit step included: the first green `main` run since the
+  2026-08-08 one noted below.
+- GitHub and Gitea histories reconciled, 2026-10-24. GitHub `main` (the
+  2026-10-23 Node, npm and Cargo security work and the SvelteKit plans) and the
+  Gitea copy at `http://magneto:3001/michael/vela.git` (owner work to
+  2026-10-03, head `d67bc4d`: the toolchain range, AVFoundation-first macOS
+  audio for 1.0.61, the signed macOS wrapper, Linux prerequisite checks) had
+  diverged from `1bd738e`. One merge commit joins them, with no history
+  rewrite. Conflicts were resolved by intent: the toolchain per the amended
+  2026-10-03 decision (next bullet); `Cargo.lock` keeps the newer of each
+  crate (the 2026-10-23 versions below supersede Gitea's h2 0.4.16, rustls
+  0.23.45 and rustls-webpki 0.103.15); `package-lock.json` was regenerated with
+  npm 12.0.2 from GitHub's audited lock, so devalue 5.9.4, vite 8.3.5 and
+  source-map-js 1.2.2 all hold. The magneto Gitea is the canonical `origin`;
+  host `q` (q:3000) is retired (`.agents/repo-guidance.md`, Remotes & Sync).
+- JS toolchain is range-checked with a security floor (decision
+  `.agents/decisions.md` 2026-10-03, amended 2026-10-24):
+  `scripts/check-js-toolchain.mjs` accepts any Node in `engines.node`
+  (`>=26.12.1 <27`; the lower bound excludes Node 26 releases before the
+  October 2026 security release) and any npm in `engines.npm` (`>=12`);
+  `packageManager` is gone. CI/release build on a fixed baseline, Node 26.12.1
+  (`.node-version`) / npm 12.0.2 (four `npm install --global` sites). Node
+  only builds and tests Vela; the shipped app runs no Node, so no end user was
+  exposed. The Linux E2E VM's user-local Node 26.5.0 is now below the floor;
+  see the Pending note in `.agents/machines.md`.
+- Node tests are line-ending-agnostic, 2026-10-24. Five tests failed on a
+  Windows `core.autocrlf=true` checkout because their patterns spell line
+  breaks as `\n`. `tests/dependency-policy.test.mjs`,
+  `tests/live-release-safety.test.mjs` and `tests/release-workflow.test.mjs`
+  now normalize CRLF to LF when they read source. No `.gitattributes` rule was
+  added: pinning LF would change the bytes every Windows checkout builds from,
+  CI's included (`scripts/build.ps1`, `.github/scripts/azure-sign.ps1`,
+  `packaging/arch/PKGBUILD` among them), which is code-like and would need a
+  plan. Each of the 14 newline-dependent assertions in those files was
+  red-proved separately in both a CRLF and an LF checkout and restored green.
+  Test-only; nothing shipped changes.
+- Rust lockfile refresh, 2026-10-23. CI on `main` went red after the 2026-08-08
+  green run. The causes were new upstream advisories and a new stable lint, not
+  repo changes. `cargo update -p` moved async-trait 0.1.89 -> 0.1.92, which
+  resolves clippy 1.99's `double_must_use` in its generated code (19 hits at
+  `src/source/mod.rs:844`). It also moved h2 0.4.15 -> 0.4.20 (RUSTSEC-2026-0258),
+  rustls 0.23.42 -> 0.23.46 (RUSTSEC-2026-0348, -0349 and two more), and
+  rustls-webpki 0.103.13 -> 0.103.16, and added syn 3.0.9 for async-trait. Every
+  new version's MSRV is <= 1.71, within the 1.89 floor. Only `Cargo.lock`
+  changed. The Rust gates could not run on the Windows authoring host that day
+  (no MSVC build tools then; see `.agents/machines.md`), so the GitHub CI run
+  on this commit is their verification. The npm audit gate that stayed red
+  afterwards is covered by the 2026-11-02 audit-threshold bullet above.
+- The npm lockfile got a non-breaking `npm audit fix` on 2026-10-23, with no
+  package.json change. It fixed the high advisories in devalue (5.9.4), vite
+  (8.3.5, with rolldown 1.2.15), and source-map-js (1.2.2).
+- 2026-08-20 explicit local signed-build path is implemented at
+  `scripts/build-signed-macos.sh`: macOS-only, Keychain-identity based, loads
+  sibling `Certificates` API metadata without reading `.p12` passwords, fails
+  closed on partial/unsafe credentials, delegates compilation to `build.sh`,
+  then independently checks DMG/app Developer ID signatures, staple,
+  Gatekeeper, and both universal architectures. Hermetic guards cover the
+  success and pre-build refusal paths; removing only `spctl` failed its guard
+  for the exact missing assessment, restored green. Real Apple submission and
+  artifact evidence are machine-specific in `.agents/machines.md`.
+- The 2026-08-05 README refresh split the old monolith: README.md is now
+  end-user-facing with new real-library screenshots (`docs/images/vela-*.png`,
+  server name scrubbed to "Plex"); deep user reference moved to
+  `docs/usage.md`, build/dev/architecture to `docs/development.md`. The
+  2026-07-25 transcoding-statement guards in `tests/transcoding-ui.test.mjs`
+  were repointed from README.md to docs/usage.md with owner approval.
+- 2026-10-03 build-health pass on an Arch-family x86_64 host:
+  `scripts/build.sh` now checks Linux system packages (pacman/apt/dnf) and
+  offers to install them (`--install-deps`; no terminal => prints the command
+  and stops); the dnf package list is untested (assumption). The E2E driver
+  fetch uses Launchpad's permanent URL after the archive pool 404'd the pinned
+  2.52.3 package. `devalue` 5.9.4 and `rustls` 0.23.45 clear the then-open
+  advisories. On that host the full verification set, E2E 39/39 (driver 2.52.3
+  against system WebKitGTK 2.52.6), and the Arch package build passed. Nothing
+  here was exercised on macOS or Windows; `scripts/build.ps1` has no
+  prerequisite check.
+- Release code signing merged at `b9c6199` (2026-08-07) shipped in 1.0.60.
+  The wiring detail and durable tauri-cli signing facts live in
+  `docs/history/state-archive.md` (2026-08-08 rotation). The merged
+  `ci/release-code-signing` branch still exists locally and on `github`;
+  deleting it is owner-gated.
+
 ## Rotated 2026-10-24 (GitHub/Gitea reconciliation — toolchain entries merged)
 
 Context for readers: GitHub `main` and the Gitea copy diverged at `1bd738e`.

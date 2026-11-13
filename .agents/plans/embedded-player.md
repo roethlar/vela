@@ -3,7 +3,7 @@
 ## Status
 
 **DRAFT 2026-11-12. NOT APPROVED. No implementation may start, including
-Slice 0's probes.** Every decision is ruled (D1, D4) or ASSUMED under the
+Slice 0's probes.** Every decision is ruled (D1, D4, D7) or ASSUMED under the
 owner's standing instruction (D2, D3, D5, D6; see below). The plan now
 needs only the owner's explicit go.
 

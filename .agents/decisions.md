@@ -1937,9 +1937,9 @@ Wayland, AMD/Mesa) HDR survives embedding at all three stages, bare
 window, GTK3 + WebKitGTK, and Tauri 2, with conditions; the main one is
 that libmpv's render API uses the older `vo=gpu` renderer, whose
 tone-mapping differs from today's `gpu-next` above about 265 nits. The
-owner's visual check is still open. Record:
-`.agents/plans/embedded-libmpv-hdr-spike.md`, Log. The status above is
-unchanged: external mpv stays the shipped player and no product code is
+owner's visual check followed the same day (Log, "Owner's visual check").
+Record: `.agents/plans/embedded-libmpv-hdr-spike.md`, Log. The status above
+is unchanged: external mpv stays the shipped player and no product code is
 authorized until an embedded-player plan is approved.
 
 ## 2026-11-12 - Vela keeps both players: embedded libmpv is added, external mpv stays

@@ -2,7 +2,7 @@
 
 ## Status
 
-**IMPLEMENTED 2026-11-12 at `bf1b1c3` on `main` (1.0.62), unpushed.
+**IMPLEMENTED 2026-11-12 at `bf1b1c3` on `main` (1.0.62).
 Windows acceptance steps 1 and 3 are NOT done. Awaiting owner acceptance.**
 
 Owner go, conditional, verbatim: "you can do a review with agy Gemini 4

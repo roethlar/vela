@@ -2,7 +2,7 @@
 
 ## Status
 
-**IMPLEMENTED 2026-11-12 on `main` (unpushed) on the owner's explicit go.
+**IMPLEMENTED 2026-11-12 on `main` on the owner's explicit go.
 Awaiting owner confirmation.**
 
 The owner approved the plan after the D1 ruling below, verbatim: "go".
