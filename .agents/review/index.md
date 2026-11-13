@@ -1,5 +1,17 @@
 # Review status
 
+**Embedded player Slice 0b review, 2026-11-13 (ACTIVE):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `5f1d9b6..b19d7d1`: `findings`. Three candidates, three
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-13-libmpv-set.md`.
+
+| ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
+|------|----------|-----------------------------------------------------------------------|--------|--------|----------|
+| lm-1 | MEDIUM   | The CI decode check passes when a decoder produces nothing            | `[ ]`  |        | codex/default/standard |
+| lm-2 | MEDIUM   | A set missing its licence texts passes the "every file" integrity check | `[ ]`  |        | codex/default/standard |
+| lm-3 | MEDIUM   | The pin test stays green when an unverified archive reaches the compiler | `[ ]`  |        | codex/default/standard |
+
 **Embedded player PLAN review recorded 2026-11-12:** openreview codex
 (gpt-6-astra @ max, grade not declared) over `c692305..cf35ddf`:
 `acceptable_with_changes`. Three plan findings admitted (ep-1 HIGH, ep-2
