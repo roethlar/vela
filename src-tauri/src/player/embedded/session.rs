@@ -27,17 +27,6 @@ use super::options::Step;
 use super::surface::{Guest, VideoSurface};
 use crate::player::launch::HeaderInclude;
 
-/// The window's Wayland connection and surface, as raw pointers GTK owns.
-#[derive(Clone, Copy)]
-pub(crate) struct WindowHandles {
-    pub(crate) wl_display: *mut c_void,
-    pub(crate) wl_surface: *mut c_void,
-}
-
-// The pointers are used through libwayland, which is thread-safe, and only
-// while the window they belong to exists (see `Session::stop_and_wait`).
-unsafe impl Send for WindowHandles {}
-
 /// Where the video is, in the window's own units, relative to the window.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct Rect {
@@ -84,8 +73,6 @@ pub(crate) struct Start {
     pub(crate) guest: Arc<Guest>,
     /// The playback session this play belongs to.
     pub(crate) session_id: String,
-    pub(crate) window: WindowHandles,
-    pub(crate) rect: Rect,
     /// The user's own mpv configuration files, when they asked for them.
     /// Applied before `steps`, so Vela's protected options still win.
     pub(crate) own_config: Vec<PathBuf>,
@@ -280,23 +267,18 @@ fn configure(player: &Player, start: &Start) -> Result<(), String> {
     Ok(())
 }
 
-fn set_up(start: &Start, shared: &Arc<Shared>) -> Result<Live, String> {
-    // SAFETY: `start.window` holds the live surface of Vela's window, which
-    // outlives this play (`Session::stop_and_wait`), on the connection
-    // `start.guest` joined.
-    let mut surface = unsafe {
-        VideoSurface::create(
-            &start.guest,
-            start.window.wl_surface,
-            start.rect.width,
-            start.rect.height,
-        )
-    }?;
+/// Build a play around `surface`, which the window's thread made for it
+/// (`VideoSurface::create`). Nothing here touches Vela's window.
+fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Result<Live, String> {
+    // The waiting the window's thread was spared: learn the surface's scale.
+    surface.settle()?;
     let (width, height) = surface.buffer_size();
-    // SAFETY: the same display, and a surface that `Live` drops after the
-    // window that draws into it.
-    let window =
-        unsafe { egl::Window::create(start.window.wl_display, surface.wl_surface(), width, height) }?;
+    // SAFETY: the connection the surface is on, which lives as long as the
+    // process, and a surface that `Live` drops after the window that draws
+    // into it.
+    let window = unsafe {
+        egl::Window::create(start.guest.display().0, surface.wl_surface(), width, height)
+    }?;
     // Something to show from the first moment: black, not whatever the
     // compositor has behind the window.
     window.show_black();
@@ -433,9 +415,9 @@ pub(crate) struct Session {
 }
 
 impl Session {
-    /// Start a play and wait until mpv has been given its file, or until
-    /// something on the way there failed.
-    pub(crate) fn start(mut start: Start) -> Result<Self, String> {
+    /// Start a play on `surface` and wait until mpv has been given its file,
+    /// or until something on the way there failed.
+    pub(crate) fn start(mut start: Start, surface: VideoSurface) -> Result<Self, String> {
         let shared = Shared::new()?;
         let header_include = start.header_include.take();
         let session_id = std::mem::take(&mut start.session_id);
@@ -445,7 +427,7 @@ impl Session {
             .name("vela-embedded-player".into())
             .spawn(move || {
                 let shared = thread_shared;
-                match set_up(&start, &shared) {
+                match set_up(&start, surface, &shared) {
                     Err(reason) => {
                         // Whatever was built on the way has been dropped
                         // again; the window's thread must not keep a handle

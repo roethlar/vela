@@ -211,13 +211,13 @@ test("the window's Wayland connection is joined once for the whole run, never pe
   const shippedSurface = code(surface.slice(0, surface.indexOf('#[cfg(test)]\nmod tests')));
   assert.equal(count(shippedSurface, 'get_registry('), 1, 'one place asks for a registry');
   assert.equal(count(shippedSurface, 'from_foreign_display('), 1, 'one place joins the connection');
-  const join = methodBody(surface, '    pub(crate) unsafe fn join(wl_display: *mut c_void) -> Result<Self, String> {', 'Guest::join');
+  const join = methodBody(surface, '    pub(crate) unsafe fn join(display: WlDisplay) -> Result<Self, String> {', 'Guest::join');
   assert.ok(join.includes('Backend::from_foreign_display(') && join.includes('.get_registry('));
   // That place is reached once per process: from the availability check,
   // whose answer is kept.
   assert.equal(count(code(host), 'Guest::join('), 1);
   const check = methodBody(host, '    fn check(app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {', 'Host::check');
-  assert.ok(check.includes('Guest::join(handles.wl_display)'));
+  assert.ok(check.includes('Guest::join(display)'));
   assert.equal(count(code(host), 'Self::check('), 1);
   assert.match(host, /self\.checked\.get_or_init\(\|\| Self::check\(app\)\)\.clone\(\)/);
   assert.match(host, /checked: OnceLock<Result<Ready, EmbeddedUnavailable>>,/);
@@ -230,7 +230,7 @@ test("the window's Wayland connection is joined once for the whole run, never pe
   const create = surface.slice(surface.indexOf('    pub(crate) unsafe fn create('));
   assert.match(
     create,
-    /^    pub\(crate\) unsafe fn create\(\s+guest: &Arc<Guest>,\s+parent_surface: \*mut c_void,\s+width: i32,\s+height: i32,\s+\) -> Result<Self, String> \{\s+guest\.drain\(\);\s+let mut queue = guest\.conn\.new_event_queue\(\);/,
+    /^    pub\(crate\) unsafe fn create\(\s+guest: &Arc<Guest>,\s+parent_surface: \*mut c_void,\s+width: i32,\s+height: i32,\s+\) -> Result<Self, String> \{\s+guest\.drain\(\);\s+let queue = guest\.conn\.new_event_queue\(\);/,
   );
   // And what a play makes, it destroys by name: nothing is left for a
   // closing connection to sweep up, because this one never closes.
@@ -251,6 +251,66 @@ test("the window's Wayland connection is joined once for the whole run, never pe
     );
   }
   assert.match(dropBody, /for description in \[self\.described\.take\(\), self\.output_query\.take\(\)\]\s+\.into_iter\(\)\s+\.flatten\(\)\s+\{\s+description\.destroy\(\);/);
+});
+
+test("the window's own surface is used on the window's thread, at once, and never carried away", () => {
+  // The window can be closed at any moment, on its own thread. A pointer to
+  // its surface that is carried to the play's thread and used there later
+  // may be to a surface that no longer exists (review finding ec-1). So the
+  // one use of it, making the video surface its child, happens on the
+  // window's thread, inside the same call that fetched it.
+  const prepare = methodBody(host, '    pub(crate) fn prepare(', 'Host::prepare');
+  assert.match(
+    prepare,
+    /let surface = on_window_thread\(app, \{\s+let app = app\.clone\(\);\s+let guest = guest\.clone\(\);\s+move \|\| \{\s+let facts = window_facts\(&app\)\?;\s+let rect = rect_in_window\(facts\.page, reported\.unwrap_or\(whole\(facts\.page\)\)\);[\s\S]{0,300}unsafe \{ VideoSurface::create\(&guest, facts\.surface, rect\.width, rect\.height\) \}/,
+  );
+  const embedded = ['egl', 'hdr', 'host', 'libmpv', 'mod', 'options', 'session', 'startup', 'surface'].map((name) => [
+    name,
+    read(`src-tauri/src/player/embedded/${name}.rs`),
+  ]);
+  const everywhere = embedded.map(([, source]) => code(source)).join('\n');
+  assert.equal(count(everywhere, 'VideoSurface::create('), 1, 'the surface is made in that one place');
+  assert.equal(count(code(host), 'facts.surface'), 1, 'and the pointer is read in that one place');
+  // It cannot be carried away either: what holds it cannot be sent to
+  // another thread, and the build fails if that changes.
+  assert.match(host, /struct WindowFacts \{\s+display: WlDisplay,\s+surface: \*mut c_void,/);
+  assert.match(
+    host,
+    /const _: fn\(\) = \|\| \{\s+trait AmbiguousIfSend<Marker> \{\s+fn check\(\) \{\}\s+\}\s+impl<T: \?Sized> AmbiguousIfSend<\(\)> for T \{\}\s+impl<T: \?Sized \+ Send> AmbiguousIfSend<u8> for T \{\}\s+let _ = <WindowFacts as AmbiguousIfSend<_>>::check;\s+\};/,
+  );
+  // The only raw pointer of the window's that IS allowed to travel is the
+  // connection, which lives as long as the process.
+  for (const [name, source] of embedded) {
+    const sends = [...code(source).matchAll(/unsafe impl (?:Send|Sync) for (\w+)/g)].map((m) => m[1]);
+    const allowed =
+      {
+        surface: ['WlDisplay', 'WlDisplay'],
+        // Tables of functions in loaded libraries, and an mpv handle.
+        egl: ['Api', 'Api'],
+        libmpv: ['LibMpv', 'LibMpv', 'Player'],
+      }[name] ?? [];
+    assert.deepEqual(sends, allowed, `${name}.rs: what is declared safe to send`);
+  }
+  // Inside the surface module the window's surface is used for exactly the
+  // two requests that make the new surface its child and put it below, and
+  // the window's thread is never made to wait for the compositor.
+  const create = surface.slice(surface.indexOf('    pub(crate) unsafe fn create('));
+  const createBody = create.slice(0, create.indexOf('\n    }\n'));
+  assert.equal(count(createBody, '&parent'), 2);
+  assert.match(createBody, /guest\.subcompositor\.get_subsurface\(&surface, &parent, &qh, \(\)\);\s+subsurface\.place_below\(&parent\);/);
+  for (const waits of ['roundtrip', 'blocking_dispatch', 'prepare_read', '.wait(']) {
+    assert.equal(count(createBody, waits), 0, `making the surface never calls ${waits}`);
+  }
+  assert.equal(count(code(surface), 'parent_surface'), 2, 'the pointer is a parameter and is used once');
+  // The play's own thread does that waiting, first thing.
+  assert.match(
+    session,
+    /fn set_up\(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>\) -> Result<Live, String> \{\s+(?:\/\/[^\n]*\n\s+)*surface\.settle\(\)\?;/,
+  );
+  assert.match(
+    surface,
+    /pub\(crate\) fn settle\(&mut self\) -> Result<\(\), String> \{\s+self\.queue\.roundtrip\(&mut self\.state\)\.map_err\(describe\)\?;\s+self\.apply\(\);\s+Ok\(\(\)\)\s+\}/,
+  );
 });
 
 test('both players give up a consumed stream-auth file the same way', () => {
@@ -293,12 +353,13 @@ test('everything a launch wrote to disk has an owner in an embedded play', () =>
     host,
     /let LaunchPlan \{\s+args,\s+env: _,\s+url,\s+header_include,\s+marker_payload,\s+\} = plan;/,
   );
-  const start = host.slice(host.indexOf('let started = Session::start(Start {'));
-  const request = start.slice(0, start.indexOf('});'));
+  const start = host.slice(host.indexOf('let start = Start {'));
+  assert.ok(start.length > 0 && start.startsWith('let start = Start {'));
+  const request = start.slice(0, start.indexOf('};'));
   assert.match(request, /\n            header_include,\n            _marker_payload: marker_payload\.map\(MarkerPayload::new\),\n/);
   // The request lives exactly as long as the play, or as its failed start:
   // the play's thread owns it, and it is nowhere copied or kept.
-  assert.match(session, /\.spawn\(move \|\| \{\s+let shared = thread_shared;\s+match set_up\(&start, &shared\) \{/);
+  assert.match(session, /\.spawn\(move \|\| \{\s+let shared = thread_shared;\s+match set_up\(&start, surface, &shared\) \{/);
   assert.match(
     session,
     /impl Drop for MarkerPayload \{\s+fn drop\(&mut self\) \{[\s\S]{0,120}let _ = std::fs::remove_file\(&self\.0\);\s+\}\s+\}/,

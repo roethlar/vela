@@ -17,10 +17,10 @@ use tauri::{Emitter, Manager};
 
 use super::libmpv::{self, LibMpv};
 use super::options;
-use super::session::{Lifecycle, MarkerPayload, Rect, Session, Start, WindowHandles};
+use super::session::{Lifecycle, MarkerPayload, Rect, Session, Start};
 use super::startup::{self, WindowMode};
 use super::egl;
-use super::surface::Guest;
+use super::surface::{Guest, VideoSurface, WlDisplay};
 use crate::player::launch::LaunchPlan;
 use crate::player::EmbeddedUnavailable;
 
@@ -73,11 +73,30 @@ fn gdk_wayland_function(name: &CStr) -> Option<unsafe extern "C" fn(*mut c_void)
 }
 
 /// What the window's thread knows that a play needs.
+///
+/// `surface` is the window's own Wayland surface, a raw pointer into GTK
+/// that is good only while the window lives, and the window can be closed at
+/// any moment, on this thread. So it is used on this thread, at once, and
+/// never carried away: this type holds a raw pointer and so cannot be sent
+/// to another thread, and the line below it makes sure that stays true.
 struct WindowFacts {
-    handles: WindowHandles,
+    display: WlDisplay,
+    surface: *mut c_void,
     /// The web view's place in the window, in the window's own units.
     page: Rect,
 }
+
+// Fails to compile if `WindowFacts` can be sent to another thread: the two
+// implementations below would then both apply and the choice between them
+// would be ambiguous.
+const _: fn() = || {
+    trait AmbiguousIfSend<Marker> {
+        fn check() {}
+    }
+    impl<T: ?Sized> AmbiguousIfSend<()> for T {}
+    impl<T: ?Sized + Send> AmbiguousIfSend<u8> for T {}
+    let _ = <WindowFacts as AmbiguousIfSend<_>>::check;
+};
 
 /// Find the web view inside the window. Tauri puts it in a box under the
 /// window; this walks down rather than assuming how deep.
@@ -127,10 +146,8 @@ fn window_facts(app: &tauri::AppHandle) -> Result<WindowFacts, EmbeddedUnavailab
         .unwrap_or((0, 0));
     let size = page_widget.allocation();
     Ok(WindowFacts {
-        handles: WindowHandles {
-            wl_display,
-            wl_surface,
-        },
+        display: WlDisplay(wl_display),
+        surface: wl_surface,
         page: Rect {
             x,
             y,
@@ -178,6 +195,11 @@ struct Ready {
     guest: Arc<Guest>,
 }
 
+/// The whole page, as a rectangle relative to the page.
+fn whole(page: Rect) -> Rect {
+    Rect { x: 0, y: 0, ..page }
+}
+
 /// The embedded player's side of the app, for the life of the process.
 pub(crate) struct Host {
     /// Whether this machine can run an embedded play, found out once, and
@@ -202,18 +224,18 @@ impl Host {
     /// Everything that has to be true of this machine, checked in order of
     /// cost and stopping at the first that is not.
     fn check(app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {
-        let handles = on_window_thread(app, {
+        let display = on_window_thread(app, {
             let app = app.clone();
-            move || window_facts(&app).map(|facts| facts.handles)
+            move || window_facts(&app).map(|facts| facts.display)
         })
         .map_err(|_| EmbeddedUnavailable::WindowNotReady)??;
         // SAFETY: the window's live Wayland connection, which GTK keeps for
         // the life of the process.
-        let guest = unsafe { Guest::join(handles.wl_display) }.map_err(|detail| {
+        let guest = unsafe { Guest::join(display) }.map_err(|detail| {
             eprintln!("vela: the embedded player is unavailable: {detail}");
             EmbeddedUnavailable::CompositorLacks
         })?;
-        egl::probe(handles.wl_display).map_err(|detail| {
+        egl::probe(display.0).map_err(|detail| {
             eprintln!("vela: the embedded player is unavailable: {detail}");
             EmbeddedUnavailable::NoGpuFormat
         })?;
@@ -268,19 +290,33 @@ impl Host {
         session_id: &str,
     ) -> Result<Prepared, String> {
         let Ready { lib, guest } = self.library(app).map_err(|reason| reason.notice())?;
-        let facts = on_window_thread(app, {
+        let reported = *self.reported.lock().unwrap_or_else(|e| e.into_inner());
+        // The play's surface is made here, on the window's thread, where the
+        // window it is made under cannot be closed in the middle (review
+        // finding ec-1). Only the finished surface leaves that thread.
+        let surface = on_window_thread(app, {
             let app = app.clone();
-            move || window_facts(&app)
+            let guest = guest.clone();
+            move || {
+                let facts = window_facts(&app)?;
+                let rect = rect_in_window(facts.page, reported.unwrap_or(whole(facts.page)));
+                // SAFETY: on the window's own thread, with the surface of a
+                // window that was alive a moment ago on this same thread, on
+                // the connection `guest` joined.
+                unsafe { VideoSurface::create(&guest, facts.surface, rect.width, rect.height) }
+                    .map_err(|detail| {
+                        eprintln!("vela: the embedded player could not make its surface: {detail}");
+                        EmbeddedUnavailable::WindowNotReady
+                    })
+            }
         })?
         .map_err(|reason| reason.notice())?;
-        let reported = self.reported_or_whole(facts.page);
         Ok(Prepared {
             host: self.clone(),
             app: app.clone(),
             lib,
             guest,
-            window: facts.handles,
-            rect: rect_in_window(facts.page, reported),
+            surface,
             session_id: session_id.to_string(),
         })
     }
@@ -291,7 +327,7 @@ impl Host {
         self.reported
             .lock()
             .unwrap_or_else(|e| e.into_inner())
-            .unwrap_or(Rect { x: 0, y: 0, ..page })
+            .unwrap_or(whole(page))
     }
 
     /// The page says where the video is. Must run on the window's thread.
@@ -318,8 +354,8 @@ pub(crate) struct Prepared {
     app: tauri::AppHandle,
     lib: Arc<LibMpv>,
     guest: Arc<Guest>,
-    window: WindowHandles,
-    rect: Rect,
+    /// The play's surface, already under the window.
+    surface: VideoSurface,
     session_id: String,
 }
 
@@ -336,8 +372,7 @@ impl Prepared {
             app,
             lib,
             guest,
-            window,
-            rect,
+            surface,
             session_id,
         } = self;
         let on_lifecycle = {
@@ -372,12 +407,10 @@ impl Prepared {
             header_include,
             marker_payload,
         } = plan;
-        let started = Session::start(Start {
+        let start = Start {
             lib,
             guest,
             session_id,
-            window,
-            rect,
             own_config: if own_config {
                 options::user_config_files(
                     std::env::var_os("MPV_HOME").as_deref(),
@@ -397,7 +430,8 @@ impl Prepared {
             header_include,
             _marker_payload: marker_payload.map(MarkerPayload::new),
             on_lifecycle,
-        });
+        };
+        let started = Session::start(start, surface);
         started.map_err(|reason| {
             // One failed start is enough: the next play uses the external
             // player and says why, instead of failing the same way.

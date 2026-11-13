@@ -296,9 +296,21 @@ fn describe(error: impl std::fmt::Display) -> String {
     format!("the connection to the compositor failed ({error})")
 }
 
+/// The window's connection to the compositor, as the raw pointer GTK owns.
+/// GTK keeps the connection for the life of the process, and libwayland,
+/// through which alone it is used, may be called from any thread.
+#[derive(Clone, Copy)]
+pub(crate) struct WlDisplay(pub(crate) *mut c_void);
+
+// SAFETY: see the type's notes: valid for the life of the process, and only
+// ever handed to libwayland and EGL, which are thread-safe on it.
+unsafe impl Send for WlDisplay {}
+unsafe impl Sync for WlDisplay {}
+
 /// Vela's place on the window's connection to the compositor: joined once,
 /// kept for the life of the process, shared by every play.
 pub(crate) struct Guest {
+    display: WlDisplay,
     conn: Connection,
     compositor: WlCompositor,
     subcompositor: WlSubcompositor,
@@ -317,12 +329,12 @@ impl Guest {
     /// offers. Call once per process; see the module's notes.
     ///
     /// # Safety
-    /// `wl_display` must be the live `wl_display` of Vela's window, which
+    /// `display` must be the live `wl_display` of Vela's window, which
     /// stays valid for the life of the process.
-    pub(crate) unsafe fn join(wl_display: *mut c_void) -> Result<Self, String> {
+    pub(crate) unsafe fn join(display: WlDisplay) -> Result<Self, String> {
         // SAFETY: the caller's contract. A guest backend never closes the
         // connection; it gives its objects an event queue of their own.
-        let backend = unsafe { Backend::from_foreign_display(wl_display.cast()) };
+        let backend = unsafe { Backend::from_foreign_display(display.0.cast()) };
         let conn = Connection::from_backend(backend);
         let mut queue = conn.new_event_queue();
         let mut globals = Globals::default();
@@ -334,6 +346,7 @@ impl Guest {
         globals.read = true;
         let lacks = |name: &str| format!("the compositor does not offer {name}");
         Ok(Guest {
+            display,
             compositor: globals.compositor.take().ok_or_else(|| lacks("wl_compositor"))?,
             subcompositor: globals
                 .subcompositor
@@ -346,6 +359,12 @@ impl Guest {
             announcements: Mutex::new((queue, globals)),
             conn,
         })
+    }
+
+    /// The connection this guest is on, for making an OpenGL window on one
+    /// of its surfaces.
+    pub(crate) fn display(&self) -> WlDisplay {
+        self.display
     }
 
     /// Take whatever has arrived for the globals' own queue off it.
@@ -389,9 +408,21 @@ impl VideoSurface {
     /// Create the surface under `parent_surface`, `width` by `height` in the
     /// window's units, at the top left of the window until it is positioned.
     ///
+    /// This is the one place the window's own surface is touched, and it is
+    /// touched only for the length of this call: the new surface is made its
+    /// child and the pointer is not kept. So this is called on the window's
+    /// own thread, where the window cannot go away while it runs; a pointer
+    /// carried to another thread and used later could be to a window that
+    /// had been closed in between (review finding ec-1). For the same reason
+    /// nothing here waits for the compositor: the window's thread must not.
+    /// [`VideoSurface::settle`] does the waiting, on the play's own thread.
+    ///
+    /// If the window goes away afterwards, the compositor unmaps this
+    /// surface; nothing here refers to the window again.
+    ///
     /// # Safety
     /// `parent_surface` must be the live `wl_surface` of Vela's window, on
-    /// the connection `guest` joined, and must outlive the returned value.
+    /// the connection `guest` joined, for the length of the call.
     pub(crate) unsafe fn create(
         guest: &Arc<Guest>,
         parent_surface: *mut c_void,
@@ -399,8 +430,8 @@ impl VideoSurface {
         height: i32,
     ) -> Result<Self, String> {
         guest.drain();
-        let mut queue = guest.conn.new_event_queue();
-        let mut state = State::default();
+        let queue = guest.conn.new_event_queue();
+        let state = State::default();
         let qh = queue.handle();
         // SAFETY: the caller's contract: a live `wl_surface` on this connection.
         let parent_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), parent_surface.cast()) }
@@ -429,10 +460,8 @@ impl VideoSurface {
             .colour_manager
             .as_ref()
             .map(|manager| manager.get_surface_feedback(&surface, &qh, ()));
-        // Learn the scale before the first buffer is sized.
-        queue.roundtrip(&mut state).map_err(describe)?;
 
-        let mut video = VideoSurface {
+        Ok(VideoSurface {
             guest: guest.clone(),
             queue,
             state,
@@ -446,9 +475,16 @@ impl VideoSurface {
             described: None,
             logical: (width.max(1), height.max(1)),
             applied_scale_120: SCALE_ONE,
-        };
-        video.apply();
-        Ok(video)
+        })
+    }
+
+    /// Learn from the compositor the scale this surface is drawn at, and
+    /// size it. Waits for one exchange with the compositor, so it belongs to
+    /// the play's own thread; call it once, before the first buffer is made.
+    pub(crate) fn settle(&mut self) -> Result<(), String> {
+        self.queue.roundtrip(&mut self.state).map_err(describe)?;
+        self.apply();
+        Ok(())
     }
 
     /// The raw `wl_surface`, for creating the EGL window on it.

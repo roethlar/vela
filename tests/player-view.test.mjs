@@ -112,7 +112,8 @@ pub async fn player_close(session_id: String, state: State<'_, AppState>) -> Res
   // A play's identity is what it was started with.
   assert.match(session, /pub\(crate\) fn is_play\(&self, session_id: &str\) -> bool \{\s+self\.session_id == session_id\s+\}/);
   assert.match(session, /let session_id = std::mem::take\(&mut start\.session_id\);/);
-  assert.match(host, /let started = Session::start\(Start \{\s+lib,\s+guest,\s+session_id,/);
+  assert.match(host, /let start = Start \{\s+lib,\s+guest,\s+session_id,/);
+  assert.match(host, /let started = Session::start\(start, surface\);/);
 });
 
 test('the page gets out of the way of the picture only while the view is mounted', () => {
