@@ -507,11 +507,24 @@ fn lifecycle_args(player: PlayerKind) -> [LaunchArg; 1] {
     }
 }
 
-/// What the embedded player cannot work without, asserted after everything
-/// the user controls: mpv draws through the library's render interface into
+/// What the embedded player cannot work without, asserted after every option
+/// the user gives: mpv draws through the library's render interface into
 /// the surface Vela gives it, and nowhere else.
-fn embedded_required_args() -> [LaunchArg; 1] {
-    [LaunchArg::set("vo", "libmpv")]
+///
+/// And `force-window` off, so that no option opens that video output before
+/// a file: with `force-window` mpv opens it as it starts or goes idle, and
+/// then the player's own thread, which hands mpv its file with a call that
+/// waits (`Live::load`), could be waiting for mpv while mpv waits for that
+/// thread to draw (review finding hd-3). `force-window=immediate` also made
+/// the library fail to start at all. Vela's window is there either way.
+/// This holds for options only: a conditional profile in the user's mpv.conf,
+/// applied once mpv runs, or a command on its IPC socket, can still turn
+/// `force-window` on (see `Live::load`).
+fn embedded_required_args() -> [LaunchArg; 2] {
+    [
+        LaunchArg::set("vo", "libmpv"),
+        LaunchArg::set("force-window", "no"),
+    ]
 }
 
 fn screen_name_arg(name: Option<&str>) -> Option<LaunchArg> {
@@ -1170,7 +1183,7 @@ mod tests {
 
         let cfg = crate::config::AppConfig {
             mpv_extra_args: Some(
-                "--volume=70\n--vo=gpu-next\n--idle=yes\n--input-ipc-server=/tmp/not-velas"
+                "--volume=70\n--vo=gpu-next\n--force-window=yes\n--idle=yes\n--input-ipc-server=/tmp/not-velas"
                     .to_string(),
             ),
             // The stock crop script must not be named for an embedded play.
@@ -1226,6 +1239,7 @@ mod tests {
             "--osc=no".to_string(),
             "--volume=70".to_string(),
             "--vo=gpu-next".to_string(),
+            "--force-window=yes".to_string(),
             "--idle=yes".to_string(),
             "--input-ipc-server=/tmp/not-velas".to_string(),
             format!("--script={markers}"),
@@ -1240,6 +1254,7 @@ mod tests {
             "--input-ipc-server=/tmp/vela-recorded/mpv.sock".to_string(),
             "--force-media-title=Recorded: Title".to_string(),
             "--vo=libmpv".to_string(),
+            "--force-window=no".to_string(),
             format!("--include={}", include_path.to_string_lossy()),
             "--start=123.5".to_string(),
         ]
@@ -1275,6 +1290,7 @@ mod tests {
                 "--input-ipc-server=/tmp/vela-recorded/min.sock",
                 "--force-media-title=Vela",
                 "--vo=libmpv",
+                "--force-window=no",
             ]
         );
         assert!(plan.env.is_empty());

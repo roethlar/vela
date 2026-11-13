@@ -88,8 +88,40 @@ pub(crate) struct RawEvent {
     pub(crate) data: *mut c_void,
 }
 
-pub(crate) const EVENT_NONE: c_int = 0;
-pub(crate) const EVENT_SHUTDOWN: c_int = 1;
+const EVENT_NONE: c_int = 0;
+const EVENT_SHUTDOWN: c_int = 1;
+/// `MPV_EVENT_SET_PROPERTY_REPLY`: the answer to `mpv_set_property_async`.
+const EVENT_SET_PROPERTY_REPLY: c_int = 4;
+/// `MPV_FORMAT_STRING`.
+const FORMAT_STRING: c_int = 1;
+
+/// What mpv has to say, as far as the play acts on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Event {
+    /// Nothing is waiting.
+    None,
+    /// The player has shut down: the file ended, or mpv was told to quit.
+    Shutdown,
+    /// The answer to an ask ([`super::hdr::Targetable::ask`]) made with
+    /// `request`: whether mpv took the value.
+    Answer { request: u64, taken: bool },
+    /// Anything else, which the play does not act on.
+    Other,
+}
+
+/// Read one of mpv's events. A refusal is a negative `error`
+/// (`/usr/include/mpv/client.h`, `MPV_EVENT_SET_PROPERTY_REPLY`).
+fn classify(event_id: c_int, error: c_int, reply_userdata: u64) -> Event {
+    match event_id {
+        EVENT_NONE => Event::None,
+        EVENT_SHUTDOWN => Event::Shutdown,
+        EVENT_SET_PROPERTY_REPLY => Event::Answer {
+            request: reply_userdata,
+            taken: error >= 0,
+        },
+        _ => Event::Other,
+    }
+}
 
 type Callback = Option<unsafe extern "C" fn(ctx: *mut c_void)>;
 
@@ -100,8 +132,8 @@ pub(crate) struct LibMpv {
     set_option_string:
         unsafe extern "C" fn(*mut RawHandle, *const c_char, *const c_char) -> c_int,
     initialize: unsafe extern "C" fn(*mut RawHandle) -> c_int,
-    set_property_string:
-        unsafe extern "C" fn(*mut RawHandle, *const c_char, *const c_char) -> c_int,
+    set_property_async:
+        unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int, *mut c_void) -> c_int,
     command: unsafe extern "C" fn(*mut RawHandle, *mut *const c_char) -> c_int,
     get_property_string: unsafe extern "C" fn(*mut RawHandle, *const c_char) -> *mut c_char,
     wait_event: unsafe extern "C" fn(*mut RawHandle, c_double) -> *mut RawEvent,
@@ -213,7 +245,7 @@ impl LibMpv {
             create: symbol!("mpv_create"),
             set_option_string: symbol!("mpv_set_option_string"),
             initialize: symbol!("mpv_initialize"),
-            set_property_string: symbol!("mpv_set_property_string"),
+            set_property_async: symbol!("mpv_set_property_async"),
             command: symbol!("mpv_command"),
             get_property_string: symbol!("mpv_get_property_string"),
             wait_event: symbol!("mpv_wait_event"),
@@ -373,16 +405,30 @@ impl Player {
         Some(value)
     }
 
-    /// The id of the next waiting event, or [`EVENT_NONE`]. Never blocks.
-    pub(crate) fn next_event(&self) -> c_int {
-        // SAFETY: a live handle. The returned pointer is valid until the next
-        // call and only its id is read.
-        let event = unsafe { (self.lib.wait_event)(self.raw, 0.0) };
+    /// The next waiting event, or [`Event::None`]. Never waits, so it may be
+    /// called on the thread that draws (render.h: `mpv_wait_event` with a
+    /// timeout of zero is one of the calls allowed there).
+    pub(crate) fn next_event(&self) -> Event {
+        self.event(0.0)
+    }
+
+    /// The next event, waiting up to `limit` for one. A waiting call: only
+    /// while no renderer exists for this player, because once one does, mpv
+    /// may itself be waiting for the thread that would be waiting here.
+    pub(crate) fn wait_for_event(&self, limit: std::time::Duration) -> Event {
+        self.event(limit.as_secs_f64())
+    }
+
+    fn event(&self, timeout: c_double) -> Event {
+        // SAFETY: a live handle. The returned event is valid until the next
+        // call on this handle; its fields are copied out here.
+        let event = unsafe { (self.lib.wait_event)(self.raw, timeout) };
         if event.is_null() {
-            EVENT_NONE
-        } else {
-            unsafe { (*event).event_id }
+            return Event::None;
         }
+        let (event_id, error, reply_userdata) =
+            unsafe { ((*event).event_id, (*event).error, (*event).reply_userdata) };
+        classify(event_id, error, reply_userdata)
     }
 
     /// Have mpv call `callback(context)` whenever an event is waiting. The
@@ -409,20 +455,35 @@ impl Player {
 }
 
 impl super::hdr::Targetable for Player {
-    /// Change, on the running player, one of the options that say what it
-    /// draws for.
-    fn set_target(&self, option: &str, value: &str) -> bool {
+    /// Ask the running player, without waiting, to change one of the options
+    /// that say what it draws for. mpv answers later with an event carrying
+    /// `request` ([`Event::Answer`]). Safe on the thread that draws
+    /// (`mpv_set_property_async` is on render.h's list); a waiting setter
+    /// there can wait out mpv's own timeout for that very thread (review
+    /// finding hd-3).
+    fn ask(&self, request: u64, option: &str, value: &str) -> bool {
         let (Ok(c_option), Ok(c_value)) = (
             c_string("an option name", option),
             c_string("an option value", value),
         ) else {
             return false;
         };
-        // SAFETY: a live handle and two valid C strings.
+        // For a string, mpv takes the address of the `char *`, not the
+        // pointer itself (client.h, `MPV_FORMAT_STRING`).
+        let mut data: *const c_char = c_value.as_ptr();
+        // SAFETY: a live handle, a valid C string, and the address of a
+        // pointer to another; mpv copies both strings before it returns.
         let code = unsafe {
-            (self.lib.set_property_string)(self.raw, c_option.as_ptr(), c_value.as_ptr())
+            (self.lib.set_property_async)(
+                self.raw,
+                request,
+                c_option.as_ptr(),
+                FORMAT_STRING,
+                (&mut data as *mut *const c_char).cast(),
+            )
         };
-        self.lib.check(code).is_ok()
+        // A negative code: the ask was not sent and no answer will come.
+        code >= 0
     }
 }
 
@@ -545,7 +606,9 @@ impl Renderer {
         unsafe { (self.lib.render_context_render)(self.raw, params.as_mut_ptr()) };
     }
 
-    /// Tell mpv the frame it drew has been shown; it times the next one from this.
+    /// Tell mpv the frame it drew has been dealt with; it times the next one
+    /// from this. Called for every frame drawn, presented or held: after a
+    /// frame, mpv's video thread waits up to 200 ms for this call.
     pub(crate) fn frame_shown(&self) {
         // SAFETY: a live render context on its own thread.
         unsafe { (self.lib.render_context_report_swap)(self.raw) };
@@ -636,5 +699,30 @@ mod tests {
             check_api_version(3, 0).unwrap_err(),
             "its interface is version 3.0, and Vela needs 2.5 or a later 2.x"
         );
+    }
+
+    #[test]
+    fn mpvs_events_are_read_as_what_they_are() {
+        assert_eq!(
+            classify(4, 0, 7),
+            Event::Answer {
+                request: 7,
+                taken: true
+            }
+        );
+        // A value mpv refuses comes back as a negative error in the answer.
+        assert_eq!(
+            classify(4, -9, 7),
+            Event::Answer {
+                request: 7,
+                taken: false
+            }
+        );
+        assert_eq!(classify(1, 0, 0), Event::Shutdown);
+        assert_eq!(classify(0, 0, 0), Event::None);
+        // Anything else, such as a property change (22) or idle (11).
+        for other in [2, 3, 6, 11, 22, 24] {
+            assert_eq!(classify(other, 0, 9), Event::Other, "{other}");
+        }
     }
 }

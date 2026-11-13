@@ -126,7 +126,10 @@ test('Advanced arguments are still applied inside base_args', () => {
 
 test("the embedded player's required options follow everything the user controls", () => {
   // `vo=libmpv` is what makes an embedded play draw into Vela's surface. A
-  // user option that came later would win and break the player.
+  // user option that came later would win and break the player. So would a
+  // user's `force-window`: mpv would open its video output before the file,
+  // and the player's thread hands over the file with a call that waits
+  // (review finding hd-3).
   const body = functionBody(launch, 'pub(crate) fn build_launch_for(', 'launch::build_launch_for');
   const required = 'args.extend(embedded_required_args())';
   const at = body.indexOf(required);
@@ -139,6 +142,6 @@ test("the embedded player's required options follow everything the user controls
   }
   assert.match(
     functionBody(launch, 'fn embedded_required_args(', 'launch::embedded_required_args'),
-    /\[LaunchArg::set\("vo", "libmpv"\)\]/,
+    /\[\s+LaunchArg::set\("vo", "libmpv"\),\s+LaunchArg::set\("force-window", "no"\),\s+\]/,
   );
 });

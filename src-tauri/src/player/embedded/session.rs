@@ -21,8 +21,8 @@ use std::time::{Duration, Instant};
 use wayland_client::protocol::wl_subsurface::WlSubsurface;
 
 use super::egl;
-use super::hdr::{self, Capabilities, Tagging};
-use super::libmpv::{LibMpv, Player, Renderer, EVENT_NONE, EVENT_SHUTDOWN};
+use super::hdr::{self, Capabilities, Frame, Tagging};
+use super::libmpv::{Event, LibMpv, Player, Renderer};
 use super::options::Step;
 use super::surface::{Guest, VideoSurface};
 use crate::player::launch::HeaderInclude;
@@ -330,17 +330,21 @@ struct Live {
 /// they arrive.
 const COLOUR_EXCHANGES_AT_START: usize = 6;
 
+/// How long, at most, a play's start waits for the compositor and for mpv's
+/// answers about colour. A change still in flight then carries on in the
+/// running play, which holds presentation until mpv has answered.
+const COLOUR_LIMIT_AT_START: Duration = Duration::from_secs(1);
+
 /// Act on whatever the compositor has said about colour since the last call:
 /// the one way, at the start of a play and during it, by which mpv and the
-/// surface are told what the display can do (see `hdr`). Returns whether a
-/// frame has to be drawn for it to be seen.
+/// surface are told what the display can do (see `hdr`).
 fn follow_colour(
     player: &Player,
     surface: &mut VideoSurface,
     capabilities: Capabilities,
     tagging: &mut Tagging,
-) -> bool {
-    let mut redraw = false;
+    now: Instant,
+) {
     // The display can change under a running play: another monitor, HDR
     // switched off, the brightness slider (which moves the reference white
     // and so the peak).
@@ -349,7 +353,7 @@ fn follow_colour(
     }
     if let Some(output) = surface.output_described() {
         let step = tagging.output_described(hdr::presentation(Some(output), capabilities));
-        redraw |= carry_out(player, surface, tagging, step);
+        hdr::carry_out(step, tagging, player, surface, now);
     }
     if let Some(made) = surface.description_answer() {
         let step = if made {
@@ -357,18 +361,12 @@ fn follow_colour(
         } else {
             tagging.description_failed()
         };
-        redraw |= carry_out(player, surface, tagging, step);
+        hdr::carry_out(step, tagging, player, surface, now);
     }
-    redraw
 }
 
-fn carry_out(
-    player: &Player,
-    surface: &mut VideoSurface,
-    tagging: &mut Tagging,
-    step: hdr::Step,
-) -> bool {
-    let change = hdr::carry_out(step, tagging, player, surface);
+/// One line on standard error for a change of the picture that has finished.
+fn say(change: hdr::Change) {
     match change {
         hdr::Change::Nothing => {}
         hdr::Change::Hdr(peak) => eprintln!("vela: embedded player: HDR output, peak {peak} nits"),
@@ -377,7 +375,6 @@ fn carry_out(
             eprintln!("vela: embedded player: HDR could not be set up; standard range")
         }
     }
-    change.needs_a_frame()
 }
 
 fn private_options_file(text: &str) -> Result<PathBuf, String> {
@@ -475,15 +472,50 @@ fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Res
     // of them said.
     if capabilities.hdr_possible() {
         surface.ask_about_output();
-        for _ in 0..COLOUR_EXCHANGES_AT_START {
-            surface.roundtrip()?;
-            follow_colour(&player, &mut surface, capabilities, &mut tagging);
-            if tagging.settled() {
+        let deadline = Instant::now() + COLOUR_LIMIT_AT_START;
+        let mut exchanges = 0;
+        while !tagging.settled() && Instant::now() < deadline {
+            if tagging.changing() {
+                // mpv's answers. No renderer exists yet, so this is the one
+                // place this thread may wait for mpv. A change waiting for
+                // room in mpv's queue has no answer to wait for: the queue
+                // is read without waiting until it is empty.
+                let left = if tagging.waiting_for_room() {
+                    Duration::ZERO
+                } else {
+                    deadline.saturating_duration_since(Instant::now())
+                };
+                match player.wait_for_event(left) {
+                    Event::Answer { request, taken } => say(hdr::answered(
+                        request,
+                        taken,
+                        &mut tagging,
+                        &player,
+                        &mut surface,
+                        Instant::now(),
+                    )),
+                    Event::Shutdown => return Err("mpv shut down as the play started".to_string()),
+                    Event::None => {
+                        hdr::drained(&mut tagging, &player, &mut surface, Instant::now())
+                    }
+                    Event::Other => {}
+                }
+            } else if exchanges < COLOUR_EXCHANGES_AT_START {
+                surface.roundtrip()?;
+                exchanges += 1;
+            } else {
                 break;
             }
+            follow_colour(&player, &mut surface, capabilities, &mut tagging, Instant::now());
         }
     }
 
+    let context = Arc::as_ptr(shared) as *mut c_void;
+    // Before the renderer exists: once it does, this thread may call only
+    // the functions render.h lists as safe for it, and this is not one.
+    // SAFETY: `shared` is held by this thread until after `Live`, and with
+    // it the player, has been dropped.
+    unsafe { player.set_wakeup(wake_from_mpv, context) };
     let render_node = window.render_node();
     let render_fd = render_node.as_ref().map_or(-1, |fd| fd.as_raw_fd());
     // SAFETY: this thread's OpenGL context is current (the window above),
@@ -491,13 +523,8 @@ fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Res
     // open in `Live` for as long as the renderer exists.
     let renderer = unsafe { Renderer::create(&player, egl::proc_address, render_fd) }
         .map_err(|reason| format!("mpv could not draw into the window ({reason})"))?;
-    let context = Arc::as_ptr(shared) as *mut c_void;
-    // SAFETY: `shared` is held by this thread until after `Live`, and with
-    // it the renderer and the player, has been dropped.
-    unsafe {
-        renderer.set_update(wake_from_mpv, context);
-        player.set_wakeup(wake_from_mpv, context);
-    }
+    // SAFETY: as for the player's, above; the renderer is dropped first.
+    unsafe { renderer.set_update(wake_from_mpv, context) };
 
     *shared.subsurface.lock().unwrap_or_else(|e| e.into_inner()) = Some(surface.subsurface());
     Ok(Live {
@@ -513,6 +540,21 @@ fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Res
 
 impl Live {
     /// Hand mpv its file.
+    ///
+    /// The one call on this thread that waits for mpv once the renderer
+    /// exists (render.h does not list `mpv_command` as safe here). mpv's
+    /// core waits for the thread that draws only through its video output,
+    /// and mpv opens one without a file only for `force-window`
+    /// (player/playloop.c, `handle_force_window`). Vela's launch sets that
+    /// option off after every option the user gives (`embedded_required_args`
+    /// in launch.rs), so as far as options go no video output exists here.
+    /// That does not cover what changes an option once mpv runs: a
+    /// conditional profile in the user's own mpv.conf (`profile-cond`,
+    /// applied after start-up; with the shipped library it turned
+    /// `force-window` back on and opened a video output with no file), or a
+    /// command on mpv's IPC socket. Then a video output can exist here, and
+    /// whether this call then waits for this thread to draw, and for how
+    /// long, has not been measured (review finding hd-3).
     fn load(&self, url: &str) -> Result<(), String> {
         self.player
             .command(&["loadfile", url])
@@ -547,25 +589,55 @@ impl Live {
                 self.window.resize(width, height);
                 redraw = true;
             }
-            redraw |= follow_colour(
+            let now = Instant::now();
+            follow_colour(
                 &self.player,
                 &mut self.surface,
                 self.capabilities,
                 &mut self.tagging,
+                now,
             );
+            // Nothing on this thread waits for mpv from here on: mpv's
+            // video thread may itself be waiting for this one to draw.
             loop {
                 match self.player.next_event() {
-                    EVENT_NONE => break,
+                    Event::None => {
+                        hdr::drained(&mut self.tagging, &self.player, &mut self.surface, now);
+                        break;
+                    }
                     // The file ended, or mpv was told to quit over its socket.
-                    EVENT_SHUTDOWN => return,
-                    _ => {}
+                    Event::Shutdown => return,
+                    Event::Answer { request, taken } => say(hdr::answered(
+                        request,
+                        taken,
+                        &mut self.tagging,
+                        &self.player,
+                        &mut self.surface,
+                        now,
+                    )),
+                    Event::Other => {}
                 }
             }
-            if self.renderer.has_new_frame() || redraw {
-                let (width, height) = self.surface.buffer_size();
-                self.renderer.draw(width, height, self.window.depth);
-                self.window.swap();
-                self.renderer.frame_shown();
+            // Decided after every answer waiting has been read, and before
+            // anything is drawn.
+            let (width, height) = self.surface.buffer_size();
+            match self.tagging.frame(self.renderer.has_new_frame(), redraw, now) {
+                Frame::Nothing => {}
+                Frame::Hold => {
+                    self.renderer.draw(width, height, self.window.depth);
+                    self.renderer.frame_shown();
+                }
+                Frame::Show => {
+                    self.renderer.draw(width, height, self.window.depth);
+                    self.window.swap();
+                    self.renderer.frame_shown();
+                }
+                Frame::Black => self.window.show_black(),
+                Frame::HoldAndBlack => {
+                    self.renderer.draw(width, height, self.window.depth);
+                    self.renderer.frame_shown();
+                    self.window.show_black();
+                }
             }
         }
     }

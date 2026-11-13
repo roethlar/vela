@@ -1355,6 +1355,7 @@ mod tests {
                 .cloned()
         };
         assert_eq!(last("vo").as_deref(), Some("--vo=libmpv"));
+        assert_eq!(last("force-window").as_deref(), Some("--force-window=no"));
         assert_eq!(last("idle").as_deref(), Some("--idle=once"));
         assert_eq!(
             last("input-ipc-server"),

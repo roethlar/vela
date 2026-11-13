@@ -51,8 +51,8 @@ for (const [sig, code] of Object.entries({ SIGHUP: 129, SIGINT: 130, SIGTERM: 14
   });
 }
 
-function runStep(cmd, args) {
-  const res = spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot });
+function runStep(cmd, args, env = {}) {
+  const res = spawnSync(cmd, args, { stdio: 'inherit', cwd: repoRoot, env: { ...process.env, ...env } });
   if (res.status !== 0) {
     console.error(`e2e: \`${cmd} ${args.join(' ')}\` failed`);
     process.exit(1);
@@ -229,8 +229,11 @@ let displayEnv = {};
 if (runPlayer === 'embedded') {
   // The embedded player loads the mpv library Vela ships. A debug build takes
   // it from wherever this variable points; by default, where
-  // scripts/build-libmpv.sh leaves it.
-  const set = process.env.VELA_LIBMPV_DIR ?? path.join(repoRoot, '.libmpv/out/libmpv');
+  // scripts/build-libmpv.sh leaves it. A relative path is taken from the
+  // repository root, where it is checked here, and handed on whole: the
+  // app and the library tests (which cargo runs from src-tauri/) would each
+  // read it from somewhere else.
+  const set = path.resolve(repoRoot, process.env.VELA_LIBMPV_DIR ?? '.libmpv/out/libmpv');
   if (!fs.existsSync(path.join(set, 'libmpv.so.2'))) {
     console.error(
       `e2e: no libmpv set at ${set} — build one with scripts/build-libmpv.sh --container, or point VELA_LIBMPV_DIR at one`,
@@ -238,6 +241,17 @@ if (runPlayer === 'embedded') {
     process.exit(1);
   }
   displayEnv = { VELA_LIBMPV_DIR: set };
+  // The tests against that library itself (`npm run test:libmpv`, ignored
+  // in an ordinary `cargo test` because CI has no library): what the player
+  // expects of mpv's answers, which no fake and no scenario here can show
+  // (weston has no colour management, so no play here ever changes mpv's
+  // target). Every full run of this player runs them first; a failure, or a
+  // set they cannot load, fails the run.
+  if (nameFilter.length === 0) {
+    runStep('npm', ['run', 'test:libmpv'], { VELA_LIBMPV_DIR: set });
+  } else {
+    console.log('e2e: the libmpv tests run in a full embedded run (npm run test:libmpv runs them alone)');
+  }
 }
 if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
   // A private, headless Wayland compositor: Xvfb is X11, where the embedded

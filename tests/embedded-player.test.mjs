@@ -491,9 +491,9 @@ test('everything a launch wrote to disk has an owner in an embedded play', () =>
 // ---- Slice 4: HDR
 
 test('mpv is told what it draws for in one place, together with the surface', () => {
-  // The unit tests in hdr.rs prove that `hdr::carry_out` changes mpv and
-  // the surface together or not at all. This proves it is the only way
-  // either of them is changed.
+  // The unit tests in hdr.rs prove that `hdr::carry_out` and `hdr::answered`
+  // change mpv and the surface together or not at all. This proves they are
+  // the only way either of them is changed.
   const rust = fs
     .readdirSync(path.join(repoRoot, 'src-tauri/src'), { recursive: true })
     .map(String)
@@ -508,11 +508,41 @@ test('mpv is told what it draws for in one place, together with the surface', ()
     );
   }
   // mpv: the one call that changes an option of the running player is the
-  // one `hdr` drives.
-  assert.equal(count(code(libmpv), '(self.lib.set_property_string)('), 1);
+  // one `hdr` drives, and it does not wait (review finding hd-3). The
+  // waiting setter is not even in the table.
+  assert.doesNotMatch(libmpv, /set_property_string/);
+  assert.equal(count(code(libmpv), 'symbol!("mpv_set_property_async")'), 1);
+  assert.equal(count(code(libmpv), '(self.lib.set_property_async)('), 1);
   assert.match(
     libmpv,
-    /impl super::hdr::Targetable for Player \{[\s\S]{0,300}fn set_target\(&self, option: &str, value: &str\) -> bool \{[\s\S]{0,500}\(self\.lib\.set_property_string\)\(self\.raw, c_option\.as_ptr\(\), c_value\.as_ptr\(\)\)[\s\S]{0,40}self\.lib\.check\(code\)\.is_ok\(\)\s+\}\s+\}/,
+    /impl super::hdr::Targetable for Player \{[\s\S]{0,600}fn ask\(&self, request: u64, option: &str, value: &str\) -> bool \{[\s\S]{0,600}let mut data: \*const c_char = c_value\.as_ptr\(\);[\s\S]{0,300}\(self\.lib\.set_property_async\)\(\s+self\.raw,\s+request,\s+c_option\.as_ptr\(\),\s+FORMAT_STRING,\s+\(&mut data as \*mut \*const c_char\)\.cast\(\),\s+\)\s+\};[\s\S]{0,120}code >= 0\s+\}\s+\}/,
+  );
+  // And that call is all `ask` does with mpv: its whole body, comments
+  // aside, is this. A waiting call added to it in any form (a `set`
+  // command, a property read) is the regression itself.
+  assert.equal(
+    code(methodBody(libmpv, '    fn ask(&self, request: u64, option: &str, value: &str) -> bool {', 'ask')),
+    [
+      '',
+      '    fn ask(&self, request: u64, option: &str, value: &str) -> bool {',
+      '        let (Ok(c_option), Ok(c_value)) = (',
+      '            c_string("an option name", option),',
+      '            c_string("an option value", value),',
+      '        ) else {',
+      '            return false;',
+      '        };',
+      '        let mut data: *const c_char = c_value.as_ptr();',
+      '        let code = unsafe {',
+      '            (self.lib.set_property_async)(',
+      '                self.raw,',
+      '                request,',
+      '                c_option.as_ptr(),',
+      '                FORMAT_STRING,',
+      '                (&mut data as *mut *const c_char).cast(),',
+      '            )',
+      '        };',
+      '        code >= 0',
+    ].join('\n'),
   );
   // The surface: a description is asked for, put on and taken off only
   // through the same trait.
@@ -529,18 +559,30 @@ test('mpv is told what it draws for in one place, together with the surface', ()
     const at = describable.indexOf(request);
     assert.ok(at !== -1 && at < ends, `${request} is sent from the Describable implementation`);
   }
-  // And the session reaches both through `hdr::carry_out`, once.
-  assert.equal(count(code(session), 'hdr::carry_out('), 1);
-  assert.match(
-    session,
-    /fn carry_out\(\s+player: &Player,\s+surface: &mut VideoSurface,\s+tagging: &mut Tagging,\s+step: hdr::Step,\s+\) -> bool \{\s+let change = hdr::carry_out\(step, tagging, player, surface\);[\s\S]{0,600}change\.needs_a_frame\(\)\s+\}/,
-  );
-  for (const direct of ['.describe(', '.tag(', '.untag(', '.set_target(']) {
+  // And the session reaches both through `hdr`: what the compositor says
+  // through `hdr::carry_out`, in `follow_colour`, and mpv's answers through
+  // `hdr::answered` and its emptied queue through `hdr::drained`, at the
+  // start of a play and while it runs.
+  const follow = functionBody(session, 'fn follow_colour(', 'follow_colour');
+  assert.equal(count(code(session), 'hdr::carry_out('), 2);
+  assert.equal(count(follow, 'hdr::carry_out(step, tagging, player, surface, now);'), 2);
+  for (const reached of ['hdr::answered(', 'hdr::drained(']) {
+    assert.equal(count(code(session), reached), 2, reached);
+    assert.equal(count(functionBody(session, 'fn set_up(', 'set_up'), reached), 1, reached);
+    assert.equal(count(methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run'), reached), 1, reached);
+  }
+  for (const direct of ['.describe(', '.tag(', '.untag(', '.ask(', '.set_target(']) {
     assert.equal(count(code(session), direct), 0, `the session never calls ${direct} itself`);
   }
   // Nothing in the module is switched off from the compiler's view: a part
   // of this that nothing calls fails the build.
-  for (const [name, source] of [['hdr.rs', hdr], ['mod.rs', embeddedMod], ['surface.rs', surface]]) {
+  for (const [name, source] of [
+    ['hdr.rs', hdr],
+    ['mod.rs', embeddedMod],
+    ['surface.rs', surface],
+    ['session.rs', session],
+    ['libmpv.rs', libmpv],
+  ]) {
     assert.doesNotMatch(source, /allow\(dead_code\)/, `${name} hides no unused code`);
   }
   assert.match(embeddedMod, /^mod hdr;$/m);
@@ -636,25 +678,41 @@ test("what the compositor says about the display is followed from a play's start
   const follow = functionBody(session, 'fn follow_colour(', 'follow_colour');
   assert.match(
     follow,
-    /if surface\.output_changed\(\) && capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+\}\s+if let Some\(output\) = surface\.output_described\(\) \{\s+let step = tagging\.output_described\(hdr::presentation\(Some\(output\), capabilities\)\);\s+redraw \|= carry_out\(player, surface, tagging, step\);\s+\}\s+if let Some\(made\) = surface\.description_answer\(\) \{\s+let step = if made \{\s+tagging\.description_ready\(\)\s+\} else \{\s+tagging\.description_failed\(\)\s+\};\s+redraw \|= carry_out\(player, surface, tagging, step\);\s+\}\s+redraw$/,
+    /if surface\.output_changed\(\) && capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+\}\s+if let Some\(output\) = surface\.output_described\(\) \{\s+let step = tagging\.output_described\(hdr::presentation\(Some\(output\), capabilities\)\);\s+hdr::carry_out\(step, tagging, player, surface, now\);\s+\}\s+if let Some\(made\) = surface\.description_answer\(\) \{\s+let step = if made \{\s+tagging\.description_ready\(\)\s+\} else \{\s+tagging\.description_failed\(\)\s+\};\s+hdr::carry_out\(step, tagging, player, surface, now\);\s+\}$/,
   );
   assert.equal(count(code(session), 'hdr::presentation('), 1);
   assert.equal(count(code(session), 'follow_colour('), 3, 'its definition and its two uses');
 
   // ...before the first picture, once mpv has every other option, with what
-  // this machine can do...
+  // this machine can do, waiting for mpv's answers there and only there
+  // (no renderer exists yet, so this thread may wait for mpv)...
   const setUp = functionBody(session, 'fn set_up(', 'set_up');
   assert.match(
     setUp,
     /let capabilities = Capabilities \{\s+can_describe: surface\.colour_support\(\),\s+ten_bit_window: window\.depth == 10,\s+\};\s+let mut tagging = Tagging::new\(\);/,
   );
   const settle = setUp.search(
-    /if capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+for _ in 0\.\.COLOUR_EXCHANGES_AT_START \{\s+surface\.roundtrip\(\)\?;\s+follow_colour\(&player, &mut surface, capabilities, &mut tagging\);\s+if tagging\.settled\(\) \{\s+break;\s+\}\s+\}\s+\}/,
+    /if capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+let deadline = Instant::now\(\) \+ COLOUR_LIMIT_AT_START;\s+let mut exchanges = 0;\s+while !tagging\.settled\(\) && Instant::now\(\) < deadline \{\s+if tagging\.changing\(\) \{[\s\S]{0,400}?let left = if tagging\.waiting_for_room\(\) \{\s+Duration::ZERO\s+\} else \{\s+deadline\.saturating_duration_since\(Instant::now\(\)\)\s+\};\s+match player\.wait_for_event\(left\) \{\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut tagging,\s+&player,\s+&mut surface,\s+Instant::now\(\),\s+\)\),\s+Event::Shutdown => return Err\([^\n]*\),\s+Event::None => \{\s+hdr::drained\(&mut tagging, &player, &mut surface, Instant::now\(\)\)\s+\}\s+Event::Other => \{\}\s+\}\s+\} else if exchanges < COLOUR_EXCHANGES_AT_START \{\s+surface\.roundtrip\(\)\?;\s+exchanges \+= 1;\s+\} else \{\s+break;\s+\}\s+follow_colour\(&player, &mut surface, capabilities, &mut tagging, Instant::now\(\)\);\s+\}\s+\}/,
   );
   assert.notEqual(settle, -1);
+  assert.match(session, /^const COLOUR_LIMIT_AT_START: Duration = Duration::from_secs\(1\);$/m);
   const optionsChecked = setUp.indexOf('return Err("mpv did not take the player\'s options".to_string());');
   assert.notEqual(optionsChecked, -1);
   assert.ok(optionsChecked < settle, "after the user's options and Vela's own");
+  // The waiting read is that one, before the renderer exists; so is the
+  // wake-up callback, which render.h does not list as safe once it does.
+  const rendererMade = setUp.indexOf('Renderer::create(');
+  assert.notEqual(rendererMade, -1);
+  assert.equal(count(code(session), '.wait_for_event('), 1);
+  assert.ok(setUp.indexOf('player.wait_for_event(') < rendererMade);
+  assert.equal(count(code(session), '.set_wakeup('), 1);
+  const wakeup = setUp.indexOf('unsafe { player.set_wakeup(wake_from_mpv, context) };');
+  assert.ok(wakeup !== -1 && settle < wakeup && wakeup < rendererMade);
+  // After the renderer, set-up only hands over what it built.
+  assert.doesNotMatch(
+    code(setUp.slice(rendererMade)),
+    /player\.(property|command|set_option|initialize|wait_for_event|next_event)\(/,
+  );
   // Before mpv has anything to draw: building a play gives mpv no file,
   // and the file is handed over only once the play is built.
   assert.equal(count(setUp, 'loadfile'), 0);
@@ -664,19 +722,112 @@ test("what the compositor says about the display is followed from a play's start
   assert.equal(count(code(setUp), 'Capabilities {'), 1);
   assert.match(setUp, /capabilities,\s+tagging,\s+\}\)$/, 'and the running play keeps both');
 
-  // ...and on every turn of the running play, drawing a frame when it
-  // changed something.
+  // ...and on every turn of the running play.
   const run = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
   assert.match(
     run,
-    /redraw \|= follow_colour\(\s+&self\.player,\s+&mut self\.surface,\s+self\.capabilities,\s+&mut self\.tagging,\s+\);/,
-  );
-  assert.ok(
-    run.indexOf('redraw |= follow_colour(') < run.indexOf('if self.renderer.has_new_frame() || redraw {'),
+    /let now = Instant::now\(\);\s+follow_colour\(\s+&self\.player,\s+&mut self\.surface,\s+self\.capabilities,\s+&mut self\.tagging,\s+now,\s+\);/,
   );
   // The compositor's change of mind is what sets it off.
   assert.match(
     surface,
     /if let wp_color_management_surface_feedback_v1::Event::PreferredChanged \{ \.\. \} = event \{\s+state\.output_changed = true;\s+\}/,
   );
+});
+
+test('the running play never waits for mpv and does with each frame what hdr decides', () => {
+  // Review finding hd-3. mpv's video thread waits for the thread that draws
+  // (render.h), so that thread must never wait for mpv once the renderer
+  // exists. The unit tests in hdr.rs prove the decisions; this proves the
+  // loop is the one they decide for.
+  const run = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
+  // Events are read without waiting, every kind named, none swallowed by a
+  // wildcard, and mpv's answers go to `hdr`.
+  assert.match(
+    run,
+    /loop \{\s+match self\.player\.next_event\(\) \{\s+Event::None => \{\s+hdr::drained\(&mut self\.tagging, &self\.player, &mut self\.surface, now\);\s+break;\s+\}\s+(?:\/\/[^\n]*\n\s+)*Event::Shutdown => return,\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::Other => \{\}\s+\}\s+\}/,
+  );
+  assert.doesNotMatch(code(run), /_ =>/);
+  assert.doesNotMatch(code(run), /wait_for_event|\.property\(|\.command\(|set_option|roundtrip/);
+  assert.match(
+    methodBody(libmpv, '    pub(crate) fn next_event(&self) -> Event {', 'next_event'),
+    /^\n    pub\(crate\) fn next_event\(&self\) -> Event \{\n        self\.event\(0\.0\)$/,
+  );
+  assert.equal(count(code(libmpv), '(self.lib.wait_event)('), 1);
+  // The one read hands its caller's limit to mpv as it is: nothing in it
+  // waits longer than asked, or at all for `next_event`'s zero.
+  assert.equal(
+    code(methodBody(libmpv, '    fn event(&self, timeout: c_double) -> Event {', 'event')),
+    [
+      '',
+      '    fn event(&self, timeout: c_double) -> Event {',
+      '        let event = unsafe { (self.lib.wait_event)(self.raw, timeout) };',
+      '        if event.is_null() {',
+      '            return Event::None;',
+      '        }',
+      '        let (event_id, error, reply_userdata) =',
+      '            unsafe { ((*event).event_id, (*event).error, (*event).reply_userdata) };',
+      '        classify(event_id, error, reply_userdata)',
+    ].join('\n'),
+  );
+  assert.match(
+    libmpv,
+    /pub\(crate\) enum Event \{[\s\S]*?None,[\s\S]*?Shutdown,[\s\S]*?Answer \{ request: u64, taken: bool \},[\s\S]*?Other,\s+\}/,
+  );
+  assert.match(libmpv, /EVENT_SET_PROPERTY_REPLY => Event::Answer \{\s+request: reply_userdata,\s+taken: error >= 0,\s+\},/);
+  // Every frame goes through the one decision, taken after the events are
+  // read and before anything is drawn; each arm does what it says, and a
+  // held frame is still reported to mpv.
+  const events = run.indexOf('match self.player.next_event() {');
+  const decision = run.indexOf('match self.tagging.frame(self.renderer.has_new_frame(), redraw, now) {');
+  assert.ok(events !== -1 && decision !== -1 && events < decision, 'events first, then the decision');
+  assert.equal(count(code(run), 'self.tagging.frame('), 1);
+  assert.equal(count(code(run), 'has_new_frame()'), 1);
+  const arms = run.slice(decision);
+  assert.match(
+    arms,
+    /Frame::Nothing => \{\}\s+Frame::Hold => \{\s+self\.renderer\.draw\(width, height, self\.window\.depth\);\s+self\.renderer\.frame_shown\(\);\s+\}\s+Frame::Show => \{\s+self\.renderer\.draw\(width, height, self\.window\.depth\);\s+self\.window\.swap\(\);\s+self\.renderer\.frame_shown\(\);\s+\}\s+Frame::Black => self\.window\.show_black\(\),\s+Frame::HoldAndBlack => \{\s+self\.renderer\.draw\(width, height, self\.window\.depth\);\s+self\.renderer\.frame_shown\(\);\s+self\.window\.show_black\(\);\s+\}\s+\}/,
+  );
+  assert.equal(count(code(run), 'self.window.swap()'), 1, 'presented in one arm only');
+  assert.equal(count(code(run), 'self.renderer.draw('), 3);
+  assert.equal(count(code(run), 'self.renderer.frame_shown()'), 3, 'every frame drawn is reported');
+  // The one waiting call the play's thread makes after the renderer exists
+  // is the file handed to mpv, once.
+  const shippedSession = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
+  assert.equal(count(shippedSession, '.command('), 1);
+  assert.match(shippedSession, /fn load\(&self, url: &str\) -> Result<\(\), String> \{\s+self\.player\s+\.command\(&\["loadfile", url\]\)/);
+});
+
+test('the shipped library is tested itself, in every full embedded E2E run', () => {
+  // What the player relies on mpv for when it changes HDR targets can only
+  // be shown against the real library (hdr.rs, "against the library Vela
+  // ships"). Those tests are ignored in an ordinary `cargo test`, so they
+  // must be run somewhere routinely: here.
+  const realTests = hdr.match(/#\[ignore = "needs the shipped libmpv set: npm run test:libmpv"\]\n    fn real_library_\w+\(\)/g) ?? [];
+  assert.equal(realTests.length, 5);
+  assert.match(hdr, /\.unwrap_or_else\(\|_\| panic!\("no libmpv set at \{\}", directory\.display\(\)\)\);/, 'a missing set fails them');
+  const pkg = JSON.parse(read('package.json'));
+  assert.equal(
+    pkg.scripts['test:libmpv'],
+    'cargo test --manifest-path src-tauri/Cargo.toml --locked --lib player::embedded::hdr::tests::real_library -- --ignored',
+  );
+  const runner = read('tests/e2e/run.mjs');
+  const embeddedBlock = runner.indexOf("if (runPlayer === 'embedded') {");
+  const runsThem = runner.indexOf("runStep('npm', ['run', 'test:libmpv'], { VELA_LIBMPV_DIR: set });");
+  const firstScenario = runner.indexOf('const err = await runScenario(scenario, tauriDriverBin);');
+  assert.ok(embeddedBlock !== -1 && embeddedBlock < runsThem && runsThem < firstScenario);
+  // The set is one absolute path, the same for the check, the app and the
+  // tests, whatever the variable gave.
+  assert.match(
+    runner,
+    /\n  const set = path\.resolve\(repoRoot, process\.env\.VELA_LIBMPV_DIR \?\? '\.libmpv\/out\/libmpv'\);\n  if \(!fs\.existsSync\(path\.join\(set, 'libmpv\.so\.2'\)\)\) \{/,
+  );
+  // Reached on every full run: the condition is the whole statement that
+  // follows the library check, with nothing but comments between.
+  assert.match(
+    runner,
+    /\n  displayEnv = \{ VELA_LIBMPV_DIR: set \};\n(?:  \/\/[^\n]*\n)*  if \(nameFilter\.length === 0\) \{\n    runStep\('npm', \['run', 'test:libmpv'\], \{ VELA_LIBMPV_DIR: set \}\);\n  \} else \{/,
+  );
+  assert.match(runner, /function runStep\(cmd, args, env = \{\}\) \{\s+const res = spawnSync\(cmd, args, \{ stdio: 'inherit', cwd: repoRoot, env: \{ \.\.\.process\.env, \.\.\.env \} \}\);\s+if \(res\.status !== 0\) \{[\s\S]{0,80}process\.exit\(1\);/);
+  assert.match(read('tests/e2e/README.md'), /`npm run test:libmpv`/);
 });

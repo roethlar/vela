@@ -47,6 +47,15 @@ It additionally needs `weston` and a built libmpv set: by default the one
 `scripts/build-libmpv.sh --container` leaves in `.libmpv/out/libmpv`, or
 wherever `VELA_LIBMPV_DIR` points.
 
+A full `--embedded` run (no scenario named) first runs
+`npm run test:libmpv`: Rust tests, ignored in an ordinary `cargo test`,
+that load that set without a window and check what the player relies on
+mpv for when it changes HDR targets (each ask answered with its own
+request; a refused value answered as refused; the shutdown event). No
+scenario can: weston never makes a play change mpv's target. If they fail,
+or cannot load the set, the run fails before any scenario. A run of named
+scenarios skips them and says so; `npm run test:libmpv` runs them alone.
+
 A scenario can belong to one player with `onlyPlayer: 'embedded'` or
 `onlyPlayer: 'external'`. In a run of the other player it is reported as
 `SKIP` and not counted; named explicitly, it fails instead.
