@@ -1993,3 +1993,22 @@ Agent's reading (not the owner's words):
 - An experimental option must be visible to be chosen, so the plan's D2
   (user-visible control) is treated as implied; the label's exact word is
   not settled.
+
+## 2026-11-12 - The embedded player does not change Vela's licence; libmpv is never shipped on desktop
+
+Status: OWNER RULING (2026-11-12), decision D4 of
+`.agents/plans/embedded-player.md`.
+
+Decision:
+Told that Vela is MIT, that mpv's library is GPL in the Arch build, and
+that loading it in-process differs from starting mpv as a program, the
+owner first asked whether giving the first embedded release "the correct
+license" would be an issue, then ruled: "I don't care about the license.
+whatever causes the least friction."
+
+Agent's choice under that ruling (not the owner's words, and not a legal
+opinion): Vela stays MIT. The embedded player loads the system's libmpv at
+run time; Vela never bundles, vendors or statically links libmpv or FFmpeg
+on a desktop OS, and the docs say which library is used. Any platform
+where the library must ship inside the app (iOS/iPadOS) reopens the
+question in its own plan; there an LGPL build of mpv is the usual route.

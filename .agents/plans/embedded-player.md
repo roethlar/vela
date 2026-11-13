@@ -3,9 +3,9 @@
 ## Status
 
 **DRAFT 2026-11-12. NOT APPROVED. No implementation may start, including
-Slice 0's probes.** One owner decision is still open (D4, licence). D3, D5
-and D6 are ASSUMED, not ruled (see below). The plan needs the owner's
-explicit go.
+Slice 0's probes.** Every decision is ruled (D1, D4) or ASSUMED under the
+owner's standing instruction (D2, D3, D5, D6; see below). The plan now
+needs only the owner's explicit go.
 
 Reviewed 2026-11-12: openreview codex, `acceptable_with_changes`, three
 admitted findings (ep-1, ep-2, ep-3). The owner adopted the fixes
@@ -51,15 +51,18 @@ Decisions:
   missing, X11 session, compositor lacks the needed protocols).
   ASSUMED: play with the external player and show one notice line
   saying why; never fail the play.
-- **D4. Licence. OPEN, the one decision still asked.** Vela is MIT. mpv's library is GPL-2.0-or-later in the
-  Arch build (`pacman -Qi mpv`: "GPL-2.0-or-later AND LGPL-2.1-or-later");
-  an LGPL-only build exists upstream. Today Vela only starts mpv as a
-  separate program. Loading the library into Vela's own process is a
-  different legal relationship. This plan loads the system's library at
-  run time and ships no mpv code, but whether that is acceptable for an
-  MIT-licensed, signed, distributed app is the owner's call, not the
-  agent's; the agent gives no legal opinion. An iOS build would have to
-  ship the library inside the app, which makes the question sharper there.
+- **D4. Licence: RULED 2026-11-12.** Owner, verbatim: "I don't care about
+  the license. whatever causes the least friction." Agent's choice under
+  that ruling (the agent gives no legal opinion): Vela stays MIT and is
+  not relicensed. The embedded player loads the SYSTEM's `libmpv` at run
+  time and Vela ships no mpv code, binary or source, on any desktop OS;
+  that constraint is now a rule of this plan, not a convenience: do not
+  bundle, vendor or statically link libmpv or FFmpeg. Slice 6 adds one
+  paragraph to the README's licence section and to `docs/usage.md` saying
+  the experimental embedded player uses the mpv library installed on the
+  machine, which is GPL or LGPL depending on how the distribution built
+  it. A platform where the library must ship inside the app (iOS/iPadOS)
+  reopens this decision in that platform's own plan.
 - **D5. Scope of the first embedded release.** ASSUMED: Linux on
   Wayland only (the one platform the spike proved). macOS, Windows and iOS
   each get their own later plan on top of the seam this plan builds.
@@ -479,6 +482,7 @@ end-to-end proof, only unit tests and manual acceptance.
   `docs/usage.md`, `docs/development.md` (build needs nothing new at link
   time; run-time needs `libmpv.so.2`), PKGBUILD/deb/rpm metadata
   (`libmpv2` where the distribution splits it), one `scripts/bump.sh`.
+- The licence paragraph of D4 in `README.md` and `docs/usage.md`.
 
 ## Non-goals
 
@@ -500,7 +504,8 @@ end-to-end proof, only unit tests and manual acceptance.
 - Two players double the acceptance surface for every later playback
   feature (owner accepted, 2026-11-12).
 - In-process playback means an mpv crash is a Vela crash.
-- Licence (D4).
+- Licence: settled for desktop by D4; open again for any platform that
+  must ship the library.
 
 ## Verification before claiming completion
 
