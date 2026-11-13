@@ -1,9 +1,9 @@
 # sel-1: a settings file that cannot be read fails a play after its session is installed, and nothing is undone
 
 **Severity**: MEDIUM — a failed play leaves the new session installed, the playlist position moved and, for a transcoded stream, an encoder running on the user's server with nothing left to stop it. It needs the settings file to become unreadable in the middle of a play start, which is rare.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
-**Commit**: `88c631b`
+**Commit**: `88c631b`, `51652d9`, `320b023`
 
 ## Evidence
 
@@ -228,3 +228,22 @@ noted, to show the injected code is real Rust that builds:
 | Another block run before the installation | PASS, rightly: nothing is installed yet | |
 | A `?` inside the block | PASS, rightly, and builds: it can only reach the arm | yes |
 | Unchanged | PASS | yes |
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-13 08:20 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d3f4-9f96-7651-befe-d5e6ba116f72`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 08:09 UTC, finished 08:14 UTC.
+- Reviewed head `320b023364d0d9b5a117a57613068fa26cf76c14`, base
+  `51652d9e287d90f066ab13eb267ec5dd179162b3` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

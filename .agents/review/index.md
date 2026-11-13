@@ -1,14 +1,15 @@
 # Review status
 
-**Embedded player Slice 2 review, 2026-11-13 (open):** codereview codex
+**Embedded player Slice 2 review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `1cedb48..90db1a6`: `findings`. Four candidates, four
-admitted, none declined. Record:
+admitted, none declined; all four fixed and verified by codex (sel-1
+after two reopens, sel-4 after one). Record:
 `.agents/review/codereview-2026-11-13-player-selection.md`.
 
 | ID    | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |-------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| sel-1 | MEDIUM   | A play that fails on an unreadable settings file leaves its session and transcode behind | `[~]`  | `88c631b`, `51652d9`, `320b023` | codex/default/standard esc:T5(ceiling); reopened twice on the guard; third repair changes the code |
+| sel-1 | MEDIUM   | A play that fails on an unreadable settings file leaves its session and transcode behind | `[x]`  | `88c631b`, `51652d9`, `320b023` | codex/default/standard esc:T5(ceiling) |
 | sel-2 | LOW      | A quality step-down makes the fallback explanation appear a second time | `[x]`  | `12828ca` | codex/default/standard |
 | sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[x]`  | `50e57e4`, `db0b8b6` | codex/default/standard |
 | sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[x]`  | `47eec9a`, `29445f2` | codex/default/standard esc:T5(ceiling) |
