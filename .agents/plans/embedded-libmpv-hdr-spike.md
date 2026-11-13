@@ -371,7 +371,18 @@ external player had. Screenshot values (R,G,B of 255) per grey patch:
   the same named curve on both (`tone-mapping=bt.2390`, no peak detection)
   narrows the gap to 4-8 between 203 and 600 nits but does not close it:
   the two renderers implement the curve differently.
-- The owner has not seen the corrected comparison.
+- Corrected comparison shown to the owner afterwards (stacked layout,
+  both players with Vela's options, picture cropped to the grey row). In
+  that layout the players differ in every patch, not only the highlights.
+  Screenshot grey level, embedded / external: 50 nits 75/63, 100 nits
+  101/84, 203 nits 134/112, 265 nits 149/125, 400 nits 174/147, 600 nits
+  200/168, 1000 nits 232/192. Both neutral. The embedded values equal the
+  uncropped ones; external mpv came out darker than uncropped (63 against
+  77 at 50 nits). Assumption, not verified: external mpv's peak detection
+  re-balanced the picture for the cropped frame. If so, a static pattern
+  cannot give one fixed answer while peak detection is on; a real film
+  scene is the meaningful test. The owner's view of this round is not yet
+  recorded.
 
 ### What a real implementation must then build
 
