@@ -262,8 +262,17 @@ What that requires:
   `mpv_render_context_create`, `_set_update_callback`, `_update`,
   `_render`, `_report_swap`, `_free`. No bindgen and no link-time
   dependency. **There is no fallback to a system libmpv**: if the shipped
-  library is missing or fails to load, embedded is unavailable and D3
-  applies. A debug/development build may point at another library through
+  library fails to load, embedded is unavailable and D3 applies. In a
+  correct install that can only come from the machine, not from Vela: a
+  system library the set needs is absent or older than the build baseline
+  (glibc, libEGL, libwayland, libva), or the install is damaged. A package
+  that simply lacks the set is a packaging DEFECT and must never reach a
+  user: the release build fails unless a packaging check finds every file
+  of the set in each built package (deb, rpm, AppImage, Arch) and loads
+  `libmpv.so.2` from the unpacked package with `mpv_client_api_version`
+  returning the pinned version. Red-prove that check by removing one
+  library from a package. The D3 notice names the actual load error so a
+  damaged or too-old system is diagnosable. A debug/development build may point at another library through
   an environment variable so developers need not build the set locally;
   release builds ignore it.
 - **CI and release:** a workflow job per target builds the set, caches it
