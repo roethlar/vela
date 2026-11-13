@@ -1994,21 +1994,31 @@ Agent's reading (not the owner's words):
   (user-visible control) is treated as implied; the label's exact word is
   not settled.
 
-## 2026-11-12 - The embedded player does not change Vela's licence; libmpv is never shipped on desktop
+## 2026-11-12 - Vela becomes GPL with the first release that contains the embedded player
 
 Status: OWNER RULING (2026-11-12), decision D4 of
-`.agents/plans/embedded-player.md`.
+`.agents/plans/embedded-player.md`. Not yet in effect: `LICENSE` is still
+MIT and changes only in the slice that first ships the embedded option.
 
 Decision:
 Told that Vela is MIT, that mpv's library is GPL in the Arch build, and
 that loading it in-process differs from starting mpv as a program, the
-owner first asked whether giving the first embedded release "the correct
-license" would be an issue, then ruled: "I don't care about the license.
-whatever causes the least friction."
+owner said: "so the first version with embedded mpv gets the correct
+license. is that an issue?" and, told it was not, "I don't care about the
+license. whatever causes the least friction." The agent then recorded the
+opposite (stay MIT, never ship the library); the owner corrected it:
+"that's not the least friction option." That mistaken entry existed only
+in commit `dc19cd2` and is replaced by this one.
 
-Agent's choice under that ruling (not the owner's words, and not a legal
-opinion): Vela stays MIT. The embedded player loads the system's libmpv at
-run time; Vela never bundles, vendors or statically links libmpv or FFmpeg
-on a desktop OS, and the docs say which library is used. Any platform
-where the library must ship inside the app (iOS/iPadOS) reopens the
-question in its own plan; there an LGPL build of mpv is the usual route.
+So Vela is relicensed to the GPL when the embedded player first ships.
+The owner is the sole author of every commit, so no one else's consent is
+needed, and published releases stay MIT.
+
+Agent's choices within the ruling (not the owner's words, no legal
+opinion):
+- `GPL-3.0-or-later`: compatible with mpv's "GPL 2 or later" and with
+  Apache-2.0 dependencies.
+- The change is one commit in the plan's last slice, preceded by a
+  dependency licence check.
+- iOS/iPadOS distribution terms are a separate question for that
+  platform's plan.
