@@ -4,7 +4,7 @@
 at random; a gate that fails at random gets re-run until it is green, and
 that is how a real failure gets waved through. Nothing the app ships
 changes.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `4fbff87` (the lock and the refusal), `1d7c405` (a test that the lock excludes)
 
@@ -107,3 +107,23 @@ None.
 ## Reviewer comments
 
 Generation pass: `.agents/review/codereview-2026-11-13-player-seam.md`.
+Verification pass, recorded 2026-11-13 06:29 UTC (this record is committed):
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly; the host's codex config
+  resolves to gpt-6-astra @ max. Thread
+  `01a1d38e-147b-74a2-92f2-ab085da09a43`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; 32 tool calls; dispatched 06:17 UTC, finished 06:26
+  UTC. Routing: T1 no sensitive path in the diff, T2 severity MEDIUM, T3
+  the recorded proof re-run by the orchestrator agrees (378 pass at the
+  head).
+- Reviewed head `1d7c405ae2ef88d5b46ef497e27375e005e3e96b`, base
+  `46d4b6b083e7b143c5721c1eb49ff9eabeb57101` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted; the finding is
+closed.
