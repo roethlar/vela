@@ -45,15 +45,7 @@ impl ManagedChild {
     /// failed removal leaves ownership attached to this child and fails the
     /// replacement closed.
     pub(crate) fn remove_consumed_header_include(&mut self) -> Result<(), String> {
-        let Some(mut include) = self._header_include.take() else {
-            return Ok(());
-        };
-        if include.remove_now().is_ok() {
-            Ok(())
-        } else {
-            self._header_include = Some(include);
-            Err("could not remove the prior mpv authentication include".to_string())
-        }
+        HeaderInclude::remove_consumed(&mut self._header_include)
     }
 }
 

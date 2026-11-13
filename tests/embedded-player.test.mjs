@@ -192,6 +192,36 @@ test('a running embedded play is asked to stop, and waited for, before its windo
   );
 });
 
+test('both players give up a consumed stream-auth file the same way', () => {
+  // `HeaderInclude::remove_consumed` keeps the file with its owner when the
+  // removal fails (proven in player/launch.rs and, for the embedded play, in
+  // session.rs). This proves each player's handle uses it and has no way of
+  // its own (review finding ec-7: the embedded one had, and lost the file).
+  const external = read('src-tauri/src/player/external.rs');
+  const launch = read('src-tauri/src/player/launch.rs');
+  assert.match(
+    external,
+    /pub\(crate\) fn remove_consumed_header_include\(&mut self\) -> Result<\(\), String> \{\s+HeaderInclude::remove_consumed\(&mut self\._header_include\)\s+\}/,
+  );
+  assert.match(
+    session,
+    /pub\(crate\) fn remove_consumed_header_include\(&mut self\) -> Result<\(\), String> \{\s+HeaderInclude::remove_consumed\(&mut self\.header_include\)\s+\}/,
+  );
+  // Nothing outside `launch.rs` removes one directly, and an include leaves
+  // its owner in exactly one place.
+  const shipped = (source) => code(source.slice(0, source.indexOf('#[cfg(test)]\nmod tests')));
+  for (const [name, source] of [['external.rs', external], ['session.rs', session]]) {
+    assert.equal(count(shipped(source), 'remove_now'), 0, `${name} never removes an include itself`);
+  }
+  assert.equal(count(shipped(session), 'header_include.take()'), 1, 'taken once: out of the start request');
+  assert.match(session, /let header_include = start\.header_include\.take\(\);/);
+  assert.equal(count(shipped(external), '_header_include.take()'), 0);
+  assert.match(
+    launch,
+    /pub\(super\) fn remove_consumed\(owner: &mut Option<HeaderInclude>\) -> Result<\(\), String> \{\s+let Some\(mut include\) = owner\.take\(\) else \{\s+return Ok\(\(\)\);\s+\};\s+if include\.remove_now\(\)\.is_ok\(\) \{\s+return Ok\(\(\)\);\s+\}\s+\*owner = Some\(include\);\s+Err\(/,
+  );
+});
+
 // ---- Slice 4: HDR
 
 test('mpv is told what it draws for in one place, together with the surface', () => {

@@ -471,11 +471,17 @@ impl Session {
     /// A play that was never started, for tests of what holds one.
     #[cfg(test)]
     pub(crate) fn for_test(session_id: &str) -> Self {
+        Self::for_test_holding(session_id, None)
+    }
+
+    /// The same, owning a stream-auth include.
+    #[cfg(test)]
+    pub(crate) fn for_test_holding(session_id: &str, header_include: Option<HeaderInclude>) -> Self {
         Session {
             session_id: session_id.to_string(),
             shared: Shared::new().expect("an eventfd"),
             thread: None,
-            header_include: None,
+            header_include,
         }
     }
 
@@ -540,14 +546,10 @@ impl Session {
     }
 
     /// mpv read the stream-auth include when it was configured. Remove it
-    /// now rather than when the play is reaped.
+    /// now rather than when the play is reaped. A failed removal leaves the
+    /// include with this play, to be tried again when the play is reaped.
     pub(crate) fn remove_consumed_header_include(&mut self) -> Result<(), String> {
-        if let Some(mut include) = self.header_include.take() {
-            include
-                .remove_now()
-                .map_err(|_| "couldn't remove the previous mpv auth config".to_string())?;
-        }
-        Ok(())
+        HeaderInclude::remove_consumed(&mut self.header_include)
     }
 }
 
@@ -558,5 +560,67 @@ impl Drop for Session {
         if self.thread.is_some() {
             self.stop_and_wait(Duration::from_secs(5));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::player::launch::write_header_include_at;
+
+    // The embedded play must hold on to a stream-auth file it could not
+    // remove, as the external player's handle does, so that reaping the play
+    // removes it (review finding ec-7: it used to let go of the file on the
+    // first failure, and nothing then knew the file existed).
+    #[test]
+    fn a_play_keeps_a_stream_auth_file_it_could_not_remove_and_removes_it_when_reaped() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: takes nothing and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            // Root removes from a read-only directory; nothing to show.
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!(
+            "vela-test-{}-embedded-include-kept",
+            std::process::id()
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = |mode: u32| {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap()
+        };
+        let path = dir.join("headers.conf");
+        let headers = vec![("X-Emby-Token".to_string(), "synthetic".to_string())];
+        let include = write_header_include_at(&path, &headers).unwrap();
+        let mut play = Session::for_test_holding("play", Some(include));
+
+        // The removal before a replacement launch fails...
+        lock(0o500);
+        assert!(play.remove_consumed_header_include().is_err());
+        lock(0o700);
+        assert!(path.exists());
+        // ...and the play is reaped later, when it can be done.
+        drop(play);
+        assert!(
+            !path.exists(),
+            "the play still owned the file and removed it when it was reaped"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_play_removes_a_consumed_stream_auth_file_at_once_when_it_can() {
+        let path = std::env::temp_dir().join(format!(
+            "vela-test-{}-embedded-include-removed.conf",
+            std::process::id()
+        ));
+        let headers = vec![("X-Emby-Token".to_string(), "synthetic".to_string())];
+        let include = write_header_include_at(&path, &headers).unwrap();
+        let mut play = Session::for_test_holding("play", Some(include));
+        assert!(path.exists());
+        assert!(play.remove_consumed_header_include().is_ok());
+        assert!(!path.exists(), "gone before the replacement launch writes its own");
+        // A play with none has nothing to remove.
+        assert!(Session::for_test("other").remove_consumed_header_include().is_ok());
     }
 }

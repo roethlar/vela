@@ -215,6 +215,26 @@ impl HeaderInclude {
         }
         unreachable!("the bounded removal loop always returns")
     }
+
+    /// Remove an include its player has finished reading, before a
+    /// replacement launch writes another. `owner` gives the include up only
+    /// once the file is gone. When the removal fails the include goes back to
+    /// its owner, so that whatever holds that owner (a player waiting to be
+    /// reaped, the exit sweep) tries again later, and the replacement fails
+    /// closed. An include that is dropped after a failed removal gets one
+    /// more attempt and is then a credential file nobody knows about; both
+    /// players use this one function so that neither can do that (review
+    /// finding ec-7).
+    pub(super) fn remove_consumed(owner: &mut Option<HeaderInclude>) -> Result<(), String> {
+        let Some(mut include) = owner.take() else {
+            return Ok(());
+        };
+        if include.remove_now().is_ok() {
+            return Ok(());
+        }
+        *owner = Some(include);
+        Err("could not remove the prior mpv authentication include".to_string())
+    }
 }
 
 impl Drop for HeaderInclude {
@@ -1026,6 +1046,46 @@ mod tests {
 
     fn tmp(name: &str) -> std::path::PathBuf {
         std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()))
+    }
+
+    // Nothing can be removed from a directory that cannot be written to,
+    // which is how these tests make a removal fail and then let it succeed.
+    // (Not for root, who can remove it anyway; the test then proves nothing
+    // and says so by returning early.)
+    #[cfg(unix)]
+    #[test]
+    fn an_include_whose_removal_fails_stays_with_its_owner_until_it_is_removed() {
+        use std::os::unix::fs::PermissionsExt;
+        // SAFETY: takes nothing and cannot fail.
+        if unsafe { libc::geteuid() } == 0 {
+            return;
+        }
+        let dir = tmp("include-kept");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let lock = |mode: u32| {
+            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode)).unwrap()
+        };
+        let path = dir.join("headers.conf");
+        let headers = vec![("X-Plex-Token".to_string(), "synthetic".to_string())];
+        let mut owner = Some(write_header_include_at(&path, &headers).unwrap());
+
+        lock(0o500);
+        assert!(HeaderInclude::remove_consumed(&mut owner).is_err());
+        assert!(owner.is_some(), "a failed removal leaves the include owned");
+        // Asked again while it still cannot be done: still owned.
+        assert!(HeaderInclude::remove_consumed(&mut owner).is_err());
+        assert!(owner.is_some());
+        lock(0o700);
+        assert!(path.exists(), "and the file is still there to be removed");
+
+        // Whatever was in the way has cleared; the same owner finishes it.
+        assert!(HeaderInclude::remove_consumed(&mut owner).is_ok());
+        assert!(owner.is_none());
+        assert!(!path.exists());
+        // Nothing owned: nothing to do, and not an error.
+        assert!(HeaderInclude::remove_consumed(&mut owner).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
