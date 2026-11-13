@@ -59,10 +59,13 @@ test('the play path starts exactly the launch that was described', () => {
 
 test('the launch asserts the lifecycle options after every user-controlled option', () => {
   const body = functionBody(launch, 'pub(crate) fn build_launch(', 'launch::build_launch');
-  const loop = 'args.extend(lifecycle_args())';
+  // One call serves both players: the external one gets `idle=no`, the
+  // embedded one `idle=once` (the Rust unit tests hold the two values).
+  const loop = 'args.extend(lifecycle_args(spec.player))';
   const at = body.indexOf(loop);
   assert.notEqual(at, -1, 'the launch must apply lifecycle_args()');
   assert.equal(body.indexOf(loop, at + 1), -1, 'lifecycle_args() is applied exactly once');
+  assert.equal(body.split('lifecycle_args(').length - 1, 1, 'and in no other form');
 
   // Advanced arguments and own-config handling live in base_args; the
   // inherited window state and screen placement are the last option groups
@@ -81,7 +84,35 @@ test('Advanced arguments are still applied inside base_args', () => {
   // The ordering assertion above leans on this: if the user's arguments ever
   // move out of base_args, that test must be re-anchored.
   const body = functionBody(launch, 'fn base_args(', 'launch::base_args');
-  assert.match(body, /mpv_extra_args/);
-  // And they come after every default of Vela's in that function.
-  assert.ok(body.lastIndexOf('LaunchArg::set(') < body.indexOf('cfg.mpv_extra_args'));
+  const user = functionBody(launch, 'fn user_args(', 'launch::user_args');
+  assert.match(user, /cfg\s*\.mpv_extra_args/, "user_args is where the user's arguments come from");
+  // Each player's list takes them once, after every default of Vela's.
+  const taken = [...body.matchAll(/args\.extend\(user_args\(cfg\)\);/g)].map((m) => m.index);
+  assert.equal(taken.length, 2, 'once for the embedded player and once for the external one');
+  assert.match(
+    body,
+    /let mut args = embedded_default_args\(\);\n\s+args\.extend\(user_args\(cfg\)\);\n\s+return \(args, Vec::new\(\)\);/,
+    "the embedded list is Vela's defaults, then the user's arguments, and nothing after",
+  );
+  assert.ok(body.lastIndexOf('LaunchArg::set(') < taken[1], 'no external default follows them');
+  assert.ok(body.lastIndexOf('LaunchArg::flag(') < taken[1]);
+});
+
+test("the embedded player's required options follow everything the user controls", () => {
+  // `vo=libmpv` is what makes an embedded play draw into Vela's surface. A
+  // user option that came later would win and break the player.
+  const body = functionBody(launch, 'pub(crate) fn build_launch(', 'launch::build_launch');
+  const required = 'args.extend(embedded_required_args())';
+  const at = body.indexOf(required);
+  assert.notEqual(at, -1, 'the launch must apply embedded_required_args()');
+  assert.equal(body.indexOf(required, at + 1), -1, 'exactly once');
+  for (const earlier of ['base_args(', 'markers_args(', 'args.extend(lifecycle_args(spec.player))']) {
+    const last = body.lastIndexOf(earlier);
+    assert.notEqual(last, -1, `the launch must still call ${earlier}`);
+    assert.ok(last < at, `embedded_required_args() must follow ${earlier}`);
+  }
+  assert.match(
+    functionBody(launch, 'fn embedded_required_args(', 'launch::embedded_required_args'),
+    /\[LaunchArg::set\("vo", "libmpv"\)\]/,
+  );
 });

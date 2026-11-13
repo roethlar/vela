@@ -10,6 +10,7 @@ use std::io::Write;
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::playback::{PlaySpec, PlaybackWindowState};
+use crate::player::PlayerKind;
 
 /// One mpv option of a launch.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -343,7 +344,12 @@ fn parse_extra_mpv_args(raw: &str) -> Vec<String> {
 /// (credentials, IPC, title, resume point, scripts, and URL) are added by
 /// [`build_launch`]; keeping the defaults here makes their ordering directly
 /// testable.
-fn base_args(cfg: &crate::config::AppConfig) -> (Vec<LaunchArg>, LaunchEnv) {
+fn base_args(cfg: &crate::config::AppConfig, player: PlayerKind) -> (Vec<LaunchArg>, LaunchEnv) {
+    if player == PlayerKind::Embedded {
+        let mut args = embedded_default_args();
+        args.extend(user_args(cfg));
+        return (args, Vec::new());
+    }
     let use_own_config = cfg.mpv_use_own_config.unwrap_or(false);
     let mut args = Vec::new();
     if !use_own_config {
@@ -398,13 +404,46 @@ fn base_args(cfg: &crate::config::AppConfig) -> (Vec<LaunchArg>, LaunchEnv) {
 
     // User-supplied advanced options remain last among defaults, so repeated
     // mpv options retain their documented last-option-wins behavior.
-    if let Some(extra) = cfg.mpv_extra_args.as_deref() {
-        for arg in parse_extra_mpv_args(extra) {
-            args.push(LaunchArg::User(arg));
-        }
-    }
+    args.extend(user_args(cfg));
 
     (args, env)
+}
+
+/// The user's Advanced mpv options, one per line, exactly as written.
+fn user_args(cfg: &crate::config::AppConfig) -> Vec<LaunchArg> {
+    cfg.mpv_extra_args
+        .as_deref()
+        .map(parse_extra_mpv_args)
+        .unwrap_or_default()
+        .into_iter()
+        .map(LaunchArg::User)
+        .collect()
+}
+
+/// Vela's defaults for the embedded player, before the user's options.
+///
+/// What the external player's list has and this one leaves out, and why
+/// (`.agents/plans/embedded-player.md`, "The seam"):
+/// - `no-config`: mpv's library never loads the user's configuration on its
+///   own. The embedded launcher applies the user's `mpv.conf` itself when
+///   asked to, before these options.
+/// - `vo`: asserted in the protected tail instead, because the embedded
+///   player cannot work with any other value.
+/// - `gpu-api`, `ENABLE_HDR_WSI`, `target-colorspace-hint`: these make mpv's
+///   own window negotiate HDR with the compositor. Embedded, Vela owns the
+///   surface and tags it itself.
+/// - the macOS audio default: the embedded player exists on Linux only.
+fn embedded_default_args() -> Vec<LaunchArg> {
+    vec![
+        LaunchArg::flag("no-ytdl"),
+        LaunchArg::set("profile", "gpu-hq"),
+        LaunchArg::set("hwdec", "auto"),
+        LaunchArg::set("hwdec-codecs", "all"),
+        LaunchArg::set("hdr-compute-peak", "yes"),
+        // mpv's own on-screen controller answers the pointer, and no pointer
+        // reaches an embedded mpv. Vela's page draws the controls.
+        LaunchArg::set("osc", "no"),
+    ]
 }
 
 /// Explicit inherited flags follow user/autocrop options so observed runtime
@@ -436,8 +475,23 @@ fn window_state_args(state: PlaybackWindowState) -> Vec<LaunchArg> {
 /// of file. The trackers' `on_end` runs only once mpv's IPC connection drops,
 /// so an idling mpv means no recents stamp, no `playback-ended`, and no
 /// continuation, ever.
-fn lifecycle_args() -> [LaunchArg; 1] {
-    [LaunchArg::set("idle", "no")]
+///
+/// The embedded player is created first and given its file afterwards, once
+/// its surface exists. With `no` mpv's library shuts down in that gap, before
+/// the file arrives; `once` waits for the first file and exits at its end,
+/// which is the same lifecycle (plan review ep-1, proved in Slice 0, A9).
+fn lifecycle_args(player: PlayerKind) -> [LaunchArg; 1] {
+    match player {
+        PlayerKind::External => [LaunchArg::set("idle", "no")],
+        PlayerKind::Embedded => [LaunchArg::set("idle", "once")],
+    }
+}
+
+/// What the embedded player cannot work without, asserted after everything
+/// the user controls: mpv draws through the library's render interface into
+/// the surface Vela gives it, and nowhere else.
+fn embedded_required_args() -> [LaunchArg; 1] {
+    [LaunchArg::set("vo", "libmpv")]
 }
 
 fn screen_name_arg(name: Option<&str>) -> Option<LaunchArg> {
@@ -653,7 +707,10 @@ pub(crate) fn build_launch(
     cfg: &crate::config::AppConfig,
     ipc_path: &str,
 ) -> Result<LaunchPlan, String> {
-    let (mut args, mut env) = base_args(cfg);
+    // Which player this launch is for decides a handful of options, here and
+    // in `base_args`. The list is never edited afterwards, by either player.
+    let embedded = spec.player == PlayerKind::Embedded;
+    let (mut args, mut env) = base_args(cfg, spec.player);
 
     // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
     // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
@@ -661,8 +718,13 @@ pub(crate) fn build_launch(
     // exists — a missing `--script=` would make mpv refuse to launch, so skip and
     // log instead. `autocrop-auto=no` in Manual mode keeps the known live
     // `video-crop` hang off the every-play path (see config `mpv_autocrop`).
+    //
+    // External only. The stock script measures black bars with an FFmpeg
+    // filter the library Vela ships does not contain, and it is GPL code that
+    // must never be loaded into Vela's own process; the embedded player gets a
+    // crop script of its own (plan, "Autocrop in the embedded player").
     let autocrop_mode = cfg.mpv_autocrop.as_deref().unwrap_or("off");
-    if autocrop_mode != "off" {
+    if autocrop_mode != "off" && !embedded {
         let script = spec
             .autocrop_script
             .as_deref()
@@ -716,21 +778,36 @@ pub(crate) fn build_launch(
             payload.is_some(),
         ));
         if let Some(path) = &payload {
-            // The player's environment only, and never an option: the payload
-            // path must not appear in the process argument list.
-            env.push(("VELA_MARKERS_PAYLOAD", path.as_os_str().to_owned()));
+            if embedded {
+                // An embedded mpv has no environment of its own, and setting
+                // the variable on Vela's process would leak it to every later
+                // child. The script reads this option first. It names a file
+                // in Vela's private directory and reaches mpv through an
+                // owner-only options file, never an argument list.
+                args.push(LaunchArg::set(
+                    "script-opts-append",
+                    format!("vela-markers-payload={}", path.to_string_lossy()),
+                ));
+            } else {
+                // The player's environment only, and never an option: the
+                // payload path must not appear in the process argument list.
+                env.push(("VELA_MARKERS_PAYLOAD", path.as_os_str().to_owned()));
+            }
         }
         payload
     };
 
-    args.extend(window_state_args(spec.inherited_window_state));
-    if let Some(screen_arg) = screen_name_arg(spec.screen_name.as_deref()) {
-        // Reassert after user options. On Wayland this is a placement request,
-        // not a guarantee; the compositor's actual choice is observed over IPC.
-        args.push(screen_arg);
+    if !embedded {
+        // The embedded player has no window of its own to place or size.
+        args.extend(window_state_args(spec.inherited_window_state));
+        if let Some(screen_arg) = screen_name_arg(spec.screen_name.as_deref()) {
+            // Reassert after user options. On Wayland this is a placement request,
+            // not a guarantee; the compositor's actual choice is observed over IPC.
+            args.push(screen_arg);
+        }
     }
 
-    args.extend(lifecycle_args());
+    args.extend(lifecycle_args(spec.player));
     args.push(LaunchArg::set("input-ipc-server", ipc_path));
     // Drive mpv's window title and OSD media-title from the human title, NOT the
     // URL. Authenticated media URLs have historically carried tokens, and mpv's
@@ -744,7 +821,12 @@ pub(crate) fn build_launch(
         spec.title.as_str()
     };
     args.push(LaunchArg::set("force-media-title", display_title));
-    args.push(LaunchArg::set("title", display_title));
+    if embedded {
+        args.extend(embedded_required_args());
+    } else {
+        // The window title. An embedded mpv has no window.
+        args.push(LaunchArg::set("title", display_title));
+    }
     // Stream auth (e.g. Plex's X-Plex-Token) rides in an owner-only include
     // file — see write_header_include for why neither argv nor the URL may
     // carry it. Asserted after the user's extra args so a user-set
@@ -773,6 +855,31 @@ pub(crate) fn build_launch(
 mod tests {
     use super::*;
 
+    /// A play with nothing optional, for the tests below to build on.
+    fn plain_spec(player: PlayerKind, url: &str) -> PlaySpec {
+        PlaySpec {
+            player,
+            url: url.to_string(),
+            title: String::new(),
+            http_headers: Vec::new(),
+            start_seconds: 0.0,
+            autocrop_script: None,
+            autocrop_shim: None,
+            inherited_window_state: PlaybackWindowState::default(),
+            screen_name: None,
+            window_observation: crate::playback::WindowStateObservation::default(),
+            markers_script: None,
+            markers: Vec::new(),
+            intro_policy: crate::config::SkipPolicy::Off,
+            credits_policy: crate::config::SkipPolicy::Off,
+            commercial_policy: crate::config::SkipPolicy::Off,
+            step_down: None,
+            duration: None,
+            osd_notice: None,
+            steps_taken: 0,
+        }
+    }
+
     // The assertions in this module were written against command-line
     // spellings, before a launch was described as data. These wrappers keep
     // them exactly as they were: each renders what the function of the same
@@ -782,7 +889,7 @@ mod tests {
     }
 
     fn base_command_args(cfg: crate::config::AppConfig) -> Vec<String> {
-        cli(base_args(&cfg).0)
+        cli(base_args(&cfg, PlayerKind::External).0)
     }
 
     fn window_state_args(state: PlaybackWindowState) -> Vec<String> {
@@ -790,7 +897,7 @@ mod tests {
     }
 
     fn lifecycle_args() -> Vec<String> {
-        cli(super::lifecycle_args())
+        cli(super::lifecycle_args(PlayerKind::External))
     }
 
     fn screen_name_arg(name: Option<&str>) -> Option<String> {
@@ -952,6 +1059,153 @@ mod tests {
     #[test]
     fn lifecycle_args_make_mpv_exit_when_its_file_ends() {
         assert_eq!(lifecycle_args(), ["--idle=no"]);
+    }
+
+    // The embedded player is created before it is given its file. `no` would
+    // shut the library down in that gap and `yes` would never end the session;
+    // `once` waits for the first file and exits at its end (plan review ep-1).
+    #[test]
+    fn the_embedded_player_waits_for_its_first_file_and_exits_at_its_end() {
+        assert_eq!(
+            cli(super::lifecycle_args(PlayerKind::Embedded)),
+            ["--idle=once"]
+        );
+    }
+
+    // Everything a launch for the embedded player is made of, in order, with
+    // every optional part present and a user who tries to take over each thing
+    // the player depends on. Rendered as command-line text only to be read;
+    // the embedded player applies the same list through an options file.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_full_embedded_launch_is_exactly_the_recorded_one() {
+        use crate::config::SkipPolicy;
+        use crate::source::MarkerKind;
+
+        let dir = tmp("embedded-launch");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        let script = |name: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, "-- test stand-in\n").expect("script stand-in");
+            path.to_string_lossy().into_owned()
+        };
+        let autocrop = script("autocrop.lua");
+        let shim = script("vela-autocrop.lua");
+        let markers = script("vela-markers.lua");
+
+        let cfg = crate::config::AppConfig {
+            mpv_extra_args: Some(
+                "--volume=70\n--vo=gpu-next\n--idle=yes\n--input-ipc-server=/tmp/not-velas"
+                    .to_string(),
+            ),
+            // The stock crop script must not be named for an embedded play.
+            mpv_autocrop: Some("auto".to_string()),
+            // Loading the user's own configuration is the embedded launcher's
+            // job; it changes nothing in the list.
+            mpv_use_own_config: Some(true),
+            ..Default::default()
+        };
+        let spec = PlaySpec {
+            title: "Recorded: Title".to_string(),
+            http_headers: vec![("X-Plex-Token".to_string(), "abc123".to_string())],
+            start_seconds: 123.5,
+            autocrop_script: Some(autocrop),
+            autocrop_shim: Some(shim),
+            inherited_window_state: PlaybackWindowState {
+                fullscreen: Some(true),
+                maximized: Some(false),
+            },
+            screen_name: Some("DP-3".to_string()),
+            markers_script: Some(markers.clone()),
+            markers: vec![marker(MarkerKind::Intro)],
+            intro_policy: SkipPolicy::Button,
+            credits_policy: SkipPolicy::Autoskip,
+            commercial_policy: SkipPolicy::Off,
+            ..plain_spec(
+                PlayerKind::Embedded,
+                "https://media.invalid/video/stream.mkv?x=1",
+            )
+        };
+
+        let _payloads = payload_test_lock::hold();
+        let plan = build_launch(&spec, &cfg, "/tmp/vela-recorded/mpv.sock")
+            .expect("the launch is described");
+        let include_path = plan
+            .header_include
+            .as_ref()
+            .expect("stream headers produce an include")
+            .path()
+            .to_path_buf();
+        let payload_path = plan
+            .marker_payload
+            .clone()
+            .expect("enabled markers produce a payload");
+        assert!(payload_path.is_file(), "the payload is written");
+
+        let expected: Vec<String> = [
+            "--no-ytdl".to_string(),
+            "--profile=gpu-hq".to_string(),
+            "--hwdec=auto".to_string(),
+            "--hwdec-codecs=all".to_string(),
+            "--hdr-compute-peak=yes".to_string(),
+            "--osc=no".to_string(),
+            "--volume=70".to_string(),
+            "--vo=gpu-next".to_string(),
+            "--idle=yes".to_string(),
+            "--input-ipc-server=/tmp/not-velas".to_string(),
+            format!("--script={markers}"),
+            "--script-opts-append=vela-markers-intro-policy=button".to_string(),
+            "--script-opts-append=vela-markers-credits-policy=autoskip".to_string(),
+            "--script-opts-append=vela-markers-commercial-policy=off".to_string(),
+            format!(
+                "--script-opts-append=vela-markers-payload={}",
+                payload_path.to_string_lossy()
+            ),
+            "--idle=once".to_string(),
+            "--input-ipc-server=/tmp/vela-recorded/mpv.sock".to_string(),
+            "--force-media-title=Recorded: Title".to_string(),
+            "--vo=libmpv".to_string(),
+            format!("--include={}", include_path.to_string_lossy()),
+            "--start=123.5".to_string(),
+        ]
+        .to_vec();
+        assert_eq!(cli(plan.args.iter().cloned()), expected);
+        assert!(
+            plan.env.is_empty(),
+            "an embedded mpv has no environment of its own to add to"
+        );
+        assert_eq!(plan.url, "https://media.invalid/video/stream.mkv?x=1");
+
+        drop(plan);
+        let _ = std::fs::remove_file(&payload_path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_minimal_embedded_launch_is_exactly_the_recorded_one() {
+        let cfg = crate::config::AppConfig::default();
+        let spec = plain_spec(PlayerKind::Embedded, "edl://not-a-url-with-a-dash");
+        let plan = build_launch(&spec, &cfg, "/tmp/vela-recorded/min.sock")
+            .expect("the launch is described");
+        assert_eq!(
+            cli(plan.args.iter().cloned()),
+            [
+                "--no-ytdl",
+                "--profile=gpu-hq",
+                "--hwdec=auto",
+                "--hwdec-codecs=all",
+                "--hdr-compute-peak=yes",
+                "--osc=no",
+                "--idle=once",
+                "--input-ipc-server=/tmp/vela-recorded/min.sock",
+                "--force-media-title=Vela",
+                "--vo=libmpv",
+            ]
+        );
+        assert!(plan.env.is_empty());
+        assert!(plan.header_include.is_none());
+        assert!(plan.marker_payload.is_none());
     }
 
     #[test]
