@@ -360,6 +360,7 @@ mod tests {
             step_down: None,
             duration: None,
             osd_notice: None,
+            on_notice_shown: None,
             steps_taken: 0,
         }
     }

@@ -3,7 +3,7 @@
 **Severity**: LOW — one extra line on screen; playback is unaffected.
 **Status**: In progress
 **Branch**: —
-**Commit**: (this commit)
+**Commit**: `12828ca`
 
 ## Evidence
 

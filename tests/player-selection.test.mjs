@@ -90,27 +90,51 @@ test('a fallback is explained once, and only by a play that started', () => {
     body,
     /let notice_plan = state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.plan\(player\.is_none\(\), player_choice\.fallback\.as_ref\(\)\);/,
   );
-  // A notice the launch already carries wins, and then nothing is recorded as
-  // explained.
+  // A notice the launch already carries wins, and then there is nothing to
+  // record as explained.
   assert.match(
     body,
     /let explained = notice_plan\s+\.explain\s+\.clone\(\)\s+\.filter\(\|_\| osd_notice\.is_none\(\)\);\s+let fallback_notice = explained\.as_ref\(\)\.map\(\|reason\| reason\.notice\(\)\);/,
   );
-  // Recorded inside the success continuation, never before the launch.
+  // The user has been told when the line reached the player, not when the
+  // player started: a play replaced during the wait never shows it (review
+  // finding sel-3). The record is made by a callback the launch carries next
+  // to the notice itself.
+  assert.match(
+    body,
+    /let on_notice_shown = explained\.map\(\|reason\| \{\s+let notices = state\.embedded_fallback_notices\.clone\(\);\s+std::sync::Arc::new\(move \|\| \{\s+notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.explained\(&reason\);\s+\}\) as playback::NoticeShown\s+\}\);/,
+  );
+  const spec = body.slice(body.indexOf('let spec = playback::PlaySpec {'));
+  assert.match(spec, /osd_notice: osd_notice\.or\(fallback_notice\),\n\s+on_notice_shown,/);
+  // ...which the play hands to the thread that sends the notice, and which
+  // that thread calls only after the wait, the replaced-play check and a
+  // successful write (the behaviour is unit-tested in playback.rs).
+  assert.match(
+    functionBody(playback, 'pub fn play(', 'playback::play'),
+    /spawn_osd_notice\(\s+ipc_path\.clone\(\),\s+stop_flag\.clone\(\),\s+notice,\s+OSD_NOTICE_DELAY,\s+spec\.on_notice_shown\.clone\(\),\s+\)/,
+  );
+  const notice = functionBody(playback, 'fn spawn_osd_notice(', 'spawn_osd_notice');
+  assert.match(
+    notice,
+    /std::thread::sleep\(delay\);\s+if stop_flag\.load\(Ordering::Relaxed\) \{\s+return;\s+\}[\s\S]{0,400}if sent\.is_ok\(\) \{\s+if let Some\(on_shown\) = on_shown \{\s+on_shown\(\);/,
+  );
+  assert.equal(notice.split('on_shown()').length - 1, 1, 'reported in one place only');
+  // A started play with nothing to fall back from forgets, inside the success
+  // continuation and never before the launch.
   const success = body.slice(body.indexOf('let played = after_successful_play(played, || {'));
   assert.match(
     success,
-    /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,300}let mut notices = state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+if let Some\(reason\) = &explained \{\s+notices\.explained\(reason\);\s+\} else if notice_plan\.forget_when_started \{\s+notices\.forget\(\);\s+\}/,
+    /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,300}if notice_plan\.forget_when_started \{\s+state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.forget\(\);\s+\}/,
   );
-  // The notice state is touched in exactly two places in the whole command
-  // layer: asked before the launch, changed after it succeeded. Anything else
-  // (an early record, a second ask) would tell the user at the wrong time.
+  // The notice state is touched in exactly three places in the whole command
+  // layer: the plan and the shown-callback before the launch, the forgetting
+  // after it succeeded. Anything else would tell the user at the wrong time.
   const uses = [...commands.matchAll(/embedded_fallback_notices/g)].map((use) => use.index);
-  assert.equal(uses.length, 2, 'no other code reads or writes the notice state');
+  assert.equal(uses.length, 3, 'no other code reads or writes the notice state');
   const successAt = commands.indexOf('let played = after_successful_play(played, || {');
   const launchAt = commands.indexOf('playback::play(\n');
-  assert.ok(uses[0] < launchAt, 'the plan is made before the launch');
-  assert.ok(uses[1] > launchAt && uses[1] > successAt, 'and acted on only after it succeeded');
+  assert.ok(uses[0] < launchAt && uses[1] < launchAt, 'planned before the launch');
+  assert.ok(uses[2] > launchAt && uses[2] > successAt, 'forgotten only after it succeeded');
   assert.deepEqual(
     [...commands.matchAll(/\.(plan|explained|forget)\(/g)].map((call) => call[1]),
     ['plan', 'explained', 'forget'],

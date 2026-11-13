@@ -265,6 +265,11 @@ pub struct PlaySpec {
     /// notices. Never set `--osd-font-size` to compensate; it is global and
     /// would override the user's own mpv config.
     pub osd_notice: Option<String>,
+    /// Called once when `osd_notice` has actually been handed to the player.
+    /// The notice is sent a moment after the player starts and is dropped if
+    /// the play is replaced first, so "the player started" does not mean "the
+    /// user was told" (review finding sel-3).
+    pub on_notice_shown: Option<NoticeShown>,
     /// Steps this LOGICAL play has already taken, carried into the new
     /// detector so the cap counts plays rather than mpv processes.
     pub steps_taken: u32,
@@ -276,6 +281,14 @@ pub struct PlaySpec {
 /// caller wires this to recents recording + UI notification (a
 /// `playback-ended` Tauri event); this module stays UI-framework-free.
 pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
+
+/// See [`PlaySpec::on_notice_shown`].
+pub type NoticeShown = Arc<dyn Fn() + Send + Sync>;
+
+/// How long a notice waits after the player's IPC connection is up. Let the
+/// picture arrive first: a notice drawn over a black frame during load
+/// explains nothing.
+const OSD_NOTICE_DELAY: Duration = Duration::from_millis(1500);
 
 /// Start a player for `spec.url`, optionally seeking to `spec.start_seconds`,
 /// and start background progress reporting that runs until the player ends.
@@ -363,7 +376,13 @@ pub fn play(
     // Explain a play the user did not ask for. Best-effort and fire-and-forget:
     // a notice that fails to render must never affect playback.
     if let Some(notice) = spec.osd_notice.clone() {
-        if let Err(e) = spawn_osd_notice(ipc_path.clone(), stop_flag.clone(), notice) {
+        if let Err(e) = spawn_osd_notice(
+            ipc_path.clone(),
+            stop_flag.clone(),
+            notice,
+            OSD_NOTICE_DELAY,
+            spec.on_notice_shown.clone(),
+        ) {
             eprintln!("vela: couldn't show the playback notice: {e}");
         }
     }
@@ -570,10 +589,15 @@ pub type StepDownNotify = Arc<dyn Fn(u64, crate::automatic::StepDownReason) + Se
 /// in.
 /// Show one short OSD line on this player, then stop. Its own connection and
 /// its own thread so a slow or refused write cannot delay the trackers.
+/// `on_shown` runs once, and only when the line was really handed to the
+/// player: not when the play was replaced during the wait, and not when the
+/// player could not be reached.
 fn spawn_osd_notice(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
     notice: String,
+    delay: Duration,
+    on_shown: Option<NoticeShown>,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("mpv-osd-notice".into())
@@ -592,17 +616,20 @@ fn spawn_osd_notice(
                 }
             }
             let Some(mut stream) = stream else { return };
-            // Let the picture arrive first — a notice drawn over a black frame
-            // during load explains nothing.
-            std::thread::sleep(Duration::from_millis(1500));
+            std::thread::sleep(delay);
             if stop_flag.load(Ordering::Relaxed) {
                 return;
             }
             // JSON-encoded so a title or unit can never break the command.
             let text = serde_json::Value::String(notice);
-            let _ = stream.write_all(
+            let sent = stream.write_all(
                 format!("{{\"command\":[\"show-text\",{text},2000]}}\n").as_bytes(),
             );
+            if sent.is_ok() {
+                if let Some(on_shown) = on_shown {
+                    on_shown();
+                }
+            }
         })?;
     Ok(())
 }
@@ -960,6 +987,107 @@ fn spawn_end_watcher(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Review finding sel-3: "the player started" is not "the user was told".
+    #[cfg(unix)]
+    fn notice_listener(name: &str) -> (std::os::unix::net::UnixListener, String) {
+        let dir = crate::player::launch::private_runtime_dir().expect("the private directory");
+        let path = dir.join(format!("{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        let listener = std::os::unix::net::UnixListener::bind(&path).expect("a socket to listen on");
+        (listener, path.to_string_lossy().into_owned())
+    }
+
+    #[cfg(unix)]
+    fn counting() -> (Arc<std::sync::atomic::AtomicUsize>, Option<NoticeShown>) {
+        let count = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = count.clone();
+        let shown: NoticeShown = Arc::new(move || {
+            counter.fetch_add(1, Ordering::SeqCst);
+        });
+        (count, Some(shown))
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_notice_that_reaches_the_player_is_reported_shown_once() {
+        use std::io::{BufRead, BufReader, Read};
+        let (listener, socket) = notice_listener("notice-shown");
+        let (count, on_shown) = counting();
+        spawn_osd_notice(
+            socket.clone(),
+            Arc::new(AtomicBool::new(false)),
+            "A \"quoted\" line".to_string(),
+            Duration::from_millis(30),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        let (stream, _) = listener.accept().expect("the notice thread connects");
+        let mut reader = BufReader::new(stream);
+        let mut line = String::new();
+        reader.read_line(&mut line).expect("the command arrives");
+        assert_eq!(
+            line,
+            "{\"command\":[\"show-text\",\"A \\\"quoted\\\" line\",2000]}\n"
+        );
+        // The thread reports and then ends, closing its side.
+        let mut rest = String::new();
+        reader.read_to_string(&mut rest).expect("the thread ends");
+        assert_eq!(rest, "", "one command and nothing else");
+        assert_eq!(count.load(Ordering::SeqCst), 1, "reported exactly once");
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_notice_dropped_because_the_play_was_replaced_is_not_reported_shown() {
+        use std::io::Read;
+        let (listener, socket) = notice_listener("notice-dropped");
+        let (count, on_shown) = counting();
+        let replaced = Arc::new(AtomicBool::new(false));
+        spawn_osd_notice(
+            socket.clone(),
+            replaced.clone(),
+            "A line".to_string(),
+            Duration::from_millis(200),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        // Connected, and now waiting for the picture. The play is replaced.
+        let (mut stream, _) = listener.accept().expect("the notice thread connects");
+        replaced.store(true, Ordering::Relaxed);
+        let mut received = String::new();
+        stream
+            .read_to_string(&mut received)
+            .expect("the thread ends and closes its side");
+        assert_eq!(received, "", "nothing was sent to the player");
+        assert_eq!(count.load(Ordering::SeqCst), 0, "and nothing was reported");
+        let _ = std::fs::remove_file(&socket);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_notice_for_a_player_that_cannot_be_reached_is_not_reported_shown() {
+        let dir = crate::player::launch::private_runtime_dir().expect("the private directory");
+        let nowhere = dir.join(format!("notice-nowhere-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&nowhere);
+        let (count, on_shown) = counting();
+        // Stop the connection attempts after the first few instead of
+        // waiting out all fifty.
+        let gave_up = Arc::new(AtomicBool::new(false));
+        spawn_osd_notice(
+            nowhere.to_string_lossy().into_owned(),
+            gave_up.clone(),
+            "A line".to_string(),
+            Duration::from_millis(1),
+            on_shown,
+        )
+        .expect("the notice thread starts");
+        std::thread::sleep(Duration::from_millis(250));
+        gave_up.store(true, Ordering::Relaxed);
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(count.load(Ordering::SeqCst), 0);
+    }
 
     fn event(name: &str, data: serde_json::Value) -> serde_json::Value {
         serde_json::json!({"event": "property-change", "id": 1, "name": name, "data": data})

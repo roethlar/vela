@@ -100,7 +100,7 @@ pub struct AppState {
     /// changed in between.
     pub(crate) active_playback_player: AsyncMutex<Option<(String, player::PlayerKind)>>,
     /// Which embedded-player fallback the user has already been told about.
-    pub(crate) embedded_fallback_notices: Mutex<player::FallbackNotices>,
+    pub(crate) embedded_fallback_notices: Arc<Mutex<player::FallbackNotices>>,
     /// Exact in-memory Ask-mode run state. Affinity is tied to one active
     /// series/Vela-playlist session and is never persisted.
     pub(crate) playback_run: AsyncMutex<Option<commands::PlaybackRunState>>,
@@ -148,7 +148,7 @@ pub fn run() {
         active_playback_session: AsyncMutex::new(None),
         active_playback_item: AsyncMutex::new(None),
         active_playback_player: AsyncMutex::new(None),
-        embedded_fallback_notices: Mutex::new(player::FallbackNotices::default()),
+        embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
         playback_run: AsyncMutex::new(None),
         playback_choices: AsyncMutex::new(Default::default()),
         playback_window_session: Mutex::new(None),

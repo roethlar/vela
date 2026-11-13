@@ -5071,6 +5071,18 @@ async fn play_by_key_locked(
         .clone()
         .filter(|_| osd_notice.is_none());
     let fallback_notice = explained.as_ref().map(|reason| reason.notice());
+    // The user has been told only once the line has really reached the
+    // player. It is sent a moment after the player starts, and a play that is
+    // replaced before then never shows it: that explanation stays due.
+    let on_notice_shown = explained.map(|reason| {
+        let notices = state.embedded_fallback_notices.clone();
+        std::sync::Arc::new(move || {
+            notices
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .explained(&reason);
+        }) as playback::NoticeShown
+    });
     let spec = playback::PlaySpec {
         player: player_choice.kind,
         url: resolved.url,
@@ -5108,6 +5120,7 @@ async fn play_by_key_locked(
         }),
         duration: item.duration_ms.map(Duration::from_millis),
         osd_notice: osd_notice.or(fallback_notice),
+        on_notice_shown,
         steps_taken,
     };
     // The tracker can observe a very fast mpv exit before this async command
@@ -5211,18 +5224,14 @@ async fn play_by_key_locked(
         observation: window_observation,
     };
     let played = after_successful_play(played, || {
-        // Only a play that started has shown the user anything, or shown
-        // that there is nothing to fall back from.
-        {
-            let mut notices = state
+        // Only a play that started has shown that there is nothing to fall
+        // back from. (An explanation is recorded when it is shown, above.)
+        if notice_plan.forget_when_started {
+            state
                 .embedded_fallback_notices
                 .lock()
-                .unwrap_or_else(|e| e.into_inner());
-            if let Some(reason) = &explained {
-                notices.explained(reason);
-            } else if notice_plan.forget_when_started {
-                notices.forget();
-            }
+                .unwrap_or_else(|e| e.into_inner())
+                .forget();
         }
         *state
             .playback_window_session
