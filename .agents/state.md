@@ -50,7 +50,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     to codex, and no agent is cut short. Later the same day the owner
     asked that agents started from then on run on Opus 5.5.
   Next in the queue after this plan:
-  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
+  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved. Since
+  2026-11-13 they are being written ahead on the local branch `geometry`
+  (a worktree beside the clone) while the embedded slices are in review.
+  Nothing of it is on `main`, and it lands only after the embedded plan's
+  slices, as the owner ordered ("Both, embedded first").
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do

@@ -2,8 +2,9 @@
 
 ## Status
 
-**APPROVED 2026-11-12 for Slices 1-3. Not started: it is queued behind
-the embedded player plan.** The go, verbatim (owner, 2026-11-12, given as
+**APPROVED 2026-11-12 for Slices 1-3. Queued behind the embedded player
+plan; since 2026-11-13 it is being written ahead on the local branch
+`geometry`, and nothing of it is on `main` yet.** The go, verbatim (owner, 2026-11-12, given as
 the session's goal): "when the sweep finishes, continue with the next
 steps. implement the plan, codereview slices with codex. ask any questions
 upfront. I won't be here after you start." Asked up front which plan that
