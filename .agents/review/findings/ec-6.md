@@ -1,7 +1,7 @@
 # ec-6: an embedded start that fails after the checks passed fails the play instead of falling back
 
 **Severity**: MEDIUM — the user gets an error instead of a film, once; decision D3 says a play is never failed over the embedded player.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `31eacad`, `ff147c2`
 
@@ -150,3 +150,22 @@ Quitting Vela in that time waits for it. That is deliberate: the exit
 handler must not pass a player that is in the middle of starting, because
 that player draws on the window's connection. It is slow only when an
 embedded start is already going wrong.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 19:18 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d642-cac8-7601-a66c-18e8aa4fc5b2`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 18:54 UTC, finished 19:01 UTC.
+- Reviewed head `ff147c21cf860efc93bda5c8ab728db2ce7fe4a4`, base
+  `544c9cd1e82bdeb02e0854f003d06ce8baecea9c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
