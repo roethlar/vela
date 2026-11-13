@@ -1,7 +1,7 @@
 # ec-2: a start that times out lets go of a worker that is still running
 
 **Severity**: HIGH — the worker keeps its thread, its surface and its player with nothing left that can stop it or wait for it, and if it comes back it hands mpv the file and announces a play that was already reported as failed. It needs a start that takes longer than 20 seconds.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `af4f142`, `d7d850a`, `7fa009b`
 
@@ -150,3 +150,22 @@ End to end, with the real players (run 2026-11-13 at `7fa009b` for finding
 whatever the caller has done, the scenario `embeddedlatestart` FAILS with
 "the player view never opened for a play that was given up on"; unchanged
 it passes.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 18:46 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d614-48a9-72c3-9aab-5e5ba8b3f50f`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 18:03 UTC, finished 18:11 UTC.
+- Reviewed head `7fa009b1a2e9e6d92db9b06a36d71f2168d2091b`, base
+  `270857aac02f69e35ecd850b7837bc9bca595c5c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

@@ -1,7 +1,7 @@
 # hd-1: an old description of the output can replace a newer one
 
 **Severity**: MEDIUM — a change of the display during a play (HDR switched off, the brightness moved) is then missed until the next change, and the picture stays drawn for the display as it was. It needs a compositor that answers an earlier question after acknowledging a later one; KWin does not.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `499a0d3`
 
@@ -62,3 +62,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `74f44b6..e8db400`, 2026-11-13 08:38 UTC
 (`.agents/review/codereview-2026-11-13-embedded-hdr.md`). Reviewer's
 title: "Associate information replies with their output query". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-13 18:46 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d609-0948-73b3-a55e-fc7f6c5309d2`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 17:51 UTC, finished 18:03 UTC.
+- Reviewed head `499a0d380e5b968675c7e6565fc00fde63c60191`, base
+  `ddf475f49ec57df2a13a5f54b94016e350a34a42` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

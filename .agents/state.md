@@ -41,7 +41,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     session that is doing this work. The agent reads that as the approval
     the 2026-08-20 constraint below asks for before more than one Claude
     session is started, for that session only. Reviews of record still go
-    to codex, and no agent is cut short.
+    to codex, and no agent is cut short. Later the same day the owner
+    asked that agents started from then on run on Opus 5.5.
   Next in the queue after this plan:
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
   Rules the owner set for this run (decision `.agents/decisions.md`

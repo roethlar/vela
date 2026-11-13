@@ -68,3 +68,28 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "An embedded setup failure does not fall back for the current play". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-13 18:46 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d61b-b90c-7640-be07-19ecfeb21f1f`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 18:11 UTC, finished 18:18 UTC.
+- Reviewed head `31eacad98f252a1bec7ca26df5e4a5e7cef668f7`, base
+  `cdaccafe8b013d889ef8e84c8ef64edd18bb0aba` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/playback.rs:465 — Fallback calls find_mpv() while holding the player-slot mutex. resolve_mpv() waits for candidate executables' --version processes without a timeout, so a stalled probe can hold this lock indefinitely, blocking the main-thread exit handler before transcode cleanup. A headless play() probe confirmed that fallback holds the lock throughout discovery, whereas an ordinary external play leaves it available. Resolve mpv and build its launch outside the lock, then reacquire it and recheck shutdown before spawning and publishing.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. The comment is correct. Finding the `mpv` program runs candidate
+programs (`mpv --version`) and waits for them, with no limit; a play given
+the external player does that before it takes the lock on the player slot,
+and the fallback did it inside the lock. The exit handler takes the same
+lock on the window's thread. The repair looks for mpv and describes the
+launch with the lock released, and takes it again only to check that Vela
+is not exiting, start the player and publish it.
