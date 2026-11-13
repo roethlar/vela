@@ -31,8 +31,9 @@ Open, not yet ruled (each is asked in chat, one at a time):
   follow the setting on a new Vela launch session". So the setting decides
   only how the first player window of a Vela run opens; later plays in
   that run follow the previous window per D1, in all three modes.
-  Still open, asked in chat: (a) which of the three a fresh install starts
-  with.
+  **D2(a) RULED 2026-11-12:** asked which of the three a fresh install
+  starts with, the owner answered: "remember last". An absent
+  `mpv_window_mode` therefore means "remember".
 - **D3 (window position on Windows).** Whether to add the Windows-only code
   that position needs. Slice 4 depends on it; Slices 1-3 do not.
 
@@ -243,7 +244,7 @@ has been published in this run.
   following the existing `Option` + validation pattern (unknown or
   malformed values invalidate the document, as for `continue_playing`):
   `mpv_window_mode: Option<"remember" | "fullscreen" | "default">` (absent
-  = the out-of-box value D2(a) rules) and `mpv_window: Option<{ fullscreen:
+  = "remember", per D2(a)) and `mpv_window: Option<{ fullscreen:
   Option<bool>, maximized: Option<bool>, screen: Option<String>, width:
   Option<u32>, height: Option<u32>, x: Option<i32>, y: Option<i32> }>`. It
   is one bounded value, so it belongs in `config.json` by the 2026-07-14
