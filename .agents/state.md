@@ -253,8 +253,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the next. Owner ruled D1 "all in current session": manual plays inherit
   too, reversing the 2026-07-18 rule. A local probe shows `osd-width` /
   `osd-height` report the window size and `--geometry=WxH` reproduces it
-  exactly. Open: D2 (remember across restarts: default, and what is
-  remembered), D3 (Windows-only position code), then the go.
+  exactly. D2 ruled: a three-way setting (remember last / full screen /
+  default), consulted for the first play of a run only, remember-last out
+  of the box. D3 (position) withdrawn. Slices 1-3 await the owner's go.
+- Owner direction 2026-11-12: embedded playback through libmpv, with
+  iOS/iPadOS as a porting goal (`.agents/decisions.md`). First step is the
+  drafted, NOT approved spike `.agents/plans/embedded-libmpv-hdr-spike.md`
+  (does HDR survive embedding on KDE Wayland). External mpv stays the
+  shipped player until a plan built on that answer is approved.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

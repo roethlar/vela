@@ -34,8 +34,12 @@ Open, not yet ruled (each is asked in chat, one at a time):
   **D2(a) RULED 2026-11-12:** asked which of the three a fresh install
   starts with, the owner answered: "remember last". An absent
   `mpv_window_mode` therefore means "remember".
-- **D3 (window position on Windows).** Whether to add the Windows-only code
-  that position needs. Slice 4 depends on it; Slices 1-3 do not.
+- **D3 (window position): WITHDRAWN 2026-11-12.** Position needs a separate
+  hack per platform (Windows, macOS, KWin; nothing on GNOME). The owner
+  instead chose embedded playback through libmpv as the direction
+  (`.agents/decisions.md`, 2026-11-12), which removes the problem. Dropping
+  position here is the agent's reading of that ruling, not the owner's
+  words. Slice 4 below is kept only as a record; do not implement it.
 
 The plan needs the owner's explicit go after those rulings.
 
@@ -281,7 +285,7 @@ pattern of `tests/transcoding-ui.test.mjs`). Red-proof each.
 
 Commit: `feat: optionally remember the player window across restarts`.
 
-## Slice 4 — ONLY IF D3 IS RULED IN: window position on Windows
+## Slice 4 — WITHDRAWN (see D3): window position on Windows
 
 mpv reports no position, so Vela reads it from Windows.
 

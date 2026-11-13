@@ -1896,3 +1896,38 @@ explicit go.
 
 Supersedes:
 The earlier "Always ask before pushing."
+
+## 2026-11-12 - Embedded playback through libmpv is the direction; HDR on Wayland is still unproven
+
+Status: OWNER DIRECTION (2026-11-12), not yet a plan. No code is authorized.
+
+Decision:
+While settling window position for the external player, the owner asked why
+video cannot be embedded, noting that an iOS/iPadOS port cannot use an
+external window at all and that embedding "would obviate all of this
+positioning noise". Given the three routes of the 2026-07-14 decision and
+told that loading mpv as a library is the only one that works on every
+platform including Wayland, the owner ruled: "right, so mpv as a library it
+is."
+
+So the intended end state is an in-process libmpv player, and iOS/iPadOS is
+a stated porting goal. Until a plan built on a successful spike is approved,
+the shipped player remains external mpv and nothing may be designed as
+already depending on embedded video.
+
+Agent's reading (not the owner's words):
+- The first step is the spike in
+  `.agents/plans/embedded-libmpv-hdr-spike.md`: does HDR passthrough survive
+  embedding on KDE Wayland. HDR on Wayland is the reason Vela exists, so a No
+  there needs a fresh owner ruling (for example: embedded on iOS, macOS and
+  Windows, external kept on Linux) rather than silently giving up HDR.
+- Window POSITION work for the external player is dropped: Slice 4 of
+  `.agents/plans/mpv-window-geometry.md` is withdrawn and no KWin probe is
+  run. Slices 1-3 of that plan (fullscreen, maximized, screen, size, the
+  three-way setting) are unaffected and still await their own go.
+
+Supersedes:
+The stance of 2026-07-14 "Video stays external; embedding mpv is a spike,
+not a plan" that embedding "is not planned". Its technical findings stand,
+and its required first question (does HDR passthrough survive?) is exactly
+the spike now drafted.
