@@ -13,7 +13,7 @@ admitted, none declined. Record:
 | sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[x]`  | `50e57e4`, `db0b8b6` | codex/default/standard |
 | sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[x]`  | `47eec9a`, `29445f2` | codex/default/standard esc:T5(ceiling) |
 
-**Embedded player Slice 1 review, 2026-11-13 (open):** codereview codex
+**Embedded player Slice 1 review, 2026-11-13 (one finding with the owner):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `b19d7d1..b719a65`, Slice 1 paths only: `findings`. Two
 candidates, two admitted, none declined; both are about tests, neither
@@ -23,7 +23,7 @@ changes what the external player does. Record:
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
 | ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[x]`  | `4fbff87`, `1d7c405` | codex/default/standard |
-| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[~]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242`, `053cb36` | codex/default/standard esc:T5(ceiling), reopened three times; a fourth goes to the owner |
+| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[!]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242`, `053cb36` | codex/default/standard esc:T5(ceiling); reopened four times on the guard; with the owner: `ps-2.contested.md` |
 
 **Embedded player Slice 0b review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

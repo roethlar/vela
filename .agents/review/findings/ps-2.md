@@ -3,7 +3,7 @@
 **Severity**: LOW — the shipped code is correct and keeps stream
 authentication in the owner-only include; what broke is one of the checks
 that would notice if that stopped being true.
-**Status**: In progress
+**Status**: Contested
 **Branch**: —
 **Commit**: `94d067e`
 
@@ -361,3 +361,26 @@ disposable worktree, each injection restored afterwards:
 | The reviewer's first reproduction on `external.rs` (raw C string, lone brace, header read after the tests) | FAIL at the recorded-lines list: the code after the tests is read |
 | The reviewer's second (63 `#`) | FAIL, the same way |
 | Unchanged | PASS |
+
+### Verification round 4 (repair-delta redispatch), recorded 2026-11-13 07:47 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d3da-6b76-73b0-80b9-259757da45ac`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 07:41 UTC, finished 07:44 UTC.
+- Reviewed head `053cb36ea59d095a20e9ed5faf5145556c061b19`, base
+  `e1ff242aa6ed8620e46f93c4711e9d116b9c315c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comment, verbatim:
+  - tests/config-integrity.test.mjs:88 — A lifetime followed immediately by an ordinary string is misread as a raw-string prefix. Put `const _: &str = stringify!('r"\"{\"");` inside external.rs's test module and `let _close = stringify!('r"\"}\"");` in an appended production function reading `spec.http_headers.len()`: matchingBrace consumes that function, hiding the header read while all 13 checks pass. Replacing `'r` with the raw identifier `r#r` also bypasses the guard. Both standalone Rust 2021 reproductions compiled and ran. Consume these tokens correctly or fail closed, and add regression cases.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. The comment is correct.
+
+**No fifth round.** As recorded after round 3, the finding now goes to the
+owner: `.agents/review/ps-2.contested.md`.
