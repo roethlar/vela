@@ -14,19 +14,32 @@ const playback = fs
   .readFileSync(path.join(repoRoot, 'src-tauri/src/playback.rs'), 'utf8')
   .replace(/\r\n/g, '\n');
 
-function playBody() {
-  const start = playback.indexOf('\npub fn play(');
-  assert.notEqual(start, -1, 'playback::play must exist');
+function functionBody(signature, what) {
+  const start = playback.indexOf(`\n${signature}`);
+  assert.notEqual(start, -1, `${what} must exist`);
   const end = playback.indexOf('\n}\n', start);
-  assert.notEqual(end, -1, 'playback::play must have a closing brace');
+  assert.notEqual(end, -1, `${what} must have a closing brace`);
   return playback.slice(start, end);
 }
 
+test('the play path launches exactly the composed command', () => {
+  // The ordering below is checked on the function that composes the command.
+  // That only says something about a real play if `play` starts that command
+  // and adds nothing to it.
+  const body = functionBody('pub fn play(', 'playback::play');
+  const call = 'compose_mpv_command(spec, &cfg, &mpv_bin, &ipc_path)?';
+  const at = body.indexOf(call);
+  assert.notEqual(at, -1, 'play must compose its command with compose_mpv_command');
+  assert.equal(body.indexOf('compose_mpv_command(', at + 1), -1, 'composed exactly once');
+  assert.match(body, /let child = cmd\.spawn\(\)/, 'play must start the composed command');
+  assert.doesNotMatch(body, /cmd\.(arg|args|env|envs)\(/, 'play must not alter the composed command');
+});
+
 test('the play path asserts the lifecycle options after every user-controlled option', () => {
-  const body = playBody();
+  const body = functionBody('fn compose_mpv_command(', 'playback::compose_mpv_command');
   const loop = 'for arg in lifecycle_args()';
   const at = body.indexOf(loop);
-  assert.notEqual(at, -1, 'play must apply lifecycle_args()');
+  assert.notEqual(at, -1, 'the composed command must apply lifecycle_args()');
   assert.equal(body.indexOf(loop, at + 1), -1, 'lifecycle_args() is applied exactly once');
 
   // Advanced arguments and own-config handling live in base_mpv_command; the
@@ -34,11 +47,11 @@ test('the play path asserts the lifecycle options after every user-controlled op
   // before Vela's protected tail.
   for (const earlier of ['base_mpv_command(', 'window_state_args(', 'screen_name_arg(']) {
     const last = body.lastIndexOf(earlier);
-    assert.notEqual(last, -1, `play must still call ${earlier}`);
+    assert.notEqual(last, -1, `the composed command must still call ${earlier}`);
     assert.ok(last < at, `lifecycle_args() must follow ${earlier}`);
   }
   const ipc = body.indexOf('--input-ipc-server=');
-  assert.notEqual(ipc, -1, 'play must still set the IPC server');
+  assert.notEqual(ipc, -1, 'the composed command must still set the IPC server');
   assert.ok(at < ipc, 'lifecycle_args() opens the protected tail, before the IPC option');
 });
 

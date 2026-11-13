@@ -977,41 +977,26 @@ fn try_write_marker_payload(markers: &[crate::source::MediaMarker]) -> Option<st
 /// `playback-ended` Tauri event); this module stays UI-framework-free.
 pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
 
-/// Spawn mpv for `spec.url`, optionally seeking to `spec.start_seconds`, and
-/// start background progress reporting that runs until mpv exits. Publishes the
-/// child into `child_slot` the instant it's launched (so an app-exit that races
-/// tracker setup can still find and kill it), and returns the stop flag so a
-/// later play can cancel this one. The caller must have already cleared/killed
-/// any previous child, since this overwrites the slot.
-pub fn play(
+/// One composed mpv launch: the command and the two private files it refers
+/// to. Split out of [`play`] so the exact command line can be checked without
+/// starting a process.
+struct ComposedLaunch {
+    cmd: Command,
+    header_include: Option<HeaderInclude>,
+    marker_payload: Option<std::path::PathBuf>,
+}
+
+/// Build the complete mpv command for one play: Vela's defaults and the
+/// user's options first, then the protected tail that no user option may
+/// override. Writes the auth include and the marker payload as a side effect;
+/// starts nothing.
+fn compose_mpv_command(
     spec: &PlaySpec,
-    progress: ProgressTarget,
-    child_slot: &Arc<Mutex<Option<ManagedChild>>>,
-    shutting_down: &Arc<AtomicBool>,
-    advance: &Arc<crate::commands::PlaybackAdvance>,
-    session_id: String,
-    on_end: Option<EndNotify>,
-) -> Result<Arc<AtomicBool>, String> {
-    // mpv emulates the IPC socket with a named pipe under \\.\pipe\ on Windows.
-    #[cfg(windows)]
-    let ipc_path = {
-        let pid = std::process::id();
-        let ts = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_millis())
-            .unwrap_or(0);
-        format!(r"\\.\pipe\mpv-plex-{}-{}", pid, ts)
-    };
-    #[cfg(not(windows))]
-    let ipc_path = ipc_socket_path()?;
-
-    let mpv_bin = resolve_mpv()?
-        .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
-
-    // Advanced/user mpv config (Settings → Advanced mpv options), loaded once here.
-    let cfg =
-        crate::config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
-    let mut cmd = base_mpv_command(&mpv_bin, &cfg);
+    cfg: &crate::config::AppConfig,
+    mpv_bin: &str,
+    ipc_path: &str,
+) -> Result<ComposedLaunch, String> {
+    let mut cmd = base_mpv_command(mpv_bin, cfg);
 
     // Bundled mpv autocrop script (Settings → Advanced). Placed with the user
     // extra args (before the re-asserted IPC/title/URL block) so it can't clobber
@@ -1130,6 +1115,52 @@ pub fn play(
     // option. In practice our URLs are absolute paths / http(s) / edl://, but
     // this closes the option-injection vector regardless.
     cmd.arg("--").arg(&spec.url);
+    Ok(ComposedLaunch {
+        cmd,
+        header_include,
+        marker_payload,
+    })
+}
+
+/// Spawn mpv for `spec.url`, optionally seeking to `spec.start_seconds`, and
+/// start background progress reporting that runs until mpv exits. Publishes the
+/// child into `child_slot` the instant it's launched (so an app-exit that races
+/// tracker setup can still find and kill it), and returns the stop flag so a
+/// later play can cancel this one. The caller must have already cleared/killed
+/// any previous child, since this overwrites the slot.
+pub fn play(
+    spec: &PlaySpec,
+    progress: ProgressTarget,
+    child_slot: &Arc<Mutex<Option<ManagedChild>>>,
+    shutting_down: &Arc<AtomicBool>,
+    advance: &Arc<crate::commands::PlaybackAdvance>,
+    session_id: String,
+    on_end: Option<EndNotify>,
+) -> Result<Arc<AtomicBool>, String> {
+    // mpv emulates the IPC socket with a named pipe under \\.\pipe\ on Windows.
+    #[cfg(windows)]
+    let ipc_path = {
+        let pid = std::process::id();
+        let ts = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        format!(r"\\.\pipe\mpv-plex-{}-{}", pid, ts)
+    };
+    #[cfg(not(windows))]
+    let ipc_path = ipc_socket_path()?;
+
+    let mpv_bin = resolve_mpv()?
+        .ok_or_else(|| "mpv was not found. Install mpv to play video.".to_string())?;
+
+    // Advanced/user mpv config (Settings → Advanced mpv options), loaded once here.
+    let cfg =
+        crate::config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    let ComposedLaunch {
+        mut cmd,
+        header_include,
+        marker_payload,
+    } = compose_mpv_command(spec, &cfg, &mpv_bin, &ipc_path)?;
 
     // Launch mpv and publish it into the shared slot while still holding the
     // lock, so launch+register is atomic w.r.t. the app-exit handler: it can
@@ -2546,5 +2577,269 @@ mod tests {
             !path.exists(),
             "nothing may be written when validation fails"
         );
+    }
+
+    // ---- The recorded external command line ------------------------------
+    //
+    // These two tests pin the COMPLETE mpv command Vela builds: every argument,
+    // in order, plus the child environment. They were recorded from the code
+    // as it stood before the player seam was introduced
+    // (.agents/plans/embedded-player.md, Slice 1), so that refactor, and any
+    // later change to how a launch is described, cannot move, drop, add or
+    // reorder an argument of the external player without failing here. Change
+    // an expected list only for a deliberate change to the external player.
+
+    /// The parts of the command that differ per platform, exactly as
+    /// `base_mpv_command` documents them.
+    fn recorded_platform_defaults(own_config: bool) -> Vec<String> {
+        let gpu_api = if cfg!(target_os = "windows") {
+            "--gpu-api=d3d11"
+        } else {
+            "--gpu-api=vulkan"
+        };
+        let mut args = vec![gpu_api.to_string()];
+        if cfg!(target_os = "macos") && !own_config {
+            args.push("--ao=avfoundation,coreaudio".to_string());
+        }
+        args
+    }
+
+    /// The child environment every launch gets, per platform.
+    fn recorded_base_env() -> Vec<(String, Option<String>)> {
+        if cfg!(any(target_os = "macos", target_os = "windows")) {
+            Vec::new()
+        } else {
+            vec![("ENABLE_HDR_WSI".to_string(), Some("1".to_string()))]
+        }
+    }
+
+    fn recorded_spec(url: &str) -> PlaySpec {
+        PlaySpec {
+            url: url.to_string(),
+            title: String::new(),
+            http_headers: Vec::new(),
+            start_seconds: 0.0,
+            autocrop_script: None,
+            autocrop_shim: None,
+            inherited_window_state: PlaybackWindowState::default(),
+            screen_name: None,
+            window_observation: WindowStateObservation::default(),
+            markers_script: None,
+            markers: Vec::new(),
+            intro_policy: crate::config::SkipPolicy::Off,
+            credits_policy: crate::config::SkipPolicy::Off,
+            commercial_policy: crate::config::SkipPolicy::Off,
+            step_down: None,
+            duration: None,
+            osd_notice: None,
+            steps_taken: 0,
+        }
+    }
+
+    fn command_args(cmd: &Command) -> Vec<String> {
+        cmd.get_args()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    }
+
+    fn command_envs(cmd: &Command) -> Vec<(String, Option<String>)> {
+        cmd.get_envs()
+            .map(|(key, value)| {
+                (
+                    key.to_string_lossy().into_owned(),
+                    value.map(|value| value.to_string_lossy().into_owned()),
+                )
+            })
+            .collect()
+    }
+
+    // The auth include and the marker payload live in the process-private
+    // runtime directory, which on Windows is the user's real config directory.
+    #[cfg(not(windows))]
+    #[test]
+    fn the_full_external_command_line_is_exactly_the_recorded_one() {
+        use crate::config::SkipPolicy;
+        use crate::source::{MarkerKind, MediaMarker};
+
+        let dir = tmp("recorded-command");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        let script = |name: &str| {
+            let path = dir.join(name);
+            std::fs::write(&path, "-- test stand-in\n").expect("script stand-in");
+            path.to_string_lossy().into_owned()
+        };
+        let autocrop = script("autocrop.lua");
+        let shim = script("vela-autocrop.lua");
+        let markers = script("vela-markers.lua");
+
+        let cfg = crate::config::AppConfig {
+            // Two ordinary options and two that try to take over what Vela
+            // protects; all four must appear, verbatim, before Vela's tail.
+            mpv_extra_args: Some(
+                "# a comment\n--volume=70\n\n--sub-font=Noto Sans\n--idle=yes\n--input-ipc-server=/tmp/not-velas"
+                    .to_string(),
+            ),
+            mpv_autocrop: Some("auto".to_string()),
+            ..Default::default()
+        };
+        let spec = PlaySpec {
+            title: "Recorded: Title".to_string(),
+            http_headers: vec![("X-Plex-Token".to_string(), "abc123".to_string())],
+            start_seconds: 123.5,
+            autocrop_script: Some(autocrop.clone()),
+            autocrop_shim: Some(shim.clone()),
+            inherited_window_state: PlaybackWindowState {
+                fullscreen: Some(true),
+                maximized: Some(false),
+            },
+            screen_name: Some("DP-3".to_string()),
+            markers_script: Some(markers.clone()),
+            markers: vec![MediaMarker {
+                kind: MarkerKind::Intro,
+                start_ms: 1_000,
+                end_ms: 2_000,
+            }],
+            intro_policy: SkipPolicy::Button,
+            credits_policy: SkipPolicy::Autoskip,
+            commercial_policy: SkipPolicy::Off,
+            ..recorded_spec("https://media.invalid/video/stream.mkv?x=1")
+        };
+
+        let launch = compose_mpv_command(&spec, &cfg, "mpv", "/tmp/vela-recorded/mpv.sock")
+            .expect("the command composes");
+        assert_eq!(launch.cmd.get_program().to_string_lossy(), "mpv");
+
+        // The two per-launch paths are unpredictable; check what they point at,
+        // then compare them by a fixed stand-in.
+        let include_path = launch
+            .header_include
+            .as_ref()
+            .expect("stream headers produce an include")
+            .path
+            .clone();
+        assert_eq!(
+            std::fs::read_to_string(&include_path).expect("include is readable"),
+            "http-header-fields=\"X-Plex-Token: abc123\"\n"
+        );
+        let payload_path = launch
+            .marker_payload
+            .clone()
+            .expect("enabled markers produce a payload");
+        assert_eq!(
+            std::fs::read_to_string(&payload_path).expect("payload is readable"),
+            "{\"markers\":[{\"kind\":\"intro\",\"start_ms\":1000,\"end_ms\":2000}]}"
+        );
+        let include_arg = format!("--include={}", include_path.to_string_lossy());
+        let args: Vec<String> = command_args(&launch.cmd)
+            .into_iter()
+            .map(|arg| {
+                if arg == include_arg {
+                    "--include=<AUTH INCLUDE>".to_string()
+                } else {
+                    arg
+                }
+            })
+            .collect();
+
+        let mut expected: Vec<String> = [
+            "--no-config",
+            "--no-ytdl",
+            "--vo=gpu-next,gpu",
+            "--profile=gpu-hq",
+            "--hwdec=auto",
+            "--hwdec-codecs=all",
+            "--target-colorspace-hint=yes",
+            "--hdr-compute-peak=yes",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        expected.extend(recorded_platform_defaults(false));
+        expected.extend(
+            [
+                "--volume=70".to_string(),
+                "--sub-font=Noto Sans".to_string(),
+                "--idle=yes".to_string(),
+                "--input-ipc-server=/tmp/not-velas".to_string(),
+                format!("--script={autocrop}"),
+                "--script-opts-append=autocrop-auto=no".to_string(),
+                format!("--script={shim}"),
+                format!("--script={markers}"),
+                "--script-opts-append=vela-markers-intro-policy=button".to_string(),
+                "--script-opts-append=vela-markers-credits-policy=autoskip".to_string(),
+                "--script-opts-append=vela-markers-commercial-policy=off".to_string(),
+                "--window-maximized=no".to_string(),
+                "--fullscreen=yes".to_string(),
+                "--screen-name=DP-3".to_string(),
+                "--idle=no".to_string(),
+                "--input-ipc-server=/tmp/vela-recorded/mpv.sock".to_string(),
+                "--force-media-title=Recorded: Title".to_string(),
+                "--title=Recorded: Title".to_string(),
+                "--include=<AUTH INCLUDE>".to_string(),
+                "--start=123.5".to_string(),
+                "--".to_string(),
+                "https://media.invalid/video/stream.mkv?x=1".to_string(),
+            ],
+        );
+        assert_eq!(args, expected);
+
+        let payload = payload_path.to_string_lossy().into_owned();
+        let mut expected_env = recorded_base_env();
+        expected_env.push(("VELA_MARKERS_PAYLOAD".to_string(), Some(payload)));
+        assert_eq!(command_envs(&launch.cmd), expected_env);
+
+        drop(launch);
+        assert!(
+            !include_path.exists(),
+            "the include is removed with the launch that owns it"
+        );
+        let _ = std::fs::remove_file(&payload_path);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_minimal_external_command_line_is_exactly_the_recorded_one() {
+        // Nothing optional: the expert's own mpv config, no Advanced options,
+        // no scripts, no inherited window, no title, no headers, no resume.
+        let cfg = crate::config::AppConfig {
+            mpv_use_own_config: Some(true),
+            ..Default::default()
+        };
+        let spec = recorded_spec("edl://not-a-url-with-a-dash");
+        let launch = compose_mpv_command(&spec, &cfg, "/opt/mpv/bin/mpv", "/tmp/vela-recorded/min.sock")
+            .expect("the command composes");
+        assert_eq!(
+            launch.cmd.get_program().to_string_lossy(),
+            "/opt/mpv/bin/mpv"
+        );
+        assert!(launch.header_include.is_none());
+        assert!(launch.marker_payload.is_none());
+
+        let mut expected: Vec<String> = [
+            "--no-ytdl",
+            "--vo=gpu-next,gpu",
+            "--profile=gpu-hq",
+            "--hwdec=auto",
+            "--hwdec-codecs=all",
+            "--target-colorspace-hint=yes",
+            "--hdr-compute-peak=yes",
+        ]
+        .map(str::to_string)
+        .to_vec();
+        expected.extend(recorded_platform_defaults(true));
+        expected.extend(
+            [
+                "--idle=no",
+                "--input-ipc-server=/tmp/vela-recorded/min.sock",
+                "--force-media-title=Vela",
+                "--title=Vela",
+                "--",
+                "edl://not-a-url-with-a-dash",
+            ]
+            .map(str::to_string),
+        );
+        assert_eq!(command_args(&launch.cmd), expected);
+
+        assert_eq!(command_envs(&launch.cmd), recorded_base_env());
     }
 }
