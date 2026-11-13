@@ -14,7 +14,8 @@ and `.agents/plans/autocrop-resume.md`.
 no upstream ancestor and no GPL code in it. It renders the intro / credits /
 commercial skip control and performs the seek, reading its marker ranges from a
 private per-launch payload file whose path arrives on the child process
-environment — see the script header and
+environment (or, for a player inside Vela's own process, as a script option)
+— see the script header and
 `.agents/plans/skip-credits-intros-v2.md`. `LICENSE.GPL` in this directory
 covers stock `autocrop.lua` only and does not extend to either Vela-authored
 script.
