@@ -8,7 +8,7 @@ admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| hd-1 | MEDIUM   | An old description of the output can replace a newer one               | `[ ]`  |        | codex/default/standard |
+| hd-1 | MEDIUM   | An old description of the output can replace a newer one               | `[~]`  | `499a0d3` | codex/default/standard |
 | hd-2 | MEDIUM   | A profile mpv applies by itself when a file loads can undo the HDR target | `[ ]`  |        | codex/default/standard |
 | hd-3 | MEDIUM   | The drawing thread waits for mpv each time it sets the HDR target      | `[ ]`  |        | codex/default/standard |
 
