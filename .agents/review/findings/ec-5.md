@@ -1,7 +1,7 @@
 # ec-5: Close can stop the play that replaced the one it was for
 
 **Severity**: MEDIUM — a play the user just started is stopped by a Close that belonged to the play before it. It needs a Close and a replacement play within the same instant.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `2a04402`
 
@@ -63,3 +63,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "Close can stop a successor after validating the predecessor". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-13 08:57 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d415-f889-7322-8cb7-e8a57418725b`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 08:46 UTC, finished 08:52 UTC.
+- Reviewed head `2a044023e09184f8a36bceb2be8a25cfbbdff6a4`, base
+  `d804fc8a4d08500fb07d7922daa9fe158a29ba09` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
