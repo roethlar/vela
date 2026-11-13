@@ -1122,6 +1122,28 @@ mod tests {
     }
 
     #[test]
+    fn the_payload_test_lock_keeps_a_second_test_out_until_the_first_is_done() {
+        use std::time::Duration;
+        let first = payload_test_lock::hold();
+        let (got_in, second_got_in) = std::sync::mpsc::channel();
+        let second = std::thread::spawn(move || {
+            let _second = payload_test_lock::hold();
+            let _ = got_in.send(());
+        });
+        assert!(
+            second_got_in
+                .recv_timeout(Duration::from_millis(300))
+                .is_err(),
+            "a second test got in while the first still held the lock"
+        );
+        drop(first);
+        second_got_in
+            .recv_timeout(Duration::from_secs(30))
+            .expect("the second test gets in once the first is done");
+        second.join().expect("the second holder finishes");
+    }
+
+    #[test]
     fn header_include_writes_quoted_fields_owner_only() {
         let path = tmp("headers-ok.conf");
         let headers = vec![("X-Plex-Token".to_string(), "abc123".to_string())];
