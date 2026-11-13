@@ -37,9 +37,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `hd-3` is being written on the local branch `hd-3` (a worktree beside
     the clone) and nothing of it is on `main` yet. The slice's acceptance
     is a by-eye comparison only the owner can make.
-  - Slice 5 (controls, cropping) is designed, not written:
-    `.agents/plans/embedded-player.slice5-design.md`. It is written after
-    `hd-3` and `hd-2` land. Its cropping script is built under an
+  - Slice 5 (controls, cropping) is designed
+    (`.agents/plans/embedded-player.slice5-design.md`) and is being written
+    on the local branches `slice5` and `slice5-page` (worktrees beside the
+    clone); nothing of it is on `main`, and it lands after `hd-3` and
+    `hd-2`. Its cropping script is built under an
     assumption the owner has not ruled on (the plan's "For the owner",
     item 3, which conflicts with a 2026-07-05 rule in
     `.agents/decisions.md`); it stays hidden with the rest.
