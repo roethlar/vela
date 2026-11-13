@@ -10,8 +10,8 @@ admitted, none declined. Record:
 |-------|----------|------------------------------------------------------------------------|--------|--------|----------|
 | sel-1 | MEDIUM   | A play that fails on an unreadable settings file leaves its session and transcode behind | `[~]`  | `88c631b` |          |
 | sel-2 | LOW      | A quality step-down makes the fallback explanation appear a second time | `[~]`  | `12828ca` |          |
-| sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[~]`  | `50e57e4` |          |
-| sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[~]`  |        |          |
+| sel-3 | LOW      | A play replaced within 1.5 s uses up the fallback explanation unseen    | `[~]`  | `50e57e4`, `db0b8b6` |          |
+| sel-4 | LOW      | The test for play's refusal passes with the refusal removed             | `[~]`  | `47eec9a` |          |
 
 **Embedded player Slice 1 review, 2026-11-13 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
@@ -23,7 +23,7 @@ changes what the external player does. Record:
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
 | ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[x]`  | `4fbff87`, `1d7c405` | codex/default/standard |
-| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[~]`  | `94d067e` |          |
+| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[~]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242` | codex/default/standard esc:T5(ceiling), reopened twice |
 
 **Embedded player Slice 0b review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

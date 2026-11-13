@@ -45,7 +45,16 @@ are gone; the play path calls `plan` before the launch and `explained` or
 
 ## Guard proof
 
-(pending)
+Run 2026-11-13 at `db0b8b6` in a disposable worktree; each injection restored
+with `git checkout` from the commit. `cargo +stable test --locked --lib select` and
+`node --test tests/player-selection.test.mjs`:
+
+| Injection | Result |
+| --- | --- |
+| The original defect: `plan` ignores whether the play chooses its player | Rust FAIL: `an_automatic_relaunch_neither_explains_nor_forgets` |
+| A relaunch forgets what was told | Rust FAIL: the same test |
+| The play path tells `plan` that every play chooses its player | JS FAIL: "a fallback is explained once, and only by a play that started" |
+| Unchanged | PASS |
 
 ## Coder dispute (if any)
 

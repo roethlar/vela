@@ -3,7 +3,7 @@
 **Severity**: LOW — the user is never told why the embedded player was not used; playback is unaffected.
 **Status**: In progress
 **Branch**: —
-**Commit**: `50e57e4` (which also carried four unrelated files by mistake; `fb64072` takes them out again)
+**Commit**: `50e57e4` (which also carried four unrelated files by mistake; `fb64072` takes them out again), `db0b8b6` (a fourth test)
 
 ## Evidence
 
@@ -52,7 +52,22 @@ do not sleep for it.
 
 ## Guard proof
 
-(pending)
+Run 2026-11-13 at `db0b8b6` in a disposable worktree; each injection restored
+with `git checkout` from the commit. `cargo +stable test --locked --lib a_notice` (four tests) and
+`node --test tests/player-selection.test.mjs`:
+
+| Injection | Result |
+| --- | --- |
+| The original defect in the sender: reported shown before the wait | Rust FAIL: `a_notice_dropped_because_the_play_was_replaced_is_not_reported_shown` and `a_notice_the_player_did_not_take_is_not_reported_shown`; JS FAIL |
+| Reported shown whether or not the write succeeded | Rust FAIL: `a_notice_the_player_did_not_take_is_not_reported_shown`; JS FAIL |
+| The launch does not carry the callback | JS FAIL |
+| `play` does not hand the callback to the sender | JS FAIL |
+| The original defect in the play path: also recorded as told when the player starts | JS FAIL |
+| Unchanged | PASS |
+
+The fourth Rust test (`a_notice_the_player_did_not_take_...`) was added at
+`db0b8b6`, after the first three: none of them made the write fail, and
+the second row needs it.
 
 ## Coder dispute (if any)
 

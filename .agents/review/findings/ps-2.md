@@ -264,3 +264,34 @@ it indented (the layout that went unread), a module above its code, and
 the four things it must refuse.
 
 File: `tests/config-integrity.test.mjs` only.
+
+Guard proof for round 3, run 2026-11-13 at `e1ff242` in a disposable
+worktree, each injection restored with `git checkout` from the commit;
+`node --test tests/config-integrity.test.mjs`. The first twelve break the
+reader itself, one rule at a time, and must fail the reader's own tests:
+
+| Injection | Failing test and message |
+| --- | --- |
+| Line comments not skipped | brace matching: "a brace in a line comment" |
+| Block comments not skipped | brace matching: "braces in nested block comments" |
+| Block comments do not nest | brace matching: same |
+| Plain strings not skipped | brace matching: "a brace in a string" |
+| A backslash in a string does not take the next character | brace matching: "after an escaped quote in a string" (and the real test, which then misreads a real file) |
+| Raw strings read as plain ones | brace matching: "a raw string with a quote in it" |
+| Escaped character literals not read | brace matching: "after an escaped quote character" |
+| Simple character literals not read | brace matching: "a brace character" |
+| Only what precedes the module is returned (the defect) | the reader: code after the module is missing |
+| A second test module not refused | the reader |
+| A test outside the module not refused | the reader: "Missing expected exception" |
+| An empty shipped part not refused | the reader: "Missing expected exception" |
+
+Then the real files, against "mpv authentication stays in a private
+include until its exact child is reaped":
+
+| Injection | Result |
+| --- | --- |
+| A function reading `spec.http_headers` after `external.rs`'s test module, first column | FAIL (the recorded-lines list) |
+| The same, indented: the reviewer's round-2 layout | FAIL |
+| All of `external.rs`'s code moved after its test module and indented, nothing added | PASS, and rightly: the code is read where it now stands and leaks nothing |
+| That, with a reader of the headers among the moved code | FAIL |
+| Unchanged | PASS |

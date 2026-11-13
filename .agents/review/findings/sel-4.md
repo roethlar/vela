@@ -3,7 +3,7 @@
 **Severity**: LOW — the shipped refusal is correct; its test is not a test.
 **Status**: In progress
 **Branch**: —
-**Commit**: (this commit)
+**Commit**: `47eec9a`
 
 ## Evidence
 
@@ -40,7 +40,15 @@ asserts anything.
 
 ## Guard proof
 
-(pending)
+Run 2026-11-13 at `db0b8b6` in a disposable worktree; each injection restored
+with `git checkout` from the commit. `cargo +stable test --locked --lib play_refuses` and
+`node --test tests/player-selection.test.mjs`:
+
+| Injection | Result |
+| --- | --- |
+| The reviewer's mutation: the refusal's body removed | Rust FAIL: `play_refuses_a_player_it_cannot_start_and_starts_nothing` |
+| The Rust test renamed away | JS FAIL: "play refuses a player it cannot start before it starts anything" |
+| Unchanged | PASS |
 
 ## Coder dispute (if any)
 

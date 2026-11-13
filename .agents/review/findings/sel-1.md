@@ -43,7 +43,16 @@ step is a hazard.
 
 ## Guard proof
 
-(pending)
+Run 2026-11-13 at `db0b8b6` in a disposable worktree; each injection restored
+with `git checkout` from the commit. `node --test tests/player-selection.test.mjs`, test "once a play
+has installed its session, only the launch-failure path ends it early":
+
+| Injection | Result |
+| --- | --- |
+| A second settings read with `?`, placed after the session is installed | FAIL (the list of early returns has two lines) |
+| The original defect: the player-setting read back where Slice 2 put it | FAIL |
+| A plain `return Err(..)` after the session is installed | FAIL |
+| Unchanged | PASS |
 
 ## Coder dispute (if any)
 
