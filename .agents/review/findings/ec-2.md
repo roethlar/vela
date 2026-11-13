@@ -144,3 +144,10 @@ within 0.3 s.
 
 Also run: `embeddedlatestart`, `embeddedplay`, `embeddedownconfig` and
 `playback` in the embedded player under the headless compositor: PASS.
+
+End to end, with the real players (run 2026-11-13 at `7fa009b` for finding
+`ec-6`'s guard proof): with `finish_start` made to load and claim the start
+whatever the caller has done, the scenario `embeddedlatestart` FAILS with
+"the player view never opened for a play that was given up on"; unchanged
+it passes.
+
