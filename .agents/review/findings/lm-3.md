@@ -4,7 +4,7 @@
 under a mutation that let an unverified archive reach the compiler.
 **Status**: In progress (fix landed; verification pending)
 **Branch**: —
-**Commit**: `1e2b953` (propagation) and the commit that adds this text (the test)
+**Commit**: `1e2b953` (propagation) and `29026c2` (the test)
 
 ## Evidence
 

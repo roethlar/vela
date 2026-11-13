@@ -5,7 +5,7 @@ that is documented as covering every file; shipping the texts is a
 licensing requirement.
 **Status**: In progress (fix landed; verification pending)
 **Branch**: —
-**Commit**: the commit that adds this text
+**Commit**: `7ca7e75`
 
 ## Evidence
 
@@ -56,9 +56,12 @@ written, so they are unchanged.
 
 `tests/dependency-policy.test.mjs` › "the libmpv integrity check covers
 every file of the set, licence texts included" and › "the shipped libmpv
-set is an LGPL build with its licence texts". The mutations and their
-results are recorded under "Reviewer comments" once run from the committed
-state.
+set is an LGPL build with its licence texts". Run 2026-11-13 from the
+committed state, each restored with `git checkout`, each FAILING its test:
+only libraries walked for unlisted files (the pre-fix behaviour); the
+licence-per-component rule removed; size and checksum not compared;
+missing files not reported; entries outside the set accepted; the build
+script's manifest listing libraries only.
 
 On a real set: the set built before this change (manifest listing
 libraries only) now FAILS with "no licence text listed for component" for

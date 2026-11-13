@@ -4,7 +4,7 @@
 pass while a decoder produces nothing.
 **Status**: In progress (fix landed; verification pending)
 **Branch**: —
-**Commit**: the commit that adds this text
+**Commit**: `ec97d6e`
 
 ## Evidence
 
@@ -69,8 +69,16 @@ so the policy tests can drive them without a built library.
 - `tests/dependency-policy.test.mjs` › "the libmpv decode check compares
   what was decoded with what was recorded" and › "every libmpv fixture
   clip has a recorded result, and both tracks have a damaged clip".
-  Mutations and results are recorded under "Reviewer comments" once run
-  from the committed state.
+  Run 2026-11-13 from the committed state, each restored with
+  `git checkout`, each FAILING its test: frame count not compared; frame
+  checksums not compared; audio amount not compared; audio level not
+  compared; unfinished decoding accepted; damaged clips never judged; any
+  failure accepted for a damaged clip whatever its track; a clip without
+  a recorded result; damaged clips not passed to the check; only one
+  track with a damaged clip.
+- The tripwire on the real set: with `judge_decode` made to accept
+  everything, the run ends `RESULT FAIL` with "the video of a damaged clip
+  was not noticed" and the same for audio.
 - On the real set, 2026-11-13: the three clips pass and both damaged
   clips fail as required on `continuum` and in clean Ubuntu 22.04,
   Debian 12 and Fedora 45 images (the decoded frames are identical in all
@@ -86,9 +94,8 @@ None.
 
 ## Known gaps
 
-- The decoding itself needs a built set, so it runs in the libmpv CI job
-  and by hand, not in 
-pm run check; the policy tests cover the judging
+- The decoding itself needs a built set, so it runs in the `libmpv` CI job
+  and by hand, not in `npm run check`; the policy tests cover the judging
   and the wiring.
 - Audio is compared by amount and level, not sample by sample.
 - Hardware decoding is not exercised here (no GPU in the images).

@@ -8,9 +8,9 @@ admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
-| lm-1 | MEDIUM   | The CI decode check passes when a decoder produces nothing            | `[ ]`  |        | codex/default/standard |
-| lm-2 | MEDIUM   | A set missing its licence texts passes the "every file" integrity check | `[ ]`  |        | codex/default/standard |
-| lm-3 | MEDIUM   | The pin test stays green when an unverified archive reaches the compiler | `[ ]`  |        | codex/default/standard |
+| lm-1 | MEDIUM   | The CI decode check passes when a decoder produces nothing            | `[~]`  | `ec97d6e` | codex/default/standard |
+| lm-2 | MEDIUM   | A set missing its licence texts passes the "every file" integrity check | `[~]`  | `7ca7e75` | codex/default/standard |
+| lm-3 | MEDIUM   | The pin test stays green when an unverified archive reaches the compiler | `[~]`  | `1e2b953`, `29026c2` | codex/default/standard |
 
 **Embedded player PLAN review recorded 2026-11-12:** openreview codex
 (gpt-6-astra @ max, grade not declared) over `c692305..cf35ddf`:
