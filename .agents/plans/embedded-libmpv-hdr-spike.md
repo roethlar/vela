@@ -306,10 +306,9 @@ reference white.
   `mpv --no-config --vo=gpu-next --gpu-api=vulkan --target-colorspace-hint=yes clips/pattern-hdr10.mp4`.
   The patches right of the fifth grey (265 nits) should be visibly brighter
   than the white HTML swatch in the bottom bar, and match external mpv.
-- **Pointer input over the hole.** Not exercised: the agent has no pointer.
-  The video surface has an empty input region and sits below the webview, so
-  clicks should reach the page; both test apps print a line when either
-  button is clicked.
+- **Pointer input over the hole.** Later exercised by the owner in the
+  GTK3 + WebKitGTK prototype (see "Owner's visual check"); not exercised
+  inside the Tauri prototype.
 - A real film sample and Dolby Vision. Only generated clips were used (the
   one public HDR10 sample URL tried returned 404).
 - Audio (disabled in every run), subtitles, OSD.
@@ -337,8 +336,11 @@ players on their default tone-mapping, as Vela launches mpv).
   found". Agent's reading, not confirmed: "tone" may also mean a colour
   cast; the embedded greys read back about 2-3 codes high in green
   (449/452/449).
-- Pointer input over the video: still not verified. No click was logged
-  during this check, and whether one was attempted is not known.
+- Pointer input: the page received the owner's clicks, 12 in all, on the
+  button in the HTML band over the video surface and on the sidebar button
+  (counts per button are in the scratch log `owner-compare-stage2.log`).
+  That band is opaque HTML; a click on a fully transparent part of the page
+  over the video was not tried.
 - The commands under "Not verified" assume the owner's own terminal. From
   a root session, prefix `./run.sh` and use the full path
   `/home/michael/dev/vela-spike-libmpv`.
