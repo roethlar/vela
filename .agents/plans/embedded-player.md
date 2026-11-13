@@ -1376,4 +1376,3 @@ From this point the work also uses several agents at once (the owner
 switched that on for the session on 2026-11-13): to measure mpv's
 behaviour before a design depends on it, and to attack a change before
 it goes to codex. The review of record is still codex.
-

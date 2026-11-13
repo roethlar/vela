@@ -3,7 +3,7 @@
 **Severity**: HIGH — the worker keeps its thread, its surface and its player with nothing left that can stop it or wait for it, and if it comes back it hands mpv the file and announces a play that was already reported as failed. It needs a start that takes longer than 20 seconds.
 **Status**: In progress
 **Branch**: —
-**Commit**: `af4f142`, `d7d850a`
+**Commit**: `af4f142`, `d7d850a`, `7fa009b`
 
 ## Evidence
 
@@ -104,3 +104,43 @@ holds (dropping its start request removes files). Joining a thread on the
 strength of that flag can wait, in a check that is meant not to; and
 another caller asking in the meantime is told there is nothing left. The
 thread itself knows when it has finished; the repair asks it.
+
+### Repair (round 2), `7fa009b`
+
+For the first comment: `Session::start` waits once. When that wait runs
+out, `waited_out` reads the outcome off the race: if the caller's giving
+up settles it, the start has failed; if the play had already won, it is a
+started play and is returned as one, without waiting for the play's word
+on the channel. Nothing is waited for a second time, so there is no
+second deadline to miss.
+
+For the second: whether a play's thread has finished is asked of the
+thread (`JoinHandle::is_finished`), in `Session::has_ended` and in
+`Leftovers::still_running` alike, and a thread is joined only after it has
+said so, which returns at once. The `ended` flag is gone. A kept thread
+stays in the list until it has really finished, so a second caller asking
+meanwhile is told the truth.
+
+Files: `src-tauri/src/player/embedded/session.rs`,
+`tests/embedded-player.test.mjs`.
+
+Guard proof for round 2, run 2026-11-13 at `7fa009b` in a disposable
+worktree; `cargo +stable test --locked --lib embedded::session` and
+`node --test tests/embedded-player.test.mjs`:
+
+| Injection | Rust | Node |
+| --- | --- | --- |
+| The first repair, which was reopened: a second wait for the word of a play that has won its start | (not run) | FAIL `a play that outlasts the wait for it neither starts unannounced nor goes untracked` |
+| A start that was won is reported as failed when the wait runs out | FAIL `a_start_that_was_won_before_the_wait_ran_out_is_a_started_play` | FAIL |
+| The wait running out no longer settles the start | FAIL, the same test | FAIL |
+| The first repair's other half: a play's thread is joined without asking whether it has finished | FAIL `a_play_has_ended_only_once_its_thread_has_finished_and_asking_does_not_wait` and two more | FAIL |
+| Kept threads are joined whether or not they have finished | FAIL `asking_whether_a_play_has_finished_never_waits_for_it`, `a_play_that_will_not_stop_is_kept_not_let_go_of` | FAIL |
+| A kept thread that has finished is never let go of | FAIL, the same two | FAIL |
+| Unchanged | PASS (14) | PASS |
+
+The two new timing tests use a stand-in that takes 0.6 s to let go of what
+it holds after its work is done, and require the question to be answered
+within 0.3 s.
+
+Also run: `embeddedlatestart`, `embeddedplay`, `embeddedownconfig` and
+`playback` in the embedded player under the headless compositor: PASS.
