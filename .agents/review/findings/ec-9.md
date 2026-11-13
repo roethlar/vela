@@ -65,3 +65,30 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "Every embedded play leaks another server-side Wayland registry". Reviewer's severity: LOW.
+
+### Verification round 1, recorded 2026-11-13 09:34 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d42e-9486-7652-9486-8e135400e6b4`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:13 UTC, finished 09:25 UTC.
+- Reviewed head `2f65c44220b29192c34823e35d1540f7c0578993`, base
+  `7aca86ba8364fe397a952813d4cccc74533ad268` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/player/embedded/surface.rs:402 — Concurrent dispatch on the shared backend can strand queue.roundtrip(): another play or Guest::drain can consume its sync.done between the completion check and prepare_read. A deterministic headless probe using the pinned library reproduced the wait until an unrelated event arrived; separate backends completed immediately. This can stall surface creation or HDR setup. Coordinate roundtrip completion with dispatch and waiting.
+  - src-tauri/src/player/embedded/surface.rs:714 — Dropping a play with get_information replies outstanding now leaks its Rust event queue. The retained backend later enqueues the information object's events into the abandoned queue; QueueEvent → QueueProxyData → QueueHandle forms a strong-reference cycle. A headless probe with WpImageDescriptionInfoV1 confirmed retention after done and backend destruction; the former per-play backend released it. Retire outstanding information objects and drain their queues before discarding the play.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. Both comments are correct, and both come from the same choice in
+the fix: every play shared one connection object, and with it one
+libwayland event queue. Then one thread can dispatch what another is
+waiting for, and a play that ends leaves its part of the shared object
+behind. The finding only asked for one registry per process; it did not
+need the plays to share a queue. The repair keeps the registry and the
+globals bound once, and gives each play a connection object and queue of
+its own again, on which it uses those same globals.

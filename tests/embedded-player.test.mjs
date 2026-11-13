@@ -212,7 +212,11 @@ test("the window's Wayland connection is joined once for the whole run, never pe
   // closes, and this connection is the window's (review finding ec-9).
   const shippedSurface = code(surface.slice(0, surface.indexOf('#[cfg(test)]\nmod tests')));
   assert.equal(count(shippedSurface, 'get_registry('), 1, 'one place asks for a registry');
-  assert.equal(count(shippedSurface, 'from_foreign_display('), 1, 'one place joins the connection');
+  assert.equal(count(shippedSurface, 'registry.bind('), 5, 'and one place binds globals, five of them');
+  assert.ok(
+    shippedSurface.lastIndexOf('registry.bind(') < shippedSurface.indexOf('pub(crate) struct Guest {'),
+    'all of them where the list of globals is read',
+  );
   const join = methodBody(surface, '    pub(crate) unsafe fn join(display: WlDisplay) -> Result<Self, String> {', 'Guest::join');
   assert.ok(join.includes('Backend::from_foreign_display(') && join.includes('.get_registry('));
   // That place is reached once per process: from the availability check,
@@ -227,13 +231,37 @@ test("the window's Wayland connection is joined once for the whole run, never pe
     assert.equal(count(code(file), 'Guest::join('), 0);
     assert.equal(count(code(file), 'get_registry('), 0);
   }
-  // A play makes its surface from what was joined, with a queue of its own
-  // and nothing asked of the compositor's registry.
+  // A play makes its surface from those globals and asks the compositor's
+  // registry nothing. It does so through a connection object of its own,
+  // with a queue of its own: two threads sharing one take each other's
+  // events off it, and a round trip can then wait for an answer the other
+  // thread has already consumed (the first repair did; reopened).
   const create = surface.slice(surface.indexOf('    pub(crate) unsafe fn create('));
+  const createBody = create.slice(0, create.indexOf('\n    }\n'));
   assert.match(
-    create,
-    /^    pub\(crate\) unsafe fn create\(\s+guest: &Arc<Guest>,\s+parent_surface: \*mut c_void,\s+width: i32,\s+height: i32,\s+\) -> Result<Self, String> \{\s+guest\.drain\(\);\s+let queue = guest\.conn\.new_event_queue\(\);/,
+    createBody,
+    /^    pub\(crate\) unsafe fn create\(\s+guest: &Arc<Guest>,\s+parent_surface: \*mut c_void,\s+width: i32,\s+height: i32,\s+\) -> Result<Self, String> \{\s+guest\.drain\(\);\s+(?:\/\/[^\n]*\n\s+)*let conn = Connection::from_backend\(unsafe \{\s+Backend::from_foreign_display\(guest\.display\.0\.cast\(\)\)\s+\}\);\s+let queue = conn\.new_event_queue\(\);/,
   );
+  assert.equal(count(code(createBody), 'registry'), 0);
+  for (const [type, field] of [
+    ['WlCompositor', 'compositor'],
+    ['WlSubcompositor', 'subcompositor'],
+    ['WpViewporter', 'viewporter'],
+  ]) {
+    assert.ok(
+      createBody.includes(`${type}::from_id(&conn, guest.${field}.id())`),
+      `the play uses the process's ${field} from its own connection object`,
+    );
+  }
+  assert.match(createBody, /\.map\(\|manager\| WpFractionalScaleManagerV1::from_id\(&conn, manager\.id\(\)\)\)/);
+  assert.match(createBody, /\.map\(\|manager\| WpColorManagerV1::from_id\(&conn, manager\.id\(\)\)\)/);
+  // Exactly two connection objects are ever made: the process's, and one for
+  // each play. Each has one queue, and nothing reaches into the other's.
+  assert.equal(count(shippedSurface, 'from_foreign_display('), 2);
+  assert.equal(count(shippedSurface, 'new_event_queue()'), 2);
+  assert.equal(count(shippedSurface, 'guest._conn'), 0, "a play never uses the process's connection object");
+  assert.equal(count(shippedSurface, 'guest.announcements'), 0);
+  assert.match(surface, /pub\(crate\) struct VideoSurface \{\s+(?:\/\/\/[^\n]*\n\s+)*guest: Arc<Guest>,\s+(?:\/\/\/[^\n]*\n\s+)*conn: Connection,\s+globals: Adopted,\s+queue: EventQueue<State>,/);
   // And what a play makes, it destroys by name: nothing is left for a
   // closing connection to sweep up, because this one never closes.
   const drop = surface.slice(surface.indexOf('impl Drop for VideoSurface {'));
@@ -253,6 +281,15 @@ test("the window's Wayland connection is joined once for the whole run, never pe
     );
   }
   assert.match(dropBody, /for description in \[self\.described\.take\(\), self\.output_query\.take\(\)\]\s+\.into_iter\(\)\s+\.flatten\(\)\s+\{\s+description\.destroy\(\);/);
+  // What a play must never destroy is what it did not make: the process's
+  // globals, which every later play needs.
+  assert.equal(count(dropBody, 'self.globals'), 0);
+  assert.equal(count(dropBody, 'self.guest'), 0);
+  assert.equal(count(createBody, '.destroy()'), 1, 'making a surface destroys one thing: its throwaway region');
+  assert.match(createBody, /let nothing = compositor\.create_region\(&qh, \(\)\);\s+surface\.set_input_region\(Some\(&nothing\)\);\s+nothing\.destroy\(\);/);
+  assert.equal(count(shippedSurface, 'compositor.destroy()'), 0);
+  assert.equal(count(shippedSurface, 'viewporter.destroy()'), 0);
+  assert.equal(count(shippedSurface, 'manager.destroy()'), 0);
 });
 
 test('a play that outlasts the wait for it neither starts unannounced nor goes untracked', () => {
@@ -354,7 +391,7 @@ test("the window's own surface is used on the window's thread, at once, and neve
   const create = surface.slice(surface.indexOf('    pub(crate) unsafe fn create('));
   const createBody = create.slice(0, create.indexOf('\n    }\n'));
   assert.equal(count(createBody, '&parent'), 2);
-  assert.match(createBody, /guest\.subcompositor\.get_subsurface\(&surface, &parent, &qh, \(\)\);\s+subsurface\.place_below\(&parent\);/);
+  assert.match(createBody, /subcompositor\.get_subsurface\(&surface, &parent, &qh, \(\)\);\s+subsurface\.place_below\(&parent\);/);
   for (const waits of ['roundtrip', 'blocking_dispatch', 'prepare_read', '.wait(']) {
     assert.equal(count(createBody, waits), 0, `making the surface never calls ${waits}`);
   }
@@ -489,7 +526,7 @@ test("nothing is sent to the compositor's colour manager that it did not offer",
   // connection, and the connection is the one Vela's window lives on.
   assert.match(
     methodBody(surface, '    pub(crate) fn colour_support(&self) -> bool {', 'colour_support'),
-    /let colour = self\.guest\.colour;\s+self\.guest\.colour_manager\.is_some\(\)\s+&& self\.feedback\.is_some\(\)\s+&& colour\.parametric\s+&& colour\.mastering\s+&& colour\.pq\s+&& colour\.bt2020\s+&& colour\.perceptual$/,
+    /let colour = self\.guest\.colour;\s+self\.globals\.colour_manager\.is_some\(\)\s+&& self\.feedback\.is_some\(\)\s+&& colour\.parametric\s+&& colour\.mastering\s+&& colour\.pq\s+&& colour\.bt2020\s+&& colour\.perceptual$/,
   );
   // Each of those is what the compositor announced, under the protocol's
   // own numbers.
