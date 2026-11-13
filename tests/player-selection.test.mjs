@@ -174,6 +174,10 @@ test('a relaunch stays in the player it replaces', () => {
 });
 
 test('play refuses a player it cannot start before it starts anything', () => {
+  // That the refusal refuses is tested by calling play (review finding
+  // sel-4): src-tauri/src/playback.rs, the test named below. This test only
+  // adds that the check is the first thing play does.
+  assert.match(playback, /fn play_refuses_a_player_it_cannot_start_and_starts_nothing\(\) \{/);
   const body = functionBody(playback, 'pub fn play(', 'playback::play');
   const guard = body.indexOf('if spec.player != crate::player::PlayerKind::External {');
   assert.notEqual(guard, -1, 'play must check which player it was asked for');

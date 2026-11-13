@@ -988,6 +988,73 @@ fn spawn_end_watcher(
 mod tests {
     use super::*;
 
+    // Review finding sel-4. `play` can start one player today, the external
+    // one. Handed any other it must refuse, and refuse before it has done
+    // anything: without the refusal an embedded play would be started as an
+    // external one, with the options of neither.
+    #[test]
+    fn play_refuses_a_player_it_cannot_start_and_starts_nothing() {
+        let spec = PlaySpec {
+            player: crate::player::PlayerKind::Embedded,
+            url: "https://media.invalid/never-played".to_string(),
+            title: String::new(),
+            http_headers: Vec::new(),
+            start_seconds: 0.0,
+            autocrop_script: None,
+            autocrop_shim: None,
+            inherited_window_state: PlaybackWindowState::default(),
+            screen_name: None,
+            window_observation: WindowStateObservation::default(),
+            markers_script: None,
+            markers: Vec::new(),
+            intro_policy: crate::config::SkipPolicy::Off,
+            credits_policy: crate::config::SkipPolicy::Off,
+            commercial_policy: crate::config::SkipPolicy::Off,
+            step_down: None,
+            duration: None,
+            osd_notice: None,
+            on_notice_shown: None,
+            steps_taken: 0,
+        };
+        let slot = Arc::new(Mutex::new(None));
+        let ended = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let on_end: EndNotify = {
+            let ended = ended.clone();
+            Arc::new(move |_position_ms| {
+                ended.fetch_add(1, Ordering::SeqCst);
+            })
+        };
+        let result = play(
+            &spec,
+            ProgressTarget::None,
+            &slot,
+            &Arc::new(AtomicBool::new(false)),
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "refused-session".to_string(),
+            Some(on_end),
+        );
+        // If the refusal is ever lost, this test has just started a real
+        // player on a machine that has one. Stop it before judging anything.
+        let started = slot.lock().unwrap_or_else(|e| e.into_inner()).take();
+        let started_a_player = started.is_some();
+        if let Some(mut player) = started {
+            let _ = player.kill();
+        }
+        if let Ok(stop) = &result {
+            stop.store(true, Ordering::Relaxed);
+        }
+        assert_eq!(
+            result.err().as_deref(),
+            Some("the embedded player is not part of this build")
+        );
+        assert!(!started_a_player, "a refused play must not start a player");
+        assert_eq!(
+            ended.load(Ordering::SeqCst),
+            0,
+            "a play that never started has no end to report"
+        );
+    }
+
     // Review finding sel-3: "the player started" is not "the user was told".
     #[cfg(unix)]
     fn notice_listener(name: &str) -> (std::os::unix::net::UnixListener, String) {

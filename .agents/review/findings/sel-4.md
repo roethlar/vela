@@ -1,9 +1,9 @@
 # sel-4: the test that play refuses a player it cannot start passes with the refusal removed
 
 **Severity**: LOW — the shipped refusal is correct; its test is not a test.
-**Status**: Open
+**Status**: In progress
 **Branch**: —
-**Commit**: —
+**Commit**: (this commit)
 
 ## Evidence
 
@@ -15,15 +15,28 @@ Reviewer, verbatim: "The test named 'play refuses a player it cannot start befor
 
 ## What
 
-(pending)
+The test read the source of `play` and checked that an `if` on the player
+comes before four calls. It never checked what the `if` does, so emptying
+its body changed nothing.
 
 ## Approach
 
-(pending)
+A Rust test calls `playback::play` with a play for the embedded player and
+requires three things: the specific refusal comes back, no player is in
+the slot afterwards, and the end-of-play callback has not run. The
+source-text test stays for the one thing it can say, that the check comes
+first, and now requires the Rust test to exist.
+
+If the refusal is lost, the Rust test starts a real external player on a
+machine that has one; it stops whatever it finds in the slot before it
+asserts anything.
 
 ## Files changed
 
-(pending)
+- `src-tauri/src/playback.rs` — test
+  `play_refuses_a_player_it_cannot_start_and_starts_nothing`
+- `tests/player-selection.test.mjs` — "play refuses a player it cannot
+  start before it starts anything" names that test
 
 ## Guard proof
 
@@ -35,7 +48,9 @@ None.
 
 ## Known gaps
 
-(pending)
+- Slice 3 of the plan gives `play` an embedded launcher. The refusal then
+  becomes "no embedded player is available here", and this test changes
+  with it.
 
 ## Reviewer comments
 

@@ -3,7 +3,7 @@
 **Severity**: LOW — the user is never told why the embedded player was not used; playback is unaffected.
 **Status**: In progress
 **Branch**: —
-**Commit**: (this commit)
+**Commit**: `50e57e4` (which also carried four unrelated files by mistake; `fb64072` takes them out again)
 
 ## Evidence
 
