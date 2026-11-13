@@ -102,13 +102,6 @@ async function setMpvProperty(mpv, property, value, what) {
 }
 
 async function finishNaturally(mpv) {
-  // mpv names its file before it can seek in it. Asked to seek in that
-  // moment it answers "property unavailable", which failed this scenario
-  // about one run in five.
-  await pollUntil(
-    () => mpv.getProp('time-pos').then((position) => typeof position === 'number').catch(() => false),
-    'mpv to be able to seek in the file',
-  );
   await mpv.setProp('time-pos', 9.2);
   await mpv.setProp('pause', false);
   mpv.close();

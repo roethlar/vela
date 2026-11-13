@@ -310,9 +310,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   installed there. Slice 5 of the embedded-player plan adds a line for its
   own new script and deliberately leaves this one alone until the owner
   answers.
-- The unrelated continuation/mpv and `refresh` E2E flakes remain recorded.
-  They reproduced during the 1.0.59 full Linux run in `continueon`,
-  `playverbs`, and `refresh` (36/39); the changed `sortpersist` scenario passed.
+- The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
+  with `continueon` and `playverbs`). One cause of the continuation flakes
+  is gone since 2026-11-13: scenarios sought in a file the moment mpv named
+  it, and mpv can answer that with "property unavailable" (seen in
+  `continuetv` and `continueon`). The harness now waits until mpv reports a
+  position before any seek (`tests/e2e/mpv.mjs`). Whether that was the
+  whole of the `continueon` and `playverbs` flakes is not established.
 - The SvelteKit removal (`## Now`) cannot merge as it stands. Its merge
   blockers moved here on 2026-11-12, re-verified at `main` `aaa01c1` against
   branch head `769d5a8`:

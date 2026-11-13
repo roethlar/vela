@@ -102,8 +102,23 @@ export class MpvIpc {
     return this.cmd('get_property', name);
   }
 
-  setProp(name, value) {
+  async setProp(name, value) {
+    // mpv names its file before it can seek in it, and answers a position
+    // set in that moment with "property unavailable". Scenarios seek as soon
+    // as a play's socket answers, so that failed one or another of them now
+    // and then. A seek therefore waits until mpv reports a position.
+    if (name === 'time-pos') await this.#untilSeekable();
     return this.cmd('set_property', name, value);
+  }
+
+  async #untilSeekable() {
+    const deadline = Date.now() + 10000;
+    while (Date.now() < deadline) {
+      const position = await this.getProp('time-pos').catch(() => undefined);
+      if (typeof position === 'number') return;
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    // Not seekable in time: the seek itself says what is wrong.
   }
 
   // fire-and-forget: mpv may close the socket before replying
