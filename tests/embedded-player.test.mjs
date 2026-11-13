@@ -148,7 +148,7 @@ test('an embedded play is offered only in a run that started in embedded window 
   }
   // Both ways in go through it.
   assert.match(host, /pub\(crate\) fn availability\([\s\S]{0,120}self\.library\(app\)\.map\(\|_\| \(\)\)/);
-  assert.match(host, /let lib = self\.library\(app\)\.map_err\(\|reason\| reason\.notice\(\)\)\?;/);
+  assert.match(host, /let Ready \{ lib, guest \} = self\.library\(app\)\.map_err\(\|reason\| reason\.notice\(\)\)\?;/);
 });
 
 test("only Vela's own copy of the mpv library is ever loaded", () => {
@@ -156,7 +156,7 @@ test("only Vela's own copy of the mpv library is ever loaded", () => {
   // developer names. `cfg!(debug_assertions)` is false in every release.
   assert.match(
     host,
-    /let directory = libmpv::set_directory\(\s+&resources,\s+cfg!\(debug_assertions\),\s+std::env::var_os\(DEVELOPMENT_SET_VARIABLE\)\.as_deref\(\),\s+\);\s+LibMpv::load\(&directory\.join\(libmpv::LIBRARY_FILE\)\)/,
+    /let directory = libmpv::set_directory\(\s+&resources,\s+cfg!\(debug_assertions\),\s+std::env::var_os\(DEVELOPMENT_SET_VARIABLE\)\.as_deref\(\),\s+\);\s+let lib = LibMpv::load\(&directory\.join\(libmpv::LIBRARY_FILE\)\)/,
   );
   // How: one call to the system's loader, after the path was checked to be
   // an exact file, with the flags that keep the set to itself.
@@ -190,6 +190,55 @@ test('a running embedded play is asked to stop, and waited for, before its windo
     session,
     /struct Live \{\s+renderer: Renderer,\s+player: Player,\s+window: egl::Window,\s+surface: VideoSurface,/,
   );
+});
+
+test("the window's Wayland connection is joined once for the whole run, never per play", () => {
+  // Joining asks the compositor for a registry, which the protocol cannot
+  // give back: the compositor keeps one per request until the connection
+  // closes, and this connection is the window's (review finding ec-9).
+  const shippedSurface = code(surface.slice(0, surface.indexOf('#[cfg(test)]\nmod tests')));
+  assert.equal(count(shippedSurface, 'get_registry('), 1, 'one place asks for a registry');
+  assert.equal(count(shippedSurface, 'from_foreign_display('), 1, 'one place joins the connection');
+  const join = methodBody(surface, '    pub(crate) unsafe fn join(wl_display: *mut c_void) -> Result<Self, String> {', 'Guest::join');
+  assert.ok(join.includes('Backend::from_foreign_display(') && join.includes('.get_registry('));
+  // That place is reached once per process: from the availability check,
+  // whose answer is kept.
+  assert.equal(count(code(host), 'Guest::join('), 1);
+  const check = methodBody(host, '    fn check(app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {', 'Host::check');
+  assert.ok(check.includes('Guest::join(handles.wl_display)'));
+  assert.equal(count(code(host), 'Self::check('), 1);
+  assert.match(host, /self\.checked\.get_or_init\(\|\| Self::check\(app\)\)\.clone\(\)/);
+  assert.match(host, /checked: OnceLock<Result<Ready, EmbeddedUnavailable>>,/);
+  for (const file of [session, libmpv, read('src-tauri/src/player/embedded/egl.rs')]) {
+    assert.equal(count(code(file), 'Guest::join('), 0);
+    assert.equal(count(code(file), 'get_registry('), 0);
+  }
+  // A play makes its surface from what was joined, with a queue of its own
+  // and nothing asked of the compositor's registry.
+  const create = surface.slice(surface.indexOf('    pub(crate) unsafe fn create('));
+  assert.match(
+    create,
+    /^    pub\(crate\) unsafe fn create\(\s+guest: &Arc<Guest>,\s+parent_surface: \*mut c_void,\s+width: i32,\s+height: i32,\s+\) -> Result<Self, String> \{\s+guest\.drain\(\);\s+let mut queue = guest\.conn\.new_event_queue\(\);/,
+  );
+  // And what a play makes, it destroys by name: nothing is left for a
+  // closing connection to sweep up, because this one never closes.
+  const drop = surface.slice(surface.indexOf('impl Drop for VideoSurface {'));
+  const dropBody = drop.slice(0, drop.indexOf('\n}\n'));
+  const fields = surface.slice(surface.indexOf('pub(crate) struct VideoSurface {'));
+  const made = [...fields.slice(0, fields.indexOf('\n}\n')).matchAll(/^    (\w+): (?:Option<)?(?:Wl|Wp)\w+>?,$/gm)].map((m) => m[1]);
+  assert.deepEqual(
+    made,
+    ['surface', 'subsurface', 'viewport', 'fractional', 'feedback', 'colour_surface', 'output_query', 'described'],
+    'the Wayland objects a play holds',
+  );
+  for (const field of made) {
+    assert.match(
+      dropBody,
+      new RegExp(`(self\\.${field}\\.destroy\\(\\)|Some\\(\\w+\\) = &self\\.${field}\\b[\\s\\S]{0,40}\\.destroy\\(\\)|self\\.${field}\\.take\\(\\))`),
+      `${field} is destroyed when the play ends`,
+    );
+  }
+  assert.match(dropBody, /for description in \[self\.described\.take\(\), self\.output_query\.take\(\)\]\s+\.into_iter\(\)\s+\.flatten\(\)\s+\{\s+description\.destroy\(\);/);
 });
 
 test('both players give up a consumed stream-auth file the same way', () => {
@@ -310,7 +359,7 @@ test("nothing is sent to the compositor's colour manager that it did not offer",
   // connection, and the connection is the one Vela's window lives on.
   assert.match(
     methodBody(surface, '    pub(crate) fn colour_support(&self) -> bool {', 'colour_support'),
-    /let colour = self\.state\.colour;\s+self\.state\.colour_manager\.is_some\(\)\s+&& self\.feedback\.is_some\(\)\s+&& colour\.parametric\s+&& colour\.mastering\s+&& colour\.pq\s+&& colour\.bt2020\s+&& colour\.perceptual$/,
+    /let colour = self\.guest\.colour;\s+self\.guest\.colour_manager\.is_some\(\)\s+&& self\.feedback\.is_some\(\)\s+&& colour\.parametric\s+&& colour\.mastering\s+&& colour\.pq\s+&& colour\.bt2020\s+&& colour\.perceptual$/,
   );
   // Each of those is what the compositor announced, under the protocol's
   // own numbers.
@@ -350,7 +399,7 @@ test("nothing is sent to the compositor's colour manager that it did not offer",
   // that form exists, and read only once it is ready.
   assert.match(
     methodBody(surface, '    pub(crate) fn ask_about_output(&mut self) {', 'ask_about_output'),
-    /let \(Some\(feedback\), true\) = \(&self\.feedback, self\.state\.colour\.parametric\) else \{\s+return;\s+\};/,
+    /let \(Some\(feedback\), true\) = \(&self\.feedback, self\.guest\.colour\.parametric\) else \{\s+return;\s+\};/,
   );
   assert.equal(count(code(surface), '.get_information('), 1);
   assert.match(surface, /\(Described::Output, Event::Ready \{ \.\. \}\) => \{[\s\S]{0,400}description\.get_information\(qh, \(\)\);/);

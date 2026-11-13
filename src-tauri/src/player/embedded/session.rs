@@ -24,7 +24,7 @@ use super::egl;
 use super::hdr::{self, Capabilities, Tagging};
 use super::libmpv::{LibMpv, Player, Renderer, EVENT_NONE, EVENT_SHUTDOWN};
 use super::options::Step;
-use super::surface::VideoSurface;
+use super::surface::{Guest, VideoSurface};
 use crate::player::launch::HeaderInclude;
 
 /// The window's Wayland connection and surface, as raw pointers GTK owns.
@@ -80,6 +80,8 @@ impl Drop for MarkerPayload {
 /// Everything a play needs to start.
 pub(crate) struct Start {
     pub(crate) lib: Arc<LibMpv>,
+    /// Vela's place on the window's connection to the compositor.
+    pub(crate) guest: Arc<Guest>,
     /// The playback session this play belongs to.
     pub(crate) session_id: String,
     pub(crate) window: WindowHandles,
@@ -279,11 +281,12 @@ fn configure(player: &Player, start: &Start) -> Result<(), String> {
 }
 
 fn set_up(start: &Start, shared: &Arc<Shared>) -> Result<Live, String> {
-    // SAFETY: `start.window` holds the live display and surface of Vela's
-    // window, which outlives this play (`Session::stop_and_wait`).
+    // SAFETY: `start.window` holds the live surface of Vela's window, which
+    // outlives this play (`Session::stop_and_wait`), on the connection
+    // `start.guest` joined.
     let mut surface = unsafe {
         VideoSurface::create(
-            start.window.wl_display,
+            &start.guest,
             start.window.wl_surface,
             start.rect.width,
             start.rect.height,

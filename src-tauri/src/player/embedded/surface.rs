@@ -8,15 +8,26 @@
 //! input: every click and key still goes to the window.
 //!
 //! Both surfaces must be created on the SAME connection to the compositor,
-//! the one GTK opened. This module joins that connection as a guest: its
-//! objects get an event queue of their own, so GTK's event handling and this
-//! module's never see each other's events (proved in Slice 0 of
-//! `.agents/plans/embedded-player.md`, A5, by 332 resizes during playback).
-//! Everything here except [`VideoSurface::subsurface`] is used from the one
-//! thread that owns the surface.
+//! the one GTK opened. This module joins that connection as a guest
+//! ([`Guest`]): its objects get event queues of their own, so GTK's event
+//! handling and this module's never see each other's events (proved in Slice
+//! 0 of `.agents/plans/embedded-player.md`, A5, by 332 resizes during
+//! playback).
+//!
+//! The connection is joined ONCE, for the life of the process. Joining asks
+//! the compositor for its list of globals, and the protocol has no way to
+//! give that list (a `wl_registry`) back: the compositor keeps one for every
+//! time it was asked, until the connection closes, and this connection is
+//! the window's and never closes. Asking per play would grow the compositor
+//! by one for every film (review finding ec-9). What a play makes for itself
+//! (its surface and what hangs off it) it also destroys.
+//!
+//! Everything in [`VideoSurface`] except [`VideoSurface::subsurface`] is used
+//! from the one thread that owns the surface.
 
 use std::ffi::c_void;
 use std::os::fd::{AsRawFd, BorrowedFd};
+use std::sync::{Arc, Mutex};
 
 use wayland_client::backend::{Backend, ObjectId};
 use wayland_client::protocol::{
@@ -72,16 +83,25 @@ struct ColourSupport {
 /// The compositor's scale for a surface, in 120ths: 120 is 1.0, 204 is 1.7.
 const SCALE_ONE: u32 = 120;
 
+/// What the compositor offers, as learnt when the connection is joined.
 #[derive(Default)]
-struct State {
+struct Globals {
     compositor: Option<WlCompositor>,
     subcompositor: Option<WlSubcompositor>,
     viewporter: Option<WpViewporter>,
     fractional_scale: Option<WpFractionalScaleManagerV1>,
-    /// The scale the compositor last asked this surface to be drawn at.
-    scale_120: Option<u32>,
     colour_manager: Option<WpColorManagerV1>,
     colour: ColourSupport,
+    /// Set once the list has been read. What the compositor announces
+    /// afterwards (a monitor plugged in) is of no interest here.
+    read: bool,
+}
+
+/// What one play hears from the compositor about its own surface.
+#[derive(Default)]
+struct State {
+    /// The scale the compositor last asked this surface to be drawn at.
+    scale_120: Option<u32>,
     /// The compositor said its description of the output has changed.
     output_changed: bool,
     /// The output's description while its parts are still arriving.
@@ -95,7 +115,7 @@ struct State {
     made: bool,
 }
 
-impl Dispatch<wl_registry::WlRegistry, ()> for State {
+impl Dispatch<wl_registry::WlRegistry, ()> for Globals {
     fn event(
         state: &mut Self,
         registry: &wl_registry::WlRegistry,
@@ -104,6 +124,9 @@ impl Dispatch<wl_registry::WlRegistry, ()> for State {
         _: &Connection,
         qh: &QueueHandle<Self>,
     ) {
+        if state.read {
+            return;
+        }
         let wl_registry::Event::Global {
             name,
             interface,
@@ -141,7 +164,7 @@ impl Dispatch<WpFractionalScaleV1, ()> for State {
     }
 }
 
-impl Dispatch<WpColorManagerV1, ()> for State {
+impl Dispatch<WpColorManagerV1, ()> for Globals {
     fn event(
         state: &mut Self,
         _: &WpColorManagerV1,
@@ -261,74 +284,75 @@ impl Dispatch<WpImageDescriptionInfoV1, ()> for State {
 delegate_noop!(State: WpColorManagementSurfaceV1);
 delegate_noop!(State: WpImageDescriptionCreatorParamsV1);
 delegate_noop!(State: ignore WlSurface);
-delegate_noop!(State: WlCompositor);
-delegate_noop!(State: WlSubcompositor);
 delegate_noop!(State: WlSubsurface);
 delegate_noop!(State: WlRegion);
-delegate_noop!(State: WpViewporter);
 delegate_noop!(State: WpViewport);
-delegate_noop!(State: WpFractionalScaleManagerV1);
+delegate_noop!(Globals: WlCompositor);
+delegate_noop!(Globals: WlSubcompositor);
+delegate_noop!(Globals: WpViewporter);
+delegate_noop!(Globals: WpFractionalScaleManagerV1);
 
 fn describe(error: impl std::fmt::Display) -> String {
     format!("the connection to the compositor failed ({error})")
 }
 
-/// Join GTK's connection as a guest and learn what the compositor offers.
-///
-/// # Safety
-/// `wl_display` must be the live `wl_display` of Vela's window and stay valid
-/// for as long as the returned objects are used.
-unsafe fn join(wl_display: *mut c_void) -> Result<(Connection, EventQueue<State>, State), String> {
-    // SAFETY: the caller's contract. A guest backend never closes the
-    // connection; it gives its objects an event queue of their own.
-    let backend = unsafe { Backend::from_foreign_display(wl_display.cast()) };
-    let conn = Connection::from_backend(backend);
-    let mut queue = conn.new_event_queue();
-    let mut state = State::default();
-    let _registry = conn.display().get_registry(&queue.handle(), ());
-    // One round trip delivers the list of globals.
-    queue.roundtrip(&mut state).map_err(describe)?;
-    Ok((conn, queue, state))
+/// Vela's place on the window's connection to the compositor: joined once,
+/// kept for the life of the process, shared by every play.
+pub(crate) struct Guest {
+    conn: Connection,
+    compositor: WlCompositor,
+    subcompositor: WlSubcompositor,
+    viewporter: WpViewporter,
+    fractional_scale: Option<WpFractionalScaleManagerV1>,
+    colour_manager: Option<WpColorManagerV1>,
+    colour: ColourSupport,
+    /// The queue the globals above were bound on. Nothing more is expected
+    /// on it, but what does arrive (the compositor announces every later
+    /// global to every registry) must be taken off it or it accumulates.
+    announcements: Mutex<(EventQueue<Globals>, Globals)>,
 }
 
-/// The first protocol the video surface needs that this compositor lacks, if
-/// any. Used to decide availability before a play is started.
-///
-/// # Safety
-/// As for [`VideoSurface::create`].
-pub(crate) unsafe fn missing_protocol(wl_display: *mut c_void) -> Result<(), String> {
-    let (conn, _queue, state) = unsafe { join(wl_display) }?;
-    let missing = if state.compositor.is_none() {
-        Some("wl_compositor")
-    } else if state.subcompositor.is_none() {
-        Some("wl_subcompositor")
-    } else if state.viewporter.is_none() {
-        Some("wp_viewporter")
-    } else {
-        None
-    };
-    release_globals(&state);
-    let _ = conn.flush();
-    match missing {
-        Some(name) => Err(format!("the compositor does not offer {name}")),
-        None => Ok(()),
+impl Guest {
+    /// Join GTK's connection as a guest and learn what the compositor
+    /// offers. Call once per process; see the module's notes.
+    ///
+    /// # Safety
+    /// `wl_display` must be the live `wl_display` of Vela's window, which
+    /// stays valid for the life of the process.
+    pub(crate) unsafe fn join(wl_display: *mut c_void) -> Result<Self, String> {
+        // SAFETY: the caller's contract. A guest backend never closes the
+        // connection; it gives its objects an event queue of their own.
+        let backend = unsafe { Backend::from_foreign_display(wl_display.cast()) };
+        let conn = Connection::from_backend(backend);
+        let mut queue = conn.new_event_queue();
+        let mut globals = Globals::default();
+        let _registry = conn.display().get_registry(&queue.handle(), ());
+        // One round trip delivers the list of globals, a second what the
+        // colour manager says about itself on being bound.
+        queue.roundtrip(&mut globals).map_err(describe)?;
+        queue.roundtrip(&mut globals).map_err(describe)?;
+        globals.read = true;
+        let lacks = |name: &str| format!("the compositor does not offer {name}");
+        Ok(Guest {
+            compositor: globals.compositor.take().ok_or_else(|| lacks("wl_compositor"))?,
+            subcompositor: globals
+                .subcompositor
+                .take()
+                .ok_or_else(|| lacks("wl_subcompositor"))?,
+            viewporter: globals.viewporter.take().ok_or_else(|| lacks("wp_viewporter"))?,
+            fractional_scale: globals.fractional_scale.take(),
+            colour_manager: globals.colour_manager.take(),
+            colour: globals.colour,
+            announcements: Mutex::new((queue, globals)),
+            conn,
+        })
     }
-}
 
-/// Tell the compositor the globals are no longer used, for those that can be
-/// released at all.
-fn release_globals(state: &State) {
-    if let Some(subcompositor) = &state.subcompositor {
-        subcompositor.destroy();
-    }
-    if let Some(viewporter) = &state.viewporter {
-        viewporter.destroy();
-    }
-    if let Some(fractional_scale) = &state.fractional_scale {
-        fractional_scale.destroy();
-    }
-    if let Some(colour_manager) = &state.colour_manager {
-        colour_manager.destroy();
+    /// Take whatever has arrived for the globals' own queue off it.
+    fn drain(&self) {
+        let mut guard = self.announcements.lock().unwrap_or_else(|e| e.into_inner());
+        let (queue, globals) = &mut *guard;
+        let _ = queue.dispatch_pending(globals);
     }
 }
 
@@ -340,7 +364,7 @@ pub(crate) fn pixels(logical: i32, scale_120: u32) -> i32 {
 }
 
 pub(crate) struct VideoSurface {
-    conn: Connection,
+    guest: Arc<Guest>,
     queue: EventQueue<State>,
     state: State,
     surface: WlSurface,
@@ -366,47 +390,42 @@ impl VideoSurface {
     /// window's units, at the top left of the window until it is positioned.
     ///
     /// # Safety
-    /// `wl_display` and `parent_surface` must be the live `wl_display` and
-    /// `wl_surface` of Vela's window and must outlive the returned value.
+    /// `parent_surface` must be the live `wl_surface` of Vela's window, on
+    /// the connection `guest` joined, and must outlive the returned value.
     pub(crate) unsafe fn create(
-        wl_display: *mut c_void,
+        guest: &Arc<Guest>,
         parent_surface: *mut c_void,
         width: i32,
         height: i32,
     ) -> Result<Self, String> {
-        let (conn, mut queue, mut state) = unsafe { join(wl_display) }?;
+        guest.drain();
+        let mut queue = guest.conn.new_event_queue();
+        let mut state = State::default();
         let qh = queue.handle();
-        let (Some(compositor), Some(subcompositor), Some(viewporter)) = (
-            state.compositor.clone(),
-            state.subcompositor.clone(),
-            state.viewporter.clone(),
-        ) else {
-            return Err("the compositor lacks a protocol the video surface needs".to_string());
-        };
         // SAFETY: the caller's contract: a live `wl_surface` on this connection.
         let parent_id = unsafe { ObjectId::from_ptr(WlSurface::interface(), parent_surface.cast()) }
             .map_err(|_| "the window's Wayland surface is not usable".to_string())?;
-        let parent = WlSurface::from_id(&conn, parent_id)
+        let parent = WlSurface::from_id(&guest.conn, parent_id)
             .map_err(|_| "the window's Wayland surface is not usable".to_string())?;
 
-        let surface = compositor.create_surface(&qh, ());
-        let viewport = viewporter.get_viewport(&surface, &qh, ());
-        let fractional = state
+        let surface = guest.compositor.create_surface(&qh, ());
+        let viewport = guest.viewporter.get_viewport(&surface, &qh, ());
+        let fractional = guest
             .fractional_scale
             .as_ref()
             .map(|manager| manager.get_fractional_scale(&surface, &qh, ()));
         // No input region at all: the pointer and the keyboard go to the
         // window above, as if this surface were not there.
-        let nothing = compositor.create_region(&qh, ());
+        let nothing = guest.compositor.create_region(&qh, ());
         surface.set_input_region(Some(&nothing));
         nothing.destroy();
 
-        let subsurface = subcompositor.get_subsurface(&surface, &parent, &qh, ());
+        let subsurface = guest.subcompositor.get_subsurface(&surface, &parent, &qh, ());
         subsurface.place_below(&parent);
         // Not tied to the window's own redraws: a video frame is shown when
         // it is ready, whether or not the page has anything new.
         subsurface.set_desync();
-        let feedback = state
+        let feedback = guest
             .colour_manager
             .as_ref()
             .map(|manager| manager.get_surface_feedback(&surface, &qh, ()));
@@ -414,7 +433,7 @@ impl VideoSurface {
         queue.roundtrip(&mut state).map_err(describe)?;
 
         let mut video = VideoSurface {
-            conn,
+            guest: guest.clone(),
             queue,
             state,
             surface,
@@ -464,13 +483,11 @@ impl VideoSurface {
         let (width, height) = self.logical;
         // The buffer is in pixels; this says how large it appears.
         self.viewport.set_destination(width, height);
-        if let Some(compositor) = &self.state.compositor {
-            // Opaque everywhere: the compositor need not draw what is behind.
-            let all = compositor.create_region(&self.queue.handle(), ());
-            all.add(0, 0, width, height);
-            self.surface.set_opaque_region(Some(&all));
-            all.destroy();
-        }
+        // Opaque everywhere: the compositor need not draw what is behind.
+        let all = self.guest.compositor.create_region(&self.queue.handle(), ());
+        all.add(0, 0, width, height);
+        self.surface.set_opaque_region(Some(&all));
+        all.destroy();
     }
 
     /// Change the size, in the window's units. Returns the new pixel size
@@ -499,7 +516,7 @@ impl VideoSurface {
     /// becomes readable, or `timeout_ms` passes; then handle what arrived.
     pub(crate) fn wait(&mut self, wake: BorrowedFd<'_>, timeout_ms: i32) -> Result<(), String> {
         self.queue.dispatch_pending(&mut self.state).map_err(describe)?;
-        let _ = self.conn.flush();
+        let _ = self.guest.conn.flush();
         // Reading the connection is shared with GTK's thread. This is the
         // protocol for that: announce the intent to read, wait, and then
         // either read or withdraw.
@@ -547,7 +564,7 @@ impl VideoSurface {
 
     /// Send everything queued for the compositor now.
     pub(crate) fn flush(&self) {
-        let _ = self.conn.flush();
+        let _ = self.guest.conn.flush();
     }
 
     /// Send what is queued and handle everything the compositor has to say
@@ -562,8 +579,8 @@ impl VideoSurface {
     /// offered is a protocol error, which ends the connection, and the
     /// connection is the one Vela's window lives on.
     pub(crate) fn colour_support(&self) -> bool {
-        let colour = self.state.colour;
-        self.state.colour_manager.is_some()
+        let colour = self.guest.colour;
+        self.guest.colour_manager.is_some()
             && self.feedback.is_some()
             && colour.parametric
             && colour.mastering
@@ -577,7 +594,7 @@ impl VideoSurface {
     pub(crate) fn ask_about_output(&mut self) {
         // The parametric form is the one whose numbers can be read; it may
         // only be asked for where the compositor says it has it.
-        let (Some(feedback), true) = (&self.feedback, self.state.colour.parametric) else {
+        let (Some(feedback), true) = (&self.feedback, self.guest.colour.parametric) else {
             return;
         };
         if let Some(previous) = self.output_query.take() {
@@ -616,7 +633,7 @@ impl Describable for VideoSurface {
         if !self.colour_support() {
             return;
         }
-        let Some(manager) = self.state.colour_manager.clone() else {
+        let Some(manager) = self.guest.colour_manager.clone() else {
             return;
         };
         let (Ok(pq), Ok(bt2020)) = (
@@ -649,7 +666,7 @@ impl Describable for VideoSurface {
         if !self.colour_support() || !self.state.made {
             return false;
         }
-        let (Some(manager), Some(description)) = (&self.state.colour_manager, &self.described)
+        let (Some(manager), Some(description)) = (&self.guest.colour_manager, &self.described)
         else {
             return false;
         };
@@ -694,10 +711,9 @@ impl Drop for VideoSurface {
         }
         self.subsurface.destroy();
         self.surface.destroy();
-        release_globals(&self.state);
-        let _ = self.conn.flush();
-        // Dropping the connection afterwards discards this guest's remaining
-        // objects and its event queue. GTK's connection stays open.
+        let _ = self.guest.conn.flush();
+        // Everything this play made is destroyed above, by name: the
+        // connection it was made on is the process's and outlives it.
     }
 }
 

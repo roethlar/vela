@@ -19,7 +19,8 @@ use super::libmpv::{self, LibMpv};
 use super::options;
 use super::session::{Lifecycle, MarkerPayload, Rect, Session, Start, WindowHandles};
 use super::startup::{self, WindowMode};
-use super::{egl, surface};
+use super::egl;
+use super::surface::Guest;
 use crate::player::launch::LaunchPlan;
 use crate::player::EmbeddedUnavailable;
 
@@ -168,10 +169,20 @@ pub(crate) fn rect_in_window(page: Rect, reported: Rect) -> Rect {
     }
 }
 
+/// What every embedded play in this run of Vela shares, made once.
+#[derive(Clone)]
+struct Ready {
+    lib: Arc<LibMpv>,
+    /// Vela's place on the window's connection to the compositor. Joined
+    /// here, once: see `surface.rs` for why never per play.
+    guest: Arc<Guest>,
+}
+
 /// The embedded player's side of the app, for the life of the process.
 pub(crate) struct Host {
-    /// Whether this machine can run an embedded play, found out once.
-    checked: OnceLock<Result<Arc<LibMpv>, EmbeddedUnavailable>>,
+    /// Whether this machine can run an embedded play, found out once, and
+    /// with it what its plays share.
+    checked: OnceLock<Result<Ready, EmbeddedUnavailable>>,
     /// Set when an embedded play failed to start, so the next play goes to
     /// the external player instead of failing the same way.
     start_failed: std::sync::atomic::AtomicBool,
@@ -190,15 +201,15 @@ impl Host {
 
     /// Everything that has to be true of this machine, checked in order of
     /// cost and stopping at the first that is not.
-    fn check(app: &tauri::AppHandle) -> Result<Arc<LibMpv>, EmbeddedUnavailable> {
+    fn check(app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {
         let handles = on_window_thread(app, {
             let app = app.clone();
             move || window_facts(&app).map(|facts| facts.handles)
         })
         .map_err(|_| EmbeddedUnavailable::WindowNotReady)??;
-        // SAFETY: the window's live Wayland connection; the window exists
-        // for as long as the process does anything with it.
-        unsafe { surface::missing_protocol(handles.wl_display) }.map_err(|detail| {
+        // SAFETY: the window's live Wayland connection, which GTK keeps for
+        // the life of the process.
+        let guest = unsafe { Guest::join(handles.wl_display) }.map_err(|detail| {
             eprintln!("vela: the embedded player is unavailable: {detail}");
             EmbeddedUnavailable::CompositorLacks
         })?;
@@ -215,7 +226,7 @@ impl Host {
             cfg!(debug_assertions),
             std::env::var_os(DEVELOPMENT_SET_VARIABLE).as_deref(),
         );
-        LibMpv::load(&directory.join(libmpv::LIBRARY_FILE))
+        let lib = LibMpv::load(&directory.join(libmpv::LIBRARY_FILE))
             .map(Arc::new)
             .map_err(|detail| {
                 // The loader's own words, so a damaged or too-old system can
@@ -224,10 +235,14 @@ impl Host {
                     "vela: the embedded player is unavailable: its mpv library could not be loaded: {detail}"
                 );
                 EmbeddedUnavailable::LibraryMissing
-            })
+            })?;
+        Ok(Ready {
+            lib,
+            guest: Arc::new(guest),
+        })
     }
 
-    fn library(&self, app: &tauri::AppHandle) -> Result<Arc<LibMpv>, EmbeddedUnavailable> {
+    fn library(&self, app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {
         let decided = startup::decision();
         if decided.mode != WindowMode::Embedded {
             return Err(decided.refused.unwrap_or(EmbeddedUnavailable::NeedsRestart));
@@ -252,7 +267,7 @@ impl Host {
         app: &tauri::AppHandle,
         session_id: &str,
     ) -> Result<Prepared, String> {
-        let lib = self.library(app).map_err(|reason| reason.notice())?;
+        let Ready { lib, guest } = self.library(app).map_err(|reason| reason.notice())?;
         let facts = on_window_thread(app, {
             let app = app.clone();
             move || window_facts(&app)
@@ -263,6 +278,7 @@ impl Host {
             host: self.clone(),
             app: app.clone(),
             lib,
+            guest,
             window: facts.handles,
             rect: rect_in_window(facts.page, reported),
             session_id: session_id.to_string(),
@@ -301,6 +317,7 @@ pub(crate) struct Prepared {
     host: Arc<Host>,
     app: tauri::AppHandle,
     lib: Arc<LibMpv>,
+    guest: Arc<Guest>,
     window: WindowHandles,
     rect: Rect,
     session_id: String,
@@ -318,6 +335,7 @@ impl Prepared {
             host,
             app,
             lib,
+            guest,
             window,
             rect,
             session_id,
@@ -356,6 +374,7 @@ impl Prepared {
         } = plan;
         let started = Session::start(Start {
             lib,
+            guest,
             session_id,
             window,
             rect,
