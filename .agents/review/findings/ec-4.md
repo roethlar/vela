@@ -56,3 +56,28 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "Includes inside user profiles override the protected option tail". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-13 09:17 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d425-a4f4-7510-88a7-a37547400fe0`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:03 UTC, finished 09:13 UTC.
+- Reviewed head `85b38ff70741727f467233cb8b9d7abf9b59b9d2`, base
+  `e66a928eda55b107743487560d35468b395f5a2a` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/player/embedded/options.rs:134 — User content remains reachable through Vela's own profile option. Enable own configuration, define [gpu-hq] with include=/path/idle-yes.conf containing idle=yes, and leave Advanced options empty. Vela's profile=gpu-hq then shares a file with idle=once. Through the actual build_launch → steps → configure path and shipped libmpv 0.42, I measured idle=yes while vo and IPC verification passed, preserving ec-4's predicted EOF/bookkeeping failure. Isolate profile applications regardless of argument origin and guard this case.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. The comment is correct, and it shows the repair drew its line in
+the wrong place. The rule "every line of the user's is a step of its own"
+assumed that only the user's lines can bring in the user's content. Vela's
+own `profile=gpu-hq` can too: a profile of that name in the user's own
+`mpv.conf` is the same profile to mpv, and Vela's line selecting it sits in
+one file with Vela's protected options. No rule about whose line it is can
+be right; the repair makes every option a step of its own.

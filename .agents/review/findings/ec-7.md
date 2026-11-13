@@ -1,7 +1,7 @@
 # ec-7: a stream-auth file whose removal fails once is never removed
 
 **Severity**: MEDIUM — a file holding the stream's credentials stays on disk after the play, in Vela's private runtime directory. It needs the removal to fail at the one moment it is tried.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `9026b4f`
 
@@ -55,3 +55,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "Failed auth-file deletion loses its cleanup owner". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-13 09:17 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d41f-fca2-70f3-985e-6d75a48da74d`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 08:57 UTC, finished 09:03 UTC.
+- Reviewed head `9026b4f79b79bd956c4fc0bdbae120781b9309f8`, base
+  `867a694837b09f5ffcbc708bc8acd916b65752a8` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
