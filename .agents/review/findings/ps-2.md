@@ -213,3 +213,31 @@ worktree, each injection restored with `git checkout` from the commit;
 | That, and the outer test checks only the exit status | pass | passes: this is why the count is checked |
 | The check not run alone, with the first mutation in place | n/a | 10 runs: caught in 7, missed in 3. The race item 4 removes |
 | Unchanged | PASS | PASS, 3 runs of 3 (33 tests) |
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 06:59 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session; the
+  host's codex config already resolves to the strongest pair it has
+  (gpt-6-astra @ max), so the reopen's one-tier escalation is at its
+  ceiling. Thread `01a1d3a8-fa13-7262-baf2-d627d30ce356`, run in the
+  disposable worktree `~/dev/vela-probe-wt` at the head SHA; the stream
+  ends in `turn.completed`; dispatched 06:47 UTC, finished 06:54 UTC. The
+  packet was the finding record, round 1's two comments verbatim, the
+  repair diff for the two declared files and the verification commands.
+- Reviewed head `2c50ae5383dd956104db96d3f1d3945306e2bc40`, base
+  `94d067ed1344f1dd840f9354d177ac5204fbfc13` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comment, verbatim:
+  - tests/config-integrity.test.mjs:42 — Checking only first-column lines still misses indented production code. Moving external.rs production items after its test module with four-space indentation leaves valid Rust, makes shippedCode return an empty production section, and passes all 11 JavaScript checks and 33 Rust tests. Reject empty production sections and detect or scan trailing production code regardless of indentation.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. Round 1's first comment (the environment) drew no further
+comment. The remaining one is correct, and it is the coder's own error:
+commit `b84baeb` removed the "shipped part must not be empty" check on the
+argument that no layout could reach it. Indenting the code that follows
+the test module reaches it. The reviewer had asked for that check in
+round 1.
