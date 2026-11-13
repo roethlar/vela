@@ -95,3 +95,36 @@ SHAs equal the pins, both booleans literally true. A valid `reopened`: not
 accepted. The comment is correct: the fix stands, and the test that guards
 it recognises an early return only when `?` is followed by `;`, a line end
 or `.`.
+
+### Repair (round 2)
+
+The fix is unchanged. The test now lists every line between the
+installation and the cleanup arm that can leave early, however it is
+written: the `?` operator wherever it stands, a `return`, `.unwrap()`,
+`.expect(`, and the panicking macros. String and character literals are
+emptied first, so a `?` in a message is not counted. The list must be
+exactly two lines: the known older settings read, and a `return;` inside
+the end-of-play callback, which leaves that callback on the tracker's
+thread and cannot leave this function.
+
+File: `tests/player-selection.test.mjs` only.
+
+Guard proof, run 2026-11-13 against `4459b40` with the repaired test, in a
+disposable worktree; each line injected after the session is installed and
+restored with `git checkout`:
+
+| Injection | Result |
+| --- | --- |
+| The reviewer's: `drop(x?,);` | FAIL |
+| `?` inside a call's arguments | FAIL |
+| `?.` before a field | FAIL |
+| `?` at a line end | FAIL |
+| `.unwrap()` | FAIL |
+| `.expect(..)` | FAIL |
+| `panic!` | FAIL |
+| `unreachable!` | FAIL |
+| `return Err(..)` | FAIL |
+| The original defect: the player-setting read back after the installation | FAIL |
+| A question mark inside a string only | PASS, rightly: it is not code |
+| A `'?'` character literal only | PASS, rightly |
+| Unchanged | PASS |

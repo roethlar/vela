@@ -57,18 +57,29 @@ test('once a play has installed its session, only the launch-failure path ends i
   const undone = body.indexOf('let stop = match played {');
   assert.notEqual(installed, -1, 'the play must still install its session');
   assert.ok(undone > installed, 'and must still end in the launch-failure arm');
-  const stretch = body
+  // Every line in that stretch that can leave early, however it is written:
+  // the `?` operator wherever it stands (`x?;`, `x?,`, `x?.y`, `f(x?)`), a
+  // `return`, and the calls and macros that panic. Literals are emptied first
+  // so that a `?` in a message is not one. The first version of this test
+  // looked for `?` only before `;`, a line end or `.`, and `drop(x?,)` got
+  // past it (review finding sel-1, round 1).
+  const codeOf = (line) =>
+    line.replace(/"(?:[^"\\]|\\.)*"/g, '""').replace(/'(?:[^'\\]|\\.)'/g, "''");
+  const leaves = /\?|\breturn\b|\.unwrap\(\)|\.expect\(|\b(panic|unreachable|todo|unimplemented)!/;
+  const leaving = body
     .slice(installed, undone)
     .split('\n')
-    .filter((line) => !/^\s*\/\//.test(line));
-  const earlyReturns = stretch
-    .filter((line) => /\?\s*(;|$)|\)\?\./.test(line) || /^ {4}(return\b|.*\breturn (Err|Ok)\()/.test(line))
-    .map((line) => line.trim());
-  assert.deepEqual(earlyReturns, [
+    .filter((line) => !/^\s*\/\//.test(line) && leaves.test(codeOf(line)));
+  assert.deepEqual(leaving, [
     // Known, older than the embedded player and recorded for the owner in
     // .agents/state.md (Blockers): the settings read for Vela's own resume
-    // position. Nothing may be added to this list.
-    '.map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?;',
+    // position.
+    '            .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?;',
+    // Inside the end-of-play callback. It leaves that callback, later and on
+    // the tracker's thread; it cannot leave this function.
+    '                return;',
+    // Nothing may be added to this list. A step that can fail belongs before
+    // the installation, or its failure belongs in the launch-failure arm.
   ]);
   // The player setting is read before anything is resolved or installed.
   const read = body.indexOf('let wanted_player = match player {');
