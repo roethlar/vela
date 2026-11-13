@@ -3,9 +3,9 @@
 **Severity**: MEDIUM — a set missing every licence text passes the check
 that is documented as covering every file; shipping the texts is a
 licensing requirement.
-**Status**: Reopened (round 1); repair in progress
+**Status**: Verified (after one reopen)
 **Branch**: —
-**Commit**: `7ca7e75`
+**Commit**: `7ca7e75`, repaired at `9cb85ea`
 
 ## Evidence
 
@@ -136,3 +136,35 @@ of the set, licence texts included" (only the patch left; a licence line
 naming no listed file; the licences directory symlinked away; a library
 symlinked away) and three static assertions on the build's role lines in
 "the shipped libmpv set is an LGPL build with its licence texts".
+
+### Verification pass, round 2
+
+Recorded 2026-11-13 05:55 UTC (this record is committed). A repair-delta
+redispatch: the reviewer was given the finding, round 1's two comments,
+the repair commit's diff and the guard, and asked to judge only those.
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Routing note: a reopen escalates one tier. codex is called plainly on
+  this machine and has one configuration (gpt-6-astra @ max per the
+  host's codex config), which is already the highest effort it offers, so
+  there is no stronger pair to escalate to. The redispatch was a fresh
+  session of the same configuration, as the ceiling rule prescribes.
+- Harness: codex-cli 0.167.2. Thread
+  `01a1d373-6b5a-7373-9412-e389234b7ee3`, in the disposable worktree at
+  the head SHA with the regenerated set available read-only; ends in
+  `turn.completed`; 13 tool calls; finished 05:52 UTC.
+- Reviewed head `9cb85eaf031c589c0b69b634133cd25a6abe7af5`, base
+  `7ca7e75745655af38eafbb02b36f16eed74cce48` (both equal the pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted; the finding is
+closed.
+
+Red-proofs of the repair, run 2026-11-13 from the committed state, each
+failing its test: any file under a component's licence directory counted
+as its licence (the rule round 1 broke); licence lines not required to be
+listed files; symbolic links not reported; files behind a link accepted;
+the build writing no licence lines.

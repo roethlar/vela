@@ -868,6 +868,109 @@ other than KWin 6.8 and headless weston, aarch64, audio output (probes ran
 with audio off except the container decode test, which used a null
 output), and anything about picture quality.
 
+### 2026-11-13 — Slice 0b (the library build): landed and reviewed
+
+What landed: `scripts/build-libmpv.sh`, the recipe in `packaging/libmpv/`
+(pins, container file, the mpv build-file patch, the check and its
+fixtures), a `libmpv` job in CI, policy tests in
+`tests/dependency-policy.test.mjs`, and a section in
+`docs/development.md`. Nothing in the app loads the set yet.
+
+Commits: `b19d7d1` (the slice); `1e2b953` (stop at a failed download, add
+mirrors; see below); review fixes `29026c2`, `7ca7e75`, `9cb85ea`,
+`ec97d6e`.
+
+Verified:
+
+- The set builds from the repo's own script in the Ubuntu 22.04
+  container on `continuum`; the check passes on the host and in clean
+  Ubuntu 22.04, Debian 12 and Fedora 45 images.
+- GitHub CI: the new job is green from `1e2b953` on (run 43371234580 and
+  every later run through `3e91c63`). That includes the decode check with
+  exact frame checksums, so the decoded video is bit-identical on GitHub's
+  CPUs and on this machine.
+- `npm run check` at each commit; the count grew from 102 to 108.
+- Red-proofs, each from a committed state: 17 mutations against the
+  first set of policy tests, 7 against the download path, 23 against the
+  three review fixes. Every one failed its test for the intended reason.
+
+What the first CI run found (run 43369746914 failed): `www.lua.org` reset
+the connection, and the script did not stop at the failed download,
+because bash does not carry `set -e` into `$(...)`. Fixed at `1e2b953`:
+`inherit_errexit`, and a component may list mirror URLs; a download is
+kept only if it matches its pinned checksum.
+
+Review: `codereview codex` over `5f1d9b6..b19d7d1`, three findings, all
+admitted (`.agents/review/codereview-2026-11-13-libmpv-set.md`).
+
+| | Finding | State |
+| --- | --- | --- |
+| lm-1 | the decode check passed when a decoder produced nothing | fixed `ec97d6e`; codex accepted |
+| lm-2 | licence texts were outside the integrity check | fixed `7ca7e75`; codex reopened it once (two correct points); repaired `9cb85ea`; codex accepted |
+| lm-3 | the pin test could not tell rejection from failed extraction | fixed `1e2b953` + `29026c2`; codex accepted |
+
+Not done, and known:
+
+- No automated check compares the pinned versions with a vulnerability
+  database. The rule and the manual step are in `docs/development.md`.
+- x86_64 only. No aarch64 build.
+- The release workflow does not consume the set yet; that arrives with
+  packaging in Slice 3.
+- NVIDIA's decoder headers are not in the build (the embedded player is
+  not offered on that driver yet).
+
+### 2026-11-13 — Slice 1 (the seam): landed, no behaviour change
+
+Commits: `38cb850` (the external command line recorded on the old code),
+`3e91c63` (the refactor), `b719a65` (the marker script takes its payload
+path as a script option).
+
+What landed:
+
+- `src-tauri/src/player/`: `launch.rs` (`build_launch`, `LaunchPlan`,
+  the private runtime directory, the auth include, the marker payload),
+  `external.rs` (mpv discovery, `command`, `launch`, `ManagedChild`),
+  `mod.rs` (`PlayerHandle`). `playback.rs` keeps supervision: `play`
+  and the trackers.
+- `AppState`, the reaper and the exit sweep hold `PlayerHandle`.
+- A launch's options are data (`LaunchArg`): Vela's own as name and
+  value, the user's Advanced lines verbatim. The external player renders
+  them; nothing else touches them.
+- `vela-markers.lua` reads the payload path from the script option
+  `vela-markers-payload` first and from the environment second. The
+  external player still uses the environment.
+
+Differences from the plan's text, both deliberate:
+
+- `PlayerKind` and `PlayerHandle::Embedded` are not introduced yet. They
+  arrive with the first code that uses them (Slices 2 and 3); adding them
+  now would be dead code that the lint cannot see through.
+- The golden test needed the command to be inspectable on the old code,
+  so `38cb850` first moved the composing statements, unchanged, into a
+  function of their own. The recording was made against that.
+
+Verified:
+
+- Both recorded command lines (every argument in order, and the child
+  environment; one with every optional part, one with none) are
+  byte-identical before and after the refactor.
+- `cargo +stable` and `+1.100.0` clippy with `-D warnings`;
+  `cargo +stable test` 369 pass; `npm run check` 108 pass;
+  `npm run build`.
+- Full E2E from a disposable worktree at `3e91c63`: 39 of 39.
+- GitHub CI run 43373621967 at `3e91c63`: every job green, including the
+  Rust 1.89 check and `cargo audit`.
+- The new `markerpayload` E2E scenario (real script, real mpv, five
+  cases) passes, and with the app rebuilt at `b719a65` so do `markers`,
+  `autocrop`, `playback` and `continueon`.
+- Red-proofs: 14 mutations of the seam (order, dropped option, dropped
+  environment, dropped `--`, wrong rendering, the handle's end and
+  retention rules) and 3 of the script each fail their test.
+
+Unit tests moved with the code and were not edited: where a function now
+returns options as data, a test-only wrapper of the same name renders
+them to the command-line text the assertions were written against.
+
 ### For the owner (decisions the agent assumed while you were away)
 
 Each can be overturned; none has shipped to users.

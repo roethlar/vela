@@ -15,8 +15,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   "Implementation log"; read it before doing anything. As of 2026-11-12:
   Slice 0 (probes) is done and changed the design in four places (the
   log's "For the owner" lists them); Slice 0b (the library build in the
-  repo) landed at `b19d7d1` and its review is open; Slice 1 (the launch
-  seam) has started. Active review loop: see `.agents/review/index.md`.
+  repo) landed at `b19d7d1`, was reviewed by codex and its three findings
+  are fixed and verified; Slice 1 (the launch seam) landed at `b719a65`
+  with no behaviour change (full E2E 39/39) and its codex review is
+  running; Slice 2 (selection and fallback) is next. Active review loop:
+  see `.agents/review/index.md`.
   Next in the queue after this plan:
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved.
   Rules the owner set for this run (decision `.agents/decisions.md`
