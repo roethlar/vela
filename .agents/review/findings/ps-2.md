@@ -295,3 +295,37 @@ include until its exact child is reaped":
 | All of `external.rs`'s code moved after its test module and indented, nothing added | PASS, and rightly: the code is read where it now stands and leaks nothing |
 | That, with a reader of the headers among the moved code | FAIL |
 | Unchanged | PASS |
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-13 07:33 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d3cb-f5e2-7932-9e6f-1c433cb3bc77`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 07:25 UTC, finished 07:30 UTC. The packet
+  was the finding record, round 2's comment verbatim, the repair diff for
+  the one declared file and the verification command.
+- Reviewed head `e1ff242aa6ed8620e46f93c4711e9d116b9c315c`, base
+  `2c50ae5383dd956104db96d3f1d3945306e2bc40` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comment, verbatim:
+  - tests/config-integrity.test.mjs:64 — Raw-string recognition misses raw C strings and valid raw strings with 63 hash delimiters. Adding `const _: &std::ffi::CStr = cr#""{""#;` inside external.rs's test module and a trailing production function containing `cr#""}""#` and `spec.http_headers.len()` makes matchingBrace consume that function. shippedCode consequently hides the header read while all 13 checks pass. The same bypass works with 63-hash raw strings; both Rust reproductions compiled and ran. Handle these literals correctly or fail closed, and add regression cases.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. Round 2's comment (indented code after the module) drew no
+further comment; this one is a new hole in the reader that round 3 added,
+and it is correct.
+
+This is the third reopen. Each round closed what the round before named,
+so the loop is moving, but each has also found the next gap in the same
+place: a check that reads Rust source as text. The next repair therefore
+closes the class the comment belongs to (literal prefixes), not the two
+instances, and makes the reader refuse what it does not know instead of
+guessing. **If that is reopened too, the finding goes to the owner as
+contested instead of into a fifth round**: it is LOW, the shipped code has
+been correct throughout, and at that point the open question is how far a
+source-text guard is worth hardening, which is the owner's to answer.
