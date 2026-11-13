@@ -28,7 +28,7 @@ candidates, nine admitted, none declined. Record:
 | ec-6 | MEDIUM   | An embedded start that fails after the checks passed fails the play instead of falling back | `[ ]`  |        | codex/default/standard |
 | ec-7 | MEDIUM   | A stream-auth file whose removal fails once is never removed           | `[~]`  | `9026b4f` | codex/default/standard |
 | ec-8 | LOW      | A failed embedded start leaves the marker payload file behind          | `[~]`  | `e66a928` | codex/default/standard |
-| ec-9 | LOW      | Every embedded play adds a registry the compositor keeps for the life of Vela | `[ ]`  |        | codex/default/standard |
+| ec-9 | LOW      | Every embedded play adds a registry the compositor keeps for the life of Vela | `[~]`  | `2f65c44` | codex/default/standard |
 
 **Embedded player Slice 2 review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
