@@ -1,9 +1,9 @@
 # ec-5: Close can stop the play that replaced the one it was for
 
 **Severity**: MEDIUM — a play the user just started is stopped by a Close that belonged to the play before it. It needs a Close and a replacement play within the same instant.
-**Status**: Open
+**Status**: In progress
 **Branch**: —
-**Commit**: —
+**Commit**: `2a04402`
 
 ## Evidence
 
@@ -17,15 +17,45 @@ Reviewer's suggested direction, verbatim: "Serialize the session check and stop 
 
 ## What
 
+`player_close` decided in two steps under two locks: it compared the command's session with `active_playback_session`, released that lock, then locked the player slot and stopped whatever embedded player was in it. A replacement play installed between the two steps, with its own session and its own player, was stopped by a Close that had been checked against the play before it.
+
 ## Approach
+
+The identity that matters is the player's, so the player carries it. `embedded::Session` now holds the session id it was started for (`Start::session_id`, from `Prepared`) and answers `is_play`. `PlayerHandle::close_embedded_play` stops the player only when it is the embedded play of that session, and never an external player. `player_close` locks the slot and calls that; it reads nothing else, so there is no check in one place and act in another. The active-session comparison is gone rather than kept beside it: a second, weaker condition would only invite the same split again.
 
 ## Files changed
 
+- `src-tauri/src/commands.rs` — `player_close`.
+- `src-tauri/src/player/mod.rs` — `PlayerHandle::close_embedded_play`; two tests.
+- `src-tauri/src/player/embedded/session.rs` — `Session::session_id`, `is_play`, `Shared::new`, and test-only `for_test`, `stop_requested`.
+- `src-tauri/src/player/embedded/host.rs` — passes the session id to the play.
+- `tests/player-view.test.mjs` — the command's exact body, and the wiring of the id.
+
 ## Guard proof
+
+Run 2026-11-13 at `867a694` (the fix is `2a04402`) in a disposable worktree; `cargo +stable test --locked --lib player::tests` and `node --test tests/player-view.test.mjs`.
+
+| Injection | Rust | Node |
+| --- | --- | --- |
+| The original defect: the active session is checked, then whatever player is current is stopped | (not run) | FAIL `Close asks the player itself whose play it is, under the player's own lock` |
+| Any Close stops the embedded play in the slot | FAIL `a_close_stops_the_embedded_play_it_names_and_no_other` | FAIL |
+| A Close stops an external player | FAIL `a_close_never_stops_an_external_player` | FAIL |
+| Every play answers to every session | FAIL `a_close_stops_the_embedded_play_it_names_and_no_other` | FAIL |
+| A play answers to a session id that only begins like its own | FAIL, same test | FAIL |
+| A play is started without its session id | | FAIL |
+| The named play is found and not stopped | FAIL, same test | FAIL |
+| A Close that is not for this play stops it anyway, in the command | | FAIL |
+| The session forgets whose play it is when it starts | | FAIL |
+| Unchanged | PASS | PASS |
+
+Also run: the `embeddedplay` E2E scenario under the headless compositor, which closes a play from the page and waits for the player to stop: PASS.
 
 ## Coder dispute (if any)
 
 ## Known gaps
+
+- That the id reaches the play from `Prepared` through `Start` into `Session` is held by source text, not by a running play: a play cannot be started in a unit test.
+- The frontend's side (a view only ever sends its own session's id) was already covered and is unchanged.
 
 ## Reviewer comments
 
