@@ -20,21 +20,28 @@
 //!   is therefore never written into the text; it becomes a step of its own
 //!   ([`Step::Include`]) so the order of the list is the order mpv applies.
 //! - An option can bring in an include without being one: `profile=NAME`,
-//!   when the user's profile contains an `include`. That include, too, takes
-//!   effect after the rest of the file the profile was selected in. Measured:
-//!   with the profile and Vela's `idle=once` in one file, the user's included
-//!   `idle=yes` won; with the profile in a file of its own, applied first,
-//!   Vela's won (review finding ec-4). Which options can do this is mpv's
-//!   business and may grow, so the rule here does not name them: every line
-//!   of the user's is a step of its own. Whatever it brings in has been
-//!   applied before the next option in the list is, as on a command line.
+//!   when the profile contains an `include`. That include, too, takes effect
+//!   after the rest of the file the profile was selected in. Measured: with
+//!   a profile and Vela's `idle=once` in one file, an `idle=yes` the profile
+//!   included won; with the profile in a file of its own, applied first,
+//!   Vela's won (review finding ec-4). It does not matter whose line selects
+//!   the profile: Vela's own `profile=gpu-hq` selects the user's profile of
+//!   that name if their configuration defines one (the first repair, which
+//!   separated only the user's lines, was reopened for that). And which
+//!   options can do this is mpv's business and may grow.
+//!
+//! So there is one rule and it names no option: EVERY option is a step of
+//! its own, applied by its own call into mpv, in the order of the list.
+//! Whatever an option brings in has been applied before the next option is,
+//! as on a command line. A launch has a few dozen options; a few dozen small
+//! files, each written, read once and removed, cost nothing a play notices.
 
 use crate::player::launch::LaunchArg;
 
 /// One thing to hand to mpv, in order.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Step {
-    /// Options to apply together: the text of one configuration file.
+    /// One option, as the text of a configuration file of its own.
     Options(String),
     /// A file for mpv to include at this point.
     Include(String),
@@ -96,46 +103,28 @@ fn line(name: &str, value: Option<&str>) -> String {
     }
 }
 
-/// Turn a launch's ordered options into the ordered steps that apply them.
-///
-/// Vela's own options next to each other share a step. An include is a step
-/// of its own, and so is every line of the user's (the module's notes say
-/// why): nothing of the user's is ever in the same options file as an option
-/// of Vela's, so nothing the user's line brings in can be applied after the
-/// options Vela puts behind it.
+/// Turn a launch's ordered options into the ordered steps that apply them:
+/// one step for each option, in order, whoever's it is (the module's notes
+/// say why). An option that includes a file is that file's inclusion; a line
+/// of the user's that is not an option, or that would have mpv load
+/// configuration files by itself, is left out.
 pub(crate) fn steps(args: &[LaunchArg]) -> Vec<Step> {
-    let mut steps = Vec::new();
-    // Vela's options collected since the last step.
-    let mut ours = String::new();
-    fn flush(steps: &mut Vec<Step>, ours: &mut String) {
-        if !ours.is_empty() {
-            steps.push(Step::Options(std::mem::take(ours)));
-        }
-    }
-    for arg in args {
-        let (name, value, users) = match arg {
-            LaunchArg::Option { name, value } => (*name, value.as_deref(), false),
-            LaunchArg::User(user) => match parse_user_line(user) {
-                Some(option) if !is_config_switch(option.name) => {
-                    (option.name, option.value, true)
+    args.iter()
+        .filter_map(|arg| {
+            let (name, value) = match arg {
+                LaunchArg::Option { name, value } => (*name, value.as_deref()),
+                LaunchArg::User(user) => {
+                    let option =
+                        parse_user_line(user).filter(|option| !is_config_switch(option.name))?;
+                    (option.name, option.value)
                 }
-                _ => continue,
-            },
-        };
-        match (name, value) {
-            ("include", Some(path)) => {
-                flush(&mut steps, &mut ours);
-                steps.push(Step::Include(path.to_string()));
-            }
-            _ if users => {
-                flush(&mut steps, &mut ours);
-                steps.push(Step::Options(line(name, value)));
-            }
-            _ => ours.push_str(&line(name, value)),
-        }
-    }
-    flush(&mut steps, &mut ours);
-    steps
+            };
+            Some(match (name, value) {
+                ("include", Some(path)) => Step::Include(path.to_string()),
+                _ => Step::Options(line(name, value)),
+            })
+        })
+        .collect()
 }
 
 /// The user's own mpv configuration files, in the order mpv reads them: the
@@ -246,89 +235,90 @@ mod tests {
         assert_eq!(
             steps(&args),
             [
-                Step::Options("no-ytdl\nhwdec=%4%auto\n".to_string()),
+                Step::Options("no-ytdl\n".to_string()),
+                Step::Options("hwdec=%4%auto\n".to_string()),
                 Step::Options("volume=%2%70\n".to_string()),
                 Step::Include("/home/u/extra.conf".to_string()),
                 Step::Options("vo=%8%gpu-next\n".to_string()),
-                Step::Options("idle=%4%once\nvo=%6%libmpv\n".to_string()),
+                Step::Options("idle=%4%once\n".to_string()),
+                Step::Options("vo=%6%libmpv\n".to_string()),
                 Step::Include("/tmp/vela-x/mpv-headers-1-n.conf".to_string()),
                 Step::Options("start=%5%123.5\n".to_string()),
             ]
         );
     }
 
-    // A profile of the user's may contain an include, and mpv applies that
-    // include after the rest of the options file the profile was selected in
-    // (measured; review finding ec-4). So no line of the user's shares a file
-    // with anything, least of all with the options Vela puts after it.
+    // A profile may contain an include, and mpv applies that include after
+    // the rest of the options file the profile was selected in (measured;
+    // review finding ec-4). The profile may be the user's even when the line
+    // selecting it is Vela's: `gpu-hq` is whatever the user's configuration
+    // says it is. So no option shares a file with the one after it.
     #[test]
-    fn a_line_of_the_users_is_a_step_of_its_own() {
-        let args = [
+    fn a_profile_is_never_in_one_file_with_the_options_after_it() {
+        // Vela's own profile line, straight before Vela's protected options,
+        // with nothing of the user's in the list at all.
+        let velas = [
             flag("no-ytdl"),
-            option("osc", "no"),
-            user("--profile=example"),
-            user("--volume=50"),
-            user("--fs"),
+            option("profile", "gpu-hq"),
+            option("hwdec", "auto"),
             option("idle", "once"),
             option("vo", "libmpv"),
         ];
         assert_eq!(
-            steps(&args),
+            steps(&velas),
             [
-                Step::Options("no-ytdl\nosc=%2%no\n".to_string()),
+                Step::Options("no-ytdl\n".to_string()),
+                Step::Options("profile=%6%gpu-hq\n".to_string()),
+                Step::Options("hwdec=%4%auto\n".to_string()),
+                Step::Options("idle=%4%once\n".to_string()),
+                Step::Options("vo=%6%libmpv\n".to_string()),
+            ]
+        );
+        // And the user's.
+        let users = [user("--profile=example"), user("--volume=50"), option("idle", "once")];
+        assert_eq!(
+            steps(&users),
+            [
                 Step::Options("profile=%7%example\n".to_string()),
                 Step::Options("volume=%2%50\n".to_string()),
-                Step::Options("fs\n".to_string()),
-                Step::Options("idle=%4%once\nvo=%6%libmpv\n".to_string()),
+                Step::Options("idle=%4%once\n".to_string()),
             ]
         );
     }
 
     #[test]
-    fn no_step_holds_an_option_of_the_users_together_with_one_of_velas() {
-        // Whatever the user writes and wherever it stands in the list.
-        let velas = ["no-ytdl", "idle", "vo", "osc", "input-ipc-server"];
-        let users = ["--profile=x", "--volume=1", "--fs", "-sub-font=A B", "--idle=yes"];
-        for first_user in 0..=velas.len() {
-            let mut args: Vec<LaunchArg> = Vec::new();
-            for (at, name) in velas.iter().enumerate() {
-                if at == first_user {
-                    args.extend(users.iter().map(|text| user(text)));
-                }
-                args.push(option(name, "v"));
-            }
-            if first_user == velas.len() {
-                args.extend(users.iter().map(|text| user(text)));
-            }
+    fn no_step_holds_more_than_one_option_and_none_is_lost_or_moved() {
+        // Whatever is in the list and in whatever order.
+        let pool = [
+            flag("no-ytdl"),
+            option("profile", "gpu-hq"),
+            option("idle", "once"),
+            option("vo", "libmpv"),
+            option("input-ipc-server", "/tmp/s.sock"),
+            user("--profile=x"),
+            user("--volume=1"),
+            user("--fs"),
+            user("-sub-font=A B"),
+            user("--idle=yes"),
+        ];
+        for rotate in 0..pool.len() {
+            let mut args = pool.to_vec();
+            args.rotate_left(rotate);
             let produced = steps(&args);
-            let mut seen_users = 0;
-            for step in &produced {
+            assert_eq!(produced.len(), args.len(), "one step for each option");
+            for (step, arg) in produced.iter().zip(&args) {
                 let Step::Options(text) = step else {
                     panic!("no include in this list");
                 };
-                let lines: Vec<&str> = text.lines().collect();
-                let of_velas = |line: &&str| velas.iter().any(|name| line.starts_with(&format!("{name}=%1%v")));
-                if lines.iter().all(of_velas) {
-                    continue;
-                }
-                assert_eq!(lines.len(), 1, "a step with a line of the user's has only that line: {text:?}");
-                seen_users += 1;
-            }
-            assert_eq!(seen_users, users.len(), "every line of the user's is applied");
-            // And the order of the list is the order of the steps.
-            let flat: String = produced
-                .iter()
-                .map(|step| match step {
-                    Step::Options(text) => text.as_str(),
-                    Step::Include(_) => "",
-                })
-                .collect();
-            let position = |needle: &str| flat.find(needle).expect(needle);
-            if first_user < velas.len() {
-                assert!(position("profile=%1%x") < position(&format!("{}=%1%v", velas[first_user])));
-            }
-            if first_user > 0 {
-                assert!(position(&format!("{}=%1%v", velas[first_user - 1])) < position("profile=%1%x"));
+                assert_eq!(text.lines().count(), 1, "one option: {text:?}");
+                let name = match arg {
+                    LaunchArg::Option { name, .. } => name.to_string(),
+                    LaunchArg::User(user) => parse_user_line(user).unwrap().name.to_string(),
+                };
+                assert!(
+                    text.trim_end() == name || text.starts_with(&format!("{name}=%")),
+                    "in the list's order: {text:?} for {name}"
+                );
             }
         }
     }
