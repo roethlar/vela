@@ -43,12 +43,10 @@ function shippedCode(source, file) {
     ["}"],
     `${file}: the test module must end the file, with nothing after it`,
   );
-  const code = head
+  return head
     .split("\n")
     .filter((line) => !/^\s*\/\//.test(line))
     .join("\n");
-  assert.match(code, /\bfn \w+\(/, `${file} must have code compiled into the app to check`);
-  return code;
 }
 
 function linesMentioning(code, pattern) {

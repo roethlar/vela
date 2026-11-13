@@ -172,8 +172,7 @@ What changed:
    test module and assumed the module was last. It now requires that: after
    `mod tests {`, the only line starting in the first column is the closing
    brace. Code after the tests, or tests moved above the code, fail the
-   test instead of going unread. It also requires the part before the tests
-   to contain code.
+   test instead of going unread.
 3. Two further source checks, not asked for, in the same test: no code that
    describes or starts a launch calls `set_var` or `remove_var`; and inside
    `player/launch.rs` every line that names the header list, the text it is
