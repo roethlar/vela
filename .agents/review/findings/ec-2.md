@@ -71,3 +71,36 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `053cb36..0a63799` with `a02db80`, 2026-11-13 08:09
 UTC (`.agents/review/codereview-2026-11-13-embedded-core.md`). Reviewer's
 title: "Timeout cleanup detaches a worker that still owns player resources". Reviewer's severity: HIGH.
+
+### Verification round 1, recorded 2026-11-13 17:46 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d447-6996-7883-aeb2-4ff51f7b0b38`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:40 UTC, finished 09:48 UTC.
+- Reviewed head `d7d850abc7866ab5af3f42f0fa62ea2c2def858b`, base
+  `f237b2984235428c5823374ae5658a9dbb173b00` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/player/embedded/session.rs:645 — The second receive can time out after claim_started() succeeds but before ready.send(). The caller then reports failure while the race remains STARTED, allowing the worker to resume and emit Opened. A deterministic probe of this branch with shortened deadlines reproduced that sequence. An already-won start must return success, or publication must be atomically cancelled.
+  - src-tauri/src/player/embedded/session.rs:208 — shared.ended is set before the thread drops Start, including MarkerPayload's filesystem cleanup. Treating it as thread completion permits an unbounded join in availability checks and the supposedly bounded exit wait. Concurrent queries also see zero after the entry is removed. A delayed-destructor probe made wait(5ms) block over 100ms and return success while another query reported zero. Check actual JoinHandle completion before removing and joining workers.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. A valid `reopened`: not
+accepted. Both comments are correct.
+
+The first: when the caller's wait runs out and the play has already won
+the start, the fix waited a second time for the play's word, and reported
+failure if that did not come in time, with the start still settled as
+"started". That is the original defect again in a narrower window. Once
+the play has won, the caller knows everything it needs: the play started.
+
+The second: "has this thread ended" was answered from a flag the thread
+sets as its last statement, which is before it has let go of what it
+holds (dropping its start request removes files). Joining a thread on the
+strength of that flag can wait, in a check that is meant not to; and
+another caller asking in the meantime is told there is nothing left. The
+thread itself knows when it has finished; the repair asks it.

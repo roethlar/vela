@@ -1,7 +1,7 @@
 # ec-9: every embedded play adds a registry the compositor keeps for the life of Vela
 
 **Severity**: LOW — memory in the compositor grows by a small amount with every embedded play and is only given back when Vela exits.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `2f65c44`, `2e3ad7e`
 
@@ -145,3 +145,21 @@ Not proven by a test in the repo: the stall itself. The reviewer showed it
 with a headless probe; the repo's guard is that a play has its own
 connection object, held by source text.
 
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 17:46 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d453-b133-75c2-b85a-1fcc9a2f20ef`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:53 UTC, finished 09:59 UTC.
+- Reviewed head `2e3ad7eacbc43e2e20157da28f8a7084c473a590`, base
+  `f80bf0c6430d3e75f37f045ee6db6d2ff5a677f8` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

@@ -1,7 +1,7 @@
 # ec-4: an include inside a profile the user selects is applied after Vela's protected options
 
 **Severity**: MEDIUM — the user's file can then set `idle`, after which mpv never ends at the end of a file and the play's final bookkeeping and Continue Playing never run. It needs own-configuration mode, a profile containing an include, and that profile selected in the Advanced options.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `85b38ff`, `f80bf0c`, `1b7b6b4`
 
@@ -112,3 +112,21 @@ options, the first repair's code passed it. The reviewer's case has nothing
 in the Advanced options. `1b7b6b4` adds that case as its own scenario, and
 the table above is from after it.
 
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-13 17:46 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d44e-9ab2-78f2-aa0d-e2427f2a4986`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:48 UTC, finished 09:53 UTC.
+- Reviewed head `1b7b6b42721ab6d785b1b32848ab3d21121e7c61`, base
+  `31eacad98f252a1bec7ca26df5e4a5e7cef668f7` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
