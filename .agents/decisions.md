@@ -1941,3 +1941,35 @@ owner's visual check is still open. Record:
 `.agents/plans/embedded-libmpv-hdr-spike.md`, Log. The status above is
 unchanged: external mpv stays the shipped player and no product code is
 authorized until an embedded-player plan is approved.
+
+## 2026-11-12 - Vela keeps both players: embedded libmpv is added, external mpv stays
+
+Status: OWNER RULING (2026-11-12). Plan drafted at
+`.agents/plans/embedded-player.md`; no code is authorized until that plan
+is approved.
+
+Decision:
+The HDR spike (`.agents/plans/embedded-libmpv-hdr-spike.md`) showed that
+embedding works on KDE Wayland but draws with mpv's older renderer, which
+clips more highlight on bright scenes; the owner judged "the external looks
+slightly better on this display". No mpv release or development branch
+offers the newer renderer for embedding. Asked whether both players could
+be kept, and told the cost is that every playback feature must work in
+both, the owner ruled: "well we need to build all of that for the embedded
+player anyway, and embedded is the only option for ios, so we're not losing
+anything by keeping both except for future feature parity. plan for both
+options".
+
+So the embedded player is built next to the external one, and the external
+player is not removed. The owner accepts that future features must be kept
+at parity across the two.
+
+Agent's reading (not the owner's words):
+- "Both" means two selectable players in the same app, not two builds.
+- Which player each platform uses by default, and whether the user can
+  switch, are open owner decisions carried in the plan.
+
+Refines:
+2026-11-12 "Embedded playback through libmpv is the direction". Its
+fallback (embedded elsewhere, external kept on Linux) is now one case of a
+general rule rather than a retreat.

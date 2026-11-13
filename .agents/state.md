@@ -271,9 +271,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   and peak detection moves both. On real clips dark scenes match and
   bright scenes clip more highlight embedded; the owner: "the external
   looks slightly better on this display." Clicks
-  on HTML drawn over the video reach the page. Next is the owner's ruling on whether to plan the
-  embedded player; external mpv stays the shipped player until such a plan
-  is approved.
+  on HTML drawn over the video reach the page. External mpv stays the shipped player until the plan in the next
+  bullet is approved.
+- Owner ruling 2026-11-12: keep both players; the embedded libmpv player
+  is added next to external mpv (`.agents/decisions.md`). Plan drafted,
+  NOT approved: `.agents/plans/embedded-player.md`. It reuses the existing
+  IPC-based trackers through one launch description and two launchers, and
+  starts with probes. Open owner decisions D1-D6 (default player per
+  platform first) are asked one at a time.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the
