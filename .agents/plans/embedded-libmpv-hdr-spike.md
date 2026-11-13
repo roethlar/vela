@@ -378,11 +378,27 @@ external player had. Screenshot values (R,G,B of 255) per grey patch:
   101/84, 203 nits 134/112, 265 nits 149/125, 400 nits 174/147, 600 nits
   200/168, 1000 nits 232/192. Both neutral. The embedded values equal the
   uncropped ones; external mpv came out darker than uncropped (63 against
-  77 at 50 nits). Assumption, not verified: external mpv's peak detection
-  re-balanced the picture for the cropped frame. If so, a static pattern
-  cannot give one fixed answer while peak detection is on; a real film
-  scene is the meaningful test. The owner's view of this round is not yet
-  recorded.
+  77 at 50 nits). The owner's own screenshot of this layout
+  (`~/Pictures/Screenshots/Screenshot_20261112_220409.png`) shows the same:
+  "this is sdr, but it shows what I mean about the color differences."
+- Follow-up measurement, same cropped picture, screenshot grey level at
+  50 / 203 / 600 / 1000 nits:
+
+  | | peak detection on | peak detection off |
+  | --- | --- | --- |
+  | external mpv | 64 / 114 / 170 / 194 | 111 / 171 / 225 / 254 |
+  | embedded | 75 / 135 / 201 / 230 | 127 / 211 / 254 / 255 |
+
+  So peak detection moves both players a great deal, cropping changed what
+  external mpv's detection settled on, and **the embedded picture is
+  brighter than external mpv across the whole range in every configuration
+  but one.** The earlier "match up to about 265 nits" (full pattern, peak
+  detection on) was a coincidence of that one frame, not a property of the
+  renderers. This corrects the first bullet of "Conditions and differences
+  found" and the "Brightness above about 265 nits" bullet above.
+- Caveat: this pattern is a stress case (a 4000-nit patch in a stream
+  declared as 1000 nits, shown on a 465-nit display). How large the
+  difference is on real films is not known.
 
 ### What a real implementation must then build
 

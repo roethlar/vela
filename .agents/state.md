@@ -266,9 +266,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   The owner confirmed by eye that it is HDR and that its greys do not
   match external mpv. Measured afterwards: a green cast in that comparison
   was the agent's missing `profile=gpu-hq`; with Vela's options the greys
-  match up to about 265 nits and are brighter above; in a second, cropped
-  layout they differed in every patch, probably external mpv's peak
-  detection (unverified). A real film scene is the test that matters. Clicks
+  are neutral but brighter than external mpv across the range in every
+  configuration measured but one; the two renderers tone-map differently
+  and peak detection moves both. The pattern is a stress case; a real film
+  scene is the test that matters. Clicks
   on HTML drawn over the video reach the page. Still open: a real film
   sample. Next is the owner's ruling on whether to plan the
   embedded player; external mpv stays the shipped player until such a plan
