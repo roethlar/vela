@@ -329,3 +329,35 @@ guessing. **If that is reopened too, the finding goes to the owner as
 contested instead of into a fifth round**: it is LOW, the shipped code has
 been correct throughout, and at that point the open question is how far a
 source-text guard is worth hardening, which is the owner's to answer.
+
+### Repair (round 4)
+
+`matchingBrace` now reads words as words. A word that runs straight into a
+quote, with or without `#` marks between, is a literal's prefix, and Rust
+has exactly five: `b` and `c` for strings with escapes, `r`, `br` and `cr`
+for raw ones, the raw ones with any number of `#`. Any other prefix is
+refused with an error instead of being read as something else: whatever
+this reader misreads, it hides from the checks that use it, so it must not
+guess. The 62-mark limit is gone; the marks are counted.
+
+Regression cases in the same file: C strings, a raw C string holding
+quotes and a lone brace, a raw string with 70 `#`, a raw identifier and
+words that only end in a prefix letter, byte characters, three unknown
+prefixes that must be refused, and for `shippedCode` the reviewer's own
+layout (a lone brace in a raw C string inside the tests, its twin and a
+header read in code after them).
+
+File: `tests/config-integrity.test.mjs` only.
+
+Guard proof, run 2026-11-13 against `17ffa01` with the repaired test, in a
+disposable worktree, each injection restored afterwards:
+
+| Injection | Result |
+| --- | --- |
+| Raw C strings not known | FAIL: "a literal with a prefix this reader does not know: cr\"" |
+| C strings not known | FAIL: the same for `c"` |
+| An unknown prefix read as a word instead of refused | FAIL: "Missing expected exception" |
+| No more than 62 `#` counted (the old limit) | FAIL: "no closing brace" |
+| The reviewer's first reproduction on `external.rs` (raw C string, lone brace, header read after the tests) | FAIL at the recorded-lines list: the code after the tests is read |
+| The reviewer's second (63 `#`) | FAIL, the same way |
+| Unchanged | PASS |

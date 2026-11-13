@@ -23,7 +23,7 @@ changes what the external player does. Record:
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
 | ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[x]`  | `4fbff87`, `1d7c405` | codex/default/standard |
-| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[~]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242` | codex/default/standard esc:T5(ceiling), reopened twice |
+| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[~]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242`, round-4 repair | codex/default/standard esc:T5(ceiling), reopened three times; a fourth goes to the owner |
 
 **Embedded player Slice 0b review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

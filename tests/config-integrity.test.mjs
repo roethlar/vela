@@ -28,10 +28,26 @@ const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
 
 // The index of the brace that closes the one at `open`. Reads Rust well enough
 // to ignore the braces that are not code: those in comments, in string
-// literals (plain, byte and raw) and in character literals.
+// literals and in character literals.
+//
+// A string literal in Rust is a quote with, optionally, a prefix written
+// directly before it: none, `b` or `c` for one with escapes, and `r`, `br` or
+// `cr` with any number of `#` for a raw one. So words are read as words, and
+// a word that runs into a quote is a prefix. One this reader does not know is
+// refused, never guessed at: whatever it misreads here, it hides from the
+// checks that use it. (It once knew only `r` and `br`, and looked no further
+// than 62 `#`: review finding ps-2, round 3.)
 function matchingBrace(text, open) {
   assert.equal(text[open], "{", "matching starts at an opening brace");
+  const isWordStart = (c) => c !== undefined && /[A-Za-z_]/.test(c);
   const isWord = (c) => c !== undefined && /[A-Za-z0-9_]/.test(c);
+  // From an opening quote to just past its closing one; a backslash takes the
+  // next character with it.
+  const afterString = (quote) => {
+    let at = quote + 1;
+    while (at < text.length && text[at] !== '"') at += text[at] === "\\" ? 2 : 1;
+    return at + 1;
+  };
   let depth = 0;
   let i = open;
   while (i < text.length) {
@@ -56,21 +72,32 @@ function matchingBrace(text, open) {
         }
       }
     } else if (c === '"') {
-      // A plain or byte string: a backslash takes the next character with it.
-      i += 1;
-      while (i < text.length && text[i] !== '"') i += text[i] === "\\" ? 2 : 1;
-      i += 1;
-    } else if (
-      c === "r" &&
-      /^r#*"/.test(text.slice(i, i + 64)) &&
-      !isWord(text[i - 1] === "b" ? text[i - 2] : text[i - 1])
-    ) {
-      // A raw string ends at a quote followed by as many `#` as opened it;
-      // nothing inside it is an escape.
-      const hashes = /^r(#*)"/.exec(text.slice(i, i + 64))[1];
-      const end = text.indexOf(`"${hashes}`, i + 2 + hashes.length);
-      assert.notEqual(end, -1, "a raw string must end");
-      i = end + 1 + hashes.length;
+      i = afterString(i);
+    } else if (isWordStart(c)) {
+      let wordEnd = i + 1;
+      while (isWord(text[wordEnd])) wordEnd += 1;
+      const word = text.slice(i, wordEnd);
+      let hashes = 0;
+      while (text[wordEnd + hashes] === "#") hashes += 1;
+      const quote = wordEnd + hashes;
+      if (text[quote] !== '"') {
+        // An ordinary word. (`r#name`, a raw identifier, is the word `r`,
+        // a `#`, and the word `name`; `b'x'` is the word `b` and a
+        // character literal.)
+        i = wordEnd;
+      } else if (["r", "br", "cr"].includes(word)) {
+        // A raw string ends at a quote followed by as many `#` as opened it;
+        // nothing inside it is an escape.
+        const end = text.indexOf(`"${"#".repeat(hashes)}`, quote + 1);
+        assert.notEqual(end, -1, "a raw string must end");
+        i = end + 1 + hashes;
+      } else if (hashes === 0 && ["b", "c"].includes(word)) {
+        i = afterString(quote);
+      } else {
+        assert.fail(
+          `a literal with a prefix this reader does not know: ${word}${"#".repeat(hashes)}"`,
+        );
+      }
     } else if (c === "'") {
       if (text[i + 1] === "\\") {
         // An escaped character: '\n', '\'', '\\', '\u{7f}'.
@@ -404,6 +431,29 @@ test("brace matching reads Rust strings, characters and comments", () => {
   assert.equal(matched('m { r#"a"}"# } z }'), '{ r#"a"}"# }', "a raw string with a quote in it");
   assert.equal(matched('m { r"\\" } z }'), '{ r"\\" }', "a raw string has no escapes");
   assert.equal(matched('m { br#"}"# b"}" } z }'), '{ br#"}"# b"}" }', "byte strings");
+  assert.equal(matched('m { c"}" cr"}" } z }'), '{ c"}" cr"}" }', "C strings");
+  assert.equal(
+    matched('m { cr#""{""# } z }'),
+    '{ cr#""{""# }',
+    "a raw C string with quotes and a lone brace in it",
+  );
+  const manyHashes = "#".repeat(70);
+  assert.equal(
+    matched(`m { r${manyHashes}"}"#"${manyHashes} } z }`),
+    `{ r${manyHashes}"}"#"${manyHashes} }`,
+    "a raw string with more hash marks than anyone writes",
+  );
+  assert.equal(
+    matched('m { let r#type = bar; let other = r; { } } z }'),
+    "{ let r#type = bar; let other = r; { } }",
+    "a raw identifier, and words that merely end in a prefix letter, are not literals",
+  );
+  assert.equal(matched("m { b'}' b'\\'' } z }"), "{ b'}' b'\\'' }", "byte characters");
+  // What it does not know, it refuses.
+  assert.throws(() => matched('m { k#"}"# } z }'), /a prefix this reader does not know: k#"/);
+  assert.throws(() => matched('m { rb"}" } z }'), /a prefix this reader does not know: rb"/);
+  assert.throws(() => matched('m { b#"}"# } z }'), /a prefix this reader does not know: b#"/);
+  assert.throws(() => matched('m { r#"} z }'), /a raw string must end/);
   assert.equal(
     matched("m { fn f<'a>(x: &'a str) -> &'a str { x } } z }"),
     "{ fn f<'a>(x: &'a str) -> &'a str { x } }",
@@ -445,6 +495,31 @@ test("the reader of shipped Rust code takes everything but the test module", () 
   // Comment lines are dropped; code lines are not.
   const commented = read(`${before}// fn in_a_comment() {}\n${tests}`);
   assert.doesNotMatch(commented, /in_a_comment/);
+
+  // The layout a reader that misjudged a literal fell for (review finding
+  // ps-2, round 3): a lone brace in a raw C string inside the tests, its twin
+  // in code after them. The code after them must still be read.
+  const paired = read(
+    [
+      before,
+      "",
+      "#[cfg(test)]",
+      "mod tests {",
+      '    const _OPEN: &std::ffi::CStr = cr#""{""#;',
+      "    #[test]",
+      "    fn inside_the_tests() {}",
+      "}",
+      "",
+      "fn after_with_its_twin(spec: &PlaySpec) -> usize {",
+      '    let _close = cr#""}""#;',
+      "    spec.http_headers.len()",
+      "}",
+      "",
+    ].join("\n"),
+  );
+  assert.match(paired, /fn after_with_its_twin/);
+  assert.match(paired, /spec\.http_headers\.len\(\)/);
+  assert.doesNotMatch(paired, /inside_the_tests/);
 
   // What must be refused rather than read as "nothing to check".
   assert.throws(() => read(`use std::io;\n${tests}`), /no code compiled into the app was found/);
