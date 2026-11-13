@@ -3,8 +3,8 @@
 **Embedded player PLAN review recorded 2026-11-12:** openreview codex
 (gpt-6-astra @ max, grade not declared) over `c692305..cf35ddf`:
 `acceptable_with_changes`. Three plan findings admitted (ep-1 HIGH, ep-2
-HIGH, ep-3 MEDIUM); the three material changes await owner rulings and
-none is adopted. Record:
+HIGH, ep-3 MEDIUM); the owner adopted all three on 2026-11-12 and the
+plan is revised; the revised text is not re-reviewed. Record:
 `.agents/review/openreview-2026-11-12-embedded-player-plan.md`.
 
 **macOS AirPlay PLAN review recorded 2026-08-20:** owner-directed

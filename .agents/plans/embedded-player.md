@@ -3,15 +3,14 @@
 ## Status
 
 **DRAFT 2026-11-12. NOT APPROVED. No implementation may start, including
-Slice 0's probes.** Open owner decisions D2-D6 below are asked in chat one
-at a time; this plan needs the owner's explicit go after them.
+Slice 0's probes.** One owner decision is still open (D4, licence). D3, D5
+and D6 are ASSUMED, not ruled (see below). The plan needs the owner's
+explicit go.
 
 Reviewed 2026-11-12: openreview codex, `acceptable_with_changes`, three
-admitted findings against this text (ep-1 embedded `idle=no` kills the
-player before `loadfile`; ep-2 `playback-ended` cannot bracket the player
-view; ep-3 the HTML skip button must call the marker script's handler).
-**This text still contains those three defects**; the revisions wait for
-the owner's rulings. Record:
+admitted findings (ep-1, ep-2, ep-3). The owner adopted the fixes
+(below); this text has been revised for all three and the revised text has
+NOT been re-reviewed. Record:
 `.agents/review/openreview-2026-11-12-embedded-player-plan.md`.
 
 Owner rulings already given (2026-11-12), verbatim:
@@ -24,7 +23,17 @@ Owner rulings already given (2026-11-12), verbatim:
   for both options" (`.agents/decisions.md`, 2026-11-12, "Vela keeps both
   players").
 
-Open, not yet ruled:
+- **Review changes and standing instruction.** Asked whether to adopt the
+  review's first change (ep-1), the owner answered: "yes, assume I won't
+  make any decisions that make all of this pointless. :)" Agent's reading,
+  not the owner's words: ep-1 is adopted by the "yes"; ep-2 and ep-3,
+  which are likewise confirmed defects with one sensible fix, are adopted
+  under the instruction; and decisions whose other answer would defeat the
+  plan are to be assumed rather than asked. Under that reading D3, D5 and
+  D6 below are taken as the agent's recommendation and marked ASSUMED. The
+  owner can overturn any of them; none is recorded as an owner ruling.
+
+Decisions:
 
 - **D1. Default player per platform: RULED 2026-11-12.** Owner, verbatim:
   "external by default for all OSes, embedded marked
@@ -40,9 +49,9 @@ Open, not yet ruled:
   ("Experimental" is what Settings already uses for Emby) is unconfirmed.
 - **D3. What happens when embedded is selected but cannot start** (libmpv
   missing, X11 session, compositor lacks the needed protocols).
-  Recommendation: play with the external player and show one notice line
+  ASSUMED: play with the external player and show one notice line
   saying why; never fail the play.
-- **D4. Licence.** Vela is MIT. mpv's library is GPL-2.0-or-later in the
+- **D4. Licence. OPEN, the one decision still asked.** Vela is MIT. mpv's library is GPL-2.0-or-later in the
   Arch build (`pacman -Qi mpv`: "GPL-2.0-or-later AND LGPL-2.1-or-later");
   an LGPL-only build exists upstream. Today Vela only starts mpv as a
   separate program. Loading the library into Vela's own process is a
@@ -51,10 +60,10 @@ Open, not yet ruled:
   MIT-licensed, signed, distributed app is the owner's call, not the
   agent's; the agent gives no legal opinion. An iOS build would have to
   ship the library inside the app, which makes the question sharper there.
-- **D5. Scope of the first embedded release.** Recommendation: Linux on
+- **D5. Scope of the first embedded release.** ASSUMED: Linux on
   Wayland only (the one platform the spike proved). macOS, Windows and iOS
   each get their own later plan on top of the seam this plan builds.
-- **D6. Where the video appears.** Recommendation: inside Vela's main
+- **D6. Where the video appears.** ASSUMED: inside Vela's main
   window, taking over the whole content area while playing (a player
   view), with Vela's own fullscreen. Not a second Vela window.
 
@@ -160,7 +169,9 @@ So split `play` into:
      (`--name=value`, `--`, URL), spawns, returns a handle.
    - `embedded`: creates an mpv handle in-process, applies each option
      with `mpv_set_option_string`, initialises, attaches the render
-     surface, sends `loadfile`. Returns a handle.
+     surface, sends `loadfile`. Returns a handle. The handle must survive
+     an arbitrary delay between `mpv_initialize` and `loadfile` (surface
+     setup takes time), which is why `idle` is `once` here.
 3. `PlayerHandle`, an enum replacing `ManagedChild` in
    `AppState.current_child` and `reap_queue`, with the operations the
    callers use today: `kill()`, `try_wait()` (has it ended),
@@ -178,7 +189,7 @@ Options that differ per player are decided in `build_launch` by a
 | `target-colorspace-hint` | `yes` | omitted (Vela tags the surface) |
 | `target-trc`, `target-prim`, `target-peak` | unset | set by the surface code |
 | window-state args, `screen-name`, `title` | as today | omitted |
-| `idle` | `no` | `no` |
+| `idle` | `no` | `once` (ep-1: with `no`, libmpv shuts down before the first `loadfile`; `once` waits for the first file, then exits at its end) |
 | `input-ipc-server`, `force-media-title`, `include`, `start`, scripts | same | same |
 | `mpv_path` | used | ignored |
 | user `mpv_extra_args` / own config | applied | applied, then the embedded-only options above are re-asserted |
@@ -271,12 +282,22 @@ video rectangle, and HTML controls sit on top. New backend surface:
 - Command `player_command {name, args}` with a closed allow-list mapped to
   mpv commands/properties: `toggle-pause`, `seek-relative`,
   `seek-absolute`, `set-volume`, `toggle-mute`, `set-audio-track`,
-  `set-subtitle-track`, `stop`. Nothing else is forwarded; no raw mpv
+  `set-subtitle-track`, `stop`, `skip-active-marker`,
+  `toggle-autocrop`. Nothing else is forwarded; no raw mpv
   command passthrough from the page.
 - Event `player-state` at most 4 times a second: position, duration,
   paused, volume, muted, track lists, and whether a skip marker is active.
-- Events `player-opened {sessionId}` and the existing `playback-ended`
-  bracket the view's lifetime.
+- Events `player-opened {sessionId}` and `player-closed {sessionId}`
+  bracket the view's lifetime (ep-2). They are emitted by the embedded
+  player's own lifecycle: opened when the surface is attached for that
+  session, closed when that session's mpv handle has shut down. The page
+  keeps the current session id and IGNORES a `player-closed` for any other
+  session, so a predecessor's late close cannot dismiss its successor's
+  view during auto-advance or a replacement play. `playback-ended` is NOT
+  used for the view: it carries no session id, fires on every end, and
+  fires a second time from the dispatcher after `advance_playlist`; it
+  keeps its one job, the watch-state refresh. Closing the view must not
+  wait for server bookkeeping.
 - Fullscreen is Vela's own window fullscreen (Tauri API), not mpv's.
 - Keyboard: the page maps mpv's default keys the external player gives
   today (space, left/right, up/down, m, f, q/Esc) to `player_command`.
@@ -285,9 +306,17 @@ video rectangle, and HTML controls sit on top. New backend surface:
 - The marker "skip" control and the OSD notice are drawn by mpv's OSD in
   the external player. In-process, the render API draws the OSD
   (ASSUMPTION A4), but pointer clicks do not reach it. The player view
-  therefore draws its own skip button from `player-state` and sends
-  `seek-absolute`; `vela-markers.lua` gets a script option to suppress its
-  own button when embedded.
+  therefore draws its own skip button from `player-state`, and pressing
+  it sends the allow-listed `skip-active-marker`, which invokes the
+  script's existing `activate-skip` binding (`script-binding`), never a
+  raw seek (ep-3): `activate_skip` in `vela-markers.lua` marks the range
+  consumed and clears the active state before seeking, and a direct seek
+  that lands inside the same range would leave the button showing.
+  `vela-markers.lua` gets a script option that suppresses only its OSD
+  DRAWING when embedded; its marker state, its Space-to-skip binding and
+  the state it publishes for `player-state` stay active. Manual autocrop
+  is reached the same way, through an allow-listed `toggle-autocrop` that
+  invokes the stock script's binding.
 
 External plays are untouched: no player view, mpv's own window.
 
@@ -315,6 +344,10 @@ player.
   `kwin_wayland --virtual`) can host the E2E harness, so embedded plays
   can be driven in CI-like runs. Xvfb cannot: it is X11.
 - A7. `autocrop.lua` works in-process (it drives `video-crop`).
+- A9. `idle=once`: the handle survives a multi-second gap before the
+  first `loadfile`, and after the file ends it emits `end-file` with
+  `reason: eof` and then shuts down (the orchestrator's 2026-11-12 probe
+  showed the first half; the second half is the reviewer's report).
 - A8. Stopping one in-process play and starting the next (quit, destroy,
   create) is leak-free and takes well under a second; needed for
   auto-advance and step-down.
@@ -354,7 +387,7 @@ then.
 
 ### Slice 0 — probes (throwaway code outside the repo; log results here)
 
-Extend the spike programs in `~/dev/vela-spike-libmpv/` to answer A1-A8.
+Extend the spike programs in `~/dev/vela-spike-libmpv/` to answer A1-A9.
 For each: what was run, the observed result, Yes/No. A1 No changes the
 whole design (the trackers would need a second, in-process event source):
 stop and re-plan. A2 No: stop and ask the owner. A6 No: the plan
@@ -400,6 +433,14 @@ end-to-end proof, only unit tests and manual acceptance.
 - Transparent main window on Linux; `player_set_rect`; a minimal player
   view (video rectangle and a Close control).
 - App-exit and new-play teardown (inventory 12).
+- Acceptance tests named by ep-1, both required: a launch with a
+  deliberate delay before `loadfile` still plays; a file that ends makes
+  the handle shut down (so inventory 14 holds embedded). Red-proof each by
+  switching `idle` to `no` and to `yes`.
+- `player-opened` / `player-closed` with session ids; a test in which a
+  successor opens before its predecessor's `player-closed` and
+  `playback-ended` arrive, asserting the successor's view stays open
+  (ep-2). Red-proof by dropping the session check.
 - Tests: unit tests for option mapping per `PlayerKind`, rectangle
   conversion, availability; the tracker threads are reused, so add wiring
   tests that an embedded launch starts the same watchers. E2E under the
@@ -421,7 +462,10 @@ end-to-end proof, only unit tests and manual acceptance.
   volume, seek bar, fullscreen, skip button, notice line.
 - Tests: allow-list rejects unknown names (red-proof by adding a
   passthrough); source-text guard that every control calls an
-  allow-listed name; E2E for pause/seek/stop through the page.
+  allow-listed name; E2E for pause/seek/stop through the page; a skip test
+  in which the seek target is clamped inside the same marker range,
+  asserting the HTML button is dismissed (ep-3; red-proof by sending a raw
+  seek instead).
 
 ### Slice 6 — parity
 

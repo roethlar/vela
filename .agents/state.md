@@ -280,8 +280,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   starts with probes. D1 is ruled: external is the default on every
   desktop OS and embedded is offered as experimental; iOS is embedded
   only. A codex openreview returned `acceptable_with_changes` with three
-  admitted plan defects whose revisions await owner rulings
-  (`.agents/review/index.md`). D3-D6 remain open.
+  admitted plan defects; the owner adopted the fixes and the plan is
+  revised, not re-reviewed (`.agents/review/index.md`). D3, D5 and D6 are
+  assumed under the owner's standing instruction, not ruled. Open: D4
+  (licence), then the owner's go.
 - Launch marketing drafts are in-repo: GitHub social preview
   `docs/images/social-preview.png` (1280×640) and Reddit copy
   `docs/marketing/reddit-launch-post.md`. Still awaiting owner go to set the

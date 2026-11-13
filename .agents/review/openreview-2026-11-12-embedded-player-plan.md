@@ -88,3 +88,12 @@ ruling on the matching material change.
 It reviewed a plan; no product code exists. The reviewer said it ran the
 diff check, four existing tests and isolated libmpv and Lua probes, and did
 not build the app or run E2E.
+
+## Disposition — 2026-11-12
+
+The owner adopted the changes: asked about ep-1, "yes, assume I won't make
+any decisions that make all of this pointless. :)". ep-1 by the "yes";
+ep-2 and ep-3 under that instruction (the agent's reading, recorded in the
+plan's Status). All three are revised into
+`.agents/plans/embedded-player.md`. The revised plan text has not been
+re-reviewed.
