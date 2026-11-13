@@ -87,3 +87,26 @@ accepted. The comment is correct. The Rust test sees that a player was
 not started; it cannot see that `mpv --version` was run on the way to
 finding that out, and the source-text test pinned where the `if` stands,
 not that the `return` is inside it.
+
+### Repair (round 2)
+
+The Rust test is unchanged: it proves the refusal refuses and that no
+player is started, and it cannot see a program that was run and exited on
+the way. What can see that is the source: the test in
+`tests/player-selection.test.mjs` now requires the refusal WHOLE, the check
+with its `return` inside it, to be the first statement of `play`. With the
+`if` emptied, or the `return` anywhere else, or anything before it, that
+is no longer the text.
+
+File: `tests/player-selection.test.mjs` only.
+
+Guard proof, run 2026-11-13 against `9b2c819` with the repaired test, in a
+disposable worktree, each injection restored with `git checkout`:
+
+| Injection | Source-text test | Rust test |
+| --- | --- | --- |
+| The reviewer's: the `if` emptied, the `return` moved below the search for the mpv program | FAIL | passes, as the reviewer found |
+| The `if` emptied, no `return` anywhere | FAIL | FAILS |
+| A step done before the refusal | FAIL | passes |
+| The refusal weakened by a second condition | FAIL | FAILS |
+| Unchanged | PASS | PASS |

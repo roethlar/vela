@@ -190,6 +190,16 @@ test('play refuses a player it cannot start before it starts anything', () => {
   // adds that the check is the first thing play does.
   assert.match(playback, /fn play_refuses_a_player_it_cannot_start_and_starts_nothing\(\) \{/);
   const body = functionBody(playback, 'pub fn play(', 'playback::play');
+  // The refusal, whole: the check with its `return` inside it, as the first
+  // statement of play. The first version of this test pinned only where the
+  // `if` stands; with the `if` emptied and the `return` moved below the search
+  // for the mpv program, `mpv --version` ran before the refusal and both
+  // tests passed (review finding sel-4, round 1).
+  assert.match(
+    body,
+    /^\npub fn play\([^{]*\) -> Result<Arc<AtomicBool>, String> \{\n(?:[ \t]*\/\/[^\n]*\n)*[ \t]*if spec\.player != crate::player::PlayerKind::External \{\n[ \t]*return Err\("the embedded player is not part of this build"\.to_string\(\)\);\n[ \t]*\}\n/,
+    'the first statement of play is the refusal, with its return',
+  );
   const guard = body.indexOf('if spec.player != crate::player::PlayerKind::External {');
   assert.notEqual(guard, -1, 'play must check which player it was asked for');
   for (const later of ['new_ipc_path()', 'resolve_mpv()', 'build_launch(', 'external::launch(']) {
