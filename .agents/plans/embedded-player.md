@@ -1260,11 +1260,17 @@ Each can be overturned; none has shipped to users.
    failed to start would fail once, against the rule "never fail the
    play". The Slice 3 review did not accept that (`ec-6`), and it is
    fixed: the film now carries on in mpv, with the one line that says why.
-7. **Packaging the embedded player's library adds about 33 MB to every
-   Linux package**, for a player that stays hidden until you have looked
-   at it. It is in the approved plan (Slice 3), so the agent does it; it
-   is listed here because it changes every Linux download. Until it lands
-   the player can be tried only from a development build.
+7. **The embedded player's library is packaged only on request, and
+   released packages do not contain it yet.** (Slice 3, packaging, landed
+   `4b8293e`.) The plan says to ship the library with Vela. The agent built
+   the packaging but left it switched off: a package with the library is
+   about 15 MB larger (an Arch package: 17.9 MB against 3.1 MB), for a
+   player nobody is offered yet, and switching it on means changing the
+   release workflow, which the agent does not do. `scripts/build.sh
+   --with-libmpv` makes such a package and checks it; a plain build makes
+   exactly today's. Turning it on for releases is yours, together with
+   the Settings control; `docs/development.md`, "Packaging the set", lists
+   what the release workflow needs.
 8. **Escape closes the embedded player when the window is not
    fullscreen.** (Slice 5 design.) In fullscreen it leaves fullscreen
    first, as in mpv. mpv's own Escape never closes its window; `q` does,
@@ -1611,3 +1617,63 @@ Known gaps, none worked around:
   the owner's eye (the list above, "From Slice 5").
 - The Arch package gets an install line for `vela-crop.lua`; the missing
   one for `vela-markers.lua` is still the recorded blocker.
+
+### 2026-11-14 — Slice 3, packaging: landed at `4b8293e`, opt-in
+
+The library set can now be put into the Linux packages, and by default is
+not.
+
+- The request is `scripts/build.sh --with-libmpv` (the set from
+  `.libmpv/out/libmpv`) or `--with-libmpv=DIR`. No environment variable
+  opts in for that script; `VELA_LIBMPV_DIR` stays what a development
+  build reads. For deb, rpm and AppImage the script adds an overlay config
+  (`src-tauri/tauri.libmpv.conf.json`) to the Tauri build; for the Arch
+  package it sets `VELA_PACKAGE_LIBMPV`, under which the PKGBUILD installs
+  the set to `/usr/lib/Vela/libmpv`, the licence texts under
+  `/usr/share/licenses/vela/libmpv`, and turns stripping off (makepkg's
+  stripping rewrote all fifteen libraries: found by building).
+- `packaging/libmpv/check-package.sh` unpacks a built package and either
+  requires the whole set (in its place, readable by every user, equal to
+  the set it was built from, at the pinned versions, and loading:
+  `libmpv.so.2` is loaded from the unpacked package and must map only the
+  set's own libraries) or, with `--without-libmpv`, requires that none of
+  it is there, by name and by contents. `--with-libmpv` runs it on every
+  package before anything reaches `dist/`, and leaves `dist/` empty when
+  one fails.
+- `src-tauri/tauri.conf.json`, the product's source and both workflows
+  are untouched. Released packages do not contain the set.
+
+How it was made: one helper built it, three attacked it (19 findings,
+among them two the first version of its own check had passed: an rpm
+whose libraries no user could read, and a piece of the set hidden in a
+directory without permission bits), a repair pass fixed all 19 and a last
+helper confirmed each with the fix taken out again (53 mutations, none
+survived).
+
+What the coordinating agent ran at the landed content, on `continuum`:
+the full check (the new test file has 137 tests); `scripts/build.sh
+--with-libmpv=<the built set>`, which built the Arch package and passed
+every line of the check (place, access, source, pins, manifest, load at
+mpv 0.42.0 with client API 2.6, 15 libraries mapped from the set, 13
+licence texts); a plain `scripts/build.sh`, whose package passed the
+must-not-contain check and failed the must-contain one, as it should.
+The helpers also built deb and rpm both ways, before the merge with
+Slice 5.
+
+One change made by the coordinating agent before landing: the helpers'
+test FAILED on a CI runner without `bsdtar`, so that CI could not skip the
+package check unnoticed. GitHub's runner image does not list `bsdtar`, and
+installing it is a change to `ci.yml`, which the agent may not make (it
+tried; the edit was refused). As built, `main`'s CI would have gone red.
+The tests now skip there with the reason printed. So CI most likely does
+not exercise the package check; a developer's machine does.
+
+Not done, and why:
+
+- No AppImage with the set was built (an Arch host cannot build one).
+- The release workflow does not build or ship the set.
+- CI does not run the package check's tests until its `frontend` job
+  installs `libarchive-tools` (one step in `ci.yml`; the owner's).
+- "A plain build is byte for byte today's package" cannot be shown while
+  Vela's build is not reproducible; what is shown is that it contains
+  nothing of the set.

@@ -42,9 +42,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     written by helper agents from a recorded design, attacked by other
     helpers and repaired; none has yet been verified by the agent that
     coordinates, reviewed by codex, or landed. Land them in this order:
-    - Packaging the mpv library into the Linux packages, opt-in (branch
-      `embedded-packaging`): `scripts/build.sh --with-libmpv`. Its repair
-      pass was cut off by a usage limit on 2026-11-13 and is being redone.
+    - (Packaging the mpv library into the Linux packages LANDED at
+      `4b8293e`, opt-in: `scripts/build.sh --with-libmpv`. Released packages
+      do not contain it; the release workflow is untouched. With codex
+      for its review.)
     - (Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
       log. Its codex review returned TWO findings, `pc-1` and `pc-2`, both
       admitted and being fixed: `.agents/review/index.md`. Its cropping
@@ -323,6 +324,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   installed there. Slice 5 of the embedded-player plan adds a line for its
   own new script and deliberately leaves this one alone until the owner
   answers.
+- CI does not exercise the package check (2026-11-14, the owner has not
+  been asked yet). `tests/libmpv-packaging.test.mjs` needs `bsdtar` to
+  build and unpack its stand-in packages; GitHub's runner image does not
+  list it and the `frontend` job installs nothing, so those tests are
+  skipped there. One step would fix it (`sudo apt-get install -y
+  libarchive-tools` before `npm run check`); it is a change to `ci.yml`,
+  which the agent does not make.
 - The external player does not check the media server's TLS certificate
   (found 2026-11-13 by a run, unfixed, the owner has not been asked yet).
   The system's mpv up to 0.41 defaults to `tls-verify=no` and Vela does
