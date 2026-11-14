@@ -52,7 +52,10 @@ test('every play chooses its player from the setting and what can run', () => {
   const at = select.indexOf(choose);
   assert.notEqual(at, -1, 'the choice of copy must choose the player with player::choose');
   assert.equal(select.indexOf('player::choose(', at + choose.length), -1, 'chosen exactly once');
-  const ranks = select.indexOf('playback_compatibility_target(state, replace_session, upcoming_player.kind, &cfg)');
+  // The screen the copy is ranked for is decided for that player
+  // (decide_play_screen; the ranking's own wiring is held in
+  // tests/player-window-ui.test.mjs).
+  const ranks = select.indexOf('decide_play_screen(state, replace_session, upcoming_player.kind, &cfg)');
   assert.notEqual(ranks, -1, 'the copy is ranked for the player that will run the play');
   assert.ok(at < ranks, 'chosen before the copy is ranked');
   assert.equal(select.split('player: upcoming_player,').length - 1, 2, 'both ready selections carry it');
@@ -433,8 +436,9 @@ test('only a play that started writes the window record, in one place', () => {
   const reads = [
     // Settings shows the display the latest play observed.
     /let observed = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\)\s+\.latest\(\)\s+\.map\(\|session\| session\.observation\.display_snapshot\(\)\);/g,
-    // A Compatible choice is made for that display.
-    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+compatibility_display\(&current, replace_session, upcoming\)\s+\};/g,
+    // The screen a play is shown on, and its copy ranked for, is decided
+    // from it.
+    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+screen_for_play\(\s+&current,\s+replace_session,\s+upcoming,\s+saved_first_screen\.as_deref\(\),\s+&screens,\s+\)\s+\};/g,
     // The launch opens its window from it.
     /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+opening_window\(&current, first_of_run\)\s+\};/g,
     // The end callback hands the play's window to the settings.

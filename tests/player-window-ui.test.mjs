@@ -37,13 +37,13 @@ test('the play path opens its window from the run or the setting, and hands it o
   // The play path reads the setting, before stream resolution...
   assert.match(
     commands,
-    /let first_of_run = config::load_config\(\)[\s\S]{0,200}config::first_window_of_run\(&cfg\)[\s\S]{0,4000}let resolved = match selection\.version_id/,
+    /let \(first_of_run, _\) = config::load_config\(\)[\s\S]{0,200}config::first_window_of_run\(&cfg\)[\s\S]{0,4000}let resolved = match selection\.version_id/,
     'the play path must read the player window setting before resolving the stream',
   );
   // ...and the launch is given what it says when the run has no window yet.
   assert.match(
     commands,
-    /let \(inherited_window_state, inherited_screen_name\) = \{[\s\S]{0,300}opening_window\(&current, first_of_run\)/,
+    /let inherited_window_state = \{[\s\S]{0,300}opening_window\(&current, first_of_run\)/,
     'the launch must open its window from the run, or else from the setting',
   );
   // It samples the record only once the stream is resolved, so a player that
@@ -59,10 +59,12 @@ test('the play path opens its window from the run or the setting, and hands it o
     resolveEnd < sampledAt,
     'the window record must be sampled after the stream is resolved',
   );
-  // What it samples is what the launch gets: nothing binds the two names
-  // again (for instance to gate them on an automatic successor once more).
+  // What it samples is what the launch gets: nothing binds the name again
+  // (for instance to gate it on an automatic successor once more). The
+  // screen is no longer sampled here at all: it comes with the copy (the
+  // next test).
   const playBody = playPath.slice(0, playPath.indexOf('\n}\n'));
-  for (const name of ['inherited_window_state', 'inherited_screen_name']) {
+  for (const name of ['inherited_window_state']) {
     const bindings = [...playBody.matchAll(new RegExp(`let\\s+(?:mut\\s+)?(?:\\([^)]*)?\\b${name}\\b`, 'g'))];
     assert.equal(bindings.length, 1, `${name} must be bound once, by the sampling`);
   }
@@ -164,59 +166,87 @@ test('the real launch seeds and shares the complete opening window state', () =>
   );
 });
 
-test('a play opens on the screen its Compatible copy was ranked for', () => {
-  // Review finding pw-1. The rule is unit-tested in commands.rs
-  // (a_play_opens_on_the_screen_its_copy_was_ranked_for); this guards that
-  // the screen looked at for the ranking is the one carried to the launch.
-  const target = commands.slice(
-    commands.indexOf('\nasync fn playback_compatibility_target('),
-    commands.indexOf('\nfn playback_source_choices('),
+test('a play is shown on the one screen decided before its copy is chosen', () => {
+  // Review findings pw-1 and pw-2. The rules are unit-tested in commands.rs
+  // (screen_for_play) and display.rs (profile_basis); this guards the wiring
+  // they cannot reach, because select_playback_version and the play path
+  // need a running app: the screen is decided once, the copy is ranked for
+  // that screen's profile, and the launch asks for that screen and no other.
+  const bodyOf = (source, signature) => {
+    const start = source.indexOf(`\n${signature}`);
+    assert.notEqual(start, -1, `${signature} exists`);
+    return source.slice(start, source.indexOf('\n}\n', start));
+  };
+  const count = (source, text) => source.split(text).length - 1;
+  const production = commands.slice(0, commands.indexOf('\n#[cfg(test)]\nmod tests {'));
+  const select = bodyOf(commands, 'async fn select_playback_version(');
+
+  // Decided once, for the player that will run the play, after the probes
+  // and before either ready selection is made.
+  const decided = select.search(
+    /let \(screen, screens\) =\s+decide_play_screen\(state, replace_session, upcoming_player\.kind, &cfg\)\.await\?;/,
   );
-  assert.match(
-    target,
-    /compatibility_display\(&current, replace_session, upcoming\)\s+\};\s+let ranked_screen = observed\.as_ref\(\)\.map\(RankedScreen::of\);\s+let detected = display::detect_profile\(app, observed\)\.await;/,
-    'the screen carried is the one the ranking looks at, taken once',
-  );
-  assert.match(target, /Ok\(Some\(\(\s+crate::selection::CompatibilityTarget \{[\s\S]{0,200}\},\s+ranked_screen,\s+\)\)\)/);
-  // The screen carried and the screen the ranking ranks for are named by
-  // one rule, ObservedDisplay::screen_name, also when an observation names
-  // several screens.
-  const rankedOf = commands.slice(
-    commands.indexOf('\nimpl RankedScreen {'),
-    commands.indexOf('\nfn screen_to_open_on('),
-  );
-  assert.match(rankedOf, /observed\s+\.screen_name\(\)\s+\.map_or\(Self::VelasScreen,/, 'the screen carried is named by screen_name');
-  assert.doesNotMatch(rankedOf, /\.names\b/, 'and by nothing else');
-  const display = read('src-tauri/src/display.rs');
-  const detectAt = display.indexOf('\npub(crate) async fn detect_profile(');
-  assert.notEqual(detectAt, -1, 'detect_profile exists');
-  const detect = display.slice(detectAt, display.indexOf('\n}\n', detectAt));
-  assert.match(
-    detect,
-    /let name = observed\s+\.as_ref\(\)\s+\.and_then\(\|value\| value\.screen_name\(\)\.cloned\(\)\)/,
-    'the ranking names the observed screen by screen_name',
-  );
-  assert.doesNotMatch(detect, /\.names\.(first|last|get|iter|into_iter)\(/, 'and by nothing else');
-  const select = commands.slice(
-    commands.indexOf('\nasync fn select_playback_version('),
-    commands.indexOf('\nstruct PlayLaunchRequest<'),
-  );
+  assert.ok(decided > 0, 'the screen is decided in the choice of copy');
+  assert.equal(count(select, 'decide_play_screen('), 1, 'once');
+  assert.ok(select.indexOf('let upcoming_player = crate::player::choose(') < decided, 'after the player is chosen');
+  assert.ok(decided < select.indexOf('if versions.is_empty() {'), 'before any selection is made');
+
+  // The ranking: its target only for a Compatible choice, the profile of
+  // the decided screen.
   assert.match(
     select,
-    /let \(target, ranked_screen\) = if policy == crate::selection::PlaybackSourcePolicy::Compatible \{\s+match playback_compatibility_target\([^)]*\)\.await\? \{\s+Some\(\(target, ranked_screen\)\) => \(Some\(target\), ranked_screen\),\s+None => \(None, None\),\s+\}\s+\} else \{\s+\(None, None\)\s+\};/,
+    /let target = match state\.app_handle\.get\(\) \{\s+Some\(app\) if policy == crate::selection::PlaybackSourcePolicy::Compatible => \{\s+Some\(compatibility_target\(app, &screen, &screens, &cfg\)\.await\?\)\s+\}\s+_ => None,\s+\};\s+crate::selection::rank_candidates\(&mut candidates, policy, target\);/,
+    'the copy is ranked for the decided screen',
   );
-  assert.match(select, /player: upcoming_player,\s+ranked_screen,\s+\}\),/, 'the ranked selection carries it');
-  assert.match(select, /player: upcoming_player,\s+ranked_screen: None,\s+\}\),/, 'an unranked one carries none');
-  // The launch opens on it, after the window state is sampled.
-  const playPath = commands.slice(commands.indexOf('\nasync fn play_by_key_locked('));
-  const playBody = playPath.slice(0, playPath.indexOf('\n}\n'));
-  const sampledAt = playBody.indexOf('opening_window(&current, first_of_run)');
-  const screenAt = playBody.search(
-    /let screen_name = match screen_to_open_on\(selection\.ranked_screen\.clone\(\), inherited_screen_name\) \{\s+Some\(name\) => Some\(name\),\s+None => match state\.app_handle\.get\(\) \{\s+Some\(app\) => display::current_screen_name\(app\)\.await,\s+None => None,\s+\},\s+\};/,
+  const target = bodyOf(commands, 'async fn compatibility_target(');
+  assert.match(
+    target,
+    /let basis = display::profile_basis\(screen\.name\.as_deref\(\), screen\.observed\.as_ref\(\), screens\);\s+let detected = display::profile_of\(app, basis\)\.await;/,
+    'the profile is the decided screen\'s',
   );
-  assert.ok(sampledAt > 0 && screenAt > sampledAt, 'the screen is decided from the ranking after the sampling');
+
+  // Both ready selections carry the decided screen.
+  assert.equal(
+    [...select.matchAll(/player: upcoming_player,\s+screen: screen\.name,\s+\}\),/g)].length,
+    2,
+    'both ready selections carry it',
+  );
+  assert.equal(count(select, 'screen: '), 2);
+
+  // How it is decided: the screens are looked at before the record is
+  // locked, and the record is held only to decide.
+  const decide = bodyOf(commands, 'async fn decide_play_screen(');
+  assert.match(
+    decide,
+    /let \(_, saved_first_screen\) = config::first_window_of_run\(cfg\)\.map_err\(PlayFailure::fatal\)\?;\s+let screens = match state\.app_handle\.get\(\) \{\s+Some\(app\) => display::look_at_screens\(app\)\.await,\s+None => display::Screens::default\(\),\s+\};\s+let screen = \{\s+let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+screen_for_play\(\s+&current,\s+replace_session,\s+upcoming,\s+saved_first_screen\.as_deref\(\),\s+&screens,\s+\)\s+\};\s+Ok\(\(screen, screens\)\)$/,
+  );
+  assert.equal(count(production, 'screen_for_play('), 2, 'decided in one place');
+  assert.equal(count(production, 'profile_basis('), 1, 'ranked for in one place');
+  const display = read('src-tauri/src/display.rs');
+  assert.equal(count(display, 'current_screen_name('), 2, "Vela's screen is looked up only by look_at_screens");
+  assert.match(
+    bodyOf(display, 'pub(crate) async fn look_at_screens('),
+    /let velas = current_screen_name\(app\)\.await;/,
+  );
+
+  // The launch asks for the decided screen: no second look at where Vela's
+  // window is, or at the record's screen, after the copy is chosen.
+  const playBody = bodyOf(commands, 'async fn play_by_key_locked(');
+  assert.match(playBody, /let screen_name = selection\.screen\.clone\(\);/);
   assert.match(playBody, /\n\s+screen_name,\n/, 'and handed to the launch');
   assert.equal([...playBody.matchAll(/\bscreen_name\b/g)].length, 2, 'untouched in between');
+  assert.doesNotMatch(
+    playBody,
+    /current_screen_name|look_at_screens|screen_for_play|decide_play_screen|detect_profile|profile_of|inherited_screen_name|display_snapshot/,
+    'and nothing in the play path looks at a screen again',
+  );
+  // A play the embedded player cannot start is described again for mpv's
+  // own window from the same play, so its window asks for the same screen.
+  const playback = read('src-tauri/src/playback.rs');
+  assert.match(
+    playback,
+    /let plan = crate::player::launch::build_launch_for\(\s+spec,\s+crate::player::PlayerKind::External,\s+&cfg,\s+&path,\s+\)\?;/,
+  );
 });
 
 // Review finding pw-7: the control shows the mode the backend holds. The

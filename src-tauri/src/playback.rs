@@ -403,9 +403,12 @@ pub struct PlaySpec {
     /// automatic. The first play of a run gets what the player window setting
     /// says (`config::first_window_of_run`); unknown properties stay `None`.
     pub inherited_window_state: PlaybackWindowState,
-    /// The output the last play's window was observed on (for the first play
-    /// of a run, the one the setting remembers), or, when there is none, the
-    /// native output containing Vela's window.
+    /// The output the play is shown on, decided once with its copy
+    /// (`commands::screen_for_play`): for mpv's own window the output the last
+    /// external play's window was observed on (for the first play of a run,
+    /// the one the setting remembers), when connected, or else the output
+    /// holding Vela's window. Only mpv's own window is placed with it, which
+    /// includes a play the embedded player could not start.
     pub screen_name: Option<String>,
     /// Fresh handle populated by this launch's IPC reader and published by the
     /// command layer only after the full launch succeeds.

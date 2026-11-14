@@ -174,13 +174,246 @@ fn current_monitor(app: &tauri::AppHandle) -> Option<MonitorDescriptor> {
     })
 }
 
-/// The current Vela-window output name is passed to mpv for a play that has
-/// no observed output to inherit (the first play of a run). Wayland
-/// compositors may still choose a different output; the observed mpv output
-/// then becomes authoritative for every later play.
-pub(crate) async fn current_screen_name(app: &tauri::AppHandle) -> Option<String> {
+/// The name of the output holding Vela's window, in the form mpv takes for
+/// `--screen-name`. A play that has no other screen to go to is shown there
+/// (`look_at_screens`). Wayland compositors may still choose a different
+/// output; the observed mpv output then counts for every later play.
+async fn current_screen_name(app: &tauri::AppHandle) -> Option<String> {
     let monitor = current_monitor(app)?;
     platform_screen_name(app, monitor).await
+}
+
+/// One output (screen) the app can see, by every name Vela or mpv may give
+/// it, with its own size, and where it is on the desktop when that is known.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Output {
+    pub names: Vec<String>,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub position: Option<(i32, i32)>,
+}
+
+impl Output {
+    fn is_called(&self, name: &str) -> bool {
+        self.names.iter().any(|own| own == name)
+    }
+}
+
+/// What a play's screen is decided from: the screen holding Vela's window and
+/// the outputs connected now (review findings pw-1 and pw-2). Looked at once
+/// per play, before its copy is chosen.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(crate) struct Screens {
+    /// The name of the screen holding Vela's window, as mpv takes it.
+    pub velas: Option<String>,
+    /// That screen itself.
+    pub velas_output: Option<Output>,
+    /// Every output connected now; `None` when they could not be listed.
+    pub connected: Option<Vec<Output>>,
+}
+
+impl Screens {
+    /// Whether an output of this name is connected now. When the outputs
+    /// could not be listed, or the list names none of them, nothing can be
+    /// told, and the name is taken as it is, as before this check existed.
+    pub(crate) fn is_connected(&self, name: &str) -> bool {
+        match &self.connected {
+            Some(outputs) if outputs.iter().any(|output| !output.names.is_empty()) => {
+                outputs.iter().any(|output| output.is_called(name))
+            }
+            _ => true,
+        }
+    }
+
+    fn output_called(&self, name: &str) -> Option<&Output> {
+        self.connected
+            .iter()
+            .flatten()
+            .find(|output| output.is_called(name))
+    }
+}
+
+/// What the profile of the output a play is shown on is worked out from;
+/// only its HDR state is still to be asked of the system (`profile_of`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct ProfileBasis {
+    pub name: Option<String>,
+    pub width_px: u32,
+    pub height_px: u32,
+    pub position: Option<(i32, i32)>,
+    pub evidence: DisplayEvidence,
+}
+
+/// The profile basis of the output named `name`, which has been decided
+/// already: this never picks an output by itself (review finding pw-1).
+///
+/// `observed` is the play's observation the name was taken from, if it was.
+/// It counts only when it names that very output first (its
+/// `screen_name`), as `detect_profile` counts an observation: its size then
+/// counts as the output's size now, and, as there, no desktop position is
+/// passed on with it. Otherwise the output's own size, from the outputs
+/// connected now, counts. An output the list does not have (it could not be
+/// listed) is given the values of the screen holding Vela's window, as
+/// `detect_profile` gives a play that has observed nothing.
+pub(crate) fn profile_basis(
+    name: Option<&str>,
+    observed: Option<&ObservedDisplay>,
+    screens: &Screens,
+) -> ProfileBasis {
+    let observed = observed.filter(|value| {
+        name.is_some()
+            && value.screen_name().map(String::as_str) == name
+            && (value.width_px.is_some() || value.height_px.is_some())
+    });
+    let output = name
+        .and_then(|name| screens.output_called(name))
+        .or(screens.velas_output.as_ref());
+    let width_px = observed
+        .and_then(|value| value.width_px)
+        .or_else(|| output.map(|value| value.width_px))
+        .unwrap_or(0);
+    let height_px = observed
+        .and_then(|value| value.height_px)
+        .or_else(|| output.map(|value| value.height_px))
+        .unwrap_or(0);
+    ProfileBasis {
+        name: name.map(str::to_string),
+        width_px,
+        height_px,
+        position: if observed.is_some() {
+            None
+        } else {
+            output.and_then(|value| value.position)
+        },
+        evidence: if observed.is_some() {
+            DisplayEvidence::MpvObserved
+        } else {
+            DisplayEvidence::Native
+        },
+    }
+}
+
+/// The profile of a decided output: its basis, and its HDR state asked of
+/// the system for that output, by the same rules as `detect_profile`.
+pub(crate) async fn profile_of(app: &tauri::AppHandle, basis: ProfileBasis) -> DisplayProfile {
+    let hdr = native_hdr_state(
+        app,
+        basis.name.clone(),
+        basis.width_px,
+        basis.height_px,
+        basis.position,
+    )
+    .await;
+    DisplayProfile {
+        name: basis.name,
+        width_px: basis.width_px,
+        height_px: basis.height_px,
+        hdr,
+        evidence: basis.evidence,
+    }
+}
+
+/// The screen holding Vela's window and the outputs connected now. The
+/// system is asked on a blocking thread, through Vela's window (Tauri hands
+/// the question to the window's own thread and waits for the answer).
+pub(crate) async fn look_at_screens(app: &tauri::AppHandle) -> Screens {
+    let velas = current_screen_name(app).await;
+    let asked = {
+        let app = app.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            use tauri::Manager;
+            let window = app.get_webview_window("main")?;
+            let velas = window.current_monitor().ok().flatten().map(|monitor| descriptor(&monitor));
+            let all = window
+                .available_monitors()
+                .ok()
+                .map(|monitors| monitors.iter().map(descriptor).collect::<Vec<_>>());
+            Some((velas, all))
+        })
+        .await
+        .ok()
+        .flatten()
+    };
+    let Some((velas_monitor, monitors)) = asked else {
+        return Screens {
+            velas,
+            ..Screens::default()
+        };
+    };
+    let velas_output = match velas_monitor {
+        Some(monitor) => Some(output_of(app, monitor).await),
+        None => None,
+    };
+    let connected = match monitors {
+        Some(monitors) => {
+            let mut outputs = platform_outputs().await;
+            for monitor in monitors {
+                outputs.push(output_of(app, monitor).await);
+            }
+            Some(outputs)
+        }
+        None => None,
+    };
+    Screens {
+        velas,
+        velas_output,
+        connected,
+    }
+}
+
+fn descriptor(monitor: &tauri::Monitor) -> MonitorDescriptor {
+    MonitorDescriptor {
+        name: monitor.name().cloned(),
+        width_px: monitor.size().width,
+        height_px: monitor.size().height,
+        position_x: monitor.position().x,
+        position_y: monitor.position().y,
+    }
+}
+
+/// A monitor as an output: Tauri's name for it and mpv's (they differ on
+/// macOS, `platform_screen_name`).
+async fn output_of(app: &tauri::AppHandle, monitor: MonitorDescriptor) -> Output {
+    let mut names: Vec<String> = monitor.name.iter().cloned().collect();
+    if let Some(name) = platform_screen_name(app, monitor.clone()).await {
+        if !names.contains(&name) {
+            names.push(name);
+        }
+    }
+    Output {
+        names,
+        width_px: monitor.width_px,
+        height_px: monitor.height_px,
+        position: Some((monitor.position_x, monitor.position_y)),
+    }
+}
+
+/// Outputs the system lists by names Tauri does not give. On Wayland, Tauri
+/// names an output by its model ("XG27UQDMS") and mpv by its connector
+/// ("DP-3"); the compositor gives both.
+#[cfg(target_os = "linux")]
+async fn platform_outputs() -> Vec<Output> {
+    tauri::async_runtime::spawn_blocking(|| {
+        if !wayland_session() {
+            return Vec::new();
+        }
+        wayland_hdr::outputs().unwrap_or_default()
+    })
+    .await
+    .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn platform_outputs() -> Vec<Output> {
+    Vec::new()
+}
+
+#[cfg(target_os = "linux")]
+fn wayland_session() -> bool {
+    !(std::env::var("XDG_SESSION_TYPE")
+        .ok()
+        .is_some_and(|value| value.eq_ignore_ascii_case("x11"))
+        || std::env::var_os("WAYLAND_DISPLAY").is_none())
 }
 
 #[cfg(target_os = "macos")]
@@ -476,11 +709,7 @@ async fn native_hdr_state(
     _target_position: Option<(i32, i32)>,
 ) -> HdrState {
     tauri::async_runtime::spawn_blocking(move || {
-        if std::env::var("XDG_SESSION_TYPE")
-            .ok()
-            .is_some_and(|value| value.eq_ignore_ascii_case("x11"))
-            || std::env::var_os("WAYLAND_DISPLAY").is_none()
-        {
+        if !wayland_session() {
             return HdrState::Disabled;
         }
         wayland_hdr::query(target_name.as_deref(), width_px, height_px).unwrap_or(HdrState::Unknown)
@@ -518,6 +747,7 @@ mod wayland_hdr {
         global_name: u32,
         proxy: wl_output::WlOutput,
         name: Option<String>,
+        model: Option<String>,
         width: u32,
         height: u32,
     }
@@ -554,6 +784,7 @@ mod wayland_hdr {
                         global_name: name,
                         proxy: registry.bind(name, version.min(4), qh, name),
                         name: None,
+                        model: None,
                         width: 0,
                         height: 0,
                     }),
@@ -584,6 +815,7 @@ mod wayland_hdr {
             };
             match event {
                 wl_output::Event::Name { name } => output.name = Some(name),
+                wl_output::Event::Geometry { model, .. } => output.model = Some(model),
                 wl_output::Event::Mode {
                     flags: WEnum::Value(value),
                     width,
@@ -653,6 +885,39 @@ mod wayland_hdr {
                 _ => {}
             }
         }
+    }
+
+    /// The compositor's outputs, each by its connector name and its model,
+    /// at its current mode.
+    pub(super) fn outputs() -> Result<Vec<super::Output>, String> {
+        let connection = Connection::connect_to_env().map_err(|error| error.to_string())?;
+        let mut queue = connection.new_event_queue();
+        let qh = queue.handle();
+        connection.display().get_registry(&qh, ());
+        let mut state = State::default();
+        queue
+            .roundtrip(&mut state)
+            .map_err(|error| error.to_string())?;
+        queue
+            .roundtrip(&mut state)
+            .map_err(|error| error.to_string())?;
+        Ok(state
+            .outputs
+            .iter()
+            .map(|output| super::Output {
+                names: output
+                    .name
+                    .iter()
+                    .chain(output.model.iter())
+                    .filter(|name| !name.trim().is_empty())
+                    .cloned()
+                    .collect(),
+                width_px: output.width,
+                height_px: output.height,
+                position: None,
+            })
+            .filter(|output| !output.names.is_empty())
+            .collect())
     }
 
     pub(super) fn query(
@@ -760,6 +1025,119 @@ mod tests {
         );
     }
 
+    fn output(name: &str, width_px: u32, height_px: u32, x: i32) -> Output {
+        Output {
+            names: vec![name.to_string()],
+            width_px,
+            height_px,
+            position: Some((x, 0)),
+        }
+    }
+
+    fn observed(names: &[&str], width_px: u32, height_px: u32) -> ObservedDisplay {
+        ObservedDisplay {
+            names: names.iter().map(|name| name.to_string()).collect(),
+            width_px: Some(width_px),
+            height_px: Some(height_px),
+        }
+    }
+
+    fn screens(connected: Vec<Output>) -> Screens {
+        Screens {
+            velas: Some("HDMI-1".to_string()),
+            velas_output: connected
+                .iter()
+                .find(|output| output.is_called("HDMI-1"))
+                .cloned(),
+            connected: Some(connected),
+        }
+    }
+
+    fn size(basis: &ProfileBasis) -> (Option<&str>, u32, u32) {
+        (basis.name.as_deref(), basis.width_px, basis.height_px)
+    }
+
+    // Review finding pw-1, comment 3: the profile is the named output's,
+    // among two outputs and among three, and never one picked otherwise.
+    #[test]
+    fn the_profile_is_the_named_outputs_among_several() {
+        let two = vec![output("DP-1", 3840, 2160, 0), output("HDMI-1", 1920, 1080, 3840)];
+        let three = {
+            let mut three = two.clone();
+            three.insert(1, output("eDP-1", 2560, 1440, -2560));
+            three
+        };
+        for connected in [two, three.clone()] {
+            let screens = screens(connected.clone());
+            for expected in &connected {
+                let name = expected.names[0].as_str();
+                let basis = profile_basis(Some(name), None, &screens);
+                assert_eq!(size(&basis), (Some(name), expected.width_px, expected.height_px));
+                assert_eq!(basis.position, expected.position, "{name}: where it is");
+                assert_eq!(basis.evidence, DisplayEvidence::Native);
+            }
+        }
+        // The size observed on the screen named counts as now, in either
+        // order of an observation across several screens.
+        let screens = screens(three);
+        for (names, first) in [
+            (&["DP-1", "HDMI-1"][..], "DP-1"),
+            (&["HDMI-1", "DP-1"][..], "HDMI-1"),
+            (&["eDP-1", "HDMI-1", "DP-1"][..], "eDP-1"),
+            (&["DP-1", "eDP-1", "HDMI-1"][..], "DP-1"),
+        ] {
+            let seen = observed(names, 3000, 2000);
+            let basis = profile_basis(Some(first), Some(&seen), &screens);
+            assert_eq!(size(&basis), (Some(first), 3000, 2000), "{names:?}");
+            assert_eq!(basis.position, None);
+            assert_eq!(basis.evidence, DisplayEvidence::MpvObserved);
+        }
+        // An observation that names another screen first is not that
+        // screen's: the named output's own size counts.
+        let seen = observed(&["HDMI-1", "DP-1"], 3000, 2000);
+        let basis = profile_basis(Some("DP-1"), Some(&seen), &screens);
+        assert_eq!(size(&basis), (Some("DP-1"), 3840, 2160));
+        assert_eq!(basis.evidence, DisplayEvidence::Native);
+        // An observation of the screen with no size: the output's own.
+        let unsized_seen = ObservedDisplay {
+            names: vec!["eDP-1".to_string()],
+            ..Default::default()
+        };
+        assert_eq!(
+            size(&profile_basis(Some("eDP-1"), Some(&unsized_seen), &screens)),
+            (Some("eDP-1"), 2560, 1440)
+        );
+    }
+
+    #[test]
+    fn an_output_the_list_lacks_gets_the_values_of_velas_screen() {
+        let screens = screens(vec![output("DP-1", 3840, 2160, 0), output("HDMI-1", 1920, 1080, 3840)]);
+        let basis = profile_basis(Some("DVI-0"), None, &screens);
+        assert_eq!(size(&basis), (Some("DVI-0"), 1920, 1080));
+        assert_eq!(size(&profile_basis(None, None, &screens)), (None, 1920, 1080));
+        assert_eq!(size(&profile_basis(None, None, &Screens::default())), (None, 0, 0));
+    }
+
+    #[test]
+    fn a_name_is_connected_when_an_output_has_it() {
+        let screens = Screens {
+            connected: Some(vec![Output {
+                names: vec!["DP-3".to_string(), "XG27UQDMS".to_string()],
+                ..Default::default()
+            }]),
+            ..Default::default()
+        };
+        assert!(screens.is_connected("DP-3"));
+        assert!(screens.is_connected("XG27UQDMS"));
+        assert!(!screens.is_connected("HDMI-1"));
+        // Nothing to tell by: every name stands.
+        assert!(Screens::default().is_connected("HDMI-1"));
+        let nameless = Screens {
+            connected: Some(vec![Output::default()]),
+            ..Default::default()
+        };
+        assert!(nameless.is_connected("HDMI-1"));
+    }
 
     #[cfg(target_os = "macos")]
     #[test]

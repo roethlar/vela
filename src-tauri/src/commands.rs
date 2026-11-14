@@ -4291,13 +4291,6 @@ fn inherited_window_state(record: &PlaybackWindowRecord) -> playback::PlaybackWi
         .unwrap_or_default()
 }
 
-/// The screen the last external play's mpv window was on, for the next play.
-fn inherited_screen_name(record: &PlaybackWindowRecord) -> Option<String> {
-    record.last_external().and_then(|last| {
-        last.observation.display_snapshot().screen_name().cloned()
-    })
-}
-
 /// What a play that has ended hands to the settings to remember: the player
 /// that ran it, how it left its window, and the screen. Only while it is
 /// still the last play that started in mpv's own window, the one the next
@@ -4450,13 +4443,15 @@ fn remember_window_on_exit_with<'a>(
 /// How a play opens its mpv window: as the last external play of this run
 /// left it, or, when there has been none, as `first_of_run` says. What this
 /// run observed always wins over the setting, and embedded plays in between
-/// do not make the setting apply again (review finding pw-6).
+/// do not make the setting apply again (review finding pw-6). The screen it
+/// opens on is not decided here but with the play's copy, by the same rule
+/// (`screen_for_play`).
 fn opening_window(
     record: &PlaybackWindowRecord,
-    first_of_run: config::OpeningWindow,
-) -> config::OpeningWindow {
+    first_of_run: playback::PlaybackWindowState,
+) -> playback::PlaybackWindowState {
     if record.last_external().is_some() {
-        (inherited_window_state(record), inherited_screen_name(record))
+        inherited_window_state(record)
     } else {
         first_of_run
     }
@@ -4902,43 +4897,79 @@ struct PlaybackSelection {
     /// it falls back (`select_playback_version`): decided with the settings
     /// the copy was chosen with, before the copy was ranked for its screen.
     player: crate::player::PlayerChoice,
-    /// The screen the copy was ranked for, when a Compatible choice was made
-    /// from a play's observation. The play opens there (review finding pw-1).
-    ranked_screen: Option<RankedScreen>,
+    /// The output the play is shown on, by name, decided once before the
+    /// copy was chosen (`screen_for_play`); a Compatible copy was ranked for
+    /// it. The launch asks for this output and no other, whichever player
+    /// ends up running the play (review findings pw-1 and pw-2). `None` only
+    /// when not even the screen holding Vela's window has a name.
+    screen: Option<String>,
 }
 
-/// The screen a Compatible copy was ranked for, as it was when the ranking
-/// was made, from a play's observation (`compatibility_display`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-enum RankedScreen {
-    /// The screen the observation names.
-    Named(String),
-    /// The observation names no screen; the ranking then named the screen
-    /// holding Vela's window (`display::detect_profile`).
-    VelasScreen,
+/// The screen a play is to be shown on, decided once, before its copy is
+/// chosen (`screen_for_play`).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct PlayScreen {
+    /// The output, by name.
+    name: Option<String>,
+    /// The play's observation the name was taken from, if it was: its size
+    /// counts as the output's size for the ranking (`display::profile_basis`).
+    observed: Option<display::ObservedDisplay>,
 }
 
-impl RankedScreen {
-    fn of(observed: &display::ObservedDisplay) -> Self {
-        observed
-            .screen_name()
-            .map_or(Self::VelasScreen, |name| Self::Named(name.clone()))
-    }
+/// The screen a play is shown on (review findings pw-1 and pw-2). The one
+/// place it is decided; everything after uses what this returns.
+///
+/// For a play in mpv's own window: the screen the last external play's window
+/// was observed on; while this run has had none, the screen saved for the
+/// first window of a run, when the player window setting uses it
+/// (`saved_first_screen`). For a play in the embedded player, which is drawn
+/// in Vela's window: the screen holding Vela's window, except that the exact
+/// automatic successor of an embedded play keeps that play's observed screen.
+/// A name that is not connected now is passed over; what is left is the
+/// screen holding Vela's window, by name.
+fn screen_for_play(
+    record: &PlaybackWindowRecord,
+    replace_session: Option<&str>,
+    upcoming: crate::player::PlayerKind,
+    saved_first_screen: Option<&str>,
+    screens: &display::Screens,
+) -> PlayScreen {
+    let observed = |session: &PlaybackWindowSession| {
+        let display = session.observation.display_snapshot();
+        display.screen_name().cloned().map(|name| PlayScreen {
+            name: Some(name),
+            observed: Some(display),
+        })
+    };
+    let wanted = match upcoming {
+        crate::player::PlayerKind::External => match record.last_external() {
+            Some(last) => observed(last),
+            None => saved_first_screen.map(|name| PlayScreen {
+                name: Some(name.to_string()),
+                observed: None,
+            }),
+        },
+        crate::player::PlayerKind::Embedded => record
+            .latest()
+            .filter(|latest| {
+                latest.player == crate::player::PlayerKind::Embedded
+                    && replace_session == Some(latest.session_id.as_str())
+            })
+            .and_then(observed),
+    };
+    wanted
+        .filter(|wanted| {
+            wanted
+                .name
+                .as_deref()
+                .is_some_and(|name| screens.is_connected(name))
+        })
+        .unwrap_or_else(|| PlayScreen {
+            name: screens.velas.clone(),
+            observed: None,
+        })
 }
 
-/// The screen a play's window opens on, by name; `None` asks for the screen
-/// holding Vela's window. A play whose copy was ranked for an observed screen
-/// opens on that screen: the screen is looked at once, where the copy is
-/// chosen, so that a report of another screen arriving while the stream is
-/// resolved cannot send the window to a screen the copy was not chosen for
-/// (review finding pw-1). Any other play opens on the screen it inherits.
-fn screen_to_open_on(ranked: Option<RankedScreen>, inherited: Option<String>) -> Option<String> {
-    match ranked {
-        Some(RankedScreen::Named(name)) => Some(name),
-        Some(RankedScreen::VelasScreen) => None,
-        None => inherited,
-    }
-}
 
 enum PlaybackSelectionOutcome {
     Ready {
@@ -5025,66 +5056,57 @@ fn completion_watch_backings(completion: &PlaybackCompletion) -> Vec<BackingRef>
     backings
 }
 
-/// The display a Compatible choice is made for: the screen the coming play
-/// will be shown on, as a play observed it (review finding pw-2). Nothing
-/// returned means the display holding Vela's window.
-///
-/// A play that will run in mpv's own window opens it on the screen the last
-/// external play's window was on (`inherited_screen_name`), so that play
-/// counts. A play that will run in the embedded player is shown in Vela's
-/// window, whatever external window came before; the one exception is the
-/// exact automatic successor of an embedded play, which counts that play's
-/// observation.
-fn compatibility_display(
-    record: &PlaybackWindowRecord,
-    replace_session: Option<&str>,
-    upcoming: crate::player::PlayerKind,
-) -> Option<display::ObservedDisplay> {
-    match upcoming {
-        crate::player::PlayerKind::External => record.last_external(),
-        crate::player::PlayerKind::Embedded => record.latest().filter(|latest| {
-            latest.player == crate::player::PlayerKind::Embedded
-                && replace_session == Some(latest.session_id.as_str())
-        }),
-    }
-    .map(|session| session.observation.display_snapshot())
-}
-
-/// What a Compatible choice ranks for, and, when it ranks for a play's
-/// observation, the screen that is (`RankedScreen`), for the play to open
-/// on. `upcoming` is the player the play will run in: the one asked for, or
-/// mpv's own window when the embedded player cannot run (review finding
-/// pw-2). Should an embedded play that could run fall back to mpv's own
-/// window when it starts after all, its copy has been chosen for Vela's
-/// screen.
-async fn playback_compatibility_target(
+/// Decide the screen a play is shown on (`screen_for_play`), from what is
+/// connected now and the record of the plays before it. `upcoming` is the
+/// player that will run the play: the one asked for, or mpv's own window
+/// when the embedded player cannot run (review finding pw-2). Also returns
+/// what was seen of the screens, for the ranking. The screens are looked at
+/// before the record is locked, and the record's lock is held only to decide.
+async fn decide_play_screen(
     state: &AppState,
     replace_session: Option<&str>,
     upcoming: crate::player::PlayerKind,
     cfg: &config::AppConfig,
-) -> Result<Option<(crate::selection::CompatibilityTarget, Option<RankedScreen>)>, PlayFailure> {
-    let Some(app) = state.app_handle.get() else {
-        return Ok(None);
+) -> Result<(PlayScreen, display::Screens), PlayFailure> {
+    let (_, saved_first_screen) = config::first_window_of_run(cfg).map_err(PlayFailure::fatal)?;
+    let screens = match state.app_handle.get() {
+        Some(app) => display::look_at_screens(app).await,
+        None => display::Screens::default(),
     };
-    let observed = {
+    let screen = {
         let current = state
             .playback_window_session
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        compatibility_display(&current, replace_session, upcoming)
+        screen_for_play(
+            &current,
+            replace_session,
+            upcoming,
+            saved_first_screen.as_deref(),
+            &screens,
+        )
     };
-    let ranked_screen = observed.as_ref().map(RankedScreen::of);
-    let detected = display::detect_profile(app, observed).await;
+    Ok((screen, screens))
+}
+
+/// What a Compatible choice ranks for: the profile of the output the play
+/// was decided to be shown on (`screen_for_play`), with the user's display
+/// overrides on top.
+async fn compatibility_target(
+    app: &tauri::AppHandle,
+    screen: &PlayScreen,
+    screens: &display::Screens,
+    cfg: &config::AppConfig,
+) -> Result<crate::selection::CompatibilityTarget, PlayFailure> {
+    let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), screens);
+    let detected = display::profile_of(app, basis).await;
     let overrides = playback_display_overrides(cfg).map_err(PlayFailure::fatal)?;
     let effective = display::apply_overrides(&detected, overrides);
-    Ok(Some((
-        crate::selection::CompatibilityTarget {
-            width: effective.width_px,
-            height: effective.height_px,
-            hdr: effective.hdr,
-        },
-        ranked_screen,
-    )))
+    Ok(crate::selection::CompatibilityTarget {
+        width: effective.width_px,
+        height: effective.height_px,
+        hdr: effective.hdr,
+    })
 }
 
 fn playback_source_choices(
@@ -5211,7 +5233,9 @@ async fn select_playback_version(
     // one asked for (review finding pw-2). Whether the embedded player can
     // run is asked only for a play that wants it (the answer comes from the
     // window). A play that can run embedded now and then cannot start there
-    // after all still falls back at the start (`EmbeddedFallback`).
+    // after all still falls back at the start (`EmbeddedFallback`), and its
+    // mpv window then opens on the screen decided below, which its copy was
+    // ranked for (review finding pw-2).
     let embedded_available = match wanted_player {
         crate::player::PlayerKind::External => Ok(()),
         crate::player::PlayerKind::Embedded => {
@@ -5299,6 +5323,14 @@ async fn select_playback_version(
         }
     }
 
+    // The screen this play is shown on, decided once, here, before the copy
+    // is chosen, for every source policy: a Compatible copy is ranked for it,
+    // and the launch asks for it and for no other (review findings pw-1 and
+    // pw-2). Decided after the probes, so that a player that has just ended
+    // has had that long to report where its window was.
+    let (screen, screens) =
+        decide_play_screen(state, replace_session, upcoming_player.kind, &cfg).await?;
+
     if versions.is_empty() {
         legacy.sort_by(|left, right| left.0.source_id.cmp(&right.0.source_id));
         let Some((backing, _source, raw)) = legacy.into_iter().next() else {
@@ -5327,7 +5359,7 @@ async fn select_playback_version(
             version_id: None,
             item: selected_item,
             player: upcoming_player,
-            ranked_screen: None,
+            screen: screen.name,
             }),
             ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
         });
@@ -5375,13 +5407,11 @@ async fn select_playback_version(
             AskSourceDecision::NoCandidate => {}
         }
     }
-    let (target, ranked_screen) = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
-        match playback_compatibility_target(state, replace_session, upcoming_player.kind, &cfg).await? {
-            Some((target, ranked_screen)) => (Some(target), ranked_screen),
-            None => (None, None),
+    let target = match state.app_handle.get() {
+        Some(app) if policy == crate::selection::PlaybackSourcePolicy::Compatible => {
+            Some(compatibility_target(app, &screen, &screens, &cfg).await?)
         }
-    } else {
-        (None, None)
+        _ => None,
     };
     crate::selection::rank_candidates(&mut candidates, policy, target);
     let winner = candidates
@@ -5406,7 +5436,7 @@ async fn select_playback_version(
             version_id: Some(version.version_id),
             item: selected_item,
             player: upcoming_player,
-            ranked_screen,
+            screen: screen.name,
         }),
         ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
     })
@@ -5592,7 +5622,8 @@ async fn play_by_key_locked(
     // How this play's window opens if it is the first external play of this
     // run: the player window setting. Read here for the same reason as the
     // player above; used only when this run has no window of its own yet.
-    let first_of_run = config::load_config()
+    // Its screen is the one decided with the copy (`selection.screen`).
+    let (first_of_run, _) = config::load_config()
         .map_err(|_| "could not read Vela settings".to_string())
         .and_then(|cfg| config::first_window_of_run(&cfg))
         .map_err(PlayFailure::fatal)?;
@@ -5632,23 +5663,19 @@ async fn play_by_key_locked(
     // while a slow server prepares this play. Every play, manual or automatic,
     // opens its window the way the last external play that started left it;
     // until there is one in this run, as the player window setting says.
-    let (inherited_window_state, inherited_screen_name) = {
+    let inherited_window_state = {
         let current = state
             .playback_window_session
             .lock()
             .unwrap_or_else(|e| e.into_inner());
         opening_window(&current, first_of_run)
     };
-    // The screen, though, is the one the copy was ranked for when a
-    // Compatible choice looked at one before the stream was resolved
-    // (review finding pw-1).
-    let screen_name = match screen_to_open_on(selection.ranked_screen.clone(), inherited_screen_name) {
-        Some(name) => Some(name),
-        None => match state.app_handle.get() {
-            Some(app) => display::current_screen_name(app).await,
-            None => None,
-        },
-    };
+    // The screen, though, was decided with the copy, before the stream was
+    // resolved, and is not looked at again: neither where Vela's window is
+    // now nor what the record says now (review finding pw-1). Whichever
+    // player runs the play is asked for it, also mpv's own window when the
+    // embedded player cannot start the play after all (review finding pw-2).
+    let screen_name = selection.screen.clone();
     // How Vela opens this window stands until mpv reports otherwise, even
     // when the reader never connects (pw-9). The requested screen is not a
     // measurement of where the compositor actually placed the window.
@@ -8318,25 +8345,23 @@ mod tests {
         // play is left windowed; an embedded play follows; the next external
         // play opens windowed, as the first external play left its window.
         // Published the way the launch path publishes.
-        let full_screen = (
-            playback::PlaybackWindowState {
-                fullscreen: Some(true),
-                ..Default::default()
-            },
-            None,
-        );
+        let full_screen = playback::PlaybackWindowState {
+            fullscreen: Some(true),
+            ..Default::default()
+        };
         let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
         assert_eq!(
-            opening_window(&slot.lock().unwrap(), full_screen.clone()),
+            opening_window(&slot.lock().unwrap(), full_screen),
             full_screen,
             "the first external window of a run follows the setting"
         );
+        assert_eq!(external_screen(&slot.lock().unwrap(), None).as_deref(), Some(VELAS));
         publish_started_play(Ok(()), &slot, windowed_session("external"), || {}).unwrap();
         let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
         publish_started_play(Ok(()), &slot, embedded, || {}).unwrap();
         let record = slot.lock().unwrap();
         assert_eq!(
-            opening_window(&record, full_screen),
+            (opening_window(&record, full_screen), external_screen(&record, None)),
             (
                 playback::PlaybackWindowState {
                     fullscreen: Some(false),
@@ -8354,7 +8379,10 @@ mod tests {
         assert_eq!(record.latest().unwrap().session_id, "embedded");
         assert_eq!(
             window_to_remember(&record, "external").map(|(_, window, screen)| (window, screen)),
-            Some(opening_window(&record, Default::default()))
+            Some((
+                opening_window(&record, Default::default()),
+                external_screen(&record, None)
+            ))
         );
         assert_eq!(window_to_remember(&record, "embedded"), None);
     }
@@ -8370,8 +8398,8 @@ mod tests {
         publish_started_play(Ok(()), &slot, windowed_session("external"), || {}).unwrap();
         let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
         publish_started_play(Ok(()), &slot, embedded, || {}).unwrap();
-        let in_this_run = opening_window(&slot.lock().unwrap(), Default::default());
-        assert_eq!(in_this_run.1.as_deref(), Some("HDMI-1"));
+        let in_this_run = external_screen(&slot.lock().unwrap(), None);
+        assert_eq!(in_this_run.as_deref(), Some("HDMI-1"));
 
         // The embedded play's end saves nothing.
         write_play_end(|change| settings.update(change), &slot, "embedded", |_| {}).unwrap();
@@ -8413,10 +8441,14 @@ mod tests {
             }
         );
         assert_eq!(
-            inherited_screen_name(&published([current])).as_deref(),
+            external_screen(&published([current]), None).as_deref(),
             Some("DP-1")
         );
     }
+
+    // What these tests said of `inherited_screen_name` (no screen inherited,
+    // so the launch asked for the screen holding Vela's window) they now say
+    // of `screen_for_play`, which names that screen at once: `VELAS`.
 
     #[test]
     fn nothing_published_inherits_nothing() {
@@ -8424,7 +8456,10 @@ mod tests {
             inherited_window_state(&PlaybackWindowRecord::default()),
             playback::PlaybackWindowState::default()
         );
-        assert_eq!(inherited_screen_name(&PlaybackWindowRecord::default()), None);
+        assert_eq!(
+            external_screen(&PlaybackWindowRecord::default(), None).as_deref(),
+            Some(VELAS)
+        );
         // A play opened without known state that has reported nothing leaves
         // both unknown, so the configured options still decide.
         let silent = PlaybackWindowSession {
@@ -8436,7 +8471,7 @@ mod tests {
             inherited_window_state(&published([silent.clone()])),
             playback::PlaybackWindowState::default()
         );
-        assert_eq!(inherited_screen_name(&published([silent])), None);
+        assert_eq!(external_screen(&published([silent]), None).as_deref(), Some(VELAS));
     }
 
     #[test]
@@ -8446,9 +8481,9 @@ mod tests {
             mpv_window_mode: Some("fullscreen".to_string()),
             ..Default::default()
         };
-        let (opened, _) = opening_window(
+        let opened = opening_window(
             &slot.lock().unwrap(),
-            config::first_window_of_run(&cfg).unwrap(),
+            config::first_window_of_run(&cfg).unwrap().0,
         );
         assert_eq!(opened.fullscreen, Some(true));
         publish_started_play(
@@ -8463,10 +8498,12 @@ mod tests {
         ).unwrap();
 
         // No IPC events at all. A contrary first-window setting must not
-        // disguise whether this run actually handed the fullscreen on.
-        let next = opening_window(&slot.lock().unwrap(), stored_first_window());
+        // disguise whether this run actually handed the fullscreen on. The
+        // play reported no screen either, so the next one is decided for the
+        // screen holding Vela's window, not for the setting's.
+        let next = opens(&slot.lock().unwrap(), stored_first_window());
         assert_eq!(
-            next, (opened, None),
+            next, (opened, Some(VELAS.to_string())),
             "the next play must inherit fullscreen even when the prior reader never connected"
         );
     }
@@ -8570,7 +8607,33 @@ mod tests {
             inherited_window_state(&published([embedded.clone()])),
             playback::PlaybackWindowState::default()
         );
-        assert_eq!(inherited_screen_name(&published([embedded])), None);
+        assert_eq!(external_screen(&published([embedded]), None).as_deref(), Some(VELAS));
+    }
+
+    /// The name of the screen holding Vela's window in these tests.
+    const VELAS: &str = "VELAS-SCREEN";
+
+    /// Screens as seen when the connected outputs cannot be listed: every
+    /// name is taken as it is.
+    fn unlisted_screens() -> display::Screens {
+        display::Screens {
+            velas: Some(VELAS.to_string()),
+            ..Default::default()
+        }
+    }
+
+    /// The screen a play in mpv's own window is decided to be shown on, the
+    /// connected outputs unlisted, `saved` the screen the setting saved for
+    /// the first window of a run.
+    fn external_screen(record: &PlaybackWindowRecord, saved: Option<&str>) -> Option<String> {
+        screen_for_play(
+            record,
+            None,
+            crate::player::PlayerKind::External,
+            saved,
+            &unlisted_screens(),
+        )
+        .name
     }
 
     /// What the player window setting gives the first play of a run: here a
@@ -8586,11 +8649,20 @@ mod tests {
         )
     }
 
+    /// `opening_window` and `screen_for_play` together, as the play path
+    /// uses them: how the mpv window opens, and where.
+    fn opens(record: &PlaybackWindowRecord, first_of_run: config::OpeningWindow) -> config::OpeningWindow {
+        (
+            opening_window(record, first_of_run.0),
+            external_screen(record, first_of_run.1.as_deref()),
+        )
+    }
+
     #[test]
     fn what_this_run_observed_wins_over_the_stored_window() {
         let current = observed_window_session("last", crate::player::PlayerKind::External);
         assert_eq!(
-            opening_window(&published([current]), stored_first_window()),
+            opens(&published([current]), stored_first_window()),
             (
                 playback::PlaybackWindowState {
                     fullscreen: Some(true),
@@ -8608,22 +8680,22 @@ mod tests {
             observation: playback::WindowStateObservation::default(),
         };
         assert_eq!(
-            opening_window(&published([silent]), stored_first_window()),
-            config::OpeningWindow::default()
+            opens(&published([silent]), stored_first_window()),
+            (playback::PlaybackWindowState::default(), Some(VELAS.to_string()))
         );
     }
 
     #[test]
     fn the_first_window_of_a_run_comes_from_the_setting() {
         assert_eq!(
-            opening_window(&PlaybackWindowRecord::default(), stored_first_window()),
+            opens(&PlaybackWindowRecord::default(), stored_first_window()),
             stored_first_window()
         );
         // An embedded play opened no mpv window, so the next external play is
         // still the first window of the run.
         let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
         assert_eq!(
-            opening_window(&published([embedded]), stored_first_window()),
+            opens(&published([embedded]), stored_first_window()),
             stored_first_window()
         );
     }
@@ -8884,37 +8956,141 @@ mod tests {
         assert_eq!(cfg.mpv_window, Some(stored));
     }
 
+    // ---- the screen a play is shown on, decided once (review findings pw-1
+    // and pw-2): `screen_for_play`, `display::profile_basis`, `rank_and_place`
+
+    /// An output connected now, by these names, at this size.
+    fn output(names: &[&str], width_px: u32, height_px: u32) -> display::Output {
+        display::Output {
+            names: names.iter().map(|name| name.to_string()).collect(),
+            width_px,
+            height_px,
+            position: None,
+        }
+    }
+
+    /// Screens as seen with Vela's window on `velas`, these outputs connected.
+    fn screens_with(velas: &str, connected: &[display::Output]) -> display::Screens {
+        display::Screens {
+            velas: Some(velas.to_string()),
+            velas_output: connected
+                .iter()
+                .find(|output| output.names.iter().any(|name| name == velas))
+                .cloned(),
+            connected: Some(connected.to_vec()),
+        }
+    }
+
+    /// DP-1, a 4K HDR screen, and HDMI-1, a 1080p one.
+    fn two_screens() -> [display::Output; 2] {
+        [output(&["DP-1"], 3840, 2160), output(&["HDMI-1"], 1920, 1080)]
+    }
+
+    /// A play whose window was observed on these screens, at this size.
+    fn session_observed_on(
+        session_id: &str,
+        player: crate::player::PlayerKind,
+        names: &[&str],
+        size: Option<(u32, u32)>,
+    ) -> PlaybackWindowSession {
+        let observation = playback::WindowStateObservation::default();
+        let mut events = vec![("display-names", serde_json::json!(names))];
+        if let Some((width, height)) = size {
+            events.push(("display-width", serde_json::json!(width)));
+            events.push(("display-height", serde_json::json!(height)));
+        }
+        for (name, data) in events {
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change",
+                "name": name,
+                "data": data
+            }));
+        }
+        PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            player,
+            observation,
+        }
+    }
+
+    /// Two copies of one title: 4K HDR and 1080p SDR.
+    fn two_copies() -> Vec<crate::selection::PlaybackCandidate> {
+        let copy = |version: &str, width, height, hdr| crate::selection::PlaybackCandidate {
+            source_id: "server".to_string(),
+            version_id: version.to_string(),
+            width,
+            height,
+            hdr,
+            bitrate: 10,
+            direct_play_rank: 0,
+            locality: crate::locality::EndpointLocality::Lan,
+        };
+        vec![copy("4k-hdr", 3840, 2160, true), copy("1080p-sdr", 1920, 1080, false)]
+    }
+
+    /// The Compatible target for the decided screen, as `compatibility_target`
+    /// makes it, with its HDR state given (the system is not asked here).
+    fn target_for(
+        screen: &PlayScreen,
+        screens: &display::Screens,
+        hdr: display::HdrState,
+    ) -> crate::selection::CompatibilityTarget {
+        let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), screens);
+        crate::selection::CompatibilityTarget {
+            width: basis.width_px,
+            height: basis.height_px,
+            hdr,
+        }
+    }
+
+    /// The copy a Compatible choice gives and where the play is shown.
+    fn compatible_choice(
+        screen: &PlayScreen,
+        screens: &display::Screens,
+        hdr: display::HdrState,
+    ) -> (String, Option<String>) {
+        let target = target_for(screen, screens, hdr);
+        let mut copies = two_copies();
+        crate::selection::rank_candidates(
+            &mut copies,
+            crate::selection::PlaybackSourcePolicy::Compatible,
+            Some(target),
+        );
+        (copies[0].version_id.clone(), screen.name.clone())
+    }
+
     #[test]
     fn a_compatible_choice_follows_the_screen_the_play_opens_on() {
+        // Per player and per record. Where this test said "nothing" (the
+        // screen holding Vela's window, looked up at the launch), the screen
+        // is now named at once: VELAS.
         use crate::player::PlayerKind::{Embedded, External};
-        let names = |observed: Option<display::ObservedDisplay>| observed.map(|value| value.names);
+        let screens = unlisted_screens();
+        let decide = |record: &PlaybackWindowRecord, replace: Option<&str>, upcoming| {
+            screen_for_play(record, replace, upcoming, None, &screens).name
+        };
+        let named = |name: &str| Some(name.to_string());
         let external = published([observed_window_session("last", External)]);
         assert_eq!(
-            names(compatibility_display(&external, None, External)),
-            Some(vec!["DP-1".to_string()]),
+            decide(&external, None, External),
+            named("DP-1"),
             "a manual play opens on the last window's screen, so it is chosen for that one"
         );
-        assert_eq!(
-            names(compatibility_display(&external, Some("other"), External)),
-            Some(vec!["DP-1".to_string()])
-        );
+        assert_eq!(decide(&external, Some("other"), External), named("DP-1"));
         let embedded = published([observed_window_session("embedded", Embedded)]);
         assert_eq!(
-            names(compatibility_display(&embedded, Some("embedded"), Embedded)),
-            Some(vec!["DP-1".to_string()]),
+            decide(&embedded, Some("embedded"), Embedded),
+            named("DP-1"),
             "an embedded play's exact successor keeps its observed display"
         );
-        assert_eq!(compatibility_display(&embedded, None, Embedded), None);
-        assert_eq!(compatibility_display(&embedded, Some("stale"), Embedded), None);
+        assert_eq!(decide(&embedded, None, Embedded), named(VELAS));
+        assert_eq!(decide(&embedded, Some("stale"), Embedded), named(VELAS));
         assert_eq!(
-            compatibility_display(&embedded, None, External),
-            None,
+            decide(&embedded, None, External),
+            named(VELAS),
             "no mpv window yet in this run: the next one opens on Vela's screen"
         );
-        assert_eq!(
-            compatibility_display(&PlaybackWindowRecord::default(), None, External),
-            None
-        );
+        assert_eq!(decide(&PlaybackWindowRecord::default(), None, External), named(VELAS));
         // An embedded play after an external one: the next play in mpv's
         // window opens on the external play's screen, so that is the one it
         // counts; the next embedded play is shown in Vela's window.
@@ -8922,94 +9098,223 @@ mod tests {
             windowed_session("external"),
             observed_window_session("embedded", Embedded),
         ]);
-        assert_eq!(
-            names(compatibility_display(&both, None, External)),
-            Some(vec!["HDMI-1".to_string()])
-        );
-        assert_eq!(
-            names(compatibility_display(&both, Some("embedded"), External)),
-            Some(vec!["HDMI-1".to_string()])
-        );
-        assert_eq!(
-            names(compatibility_display(&both, Some("embedded"), Embedded)),
-            Some(vec!["DP-1".to_string()])
-        );
-        assert_eq!(compatibility_display(&both, None, Embedded), None);
+        assert_eq!(decide(&both, None, External), named("HDMI-1"));
+        assert_eq!(decide(&both, Some("embedded"), External), named("HDMI-1"));
+        assert_eq!(decide(&both, Some("embedded"), Embedded), named("DP-1"));
+        assert_eq!(decide(&both, None, Embedded), named(VELAS));
     }
 
     #[test]
     fn a_play_opens_on_the_screen_its_copy_was_ranked_for() {
-        // Review finding pw-1, the reviewer's probe: the copy is ranked for
-        // DP-1, where the last mpv window was; while the stream is resolved
-        // that mpv reports HDMI-1. The play opens on DP-1, the screen its copy
-        // was chosen for. The steps are the play path's, in its order.
+        // Review finding pw-1, the reviewer's first probe: the copy is ranked
+        // for DP-1, where the last mpv window was; while the stream is
+        // resolved that mpv reports HDMI-1. The play opens on DP-1, the screen
+        // its copy was chosen for. The steps are the play path's, in its order.
         use crate::player::PlayerKind::External;
-        let last = observed_window_session("last", External);
-        let slot = std::sync::Mutex::new(published([last.clone()]));
-        // Choosing the copy (`playback_compatibility_target`).
-        let observed = compatibility_display(&slot.lock().unwrap(), None, External)
-            .expect("the last mpv window's screen is ranked for");
-        let ranked = Some(RankedScreen::of(&observed));
-        assert_eq!(ranked, Some(RankedScreen::Named("DP-1".to_string())));
-        // A late report while the stream is resolved.
+        let last = session_observed_on("last", External, &["DP-1"], Some((3840, 2160)));
         last.observation.apply_ipc_event(&serde_json::json!({
-            "event": "property-change",
-            "name": "display-names",
-            "data": ["HDMI-1"]
+            "event": "property-change", "name": "fullscreen", "data": false
         }));
-        // After resolution: the window's state is still looked at now...
-        let (window, inherited) = opening_window(&slot.lock().unwrap(), Default::default());
+        let slot = std::sync::Mutex::new(published([last.clone()]));
+        let screens = screens_with("HDMI-1", &two_screens());
+        // Choosing the copy (`select_playback_version`).
+        let screen = screen_for_play(&slot.lock().unwrap(), None, External, None, &screens);
+        let (copy, destination) = compatible_choice(&screen, &screens, display::HdrState::Enabled);
+        assert_eq!((copy.as_str(), destination.as_deref()), ("4k-hdr", Some("DP-1")));
+        // A late report while the stream is resolved.
+        for (name, data) in [
+            ("display-names", serde_json::json!(["HDMI-1"])),
+            ("fullscreen", serde_json::json!(true)),
+        ] {
+            last.observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": name, "data": data
+            }));
+        }
+        // After resolution the window's state is still looked at now...
+        let window = opening_window(&slot.lock().unwrap(), Default::default());
         assert_eq!(window.fullscreen, Some(true));
-        assert_eq!(inherited.as_deref(), Some("HDMI-1"));
-        // ...and the screen is the one the copy was ranked for.
+        // ...and the screen is the one carried, which the copy was ranked
+        // for; deciding again would give the other one.
         assert_eq!(
-            screen_to_open_on(ranked, inherited.clone()).as_deref(),
-            Some("DP-1"),
-            "the play must not open on a screen its copy was not chosen for"
+            screen_for_play(&slot.lock().unwrap(), None, External, None, &screens).name.as_deref(),
+            Some("HDMI-1")
         );
-        // No Compatible ranking: the screen looked at after resolution.
-        assert_eq!(screen_to_open_on(None, inherited).as_deref(), Some("HDMI-1"));
-        // An observation that names no screen was ranked with the name of the
-        // screen holding Vela's window: the play opens there.
-        let unnamed = display::ObservedDisplay {
-            names: Vec::new(),
-            width_px: Some(1920),
-            height_px: Some(1080),
+        assert_eq!(destination.as_deref(), Some("DP-1"));
+    }
+
+    #[test]
+    fn the_screen_holding_velas_window_is_carried_by_name() {
+        // Review finding pw-1, comment 1: a play with no screen to inherit
+        // is ranked for the screen holding Vela's window, and must open on
+        // that screen, by name, even if Vela's window moves to another
+        // screen while the stream is resolved.
+        use crate::player::PlayerKind::External;
+        let record = PlaybackWindowRecord::default();
+        let before = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&record, None, External, None, &before);
+        assert_eq!(screen.name.as_deref(), Some("HDMI-1"), "a concrete output, by name");
+        let (copy, destination) = compatible_choice(&screen, &before, display::HdrState::Disabled);
+        assert_eq!(copy, "1080p-sdr", "ranked for HDMI-1, a 1080p SDR screen");
+        assert_eq!(destination.as_deref(), Some("HDMI-1"));
+        // Vela's window is moved to DP-1. A second look would now name DP-1,
+        // which the 1080p copy was not chosen for; the selection keeps
+        // HDMI-1, and the launch takes nothing else (the play path's text is
+        // held by tests/player-window-ui.test.mjs).
+        let after = screens_with("DP-1", &two_screens());
+        assert_eq!(
+            screen_for_play(&record, None, External, None, &after).name.as_deref(),
+            Some("DP-1")
+        );
+        assert_eq!(destination.as_deref(), Some("HDMI-1"));
+    }
+
+    #[test]
+    fn the_first_play_of_a_run_is_ranked_for_the_saved_screen_it_opens_on() {
+        // Review finding pw-1, comment 4, and the plan's two "left as they
+        // are" items about the first window's screen: nothing played yet in
+        // this run, the setting saved DP-1, Vela's window is on HDMI-1.
+        use crate::player::PlayerKind::External;
+        let record = PlaybackWindowRecord::default();
+        let cfg = config::AppConfig {
+            mpv_window: Some(config::MpvWindow {
+                screen: Some("DP-1".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
         };
-        assert_eq!(RankedScreen::of(&unnamed), RankedScreen::VelasScreen);
+        let (_, saved) = config::first_window_of_run(&cfg).unwrap();
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&record, None, External, saved.as_deref(), &screens);
+        assert_eq!(screen.name.as_deref(), Some("DP-1"));
         assert_eq!(
-            screen_to_open_on(Some(RankedScreen::VelasScreen), Some("HDMI-1".to_string())),
-            None
+            compatible_choice(&screen, &screens, display::HdrState::Enabled),
+            ("4k-hdr".to_string(), Some("DP-1".to_string())),
+            "ranked for the saved screen, the one it opens on"
         );
-        // A window across two screens reports both names. The ranking
-        // (`display::detect_profile`) ranks for the first, by
-        // `ObservedDisplay::screen_name`; the play opens on that one.
-        let across = display::ObservedDisplay {
-            names: vec!["DP-1".to_string(), "HDMI-1".to_string()],
-            width_px: Some(3840),
-            height_px: Some(2160),
+        // The saved screen is no longer connected: the play goes to Vela's
+        // screen, by name, and is ranked for it.
+        let unplugged = screens_with("HDMI-1", &[output(&["HDMI-1"], 1920, 1080)]);
+        let screen = screen_for_play(&record, None, External, saved.as_deref(), &unplugged);
+        assert_eq!(
+            compatible_choice(&screen, &unplugged, display::HdrState::Disabled),
+            ("1080p-sdr".to_string(), Some("HDMI-1".to_string()))
+        );
+        // A setting that does not use the saved screen sends the first play
+        // to Vela's screen.
+        let full_screen = config::AppConfig {
+            mpv_window_mode: Some("fullscreen".to_string()),
+            ..cfg
         };
-        assert_eq!(across.screen_name().map(String::as_str), Some("DP-1"));
+        let (_, saved) = config::first_window_of_run(&full_screen).unwrap();
+        assert_eq!(saved, None);
         assert_eq!(
-            RankedScreen::of(&across),
-            RankedScreen::Named("DP-1".to_string()),
-            "the screen carried is the one the ranking names"
+            screen_for_play(&record, None, External, saved.as_deref(), &screens).name.as_deref(),
+            Some("HDMI-1")
         );
+    }
+
+    #[test]
+    fn a_screen_that_is_not_connected_is_passed_over() {
+        // Review finding pw-1, comment 2, what is checked: the output a play
+        // is decided to be shown on is connected when it is decided.
+        use crate::player::PlayerKind::{Embedded, External};
+        let only_hdmi = screens_with("HDMI-1", &[output(&["HDMI-1"], 1920, 1080)]);
+        let on_dp1 = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let screen = screen_for_play(&on_dp1, None, External, None, &only_hdmi);
+        assert_eq!(
+            screen,
+            PlayScreen { name: Some("HDMI-1".to_string()), observed: None },
+            "the last window's screen is gone: Vela's screen, and the observation does not count"
+        );
+        assert_eq!(
+            display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), &only_hdmi).width_px,
+            1920
+        );
+        // An embedded play's successor whose screen is gone.
+        let embedded = published([session_observed_on("embedded", Embedded, &["DP-1"], None)]);
+        assert_eq!(
+            screen_for_play(&embedded, Some("embedded"), Embedded, None, &only_hdmi).name.as_deref(),
+            Some("HDMI-1")
+        );
+        // Connected under another of its names (Wayland: the model Tauri
+        // gives and the connector mpv gives).
+        let both_names = screens_with("XG27UQDMS", &[output(&["DP-1", "XG27UQDMS"], 3840, 2160)]);
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &both_names).name.as_deref(),
+            Some("DP-1")
+        );
+        // The outputs could not be listed, or the list names none: nothing
+        // can be told, and the name stands as before.
+        for unknown in [
+            unlisted_screens(),
+            display::Screens {
+                velas: Some(VELAS.to_string()),
+                velas_output: None,
+                connected: Some(vec![output(&[], 1920, 1080)]),
+            },
+        ] {
+            assert_eq!(
+                screen_for_play(&on_dp1, None, External, None, &unknown).name.as_deref(),
+                Some("DP-1")
+            );
+        }
+        // Nothing is named at all: no name, as before.
+        let nameless = display::Screens {
+            velas: None,
+            velas_output: None,
+            connected: Some(vec![output(&["HDMI-1"], 1920, 1080)]),
+        };
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &nameless),
+            PlayScreen::default()
+        );
+    }
+
+    #[test]
+    fn an_observation_across_several_screens_is_shown_on_its_first() {
+        // Review finding pw-1, comment 3: a window across several screens
+        // reports them all; the screen decided, ranked for and opened on is
+        // the first, with two screens and three, in either order.
+        use crate::player::PlayerKind::External;
+        let three = [
+            output(&["DP-1"], 3840, 2160),
+            output(&["HDMI-1"], 1920, 1080),
+            output(&["eDP-1"], 2560, 1440),
+        ];
+        for (names, size, first, connected) in [
+            (vec!["DP-1", "HDMI-1"], (3000, 2000), "DP-1", &three[..2]),
+            (vec!["HDMI-1", "DP-1"], (1600, 900), "HDMI-1", &three[..2]),
+            (vec!["eDP-1", "DP-1", "HDMI-1"], (2400, 1350), "eDP-1", &three[..]),
+            (vec!["HDMI-1", "eDP-1", "DP-1"], (1280, 720), "HDMI-1", &three[..]),
+        ] {
+            let record = published([session_observed_on("last", External, &names, Some(size))]);
+            let screens = screens_with("DP-1", connected);
+            let screen = screen_for_play(&record, None, External, None, &screens);
+            assert_eq!(screen.name.as_deref(), Some(first), "{names:?}");
+            let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), &screens);
+            assert_eq!(
+                (basis.name.as_deref(), basis.width_px, basis.height_px),
+                (Some(first), size.0, size.1),
+                "ranked for the screen it is shown on, at the size observed there: {names:?}"
+            );
+            let (_, destination) = compatible_choice(&screen, &screens, display::HdrState::Disabled);
+            assert_eq!(destination.as_deref(), Some(first));
+        }
     }
 
     #[test]
     fn an_embedded_play_is_ranked_for_the_screen_holding_velas_window() {
         // Review finding pw-2, the reviewer's case: the last play ran in
         // mpv's own window on DP-1, and the user's next play will run in the
-        // embedded player, inside Vela's window. It is ranked for the screen
-        // that holds Vela's window (nothing observed), not for DP-1.
-        let external = published([observed_window_session(
-            "external",
-            crate::player::PlayerKind::External,
-        )]);
+        // embedded player, inside Vela's window, on HDMI-1. It is ranked for
+        // HDMI-1, not for DP-1.
+        use crate::player::PlayerKind::{Embedded, External};
+        let external = published([session_observed_on("external", External, &["DP-1"], Some((3840, 2160)))]);
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&external, None, Embedded, None, &screens);
         assert_eq!(
-            compatibility_display(&external, None, crate::player::PlayerKind::Embedded),
-            None
+            compatible_choice(&screen, &screens, display::HdrState::Disabled),
+            ("1080p-sdr".to_string(), Some("HDMI-1".to_string()))
         );
     }
 
@@ -9020,27 +9325,26 @@ mod tests {
         // The play runs in mpv's own window, which opens on the last mpv
         // window's screen, DP-1; its copy is ranked for DP-1 too. The steps
         // are the play path's, in its order: the player is chosen, then the
-        // copy is ranked for that player's screen, then the window opens.
+        // screen is decided, the copy ranked for it, and the window opens.
         use crate::player::PlayerKind::{Embedded, External};
-        let slot = std::sync::Mutex::new(published([observed_window_session("last", External)]));
+        let record = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let screens = screens_with("HDMI-1", &two_screens());
         let choice = crate::player::choose(
             Embedded,
             &Err(crate::player::EmbeddedUnavailable::NeedsRestart),
         );
         assert_eq!(choice.kind, External);
-        let observed = compatibility_display(&slot.lock().unwrap(), None, choice.kind)
-            .expect("the copy is ranked for the mpv window's screen");
-        let ranked = Some(RankedScreen::of(&observed));
-        let (_, inherited) = opening_window(&slot.lock().unwrap(), Default::default());
+        let screen = screen_for_play(&record, None, choice.kind, None, &screens);
         assert_eq!(
-            screen_to_open_on(ranked, inherited).as_deref(),
-            Some("DP-1"),
+            compatible_choice(&screen, &screens, display::HdrState::Enabled),
+            ("4k-hdr".to_string(), Some("DP-1".to_string())),
             "the play opens on the screen its copy was ranked for"
         );
         // The same play when the embedded player can run is shown in Vela's
         // window and ranked for the screen holding it.
         let choice = crate::player::choose(Embedded, &Ok(()));
-        assert_eq!(compatibility_display(&slot.lock().unwrap(), None, choice.kind), None);
+        let screen = screen_for_play(&record, None, choice.kind, None, &screens);
+        assert_eq!(screen.name.as_deref(), Some("HDMI-1"));
     }
 
     #[test]

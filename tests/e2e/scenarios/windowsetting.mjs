@@ -145,8 +145,9 @@ export default {
       }, 'the end of the play in config.json');
     }
 
-    // Run 1, remember: the first play opens as the stored window says, on the
-    // stored screen even though it is gone, and the play still starts.
+    // Run 1, remember: the first play opens as the stored window says. The
+    // stored screen is gone, so the play is sent to the screen holding
+    // Vela's window instead (review finding pw-1), and it still starts.
     const first = await play();
     assert.equal(
       await first.mpv.getProp('fullscreen'),
@@ -154,10 +155,10 @@ export default {
       'nothing but the stored window can make the first play of a run fullscreen',
     );
     assert.equal(await first.mpv.getProp('window-maximized'), false);
-    assert.equal(
+    assert.notEqual(
       await first.mpv.getProp('screen-name'),
       'no-such-screen',
-      'a stored screen that is gone is still only a request to mpv',
+      'a stored screen that is not connected must not be asked for',
     );
     assert.equal(await first.mpv.getProp('geometry'), '800x450', 'the stored size');
     // It stays fullscreen to the end, so it never shows a windowed size of
