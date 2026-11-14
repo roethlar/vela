@@ -1677,3 +1677,22 @@ Not done, and why:
 - "A plain build is byte for byte today's package" cannot be shown while
   Vela's build is not reproducible; what is shown is that it contains
   nothing of the set.
+
+### 2026-11-14 — the Slice 5 review: two findings, both fixed
+
+codex over `0aeeff0..3d2fef6` returned two findings, both admitted
+(`.agents/review/codereview-2026-11-14-embedded-controls.md`).
+
+- `pc-1` (`a909c20`): the reader of mpv's socket returns after every read,
+  so a line that comes in pieces can no longer keep a command past its
+  two seconds or a stopped play's state thread alive.
+- `pc-2` (`4118fea`): a play that ends in an error, or is quit by another
+  hand, or whose playlist cannot start its next entry, says so, and
+  Vela's window leaves the player's fullscreen at once where it used to
+  wait out a 50-second backstop. The second of those three cases was
+  found by attacking the first version of the fix. The fix changes code
+  both players use to go on to the next play, so the whole external suite
+  was run on it (41 of 42; `pagefail`).
+
+Both are with codex. The records have the guard proofs and what is not
+covered.

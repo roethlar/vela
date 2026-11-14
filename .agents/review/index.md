@@ -23,8 +23,8 @@ admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| pc-1 | MEDIUM   | A line that arrives in pieces is read past the limit of whoever waits for it | `[ ]`  | — | codex/default/standard |
-| pc-2 | MEDIUM   | A play that ends in an error leaves Vela's window in fullscreen for 50 seconds | `[ ]`  | — | codex/default/standard |
+| pc-1 | MEDIUM   | A line that arrives in pieces is read past the limit of whoever waits for it | `[~]`  | `a909c20` | codex/default/standard |
+| pc-2 | MEDIUM   | A play that ends in an error leaves Vela's window in fullscreen for 50 seconds | `[~]`  | `4118fea` | codex/default/standard |
 
 **Embedded player Slice 4 review, 2026-11-13 (closed 2026-11-14, all three verified):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

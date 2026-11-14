@@ -52,7 +52,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       you did not build.)
     - (Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
       log. Its codex review returned TWO findings, `pc-1` and `pc-2`, both
-      admitted and being fixed: `.agents/review/index.md`. Its cropping
+      admitted, fixed (`a909c20`, `4118fea`) and with codex:
+      `.agents/review/index.md`. Its cropping
       script is built under an assumption the owner has not ruled on: the
       plan's "For the owner", item 3.)
     - Then Slice 6 (parity), being written since the evening of
