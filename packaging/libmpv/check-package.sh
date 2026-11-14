@@ -308,7 +308,7 @@ not_enterable() {
 # The package must contain the set, whole, where Vela will look for it.
 check_with() {
   local package="$1" root="$2" set="$2/$SET_PATH"
-  local stray real_root real_set closed pins have line out status kind component path texts copy closed_dir
+  local stray real_root real_set closed manifest pins have line out status kind component path texts copy closed_dir
   local -A told=()
 
   if [ ! -d "$set" ]; then
@@ -355,15 +355,22 @@ check_with() {
   # Everything below can pass for a set that is whole and is still not the set
   # that was built: one with a library changed and its MANIFEST written to
   # match. Only the built set can tell, and the load waits for this.
-  if cmp -s "$reference/MANIFEST" "$set/MANIFEST"; then
+  # The package's MANIFEST is read here and below, and only if it is a file of
+  # the package: a named pipe would hold the check until something wrote to
+  # it, and a link leads out of the package.
+  manifest=0
+  [ ! -f "$set/MANIFEST" ] || [ -L "$set/MANIFEST" ] || manifest=1
+  if [ "$manifest" -eq 1 ] && cmp -s "$reference/MANIFEST" "$set/MANIFEST"; then
     pass "source: its MANIFEST is the one in $reference"
+  elif [ "$manifest" -eq 0 ] && { [ -e "$set/MANIFEST" ] || [ -L "$set/MANIFEST" ]; }; then
+    fail "source: $SET_PATH/MANIFEST is not a file of the package (it is a symbolic link, a pipe or the like), so it was not read"
   else
     fail "source: its MANIFEST is not the one in $reference; the package holds another set"
   fi
 
   pins="$(awk '$1 !~ /^#/ && $3 == "ship" { print $1, $2 }' "$here/versions.txt" | LC_ALL=C sort)"
   have=""
-  [ ! -f "$set/MANIFEST" ] || have="$(awk '$1 == "component" { print $2, $3 }' "$set/MANIFEST" | LC_ALL=C sort)"
+  [ "$manifest" -eq 0 ] || have="$(awk '$1 == "component" { print $2, $3 }' "$set/MANIFEST" | LC_ALL=C sort)"
   if [ "$pins" = "$have" ]; then
     pass "pins: its components are the versions versions.txt pins"
   else
@@ -406,7 +413,7 @@ check_with() {
   case "$package" in
     *.pkg.tar.*)
       texts=0
-      if [ -f "$set/MANIFEST" ]; then
+      if [ "$manifest" -eq 1 ]; then
         while read -r kind component path; do
           [ "$kind" = licence ] || continue
           texts=$((texts + 1))
@@ -424,7 +431,11 @@ check_with() {
             fail "licences: $closed_dir cannot be entered by every user (other users have '$(stat -c %A "$root/$closed_dir" | cut -c8-10)'), and a licence text is below it"
             told[$closed_dir]=1
           fi
-          if [ ! -f "$root/$copy" ] || ! cmp -s "$set/$path" "$root/$copy"; then
+          # The set's own text is read only if it is a file of the set, for
+          # the same reasons as the MANIFEST above.
+          if [ ! -f "$root/$copy" ] || [ ! -f "$set/$path" ] ||
+             [ "$(realpath -m -- "$set/$path")" != "$real_root/$SET_PATH/$path" ] ||
+             ! cmp -s "$set/$path" "$root/$copy"; then
             fail "licences: $copy is missing or is not the set's $path"
           elif [ -z "$(find "$root/$copy" -maxdepth 0 -perm -004 -print)" ]; then
             fail "licences: $copy cannot be read by every user (other users have '$(stat -c %A "$root/$copy" | cut -c8-10)')"

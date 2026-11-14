@@ -261,7 +261,7 @@ test('the Arch package installs the set where the loader reads it, with its lice
   );
   has(
     checkPackage,
-    '\n          if [ ! -f "$root/$copy" ] || ! cmp -s "$set/$path" "$root/$copy"; then\n            fail "licences: ',
+    '\n             ! cmp -s "$set/$path" "$root/$copy"; then\n            fail "licences: ',
     'and compares it with the text in the set',
   );
 });
@@ -881,6 +881,8 @@ function packageOf(t, kind, files, links = {}, modes = {}, options = {}) {
     fs.mkdirSync(path.dirname(path.join(tree, name)), { recursive: true });
     fs.symlinkSync(target, path.join(tree, name));
   }
+  // Whatever else the tree is to hold, done to it before it is packed.
+  options.prepare?.(tree);
   return { root, file: packageKinds[kind](root, tree, options) };
 }
 const pacmanPackage = (t, files, links, modes) => packageOf(t, 'pkg.tar.zst', files, links, modes);
@@ -888,12 +890,15 @@ const pacmanPackage = (t, files, links, modes) => packageOf(t, 'pkg.tar.zst', fi
 // One run of the check. Every run in this suite gets a temporary directory of
 // its own (or the one named in `env`) and must leave it empty, however the
 // run ended: an unpacked package with the set is some 60 MB. `cwd` is where
-// the check is started, for packages named relative to it.
-function checkPackageRun(args, script = checkPackagePath, env = {}, { cwd } = {}) {
+// the check is started, for packages named relative to it; `timeout` (ms)
+// ends a check that hangs (it is then killed, and its status is null).
+function checkPackageRun(args, script = checkPackagePath, env = {}, { cwd, timeout } = {}) {
   const tmp = env.TMPDIR ?? fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-check-tmp-')));
   try {
     const run = spawnSync('/bin/bash', [script, ...args], {
       cwd,
+      timeout,
+      killSignal: 'SIGKILL',
       encoding: 'utf8',
       env: { ...process.env, ...env, TMPDIR: tmp },
     });
@@ -1393,6 +1398,47 @@ test('the package check compares the set in the package with the pins, the set i
       'skip load: libmpv.so.2 was not loaded, because the set failed the check above; nothing of a set that failed is run',
     ]);
   });
+
+  // What the check reads of the package it reads only from files of the
+  // package. A named pipe would hold it until something wrote to the pipe, and
+  // nothing does: such a check never ends (here, it would be killed after 20
+  // seconds and fail the test).
+  const inSetWith = (t, name, make) => {
+    const files = Object.fromEntries(
+      Object.entries(setFilesOf(right, { [name]: null })).map(([file, contents]) => [`usr/lib/Vela/libmpv/${file}`, contents]),
+    );
+    for (const [component] of pinned) files[`usr/share/licenses/vela/libmpv/${component}/LICENSE.LGPL`] = licenceOf(component);
+    const prepare = (tree) => {
+      const file = path.join(tree, 'usr/lib/Vela/libmpv', name);
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      make(file);
+    };
+    return packageOf(t, 'pkg.tar.zst', files, {}, {}, { prepare }).file;
+  };
+  const pipe = (file) => {
+    const made = spawnSync('mkfifo', ['-m', '644', file], { encoding: 'utf8' });
+    assert.equal(made.status, 0, made.stderr);
+  };
+  const pipes = {
+    'its MANIFEST a named pipe': ['MANIFEST', pipe, [
+      'FAIL source: usr/lib/Vela/libmpv/MANIFEST is not a file of the package (it is a symbolic link, a pipe or the like), so it was not read',
+    ]],
+    'its MANIFEST a link to the right MANIFEST outside the package': ['MANIFEST', (file) => fs.symlinkSync(path.join(referenceWith(t, right), 'MANIFEST'), file), [
+      'FAIL source: usr/lib/Vela/libmpv/MANIFEST is not a file of the package (it is a symbolic link, a pipe or the like), so it was not read',
+    ]],
+    'a licence text of the set a named pipe': [licencePath('mpv'), pipe, [
+      `FAIL manifest: missing: ${licencePath('mpv')}`,
+      `FAIL licences: usr/share/licenses/vela/libmpv/mpv/LICENSE.LGPL is missing or is not the set's ${licencePath('mpv')}`,
+    ]],
+  };
+  for (const [what, [name, make, lines]] of Object.entries(pipes)) {
+    await t.test(`${what}: never read, and the package fails`, (t) => {
+      const run = checkPackageRun([...builtSet(t), inSetWith(t, name, make)], checkPackagePath, {}, { timeout: 20_000 });
+      assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+      for (const line of lines) assert.ok(run.stdout.split('\n').includes(line), `${line}\n${run.stdout}`);
+      assert.match(run.stdout, /^RESULT FAIL /m);
+    });
+  }
 
   await t.test('a component at another version', (t) => {
     const stale = manifestOf(pinned.map(([name, version]) => [name, name === 'ffmpeg' ? '1.0.0' : version]));
