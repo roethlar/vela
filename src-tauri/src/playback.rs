@@ -229,6 +229,17 @@ enum ReaderPhase {
     #[default]
     NotStarted,
     Reading,
+    /// Still reading, and a wait has already given up on it. A later wait
+    /// gives up at once: Vela's exit handler runs twice in one exit (tauri's
+    /// `ExitRequested` and then `Exit`). A reader that outlived the first
+    /// wait is still trying to connect (it has nothing to apply), or reads
+    /// from an mpv the exit's kill did not end (an `mpv_path` that starts
+    /// mpv under another process, which the kill ends instead: it would
+    /// outlive the second wait as well), or is on a machine so loaded that
+    /// it took more than the whole limit. Only that last one could finish in
+    /// a second wait, and it is let go of so that the first two do not add a
+    /// second limit to every exit.
+    WaitedOut,
     Finished,
 }
 
@@ -241,7 +252,8 @@ pub(crate) enum ReaderWait {
     AlreadyFinished,
     /// The reader finished during the wait.
     FinishedWithin,
-    /// The limit passed with the reader still running.
+    /// The limit passed with the reader still running, or an earlier wait
+    /// had given up on it already (then without waiting).
     GaveUp,
 }
 
@@ -288,20 +300,23 @@ impl WindowStateObservation {
     }
 
     /// Wait at most `limit` for this observation's reader to finish, and not
-    /// at all when none was started or it has finished already. Holds no
-    /// other lock while it waits.
+    /// at all when none was started, it has finished already, or an earlier
+    /// wait has given up on it (`ReaderPhase::WaitedOut`). Holds no other
+    /// lock while it waits.
     pub(crate) fn wait_for_reader(&self, limit: Duration) -> ReaderWait {
         let phase = self.reader.phase.lock().unwrap_or_else(|e| e.into_inner());
         match *phase {
             ReaderPhase::NotStarted => ReaderWait::NoReader,
             ReaderPhase::Finished => ReaderWait::AlreadyFinished,
+            ReaderPhase::WaitedOut => ReaderWait::GaveUp,
             ReaderPhase::Reading => {
-                let (phase, _) = self
+                let (mut phase, _) = self
                     .reader
                     .changed
                     .wait_timeout_while(phase, limit, |phase| *phase == ReaderPhase::Reading)
                     .unwrap_or_else(|e| e.into_inner());
                 if *phase == ReaderPhase::Reading {
+                    *phase = ReaderPhase::WaitedOut;
                     ReaderWait::GaveUp
                 } else {
                     ReaderWait::FinishedWithin
@@ -2758,6 +2773,25 @@ mod tests {
     }
 
     #[test]
+    fn a_reader_given_up_on_is_not_waited_for_again() {
+        // Vela's exit handler runs twice in one exit; a reader the first
+        // wait gave up on must not cost the exit a second limit.
+        let observation = WindowStateObservation::default();
+        let reading = observation.reader_started();
+        assert_eq!(observation.wait_for_reader(Duration::from_millis(100)), ReaderWait::GaveUp);
+        let started = Instant::now();
+        assert_eq!(observation.wait_for_reader(Duration::from_secs(10)), ReaderWait::GaveUp);
+        let waited = started.elapsed();
+        assert!(waited < Duration::from_secs(1), "waited {waited:?} for a reader given up on");
+        // It still says when it finishes.
+        drop(reading);
+        assert_eq!(
+            observation.wait_for_reader(Duration::from_secs(10)),
+            ReaderWait::AlreadyFinished
+        );
+    }
+
+    #[test]
     fn a_reader_that_finishes_during_the_wait_ends_it() {
         let observation = WindowStateObservation::default();
         let reading = observation.reader_started();
@@ -2808,6 +2842,13 @@ mod tests {
         )
     }
 
+    /// Whether the reader is running, looked at without a wait (a wait that
+    /// gives up marks the reader given up on, `ReaderPhase::WaitedOut`).
+    #[cfg(unix)]
+    fn reader_running(observation: &WindowStateObservation) -> bool {
+        *observation.reader.phase.lock().unwrap() == ReaderPhase::Reading
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_real_reader_is_finished_when_told_to_stop_before_it_connects() {
@@ -2816,11 +2857,7 @@ mod tests {
         spawn_position_reader(nowhere("reader-stop"), 0, stop.clone(), observation.clone())
             .expect("reader");
         std::thread::sleep(Duration::from_millis(250));
-        assert_eq!(
-            observation.wait_for_reader(Duration::ZERO),
-            ReaderWait::GaveUp,
-            "still trying to connect"
-        );
+        assert!(reader_running(&observation), "still trying to connect");
         stop.store(true, Ordering::Relaxed);
         assert!(reader_finished(&observation, Duration::from_secs(2)));
     }
@@ -2880,7 +2917,7 @@ mod tests {
         let stop = Arc::new(AtomicBool::new(false));
         spawn_position_reader(path.clone(), 0, stop.clone(), observation.clone()).expect("reader");
         let mut mpv = accept_reader(&listener);
-        assert_eq!(observation.wait_for_reader(Duration::ZERO), ReaderWait::GaveUp);
+        assert!(reader_running(&observation), "still reading");
         // mpv sends the change and goes, a moment after the wait has begun.
         let player = std::thread::spawn(move || {
             std::thread::sleep(Duration::from_millis(100));

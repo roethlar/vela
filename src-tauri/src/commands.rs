@@ -4394,8 +4394,17 @@ fn write_play_end<'a>(
 /// just killed that play's mpv, so a connected reader reads what mpv had
 /// already sent and then the end of its connection; without the wait, a
 /// change mpv had sent and the reader had not yet applied was lost. There is
-/// no wait when there has been no play in mpv's own window this run, or when
-/// its reader has finished already.
+/// no wait when there has been no play in mpv's own window this run, when
+/// its reader has finished already, or when an earlier pass of this exit has
+/// given up on it (the exit handler runs on both `ExitRequested` and `Exit`).
+///
+/// The wait is the whole `EXIT_READER_DRAIN_LIMIT`, on the first pass only,
+/// whenever that reader is still running when Vela quits: while it is still
+/// trying to connect (mpv started moments before, or mpv never made its
+/// socket; the stop flag set after the hand-over ends those tries), and
+/// when the kill did not end the mpv it reads from, as when `mpv_path` names
+/// a program that starts mpv under itself and the kill ends only that
+/// program (the reader then reads on from a live mpv).
 pub(crate) fn remember_window_on_exit(latest: &std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>) {
     hand_over_window_on_exit(
         latest.clone(),
@@ -9150,6 +9159,29 @@ mod tests {
             waited >= limit && waited < limit + Duration::from_millis(300),
             "quitting waited {waited:?}, more than the hand-over's limit"
         );
+        drop(reading);
+    }
+
+    #[test]
+    fn quitting_twice_waits_for_a_reader_that_never_finishes_only_once() {
+        // The exit handler runs on tauri's ExitRequested and again on its
+        // Exit. A reader still running after the first hand-over (its mpv
+        // started under another process that the kill ended instead) must
+        // not add a second limit to the exit.
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, first) =
+            quit_into(&settings, record.clone(), EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        assert!(finished && first >= EXIT_READER_DRAIN_LIMIT, "the first waited {first:?}");
+        let (finished, second) =
+            quit_into(&settings, record, EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        assert!(finished);
+        assert!(
+            second < EXIT_READER_DRAIN_LIMIT / 2,
+            "the second hand-over waited {second:?} for a reader the first gave up on"
+        );
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
         drop(reading);
     }
 
