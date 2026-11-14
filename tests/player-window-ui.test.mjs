@@ -282,6 +282,11 @@ const playerWindowParts = async () => {
   };
   const load = declaration('load');
   const save = declaration('savePlayerWindowMode');
+  // The component's other functions for the player window (how it shows a
+  // confirmed mode), each declared once.
+  const helpers = [...functions.keys()]
+    .filter((name) => name.includes('PlayerWindow') && name !== 'savePlayerWindowMode')
+    .map(declaration);
   // The player window state, as the component declares it at its top level.
   const state = sourceFile.statements.filter(
     (statement) =>
@@ -291,6 +296,21 @@ const playerWindowParts = async () => {
       ),
   );
   assert.ok(state.length >= 2, 'the player window state is declared');
+  // What the component does about the player window when it is closed.
+  const teardown = sourceFile.statements.filter(
+    (statement) =>
+      ts.isExpressionStatement(statement) &&
+      ts.isCallExpression(statement.expression) &&
+      ts.isIdentifier(statement.expression.expression) &&
+      statement.expression.expression.text === 'onDestroy' &&
+      /\bplayerWindow/.test(statement.expression.getText(sourceFile)),
+  );
+  // The module script runs once and is shared by every mounting of the
+  // component (review finding pw-7: what the backend confirmed outlives one
+  // opening of Settings). It is taken whole, as the compiler takes it.
+  const moduleScript = ast.module
+    ? settings.slice(ast.module.content.start, ast.module.content.end)
+    : '';
   // Everything else load assigns is declared here as a plain variable.
   const assigned = new Set();
   const assignments = (node) => {
@@ -306,24 +326,40 @@ const playerWindowParts = async () => {
   assignments(load);
   const others = [...assigned].filter((name) => !name.startsWith('playerWindow') && name !== 'err');
   const code = (node) => node.getText(sourceFile);
+  // One app: the module script, run once; each call of `open` is one
+  // mounting of the component, with its own instance state, sharing the
+  // module's. `close` runs what the mounting asked to run on destroy.
   const source = ts.transpileModule(
     [
+      moduleScript,
+      'return () => {',
+      'const destroyed = [];',
+      'const onDestroy = (fn) => { destroyed.push(fn); };',
       'let err = null;',
       'let loadSeq = 0;',
       others.length ? `let ${others.join(', ')};` : '',
       'function applyPlaybackPreferences() {}',
       ...state.map(code),
+      ...teardown.map(code),
+      ...helpers.map(code),
       code(load),
       code(save),
       'return {',
       '  load, savePlayerWindowMode,',
       '  get mode() { return playerWindowMode; }, set mode(value) { playerWindowMode = value; },',
+      '  get confirmed() { return playerWindowSaved; },',
       '  get err() { return err; },',
+      '  close() { for (const fn of destroyed.splice(0)) fn(); },',
+      '};',
       '};',
     ].join('\n'),
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
   ).outputText;
-  return (invoke) => new Function('invoke', '$state', source)(invoke, (value) => value);
+  const app = (invoke) => ({ open: new Function('invoke', '$state', source)(invoke, (value) => value) });
+  // A fresh app with one mounting, for the tests of one opening.
+  const build = (invoke) => app(invoke).open();
+  build.app = app;
+  return build;
 };
 
 // A made-up backend. Each read of the playback preferences, and each save,
@@ -331,7 +367,7 @@ const playerWindowParts = async () => {
 // backend holds when the load asks, and a held save changes the backend only
 // when it is let go.
 const madeUpBackend = (mode) => {
-  const backend = { mode, refuse: false, holdLoads: false, holdSaves: false, held: [] };
+  const backend = { mode, refuse: false, failLoads: false, holdLoads: false, holdSaves: false, held: [] };
   const hold = (finish) =>
     new Promise((resolve, reject) => {
       backend.held.push(() => {
@@ -350,6 +386,7 @@ const madeUpBackend = (mode) => {
   backend.invoke = async (command, args) => {
     if (command === 'get_mpv_window_mode') return backend.mode;
     if (command === 'set_mpv_window_mode') return backend.holdSaves ? hold(() => set(args)) : set(args);
+    if (command === 'get_playback_preferences' && backend.failLoads) throw new Error('the settings could not be read');
     if (command === 'get_playback_preferences' && backend.holdLoads) return hold(() => ({}));
     return {};
   };
@@ -510,6 +547,214 @@ test('a load that read the mode before a save was confirmed does not put the old
     await control.savePlayerWindowMode();
     assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
   }
+});
+
+// Settings is mounted afresh each time it is opened, and can be closed while
+// a save is out, so one opening's save can be confirmed while another is
+// loading or open (review finding pw-7, round 2). Each test below runs two
+// mountings of the component that share its module script, as the app does.
+
+test('a save confirmed while a reopened Settings is loading is what it shows', async () => {
+  const build = await playerWindowParts();
+
+  // As the review found it: A sends fullscreen; Settings is reopened as B,
+  // which reads remember; A's save is confirmed; B's load completes. B must
+  // show fullscreen, and a refused retry in B must go back to it. Run with A
+  // closed, as reported, and with A still open.
+  for (const closeA of [true, false]) {
+    const backend = madeUpBackend('remember');
+    const app = build.app(backend.invoke);
+    const a = app.open();
+    await a.load();
+    a.mode = 'fullscreen';
+    backend.holdSaves = true;
+    const saving = a.savePlayerWindowMode();
+    backend.holdSaves = false;
+    if (closeA) a.close();
+    const b = app.open();
+    backend.holdLoads = true;
+    const loading = b.load();
+    backend.holdLoads = false;
+    // held[0] is A's save, held[1] B's load, which has read remember.
+    await backend.release();
+    await saving;
+    assert.equal(backend.mode, 'fullscreen');
+    await backend.release();
+    await loading;
+    assert.equal(b.mode, 'fullscreen', 'a load must not undo a save confirmed after it read, from any opening');
+    assert.equal(b.confirmed, 'fullscreen');
+    if (!closeA) {
+      assert.equal(a.mode, 'fullscreen');
+      assert.equal(a.confirmed, 'fullscreen');
+    }
+    backend.refuse = true;
+    b.mode = 'default';
+    await b.savePlayerWindowMode();
+    assert.equal(backend.mode, 'fullscreen');
+    assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  }
+
+  // The same, but B's load completes before A's save is confirmed: B shows
+  // what it read, which the backend held when B asked, and then what A's
+  // save confirmed, without the user doing anything.
+  for (const closeA of [true, false]) {
+    const backend = madeUpBackend('remember');
+    const app = build.app(backend.invoke);
+    const a = app.open();
+    await a.load();
+    a.mode = 'fullscreen';
+    backend.holdSaves = true;
+    const saving = a.savePlayerWindowMode();
+    backend.holdSaves = false;
+    if (closeA) a.close();
+    const b = app.open();
+    backend.holdLoads = true;
+    const loading = b.load();
+    backend.holdLoads = false;
+    backend.held.push(backend.held.shift());
+    await backend.release();
+    await loading;
+    assert.equal(b.mode, 'remember', 'nothing confirmed yet: what the load read');
+    await backend.release();
+    await saving;
+    assert.equal(b.mode, 'fullscreen', 'a save confirmed from another opening must reach this one');
+    assert.equal(b.confirmed, 'fullscreen');
+    backend.refuse = true;
+    b.mode = 'default';
+    await b.savePlayerWindowMode();
+    assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  }
+});
+
+test('a Settings opened after one that closed with its save out shows what that save confirmed', async () => {
+  const build = await playerWindowParts();
+
+  // A sends fullscreen and is closed; the save is confirmed with no Settings
+  // open. B is opened: before its load answers, and if its load fails, it
+  // shows what the app knows the backend holds.
+  for (const loadFails of [false, true]) {
+    const backend = madeUpBackend('remember');
+    const app = build.app(backend.invoke);
+    const a = app.open();
+    await a.load();
+    a.mode = 'fullscreen';
+    backend.holdSaves = true;
+    const saving = a.savePlayerWindowMode();
+    backend.holdSaves = false;
+    a.close();
+    await backend.release();
+    await saving;
+    assert.equal(backend.mode, 'fullscreen');
+
+    const b = app.open();
+    assert.equal(b.mode, 'fullscreen', 'a new opening starts on what the backend last confirmed');
+    if (loadFails) {
+      backend.failLoads = true;
+      await b.load();
+      assert.match(b.err, /could not be read/);
+    } else {
+      backend.holdLoads = true;
+      const loading = b.load();
+      backend.holdLoads = false;
+      backend.refuse = true;
+      b.mode = 'default';
+      await b.savePlayerWindowMode();
+      assert.equal(b.mode, 'fullscreen', 'a refused save before the load answers must show what the backend holds');
+      backend.refuse = false;
+      await backend.release();
+      await loading;
+    }
+    assert.equal(b.mode, 'fullscreen');
+    assert.equal(b.confirmed, 'fullscreen');
+    backend.refuse = true;
+    b.mode = 'remember';
+    await b.savePlayerWindowMode();
+    assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
+
+    // A closed opening is no longer told of saves.
+    backend.refuse = false;
+    const before = [a.mode, a.confirmed];
+    b.mode = 'default';
+    await b.savePlayerWindowMode();
+    assert.equal(backend.mode, 'default');
+    assert.equal(b.mode, 'default');
+    assert.deepEqual([a.mode, a.confirmed], before, 'a closed Settings must not be told of later saves');
+  }
+});
+
+test('a save confirmed in one open Settings reaches another, keeping an unsaved choice the save does not change', async () => {
+  const build = await playerWindowParts();
+  const backend = madeUpBackend('remember');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  const b = app.open();
+  await a.load();
+  await b.load();
+
+  // B has loaded and is open; A's save is confirmed: B shows it.
+  a.mode = 'fullscreen';
+  await a.savePlayerWindowMode();
+  assert.equal(b.mode, 'fullscreen', 'a save confirmed from another opening must reach this one');
+  assert.equal(b.confirmed, 'fullscreen');
+  backend.refuse = true;
+  b.mode = 'default';
+  await b.savePlayerWindowMode();
+  assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  backend.refuse = false;
+
+  // B's user picks default and has not saved. A save that confirms what the
+  // backend already held, and a load that reads it, leave that choice.
+  b.mode = 'default';
+  await a.savePlayerWindowMode();
+  assert.equal(b.mode, 'default', 'an unsaved choice stays while the backend has not changed');
+  await b.load();
+  assert.equal(b.mode, 'default', 'and a load that reads the same mode keeps it');
+  assert.equal(b.confirmed, 'fullscreen');
+  // A save that changes the backend under it replaces it.
+  a.mode = 'remember';
+  await a.savePlayerWindowMode();
+  assert.equal(b.mode, 'remember', 'a changed backend replaces an unsaved choice');
+  assert.equal(b.confirmed, 'remember');
+
+  // Two saves out at once, one from each: the one confirmed last is what
+  // the backend holds, and what both show.
+  a.mode = 'fullscreen';
+  b.mode = 'default';
+  backend.holdSaves = true;
+  const savingA = a.savePlayerWindowMode();
+  const savingB = b.savePlayerWindowMode();
+  backend.holdSaves = false;
+  await backend.release();
+  await savingA;
+  await backend.release();
+  await savingB;
+  assert.equal(backend.mode, 'default');
+  for (const [name, control] of [['A', a], ['B', b]]) {
+    assert.equal(control.mode, 'default', `${name} shows what the backend holds`);
+    assert.equal(control.confirmed, 'default');
+  }
+});
+
+test('a refused save in one open Settings goes back to what the backend holds and leaves the other alone', async () => {
+  const build = await playerWindowParts();
+  const backend = madeUpBackend('fullscreen');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  const b = app.open();
+  await a.load();
+  await b.load();
+  b.mode = 'remember';
+  backend.refuse = true;
+  a.mode = 'default';
+  await a.savePlayerWindowMode();
+  assert.equal(backend.mode, 'fullscreen');
+  assert.equal(a.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  assert.equal(a.confirmed, 'fullscreen');
+  assert.equal(b.mode, 'remember', "the other's unsaved choice is left alone");
+  assert.equal(b.confirmed, 'fullscreen');
+  b.mode = 'default';
+  await b.savePlayerWindowMode();
+  assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
 });
 
 test('the remembered window never holds a position', () => {

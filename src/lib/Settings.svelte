@@ -1,3 +1,39 @@
+<script module lang="ts">
+  type PlayerWindowMode = "remember" | "fullscreen" | "default";
+
+  // The Player window mode as the backend last confirmed it, kept for the
+  // app and not for one opening of Settings: Settings is mounted afresh each
+  // time it opens, and a save sent from one opening can be confirmed after
+  // it has closed, or while another opening is loading or open (review
+  // finding pw-7). `saves` counts the saves of the mode the backend has
+  // confirmed; `mode` is what it last confirmed, by such a save or by a load
+  // that read it with no save confirmed since the load asked. Remember
+  // matches the backend's missing-field default.
+  const playerWindowConfirmed: { saves: number; mode: PlayerWindowMode } = {
+    saves: 0,
+    mode: "remember",
+  };
+  // The openings of Settings that are mounted, each told of a confirmed save.
+  const playerWindowFollowers = new Set<(mode: PlayerWindowMode) => void>();
+
+  // Tells `show` of every save confirmed from now on, until the function it
+  // returns is called.
+  function followPlayerWindowMode(show: (mode: PlayerWindowMode) => void): () => void {
+    playerWindowFollowers.add(show);
+    return () => {
+      playerWindowFollowers.delete(show);
+    };
+  }
+
+  // Records a save the backend confirmed, whichever opening sent it and
+  // whether or not that opening is still open, and tells every open one.
+  function confirmPlayerWindowSave(mode: PlayerWindowMode) {
+    playerWindowConfirmed.saves += 1;
+    playerWindowConfirmed.mode = mode;
+    for (const show of [...playerWindowFollowers]) show(mode);
+  }
+</script>
+
 <script lang="ts">
   import { invoke } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
@@ -24,7 +60,6 @@
   };
 
   type AutocropMode = "off" | "manual" | "auto";
-  type PlayerWindowMode = "remember" | "fullscreen" | "default";
   type SkipPolicy = "off" | "button" | "autoskip";
   type QualityTier = {
     id: string;
@@ -174,20 +209,27 @@
   let continuePlaying = $state<ContinuePlayingMode>("only-tv");
   let continuePlayingBusy = $state(false);
 
-  // How the first mpv window after Vela starts opens. Remember matches the
-  // backend's missing-field default.
-  let playerWindowMode = $state<PlayerWindowMode>("remember");
+  // How the first mpv window after Vela starts opens. The control starts on
+  // the mode the backend last confirmed to the app (see the module script).
+  let playerWindowMode = $state<PlayerWindowMode>(playerWindowConfirmed.mode);
   let playerWindowBusy = $state(false);
-  // The mode the backend last said it holds, from loading or from the last
-  // save that succeeded. A save that fails puts the control back to it, so
-  // the control never shows a choice that was not saved (review finding
-  // pw-7).
-  let playerWindowSaved: PlayerWindowMode = "remember";
-  // How many saves of the mode the backend has confirmed. A load reads the
-  // mode at one moment and applies it later; a save confirmed in between is
-  // newer than what the load read, so the load then leaves the mode alone
+  // The confirmed mode this opening last put in the control. While the
+  // control shows something else, the user has a choice not yet saved
   // (review finding pw-7).
-  let playerWindowSaves = 0;
+  let playerWindowSaved: PlayerWindowMode = playerWindowConfirmed.mode;
+  // This opening is told of every save confirmed while it is open, from
+  // whichever opening sent it, and stops being told when it closes.
+  const playerWindowUnfollow = followPlayerWindowMode(showPlayerWindowConfirmed);
+  onDestroy(playerWindowUnfollow);
+
+  // Puts a mode the backend confirmed in the control. A choice the user has
+  // made and not saved is kept, unless the backend's mode has changed under
+  // it (review finding pw-7).
+  function showPlayerWindowConfirmed(mode: PlayerWindowMode) {
+    const unsaved = playerWindowMode !== playerWindowSaved;
+    if (!unsaved || mode !== playerWindowSaved) playerWindowMode = mode;
+    playerWindowSaved = mode;
+  }
 
   // Duplicate-copy selection and the display profile used by Compatible.
   let playbackPreferences = $state<PlaybackPreferences | null>(null);
@@ -262,7 +304,10 @@
 
   async function load() {
     const seq = ++loadSeq;
-    const windowSaves = playerWindowSaves;
+    // A load reads the mode at one moment and applies it later. A save
+    // confirmed in between, from this opening or any other, is newer than
+    // what the load read (review finding pw-7).
+    const windowSaves = playerWindowConfirmed.saves;
     try {
       const [s, mp, adv, continueMode, windowMode, playbackPrefs] = await Promise.all([
         invoke<Source[]>("get_sources"),
@@ -285,9 +330,10 @@
       skipCredits = adv.skipCredits;
       skipCommercials = adv.skipCommercials;
       continuePlaying = continueMode;
-      if (windowSaves === playerWindowSaves) {
-        playerWindowMode = playerWindowSaved = windowMode;
+      if (windowSaves === playerWindowConfirmed.saves) {
+        playerWindowConfirmed.mode = windowMode;
       }
+      showPlayerWindowConfirmed(playerWindowConfirmed.mode);
       applyPlaybackPreferences(playbackPrefs);
     } catch (e) {
       if (seq === loadSeq) err = String(e);
@@ -438,10 +484,10 @@
       const saved = await invoke<PlayerWindowMode>("set_mpv_window_mode", {
         mode: playerWindowMode,
       });
-      playerWindowSaves += 1;
+      confirmPlayerWindowSave(saved);
       playerWindowMode = playerWindowSaved = saved;
     } catch (e) {
-      playerWindowMode = playerWindowSaved;
+      playerWindowMode = playerWindowSaved = playerWindowConfirmed.mode;
       err = String(e);
     } finally {
       playerWindowBusy = false;
