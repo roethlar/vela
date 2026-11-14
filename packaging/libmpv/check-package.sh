@@ -8,11 +8,13 @@
 # the set and lacks one file of it would install cleanly and then never play
 # embedded. This script is where such a package is stopped: at build time.
 #
-# usage: check-package.sh [--without-libmpv] [--set DIR] PACKAGE...
+# usage: check-package.sh --set DIR PACKAGE...
+#        check-package.sh --without-libmpv [--set DIR] PACKAGE...
 #        check-package.sh --preflight [--without-libmpv] [--set DIR] [--appimage]
 #
 #   PACKAGE  a .deb, .rpm, .AppImage or pacman package (.pkg.tar.zst, .xz)
-#   --set DIR  the set the package was built from, or was built without
+#   --set DIR  the set the package was built from (needed, unless the package
+#              is checked --without-libmpv), or was built without
 #   --preflight  check no package: only say, by status 0 or 2, whether this
 #              check could be made here. scripts/build.sh asks before it
 #              builds, so that a missing tool stops a --with-libmpv build
@@ -34,8 +36,9 @@
 #     the package (no symbolic link leads there);
 #   * every user of the machine may read every file of it, not only the
 #     package's owner, and may enter every directory above it;
-#   * with --set, its MANIFEST is that set's MANIFEST, not another set's
-#     (without --set this is not compared, and a "skip" line says so);
+#   * its MANIFEST is the MANIFEST of the set given with --set, not another
+#     set's (the library is loaded only from that set, so this question is
+#     not asked without one);
 #   * its components are the versions pinned in versions.txt;
 #   * every file the MANIFEST lists is there and unmodified, and nothing else
 #     is (check-libmpv.py);
@@ -142,6 +145,12 @@ if [ "$without" -eq 0 ]; then
   command -v python3 >/dev/null 2>&1 || die "python3 is not installed; loading the library needs it"
   mpv_pin="$(awk '$1 == "mpv" { print $2 }' "$here/versions.txt")"
   [ "$mpv_pin" = "$CLIENT_API_OF_MPV" ] || die "versions.txt pins mpv $mpv_pin, but the client API version written in this script ($CLIENT_API) was looked up for mpv $CLIENT_API_OF_MPV. Read MPV_CLIENT_API_VERSION in include/mpv/client.h of mpv $mpv_pin and bring CLIENT_API_OF_MPV and CLIENT_API up to date."
+  # Checking a package for the set loads its libmpv.so.2, and loading a library
+  # runs its start-up code. A set that is whole by its own MANIFEST may still
+  # be anyone's code, with a MANIFEST written to match; only the set the
+  # package was built from tells it apart. Without that set nothing is loaded,
+  # and so nothing is checked.
+  [ -n "$reference" ] || die "--set DIR is needed to check a package for the set: the check loads the package's libmpv.so.2, which runs its code, and only when the package holds the set in DIR"
 fi
 [ "$preflight" -eq 0 ] || exit 0
 
@@ -322,17 +331,13 @@ check_with() {
            find "$set" \( -type d ! -perm -005 -o ! -type d ! -perm -004 \) -print0)
   [ "$closed" -eq 1 ] || pass "access: every user may read every file of the set"
 
-  if [ -n "$reference" ]; then
-    if cmp -s "$reference/MANIFEST" "$set/MANIFEST"; then
-      pass "source: its MANIFEST is the one in $reference"
-    else
-      fail "source: its MANIFEST is not the one in $reference; the package holds another set"
-    fi
+  # Everything below can pass for a set that is whole and is still not the set
+  # that was built: one with a library changed and its MANIFEST written to
+  # match. Only the built set can tell, and the load waits for this.
+  if cmp -s "$reference/MANIFEST" "$set/MANIFEST"; then
+    pass "source: its MANIFEST is the one in $reference"
   else
-    # Everything below can pass for a set that is whole and loads and is still
-    # not the set that was built: one with a library changed and its MANIFEST
-    # written to match. Only the built set can tell, so say it was not asked.
-    skipped "source: no set was given (--set DIR), so its MANIFEST was not compared with the built set's"
+    fail "source: its MANIFEST is not the one in $reference; the package holds another set"
   fi
 
   pins="$(awk '$1 !~ /^#/ && $3 == "ship" { print $1, $2 }' "$here/versions.txt" | LC_ALL=C sort)"

@@ -282,11 +282,11 @@ directory (nothing is installed) and requires that:
   the PKGBUILD set them), so a set copied under a strict umask makes an rpm
   whose libraries no user can load. If the check says so, `chmod -R a+rX` the
   set and build again;
-- its `MANIFEST` is the one of the set the build was given. Run by hand
-  without `--set`, the check cannot compare the two and prints a line that
-  begins `skip` in place of this one; such a package is known to hold a set
-  that is whole and loads, not to hold the set you built. `--set` with
-  nothing after it stops the check;
+- its `MANIFEST` is the one of the set the build was given. A set whose
+  library was changed and whose `MANIFEST` was written to match is whole by
+  its own account; only the built set tells it apart, and the library is
+  loaded only from that set. So this check needs `--set`, also run by hand,
+  and stops without it, as it does for a `--set` with nothing after it;
 - its components are the versions `packaging/libmpv/versions.txt` pins, so a
   set left over from before a bump is not shipped;
 - every file the `MANIFEST` lists is present and unmodified, and nothing

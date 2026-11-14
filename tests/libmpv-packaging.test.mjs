@@ -972,6 +972,10 @@ const referenceWith = (t, manifest) => {
   fs.writeFileSync(path.join(directory, 'MANIFEST'), manifest);
   return directory;
 };
+// What a package that is to hold the set is checked against: the set it was
+// built from, by default one whose MANIFEST is that of manifestOf(pinned).
+// Without one the check loads nothing, and so judges no package.
+const builtSet = (t, manifest = manifestOf(pinned)) => ['--set', referenceWith(t, manifest)];
 
 // An AppImage is an ELF program with a squashfs appended to it. The check
 // finds the squashfs where the ELF section header table ends; this is the
@@ -1124,7 +1128,7 @@ test('the package check fails the run when any one of several packages fails', {
 test('the package check refuses a set that is not in the package where the loader reads it', { skip: checkUnavailable }, async (t) => {
   await t.test('no set at all', (t) => {
     const without = pacmanPackage(t, {});
-    const run = checkPackageRun([without.file]);
+    const run = checkPackageRun([...builtSet(t), without.file]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL place: the package has no usr\/lib\/Vela\/libmpv, /m);
     assert.match(run.stdout, /^RESULT FAIL /m);
@@ -1132,7 +1136,7 @@ test('the package check refuses a set that is not in the package where the loade
 
   await t.test('a set in another directory', (t) => {
     const misplaced = pacmanPackage(t, { 'usr/lib/vela/libmpv/libmpv.so.2': 'x\n' });
-    const run = checkPackageRun([misplaced.file]);
+    const run = checkPackageRun([...builtSet(t), misplaced.file]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL place: the package has no usr\/lib\/Vela\/libmpv, /m);
     assert.match(run.stdout, /^FAIL place: it does have usr\/lib\/vela\/libmpv\/libmpv\.so\.2$/m);
@@ -1146,7 +1150,7 @@ test('the package check refuses a set that is not in the package where the loade
       { 'usr/share/elsewhere/libmpv.so.2': 'x\n', 'usr/share/elsewhere/MANIFEST': '' },
       { 'usr/lib/Vela/libmpv': '../../share/elsewhere' },
     );
-    const run = checkPackageRun([linked.file]);
+    const run = checkPackageRun([...builtSet(t), linked.file]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL place: usr\/lib\/Vela\/libmpv is reached through a symbolic link /m);
     assert.doesNotMatch(run.stdout, /load:/, 'nothing is loaded from a set that is not in its place');
@@ -1156,7 +1160,7 @@ test('the package check refuses a set that is not in the package where the loade
     const other = pacmanPackage(t, {});
     const renamed = path.join(other.root, 'vela.zip');
     fs.copyFileSync(other.file, renamed);
-    const run = checkPackageRun([renamed, path.join(other.root, 'missing.deb')]);
+    const run = checkPackageRun([...builtSet(t), renamed, path.join(other.root, 'missing.deb')]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL unpack: not a \.deb, \.rpm, \.AppImage or pacman package$/m);
     assert.match(run.stdout, /^FAIL unpack: no such file$/m);
@@ -1184,7 +1188,7 @@ test('the package check unpacks each kind of package, and fails one it cannot un
 
     await t.test(`a ${kind} with the set: found in its place, and loaded from there`, (t) => {
       // No licence text in the directory Arch keeps licences in.
-      const run = checkPackageRun([packageWith(t, manifestOf(pinned), { archLicences: null, kind }).file]);
+      const run = checkPackageRun([...builtSet(t), packageWith(t, manifestOf(pinned), { archLicences: null, kind }).file]);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.match(run.stdout, /^ok   place: the set is at usr\/lib\/Vela\/libmpv$/m);
       assert.match(run.stdout, /^ok   pins: /m);
@@ -1199,7 +1203,7 @@ test('the package check unpacks each kind of package, and fails one it cannot un
       const whole = packageOf(t, kind, { ...script, 'usr/lib/Vela/noise.bin': crypto.randomBytes(1 << 16) });
       const bytes = fs.readFileSync(whole.file);
       fs.writeFileSync(whole.file, bytes.subarray(0, bytes.length >> 1));
-      for (const mode of [['--without-libmpv'], []]) {
+      for (const mode of [['--without-libmpv'], builtSet(t)]) {
         const run = checkPackageRun([...mode, whole.file]);
         assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
         assert.match(run.stdout, /^FAIL unpack: the package could not be unpacked$/m);
@@ -1222,7 +1226,7 @@ test('the package check unpacks each kind of package, and fails one it cannot un
     // come out before the damage must not be judged as if it were the package.
     const files = { ...script, 'usr/lib/Vela/noise.bin': crypto.randomBytes(1 << 16) };
     const damaged = packageOf(t, 'deb', files, {}, {}, { dataMember: 'cut short' });
-    for (const mode of [['--without-libmpv'], []]) {
+    for (const mode of [['--without-libmpv'], builtSet(t)]) {
       const run = checkPackageRun([...mode, damaged.file]);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.match(run.stdout, /^FAIL unpack: the package could not be unpacked$/m);
@@ -1237,8 +1241,8 @@ test('the package check judges nothing that is not a package of Vela', { skip: c
   // pass for a default build of Vela, and what is asked of a package with
   // the set is not asked of them either.
   const notVela = /^FAIL unpack: this is not a package of Vela: it has no usr\/bin\/vela$/m;
-  const failsBothWays = (file, pattern) => {
-    for (const mode of [['--without-libmpv'], []]) {
+  const failsBothWays = (t, file, pattern) => {
+    for (const mode of [['--without-libmpv'], builtSet(t)]) {
       const run = checkPackageRun([...mode, file]);
       assert.equal(run.status, 1, `${mode} ${run.stdout}\n${run.stderr}`);
       assert.match(run.stdout, pattern);
@@ -1257,14 +1261,14 @@ test('the package check judges nothing that is not a package of Vela', { skip: c
       // bsdtar unpacks an empty file without complaint, to nothing.
       const file = path.join(scratch(t), name);
       fs.writeFileSync(file, '');
-      failsBothWays(file, notVela);
+      failsBothWays(t, file, notVela);
     });
   }
 
   await t.test('an empty file called Vela_1.0.0_amd64.deb', (t) => {
     const file = path.join(scratch(t), 'Vela_1.0.0_amd64.deb');
     fs.writeFileSync(file, '');
-    failsBothWays(file, /^FAIL unpack: the package could not be unpacked$/m);
+    failsBothWays(t, file, /^FAIL unpack: the package could not be unpacked$/m);
   });
 
   await t.test('a deb that holds a set, under the name of an rpm', (t) => {
@@ -1273,18 +1277,18 @@ test('the package check judges nothing that is not a package of Vela', { skip: c
     const deb = packageWith(t, manifestOf(pinned), { kind: 'deb' });
     const renamed = path.join(deb.root, 'Vela-1.0.0-1.x86_64.rpm');
     fs.copyFileSync(deb.file, renamed);
-    failsBothWays(renamed, notVela);
+    failsBothWays(t, renamed, notVela);
   });
 
   await t.test('a package of something else', (t) => {
     const other = packageOf(t, 'pkg.tar.zst', { 'usr/bin/vela': null, 'usr/bin/other': 'another program\n' });
-    failsBothWays(other.file, notVela);
+    failsBothWays(t, other.file, notVela);
   });
 
   await t.test('a package in which the program is a link to somewhere else', (t) => {
     // A link that leads out of the package finds the builder's own files.
     const linked = packageOf(t, 'pkg.tar.zst', { 'usr/bin/vela': null }, { 'usr/bin/vela': '/bin/sh' });
-    failsBothWays(linked.file, notVela);
+    failsBothWays(t, linked.file, notVela);
   });
 
   await t.test('a file that is no package, and a file that is not there, asked for no set', (t) => {
@@ -1337,7 +1341,7 @@ test('the package check compares the set in the package with the pins, the set i
   };
   for (const [what, [files, problem]] of Object.entries(damaged)) {
     await t.test(what, (t) => {
-      const run = checkPackageRun([packageWith(t, right, { files }).file]);
+      const run = checkPackageRun([...builtSet(t), packageWith(t, right, { files }).file]);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.deepEqual(run.stdout.match(/^FAIL manifest: .*$/gm), [`FAIL manifest: ${problem}`], run.stdout);
       assert.doesNotMatch(run.stdout, /^ok   manifest:/m);
@@ -1362,7 +1366,7 @@ test('the package check compares the set in the package with the pins, the set i
       ),
       { 'usr/lib/Vela/libmpv/libmpv.so.2': path.join(elsewhere, 'libmpv.so.2') },
     );
-    const run = checkPackageRun([linked.file]);
+    const run = checkPackageRun([...builtSet(t), linked.file]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL manifest: reached through a symbolic link: libmpv\.so\.2$/m);
     assert.deepEqual(run.stdout.match(/^\S+ +load: .*$/gm), [
@@ -1372,7 +1376,7 @@ test('the package check compares the set in the package with the pins, the set i
 
   await t.test('a component at another version', (t) => {
     const stale = manifestOf(pinned.map(([name, version]) => [name, name === 'ffmpeg' ? '1.0.0' : version]));
-    const run = checkPackageRun([packageWith(t, stale).file]);
+    const run = checkPackageRun([...builtSet(t, stale), packageWith(t, stale).file]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     const ffmpeg = pinned.find(([name]) => name === 'ffmpeg')[1];
     assert.ok(
@@ -1388,7 +1392,7 @@ test('the package check compares the set in the package with the pins, the set i
 
   await t.test('a pinned component that is not in the set', (t) => {
     const short = manifestOf(pinned.filter(([name]) => name !== 'dav1d'));
-    const run = checkPackageRun([packageWith(t, short).file]);
+    const run = checkPackageRun([...builtSet(t, short), packageWith(t, short).file]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL pins: versions\.txt pins dav1d \S+, and the set in the package is not built from it$/m);
   });
@@ -1404,18 +1408,23 @@ test('the package check compares the set in the package with the pins, the set i
     assert.match(run.stdout, /^ok   pins: /m);
   });
 
-  await t.test('no set given: the comparison that was not made is named, not passed over', (t) => {
+  await t.test('no set given: no package is judged, and nothing of one is loaded', (t) => {
     // A set with a library changed and its MANIFEST written to match is
-    // whole, pinned and loads. Only the built set can tell it is another.
-    const run = checkPackageRun([packageWith(t, right).file]);
-    assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
-    assert.match(
-      run.stdout,
-      /^skip source: no set was given \(--set DIR\), so its MANIFEST was not compared with the built set's$/m,
-    );
-    assert.doesNotMatch(run.stdout, /^(ok  |FAIL) source:/m);
-    // The line stands where the comparison would: after the place, before the pins.
-    assert.match(run.stdout, /^ok   access: .*\nskip source: .*\nok   pins: /m);
+    // whole and pinned by its own account, and loading it runs that library's
+    // code. Only the built set can tell it is another, so without one the
+    // check stops before it unpacks anything.
+    const standIn = checkBesideStandIn(t, { lines: ['RESULT PASS'] });
+    const good = packageWith(t, right).file;
+    for (const args of [[good], ['--preflight']]) {
+      const run = checkPackageRun(args, standIn.script);
+      assert.equal(run.status, 2, `${run.stdout}\n${run.stderr}`);
+      assert.equal(
+        run.stderr,
+        "check-package: --set DIR is needed to check a package for the set: the check loads the package's libmpv.so.2, which runs its code, and only when the package holds the set in DIR\n",
+      );
+      assert.equal(run.stdout, '', 'no package is judged');
+      assert.equal(standIn.wasCalled(), false, 'check-libmpv.py was started without the set the package was built from');
+    }
   });
 
   await t.test('a --set that names nothing stops the check; it is not taken for "no set"', (t) => {
@@ -1455,7 +1464,7 @@ test('the package check compares the set in the package with the pins, the set i
   };
   for (const [what, [file, mode, others]] of Object.entries(closed)) {
     await t.test(what, (t) => {
-      const run = checkPackageRun([packageWith(t, right, { modes: { [file]: mode } }).file]);
+      const run = checkPackageRun([...builtSet(t), packageWith(t, right, { modes: { [file]: mode } }).file]);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.ok(
         run.stdout.includes(`\nFAIL access: ${file} cannot be read by every user (other users have '${others}')\n`),
@@ -1476,7 +1485,7 @@ test('the package check compares the set in the package with the pins, the set i
   };
   for (const [what, [modes, first, others]] of Object.entries(above)) {
     await t.test(what, (t) => {
-      const run = checkPackageRun([packageWith(t, right, { modes }).file]);
+      const run = checkPackageRun([...builtSet(t), packageWith(t, right, { modes }).file]);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.deepEqual(run.stdout.match(/^FAIL access: .*$/gm), [
         `FAIL access: ${first} cannot be entered by every user (other users have '${others}'), and the set is below it`,
@@ -1486,7 +1495,7 @@ test('the package check compares the set in the package with the pins, the set i
   }
 
   await t.test('a directory above the set that every user may enter but not list is enough', (t) => {
-    const run = checkPackageRun([packageWith(t, right, { modes: { usr: 0o711, 'usr/lib': 0o711 } }).file]);
+    const run = checkPackageRun([...builtSet(t), packageWith(t, right, { modes: { usr: 0o711, 'usr/lib': 0o711 } }).file]);
     assert.match(run.stdout, /^ok   access: every user may read every file of the set$/m);
   });
 
@@ -1494,7 +1503,7 @@ test('the package check compares the set in the package with the pins, the set i
     // Unpacking applies the umask. Under a strict one every file would come
     // out closed, and a good package would be blamed for the builder's shell.
     const good = packageWith(t, right).file;
-    const run = spawnSync('/bin/bash', ['-c', 'umask 077 && exec /bin/bash "$0" "$1"', checkPackagePath, good], {
+    const run = spawnSync('/bin/bash', ['-c', 'umask 077 && exec /bin/bash "$0" "$@"', checkPackagePath, ...builtSet(t), good], {
       encoding: 'utf8',
     });
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
@@ -1504,7 +1513,7 @@ test('the package check compares the set in the package with the pins, the set i
 
   for (const [what, inArchDirectory] of [['missing from', null], ['changed in', 'another text\n']]) {
     await t.test(`a licence text ${what} the directory Arch keeps licences in`, (t) => {
-      const run = checkPackageRun([packageWith(t, right, { archLicences: { mpv: inArchDirectory } }).file]);
+      const run = checkPackageRun([...builtSet(t), packageWith(t, right, { archLicences: { mpv: inArchDirectory } }).file]);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.deepEqual(run.stdout.match(/^FAIL licences: .*$/gm), [
         "FAIL licences: usr/share/licenses/vela/libmpv/mpv/LICENSE.LGPL is missing or is not the set's licenses/mpv/LICENSE.LGPL",
@@ -1558,7 +1567,7 @@ test('the package check compares the set in the package with the pins, the set i
   for (const [what, make] of Object.entries(licenceCopies)) {
     await t.test(`a licence copy: ${what}`, (t) => {
       const [options, lines] = make(t);
-      const run = checkPackageRun([packageWith(t, right, options).file]);
+      const run = checkPackageRun([...builtSet(t), packageWith(t, right, options).file]);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.deepEqual(run.stdout.match(/^FAIL licences: .*$/gm), lines);
       assert.doesNotMatch(run.stdout, /^ok   licences:/m);
@@ -1568,7 +1577,7 @@ test('the package check compares the set in the package with the pins, the set i
   await t.test('a set whose MANIFEST names no licence text at all', (t) => {
     // With nothing named there is nothing to find missing, and that must not
     // read as "every licence text is in its place".
-    const run = checkPackageRun([packageWith(t, manifestOf(pinned, { licences: false })).file]);
+    const run = checkPackageRun([...builtSet(t, manifestOf(pinned, { licences: false })), packageWith(t, manifestOf(pinned, { licences: false })).file]);
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL licences: the set's MANIFEST names no licence text$/m);
   });
@@ -1706,12 +1715,12 @@ test('the package check calls check-libmpv.py on the unpacked set, and passes a 
       line: /^FAIL source: /m,
     }),
     'a component is not the pinned version': (t) => ({
-      args: [],
+      args: builtSet(t, manifestOf(pinned.map(([name, version]) => [name, name === 'ffmpeg' ? '1.0.0' : version]))),
       file: packageWith(t, manifestOf(pinned.map(([name, version]) => [name, name === 'ffmpeg' ? '1.0.0' : version]))).file,
       line: /^FAIL pins: /m,
     }),
     'a library of the set is closed to other users': (t) => ({
-      args: [],
+      args: builtSet(t),
       file: packageWith(t, right, { modes: { 'usr/lib/Vela/libmpv/libmpv.so.2': 0o600 } }).file,
       line: /^FAIL access: /m,
     }),
@@ -1736,7 +1745,7 @@ test('the package check calls check-libmpv.py on the unpacked set, and passes a 
     await t.test(what, (t) => {
       const standIn = checkBesideStandIn(t, answer);
       const good = packageWith(t, right).file;
-      const run = checkPackageRun([good], standIn.script);
+      const run = checkPackageRun([...builtSet(t), good], standIn.script);
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.deepEqual(run.stdout.match(/^FAIL .*$/gm), [line], run.stdout);
       assert.deepEqual(run.stdout.match(/^RESULT .*$/gm), [`RESULT FAIL ${good}`]);
@@ -1789,7 +1798,7 @@ test('the package check removes what it unpacked, also when it is cancelled', { 
 
   await t.test('one unpacked package at a time: the first is gone when the second is checked', (t) => {
     const standIn = checkBesideStandIn(t, { lines: ['RESULT PASS'] });
-    const run = checkPackageRun([packageWith(t, right).file, packageWith(t, right, { kind: 'deb' }).file], standIn.script);
+    const run = checkPackageRun([...builtSet(t), packageWith(t, right).file, packageWith(t, right, { kind: 'deb' }).file], standIn.script);
     assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
     assert.deepEqual(standIn.called().unpacked, ['2', '2.log']);
   });
@@ -1810,7 +1819,7 @@ test('the package check removes what it unpacked, also when it is cancelled', { 
       ],
     });
     const tmp = emptyDirectory(t);
-    const first = await started({ script: standIn.script, args: [packageWith(t, right).file], tmp, marker });
+    const first = await started({ script: standIn.script, args: [...builtSet(t), packageWith(t, right).file], tmp, marker });
     const second = spawnSync('/bin/bash', [checkPackagePath, '--without-libmpv', pacmanPackage(t, {}).file], {
       encoding: 'utf8',
       env: { ...process.env, TMPDIR: tmp },
@@ -1837,7 +1846,7 @@ test('the package check removes what it unpacked, also when it is cancelled', { 
     for (let round = 0; round < 8; round += 1) {
       fs.rmSync(marker, { force: true });
       const tmp = emptyDirectory(t);
-      ends.push(await interrupted({ script: standIn.script, args: [good], tmp, marker, signal: 'SIGHUP', wholeGroup: true }));
+      ends.push(await interrupted({ script: standIn.script, args: [...builtSet(t), good], tmp, marker, signal: 'SIGHUP', wholeGroup: true }));
       assert.deepEqual(fs.readdirSync(tmp), [], `round ${round}: the unpacked package was left behind`);
     }
     // And it left by its own door each time, with the status of a hangup.
@@ -1853,7 +1862,7 @@ test('the package check removes what it unpacked, also when it is cancelled', { 
       const tmp = emptyDirectory(t);
       const end = await interrupted({
         script: standIn.script,
-        args: [packageWith(t, right).file],
+        args: [...builtSet(t), packageWith(t, right).file],
         tmp,
         marker,
         signal,
@@ -2138,7 +2147,7 @@ test('the package check reads an AppImage with unsquashfs and never runs it', { 
     fs.chmodSync(file, 0o644);
     return file;
   };
-  const both = [['--without-libmpv'], []];
+  const both = [['--without-libmpv'], builtSet(t)];
 
   await t.test('a file named like an AppImage that is a script: never run, refused before anything else', () => {
     // It does what an AppImage asked to unpack itself would do, and leaves a
@@ -2248,7 +2257,7 @@ echo app > squashfs-root/usr/bin/vela
         /^FAIL unpack: unsquashfs is not installed \(squashfs-tools\), and an AppImage is read with nothing else, so this package could not be checked$/m,
       );
       // The other package is judged all the same.
-      assert.deepEqual(run.stdout.match(/^RESULT \w+/gm), ['RESULT FAIL', args.length ? 'RESULT PASS' : 'RESULT FAIL']);
+      assert.deepEqual(run.stdout.match(/^RESULT \w+/gm), ['RESULT FAIL', args[0] === '--without-libmpv' ? 'RESULT PASS' : 'RESULT FAIL']);
     }
   });
 });
@@ -2291,7 +2300,7 @@ test('the package check reads a real squashfs behind an ELF program', {
   // The modes in the image are the package's, and unsquashfs keeps them.
   const right = manifestOf(pinned);
   const inSet = Object.fromEntries(Object.entries(setFilesOf(right)).map(([name, contents]) => [`usr/lib/Vela/libmpv/${name}`, contents]));
-  const closed = checkPackageRun([appImage('Vela_1.0.2_amd64.AppImage', inSet, { 'usr/lib/Vela/libmpv/libmpv.so.2': 0o600 })]);
+  const closed = checkPackageRun([...builtSet(t), appImage('Vela_1.0.2_amd64.AppImage', inSet, { 'usr/lib/Vela/libmpv/libmpv.so.2': 0o600 })]);
   assert.equal(closed.status, 1, `${closed.stdout}\n${closed.stderr}`);
   assert.match(closed.stdout, /^ok   place: the set is at usr\/lib\/Vela\/libmpv$/m);
   assert.match(closed.stdout, /^FAIL access: usr\/lib\/Vela\/libmpv\/libmpv\.so\.2 cannot be read by every user/m);
@@ -2364,7 +2373,7 @@ test('the package check never lets an unpacked package write outside its tempora
       const file = path.join(scratch, kind === 'pacman' ? 'vela-1.0.0-1-x86_64.pkg.tar.zst' : 'Vela_1.0.0_amd64.deb');
       const made = spawnSync('python3', ['-I', '-c', make, file, outside, which, kind], { encoding: 'utf8' });
       assert.equal(made.status, 0, made.stderr);
-      for (const mode of [['--without-libmpv'], []]) {
+      for (const mode of [['--without-libmpv'], builtSet(t)]) {
         const run = checkPackageRun([...mode, file]);
         if (!/absolute/.test(which)) {
           assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
@@ -2537,7 +2546,7 @@ test('the package check, asked beforehand, says whether it can run and judges no
   const set = referenceWith(t, manifestOf(pinned));
 
   await t.test('it can: status 0 and not a word', () => {
-    for (const args of [['--preflight'], ['--preflight', '--set', set], ['--without-libmpv', '--preflight', `--set=${set}`]]) {
+    for (const args of [['--preflight', '--set', set], ['--without-libmpv', '--preflight'],['--without-libmpv', '--preflight', `--set=${set}`]]) {
       const run = checkPackageRun(args);
       assert.deepEqual([run.status, run.stdout, run.stderr], [0, '', ''], args.join(' '));
     }
