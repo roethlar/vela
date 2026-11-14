@@ -66,14 +66,40 @@ problem). A scenario's default export may hold only these keys:
   TEST-ONLY ROUTES: it is not shown the way a user of that player would.
 
 Importing a scenario must do nothing: the runner imports all of them before
-it runs any. The parity test imports them with the ways of acting on the
-machine it knows watched, and fails if any is used: processes
+it runs any. The parity test imports them in a process of its own
+(`import-watch.mjs`), with the ways of acting on the machine it knows
+watched, and fails if any is used. The watch is in place before the loader
+or any scenario is imported, and it is never taken down: the process reports
+only once it has nothing left to do, so an act an import puts off (a promise
+that settles later) is seen when it runs, and an import that keeps the
+process busy for good fails. Watched: processes
 (child_process, cluster), worker threads, sockets and servers (net, dgram,
 http, https, fetch), every fs call that writes, removes or changes a file or
-its metadata, and opening one other than to read; timers, signal handlers,
-process.exit/kill/chdir/umask; and it fails on any change to the
-environment, to the global object's names or to a built-in prototype. A way
-not in that list (a native addon, say) is not seen.
+its metadata, and opening one other than to read; timers and put-off
+callbacks, by every route it knows to them (the global `setTimeout`,
+`setInterval`, `setImmediate` and `queueMicrotask`; the same three of
+`node:timers`, however imported or required; `setTimeout`, `setInterval`,
+`setImmediate` and `scheduler.wait`/`scheduler.yield` of
+`node:timers/promises`; `AbortSignal.timeout`; `process.nextTick`;
+`Atomics.waitAsync`), so that an unreferenced timer, which holds no handle,
+is seen too; sockets, servers and children made with `new` (`connect` of
+`net.Socket`, `listen` of `net.Server`, `bind`/`connect`/`send` of
+`dgram.Socket`, `spawn` of `ChildProcess`); DNS queries (`node:dns` and its
+`promises`, of the module or of a `Resolver`); file watchers (`fs.watch`,
+`fs.watchFile`, `fs.promises.watch`); signal handlers, by any route, since
+the process's listeners are compared, as well as the calls of `process.on`,
+`once`, `addListener` and `prependListener`; process.exit/kill/chdir/umask;
+and it fails on any change to the environment, to the global object's names
+or to a built-in prototype, read once the process has nothing left to do,
+and on a handle still open just after the import. The test proves, each
+with a made-up module of its own, that every timer route above is seen, that
+an act put off past the import is seen, and that one route of each other
+new kind is: a socket, a server, a UDP socket and a child made with `new`, a
+DNS lookup (callback and promise) and a resolver's query (both kinds),
+`fs.watch` and `fs.watchFile`, and a signal handler added through
+`EventEmitter.prototype.on`. The other names listed are watched the same way
+but not each proved. A way not in that list is not seen: a native addon,
+say, or a module of Node's own not named here.
 
 ## Parity
 

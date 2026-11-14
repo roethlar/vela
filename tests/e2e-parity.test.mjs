@@ -5,18 +5,12 @@
 // their own default export, read here through the loader the runner uses.
 // Nothing reads JavaScript source: the scenarios are imported.
 import assert from 'node:assert/strict';
-import childProcess from 'node:child_process';
-import cluster from 'node:cluster';
-import dgram from 'node:dgram';
+import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
-import http from 'node:http';
-import https from 'node:https';
-import module from 'node:module';
-import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
-import workerThreads from 'node:worker_threads';
 import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS, SPLITS } from './e2e/parity.mjs';
 import { beginProof, endProof, TEST_ONLY_ROUTES, testOnlyRoute } from './e2e/proof.mjs';
 import {
@@ -38,117 +32,194 @@ const scenarioDir = path.join(repoRoot, 'tests/e2e/scenarios');
 const liveDir = path.join(repoRoot, 'tests/e2e/live');
 
 // Importing a scenario must do nothing: the runner imports every one of them
-// before it runs any, and this test imports them all. So the first import of
-// them in this process happens with every way of acting on the machine
-// replaced by one that records the call, and with the process's live handles
-// counted before and after.
-async function importWatched() {
-  const calls = [];
-  const patched = [];
-  const watch = (object, names, label) => {
-    for (const name of names) {
-      if (typeof object[name] !== 'function') continue;
-      const original = object[name];
-      patched.push(() => {
-        object[name] = original;
-      });
-      object[name] = function watched(...args) {
-        // Opening a file to read it is how modules are loaded at all.
-        const readOnly = (name === 'openSync' || name === 'open') && [undefined, 'r', 0].includes(args[1]);
-        if (!readOnly) calls.push(`${label}.${name}(${typeof args[0] === 'string' ? args[0] : ''})`);
-        return original.apply(this, args);
-      };
-    }
-  };
-  watch(childProcess, ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'], 'child_process');
-  watch(cluster, ['fork', 'setupPrimary', 'setupMaster'], 'cluster');
-  watch(net, ['createServer', 'createConnection', 'connect'], 'net');
-  watch(dgram, ['createSocket'], 'dgram');
-  watch(http, ['createServer', 'request', 'get'], 'http');
-  watch(https, ['createServer', 'request', 'get'], 'https');
-  // Every fs call that changes a file, a directory or its metadata; opening
-  // is watched too, except to read.
-  const FS_WRITERS = [
-    'writeFile', 'appendFile', 'write', 'writev', 'mkdir', 'mkdtemp', 'rm', 'rmdir', 'unlink', 'rename',
-    'copyFile', 'cp', 'symlink', 'link', 'truncate', 'ftruncate', 'chmod', 'fchmod', 'lchmod', 'chown',
-    'fchown', 'lchown', 'utimes', 'futimes', 'lutimes', 'open',
-  ];
-  watch(fs, [...FS_WRITERS, ...FS_WRITERS.map((name) => `${name}Sync`), 'createWriteStream'], 'fs');
-  watch(fs.promises, FS_WRITERS, 'fs.promises');
-  watch(globalThis, ['fetch', 'setTimeout', 'setInterval', 'setImmediate', 'queueMicrotask'], 'global');
-  watch(process, ['on', 'once', 'addListener', 'prependListener', 'kill', 'exit', 'chdir', 'umask'], 'process');
-  // A worker thread runs code of its own, which can do any of the above out of
-  // this thread's sight (review finding atk-8); its construction is the act.
-  const OriginalWorker = workerThreads.Worker;
-  patched.push(() => {
-    workerThreads.Worker = OriginalWorker;
+// before it runs any. tests/e2e/import-watch.mjs imports them in a process of
+// its own, with every way of acting on the machine it knows replaced by one
+// that records the call, and reports what it saw once that process has
+// nothing left to do, so that what an import puts off is seen as well as what
+// it does at once (review finding pa-4). `pairs` are directories and the
+// prefix their scenarios are loaded with.
+function importWatched(pairs, { timeout = 60000 } = {}) {
+  const res = spawnSync(process.execPath, [path.join(repoRoot, 'tests/e2e/import-watch.mjs'), ...pairs], {
+    encoding: 'utf8',
+    timeout,
   });
-  workerThreads.Worker = class WatchedWorker extends OriginalWorker {
-    constructor(...args) {
-      calls.push(`worker_threads.Worker(${typeof args[0] === 'string' ? args[0].slice(0, 80) : ''})`);
-      super(...args);
-    }
-  };
-  // Named imports of the built-in modules (`import { spawnSync } from
-  // 'node:child_process'`) see the replacements only after this.
-  module.syncBuiltinESMExports();
-  const handlesBefore = process.getActiveResourcesInfo().length;
-  const envBefore = JSON.stringify(process.env);
-  // What an import could change in this process for every later module: the
-  // global object's own names, and the built-in prototypes' properties.
-  const shared = () => {
-    const out = new Map([['globalThis', Object.getOwnPropertyNames(globalThis).sort().join(',')]]);
-    for (const [name, proto] of Object.entries({
-      Object: Object.prototype, Array: Array.prototype, String: String.prototype, Function: Function.prototype,
-      Promise: Promise.prototype, Number: Number.prototype, RegExp: RegExp.prototype, Map: Map.prototype,
-      Set: Set.prototype, Error: Error.prototype, JSON, Math, Reflect, Object_: Object, Array_: Array, Promise_: Promise,
-    })) {
-      for (const key of Reflect.ownKeys(proto)) {
-        const d = Object.getOwnPropertyDescriptor(proto, key);
-        out.set(`${name}.${String(key)}`, d);
-      }
-    }
-    return out;
-  };
-  const sharedBefore = shared();
-  let loaded;
+  if (res.error?.code === 'ETIMEDOUT' || res.signal) {
+    return { error: `the import never let its process end (${res.error?.code ?? res.signal}): it left something running`, calls: [] };
+  }
+  const line = res.stdout.trim().split('\n').at(-1) ?? '';
   try {
-    loaded = {
-      scenarios: await loadScenarios(scenarioDir),
-      live: await loadScenarios(liveDir, { prefix: 'live-' }),
-    };
-  } finally {
-    for (const restore of patched) restore();
-    module.syncBuiltinESMExports();
+    return JSON.parse(line);
+  } catch {
+    return { error: `the watch reported nothing it could read (exit ${res.status}): ${res.stderr.trim()}`, calls: [] };
   }
-  const sharedAfter = shared();
-  const sharedChanged = [];
-  for (const key of new Set([...sharedBefore.keys(), ...sharedAfter.keys()])) {
-    const [a, b] = [sharedBefore.get(key), sharedAfter.get(key)];
-    if (key === 'globalThis' ? a !== b : !sameDescriptor(a, b)) sharedChanged.push(key);
-  }
-  return {
-    ...loaded,
-    calls,
-    newHandles: process.getActiveResourcesInfo().length - handlesBefore,
-    envChanged: JSON.stringify(process.env) !== envBefore,
-    sharedChanged,
-  };
 }
 
-function sameDescriptor(a, b) {
-  if (!a || !b) return a === b;
-  return ['value', 'get', 'set', 'writable', 'enumerable', 'configurable'].every((k) => Object.is(a[k], b[k]));
-}
-
-const imported = await importWatched();
-const { scenarios, live } = imported;
+const imported = importWatched([scenarioDir, '', liveDir, 'live-']);
+const scenarios = await loadScenarios(scenarioDir);
+const live = await loadScenarios(liveDir, { prefix: 'live-' });
 
 test('importing a scenario has no side effects', () => {
+  assert.equal(imported.error, undefined, imported.error);
+  // Every scenario was imported under the watch, so that an empty import
+  // cannot pass.
+  assert.deepEqual(imported.loaded, [...scenarios, ...live].map((s) => s.name));
   assert.deepEqual(imported.calls, [], 'a scenario module acted on the machine when it was imported');
   assert.equal(imported.newHandles, 0, 'a scenario module left something running when it was imported');
   assert.equal(imported.envChanged, false, 'a scenario module changed the environment when it was imported');
   assert.deepEqual(imported.sharedChanged, [], 'a scenario module changed the global object or a built-in when it was imported');
+});
+
+// Each route to a timer, taken by a made-up scenario module at import, must be
+// seen by the watch above (review finding pa-4). The modules are written to a
+// directory of their own, never among the scenarios, and loaded through the
+// loader the runner uses.
+test('the import watch sees a timer started by any route, and what an import puts off', async () => {
+  const routes = {
+    timerssettimeout: ["import { setTimeout } from 'node:timers';", 'setTimeout(() => {}, 1);', 'timers.setTimeout()'],
+    timersunref: ["import { setTimeout } from 'node:timers';", 'setTimeout(() => {}, 60000).unref();', 'timers.setTimeout()'],
+    timersdefault: ["import timers from 'node:timers';", 'timers.setTimeout(() => {}, 60000).unref();', 'timers.setTimeout()'],
+    timersrequire: [
+      "import { createRequire } from 'node:module';",
+      "createRequire(import.meta.url)('node:timers').setTimeout(() => {}, 60000).unref();",
+      'timers.setTimeout()',
+    ],
+    timerssetinterval: [
+      "import { setInterval, clearInterval } from 'node:timers';",
+      'clearInterval(setInterval(() => {}, 60000));',
+      'timers.setInterval()',
+    ],
+    timerssetimmediate: ["import { setImmediate } from 'node:timers';", 'setImmediate(() => {});', 'timers.setImmediate()'],
+    promisesdelay: ["import { setTimeout as delay } from 'node:timers/promises';", 'await delay(1);', 'timers/promises.setTimeout()'],
+    promisesoftimers: ["import { promises } from 'node:timers';", 'await promises.setTimeout(1);', 'timers/promises.setTimeout()'],
+    promisesunawaited: [
+      "import { setTimeout as delay } from 'node:timers/promises';",
+      'delay(60000, undefined, { ref: false }).catch(() => {});',
+      'timers/promises.setTimeout()',
+    ],
+    promisessetinterval: [
+      "import { setInterval } from 'node:timers/promises';",
+      'const ticks = setInterval(1); await ticks.next(); await ticks.return();',
+      'timers/promises.setInterval()',
+    ],
+    promisessetimmediate: ["import { setImmediate } from 'node:timers/promises';", 'await setImmediate();', 'timers/promises.setImmediate()'],
+    schedulerwait: ["import { scheduler } from 'node:timers/promises';", 'await scheduler.wait(1);', 'timers/promises.scheduler.wait()'],
+    scheduleryield: ["import { scheduler } from 'node:timers/promises';", 'await scheduler.yield();', 'timers/promises.scheduler.yield()'],
+    globalunref: ['', 'setTimeout(() => {}, 60000).unref();', 'global.setTimeout()'],
+    globalsetinterval: ['', 'clearInterval(setInterval(() => {}, 60000));', 'global.setInterval()'],
+    globalsetimmediate: ['', 'setImmediate(() => {});', 'global.setImmediate()'],
+    aborttimeout: ['', 'AbortSignal.timeout(60000);', 'AbortSignal.timeout()'],
+    // Callbacks put off without a timer, which run after the import too.
+    nexttick: ['', 'process.nextTick(() => {});', 'process.nextTick()'],
+    microtask: ['', 'queueMicrotask(() => {});', 'global.queueMicrotask()'],
+    // A wait on shared memory, which settles later with no timer and no handle.
+    atomicswaitasync: ['', 'Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);', 'Atomics.waitAsync()'],
+    // An act put off through a route the watch does not record (reading a
+    // file), which runs after the import has returned: the watch must still
+    // be up then. Two reads in a row put it well after the import.
+    deferredwrite: [
+      "import fs from 'node:fs';",
+      'const self = new URL(import.meta.url);\n' +
+        "fs.promises.readFile(self).then(() => fs.promises.readFile(self)).then(() => fs.writeFileSync(new URL('./written.txt', self), 'x'));",
+      'fs.writeFileSync()',
+    ],
+  };
+  seenByTheWatch(routes);
+});
+
+// Each made-up module, `name: [imports, act, expected]`, is written to a
+// directory of its own under a temporary one and imported under the watch,
+// which must record `expected`.
+function seenByTheWatch(routes) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
+  try {
+    for (const [name, [imports, act, expected]] of Object.entries(routes)) {
+      const one = path.join(dir, name);
+      fs.mkdirSync(one);
+      fs.writeFileSync(
+        path.join(one, `${name}.mjs`),
+        `${imports}\n${act}\nexport default { name: '${name}', rows: [], noRows: 'made up', async run() {} };\n`,
+      );
+      const watched = importWatched([one, '']);
+      assert.equal(watched.error, undefined, `${name}: ${watched.error}`);
+      assert.deepEqual(watched.loaded, [name]);
+      assert.ok(watched.calls.includes(expected), `${name}: ${JSON.stringify(watched.calls)} should include ${expected}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+// Acts reached other than through the module functions the watch first
+// covered, each found unseen once (review finding pa-4): a signal handler
+// added through the EventEmitter prototype, a DNS query, a file watcher that
+// holds no handle, and a socket, server or child made with `new`. Every
+// address is this machine's, and each is closed or cancelled at once. The
+// call is what the watch records, so each probe takes a refusal as well as a
+// success: where no socket is allowed (a sandbox answers EPERM to a listen
+// on this machine's own address) the probe still ends and the call is seen.
+test('the import watch sees a signal handler, a DNS query, a file watcher, and a socket or child made with new', () => {
+  seenByTheWatch({
+    prototypelistener: [
+      "import { EventEmitter } from 'node:events';",
+      "EventEmitter.prototype.on.call(process, 'SIGUSR2', () => {});",
+      'process listeners of SIGUSR2 changed',
+    ],
+    processon: ['', "process.on('SIGUSR2', () => {});", 'process.on(SIGUSR2)'],
+    dnslookup: ["import dns from 'node:dns';", "dns.lookup('localhost', () => {});", 'dns.lookup(localhost)'],
+    dnspromises: ["import dns from 'node:dns';", "await dns.promises.lookup('localhost').catch(() => {});", 'dns.promises.lookup(localhost)'],
+    dnsresolver: [
+      "import { Resolver } from 'node:dns';",
+      "const r = new Resolver(); r.setServers(['127.0.0.1']); r.resolve4('vela.invalid', () => {}); r.cancel();",
+      'dns.Resolver.resolve4(vela.invalid)',
+    ],
+    dnspromisesresolver: [
+      "import dns from 'node:dns';",
+      "const r = new dns.promises.Resolver(); r.setServers(['127.0.0.1']); const q = r.resolve4('vela.invalid').catch(() => {}); r.cancel(); await q;",
+      'dns.promises.Resolver.resolve4(vela.invalid)',
+    ],
+    watchfile: [
+      "import fs from 'node:fs';",
+      'const self = new URL(import.meta.url); fs.watchFile(self, { persistent: false }, () => {}); fs.unwatchFile(self);',
+      'fs.watchFile()',
+    ],
+    fswatch: ["import fs from 'node:fs';", 'try { fs.watch(new URL(import.meta.url), { persistent: false }).close(); } catch {}', 'fs.watch()'],
+    socketnew: [
+      "import net from 'node:net';",
+      "const s = new net.Socket(); s.on('error', () => {}); s.connect(9, '127.0.0.1'); s.destroy();",
+      'net.Socket.connect()',
+    ],
+    servernew: [
+      "import net from 'node:net';",
+      "const s = new net.Server(); await new Promise((r) => { s.on('error', r); s.listen(0, '127.0.0.1', r); }); s.close();",
+      'net.Server.listen()',
+    ],
+    udpnew: [
+      "import dgram from 'node:dgram';",
+      "const s = new dgram.Socket('udp4'); await new Promise((r) => { s.on('error', r); s.bind(0, '127.0.0.1', r); }); s.close();",
+      'dgram.Socket.bind()',
+    ],
+    childnew: [
+      "import { ChildProcess } from 'node:child_process';",
+      "const c = new ChildProcess(); c.on('error', () => {}); try { c.spawn({ file: '/nonexistent/vela-probe', args: ['/nonexistent/vela-probe'], envPairs: [], stdio: 'ignore' }); } catch {}",
+      'child_process.ChildProcess.spawn()',
+    ],
+  });
+});
+
+// The watch reports only once its process has nothing left to do; an import
+// that keeps it busy for good must fail, not hang the test or pass.
+test('an import that keeps its process busy for good fails', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'busy.mjs'),
+      "setInterval(() => {}, 1000);\nexport default { name: 'busy', rows: [], noRows: 'made up', async run() {} };\n",
+    );
+    const watched = importWatched([dir, ''], { timeout: 3000 });
+    assert.match(watched.error ?? '', /^the import never let its process end/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test('every scenario says which rows it stands for, in a way the loader understands', () => {
