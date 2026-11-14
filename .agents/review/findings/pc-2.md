@@ -89,3 +89,18 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `0aeeff0..3d2fef6`, 2026-11-14 00:45 UTC
 (`.agents/review/codereview-2026-11-14-embedded-controls.md`). Reviewer's
 title: "Playback errors leave Vela fullscreen for 50 seconds". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 02:17 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d7ce-e93e-7842-b0bd-47dec7fd6aa6`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 02:07 UTC, finished 02:14 UTC.
+- Reviewed head `4118fea55f8dddb27aac30cd2d18078c4aa41a3c`, base
+  `a909c206eb53e21d5e8d6f1181fd0df69960b6be` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/commands.rs:4167 — A provisional replacement is treated as a guaranteed successor. During automatic step-down, the old tracker can report runOver=false before the replacement fails to launch. Cleanup at line 5391 clears the session without emitting a terminal outcome; apply_step_down only logs the failure. Replaying the actual page handlers confirms fullscreen remains until the 50-second backstop in either close/report order. Emit a terminal outcome when that replacement fails and nothing follows.
