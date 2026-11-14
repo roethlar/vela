@@ -18,6 +18,7 @@ import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import workerThreads from 'node:worker_threads';
 import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS } from './e2e/parity.mjs';
+import { beginProof, endProof, TEST_ONLY_ROUTES, testOnlyRoute } from './e2e/proof.mjs';
 import {
   coverage,
   inventoryProblems,
@@ -258,6 +259,27 @@ test('the loader refuses a scenario it does not understand', () => {
   refused(ok({ testOnly: [] }), /not a non-empty array/);
   refused(ok({ testOnly: [{ ...route, via: 'somethingElse' }] }), /"via" is "somethingElse", not one of the test-only routes/);
   refused(ok({ testOnly: [{ ...route, via: undefined }] }), /"via" is undefined/);
+  // Names every object has are no route (review finding pa-8).
+  for (const inherited of ['toString', 'constructor', '__proto__', 'hasOwnProperty']) {
+    refused(
+      ok({ testOnly: [{ ...route, via: inherited }] }),
+      new RegExp(`"via" is "${inherited}", not one of the test-only routes`),
+    );
+  }
+});
+
+// The recorder (proof.mjs) takes only the routes it names, and no name every
+// object inherits (review finding pa-8).
+test('the recorder refuses a test-only route it does not name, an inherited name included', () => {
+  beginProof();
+  try {
+    for (const id of Object.keys(TEST_ONLY_ROUTES)) testOnlyRoute(id);
+    for (const inherited of ['toString', 'constructor', '__proto__', 'hasOwnProperty', 'somethingElse']) {
+      assert.throws(() => testOnlyRoute(inherited), new RegExp(`unknown test-only route "${inherited}"`));
+    }
+  } finally {
+    assert.deepEqual(endProof().routes.sort(), Object.keys(TEST_ONLY_ROUTES).sort());
+  }
 });
 
 test('the parity check refuses a one-sided row, a row with nothing, and a wrong exemption', () => {

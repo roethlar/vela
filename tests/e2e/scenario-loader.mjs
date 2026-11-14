@@ -83,7 +83,9 @@ export function scenarioProblems(scenario, expectedName) {
         } else if (scenario.onlyPlayer && scenario.onlyPlayer !== route.player) {
           problems.push(`${about}: player ${route.player}, but the scenario runs only in ${scenario.onlyPlayer}`);
         }
-        if (!(route.via in TEST_ONLY_ROUTES)) {
+        // Own names only: `in` is also true of what every object inherits,
+        // such as toString (review finding pa-8).
+        if (typeof route.via !== 'string' || !Object.hasOwn(TEST_ONLY_ROUTES, route.via)) {
           problems.push(
             `${about}: "via" is ${JSON.stringify(route.via)}, not one of the test-only routes (${Object.keys(TEST_ONLY_ROUTES).join(', ')}; proof.mjs)`,
           );

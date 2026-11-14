@@ -41,6 +41,8 @@ export function shown(...rows) {
 }
 
 export function testOnlyRoute(id) {
-  if (!(id in TEST_ONLY_ROUTES)) throw new Error(`unknown test-only route "${id}"`);
+  // Own names only: `in` is also true of what every object inherits, such as
+  // toString (review finding pa-8).
+  if (typeof id !== 'string' || !Object.hasOwn(TEST_ONLY_ROUTES, id)) throw new Error(`unknown test-only route "${id}"`);
   current?.routes.add(id);
 }
