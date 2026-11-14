@@ -250,3 +250,20 @@ Not covered:
   build printed no report from Cargo").
 - The text test of the runner cannot catch a deliberate way round it that
   uses none of the words it counts.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 12:50 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da0f-dcf4-7d20-87e8-3509a297116a`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 12:37 UTC, finished 12:46 UTC.
+- Reviewed head `8cf3a056fbf8577df8ed9062aa89c8289a34e98c`, base
+  `9e005c449b9e377986a0eece38b543e7685a03e5` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/app-binary.mjs:111 — Any JSON object with a string reason is swallowed as Cargo output. A non-Cargo diagnostic with reason: 'dependency-warning', emitted before a real Cargo build, disappeared from terminal output. Recognize Cargo message schemas and echo unmatched JSON; the existing output test only covers JSON without reason.
+  - tests/e2e-harness.test.mjs:410 — The wiring guard still permits another executable. I added a helper importing Driver as Client, constructed it with an OLD binary, and shadowed driver inside runScenario's existing try block. Both accepted newSession calls then used that client, while all fifteen tests passed. A stubbed fetch confirmed the alternate application path. The guard checks spellings rather than the binding actually used.
