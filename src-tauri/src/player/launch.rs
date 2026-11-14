@@ -143,6 +143,13 @@ pub(crate) fn private_runtime_dir() -> Result<std::path::PathBuf, String> {
     Ok(dir.clone())
 }
 
+/// A number no other IPC path of this run of Vela has. The time alone is not
+/// enough: two launches can fall in the same millisecond.
+fn next_ipc_number() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
 /// Path for mpv's JSON IPC socket, inside [`private_runtime_dir`].
 #[cfg(not(windows))]
 fn ipc_socket_path() -> Result<String, String> {
@@ -152,7 +159,12 @@ fn ipc_socket_path() -> Result<String, String> {
         .map(|d| d.as_millis())
         .unwrap_or(0);
     Ok(dir
-        .join(format!("mpv-{}-{}.sock", std::process::id(), ts))
+        .join(format!(
+            "mpv-{}-{}-{}.sock",
+            std::process::id(),
+            ts,
+            next_ipc_number()
+        ))
         .to_string_lossy()
         .into_owned())
 }
@@ -168,7 +180,12 @@ pub(crate) fn new_ipc_path() -> Result<String, String> {
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis())
             .unwrap_or(0);
-        Ok(format!(r"\\.\pipe\mpv-plex-{}-{}", pid, ts))
+        Ok(format!(
+            r"\\.\pipe\mpv-plex-{}-{}-{}",
+            pid,
+            ts,
+            next_ipc_number()
+        ))
     }
     #[cfg(not(windows))]
     {
@@ -564,6 +581,31 @@ fn autocrop_args(mode: &str, script: Option<&str>, shim: Option<&str>) -> Vec<La
     }
 }
 
+/// mpv launch args for cropping in the embedded player, given the config
+/// `mode` and Vela's own `vela-crop.lua` (already existence-checked by the
+/// caller; `None` when unresolved/missing). Pure, like [`autocrop_args`]:
+/// - `off` / unknown, or no script → no args.
+/// - `manual` → the script with its automatic measurement off. The script's
+///   own default is off too; this says it anyway, so the launch reads the
+///   same whatever the script's default.
+/// - `auto` → the script with its automatic measurement on. No delay is
+///   passed: the script owns its defaults, and a user's own
+///   `--script-opts-append=vela-crop-delay=N` changes it.
+fn crop_args(mode: &str, script: Option<&str>) -> Vec<LaunchArg> {
+    let Some(path) = script else {
+        return Vec::new();
+    };
+    let auto = match mode {
+        "manual" => "no",
+        "auto" => "yes",
+        _ => return Vec::new(),
+    };
+    vec![
+        LaunchArg::set("script", path),
+        LaunchArg::set("script-opts-append", format!("vela-crop-auto={auto}")),
+    ]
+}
+
 /// mpv launch args for marker skipping. Pure, so the injection is testable
 /// without spawning mpv. Every "don't act" condition collapses to no args:
 /// no resolved script, every policy Off, or no payload successfully written —
@@ -792,6 +834,21 @@ pub(crate) fn build_launch_for(
         }
         args.extend(autocrop_args(autocrop_mode, script, shim));
     }
+    // The embedded player's cropping: Vela's own script, never the stock one,
+    // placed where the stock one would be and under the same existence check.
+    if autocrop_mode != "off" && embedded {
+        let script = spec
+            .crop_script
+            .as_deref()
+            .filter(|p| std::path::Path::new(p).is_file());
+        if script.is_none() {
+            eprintln!(
+                "vela: cropping is set to '{autocrop_mode}' but the crop script \
+                 (vela-crop.lua) did not resolve; skipping (playback continues uncropped)"
+            );
+        }
+        args.extend(crop_args(autocrop_mode, script));
+    }
 
     // Marker skipping. Like autocrop this lands after the user's own options so
     // user configuration cannot replace Vela's policies, and every failure here
@@ -833,6 +890,10 @@ pub(crate) fn build_launch_for(
                     "script-opts-append",
                     format!("vela-markers-payload={}", path.to_string_lossy()),
                 ));
+                // The page draws the skip button: no pointer reaches this
+                // mpv, so a button it drew could never be clicked. The script
+                // still arms the marker and acts on `activate-skip`.
+                args.push(LaunchArg::set("script-opts-append", "vela-markers-draw=no"));
             } else {
                 // The player's environment only, and never an option: the
                 // payload path must not appear in the process argument list.
@@ -910,6 +971,7 @@ mod tests {
             start_seconds: 0.0,
             autocrop_script: None,
             autocrop_shim: None,
+            crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
             window_observation: crate::playback::WindowStateObservation::default(),
@@ -925,6 +987,16 @@ mod tests {
             if_embedded_cannot_start: Default::default(),
             steps_taken: 0,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn every_ipc_path_is_new_even_within_one_millisecond() {
+        // Tests (and plays) in one process bind the paths made for them;
+        // two alike would collide.
+        let paths: std::collections::HashSet<String> =
+            (0..100).map(|_| new_ipc_path().unwrap()).collect();
+        assert_eq!(paths.len(), 100);
     }
 
     // The assertions in this module were written against command-line
@@ -1179,6 +1251,7 @@ mod tests {
         };
         let autocrop = script("autocrop.lua");
         let shim = script("vela-autocrop.lua");
+        let crop = script("vela-crop.lua");
         let markers = script("vela-markers.lua");
 
         let cfg = crate::config::AppConfig {
@@ -1186,7 +1259,8 @@ mod tests {
                 "--volume=70\n--vo=gpu-next\n--force-window=yes\n--idle=yes\n--input-ipc-server=/tmp/not-velas"
                     .to_string(),
             ),
-            // The stock crop script must not be named for an embedded play.
+            // The stock crop script must not be named for an embedded play;
+            // Vela's own is, in automatic mode.
             mpv_autocrop: Some("auto".to_string()),
             // Loading the user's own configuration is the embedded launcher's
             // job; it changes nothing in the list.
@@ -1199,6 +1273,7 @@ mod tests {
             start_seconds: 123.5,
             autocrop_script: Some(autocrop),
             autocrop_shim: Some(shim),
+            crop_script: Some(crop.clone()),
             inherited_window_state: PlaybackWindowState {
                 fullscreen: Some(true),
                 maximized: Some(false),
@@ -1242,6 +1317,8 @@ mod tests {
             "--force-window=yes".to_string(),
             "--idle=yes".to_string(),
             "--input-ipc-server=/tmp/not-velas".to_string(),
+            format!("--script={crop}"),
+            "--script-opts-append=vela-crop-auto=yes".to_string(),
             format!("--script={markers}"),
             "--script-opts-append=vela-markers-intro-policy=button".to_string(),
             "--script-opts-append=vela-markers-credits-policy=autoskip".to_string(),
@@ -1250,6 +1327,7 @@ mod tests {
                 "--script-opts-append=vela-markers-payload={}",
                 payload_path.to_string_lossy()
             ),
+            "--script-opts-append=vela-markers-draw=no".to_string(),
             "--idle=once".to_string(),
             "--input-ipc-server=/tmp/vela-recorded/mpv.sock".to_string(),
             "--force-media-title=Recorded: Title".to_string(),
@@ -1368,6 +1446,179 @@ mod tests {
         // is useless — it triggers a script that isn't loaded.
         assert!(autocrop_args("manual", None, None).is_empty());
         assert!(autocrop_args("auto", None, Some("/x/vela-autocrop.lua")).is_empty());
+    }
+
+    #[test]
+    fn crop_args_name_the_script_with_the_mode_and_nothing_else() {
+        let cli_crop = |mode: &str, script: Option<&str>| cli(super::crop_args(mode, script));
+        assert_eq!(
+            cli_crop("manual", Some("/x/vela-crop.lua")),
+            [
+                "--script=/x/vela-crop.lua",
+                "--script-opts-append=vela-crop-auto=no",
+            ]
+        );
+        assert_eq!(
+            cli_crop("auto", Some("/x/vela-crop.lua")),
+            [
+                "--script=/x/vela-crop.lua",
+                "--script-opts-append=vela-crop-auto=yes",
+            ]
+        );
+        assert!(cli_crop("off", Some("/x/vela-crop.lua")).is_empty());
+        assert!(cli_crop("wat", Some("/x/vela-crop.lua")).is_empty());
+        assert!(cli_crop("manual", None).is_empty());
+        assert!(cli_crop("auto", None).is_empty());
+    }
+
+    /// Stand-ins for the three crop scripts in a scratch directory of the
+    /// test's own, as (stock script, stock trigger shim, Vela's crop script).
+    fn crop_stand_ins(name: &str) -> (std::path::PathBuf, String, String, String) {
+        let dir = tmp(name);
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        let script = |file: &str| {
+            let path = dir.join(file);
+            std::fs::write(&path, "-- test stand-in\n").expect("script stand-in");
+            path.to_string_lossy().into_owned()
+        };
+        let stock = script("autocrop.lua");
+        let shim = script("vela-autocrop.lua");
+        let own = script("vela-crop.lua");
+        (dir, stock, shim, own)
+    }
+
+    fn launch_args(spec: &PlaySpec, mode: &str) -> Vec<String> {
+        let cfg = crate::config::AppConfig {
+            mpv_autocrop: Some(mode.to_string()),
+            ..Default::default()
+        };
+        let plan = build_launch(spec, &cfg, "/tmp/vela-recorded/crop.sock")
+            .expect("the launch is described");
+        cli(plan.args.iter().cloned())
+    }
+
+    // The stock script is GPL code and measures with a filter the shipped
+    // library does not have: it must never be loaded into Vela's own process,
+    // whatever the mode and whatever resolved.
+    #[test]
+    fn an_embedded_launch_never_names_the_stock_crop_scripts() {
+        let (dir, stock, shim, own) = crop_stand_ins("embedded-crop-stock");
+        let spec = PlaySpec {
+            autocrop_script: Some(stock),
+            autocrop_shim: Some(shim),
+            crop_script: Some(own.clone()),
+            ..plain_spec(PlayerKind::Embedded, "https://media.invalid/v.mkv")
+        };
+        for mode in ["off", "manual", "auto"] {
+            let args = launch_args(&spec, mode);
+            for arg in &args {
+                assert!(
+                    !arg.contains("autocrop.lua") && !arg.contains("autocrop-auto"),
+                    "{mode}: an embedded launch named the stock crop script: {arg}"
+                );
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_embedded_launch_crops_with_velas_own_script_in_the_chosen_mode() {
+        let (dir, stock, shim, own) = crop_stand_ins("embedded-crop-own");
+        let spec = PlaySpec {
+            autocrop_script: Some(stock),
+            autocrop_shim: Some(shim),
+            crop_script: Some(own.clone()),
+            ..plain_spec(PlayerKind::Embedded, "https://media.invalid/v.mkv")
+        };
+        let own_arg = format!("--script={own}");
+        let crop_args = |mode: &str| -> Vec<String> {
+            launch_args(&spec, mode)
+                .into_iter()
+                .filter(|arg| arg.contains("vela-crop"))
+                .collect()
+        };
+        assert_eq!(
+            crop_args("manual"),
+            [own_arg.clone(), "--script-opts-append=vela-crop-auto=no".to_string()],
+            "manual: the script, measuring only when asked"
+        );
+        assert_eq!(
+            crop_args("auto"),
+            [own_arg, "--script-opts-append=vela-crop-auto=yes".to_string()],
+            "auto: the script, measuring by itself"
+        );
+        assert!(crop_args("off").is_empty(), "off: no crop script at all");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // A `--script=` naming a missing file makes mpv refuse the whole play.
+    #[test]
+    fn an_embedded_launch_whose_crop_script_is_missing_plays_uncropped() {
+        let (dir, _, _, own) = crop_stand_ins("embedded-crop-missing");
+        std::fs::remove_file(&own).expect("the stand-in is removed");
+        let spec = PlaySpec {
+            crop_script: Some(own),
+            ..plain_spec(PlayerKind::Embedded, "https://media.invalid/v.mkv")
+        };
+        for mode in ["manual", "auto"] {
+            let args = launch_args(&spec, mode);
+            assert!(
+                !args.iter().any(|arg| arg.contains("vela-crop")),
+                "{mode}: a crop script that is not there must not be named: {args:?}"
+            );
+        }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    // Only the embedded player's page draws the skip button; mpv's own window
+    // keeps drawing it itself.
+    #[cfg(not(windows))]
+    #[test]
+    fn only_the_embedded_launch_tells_the_marker_script_not_to_draw() {
+        use crate::config::SkipPolicy;
+        use crate::source::MarkerKind;
+
+        let dir = tmp("markers-draw");
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("scratch directory");
+        let markers = dir.join("vela-markers.lua");
+        std::fs::write(&markers, "-- test stand-in\n").expect("script stand-in");
+        let cfg = crate::config::AppConfig::default();
+        let _payloads = payload_test_lock::hold();
+        for player in [PlayerKind::External, PlayerKind::Embedded] {
+            let spec = PlaySpec {
+                markers_script: Some(markers.to_string_lossy().into_owned()),
+                markers: vec![marker(MarkerKind::Intro)],
+                intro_policy: SkipPolicy::Button,
+                ..plain_spec(player, "https://media.invalid/v.mkv")
+            };
+            let plan = build_launch(&spec, &cfg, "/tmp/vela-recorded/draw.sock")
+                .expect("the launch is described");
+            let args = cli(plan.args.iter().cloned());
+            let draw: Vec<usize> = args
+                .iter()
+                .enumerate()
+                .filter(|(_, arg)| arg.contains("vela-markers-draw"))
+                .map(|(at, _)| at)
+                .collect();
+            match player {
+                PlayerKind::External => assert!(draw.is_empty(), "external: {args:?}"),
+                PlayerKind::Embedded => {
+                    assert_eq!(draw.len(), 1, "embedded: {args:?}");
+                    assert_eq!(args[draw[0]], "--script-opts-append=vela-markers-draw=no");
+                    assert!(
+                        args[draw[0] - 1].starts_with("--script-opts-append=vela-markers-payload="),
+                        "right after the payload option: {args:?}"
+                    );
+                }
+            }
+            if let Some(payload) = plan.marker_payload.clone() {
+                drop(plan);
+                let _ = std::fs::remove_file(payload);
+            }
+        }
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     fn marker(kind: crate::source::MarkerKind) -> crate::source::MediaMarker {

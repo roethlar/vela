@@ -37,6 +37,9 @@ package() {
   # a settle delay — without it, resumed plays fall back to the broken stock
   # trigger (see the shim header).
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/vela-autocrop.lua" "$pkgdir/usr/lib/Vela/mpv-scripts/vela-autocrop.lua"
+  # Vela's own crop script (repo license, not upstream), loaded instead of the
+  # stock one by a player inside Vela's own process.
+  install -Dm644 "$repo/src-tauri/resources/mpv-scripts/vela-crop.lua" "$pkgdir/usr/lib/Vela/mpv-scripts/vela-crop.lua"
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/LICENSE.GPL" "$pkgdir/usr/lib/Vela/mpv-scripts/LICENSE.GPL"
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/PROVENANCE.md" "$pkgdir/usr/lib/Vela/mpv-scripts/PROVENANCE.md"
   # GPL license text for the bundled script (Arch license convention).

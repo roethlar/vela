@@ -9,10 +9,12 @@
 //! IPC socket and do not care which one it is. [`select`] decides which
 //! player a play uses.
 
+pub(crate) mod control;
 #[cfg(target_os = "linux")]
 pub(crate) mod embedded;
 pub(crate) mod external;
 pub(crate) mod launch;
+pub(crate) mod report;
 mod select;
 
 pub(crate) use select::{choose, EmbeddedUnavailable, FallbackNotices, PlayerKind};
@@ -136,6 +138,26 @@ impl PlayerHandle {
                 session.stop();
                 true
             }
+        }
+    }
+
+    /// The way to send the player view's commands to this player, if it is
+    /// the EMBEDDED play of `session_id`. Asked under the slot's lock, like
+    /// [`Self::close_embedded_play`]. An external player has none: the page
+    /// never drives mpv's own window.
+    pub(crate) fn command_channel(
+        &self,
+        session_id: &str,
+    ) -> Option<std::sync::Arc<control::Channel>> {
+        match self {
+            PlayerHandle::External(_) => {
+                let _ = session_id;
+                None
+            }
+            #[cfg(target_os = "linux")]
+            PlayerHandle::Embedded(session) => session
+                .is_play(session_id)
+                .then(|| session.channel()),
         }
     }
 

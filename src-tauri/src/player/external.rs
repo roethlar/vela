@@ -341,6 +341,7 @@ mod tests {
             start_seconds: 0.0,
             autocrop_script: None,
             autocrop_shim: None,
+            crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
             window_observation: WindowStateObservation::default(),
@@ -420,6 +421,9 @@ mod tests {
         let autocrop = script("autocrop.lua");
         let shim = script("vela-autocrop.lua");
         let markers = script("vela-markers.lua");
+        // Resolved and present, and still never named: Vela's own crop script
+        // belongs to the embedded player only.
+        let crop = script("vela-crop.lua");
 
         let cfg = crate::config::AppConfig {
             // Two ordinary options and two that try to take over what Vela
@@ -437,6 +441,7 @@ mod tests {
             start_seconds: 123.5,
             autocrop_script: Some(autocrop.clone()),
             autocrop_shim: Some(shim.clone()),
+            crop_script: Some(crop),
             inherited_window_state: PlaybackWindowState {
                 fullscreen: Some(true),
                 maximized: Some(false),

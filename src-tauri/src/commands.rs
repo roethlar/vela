@@ -5029,6 +5029,9 @@ async fn play_by_key_locked(
         // the stock trigger and lets the shim fire detection after a settle
         // delay — the stock trigger breaks on --start resumes; see the shim).
         let autocrop_shim = resolve_resource("vela-autocrop.lua");
+        // Vela's own crop script, the only one a play in Vela's own window
+        // loads (same mode, same existence check when the launch is described).
+        let crop_script = resolve_resource("vela-crop.lua");
         // Own the session in app state from here on. The end callback alone is not
         // enough: app exit kills mpv and returns without waiting for any tracker
         // tail, so a teardown that only exists inside that callback — or in a task
@@ -5128,6 +5131,7 @@ async fn play_by_key_locked(
             start_seconds: resume_ms as f64 / 1000.0,
             autocrop_script,
             autocrop_shim,
+            crop_script,
             inherited_window_state,
             screen_name,
             window_observation: window_observation.clone(),
@@ -5231,6 +5235,12 @@ async fn play_by_key_locked(
         let playback_session = session_id.to_string();
         let embedded_launcher =
             crate::player::embedded_launcher(&state.embedded, state.app_handle.get());
+        // The player view's state; `play` hands it to an embedded play only.
+        let on_state = state.app_handle.get().cloned().map(|app| {
+            std::sync::Arc::new(move |player_state: &crate::player::report::PlayerState| {
+                let _ = tauri::Emitter::emit(&app, crate::player::report::EVENT, player_state);
+            }) as crate::player::report::StateNotify
+        });
         let played = if let Some(error) = prior_include_error {
             Err(error)
         } else {
@@ -5246,6 +5256,7 @@ async fn play_by_key_locked(
                     &advance,
                     playback_session,
                     on_end,
+                    on_state,
                 )
             })
             .await
@@ -5405,24 +5416,53 @@ pub fn player_window_ready() {
     crate::player::embedded::startup::window_came_up();
 }
 
-/// The player view's Close control: stop the embedded play it belongs to. A
-/// view left over from an earlier play cannot stop its successor, and this
-/// never touches an external player, which has a window of its own to close.
-///
-/// Whose play it is, is asked of the player in the slot, under the slot's
-/// lock, and of nothing else. Checking the active session first and the slot
-/// afterwards left a gap in which a replacement play could be installed and
-/// then stopped by its predecessor's Close (review finding ec-5).
+/// The player view's controls: one of ten commands to the embedded play the
+/// view belongs to (`crate::player::control`). A view left over from an
+/// earlier play reaches nothing, and an external player is never driven or
+/// stopped from here. The arguments are plain JSON so that every refusal is
+/// one of Vela's own fixed texts. All of it runs on the blocking pool: it
+/// takes the player slot's lock and may wait on mpv's socket.
 #[tauri::command]
-pub async fn player_close(session_id: String, state: State<'_, AppState>) -> Result<(), String> {
-    let mut slot = state
-        .current_child
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    if let Some(player) = slot.as_mut() {
-        player.close_embedded_play(&session_id);
-    }
-    Ok(())
+pub async fn player_command(
+    session_id: serde_json::Value,
+    name: serde_json::Value,
+    args: serde_json::Value,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    let slot = state.current_child.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        crate::player::control::command(&slot, &session_id, &name, &args)
+    })
+    .await
+    .unwrap_or_else(|_| Err(crate::player::control::NOT_RUNNING.to_string()))
+}
+
+/// The player view's fullscreen: on only for the running embedded play, off
+/// always. What the window really did arrives as `window-fullscreen`
+/// (`player::embedded::follow_fullscreen`); Tauri's own answer is only the
+/// last request. Whose play it is, is asked under the slot's lock; the window
+/// is asked after that lock is let go of, from the blocking pool.
+#[tauri::command]
+pub async fn player_fullscreen(
+    session_id: serde_json::Value,
+    on: serde_json::Value,
+    app: tauri::AppHandle,
+) {
+    let _ = tauri::async_runtime::spawn_blocking(move || {
+        use tauri::Manager;
+        let on = on.as_bool() == Some(true);
+        if on {
+            let state = app.state::<AppState>();
+            let slot = &state.current_child;
+            if !crate::player::control::is_running_embedded_play(slot, &session_id) {
+                return;
+            }
+        }
+        if let Some(window) = app.webview_windows().into_values().next() {
+            let _ = window.set_fullscreen(on);
+        }
+    })
+    .await;
 }
 
 /// Play one item, either resuming its resolved position or explicitly starting

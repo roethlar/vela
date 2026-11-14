@@ -16,9 +16,16 @@ commercial skip control and performs the seek, reading its marker ranges from a
 private per-launch payload file whose path arrives on the child process
 environment (or, for a player inside Vela's own process, as a script option)
 — see the script header and
-`.agents/plans/skip-credits-intros-v2.md`. `LICENSE.GPL` in this directory
-covers stock `autocrop.lua` only and does not extend to either Vela-authored
-script.
+`.agents/plans/skip-credits-intros-v2.md`.
+
+`vela-crop.lua` is likewise NOT an upstream file: Vela-authored, MIT, with no
+upstream ancestor and no GPL code in it; it was written independently of
+`autocrop.lua`. It finds the picture inside black bars with FFmpeg's `bbox`
+filter and crops to it with mpv's `video-crop`, for a player inside Vela's own
+process, where the stock script is never loaded — see the script header.
+
+`LICENSE.GPL` in this directory covers stock `autocrop.lua` only and does not
+extend to any of the Vela-authored scripts.
 
 - **Source:** mpv `TOOLS/lua/autocrop.lua`
   (https://github.com/mpv-player/mpv)

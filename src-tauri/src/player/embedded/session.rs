@@ -25,6 +25,7 @@ use super::hdr::{self, Capabilities, Frame, Tagging};
 use super::libmpv::{Event, LibMpv, Player, Renderer};
 use super::options::Step;
 use super::surface::{Guest, VideoSurface};
+use crate::player::control::Channel;
 use crate::player::launch::HeaderInclude;
 
 /// Where the video is, in the window's own units, relative to the window.
@@ -679,6 +680,9 @@ pub(crate) struct Session {
     /// The playback session this play belongs to. A player is told apart
     /// from the one that replaced it by this and nothing else.
     session_id: String,
+    /// The play's IPC socket, for the player view's commands
+    /// (`crate::player::control`), with the gate those commands pass.
+    channel: Arc<Channel>,
     shared: Arc<Shared>,
     thread: Option<std::thread::JoinHandle<()>>,
     header_include: Option<HeaderInclude>,
@@ -695,6 +699,7 @@ impl Session {
         let shared = Shared::new()?;
         let header_include = start.header_include.take();
         let session_id = std::mem::take(&mut start.session_id);
+        let channel = Arc::new(Channel::new(start.ipc_path.clone()));
         let start_limit = start.start_limit;
         let (ready, started) = std::sync::mpsc::sync_channel::<Result<(), String>>(1);
         let thread_shared = shared.clone();
@@ -747,6 +752,7 @@ impl Session {
             .map_err(|e| format!("couldn't start the embedded player's thread: {e}"))?;
         let session = Session {
             session_id,
+            channel,
             shared,
             thread: Some(thread),
             header_include,
@@ -770,11 +776,26 @@ impl Session {
         Self::for_test_holding(session_id, None)
     }
 
+    /// The same, whose player view's commands go to the socket at `path`.
+    #[cfg(test)]
+    pub(crate) fn for_test_on(session_id: &str, path: &str) -> Self {
+        Self::for_test_with_channel(session_id, Channel::new(path.to_string()))
+    }
+
+    /// The same, with a channel a test has made.
+    #[cfg(test)]
+    pub(crate) fn for_test_with_channel(session_id: &str, channel: Channel) -> Self {
+        let mut session = Self::for_test(session_id);
+        session.channel = Arc::new(channel);
+        session
+    }
+
     /// The same, owning a stream-auth include.
     #[cfg(test)]
     pub(crate) fn for_test_holding(session_id: &str, header_include: Option<HeaderInclude>) -> Self {
         Session {
             session_id: session_id.to_string(),
+            channel: Arc::new(Channel::new(String::new())),
             shared: Shared::new().expect("an eventfd"),
             thread: None,
             header_include,
@@ -799,6 +820,7 @@ impl Session {
         });
         Session {
             session_id: "test".to_string(),
+            channel: Arc::new(Channel::new(String::new())),
             shared,
             thread: Some(thread),
             header_include: None,
@@ -810,6 +832,11 @@ impl Session {
     /// Whether this is the play of that playback session.
     pub(crate) fn is_play(&self, session_id: &str) -> bool {
         self.session_id == session_id
+    }
+
+    /// The way to this play's player for the player view's commands.
+    pub(crate) fn channel(&self) -> Arc<Channel> {
+        self.channel.clone()
     }
 
     /// Ask the play to stop. Does not wait.

@@ -1,6 +1,6 @@
 // Minimal mpv JSON-IPC client (newline-delimited JSON over a unix socket)
 // plus discovery of the socket Vela creates per play session
-// (/tmp/vela-<random>/mpv-<pid>-<ts>.sock, owner-only dirs).
+// (/tmp/vela-<random>/mpv-<pid>-<ms>-<n>.sock, owner-only dirs).
 import fs from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';

@@ -53,6 +53,46 @@ async function scriptLoadsMarkers({ script, dir, name, option, environment }) {
   }
 }
 
+// Play a clip with a button policy and the given `draw` option, and record
+// what `user-data/vela-markers/active` and `button-bounds` show until playback
+// has passed the marker (1 s to 2 s). There is no window (`vo=null`), so mpv
+// never publishes an OSD size: a drawn button can never be shown, and only
+// the quiet arm of `draw=no` can arm the marker.
+async function armsWithoutWindow({ script, dir, name, draw }) {
+  const socket = path.join(dir, `${name}.sock`);
+  const payload = path.join(dir, `${name}.json`);
+  fs.writeFileSync(payload, PAYLOAD, { mode: 0o600 });
+  const env = { ...process.env };
+  delete env.VELA_MARKERS_PAYLOAD;
+  const args = [
+    '--no-config', '--vo=null', '--ao=null', '--keep-open=yes',
+    `--input-ipc-server=${socket}`,
+    `--script=${script}`,
+    '--script-opts-append=vela-markers-intro-policy=button',
+    `--script-opts-append=vela-markers-payload=${payload}`,
+  ];
+  if (draw !== undefined) args.push(`--script-opts-append=vela-markers-draw=${draw}`);
+  args.push('av://lavfi:testsrc=duration=10:size=320x180:rate=24');
+  const mpv = spawn('mpv', args, { env, stdio: 'ignore' });
+  try {
+    const ipc = await MpvIpc.connect(socket);
+    const seen = new Set();
+    const bounds = new Set();
+    await pollUntil(async () => {
+      const active = await ipc.getProp('user-data/vela-markers/active').catch(() => null);
+      if (typeof active === 'string') seen.add(active);
+      const box = await ipc.getProp('user-data/vela-markers/button-bounds').catch(() => null);
+      if (box !== null) bounds.add(JSON.stringify(box));
+      return ((await ipc.getProp('time-pos').catch(() => 0)) ?? 0) > 2.3;
+    }, `${name}: playback to pass the marker`, { intervalMs: 50 });
+    ipc.quit();
+    ipc.close();
+    return { seen: [...seen].sort(), bounds: [...bounds] };
+  } finally {
+    mpv.kill('SIGKILL');
+  }
+}
+
 export default {
   name: 'markerpayload',
 
@@ -114,5 +154,27 @@ export default {
 
     // 5. Neither: inert.
     assert.equal(await scriptLoadsMarkers({ script, dir, name: 'neither' }), false);
+
+    // 6. `draw=no`, as Vela passes it when its page shows the skip button:
+    //    the marker is armed with no OSD size, and nothing is drawn.
+    const quiet = await armsWithoutWindow({ script, dir, name: 'draw-no', draw: 'no' });
+    assert.deepEqual(
+      quiet.seen,
+      ['', 'intro'],
+      'with draw=no the marker must be armed (active = its kind) without any OSD size',
+    );
+    // (An empty Lua table reaches IPC as an empty JSON array.)
+    assert.deepEqual(quiet.bounds, ['[]'], 'with draw=no nothing is drawn, so button-bounds stays empty');
+
+    // 7. `draw=yes`, and the option left out (the external player): the
+    //    button waits for an OSD size, which never comes without a window.
+    for (const [name, draw] of [['draw-yes', 'yes'], ['draw-default', undefined]]) {
+      const drawn = await armsWithoutWindow({ script, dir, name, draw });
+      assert.deepEqual(
+        drawn.seen,
+        [''],
+        `${name}: a button that has to be drawn must not be armed without an OSD size`,
+      );
+    }
   },
 };

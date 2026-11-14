@@ -8,6 +8,7 @@
   import ItemDetail from "$lib/ItemDetail.svelte";
   import PlayerView from "$lib/PlayerView.svelte";
   import { nextPlayerSession } from "$lib/playerView";
+  import { setPlayerFullscreen } from "$lib/playerControls";
   import PlaylistsView from "$lib/PlaylistsView.svelte";
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
   import ServerLogo from "$lib/ServerLogo.svelte";
@@ -43,9 +44,82 @@
   // The playback session whose picture is showing inside this window, when a
   // play runs in the window instead of in a player window of its own.
   let playerSession = $state<string | null>(null);
+  let unlistenWindowFullscreen: (() => void) | undefined;
+
+  // Fullscreen for the player. `windowFullscreen` is what the window really
+  // is, from the `window-fullscreen` event; `playerAskedFullscreen` is whether
+  // Vela asked for it on the player's behalf. Both live here, outside the
+  // view, because they outlast it: between two plays of a run the window
+  // stays fullscreen. Vela leaves fullscreen only where it asked for it, so a
+  // window the user made fullscreen themselves is left alone.
+  let windowFullscreen = $state(false);
+  let playerAskedFullscreen = false;
+  // The ends reported since the last view closed: a clean end reports two,
+  // the second after the run's successor (if any) has been decided.
+  let endsSinceViewClosed = 0;
+  let playerFullscreenBackstop: ReturnType<typeof setTimeout> | undefined;
+  // How long a play may take to start (the backend's `START_LIMIT` for the
+  // in-window player), plus a margin: the backstop against a lost
+  // event, never the way fullscreen is normally left.
+  const PLAYER_FULLSCREEN_BACKSTOP_MS = 20_000 + 30_000;
+
+  function askPlayerFullscreen(on: boolean) {
+    const sessionId = playerSession;
+    if (on && sessionId === null) return;
+    playerAskedFullscreen = on;
+    if (!on) clearPlayerFullscreenBackstop();
+    setPlayerFullscreen(sessionId ?? "", on).catch(() => {
+      if (on) playerAskedFullscreen = false;
+    });
+  }
+
+  function leavePlayerFullscreen() {
+    clearPlayerFullscreenBackstop();
+    if (!playerAskedFullscreen) return;
+    askPlayerFullscreen(false);
+  }
+
+  function clearPlayerFullscreenBackstop() {
+    if (playerFullscreenBackstop) clearTimeout(playerFullscreenBackstop);
+    playerFullscreenBackstop = undefined;
+  }
+
+  // After `player-opened` or `player-closed`: with no view left, the run may
+  // still go on; the backstop leaves fullscreen if nothing ever says so.
+  function playerViewChanged() {
+    endsSinceViewClosed = 0;
+    if (playerSession !== null) {
+      clearPlayerFullscreenBackstop();
+    } else if (playerAskedFullscreen && !playerFullscreenBackstop) {
+      playerFullscreenBackstop = setTimeout(() => {
+        playerFullscreenBackstop = undefined;
+        if (playerSession === null) leavePlayerFullscreen();
+      }, PLAYER_FULLSCREEN_BACKSTOP_MS);
+    }
+  }
+
+  // Whether the page itself is still deciding or starting a successor.
+  function continuationPending(): boolean {
+    return continuationsRunning > 0 || continuationSession !== null || sourceChoiceRequest !== null;
+  }
+
+  // A play ended. The first report of a clean end comes before the backend
+  // has decided on a successor, so only a later one, with no view showing and
+  // nothing pending here, means the run is over (an end that is not clean
+  // reports once and is left to the backstop).
+  function playbackEnded(): Promise<unknown> {
+    endsSinceViewClosed++;
+    if (playerSession === null && endsSinceViewClosed >= 2 && !continuationPending()) {
+      leavePlayerFullscreen();
+    }
+    return refreshWatchState();
+  }
+
   onDestroy(() => {
     unlistenPlayerOpened?.();
     unlistenPlayerClosed?.();
+    unlistenWindowFullscreen?.();
+    clearPlayerFullscreenBackstop();
     if (copyTimer) clearTimeout(copyTimer);
     if (pollTimer) clearTimeout(pollTimer);
     unlistenPlaybackEnded?.();
@@ -453,7 +527,7 @@
       await tick();
       durableHeading?.focus();
     }).then((un) => (unlistenDurableFault = un));
-    listen("playback-ended", refreshWatchState).then((un) => (unlistenPlaybackEnded = un));
+    listen("playback-ended", playbackEnded).then((un) => (unlistenPlaybackEnded = un));
     // The in-window player's own lifecycle, each event naming its session
     // (the rule for them is in $lib/playerView). `playback-ended` is not used
     // for this; it names no session and can fire twice.
@@ -462,13 +536,24 @@
         kind: "opened",
         sessionId: payload.sessionId,
       });
+      playerViewChanged();
     }).then((un) => (unlistenPlayerOpened = un));
     listen<{ sessionId: string }>("player-closed", ({ payload }) => {
       playerSession = nextPlayerSession(playerSession, {
         kind: "closed",
         sessionId: payload.sessionId,
       });
+      playerViewChanged();
     }).then((un) => (unlistenPlayerClosed = un));
+    // What the window really is; the user may leave fullscreen with the
+    // compositor's own shortcut, and then Vela no longer holds it.
+    listen<{ on: boolean }>("window-fullscreen", ({ payload }) => {
+      windowFullscreen = payload.on === true;
+      if (!windowFullscreen) {
+        playerAskedFullscreen = false;
+        clearPlayerFullscreenBackstop();
+      }
+    }).then((un) => (unlistenWindowFullscreen = un));
     // Tells the backend the page has loaded; see `player_window_ready` there.
     invoke("player_window_ready").catch(() => {});
     listen<PlaybackContinuation>("continue-playing", handlePlaybackContinuation).then(
@@ -975,7 +1060,10 @@
     }
   }
 
+  // The run has no successor: the end of it, and of fullscreen for it, unless
+  // another play's view is showing by now.
   function finishPlaybackRun(sessionId: string) {
+    if (playerSession === null || playerSession === sessionId) leavePlayerFullscreen();
     void invoke("finish_playback_run", { sessionId });
   }
 
@@ -996,8 +1084,19 @@
     resetContinuationRun();
   }
 
+  // How many continuations are being decided right now.
+  let continuationsRunning = 0;
+
   async function handlePlaybackContinuation(event: { payload: PlaybackContinuation }) {
-    const completed = event.payload;
+    continuationsRunning++;
+    try {
+      await continueAfterPlayback(event.payload);
+    } finally {
+      continuationsRunning--;
+    }
+  }
+
+  async function continueAfterPlayback(completed: PlaybackContinuation) {
     if (continuationSession !== completed.sessionId) {
       continuationSeen = new Set();
     }
@@ -3713,7 +3812,12 @@
 
 {#if playerSession}
   {#key playerSession}
-    <PlayerView sessionId={playerSession} />
+    <PlayerView
+      sessionId={playerSession}
+      fullscreen={windowFullscreen}
+      onfullscreen={askPlayerFullscreen}
+      onstop={leavePlayerFullscreen}
+    />
   {/key}
 {/if}
 

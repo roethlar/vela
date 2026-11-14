@@ -1,0 +1,12 @@
+[
+  "toggle-pause",
+  "seek-relative",
+  "seek-absolute",
+  "set-volume",
+  "toggle-mute",
+  "set-audio-track",
+  "set-subtitle-track",
+  "stop",
+  "skip-active-marker",
+  "toggle-autocrop"
+]

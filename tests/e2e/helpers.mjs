@@ -144,6 +144,35 @@ export async function holdsFor(check, ms, what) {
   }
 }
 
+// The player view's controls hide while a play runs untouched; a pointer
+// move over the view shows them for a few seconds. Returns once the bar is
+// visible, so a click that follows at once reaches it.
+export async function showPlayerBar(driver) {
+  await driver.movePointer(400, 300);
+  await driver.waitFor(
+    `const bar = document.querySelector('.player .bar');
+     return !!bar && !bar.classList.contains('hidden') && getComputedStyle(bar).visibility === 'visible';`,
+    'the player controls to show',
+    { timeoutMs: 3000, intervalMs: 50 },
+  );
+}
+
+// Starts recording, in the page, every `player-state` and
+// `window-fullscreen` event, the same events the player view listens to:
+// `window.__playerEvents.states` and `.fullscreen`.
+export async function recordPlayerEvents(driver) {
+  await driver.exec(`
+    window.__playerEvents = { states: [], fullscreen: [] };
+    const tauri = window.__TAURI_INTERNALS__;
+    const state = tauri.transformCallback((e) => window.__playerEvents.states.push(e.payload));
+    const fullscreen = tauri.transformCallback((e) => window.__playerEvents.fullscreen.push(e.payload));
+    return Promise.all([
+      tauri.invoke('plugin:event|listen', { event: 'player-state', target: { kind: 'Any' }, handler: state }),
+      tauri.invoke('plugin:event|listen', { event: 'window-fullscreen', target: { kind: 'Any' }, handler: fullscreen }),
+    ]).then(() => true);
+  `);
+}
+
 export async function goHome(driver) {
   const home = await driver.find(
     'xpath',

@@ -248,6 +248,10 @@ pub fn run() {
                 .set(app.handle().clone());
             durable::register_app_handle(app.handle().clone());
 
+            // What the window's fullscreen really is, for the player view.
+            #[cfg(target_os = "linux")]
+            player::embedded::follow_fullscreen(app.handle());
+
             // Automatic's step-down dispatcher. Deliberately NOT folded into the
             // completion dispatcher below, and deliberately declared BEFORE its
             // marker comment: that dispatcher's contract is that only a joined
@@ -379,7 +383,8 @@ pub fn run() {
             commands::play_item,
             commands::player_set_rect,
             commands::player_window_ready,
-            commands::player_close,
+            commands::player_command,
+            commands::player_fullscreen,
             commands::get_playback_source_choice,
             commands::resolve_playback_source_choice,
             commands::cancel_playback_source_choice,

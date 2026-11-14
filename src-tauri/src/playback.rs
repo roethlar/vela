@@ -230,6 +230,11 @@ pub struct PlaySpec {
     /// delay — the stock trigger skips its delay on `--start` resumes and
     /// races hwdec init (see the shim header + `.agents/plans/autocrop-resume.md`).
     pub autocrop_shim: Option<String>,
+    /// Absolute path to Vela's own `vela-crop.lua` (same resolver and
+    /// existence check), the cropping of a play in Vela's own window: the
+    /// stock script above is never loaded there. `None` when it could not be
+    /// resolved — that play is then uncropped.
+    pub crop_script: Option<String>,
     /// Actual state sampled from the exact automatic predecessor. Manual plays
     /// and unknown properties use the default (both `None`).
     pub inherited_window_state: PlaybackWindowState,
@@ -365,7 +370,8 @@ fn another_ipc_path(taken: &str) -> Result<String, String> {
         if path != taken {
             return Ok(path);
         }
-        // The path is named after the millisecond.
+        // Each path carries a number of its own, so this is not reached;
+        // should it be, the next millisecond names another.
         std::thread::sleep(Duration::from_millis(1));
     }
 }
@@ -416,6 +422,7 @@ pub fn play(
     advance: &Arc<crate::commands::PlaybackAdvance>,
     session_id: String,
     on_end: Option<EndNotify>,
+    on_state: Option<crate::player::report::StateNotify>,
 ) -> Result<PlayStarted, String> {
     let Players {
         slot: player_slot,
@@ -549,6 +556,7 @@ pub fn play(
     // reports reason=quit/stop), only on reason=eof. Always-on regardless of
     // progress target. Failure to spawn the watcher is non-fatal — playback
     // still works, just without sequence advancement.
+    let state_session = session_id.clone();
     if let Err(e) = spawn_eof_watcher(
         ipc_path.clone(),
         stop_flag.clone(),
@@ -557,6 +565,27 @@ pub fn play(
     ) {
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
+
+    // The player view's state, for an embedded play only: one that runs in
+    // the external player, from the start or after falling back, has no view
+    // and never gets the notifier. Non-fatal like the watcher above: the play
+    // goes on, its view without controls. Only Linux has an embedded play.
+    #[cfg(target_os = "linux")]
+    if started_player == crate::player::PlayerKind::Embedded {
+        if let Some(notify) = on_state {
+            if let Err(e) = crate::player::report::spawn_reporter(
+                ipc_path.clone(),
+                stop_flag.clone(),
+                state_session,
+                spec.duration,
+                notify,
+            ) {
+                eprintln!("vela: couldn't spawn the player state reporter: {e}");
+            }
+        }
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (on_state, state_session);
 
     // Automatic only. Like the EOF watcher, failing to spawn is non-fatal:
     // playback still works, it just cannot step itself down.
@@ -1225,6 +1254,7 @@ mod tests {
             &Arc::new(crate::commands::PlaybackAdvance::default()),
             "refused-session".to_string(),
             Some(on_end),
+            None,
         );
         // If the refusal is ever lost, this test has just started a real
         // player on a machine that has one. Stop it before judging anything.
@@ -1255,6 +1285,7 @@ mod tests {
             start_seconds: 0.0,
             autocrop_script: None,
             autocrop_shim: None,
+            crop_script: None,
             inherited_window_state: PlaybackWindowState::default(),
             screen_name: None,
             window_observation: WindowStateObservation::default(),
@@ -1325,6 +1356,7 @@ mod tests {
             },
             &Arc::new(crate::commands::PlaybackAdvance::default()),
             "embedded-session".to_string(),
+            None,
             None,
         );
         // Whatever happened, leave nothing running.
@@ -1536,6 +1568,7 @@ mod tests {
             &Arc::new(crate::commands::PlaybackAdvance::default()),
             "fallback-session".to_string(),
             None,
+            None,
         );
         // The stand-in writes its arguments as it starts.
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -1585,6 +1618,187 @@ mod tests {
         );
     }
 
+    /// A notifier of player states that counts them.
+    #[cfg(unix)]
+    fn counting_states() -> (
+        Arc<Mutex<Vec<crate::player::report::PlayerState>>>,
+        crate::player::report::StateNotify,
+    ) {
+        let states = Arc::new(Mutex::new(Vec::new()));
+        let notify: crate::player::report::StateNotify = {
+            let states = states.clone();
+            Arc::new(move |state: &crate::player::report::PlayerState| {
+                states.lock().unwrap().push(state.clone())
+            })
+        };
+        (states, notify)
+    }
+
+    /// Stands in for an embedded launcher whose player listens on the socket
+    /// the launch names, as mpv does.
+    #[cfg(target_os = "linux")]
+    struct ListeningLauncher {
+        listener: Arc<Mutex<Option<(std::os::unix::net::UnixListener, String)>>>,
+    }
+
+    #[cfg(target_os = "linux")]
+    impl crate::player::EmbeddedLauncher for ListeningLauncher {
+        fn prepare(&self, _session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+            let listener = self.listener.clone();
+            Ok(Box::new(move |_plan, _own_config, ipc_path: &str| {
+                let bound = std::os::unix::net::UnixListener::bind(ipc_path).map_err(|e| e.to_string())?;
+                *listener.lock().unwrap() = Some((bound, ipc_path.to_string()));
+                let stand_in = std::process::Command::new("sleep")
+                    .arg("30")
+                    .spawn()
+                    .map_err(|e| e.to_string())?;
+                Ok(crate::player::PlayerHandle::External(
+                    crate::player::external::ManagedChild::for_test(stand_in),
+                ))
+            }))
+        }
+    }
+
+    // The player view's state reaches the page from an embedded play: `play`
+    // starts the reporter on the play's own socket, with the play's session.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_embedded_play_reports_its_state_to_its_view() {
+        use std::io::{BufRead, Write};
+        let listener = Arc::new(Mutex::new(None));
+        let launcher = ListeningLauncher {
+            listener: listener.clone(),
+        };
+        let (states, notify) = counting_states();
+        let slot = Arc::new(Mutex::new(None));
+        let mut spec = embedded_spec();
+        spec.duration = Some(Duration::from_secs(1200));
+        let result = play(
+            &spec,
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "state-session".to_string(),
+            None,
+            Some(notify),
+        );
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let started = result.unwrap_or_else(|reason| panic!("the play starts: {reason}"));
+        let (listener, path) = listener.lock().unwrap().take().expect("the launch was started");
+        listener.set_nonblocking(true).unwrap();
+        // Several of the play's threads connect; the reporter is the one
+        // that asks for the crop script's state.
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let mut reporter = None;
+        while reporter.is_none() && std::time::Instant::now() < deadline {
+            let Ok((stream, _)) = listener.accept() else {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream.set_read_timeout(Some(Duration::from_millis(500))).unwrap();
+            // The other threads ask for other things, or nothing.
+            let mut asked = String::new();
+            let mut reader = std::io::BufReader::new(&stream);
+            while !asked.contains("user-data/vela-crop/state") {
+                match reader.read_line(&mut asked) {
+                    Ok(0) | Err(_) => break,
+                    Ok(_) => {}
+                }
+            }
+            if asked.contains("user-data/vela-crop/state") {
+                reporter = Some(stream);
+            }
+        }
+        let mut reporter = reporter.expect("the reporter connected to the play's socket");
+        reporter
+            .write_all(b"{\"event\":\"property-change\",\"id\":3,\"name\":\"pause\",\"data\":false}\n")
+            .unwrap();
+        while states.lock().unwrap().is_empty() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        started.stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&path);
+        let first = states.lock().unwrap().first().cloned().expect("a state was reported");
+        assert_eq!(first.session_id, "state-session");
+        assert_eq!(first.paused, Some(false));
+        assert_eq!(first.duration, Some(1200.0), "the item's own duration until mpv has one");
+    }
+
+    // A play given the embedded player that runs in the external one has no
+    // view: nothing reports its state, though the notifier was handed in.
+    #[cfg(unix)]
+    #[test]
+    fn a_play_that_fell_back_reports_no_state() {
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let (program, arguments) = stand_in_for_mpv("fallback-no-state");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let (states, notify) = counting_states();
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(crate::commands::PlaybackAdvance::default()),
+            "fallback-state-session".to_string(),
+            None,
+            Some(notify),
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        // Listen on the external player's socket, as mpv would, while the
+        // play's threads are still trying to connect.
+        let socket = started_with
+            .lines()
+            .rev()
+            .find_map(|argument| argument.strip_prefix("--input-ipc-server="))
+            .expect("the external player is given a socket")
+            .to_string();
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let mut asked_for_state = false;
+        let watch_until = std::time::Instant::now() + Duration::from_millis(1500);
+        while std::time::Instant::now() < watch_until {
+            match listener.accept() {
+                Ok((stream, _)) => {
+                    use std::io::Read;
+                    stream.set_nonblocking(false).unwrap();
+                    stream.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+                    let mut asked = vec![0u8; 4096];
+                    let read = (&stream).read(&mut asked).unwrap_or(0);
+                    asked_for_state |= String::from_utf8_lossy(&asked[..read]).contains("vela-crop/state");
+                }
+                Err(_) => std::thread::sleep(Duration::from_millis(10)),
+            }
+        }
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_file(&socket);
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play is not failed: {reason}"));
+        started.stop.store(true, Ordering::Relaxed);
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert!(!asked_for_state, "no reporter connected to the external player");
+        assert!(states.lock().unwrap().is_empty());
+    }
+
     // The lock on the player slot is the one the exit handler waits for on
     // the window's thread. Looking for mpv runs programs and waits for them.
     #[cfg(unix)]
@@ -1613,6 +1827,7 @@ mod tests {
             },
             &Arc::new(crate::commands::PlaybackAdvance::default()),
             "looking-session".to_string(),
+            None,
             None,
         );
         assert_eq!(
@@ -1658,6 +1873,7 @@ mod tests {
             &Arc::new(crate::commands::PlaybackAdvance::default()),
             "exit-session".to_string(),
             None,
+            None,
         );
         std::thread::sleep(Duration::from_millis(200));
         let was_started = arguments.exists();
@@ -1681,9 +1897,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_second_launch_of_a_play_gets_a_socket_of_its_own() {
-        // Paths are named after the millisecond, so two made in a row are
-        // usually the same. The embedded player that failed may still own
-        // the first.
+        // The embedded player that failed may still own the first.
         let first = crate::player::launch::new_ipc_path().unwrap();
         for _ in 0..10 {
             assert_ne!(another_ipc_path(&first).unwrap(), first);
@@ -1708,6 +1922,7 @@ mod tests {
             },
             &Arc::new(crate::commands::PlaybackAdvance::default()),
             "late-session".to_string(),
+            None,
             None,
         );
         let published = slot.lock().unwrap_or_else(|e| e.into_inner()).take();

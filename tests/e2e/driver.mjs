@@ -6,6 +6,16 @@ import fs from 'node:fs/promises';
 export class WebDriverError extends Error {}
 
 export class Driver {
+  // WebDriver's codes for the keys that are not characters.
+  static KEY = {
+    Escape: '',
+    Space: ' ',
+    ArrowLeft: '',
+    ArrowUp: '',
+    ArrowRight: '',
+    ArrowDown: '',
+  };
+
   constructor(baseUrl) {
     this.baseUrl = baseUrl;
     this.sessionId = null;
@@ -96,6 +106,40 @@ export class Driver {
   // (e.g. Svelte bind:value + keydown handlers) fire like they do for a user.
   async type(elementId, text) {
     await this.#cmd('POST', this.#s(`/element/${elementId}/value`), { text });
+  }
+
+  // WebDriver Actions: real, trusted input that goes wherever the page has
+  // put focus (keys) or to a point in the viewport (the pointer). Released
+  // after each call, so no key is left held for the next one.
+  async #actions(actions) {
+    await this.#cmd('POST', this.#s('/actions'), { actions });
+    await this.#cmd('DELETE', this.#s('/actions'));
+  }
+
+  // Presses and releases each key in turn. A key is a character, or one of
+  // WebDriver's codes such as Driver.KEY.ArrowLeft.
+  async pressKeys(...keys) {
+    const sequence = keys.flatMap((value) => [
+      { type: 'keyDown', value },
+      { type: 'keyUp', value },
+    ]);
+    await this.#actions([{ type: 'key', id: 'keyboard', actions: sequence }]);
+  }
+
+  // Moves the mouse pointer to (x, y) in the viewport and two pixels on, so
+  // that the page sees a pointermove even when the pointer was already there.
+  async movePointer(x, y) {
+    await this.#actions([
+      {
+        type: 'pointer',
+        id: 'mouse',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 0, origin: 'viewport', x, y },
+          { type: 'pointerMove', duration: 0, origin: 'viewport', x: x + 2, y: y + 2 },
+        ],
+      },
+    ]);
   }
 
   async screenshotTo(filePath) {

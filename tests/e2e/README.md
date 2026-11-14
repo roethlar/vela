@@ -69,3 +69,30 @@ Vela's own options;
 `embeddedlatestart` stages an embedded play that does not start in time
 and checks that the same play carries on in the external player while the
 late one stays out of it.
+
+The player view's controls have three scenarios of their own, all
+embedded-only. Each drives the page for real (WebDriver clicks, and keys and
+pointer moves through WebDriver's Actions, which arrive as trusted events)
+and reads the outcome from mpv over its IPC socket:
+
+- `embeddedcontrols`: the `player-state` events arrive; pause, the seek bar,
+  the seek keys in both directions, mute, volume, fullscreen on and off
+  (checked by the page's real height and mpv's `osd-dimensions`, not by
+  Tauri's answer) and stop, through the controls and through the keys.
+- `embeddedskip`: a button policy and an intro that ends past the end of
+  the clip. The play is paused through the page, the page's Skip Intro
+  button is pressed, and the marker must clear through the script while the
+  play stays up. The script draws no button of its own there.
+- `embeddedcrop`: Vela's own `vela-crop.lua` crops a letterboxed clip by
+  itself in automatic mode, on a fresh and on a resumed play, and only on
+  the Crop control in manual mode; `C` takes the crop away. It is the
+  embedded counterpart of `autocrop`, which covers the stock script of the
+  external player and is external-only.
+
+The controls hide after three seconds of playing untouched, and a hidden
+control takes no click: `showPlayerBar` in `helpers.mjs` moves the pointer
+over the view first. `cropscript` (ordinary venue, system mpv, no app) holds
+the crop script's own contract, as `markerpayload` does for the marker
+script. The debug app runs the scripts copied into
+`src-tauri/target/debug/mpv-scripts/` at build time, so after a change to a
+script the scenarios that drive the app need a run without `--skip-build`.

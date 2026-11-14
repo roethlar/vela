@@ -32,7 +32,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createConnection } from 'node:net';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig } from '../helpers.mjs';
+import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig, showPlayerBar } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
 let mock;
@@ -216,7 +216,10 @@ export default {
       assert.ok(drawn.w > 0 && drawn.h > 0);
       await screenshot('01-playing');
 
-      // 2. Close, from the page.
+      // 2. Close, from the page. The controls hide after a few seconds of
+      //    playing without a pointer move, and a hidden control takes no
+      //    click; the pointer brings them back, as it does for a user.
+      await showPlayerBar(driver);
       const close = await driver.find('css selector', '.player button.close');
       await driver.click(close);
     } finally {

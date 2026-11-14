@@ -188,6 +188,28 @@ fn redraw_window(app: &tauri::AppHandle) {
     }
 }
 
+/// Tell the page, as `window-fullscreen { on }`, each time the window goes
+/// into or out of fullscreen, whoever asked: the player view, or the user
+/// through the compositor. Tauri's own answer is only what was last asked
+/// for. Connected once, at setup, which runs on the window's thread.
+pub(crate) fn follow_fullscreen(app: &tauri::AppHandle) {
+    let Some(window) = app.webview_windows().into_values().next() else {
+        return;
+    };
+    let Ok(gtk_window) = window.gtk_window() else {
+        return;
+    };
+    let app = app.clone();
+    gtk_window.connect_window_state_event(move |_, event| {
+        let fullscreen = gtk::gdk::WindowState::FULLSCREEN;
+        if event.changed_mask().contains(fullscreen) {
+            let on = event.new_window_state().contains(fullscreen);
+            let _ = app.emit("window-fullscreen", serde_json::json!({ "on": on }));
+        }
+        gtk::glib::Propagation::Proceed
+    });
+}
+
 /// A rectangle the page reported, in CSS pixels relative to the page, turned
 /// into the window's own units relative to the window.
 ///

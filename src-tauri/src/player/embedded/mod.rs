@@ -21,7 +21,7 @@ mod session;
 pub(crate) mod startup;
 mod surface;
 
-pub(crate) use host::{Host, Launcher};
+pub(crate) use host::{follow_fullscreen, Host, Launcher};
 pub(crate) use session::{wait_for_unfinished_plays, Rect, Session};
 
 /// Turn an address the system's loader returned into a function pointer of

@@ -107,6 +107,10 @@ async function playAndAssertCrop(driver, label, { minStart, maxStart, park }) {
 
 export default {
   name: 'autocrop',
+  // The stock autocrop.lua and its shim belong to the external player. The
+  // embedded player crops with Vela's own vela-crop.lua instead, and
+  // `embeddedcrop` is this scenario's counterpart there.
+  onlyPlayer: 'external',
 
   async seed({ configRoot }) {
     const clip = makePaddedClip(configRoot);
