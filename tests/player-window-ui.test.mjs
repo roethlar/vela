@@ -511,6 +511,8 @@ const playerWindowParts = async () => {
       '  load, savePlayerWindowMode,',
       '  get mode() { return playerWindowMode; }, set mode(value) { playerWindowMode = value; },',
       '  get confirmed() { return playerWindowSaved; },',
+      '  get sharedConfirmed() { return playerWindowConfirmed.mode; },',
+      '  get saving() { return playerWindowBusy; },',
       '  get err() { return err; },',
       '  close() { for (const fn of destroyed.splice(0)) fn(); },',
       '};',
@@ -879,18 +881,19 @@ test('a save confirmed in one open Settings reaches another, keeping an unsaved 
   assert.equal(b.mode, 'remember', 'a changed backend replaces an unsaved choice');
   assert.equal(b.confirmed, 'remember');
 
-  // Two saves out at once, one from each: the one confirmed last is what
-  // the backend holds, and what both show.
+  // Two save requests, one from each: both complete, and both openings
+  // show what the backend holds. Keep holding writes until both have been
+  // sent, including when the second waits for the first one's reply.
   a.mode = 'fullscreen';
   b.mode = 'default';
   backend.holdSaves = true;
   const savingA = a.savePlayerWindowMode();
   const savingB = b.savePlayerWindowMode();
-  backend.holdSaves = false;
   await backend.release();
   await savingA;
   await backend.release();
   await savingB;
+  backend.holdSaves = false;
   assert.equal(backend.mode, 'default');
   for (const [name, control] of [['A', a], ['B', b]]) {
     assert.equal(control.mode, 'default', `${name} shows what the backend holds`);
@@ -918,6 +921,460 @@ test('a refused save in one open Settings goes back to what the backend holds an
   b.mode = 'default';
   await b.savePlayerWindowMode();
   assert.equal(b.mode, 'fullscreen', 'a refused save must show what the backend holds');
+});
+
+// Round 3: applying a write and delivering its reply are different events.
+// No write in this backend applies or answers automatically. A successful
+// reply carries THAT write's applied value, even if a later write has since
+// changed the backend. Tests may refuse a write before or after applying it.
+// This permits the exact bad reply order when the serialization is removed;
+// with serialization in place, the later request must not even be sent yet.
+const splitWriteBackend = (mode) => {
+  const backend = { mode, writes: [], applied: [], delivered: [] };
+  const request = (index) => {
+    assert.ok(backend.writes[index], `write ${index} has not been sent`);
+    return backend.writes[index];
+  };
+  backend.invoke = (command, args) => {
+    if (command === 'get_mpv_window_mode') return Promise.resolve(backend.mode);
+    if (command !== 'set_mpv_window_mode') return Promise.resolve({});
+    return new Promise((resolve, reject) => {
+      backend.writes.push({ mode: args.mode, resolve, reject, applied: false, delivered: false });
+    });
+  };
+  backend.apply = (index) => {
+    const write = request(index);
+    assert.equal(write.applied, false, `write ${index} was already applied`);
+    assert.equal(write.delivered, false, `write ${index} already replied`);
+    backend.mode = write.mode;
+    write.applied = true;
+    backend.applied.push(index);
+  };
+  backend.deliver = (index, refused = false) => {
+    const write = request(index);
+    assert.equal(write.delivered, false, `write ${index} already replied`);
+    assert.ok(refused || write.applied, `write ${index} must apply before a successful reply`);
+    write.delivered = true;
+    backend.delivered.push(index);
+    if (refused) write.reject(new Error('the settings could not be saved'));
+    else write.resolve(write.mode);
+  };
+  return backend;
+};
+
+// Give promise continuations (including the next queued send) a full event
+// loop turn. There is no clock delay and an unanswered save is never awaited.
+const nextTurn = () => new Promise((resolve) => setImmediate(resolve));
+const assertBackendMode = (control, backend, because) => {
+  assert.equal(control.mode, backend.mode, `${because}: selection`);
+  assert.equal(control.confirmed, backend.mode, `${because}: opening's confirmed mode`);
+  assert.equal(control.sharedConfirmed, backend.mode, `${because}: app's confirmed mode`);
+};
+
+test('an applied save from closed A cannot reply after reopened B is confirmed', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  await a.load();
+  a.mode = 'fullscreen';
+  const savingA = a.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(0);
+  a.close();
+
+  const b = app.open();
+  await b.load();
+  assertBackendMode(b, backend, 'B reads the applied fullscreen before A replies');
+  b.mode = 'default';
+  const savingB = b.savePlayerWindowMode();
+  await nextTurn();
+
+  // Attempt the reviewer's exact order: B applies and is confirmed, then
+  // A's old reply arrives. Under the fix B cannot reach the backend yet.
+  // If that gate regresses, do deliver this order so the final assertion
+  // diagnoses the original stale selection AND stale confirmed value.
+  const overlapped = backend.writes.length > 1;
+  if (overlapped) {
+    backend.apply(1);
+    backend.deliver(1);
+    await savingB;
+    assertBackendMode(b, backend, 'B has confirmed default before A replies');
+  }
+  backend.deliver(0);
+  await savingA;
+  await nextTurn();
+  if (!overlapped) {
+    assert.equal(backend.writes.length, 2, 'B is sent when A answers');
+    backend.apply(1);
+    backend.deliver(1);
+    await savingB;
+  }
+  assert.equal(backend.mode, 'default');
+  assertBackendMode(b, backend, "A's delayed reply must not undo B's applied default");
+  assert.equal(overlapped, false, 'B must wait for A, not guess backend order from replies');
+});
+
+// Separate guards for a normal refusal and a rejection after application.
+for (const applyA of [false, true]) {
+  test(`a delayed refusal from closed A ${applyA ? 'after applying' : 'without applying'} releases reopened B`, async () => {
+    const build = await playerWindowParts();
+    const backend = splitWriteBackend('remember');
+    const app = build.app(backend.invoke);
+    const a = app.open();
+    await a.load();
+    a.mode = 'fullscreen';
+    const savingA = a.savePlayerWindowMode();
+    await nextTurn();
+    if (applyA) backend.apply(0);
+    a.close();
+    const b = app.open();
+    await b.load();
+    b.mode = 'default';
+    const savingB = b.savePlayerWindowMode();
+    await nextTurn();
+    assert.equal(backend.writes.length, 1, 'B must wait even if A will refuse');
+    backend.deliver(0, true);
+    await savingA;
+    await nextTurn();
+    assert.match(a.err, /could not be saved/, 'the refusal is reported to its caller');
+    assert.equal(backend.writes.length, 2, 'a refused predecessor must release B');
+    assert.equal(b.sharedConfirmed, backend.mode, 'a refusal must not confirm the attempted mode');
+    backend.apply(1);
+    backend.deliver(1);
+    await savingB;
+    assert.equal(backend.mode, 'default');
+    assertBackendMode(b, backend, 'B confirms default after the refusal');
+    assert.equal(b.err, null, 'A does not give B its error');
+  });
+}
+
+test('a refused retry after reopened B saves default restores default', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  await a.load();
+  a.mode = 'fullscreen';
+  const savingA = a.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(0);
+  a.close();
+  const b = app.open();
+  await b.load();
+  b.mode = 'default';
+  const savingB = b.savePlayerWindowMode();
+  await nextTurn();
+  const overlapped = backend.writes.length > 1;
+  if (overlapped) {
+    backend.apply(1);
+    backend.deliver(1);
+    await savingB;
+  }
+  backend.deliver(0);
+  await savingA;
+  await nextTurn();
+  if (!overlapped) {
+    backend.apply(1);
+    backend.deliver(1);
+    await savingB;
+  }
+  b.mode = 'remember';
+  const retry = b.savePlayerWindowMode();
+  await nextTurn();
+  backend.deliver(2, true);
+  await retry;
+  assert.equal(backend.mode, 'default');
+  assertBackendMode(b, backend, 'a refused retry must restore B\'s applied default');
+  assert.match(b.err, /could not be saved/);
+
+  // The refusal must leave the page able to retry successfully too.
+  b.mode = 'fullscreen';
+  const success = b.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(3);
+  backend.deliver(3);
+  await success;
+  assertBackendMode(b, backend, 'the retry after a refusal is confirmed');
+  assert.equal(b.err, null);
+  assert.equal(b.saving, false);
+});
+
+test('one page prevents replies in reverse application order', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const control = build(backend.invoke);
+  await control.load();
+  control.mode = 'fullscreen';
+  const first = control.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(0);
+  control.mode = 'default';
+  const duplicate = control.savePlayerWindowMode();
+  await nextTurn();
+  assert.equal(backend.writes.length, 1, 'a busy page must not send a second write');
+  assert.throws(() => backend.deliver(1), /write 1 has not been sent/);
+  backend.deliver(0);
+  await first;
+  await nextTurn();
+  assert.equal(backend.writes.length, 1, 'a busy page must not queue a hidden second save');
+  await duplicate;
+  assertBackendMode(control, backend, 'the first reply confirms fullscreen');
+  control.mode = 'default';
+  const second = control.savePlayerWindowMode();
+  await nextTurn();
+  assert.equal(backend.writes.length, 2, 'a new click after the reply must send');
+  backend.apply(1);
+  backend.deliver(1);
+  await second;
+  assertBackendMode(control, backend, 'the later save confirms default');
+  assert.deepEqual(backend.applied, [0, 1]);
+  assert.deepEqual(backend.delivered, [0, 1]);
+});
+
+test('two open pages prevent replies in reverse application order', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  const b = app.open();
+  await a.load();
+  await b.load();
+  a.mode = 'fullscreen';
+  const savingA = a.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(0);
+  b.mode = 'default';
+  const savingB = b.savePlayerWindowMode();
+  await nextTurn();
+  const overlapped = backend.writes.length > 1;
+  if (overlapped) {
+    backend.apply(1);
+    backend.deliver(1);
+    await savingB;
+    assertBackendMode(a, backend, 'B reaches the other open page');
+  }
+  backend.deliver(0);
+  await savingA;
+  await nextTurn();
+  if (!overlapped) {
+    backend.apply(1);
+    backend.deliver(1);
+    await savingB;
+  }
+  assert.deepEqual(backend.applied, [0, 1]);
+  assert.equal(backend.mode, 'default');
+  for (const [name, control] of [['A', a], ['B', b]]) {
+    assertBackendMode(control, backend, `${name} must follow application order, not reversed replies`);
+  }
+  assert.deepEqual(backend.delivered, [0, 1], 'serialization makes reverse replies unreachable');
+});
+
+test('queued choices survive several closings and openings', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const choices = ['fullscreen', 'default', 'remember', 'fullscreen'];
+  const pending = [];
+  for (const choice of choices) {
+    const control = app.open();
+    await control.load();
+    control.mode = choice;
+    pending.push(control.savePlayerWindowMode());
+    control.close();
+  }
+  await nextTurn();
+  assert.equal(backend.writes.length, 1, 'closing a page must not let later writes overtake it');
+  // Drain with NO page open: unmounting must not discard queued choices.
+  for (const [index, choice] of choices.entries()) {
+    assert.equal(backend.writes.length, index + 1, 'only the next queued write is sent');
+    assert.equal(backend.writes[index].mode, choice, 'every closed page keeps its clicked choice');
+    backend.apply(index);
+    backend.deliver(index);
+    await pending[index];
+    await nextTurn();
+  }
+  const reopened = app.open();
+  assertBackendMode(reopened, backend, 'a new opening starts on the last queued confirmation');
+  await reopened.load();
+  assertBackendMode(reopened, backend, 'loading agrees with the last queued confirmation');
+});
+
+test('a queued save keeps its clicked choice when an earlier confirmation changes the control', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  const b = app.open();
+  await a.load();
+  await b.load();
+  a.mode = 'fullscreen';
+  const savingA = a.savePlayerWindowMode();
+  b.mode = 'default';
+  const savingB = b.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(0);
+  backend.deliver(0);
+  await savingA;
+  await nextTurn();
+  assert.equal(b.mode, 'fullscreen', 'the earlier confirmation reaches B while B is waiting');
+  assert.equal(backend.writes[1]?.mode, 'default', 'the queued write must keep the clicked default');
+  // An unrelated load and another unsaved selection cannot change the
+  // already captured request either.
+  await b.load();
+  b.mode = 'remember';
+  backend.apply(1);
+  backend.deliver(1);
+  await savingB;
+  assert.equal(backend.mode, 'default');
+  assertBackendMode(b, backend, 'the queued default is what was saved');
+});
+
+test('a refusal in the middle of the queue does not discard the following save', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const controls = ['fullscreen', 'default', 'remember'].map((mode) => {
+    const control = app.open();
+    control.mode = mode;
+    return control;
+  });
+  const pending = controls.map((control) => control.savePlayerWindowMode());
+  await nextTurn();
+  backend.apply(0);
+  backend.deliver(0);
+  await pending[0];
+  await nextTurn();
+  assert.equal(backend.writes.length, 2, 'only the second write may run before its reply');
+  backend.deliver(1, true);
+  await pending[1];
+  await nextTurn();
+  assertBackendMode(controls[1], backend, 'the refused middle save restores fullscreen');
+  assert.match(controls[1].err, /could not be saved/);
+  assert.equal(backend.writes.length, 3, 'a queued refusal must release the following write');
+  backend.apply(2);
+  backend.deliver(2);
+  await pending[2];
+  assert.equal(backend.mode, 'remember');
+  for (const control of controls) {
+    assertBackendMode(control, backend, 'the final queued save reaches every open page');
+    assert.equal(control.saving, false);
+  }
+});
+
+test('a fresh page sends and confirms its first save', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('default');
+  const control = build(backend.invoke);
+  await control.load();
+  control.mode = 'fullscreen';
+  const saving = control.savePlayerWindowMode();
+  await nextTurn();
+  assert.equal(backend.writes.length, 1, 'a fresh page must send its first save');
+  assert.equal(backend.writes[0].mode, 'fullscreen');
+  assert.equal(control.saving, true);
+  assert.equal(backend.mode, 'default', 'sending alone does not apply a write');
+  assert.equal(control.sharedConfirmed, 'default', 'sending alone does not confirm a write');
+  backend.apply(0);
+  assert.equal(control.sharedConfirmed, 'default', 'applying alone does not deliver a reply');
+  backend.deliver(0);
+  await saving;
+  assertBackendMode(control, backend, 'the fresh page confirms its save');
+  assert.equal(control.saving, false, 'a confirmed save must release its button');
+  assert.equal(control.err, null);
+});
+
+test('a new page can save after a queue has drained', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const first = app.open();
+  first.mode = 'fullscreen';
+  const savingFirst = first.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(0);
+  backend.deliver(0);
+  await savingFirst;
+  first.close();
+  await nextTurn();
+  const fresh = app.open();
+  await fresh.load();
+  fresh.mode = 'default';
+  const savingFresh = fresh.savePlayerWindowMode();
+  await nextTurn();
+  assert.equal(backend.writes.length, 2, 'a drained queue must accept a new page\'s save');
+  backend.apply(1);
+  backend.deliver(1);
+  await savingFresh;
+  assertBackendMode(fresh, backend, 'the new page confirms default');
+});
+
+test('an earlier completion cannot release the queue while a later write is unanswered', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  const b = app.open();
+  a.mode = 'fullscreen';
+  const savingA = a.savePlayerWindowMode();
+  b.mode = 'default';
+  const savingB = b.savePlayerWindowMode();
+  await nextTurn();
+  backend.apply(0);
+  backend.deliver(0);
+  await savingA;
+  await nextTurn();
+  assert.equal(backend.writes.length, 2);
+  a.close();
+  b.close();
+  const c = app.open();
+  await c.load();
+  c.mode = 'remember';
+  const savingC = c.savePlayerWindowMode();
+  await nextTurn();
+  assert.equal(backend.writes.length, 2, 'finishing A must not let C bypass unanswered B');
+  backend.apply(1);
+  backend.deliver(1);
+  await savingB;
+  await nextTurn();
+  assert.equal(backend.writes.length, 3, 'C is sent only after B answers');
+  backend.apply(2);
+  backend.deliver(2);
+  await savingC;
+  assertBackendMode(c, backend, 'C becomes the final confirmed write');
+});
+
+test('an unanswered save keeps later writes queued while pages can load and close', async () => {
+  const build = await playerWindowParts();
+  const backend = splitWriteBackend('remember');
+  const app = build.app(backend.invoke);
+  const a = app.open();
+  await a.load();
+  a.mode = 'fullscreen';
+  let finished = 0;
+  void a.savePlayerWindowMode().then(() => { finished += 1; });
+  await nextTurn();
+  backend.apply(0);
+  a.close();
+  for (const choice of ['default', 'remember', 'default']) {
+    const control = app.open();
+    let loaded = false;
+    const loading = control.load().then(() => { loaded = true; });
+    await nextTurn();
+    assert.equal(loaded, true, 'an unanswered save must not block a new page load');
+    await loading;
+    assertBackendMode(control, backend, 'a pending save does not block loading a new page');
+    assert.equal(control.saving, false, 'a new page is usable while another waits');
+    control.mode = choice;
+    void control.savePlayerWindowMode().then(() => { finished += 1; });
+    assert.equal(control.saving, true, 'this page reports its queued save as pending');
+    control.close();
+    await nextTurn();
+  }
+  assert.equal(backend.writes.length, 1, 'no later write may escape an unanswered predecessor');
+  assert.equal(finished, 0, 'no queued save may be reported complete or discarded');
+  assert.equal(backend.mode, 'fullscreen');
+  assert.deepEqual(backend.delivered, [], 'the test never answers the first write');
 });
 
 test('the remembered window never holds a position', () => {

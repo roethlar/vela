@@ -32,6 +32,30 @@
     playerWindowConfirmed.mode = mode;
     for (const show of [...playerWindowFollowers]) show(mode);
   }
+
+  // One write at a time, across every opening of Settings. Replies carry no
+  // backend revision, so allowing overlapping writes would let an older
+  // write's late reply replace the mode a newer write actually stored.
+  // Closing an opening does not cancel its queued write. A refusal releases
+  // the next write too; an unanswered write must keep the queue waiting.
+  let playerWindowSaveTail: Promise<void> | undefined;
+
+  function queuePlayerWindowSave(write: () => Promise<PlayerWindowMode>): Promise<PlayerWindowMode> {
+    const save = async () => {
+      const mode = await write();
+      confirmPlayerWindowSave(mode);
+      return mode;
+    };
+    // Start an idle queue immediately; otherwise wait for the preceding
+    // write's reply AND confirmation before sending the next write.
+    const pending = playerWindowSaveTail ? playerWindowSaveTail.then(save) : save();
+    const settled = pending.then(() => {}, () => {});
+    playerWindowSaveTail = settled;
+    void settled.then(() => {
+      if (playerWindowSaveTail === settled) playerWindowSaveTail = undefined;
+    });
+    return pending;
+  }
 </script>
 
 <script lang="ts">
@@ -480,11 +504,13 @@
     if (playerWindowBusy) return;
     playerWindowBusy = true;
     err = null;
+    // Capture the click's choice before an earlier save or a load can
+    // change this opening's control while its write is queued.
+    const mode = playerWindowMode;
     try {
-      const saved = await invoke<PlayerWindowMode>("set_mpv_window_mode", {
-        mode: playerWindowMode,
-      });
-      confirmPlayerWindowSave(saved);
+      const saved = await queuePlayerWindowSave(() =>
+        invoke<PlayerWindowMode>("set_mpv_window_mode", { mode }),
+      );
       playerWindowMode = playerWindowSaved = saved;
     } catch (e) {
       playerWindowMode = playerWindowSaved = playerWindowConfirmed.mode;
