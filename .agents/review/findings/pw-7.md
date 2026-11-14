@@ -377,3 +377,43 @@ be reviewed and landed by the coordinating agent, whose review then stands
 in the record in place of a codex verification, because codex cannot
 verify code it wrote. If that repair turns out to need a change in the
 backend, or is found wanting once more, the finding goes to the owner.
+
+### Repair (round 4), `0cc2e03`: written by codex, reviewed by the coordinating agent. CLOSED.
+
+Saves of the Player window choice go one at a time, across every opening
+of Settings (`queuePlayerWindowSave` in the module script of
+`src/lib/Settings.svelte`): a save is sent only once the one before it has
+been answered and its confirmation recorded, so the order of the replies
+is the order in which the backend applied the writes, and a late reply
+cannot replace a newer choice. A save takes the choice as it was when its
+button was pressed. No backend change.
+
+What happens to a save that is waiting: closing the page does not drop
+it; a refused save before it lets it go; a save the backend never answers
+keeps it, and every later save of this choice, waiting for as long as
+Vela runs (loading and closing the page and the other controls are not
+held up). There is no time limit, because one would let two writes
+overlap again.
+
+Guard: thirteen new tests in `tests/player-window-ui.test.mjs` on a
+stand-in backend in which applying a write and delivering its reply are
+separate steps: the reviewer's sequence, the same with a refusal (applied
+and not applied) and with a retry after a refusal, replies in reverse
+order within one page and across two, choices waiting through several
+closings and openings, a waiting save keeping the choice it was pressed
+with, a refusal in the middle of the queue, a fresh page's first save, a
+new page after the queue has drained, and an unanswered save. Codex
+red-proved each, and the inherited tests again (its report lists 32
+cases).
+
+The coordinating agent read the change (a promise chain of about twenty
+lines and one captured value), merged it onto `main`, and ran `npm run
+check` (green, 546 Node tests) and the production build there. It made no
+red-proofs of its own: the owner set work on tests aside that day. Under
+the owner's decision of 2026-11-14 (`.agents/decisions.md`, "Coding tasks
+may go to codex") this review closes the finding.
+
+Not checked: the control mounted in the real window with replies held
+back; the tests run the component's code, not the window. `windowsetting`,
+which saves the choice once through the real window, runs in the
+end-to-end suite.
