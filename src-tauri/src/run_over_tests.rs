@@ -91,8 +91,8 @@ struct World {
     b_running: bool,
     /// A launch is installed and has not finished.
     launching: bool,
-    /// The dispatcher authorised Continue Playing: the page starts the next
-    /// play, which is the launch that follows.
+    /// A successor is being chosen, or a clean end still allows a successor
+    /// (including before its dispatch authorises Continue Playing).
     coming: bool,
     /// The page has not yet had the answer of the play it started.
     pending: bool,
@@ -862,6 +862,9 @@ enum ChoiceEnd {
 enum Chain {
     /// A's dispatch asks the user to choose B's source; the choice ends.
     Choice(ChoiceEnd),
+    /// A manual choice is cancelled before or after A's dispatcher meets
+    /// it. Before dispatch, A remains authorised for Continue Playing.
+    ManualChoice { ends_before_dispatch: bool },
     /// A's dispatch starts B in mpv's own window; B ends cleanly, and its
     /// dispatch starts C there too, or (`last`) cannot.
     OwnWindowEnds { last: bool },
@@ -878,6 +881,7 @@ enum Link {
     Reap,
     DispatchA,
     ChoiceEnds,
+    StartB,
     OpenB,
     BEndsClean,
     TrackerB,
@@ -899,6 +903,14 @@ impl Chain {
                     links.push(OpenB);
                 }
             }
+            Chain::ManualChoice { ends_before_dispatch } => {
+                if ends_before_dispatch {
+                    links.insert(0, ChoiceEnds);
+                    links.extend([StartB, OpenB]);
+                } else {
+                    links.push(ChoiceEnds);
+                }
+            }
             Chain::OwnWindowEnds { .. } => links.extend([BEndsClean, TrackerB, DispatchB]),
             Chain::OwnWindowSteppedDown { .. } => {
                 links.extend([StepDown, TrackerB, DEndsClean, TrackerD, DispatchD])
@@ -913,9 +925,17 @@ impl Chain {
         let has = |l: Link| done.contains(&l);
         match link {
             CloseA | TrackerA | Reap => true,
-            DispatchA => has(TrackerA),
-            ChoiceEnds | BEndsClean | StepDown => has(DispatchA),
-            OpenB => has(ChoiceEnds),
+            DispatchA => {
+                has(TrackerA)
+                    && (!matches!(self, Chain::ManualChoice { ends_before_dispatch: true }) || has(ChoiceEnds))
+            }
+            ChoiceEnds => {
+                matches!(self, Chain::ManualChoice { ends_before_dispatch: true }) || has(DispatchA)
+            }
+            BEndsClean | StepDown | StartB => has(DispatchA),
+            OpenB => {
+                if matches!(self, Chain::ManualChoice { .. }) { has(StartB) } else { has(ChoiceEnds) }
+            }
             TrackerB => has(BEndsClean) || has(StepDown),
             DispatchB => has(TrackerB),
             DEndsClean => has(StepDown),
@@ -950,7 +970,11 @@ impl Chain {
 }
 
 fn chains() -> Vec<Chain> {
-    let mut all: Vec<Chain> = [
+    let mut all = vec![
+        Chain::ManualChoice { ends_before_dispatch: true },
+        Chain::ManualChoice { ends_before_dispatch: false },
+    ];
+    all.extend([
         ChoiceEnd::Cancel,
         ChoiceEnd::Expired,
         ChoiceEnd::Refused,
@@ -958,8 +982,7 @@ fn chains() -> Vec<Chain> {
         ChoiceEnd::Starts,
     ]
     .into_iter()
-    .map(Chain::Choice)
-    .collect();
+    .map(Chain::Choice));
     for last in [false, true] {
         all.push(Chain::OwnWindowEnds { last });
         all.push(Chain::OwnWindowSteppedDown { last });
@@ -1042,7 +1065,7 @@ const CHOICE: &str = "Q";
 
 /// A source choice for the play `session`, to follow `replaces`, held as
 /// `play_by_key_locked` holds it when the user is to choose.
-async fn offer_choice(state: &AppState, replaces: &str, session: &str) -> PlaybackSourceChoiceRequestDto {
+async fn offer_choice(state: &AppState, replaces: Option<&str>, session: &str) -> PlaybackSourceChoiceRequestDto {
     let request = PlaybackSourceChoiceRequestDto {
         request_id: CHOICE.to_string(),
         title: "k".to_string(),
@@ -1061,7 +1084,8 @@ async fn offer_choice(state: &AppState, replaces: &str, session: &str) -> Playba
             start_from_beginning: false,
             session_id: session.to_string(),
             playlist: None,
-            replace_session: Some(replaces.to_string()),
+            replace_session: replaces.map(str::to_string),
+            run_waiting: replaces.is_some(),
             run_kind: Some(PlaybackRunKind::VelaPlaylist),
         },
         Instant::now(),
@@ -1073,7 +1097,7 @@ async fn offer_choice(state: &AppState, replaces: &str, session: &str) -> Playba
 /// choose B's source: the choice is held, and the real `after_successor`
 /// answers; its report as `lib.rs` sends it.
 async fn dispatch_asks_choice(state: &AppState, page: &Page) -> AfterCleanEnd {
-    let request = offer_choice(state, "A", "B").await;
+    let request = offer_choice(state, Some("A"), "B").await;
     page.world.lock().unwrap().coming = true;
     let after = after_successor(state, PlayCommandResult::SourceChoiceRequired { request }).await;
     page.ended(&clean_end_report(&completion("A"), after));
@@ -1153,6 +1177,13 @@ async fn run_chain(chain: Chain, order: &[Link]) -> (Vec<PageEvent>, bool) {
     let state = AppState::for_tests();
     let page = Page::default();
     run_in_fullscreen(&state, &page, false).await;
+    if matches!(chain, Chain::ManualChoice { .. }) {
+        offer_choice(&state, None, "B").await;
+        // A's clean completion can still start a successor even before its
+        // tracker reports or its dispatcher runs. Cancelling this unrelated
+        // choice does not revoke that continuation.
+        page.world.lock().unwrap().coming = true;
+    }
     ends_clean(&state, &page, "A");
     page.world.lock().unwrap().a_clean = true;
     for link in order {
@@ -1163,8 +1194,27 @@ async fn run_chain(chain: Chain, order: &[Link]) -> (Vec<PageEvent>, bool) {
             (DispatchA, Chain::Choice(_)) => {
                 dispatch_asks_choice(&state, &page).await;
             }
+            (DispatchA, Chain::ManualChoice { ends_before_dispatch }) => {
+                let expected = if ends_before_dispatch {
+                    AfterCleanEnd::ContinuePlaying
+                } else {
+                    AfterCleanEnd::Successor
+                };
+                assert_eq!(dispatcher_reports(&state, &page, "A").await, expected);
+            }
             (DispatchA, _) => dispatch_starts(&state, &page, "A", "B").await,
             (ChoiceEnds, Chain::Choice(end)) => end_choice(&state, &page, end).await,
+            (ChoiceEnds, Chain::ManualChoice { ends_before_dispatch }) => {
+                page.world.lock().unwrap().coming = ends_before_dispatch;
+                assert!(cancel_choice(&state, CHOICE, |e| page.ended(&e)).await);
+            }
+            (StartB, Chain::ManualChoice { .. }) => {
+                assert!(launch(&state, &page, "B", async {
+                    replace_in_slot(&state, &page, "A", "B");
+                    page.world.lock().unwrap().coming = false;
+                    started()
+                }).await);
+            }
             (OpenB, _) => view(&state, &page, "B", true),
             (BEndsClean, _) => ends_clean(&state, &page, "B"),
             (TrackerB, chain) => {
@@ -1255,8 +1305,8 @@ fn scenarios() -> Vec<Scenario> {
 /// when something was playing or coming as it was sent and `-` when not;
 /// then `p` when the page was still starting a play of its own and `.` when
 /// not), and after `|`, `+` or `-` for whether anything plays or is coming at
-/// the end.
-fn sequence_line(events: &[PageEvent], final_busy: bool) -> String {
+/// the end, or `backstop` for an expired choice whose end reports nothing.
+fn sequence_line(events: &[PageEvent], final_busy: bool, expired: bool) -> String {
     let flag = |on: bool| if on { '+' } else { '-' };
     let mut line: Vec<String> = events
         .iter()
@@ -1282,7 +1332,11 @@ fn sequence_line(events: &[PageEvent], final_busy: bool) -> String {
             format!("{what}{}{}", flag(e.busy), if e.pending { 'p' } else { '.' })
         })
         .collect();
-    line.push(format!("|{}", flag(final_busy)));
+    line.push(if expired {
+        "|backstop".to_string()
+    } else {
+        format!("|{}", flag(final_busy))
+    });
     serde_json::json!(line.join(" ")).to_string()
 }
 
@@ -1291,8 +1345,9 @@ const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/ru
 // Every order of each scenario's events (`Scenario::steps`, constrained only
 // by what must come before what, `Scenario::ready`), and of each chain's
 // (`Chain::links`, `Chain::ready`: a successor the dispatcher asks the user
-// to choose, and successors in mpv's own window, one after another or
-// stepped down), run through the real backend functions. In every order the page, applying its own rule, leaves
+// to choose, a manual choice cancelled before or after dispatch, and successors
+// in mpv's own window, one after another or stepped down), run through the real
+// backend functions. In every order the page, applying its own rule, leaves
 // the player's fullscreen at a report once nothing plays or is coming, and
 // never while something plays or is coming. The distinct sequences the page
 // receives are kept in `tests/fixtures/run-over-orders.json`, which the Node
@@ -1304,7 +1359,8 @@ const FIXTURE: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/../tests/fixtures/ru
 // and the Node test takes it from the fixture: the two check the page's rule
 // against the same model, not against each other. Time is not modelled: the
 // page's backstop, which leaves fullscreen 50 s after the last view closed,
-// never runs here.
+// never runs here. An expired choice (120 s) reports nothing; those sequences
+// are marked separately, since leaving fullscreen belongs to the backstop.
 //
 // The orders are shared out over threads, each running its share on a
 // runtime of its own, one order after another on a fresh `AppState`.
@@ -1358,8 +1414,13 @@ fn in_every_order_the_page_leaves_fullscreen_exactly_when_the_run_is_over() {
                                 (events, busy, format!("{chain:?} {order:?}"))
                             }
                         };
-                        assert_page_left_rightly(&events, busy, &what);
-                        seen.insert(sequence_line(&events, busy));
+                        let expired = matches!(item, Work::Successors(Chain::Choice(ChoiceEnd::Expired), _));
+                        if expired {
+                            assert_eq!(page_leaves_at(&events), None, "{what}: {events:#?}");
+                        } else {
+                            assert_page_left_rightly(&events, busy, &what);
+                        }
+                        seen.insert(sequence_line(&events, busy, expired));
                     }
                     seen
                 })
@@ -1777,21 +1838,25 @@ async fn successor_being_chosen(state: &AppState, page: &Page) {
 
 // The dispatcher asks the user to choose the source of the run's next play;
 // the page keeps fullscreen while the dialog is up. The user cancels it, or
-// the choice has expired, or the play chosen is refused before it is
-// installed: nothing plays or is coming, and the backend says the run is
-// over, naming the play the choice was to follow (or, for a choice no longer
-// held, its request: no view shows, and the page leaves whatever the name).
+// the play chosen is refused before it is installed: nothing plays or is
+// coming, and the backend says the run is over, naming the predecessor.
+// An expired choice reports nothing: by its 120 s expiry, the page's 50 s
+// backstop is responsible for leaving fullscreen.
 #[tokio::test]
 async fn a_successor_being_chosen_keeps_fullscreen_and_a_choice_ended_without_a_play_ends_the_run() {
     for end in [ChoiceEnd::Cancel, ChoiceEnd::Expired, ChoiceEnd::Refused] {
         let state = AppState::for_tests();
         let page = Page::default();
         successor_being_chosen(&state, &page).await;
+        let before = page.events();
         end_choice(&state, &page, end).await;
         let events = page.events();
-        let named = if end == ChoiceEnd::Expired { CHOICE } else { "A" };
-        assert_eq!(events.last().map(|e| &e.seen), Some(&ended(named, true)), "{end:?}: {events:#?}");
-        assert_page_left_rightly(&events, false, &format!("{end:?}"));
+        if end == ChoiceEnd::Expired {
+            assert_eq!(events, before, "an expired choice reports nothing");
+        } else {
+            assert_eq!(events.last().map(|e| &e.seen), Some(&ended("A", true)), "{end:?}: {events:#?}");
+            assert_page_left_rightly(&events, false, &format!("{end:?}"));
+        }
         // The playlist's run is given up with the choice.
         if end == ChoiceEnd::Cancel {
             assert!(state.playback_run.lock().await.is_none());
@@ -1836,6 +1901,7 @@ async fn a_choice_ending_while_another_waits_or_a_play_runs_reports_nothing() {
             session_id: "C".to_string(),
             playlist: None,
             replace_session: Some("A".to_string()),
+            run_waiting: true,
             run_kind: None,
         },
         Instant::now(),
@@ -1847,7 +1913,7 @@ async fn a_choice_ending_while_another_waits_or_a_play_runs_reports_nothing() {
     let state = AppState::for_tests();
     let page = Page::default();
     run_in_fullscreen(&state, &page, false).await;
-    offer_choice(&state, "A", "B").await;
+    offer_choice(&state, Some("A"), "B").await;
     let before = page.events().len();
     assert!(cancel_choice(&state, CHOICE, |e| page.ended(&e)).await);
     let result = resolve_choice(&state, "gone", "s", |_, _| async { Err(never_played()) }, |e| page.ended(&e)).await;
@@ -1862,7 +1928,7 @@ async fn a_choice_sends_nothing_new_to_somebody_who_uses_mpv_own_window() {
     for end in [ChoiceEnd::Cancel, ChoiceEnd::Expired, ChoiceEnd::Refused] {
         let state = AppState::for_tests();
         let page = Page::default();
-        offer_choice(&state, "A", "B").await;
+        offer_choice(&state, Some("A"), "B").await;
         end_choice(&state, &page, end).await;
         assert_eq!(page.events(), vec![], "{end:?}");
     }

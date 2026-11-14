@@ -603,7 +603,8 @@ test('a play the backend replaces keeps fullscreen (case 8)', () => {
 // What plays or is coming at each event is the Rust test's model (its
 // `World`), carried in the fixture: this replay checks the page's real
 // helpers against that model, not the model itself. The page's backstop is
-// not replayed (no time passes here).
+// not replayed (no time passes here); expired choices are marked as relying
+// on it and must produce no report that leaves fullscreen.
 const orders = JSON.parse(read('tests/fixtures/run-over-orders.json'));
 
 // An end's code: `1`/`0` a play's own report (over or not), `R`/`s`/`n` the
@@ -668,6 +669,10 @@ test('in every order the backend produces, the page leaves fullscreen at a repor
     const events = body.split(' ').map(parseToken);
     const busyAtEnd = end === '+';
     const leftAt = replayPage(events);
+    if (end === 'backstop') {
+      assert.equal(leftAt, null, `an expired choice reports nothing: ${line}`);
+      continue;
+    }
     if (busyAtEnd) {
       assert.equal(leftAt, null, `left while something still plays: ${line}`);
       kept++;
@@ -903,11 +908,12 @@ test("a source choice's end is reported from the state of the app, through the r
         });
     }`),
   );
-  // Every way a choice ends without a play reaches it: no longer held, a
-  // source not offered, and a play that neither started nor was launched.
+  // A held choice the run awaited can report when the source was not
+  // offered or the play neither started nor was launched. Expired choices
+  // no longer report.
   const choose = shipped.slice(shipped.indexOf('\nasync fn resolve_choice<'));
   const chooseBody = choose.slice(0, choose.indexOf('\n}\n'));
-  assert.equal(chooseBody.split('report_choice_end(').length - 1, 3);
+  assert.equal(chooseBody.split('report_choice_end(').length - 1, 2);
   assert.match(chooseBody, shape(`Ok(PlayCommandResult::Started { .. }) => true,
       Err(failure) => failure.launched,
       Ok(_) => false,`));

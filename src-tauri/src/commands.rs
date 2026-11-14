@@ -3687,6 +3687,9 @@ struct PendingPlaybackChoice {
     session_id: String,
     playlist: Option<PlaylistLocation>,
     replace_session: Option<String>,
+    /// The run awaits this choice: a successor's, or a manual choice the
+    /// completion dispatcher has met instead of starting a successor.
+    run_waiting: bool,
     run_kind: Option<PlaybackRunKind>,
 }
 
@@ -3751,11 +3754,20 @@ impl PlaybackChoiceRequests {
         !self.entries.is_empty()
     }
 
-    fn has_manual_pending(&mut self, now: Instant) -> bool {
+    /// Mark every manual choice on whose account the dispatcher says a
+    /// successor is being chosen. Taking a choice uses this same lock.
+    fn mark_manual_pending(&mut self, now: Instant) -> bool {
         self.prune_at(now);
-        self.entries
-            .iter()
-            .any(|entry| entry.replace_session.is_none())
+        let mut found = false;
+        for entry in self
+            .entries
+            .iter_mut()
+            .filter(|entry| entry.replace_session.is_none())
+        {
+            entry.run_waiting = true;
+            found = true;
+        }
+        found
     }
 }
 
@@ -4631,13 +4643,13 @@ async fn report_failed_launch_end(
     }
 }
 
-/// Whether a source choice the user was asked to make, once it has been dealt
-/// with without starting a play (cancelled, expired, or chosen and then
-/// refused or failed before its play was installed), leaves the run over
+/// Whether a source choice the run awaited, once it has been dealt with
+/// without starting a play (cancelled, or chosen and then refused or failed
+/// before its play was installed), leaves the run over
 /// (review finding pc-2): nothing is playing, no choice is still waiting, and
 /// the page holds the player's fullscreen. While a choice waits, the page
 /// keeps fullscreen (the dispatcher said a successor is coming), so its end
-/// is a moment the run can end. Decided from the state of the app alone.
+/// is a moment the run can end. The callers check that the run awaited it.
 fn choice_end_ends_run(nothing_playing: bool, choice_pending: bool, fullscreen_held: bool) -> bool {
     nothing_playing && !choice_pending && fullscreen_held
 }
@@ -4652,9 +4664,9 @@ fn nothing_plays_now(slot: &mut Option<crate::player::PlayerHandle>) -> bool {
         .is_none_or(|player| matches!(player.has_ended(), Ok(true)))
 }
 
-/// After a source choice was dealt with without starting a play: when the
-/// run is over by then (`choice_end_ends_run`), give `report_end` the one
-/// report that says so, naming the session whose view the page is showing,
+/// After a source choice the run awaited was dealt with without starting a
+/// play: when the run is over by then (`choice_end_ends_run`), give `report_end`
+/// the one report that says so, naming the session whose view the page is showing,
 /// or `own` when no view is showing (the page then leaves whatever the name).
 /// Runs on the async command task under the play lock: the slot's lock is
 /// taken alone and let go of before the choices' lock is awaited, and the
@@ -4693,10 +4705,9 @@ fn choice_own_session(pending: &PendingPlaybackChoice) -> String {
 }
 
 /// Cancel a source choice, under the play lock, and then report the end of
-/// the run if that leaves it over (`report_choice_end`). A choice no longer
-/// held (it expired, or was cleared) is reported on all the same: the user
-/// has given up on it either way, and only the state decides. Answers
-/// whether the choice was still held.
+/// the run if the run awaited that choice and is now over (`report_choice_end`).
+/// A manual choice the dispatcher has not met, or a choice no longer held
+/// (expired or cleared), reports nothing. Answers whether it was still held.
 async fn cancel_choice(
     state: &AppState,
     request_id: &str,
@@ -4708,31 +4719,29 @@ async fn cancel_choice(
         .lock()
         .await
         .take_at(request_id, Instant::now());
-    let own = match taken.as_ref() {
-        Some(pending) => {
-            if let Some(expected) = pending.replace_session.as_deref() {
-                clear_playlist_cursor_if(state, expected).await;
-                let mut run = state.playback_run.lock().await;
-                if run.as_ref().is_some_and(|run| run.session_id == expected) {
-                    *run = None;
-                }
-            }
-            choice_own_session(pending)
-        }
-        // No play is known; the request's id stands in for a name, which the
-        // page needs only when no view shows, and then leaves whatever it is.
-        None => request_id.to_string(),
+    let Some(pending) = taken else {
+        return false;
     };
-    report_choice_end(state, &own, &mut report_end).await;
-    taken.is_some()
+    if let Some(expected) = pending.replace_session.as_deref() {
+        clear_playlist_cursor_if(state, expected).await;
+        let mut run = state.playback_run.lock().await;
+        if run.as_ref().is_some_and(|run| run.session_id == expected) {
+            *run = None;
+        }
+    }
+    if pending.run_waiting {
+        report_choice_end(state, &choice_own_session(&pending), &mut report_end).await;
+    }
+    true
 }
 
 /// Resolve a source choice with `source_id`, under the play lock: `play`
 /// starts the chosen play (the real command passes `play_by_key_locked`).
-/// Whenever that does not start a play (the choice expired, the source was
-/// not offered, the play was refused or failed before its session was
-/// installed), the end of the run is reported if that leaves it over
-/// (`report_choice_end`). A launch that failed after its session was
+/// When a held choice does not start a play (the source was not offered, the
+/// play was refused or failed before its session was installed), the end of
+/// the run is reported only if the run awaited it and is now over
+/// (`report_choice_end`). An expired choice reports nothing.
+/// A launch that failed after its session was
 /// installed has already made that report itself (`PlayFailure::launched`).
 async fn resolve_choice<P, F>(
     state: &AppState,
@@ -4752,9 +4761,9 @@ where
         .await
         .take_at(request_id, Instant::now());
     let Some(pending) = taken else {
-        report_choice_end(state, request_id, &mut report_end).await;
         return Err("this source choice expired or was superseded".to_string());
     };
+    let run_waiting = pending.run_waiting;
     let own = choice_own_session(&pending);
     if !pending
         .request
@@ -4762,7 +4771,9 @@ where
         .iter()
         .any(|choice| choice.source_id == source_id)
     {
-        report_choice_end(state, &own, &mut report_end).await;
+        if run_waiting {
+            report_choice_end(state, &own, &mut report_end).await;
+        }
         return Err("that source was not offered for this playback request".to_string());
     }
     let result = play(pending, source_id.to_string()).await;
@@ -4771,7 +4782,7 @@ where
         Err(failure) => failure.launched,
         Ok(_) => false,
     };
-    if !started_or_reported {
+    if run_waiting && !started_or_reported {
         report_choice_end(state, &own, &mut report_end).await;
     }
     match result {
@@ -5780,6 +5791,7 @@ async fn play_by_key_locked(
                     session_id: session_id.to_string(),
                     playlist,
                     replace_session: replace_session.map(str::to_string),
+                    run_waiting: replace_session.is_some(),
                     run_kind,
                 },
                 Instant::now(),
@@ -7431,7 +7443,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> A
         .playback_choices
         .lock()
         .await
-        .has_manual_pending(Instant::now())
+        .mark_manual_pending(Instant::now())
     {
         return AfterCleanEnd::Successor;
     }
@@ -8275,6 +8287,7 @@ mod tests {
             session_id: format!("future-{request_id}"),
             playlist: None,
             replace_session: replace_session.map(str::to_string),
+            run_waiting: replace_session.is_some(),
             run_kind: Some(PlaybackRunKind::Series),
         }
     }
