@@ -1,7 +1,7 @@
 # pa-3: half of a split row can be deleted from the list and the guard still says the plan's list is all there
 
 **Severity**: MEDIUM — the check that every row of the plan is in the parity list accepts any one part of a split row. Deleting row 8b (the skip button) together with its two scenarios leaves every parity test passing, and the verdict then has no row 8b to ask for.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `ddbb743`
 
@@ -95,3 +95,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "The inventory guard accepts removal of a split half". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 10:09 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d983-c43f-7b52-afc6-75b3a654f4a4`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 10:04 UTC, finished 10:09 UTC.
+- Reviewed head `ddbb7433d915b3ad2299103911a7992e32738528`, base
+  `115cbaad15c2fcca76b69239265a29733be12f30` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
