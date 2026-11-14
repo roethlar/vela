@@ -13,7 +13,7 @@ import { positionsWhile } from './e2e/helpers.mjs';
 
 // markers.mjs's rule: the play resumed from 1 s ahead of a range at 2-12 s,
 // a 5000 ms window, a 1 s margin past the range's start.
-const MARKERS = { startS: 1, rangeStart: 2, rangeEnd: 12, windowMs: 5000, marginS: 1 };
+const MARKERS = { startS: 1, rangeStart: 2, rangeEnd: 12, windowMs: 5000, marginS: 1, maxGapMs: 500 };
 
 // The verdicts as the scenario asks for them, after each sample: the first
 // one given, and the index of the sample it was given at.
@@ -115,6 +115,24 @@ test('pa-1: a crossing counts only inside the window, and the first sample may b
   );
 });
 
+test('pa-1: a crossing counts only if the play was watched across it', () => {
+  const upTo = (ms) => Array.from({ length: ms / 100 }, (_, k) => ({ t: 1 + (k + 1) / 10, ms: 100 * (k + 1) }));
+  // 500 ms between the position before and the one past the end still counts; 501 does not.
+  assert.equal(decide([...upTo(900), { t: 12.0, ms: 1400 }]).verdict.ok, true);
+  const gap = decide([...upTo(900), { t: 12.0, ms: 1401 }]).verdict;
+  assert.equal(
+    gap.why,
+    "the play was not watched across the jump: 501 ms lie between the position seen before it (1.9 s) and the one past the range's end (12 s), " +
+      'more than the 500 ms allowed; a skip that landed short of the end could have played the rest unseen',
+  );
+  // Reads that failed in between do not count as watching.
+  const blind = decide([...upTo(900), { t: null, ms: 1100 }, { t: null, ms: 1300 }, { t: 12.0, ms: 1500 }]).verdict;
+  assert.match(blind.why, /^the play was not watched across the jump: 600 ms lie between/);
+  // A first sample that is the jump is measured from the resume.
+  assert.equal(decide([{ t: 12.1, ms: 500 }]).verdict.ok, true);
+  assert.match(decide([{ t: 12.1, ms: 501 }]).verdict.why, /^the play was not watched across the jump: 501 ms lie between the position seen before it \(1 s\)/);
+});
+
 test('pa-1: a failed read past the window ends it, and says the position is unknown', () => {
   const held = Array.from({ length: 51 }, (_, k) => ({ t: 1, ms: 100 * k }));
   const { at, verdict } = decide([...held, { t: null, ms: 5100 }]);
@@ -145,13 +163,10 @@ test('pa-1: a read that failed changes nothing', () => {
 // A seek to 1 s lands at `landsAt` (the scenario takes anything from 0.9 to
 // 1.5 s as the start, as a real seek may land on a frame near it), so that a
 // verdict judged from a start other than the one seen shows.
-// `slowRead`, if given, makes one read of the position, the first at or after
-// `slowRead.at` ms since the resume, take `slowRead.ms` to answer.
-function standInMpv(positionAt, { landsAt = 1, slowRead = null } = {}) {
+function standInMpv(positionAt, { landsAt = 1 } = {}) {
   let paused = false;
   let pos = 0.5;
   let resumedAt = null;
-  let slowed = false;
   const made = Date.now();
   return {
     async getProp(name) {
@@ -160,14 +175,7 @@ function standInMpv(positionAt, { landsAt = 1, slowRead = null } = {}) {
       // it (a timer left running would keep the test process alive).
       if (Date.now() - made > 10000) return new Promise(() => {});
       if (name === 'pause') return paused;
-      if (name === 'time-pos') {
-        if (paused || resumedAt == null) return pos;
-        if (slowRead && !slowed && Date.now() - resumedAt >= slowRead.at) {
-          slowed = true;
-          await new Promise((r) => setTimeout(r, slowRead.ms));
-        }
-        return positionAt(Date.now() - resumedAt);
-      }
+      if (name === 'time-pos') return paused || resumedAt == null ? pos : positionAt(Date.now() - resumedAt);
       throw new Error(`the stand-in has no property ${name}`);
     },
     async setProp(name, value) {
@@ -231,17 +239,105 @@ test('pa-1: the markers scenario fails a play that never crosses the range, once
   );
 });
 
-test('pa-1: the markers scenario fails a play first seen past the range after the window, through one slow read', STAND_IN, async () => {
-  // The play creeps on, short of the range's margin, and is past the end
-  // only 5.2 s after resuming, which no skip explains; one read of the
-  // position, begun half a second in, takes 4.9 s, so no sample is taken in
-  // between and the first one after it is past the end. About 5.5 s.
-  const mpv = standInMpv((ms) => (ms < 5200 ? 1 + ms / 5000 : 12.3), { slowRead: { at: 500, ms: 4900 } });
+// The same scenario code in made-up time, so that slow answers cost nothing
+// to wait for and the play can be modelled honestly: it plays at one second
+// per second from the moment mpv is told to resume, a skip is a jump of the
+// position, and an answer can be slow. `timeline` gives the position at a
+// time since the resume was asked for; `slow` gives how long the answer to a
+// read begun at that time takes (0 if not given); `resumeAnswerMs` how long
+// the answer to the resume takes.
+function madeUpTime(timeline, { slow = () => 0, resumeAnswerMs = 0, failing = () => false } = {}) {
+  let now = 1000;
+  let resumeAskedAt = null;
+  let paused = false;
+  const clock = {
+    now: () => now,
+    sleep: async (ms) => {
+      now += ms;
+    },
+  };
+  const mpv = {
+    async getProp(name) {
+      if (name === 'pause') return paused;
+      assert.equal(name, 'time-pos');
+      if (resumeAskedAt === null) return 1;
+      const begun = now - resumeAskedAt;
+      now += slow(begun);
+      if (failing(begun)) throw new Error('mpv: no reply to get_property');
+      // What mpv answers is the position when it answers.
+      return timeline(now - resumeAskedAt);
+    },
+    async setProp(name, value) {
+      if (name === 'pause') {
+        paused = value;
+        if (!value) {
+          resumeAskedAt = now;
+          now += resumeAnswerMs;
+        }
+      } else assert.equal(name, 'time-pos');
+    },
+  };
+  return { mpv, clock, elapsed: () => now - resumeAskedAt };
+}
+const playsOn = (ms) => 1 + ms / 1000; // no skip at all
+const prove = ({ mpv, clock }) => proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12, { clock });
+
+test('pa-1: ordinary playback seen past the range late, through one slow read, fails', async () => {
+  // The reviewer's first trace: no skip, one read that takes 9400 ms, and the
+  // next position is past the end, 11 seconds after the resume.
+  const world = madeUpTime(playsOn, { slow: (begun) => (begun >= 1800 && begun < 1900 ? 9400 : 0) });
+  await assert.rejects(prove(world), /^Error: auto-skip: the intro range: the position was first seen past the range's end \(12 s\) \d+ ms after playing on from 1\.00 s, after the 5000 ms/);
+});
+
+test('pa-1: the time a slow answer to the resume takes counts against the window', async () => {
+  // Verification round 2: the clock used to start when the resume had been
+  // answered. No skip; the answer to the resume takes 9400 ms, the next read
+  // 1800 ms: the play is at 12.2 s, 11.2 real seconds on.
+  const world = madeUpTime(playsOn, { resumeAnswerMs: 9400, slow: (begun) => (begun < 9500 ? 1800 : 0) });
+  await assert.rejects(prove(world), /^Error: auto-skip: the intro range: the position was first seen past the range's end \(12 s\) 11\d\d\d ms after playing on from 1\.00 s, after the 5000 ms/);
+});
+
+test('pa-1: a skip that lands short and plays the rest behind a slow read, or behind reads that fail, fails', async () => {
+  // Verification round 2: the skip lands at 9 s one second in and the play
+  // goes on from there; a read begun at about 900 ms takes 3300 ms, so the
+  // next position seen is past the end, inside the window, and nothing was
+  // seen in between.
+  const landsShort = (ms) => (ms < 1000 ? 1 + ms / 1000 : 9 + (ms - 1000) / 1000);
+  const slowRead = madeUpTime(landsShort, { slow: (begun) => (begun >= 900 && begun < 1000 ? 3300 : 0) });
   await assert.rejects(
-    proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12),
-    /^Error: auto-skip: the intro range: the position was first seen past the range's end \(12 s\) \d+ ms after playing on from 1\.00 s, after the 5000 ms in which only a skip can get it there; it is 12\.3 /,
-    'the scenario must fail a crossing first seen after the window',
+    prove(slowRead),
+    /^Error: auto-skip: the intro range: the play was not watched across the jump: 3\d\d\d ms lie between the position seen before it \(1\.\d+ s\) and the one past the range's end \(12\.\d+ s\), more than the 500 ms allowed/,
   );
+  // The same with reads that fail all through that time.
+  const failedReads = madeUpTime(landsShort, { failing: (begun) => begun >= 900 && begun < 4100 });
+  await assert.rejects(prove(failedReads), /^Error: auto-skip: the intro range: the play was not watched across the jump: 3\d\d\d ms lie between/);
+});
+
+test('pa-1: a real skip passes in made-up time, and a watched one a little slow still does', async (t) => {
+  const logged = [];
+  t.mock.method(console, 'log', (line) => logged.push(line));
+  const skips = (ms) => (ms < 1000 ? 1 + ms / 1000 : 12 + (ms - 1000) / 1000);
+  await prove(madeUpTime(skips));
+  // Reads that each take 300 ms: the jump is still seen within the gap allowed.
+  await prove(madeUpTime(skips, { slow: () => 300 }));
+  assert.equal(logged.length, 2, JSON.stringify(logged));
+  assert.match(logged[0], /^auto-skip: the intro range: from 1\.00 s, last sample before the jump 1\.9\d s, first after 12\.\d\d s, 1\d\d\d ms after the play resumed$/);
+});
+
+test('pa-1: the scenario counts time on a clock that cannot go back', STAND_IN, async (t) => {
+  // Verification round 2: with the wall clock, a clock set back during the
+  // run hid seconds. The scenario's own clock is the process's monotonic one;
+  // here the wall clock runs backwards all through a real one-jump run.
+  const source = fs.readFileSync(new URL('./e2e/scenarios/markers.mjs', import.meta.url), 'utf8');
+  const body = source.slice(source.indexOf('export async function proveSkippedPast('), source.indexOf('\nasync function endSession('));
+  assert.doesNotMatch(body, /Date\.now|new Date/, 'proveSkippedPast reads no wall clock');
+  assert.match(source, /const REAL_CLOCK = \{\n {2}now: \(\) => performance\.now\(\),/);
+  const mpv = standInMpv((ms) => (ms < 900 ? 1 + ms / 1000 : 12.5));
+  const logged = [];
+  t.mock.method(console, 'log', (line) => logged.push(line));
+  await proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12);
+  const ms = Number(logged[0].match(/(\d+) ms after the play resumed$/)[1]);
+  assert.ok(ms >= 800 && ms < 2500, `the jump is timed by the real elapsed time: ${logged[0]}`);
 });
 
 test('pa-1: the markers scenario fails a skip that lands just past the margin', STAND_IN, async () => {

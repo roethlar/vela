@@ -24,10 +24,19 @@
 //   before the skip lands);
 // - once `windowMs` is over with neither, it fails: from startS ordinary
 //   playback cannot cross the range in that time, only a skip can.
+// A crossing also counts only if the play was watched across it: no more
+// than `maxGapMs` may lie between the last position seen before it and the
+// sample past the end. In a longer gap (one slow read, or reads that
+// failed) a skip that landed short of the end could have played the rest
+// unseen (verification round 2). `ms` is taken when a read has answered,
+// from a clock started before the play was told to resume, so a slow read
+// and a slow resume both count.
 // Returns null while undecided, `{ ok: true, before, after, ms }` or
 // `{ ok: false, why }`.
-export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowMs, marginS }) {
+export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowMs, marginS, maxGapMs }) {
   let before = startS;
+  // When `before` was seen: the start, when the play was told to resume.
+  let beforeMs = 0;
   let last = null;
   for (const { t, ms } of samples) {
     if (t != null && t >= rangeEnd) {
@@ -38,6 +47,15 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
             `the position was first seen past the range's end (${rangeEnd} s) ${ms} ms after playing on from ` +
             `${startS.toFixed(2)} s, after the ${windowMs} ms in which only a skip can get it there; ` +
             `it is ${t} (the sample before was ${before} s)`,
+        };
+      }
+      if (ms - beforeMs > maxGapMs) {
+        return {
+          ok: false,
+          why:
+            `the play was not watched across the jump: ${ms - beforeMs} ms lie between the position seen before it ` +
+            `(${before} s) and the one past the range's end (${t} s), more than the ${maxGapMs} ms allowed; ` +
+            'a skip that landed short of the end could have played the rest unseen',
         };
       }
       return { ok: true, before, after: t, ms };
@@ -51,7 +69,10 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
           `(the sample before was ${before} s), ${ms} ms after resuming from ${startS.toFixed(2)} s`,
       };
     }
-    if (t != null) before = t;
+    if (t != null) {
+      before = t;
+      beforeMs = ms;
+    }
     last = t;
     if (ms > windowMs) {
       return {

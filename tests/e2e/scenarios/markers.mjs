@@ -88,12 +88,25 @@ async function launch(driver) {
 // rangeStart + IN_RANGE_MARGIN_S on) fails at once, so a skip that lands short
 // of the end and lets playback cover the rest does not pass. The margin
 // allows for the sample that sees the play just past the start, before the
-// script's seek lands. The samples either side of the jump are logged.
+// script's seek lands. And the play must have been watched across the jump:
+// at most MAX_GAP_MS between the position seen before it and the one past
+// the end, or a skip that landed short could have played the rest unseen.
+// Time is counted from before the play is told to resume, on a clock that
+// cannot go back, and a sample's time is taken when its read has answered,
+// so a slow resume and a slow read both count against the window. The
+// samples either side of the jump are logged.
 // Exported for tests/e2e-judge.test.mjs, which drives it with a stand-in for
 // mpv to see that its verdict is the one it acts on.
 const JUMP_WINDOW_MS = 5000;
 const IN_RANGE_MARGIN_S = 1;
-export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
+const MAX_GAP_MS = 500;
+// `clock` is for the unit tests, which run the samples in made-up time:
+// `now()` in milliseconds, never going back, and `sleep(ms)`.
+const REAL_CLOCK = {
+  now: () => performance.now(),
+  sleep: (ms) => new Promise((r) => setTimeout(r, ms)),
+};
+export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd, { clock = REAL_CLOCK } = {}) {
   await pollUntil(
     () => mpv.getProp('time-pos').catch(() => null).then((t) => t != null),
     `${what}: the play to have a position`,
@@ -114,8 +127,10 @@ export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
     `${what}: the paused play at 1 s, ahead of the range`,
     { timeoutMs: 5000, intervalMs: 100 },
   );
+  // From before the resume is asked for: its answer may be slow, and the
+  // play runs meanwhile.
+  const resumeAskedAt = clock.now();
   await mpv.setProp('pause', false);
-  const unpausedAt = Date.now();
   // The judgement is skipJumpVerdict's (judge.mjs), held by unit tests; this
   // loop only samples, and asks it after each sample.
   const samples = [];
@@ -125,10 +140,11 @@ export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
     rangeEnd,
     windowMs: JUMP_WINDOW_MS,
     marginS: IN_RANGE_MARGIN_S,
+    maxGapMs: MAX_GAP_MS,
   };
   for (;;) {
     const t = await mpv.getProp('time-pos').catch(() => null);
-    samples.push({ t, ms: Date.now() - unpausedAt });
+    samples.push({ t, ms: Math.round(clock.now() - resumeAskedAt) });
     const verdict = skipJumpVerdict(samples, rule);
     if (verdict?.ok === true) {
       console.log(
@@ -138,7 +154,7 @@ export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
       return;
     }
     if (verdict) throw new Error(`${what}: ${verdict.why}`);
-    await new Promise((r) => setTimeout(r, 100));
+    await clock.sleep(100);
   }
 }
 
