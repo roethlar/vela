@@ -75,6 +75,75 @@ async function launch(driver) {
   return MpvIpc.connect(await waitForNewMpvSocket(before));
 }
 
+// The proof that the script SKIPPED a range (2-12 s), not that the play ran
+// past it (review finding pa-1). The play is paused and put at a known
+// position, 1 s, just ahead of the range (playing into the range is what
+// triggers a skip; a position seen outside it also re-arms a range already
+// skipped once). Then it plays on, and its position must be past the range's
+// end within JUMP_WINDOW_MS. From 1 s, ordinary playback reaches at most
+// about 1 + JUMP_WINDOW_MS / 1000 s in that time, far short of 12 s, so only
+// the script's seek explains it. The crossing must also be one jump from the
+// range's start to its end: a sample seen well inside the range (from
+// rangeStart + IN_RANGE_MARGIN_S on) fails at once, so a skip that lands short
+// of the end and lets playback cover the rest does not pass. The margin
+// allows for the sample that sees the play just past the start, before the
+// script's seek lands. The samples either side of the jump are logged.
+const JUMP_WINDOW_MS = 5000;
+const IN_RANGE_MARGIN_S = 1;
+async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
+  await pollUntil(
+    () => mpv.getProp('time-pos').catch(() => null).then((t) => t != null),
+    `${what}: the play to have a position`,
+    { timeoutMs: 12000 },
+  );
+  await mpv.setProp('pause', true);
+  await mpv.setProp('time-pos', 1);
+  const start = await pollUntil(
+    async () => {
+      const paused = await mpv.getProp('pause').catch(() => null);
+      const t = await mpv.getProp('time-pos').catch(() => null);
+      if (paused === true && t != null && t >= 0.9 && t < 1.5) return { t };
+      // A skip the play made on its own before the pause can land after this
+      // seek and move it on again: put it back.
+      await mpv.setProp('time-pos', 1).catch(() => {});
+      return null;
+    },
+    `${what}: the paused play at 1 s, ahead of the range`,
+    { timeoutMs: 5000, intervalMs: 100 },
+  );
+  await mpv.setProp('pause', false);
+  const unpausedAt = Date.now();
+  let before = start.t;
+  let last = null;
+  for (;;) {
+    const t = await mpv.getProp('time-pos').catch(() => null);
+    const elapsed = Date.now() - unpausedAt;
+    if (t != null && t >= rangeEnd) {
+      console.log(
+        `${what}: from ${start.t.toFixed(2)} s, last sample before the jump ${before.toFixed(2)} s, ` +
+          `first after ${t.toFixed(2)} s, ${elapsed} ms after the play resumed`,
+      );
+      return;
+    }
+    if (t != null && t >= rangeStart + IN_RANGE_MARGIN_S) {
+      throw new Error(
+        `${what}: the play must jump from the range's start (${rangeStart} s) past its end ` +
+          `(${rangeEnd} s) in one step; it was seen inside the range at ${t} s ` +
+          `(the sample before was ${before} s), ${elapsed} ms after resuming from ${start.t.toFixed(2)} s`,
+      );
+    }
+    if (t != null) before = t;
+    last = t;
+    if (elapsed > JUMP_WINDOW_MS) {
+      throw new Error(
+        `${what}: the position must be past the range's end (${rangeEnd} s) within ${JUMP_WINDOW_MS} ms ` +
+          `of playing on from ${start.t.toFixed(2)} s, which only a skip can do; it is ${last}`,
+      );
+    }
+    await new Promise((r) => setTimeout(r, 100));
+  }
+}
+
 async function endSession(mpv) {
   mpv.quit();
   mpv.close();
@@ -112,8 +181,9 @@ export default {
     await openLibraryGrid(driver, { cardPrefix: 'Marker Movie' });
 
     // Leg 1 — the whole chain: the app must request the ranges, write the
-    // payload, inject the script, and the script must seek. The range ends far
-    // enough ahead that crossing it is only explicable as that seek.
+    // payload, inject the script, and the script must seek. proveSkippedPast
+    // gives the play too little time to cross the range by playing, so
+    // crossing it is only explicable as that seek.
     mock.state.setMediaSegments('m1', [segment('Intro', 2_000, 12_000)]);
     let mpv = await launch(driver);
     try {
@@ -122,11 +192,7 @@ export default {
         'auto-skip: the script loaded with a payload',
         { timeoutMs: 10000 },
       );
-      await pollUntil(
-        () => mpv.getProp('time-pos').catch(() => null).then((t) => (t != null && t >= 12 ? t : null)),
-        'auto-skip: time-pos past the end of the intro range',
-        { timeoutMs: 14000 },
-      );
+      await proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12);
     } finally {
       await endSession(mpv);
     }
@@ -146,10 +212,11 @@ export default {
     mpv = await launch(driver);
     try {
       await pollUntil(
-        () => mpv.getProp('time-pos').catch(() => null).then((t) => (t != null && t >= 12 ? t : null)),
-        'commercial: time-pos past the end of the commercial range',
-        { timeoutMs: 16000 },
+        () => mpv.getProp('user-data/vela-markers/loaded').catch(() => null),
+        'commercial: the script loaded with a payload',
+        { timeoutMs: 10000 },
       );
+      await proveSkippedPast(mpv, 'commercial: the commercial range', 2, 12);
     } finally {
       await endSession(mpv);
     }
