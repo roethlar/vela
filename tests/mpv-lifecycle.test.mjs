@@ -40,10 +40,10 @@ test('the play path starts exactly the launch that was described', () => {
   // step the embedded launcher prepared.
   // The external player, chosen: under the lock on the player slot, after
   // the check that Vela is not exiting, the described launch is started and
-  // published in one statement.
+  // its identity captured and published before the lock is released.
   assert.match(
     play,
-    /let started_player = match \(embedded_start, mpv_bin\) \{\s+\(None, None\) => return Err\(NO_EMBEDDED_PLAYER\.to_string\(\)\),\s+\(None, Some\(mpv_bin\)\) => \{\s+let mut slot = player_slot\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+if shutting_down\.load\(Ordering::SeqCst\) \{\s+plan\.discard_marker_payload\(\);\s+return Err\(SHUTTING_DOWN\.to_string\(\)\);\s+\}\s+\*slot = Some\(crate::player::external::launch\(&mpv_bin, plan\)\?\);\s+crate::player::PlayerKind::External\s+\}/,
+    /let \(serial, started_player\) = match \(embedded_start, mpv_bin\) \{\s+\(None, None\) => return Err\(NO_EMBEDDED_PLAYER\.to_string\(\)\),\s+\(None, Some\(mpv_bin\)\) => \{\s+let mut slot = player_slot\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+if shutting_down\.load\(Ordering::SeqCst\) \{\s+plan\.discard_marker_payload\(\);\s+return Err\(SHUTTING_DOWN\.to_string\(\)\);\s+\}\s+let player = crate::player::external::launch\(&mpv_bin, plan\)\?;\s+let serial = player\.serial\(\);\s+\*slot = Some\(player\);\s+\(serial, crate::player::PlayerKind::External\)\s+\}/,
     'play must start the described launch',
   );
   // The embedded player: the same lock, the same check, then the step the

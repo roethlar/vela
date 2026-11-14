@@ -272,6 +272,17 @@ impl Drop for ReaderFinishes {
     }
 }
 
+/// Sets the position reader's done flag even when its thread unwinds.
+struct ReaderDone(Arc<AtomicBool>);
+
+impl Drop for ReaderDone {
+    fn drop(&mut self) {
+        // Release, read with Acquire where the startup evidence is read
+        // after it (`PositionReader::end`).
+        self.0.store(true, Ordering::Release);
+    }
+}
+
 impl WindowStateObservation {
     /// A fresh handle carrying how Vela opened the window until mpv reports
     /// otherwise. Each reported flag replaces its seed immediately; the size
@@ -730,6 +741,28 @@ pub struct Players<'a> {
     pub(crate) embedded: Option<&'a dyn crate::player::EmbeddedLauncher>,
 }
 
+/// A failed socket connection says nothing about a player still starting.
+/// Ask only the handle of this launch, using its non-blocking exit query.
+/// A busy slot, a replacement, or an OS query error supplies no evidence.
+#[derive(Clone, Default)]
+struct PlayerExit {
+    slot: Arc<Mutex<Option<crate::player::PlayerHandle>>>,
+    serial: u64,
+}
+
+impl PlayerExit {
+    fn confirmed(&self) -> bool {
+        let mut slot = match self.slot.try_lock() {
+            Ok(slot) => slot,
+            Err(std::sync::TryLockError::Poisoned(error)) => error.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => return false,
+        };
+        slot.as_mut().is_some_and(|player| {
+            player.serial() == self.serial && matches!(player.has_ended(), Ok(true))
+        })
+    }
+}
+
 /// What `play` answers when handed an embedded play and nothing to start it
 /// with.
 const NO_EMBEDDED_PLAYER: &str = "No embedded player is available here.";
@@ -810,7 +843,7 @@ pub fn play(
     // fall back to it looks, and describes its launch, between two holds of the
     // lock (review finding ec-6, reopened for looking inside the first).
     let mut external_ipc_path = None;
-    let started_player = match (embedded_start, mpv_bin) {
+    let (serial, started_player) = match (embedded_start, mpv_bin) {
         (None, None) => return Err(NO_EMBEDDED_PLAYER.to_string()),
         (None, Some(mpv_bin)) => {
             let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
@@ -818,12 +851,14 @@ pub fn play(
                 plan.discard_marker_payload();
                 return Err(SHUTTING_DOWN.to_string());
             }
-            *slot = Some(crate::player::external::launch(&mpv_bin, plan)?);
-            crate::player::PlayerKind::External
+            let player = crate::player::external::launch(&mpv_bin, plan)?;
+            let serial = player.serial();
+            *slot = Some(player);
+            (serial, crate::player::PlayerKind::External)
         }
         (Some(prepared), _) => {
             let own_config = cfg.mpv_use_own_config.unwrap_or(false);
-            let ((), kind) = start_player(
+            start_player(
                 Some(|| {
                     let mut slot = player_slot.lock().unwrap_or_else(|e| e.into_inner());
                     if shutting_down.load(Ordering::SeqCst) {
@@ -839,8 +874,9 @@ pub fn play(
                         }
                     }
                     .map_err(NotStarted::CouldNot)?;
+                    let serial = player.serial();
                     *slot = Some(player);
-                    Ok(())
+                    Ok(serial)
                 }),
                 || {
                     // The lock is not held here. The same play, described
@@ -859,13 +895,18 @@ pub fn play(
                         plan.discard_marker_payload();
                         return Err(SHUTTING_DOWN.to_string());
                     }
-                    *slot = Some(crate::player::external::launch(&mpv_bin, plan)?);
+                    let player = crate::player::external::launch(&mpv_bin, plan)?;
+                    let serial = player.serial();
+                    *slot = Some(player);
                     external_ipc_path = Some(path);
-                    Ok(())
+                    Ok(serial)
                 },
-            )?;
-            kind
+            )?
         }
+    };
+    let player_exit = PlayerExit {
+        slot: player_slot.clone(),
+        serial,
     };
     // The trackers below follow the player that started, on its socket.
     let ipc_path = external_ipc_path.unwrap_or(ipc_path);
@@ -975,6 +1016,7 @@ pub fn play(
             start_ms,
             stop_flag.clone(),
             spec.window_observation.clone(),
+            player_exit,
             on_end,
         ),
         ProgressTarget::Jellyfin(track) if !track.base_url.is_empty() => start_tracking_jellyfin(
@@ -983,12 +1025,14 @@ pub fn play(
             start_ms,
             stop_flag.clone(),
             spec.window_observation.clone(),
+            player_exit,
             on_end,
         ),
         _ => spawn_end_watcher(
             ipc_path,
             stop_flag.clone(),
             spec.window_observation.clone(),
+            player_exit,
             on_end,
         ),
     };
@@ -1093,19 +1137,23 @@ impl PositionReader {
     }
 }
 
-/// Observe position and window state without server I/O. `done` is set when
-/// the IPC connection ends or cannot be made; startup evidence lets the UI
-/// explain a play that ended before opening, even when IPC never connected.
+/// Observe position and window state without server I/O. `done` is set on
+/// every way out of the reader's thread, a panic included (the trackers wait
+/// on it): when the IPC connection ends, or cannot be made. A confirmed exit
+/// of the player ends the connect tries at once. The startup evidence lets
+/// the UI explain a play that ended before opening, even when IPC never
+/// connected.
 fn spawn_position_reader(
     socket_path: String,
     initial_ms: u64,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
+    player_exit: PlayerExit,
 ) -> std::io::Result<PositionReader> {
     let last_t_ms = Arc::new(AtomicU64::new(initial_ms));
     let done = Arc::new(AtomicBool::new(false));
     let last_t_ms_r = last_t_ms.clone();
-    let done_r = done.clone();
+    let marks_done = ReaderDone(done.clone());
     let start_unconfirmed = Arc::new(AtomicBool::new(true));
     let start_unconfirmed_r = start_unconfirmed.clone();
     // Taken before the thread, so that a thread that cannot be started marks
@@ -1117,10 +1165,10 @@ fn spawn_position_reader(
             // Dropped last, on every way out of this thread, after the last
             // event read has been applied (`ReaderFinishes`).
             let _finishes = finishes;
+            let _marks_done = marks_done;
             let mut stream = None;
             for _ in 0..50 {
                 if stop_flag.load(Ordering::Relaxed) {
-                    done_r.store(true, Ordering::Relaxed);
                     return;
                 }
                 match ipc_connect(&socket_path) {
@@ -1128,22 +1176,17 @@ fn spawn_position_reader(
                         stream = Some(s);
                         break;
                     }
+                    Err(_) if player_exit.confirmed() => break,
                     Err(_) => std::thread::sleep(Duration::from_millis(100)),
                 }
             }
             let mut stream = match stream {
                 Some(s) => s,
-                None => {
-                    done_r.store(true, Ordering::Relaxed);
-                    return;
-                }
+                None => return,
             };
             let reader_clone = match stream.try_clone() {
                 Ok(s) => s,
-                Err(_) => {
-                    done_r.store(true, Ordering::Relaxed);
-                    return;
-                }
+                Err(_) => return,
             };
             let mut reader = BufReader::new(reader_clone);
 
@@ -1195,7 +1238,6 @@ fn spawn_position_reader(
                     window_observation.apply_ipc_event(&v);
                 }
             }
-            done_r.store(true, Ordering::Release);
         })?;
     Ok(PositionReader {
         last_t_ms,
@@ -1411,10 +1453,16 @@ fn start_tracking_plex(
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
+    player_exit: PlayerExit,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let reading =
-        spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
+    let reading = spawn_position_reader(
+        socket_path,
+        start_ms,
+        stop_flag.clone(),
+        window_observation,
+        player_exit,
+    )?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-plex".into())
@@ -1504,10 +1552,16 @@ fn start_tracking_jellyfin(
     start_ms: u64,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
+    player_exit: PlayerExit,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let reading =
-        spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
+    let reading = spawn_position_reader(
+        socket_path,
+        start_ms,
+        stop_flag.clone(),
+        window_observation,
+        player_exit,
+    )?;
 
     std::thread::Builder::new()
         .name("mpv-tracker-jellyfin".into())
@@ -1593,12 +1647,18 @@ fn spawn_end_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
+    player_exit: PlayerExit,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
     // Reuse the shared position reader: its `done` flag doubles as the EOF
     // signal (set when mpv exits / the socket drops).
-    let reading =
-        spawn_position_reader(socket_path, 0, stop_flag.clone(), window_observation)?;
+    let reading = spawn_position_reader(
+        socket_path,
+        0,
+        stop_flag.clone(),
+        window_observation,
+        player_exit,
+    )?;
     let Some(on_end) = on_end else {
         return Ok(());
     };
@@ -2696,6 +2756,7 @@ mod tests {
             0,
             stop.clone(),
             WindowStateObservation::default(),
+            PlayerExit::default(),
         )
         .expect("reader");
 
@@ -2741,6 +2802,7 @@ mod tests {
             0,
             stop.clone(),
             observation.clone(),
+            PlayerExit::default(),
         )
         .expect("reader");
 
@@ -2894,13 +2956,87 @@ mod tests {
         *observation.reader.phase.lock().unwrap() == ReaderPhase::Reading
     }
 
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_play_ending_before_its_socket_exists_finishes_without_the_connect_timeout() {
+        struct NoSocketLauncher;
+        impl crate::player::EmbeddedLauncher for NoSocketLauncher {
+            fn prepare(&self, session_id: &str) -> Result<crate::player::EmbeddedStart, String> {
+                let session_id = session_id.to_string();
+                Ok(Box::new(move |_, _, _| {
+                    Ok(crate::player::PlayerHandle::Embedded(
+                        crate::player::embedded::Session::for_test_live(&session_id),
+                    ))
+                }))
+            }
+        }
+
+        // Exercise play's wiring, using the real process handle and the real
+        // embedded thread handle, but neither a display nor a media server.
+        let (program, _) = stand_in_for_mpv("exit-before-socket");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        for kind in [
+            crate::player::PlayerKind::External,
+            crate::player::PlayerKind::Embedded,
+        ] {
+            let mut spec = embedded_spec();
+            spec.player = kind;
+            let slot = Arc::new(Mutex::new(None));
+            let (ended, end) = std::sync::mpsc::channel();
+            let started = play(
+                &spec,
+                ProgressTarget::None,
+                Players {
+                    slot: &slot,
+                    shutting_down: &Arc::new(AtomicBool::new(false)),
+                    embedded: Some(&NoSocketLauncher),
+                },
+                &Arc::new(crate::commands::PlaybackAdvance::default()),
+                "exit-before-socket".into(),
+                Some(Arc::new(move |end: PlaybackEnd| {
+                    let _ = ended.send((end.position_ms, end.failed_to_start));
+                })),
+                None,
+            )
+            .expect("play starts");
+
+            // Refused connections while the player is starting are not an end.
+            assert!(end.recv_timeout(Duration::from_millis(250)).is_err());
+            assert!(reader_running(&spec.window_observation));
+            slot.lock().unwrap().as_mut().unwrap().kill().unwrap();
+            let finished = end.recv_timeout(Duration::from_secs(1));
+            // Clean up even when the regression is injected.
+            started.stop.store(true, Ordering::Relaxed);
+            assert!(reader_finished(
+                &spec.window_observation,
+                Duration::from_secs(2)
+            ));
+            let mut player = slot.lock().unwrap().take().unwrap();
+            assert!(player.has_ended().unwrap());
+            // No position, and nothing seen of a start: the end says so.
+            assert_eq!(
+                finished,
+                Ok((0, true)),
+                "{kind:?}: a confirmed exit must not wait five seconds"
+            );
+        }
+        std::fs::remove_dir_all(program.parent().unwrap()).unwrap();
+    }
+
     #[cfg(unix)]
     #[test]
     fn the_real_reader_is_finished_when_told_to_stop_before_it_connects() {
         let observation = WindowStateObservation::default();
         let stop = Arc::new(AtomicBool::new(false));
-        spawn_position_reader(nowhere("reader-stop"), 0, stop.clone(), observation.clone())
-            .expect("reader");
+        spawn_position_reader(
+            nowhere("reader-stop"),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
         std::thread::sleep(Duration::from_millis(250));
         assert!(reader_running(&observation), "still trying to connect");
         stop.store(true, Ordering::Relaxed);
@@ -2912,8 +3048,14 @@ mod tests {
     fn the_real_reader_is_finished_when_it_gives_up_connecting() {
         let observation = WindowStateObservation::default();
         let stop = Arc::new(AtomicBool::new(false));
-        spawn_position_reader(nowhere("reader-never"), 0, stop.clone(), observation.clone())
-            .expect("reader");
+        spawn_position_reader(
+            nowhere("reader-never"),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
         // Fifty tries, 100 ms apart.
         assert!(reader_finished(&observation, Duration::from_secs(10)));
         stop.store(true, Ordering::Relaxed);
@@ -2960,7 +3102,14 @@ mod tests {
             ..Default::default()
         });
         let stop = Arc::new(AtomicBool::new(false));
-        spawn_position_reader(path.clone(), 0, stop.clone(), observation.clone()).expect("reader");
+        spawn_position_reader(
+            path.clone(),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
         let mut mpv = accept_reader(&listener);
         assert!(reader_running(&observation), "still reading");
         // mpv sends the change and goes, a moment after the wait has begun.
@@ -2989,7 +3138,14 @@ mod tests {
         let Some((listener, path)) = listen("reader-stop-connected") else { return };
         let observation = WindowStateObservation::default();
         let stop = Arc::new(AtomicBool::new(false));
-        spawn_position_reader(path.clone(), 0, stop.clone(), observation.clone()).expect("reader");
+        spawn_position_reader(
+            path.clone(),
+            0,
+            stop.clone(),
+            observation.clone(),
+            PlayerExit::default(),
+        )
+        .expect("reader");
         let mut mpv = accept_reader(&listener);
         stop.store(true, Ordering::Relaxed);
         // One line wakes the reader from its read; the connection stays open,

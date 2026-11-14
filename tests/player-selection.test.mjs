@@ -359,7 +359,7 @@ test('a play the embedded player cannot start goes on in the external player', (
   // external player is NOT tried), and the player is started and published.
   // The lock is let go of when that closure returns.
   const embeddedTurn =
-    /let \(\(\), kind\) = start_player\(\s+Some\(\|\| \{\s+let mut slot = player_slot\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+if shutting_down\.load\(Ordering::SeqCst\) \{\s+plan\.discard_marker_payload\(\);\s+return Err\(NotStarted::MustNot\(SHUTTING_DOWN\.to_string\(\)\)\);\s+\}\s+let player = match prepared \{\s+Ok\(start\) => start\(plan, own_config, &ipc_path\),\s+Err\(reason\) => \{\s+(?:\/\/[^\n]*\n\s+)*plan\.discard_marker_payload\(\);\s+Err\(reason\)\s+\}\s+\}\s+\.map_err\(NotStarted::CouldNot\)\?;\s+\*slot = Some\(player\);\s+Ok\(\(\)\)\s+\}\),/;
+    /start_player\(\s+Some\(\|\| \{\s+let mut slot = player_slot\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+if shutting_down\.load\(Ordering::SeqCst\) \{\s+plan\.discard_marker_payload\(\);\s+return Err\(NotStarted::MustNot\(SHUTTING_DOWN\.to_string\(\)\)\);\s+\}\s+let player = match prepared \{\s+Ok\(start\) => start\(plan, own_config, &ipc_path\),\s+Err\(reason\) => \{\s+(?:\/\/[^\n]*\n\s+)*plan\.discard_marker_payload\(\);\s+Err\(reason\)\s+\}\s+\}\s+\.map_err\(NotStarted::CouldNot\)\?;\s+let serial = player\.serial\(\);\s+\*slot = Some\(player\);\s+Ok\(serial\)\s+\}\),/;
   assert.match(play, embeddedTurn);
   // The external player's turn after a failure. Looking for the mpv program
   // (which runs programs and waits for them) and describing the launch
@@ -368,7 +368,7 @@ test('a play the embedded player cannot start goes on in the external player', (
   // only then, and Vela is checked again not to be exiting before anything is
   // started.
   const externalTurn =
-    /\|\| \{\s+(?:\/\/[^\n]*\n\s+)*let mpv_bin = find_mpv\(\)\?;\s+let path = another_ipc_path\(&ipc_path\)\?;\s+let plan = crate::player::launch::build_launch_for\(\s+spec,\s+crate::player::PlayerKind::External,\s+&cfg,\s+&path,\s+\)\?;\s+let mut slot = player_slot\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+(?:\/\/[^\n]*\n\s+)*if shutting_down\.load\(Ordering::SeqCst\) \{\s+plan\.discard_marker_payload\(\);\s+return Err\(SHUTTING_DOWN\.to_string\(\)\);\s+\}\s+\*slot = Some\(crate::player::external::launch\(&mpv_bin, plan\)\?\);\s+external_ipc_path = Some\(path\);\s+Ok\(\(\)\)\s+\},\s+\)\?;\s+kind/;
+    /\|\| \{\s+(?:\/\/[^\n]*\n\s+)*let mpv_bin = find_mpv\(\)\?;\s+let path = another_ipc_path\(&ipc_path\)\?;\s+let plan = crate::player::launch::build_launch_for\(\s+spec,\s+crate::player::PlayerKind::External,\s+&cfg,\s+&path,\s+\)\?;\s+let mut slot = player_slot\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+(?:\/\/[^\n]*\n\s+)*if shutting_down\.load\(Ordering::SeqCst\) \{\s+plan\.discard_marker_payload\(\);\s+return Err\(SHUTTING_DOWN\.to_string\(\)\);\s+\}\s+let player = crate::player::external::launch\(&mpv_bin, plan\)\?;\s+let serial = player\.serial\(\);\s+\*slot = Some\(player\);\s+external_ipc_path = Some\(path\);\s+Ok\(serial\)\s+\},\s+\)\?/;
   assert.match(play, externalTurn);
   // Three places take that lock to start a player, each checks for the exit
   // first, and nowhere is mpv looked for between a lock and its start.
