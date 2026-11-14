@@ -20,13 +20,15 @@
 //!
 //! This file is the arithmetic, the decisions, and the one place where a
 //! decision is carried out on both sides (`carry_out`; `answered` for
-//! mpv's answers; `drained` once mpv's queue for Vela has been read empty),
+//! mpv's answers; `drained` once mpv's queue for Vela has been read empty;
+//! `target_changed` when mpv reports a change of its targets),
 //! all of it against two small traits so that it can be
 //! tested without a compositor or an mpv. It also decides what becomes of
 //! each frame while mpv's side changes (`Tagging::frame`). `surface.rs`
 //! speaks the protocol and `session.rs` passes on what the compositor and
 //! mpv say and does what `Tagging::frame` says.
 
+use std::collections::VecDeque;
 use std::time::{Duration, Instant};
 
 /// The reference white PQ video is mastered against, in nits.
@@ -255,17 +257,75 @@ pub(crate) trait Targetable {
     /// which goes to [`answered`]. `false`: the ask could not be sent and no
     /// answer will come.
     fn ask(&self, request: u64, option: &str, value: &str) -> bool;
+    /// Have mpv report one of those options as text under `registration`:
+    /// its value as mpv next reads it, whatever it is, and then every change
+    /// of it, whoever makes it. The reports go to [`target_changed`].
+    /// `false`: mpv would not.
+    fn observe(&self, registration: u64, option: &str) -> bool;
+    /// Stop the reports made under `registration`.
+    fn unobserve(&self, registration: u64);
 }
 
 /// The three options that tell mpv what it is drawing for. `auto` for all
 /// three hands the choice back to mpv.
 const TARGET_OPTIONS: [&str; 3] = ["target-trc", "target-prim", "target-peak"];
 
+/// How many times within [`FIGHT_WINDOW`] mpv's targets are put back after
+/// something else changed them. One more, and Vela gives up HDR for the
+/// rest of the play rather than fight. A profile mpv applies when a file
+/// loads, or a conditional one whose condition becomes true, costs one each
+/// time; only something that changes them again and again reaches this.
+const RESTORATIONS_IN_WINDOW: usize = 5;
+
+/// See [`RESTORATIONS_IN_WINDOW`].
+const FIGHT_WINDOW: Duration = Duration::from_secs(10);
+
+/// What mpv is asked to draw for, option by option, for `goal`.
+fn values(goal: Goal) -> [String; 3] {
+    match goal {
+        Goal::Hdr(target) => ["pq".to_string(), "bt.2020".to_string(), target.peak.to_string()],
+        Goal::Sdr { .. } => ["auto", "auto", "auto"].map(String::from),
+    }
+}
+
+/// Whether mpv reporting `value` for `option` is what HDR at `target` asks
+/// it for. The peak is compared as a number, the other two as text.
+fn agrees(target: HdrTarget, option: usize, value: Option<&str>) -> bool {
+    let Some(value) = value else {
+        // mpv cannot say: not something Vela asked for.
+        return false;
+    };
+    if option == 2 {
+        value
+            .trim()
+            .parse::<f64>()
+            .is_ok_and(|peak| peak == f64::from(target.peak))
+    } else {
+        value == values(Goal::Hdr(target))[option]
+    }
+}
+
+/// Have mpv report every change of its three targets (see
+/// [`target_changed`]). Called once, as soon as mpv has started. `false`
+/// when it would not report one of them, which mpv says only for a format
+/// it does not have (client.c, `mpv_observe_property`): a name it does not
+/// know is taken, and reported as a value it cannot read. Each is observed
+/// under the number a change numbered 0 would ask it with; no change has
+/// that number, and each answer to a change observes its option anew (see
+/// [`answered`]).
+pub(crate) fn observe_targets(mpv: &impl Targetable) -> bool {
+    (0..TARGET_OPTIONS.len()).all(|option| mpv.observe(request(0, option), TARGET_OPTIONS[option]))
+}
+
 /// The longest unbroken time presentation is held while mpv's targets
 /// change. Drawing and reporting every frame it holds, mpv answers ONE
 /// change within about one frame interval: at most 84 ms at 24 frames a
-/// second, 51 ms at 2, under 1 ms paused. Changes that replace each other
-/// are held as one stretch, and those chain: a brightness slider dragged
+/// second, 51 ms at 2, under 1 ms paused. Its report of each option afresh
+/// (see [`answered`]) follows in under 0.2 ms, or in 25 ms when mpv was
+/// applying someone else's change of it at that moment, with a 24 frames a
+/// second file playing and no window (review finding hd-2). Changes that
+/// replace each other are held as one stretch, and those chain: a
+/// brightness slider dragged
 /// for ten seconds, one change per frame, held mpv for up to 667 ms at 24
 /// frames a second, and fewer frames are presented while that lasts (all
 /// measured with the shipped library for review finding hd-3). So this
@@ -324,11 +384,17 @@ struct Transition {
     goal: Goal,
     /// Which of the three asks have not been answered.
     unanswered: [bool; 3],
+    /// Which of the three options mpv has not yet reported afresh since
+    /// their ask was answered (see [`answered`]).
+    unreported: [bool; 3],
     /// An ask was refused.
     refused: bool,
     /// An ask could not be sent: mpv's queue for Vela was full. This change
     /// is asked again once Vela has read that queue empty (see [`drained`]).
     unsent: bool,
+    /// Something else changed an option after mpv had answered this
+    /// change's ask for it: when the change finishes it is asked again.
+    again: bool,
 }
 
 /// Each ask carries the number of its transition and the index of its
@@ -351,7 +417,7 @@ fn split(request: u64) -> (u64, usize) {
 /// pixels on a surface the compositor takes for sRGB, or the reverse, is
 /// the one outcome that must not happen: when either side refuses, both go
 /// to standard range. A change is reported when it has finished, which is
-/// only ever in [`answered`].
+/// only ever in [`answered`] or [`target_changed`].
 pub(crate) fn carry_out(
     step: Step,
     tagging: &mut Tagging,
@@ -377,10 +443,20 @@ pub(crate) fn carry_out(
     }
 }
 
-/// mpv has answered the ask made with `request`: `taken`, or refused. The
-/// only way a change of mpv's targets finishes. Answers to a change that has
-/// since been replaced are ignored: mpv applies asks in the order they were
-/// made, so the latest is the one that holds.
+/// mpv has answered the ask made with `request`: `taken`, or refused. Answers
+/// to a change that has since been replaced are ignored: mpv applies asks in
+/// the order they were made, so the latest is the one that holds.
+///
+/// The answer says that mpv has applied Vela's value, not that the value is
+/// still in effect: something else may have set the option in the same
+/// pass of mpv's core, and mpv reports a change only when the value it reads
+/// at the end of a pass differs from the one it read before. Set back to
+/// the value Vela was last told, it is never reported (review finding hd-2;
+/// measured with the shipped library). So the option is observed anew here,
+/// under the number of this ask, and mpv reports it once more as it reads
+/// it after this answer, whatever it is. The change finishes, in
+/// [`target_changed`], when every option has been answered and reported
+/// afresh.
 pub(crate) fn answered(
     request: u64,
     taken: bool,
@@ -401,12 +477,17 @@ pub(crate) fn answered(
     }
     pending.unanswered[option] = false;
     pending.refused |= !taken;
-    if pending.unanswered.contains(&true) || pending.unsent {
-        // An ask of this change could not be sent; it is asked again, whole,
-        // once there is room (see [`drained`]).
-        return Change::Nothing;
+    // The new registration first, so that the option is never unobserved.
+    if mpv.observe(request, TARGET_OPTIONS[option]) {
+        mpv.unobserve(tagging.observing[option]);
+        tagging.observing[option] = request;
+        pending.unreported[option] = true;
+    } else if matches!(pending.goal, Goal::Hdr(_)) {
+        // What mpv draws for cannot be known from here on: standard range,
+        // which needs no defending.
+        pending.refused = true;
     }
-    tagging.finish(mpv, surface, now)
+    tagging.finish_when_done(mpv, surface, now)
 }
 
 /// Vela has read mpv's queue for it empty, so asks can be sent again. A
@@ -425,6 +506,74 @@ pub(crate) fn drained(
     if let Some(pending) = tagging.pending {
         if pending.unsent {
             tagging.begin(pending.goal, mpv, surface, now);
+        }
+    }
+}
+
+/// mpv reports that one of its targets, `option`, is `value` (`None` when it
+/// cannot say), under `registration`. Vela asks for those options itself,
+/// and so can something else: a profile in the user's mpv configuration
+/// that mpv applies when a file loads or when its condition becomes true,
+/// or a command on mpv's IPC socket (review finding hd-2). While HDR is in
+/// effect that leaves mpv drawing for something other than what the
+/// surface says, so the change is put back.
+///
+/// Only reports under the option's latest registration count, and while a
+/// change is in flight only those under the registration made when mpv
+/// answered that change's ask for the option (see [`answered`]): before
+/// that answer the value is Vela's own earlier one, or one that ask is
+/// about to replace. A report under that registration carries the value as
+/// mpv read it after its answer, so a value other than the one Vela asks
+/// for is someone else's when HDR is in effect. In standard range nothing
+/// is put back: the user's own targets are theirs, as they always were.
+///
+/// With nothing in flight the same HDR target is asked for again at once.
+/// The surface is not touched: it already says the right thing, and a
+/// newer description may be on its way, which would make tagging fail.
+/// With a change in flight, it is asked again when it finishes. Presentation
+/// is held meanwhile, as for any change, and the finish is presented even on
+/// a paused picture. More than [`RESTORATIONS_IN_WINDOW`] in
+/// [`FIGHT_WINDOW`], and both sides go to standard range for the rest of the
+/// play. A change in flight finishes here, once every one of its options has
+/// been answered and reported afresh.
+pub(crate) fn target_changed(
+    registration: u64,
+    option: &str,
+    value: Option<&str>,
+    tagging: &mut Tagging,
+    mpv: &impl Targetable,
+    surface: &mut impl Describable,
+    now: Instant,
+) -> Change {
+    let Some(option) = TARGET_OPTIONS.iter().position(|name| *name == option) else {
+        return Change::Nothing;
+    };
+    if registration != tagging.observing[option] {
+        // A registration since replaced.
+        return Change::Nothing;
+    }
+    // Once Vela has given up, standard range is in effect for good.
+    let theirs = match tagging.in_effect {
+        Presentation::Hdr(target) => !agrees(target, option, value),
+        Presentation::Sdr => false,
+    };
+    match tagging.pending.as_mut() {
+        Some(pending) => {
+            if registration != request(pending.number, option) {
+                // Read before this change's ask for the option was answered.
+                return Change::Nothing;
+            }
+            pending.unreported[option] = false;
+            if theirs {
+                pending.again = true;
+            }
+            tagging.finish_when_done(mpv, surface, now)
+        }
+        None => {
+            if let (true, Presentation::Hdr(target)) = (theirs, tagging.in_effect) {
+                tagging.restore(target, mpv, surface, now);
+            }
+            Change::Nothing
         }
     }
 }
@@ -453,6 +602,15 @@ pub(crate) struct Tagging {
     owed: bool,
     /// Black has been presented since the hold ran out.
     black_shown: bool,
+    /// When mpv's targets were put back after someone else changed them,
+    /// within the last [`FIGHT_WINDOW`].
+    restorations: VecDeque<Instant>,
+    /// Vela has stopped putting them back: standard range for the rest of
+    /// the play, whatever the compositor says.
+    given_up: bool,
+    /// The registration under which each option's reports count (see
+    /// [`target_changed`]).
+    observing: [u64; 3],
 }
 
 impl Tagging {
@@ -466,6 +624,10 @@ impl Tagging {
             changing_since: None,
             owed: false,
             black_shown: false,
+            restorations: VecDeque::new(),
+            given_up: false,
+            // As [`observe_targets`] registers them.
+            observing: [request(0, 0), request(0, 1), request(0, 2)],
         }
     }
 
@@ -503,17 +665,9 @@ impl Tagging {
     ) {
         self.transitions += 1;
         let number = self.transitions;
-        let peak = match goal {
-            Goal::Hdr(target) => target.peak.to_string(),
-            Goal::Sdr { .. } => String::new(),
-        };
-        let values = match goal {
-            Goal::Hdr(_) => ["pq", "bt.2020", peak.as_str()],
-            Goal::Sdr { .. } => ["auto", "auto", "auto"],
-        };
         let mut unanswered = [false; 3];
-        for (option, (name, value)) in TARGET_OPTIONS.iter().zip(values).enumerate() {
-            unanswered[option] = mpv.ask(request(number, option), name, value);
+        for (option, (name, value)) in TARGET_OPTIONS.iter().zip(values(goal)).enumerate() {
+            unanswered[option] = mpv.ask(request(number, option), name, &value);
         }
         let unsent = unanswered.contains(&false);
         self.changing_since.get_or_insert(now);
@@ -521,8 +675,10 @@ impl Tagging {
             number,
             goal,
             unanswered,
+            unreported: [false; 3],
             refused: false,
             unsent,
+            again: false,
         });
         if unsent && matches!(goal, Goal::Hdr(_)) {
             // An ask that cannot be sent counts as refused: standard range,
@@ -536,7 +692,30 @@ impl Tagging {
         // the queue filled still land.
     }
 
-    /// Every ask of the change in flight has been sent and answered.
+    /// Finish the change in flight once every one of its asks has been sent
+    /// and answered, and every option reported afresh after its answer.
+    fn finish_when_done(
+        &mut self,
+        mpv: &impl Targetable,
+        surface: &mut impl Describable,
+        now: Instant,
+    ) -> Change {
+        let Some(pending) = self.pending else {
+            return Change::Nothing;
+        };
+        if pending.unanswered.contains(&true)
+            || pending.unreported.contains(&true)
+            || pending.unsent
+        {
+            // Still to come: an answer, a report, or room to ask again for
+            // an ask that could not be sent (see [`drained`]).
+            return Change::Nothing;
+        }
+        self.finish(mpv, surface, now)
+    }
+
+    /// Every ask of the change in flight has been sent and answered, and
+    /// every option reported afresh.
     fn finish(
         &mut self,
         mpv: &impl Targetable,
@@ -547,6 +726,12 @@ impl Tagging {
             return Change::Nothing;
         };
         let change = match done.goal {
+            Goal::Hdr(target) if !done.refused && done.again => {
+                // Something else changed an option after mpv had taken
+                // Vela's value for it: asked again, still held.
+                self.restore(target, mpv, surface, now);
+                return Change::Nothing;
+            }
             Goal::Hdr(target) if !done.refused => Change::Hdr(target.peak),
             Goal::Hdr(_) => {
                 self.refused(mpv, surface, now);
@@ -579,6 +764,51 @@ impl Tagging {
         surface: &mut impl Describable,
         now: Instant,
     ) {
+        self.in_effect = Presentation::Sdr;
+        surface.untag();
+        self.begin(Goal::Sdr { refused: true }, mpv, surface, now);
+    }
+
+    /// Ask mpv for HDR at `target` again, after something else changed one
+    /// of its targets: the surface already says `target` and is left alone.
+    /// Unless that has happened too often lately (see [`target_changed`]).
+    fn restore(
+        &mut self,
+        target: HdrTarget,
+        mpv: &impl Targetable,
+        surface: &mut impl Describable,
+        now: Instant,
+    ) {
+        while self
+            .restorations
+            .front()
+            .is_some_and(|then| now.saturating_duration_since(*then) >= FIGHT_WINDOW)
+        {
+            self.restorations.pop_front();
+        }
+        if self.restorations.len() >= RESTORATIONS_IN_WINDOW {
+            self.give_up(mpv, surface, now);
+            return;
+        }
+        self.restorations.push_back(now);
+        self.begin(Goal::Hdr(target), mpv, surface, now);
+    }
+
+    /// Something keeps changing mpv's targets: standard range on both sides,
+    /// the ordinary way, and for the rest of the play. A fight would flicker
+    /// the picture; standard range is always correct.
+    fn give_up(
+        &mut self,
+        mpv: &impl Targetable,
+        surface: &mut impl Describable,
+        now: Instant,
+    ) {
+        eprintln!(
+            "vela: embedded player: mpv's target keeps being changed by something else; standard range for the rest of this play"
+        );
+        self.given_up = true;
+        // A description on its way must not bring HDR back.
+        self.asked = None;
         self.in_effect = Presentation::Sdr;
         surface.untag();
         self.begin(Goal::Sdr { refused: true }, mpv, surface, now);
@@ -619,6 +849,12 @@ impl Tagging {
     /// The compositor has described the output, for the first time or again.
     pub(crate) fn output_described(&mut self, wanted: Presentation) -> Step {
         self.heard = true;
+        // Given up on HDR: nothing the compositor says brings it back.
+        let wanted = if self.given_up {
+            Presentation::Sdr
+        } else {
+            wanted
+        };
         match wanted {
             Presentation::Sdr => {
                 // Whatever was asked for is no longer wanted.
@@ -1012,8 +1248,11 @@ mod tests {
     // The rig below stands in for both sides the way they really behave:
     // mpv APPLIES each ask at a moment the test chooses, one option at a
     // time, and a draw uses whatever it has applied by then; its answer is
-    // read later still. The surface's description is pending until a frame
-    // is presented. Every presented frame is checked against both.
+    // read later still. Something else can change mpv's targets too, and
+    // that is drawn at once and reported only later, after every answer
+    // waiting, with the value as it is then, as real mpv reports the
+    // options Vela observes. The surface's description is pending until a
+    // frame is presented. Every presented frame is checked against both.
 
     use std::cell::{Cell, RefCell};
     use std::collections::{HashSet, VecDeque};
@@ -1038,6 +1277,26 @@ mod tests {
         room: Cell<Option<usize>>,
         asks: Cell<usize>,
         given_pq: Cell<bool>,
+        /// The value of each option mpv last read for its latest
+        /// registration, which is the value Vela was last told about under
+        /// it. mpv reads an option once per pass of its core and reports it
+        /// only when it differs from what it read before; here the read is
+        /// the report, so a value set and set back between two reports, as
+        /// in one pass, is never reported.
+        reported: [String; 3],
+        /// The value applied was set by someone else, not by Vela.
+        by_others: [bool; 3],
+        /// Someone else set it and Vela has not been told yet.
+        untold: [bool; 3],
+        /// Registrations Vela made, oldest first: registration, option.
+        registrations: RefCell<Vec<(u64, usize)>>,
+        /// An option observed anew and not yet reported under its new
+        /// registration: mpv reports it once whatever its value.
+        fresh: RefCell<[bool; 3]>,
+        /// mpv will not observe any option.
+        refuses_to_observe: bool,
+        /// The options Vela asked mpv to report, in order.
+        observed: RefCell<Vec<String>>,
     }
 
     impl FakeMpv {
@@ -1050,7 +1309,36 @@ mod tests {
                 room: Cell::new(None),
                 asks: Cell::new(0),
                 given_pq: Cell::new(false),
+                reported: AUTO.map(String::from),
+                by_others: [false; 3],
+                untold: [false; 3],
+                registrations: RefCell::new(Vec::new()),
+                fresh: RefCell::new([false; 3]),
+                refuses_to_observe: false,
+                observed: RefCell::new(Vec::new()),
             }
+        }
+
+        /// The registration an option is reported under: its latest.
+        fn registration(&self, option: usize) -> Option<u64> {
+            self.registrations
+                .borrow()
+                .iter()
+                .rev()
+                .find(|(_, observed)| *observed == option)
+                .map(|(registration, _)| *registration)
+        }
+
+        /// An option mpv has a report to make about: observed anew, or a
+        /// value other than the one it last read.
+        fn to_report(&self) -> Vec<usize> {
+            (0..TARGET_OPTIONS.len())
+                .filter(|&option| {
+                    self.registration(option).is_some()
+                        && (self.fresh.borrow()[option]
+                            || self.applied[option] != self.reported[option])
+                })
+                .collect()
         }
 
         fn refusing(option: &'static str) -> Self {
@@ -1090,6 +1378,26 @@ mod tests {
                 .borrow_mut()
                 .push_back((request, index, value.to_string()));
             true
+        }
+
+        fn observe(&self, registration: u64, option: &str) -> bool {
+            if self.refuses_to_observe {
+                return false;
+            }
+            let index = TARGET_OPTIONS
+                .iter()
+                .position(|name| *name == option)
+                .expect("one of the three target options");
+            self.observed.borrow_mut().push(option.to_string());
+            self.registrations.borrow_mut().push((registration, index));
+            self.fresh.borrow_mut()[index] = true;
+            true
+        }
+
+        fn unobserve(&self, registration: u64) {
+            self.registrations
+                .borrow_mut()
+                .retain(|(made, _)| *made != registration);
         }
     }
 
@@ -1141,8 +1449,14 @@ mod tests {
         now: Instant,
         presented: Presented,
         refusals: usize,
+        /// What the last change to finish finished as.
+        finished: Change,
         /// Whether mpv has a frame at every turn (playing) or none (paused).
         playing: bool,
+        /// Frames presented and checked, and presented while someone
+        /// else's change was not yet reported, which cannot be checked.
+        checked: usize,
+        unchecked: usize,
         /// What happened, for the message when a check fails.
         trail: Vec<String>,
     }
@@ -1156,9 +1470,16 @@ mod tests {
                 now: Instant::now(),
                 presented: Presented::Black,
                 refusals: 0,
+                finished: Change::Nothing,
                 playing: true,
+                checked: 0,
+                unchecked: 0,
                 trail: Vec::new(),
             };
+            // As set-up does: mpv reports its targets, and their first values
+            // are read.
+            assert!(observe_targets(&rig.mpv));
+            rig.drains();
             // The play's first picture.
             rig.frame(true);
             assert_eq!(rig.presented, Presented::Video(None));
@@ -1180,8 +1501,8 @@ mod tests {
             rig
         }
 
-        /// Everything but the trail, which differs between orders that end
-        /// in the same state.
+        /// Everything but the trail and the counts of frames, which differ
+        /// between orders that end in the same state.
         fn key(&self) -> String {
             format!(
                 "{:?}{:?}{:?}{:?}{}{}",
@@ -1192,6 +1513,9 @@ mod tests {
         fn record(&mut self, change: Change) {
             if change == Change::HdrRefused {
                 self.refusals += 1;
+            }
+            if change != Change::Nothing {
+                self.finished = change;
             }
         }
 
@@ -1229,15 +1553,64 @@ mod tests {
             let refused = value != "auto" && self.mpv.refuses == Some(TARGET_OPTIONS[option]);
             if !refused {
                 self.mpv.applied[option] = value;
+                self.mpv.by_others[option] = false;
+                self.mpv.untold[option] = false;
             }
             self.mpv.answers.push_back((request, !refused));
             true
         }
 
+        /// Someone else sets one of mpv's targets: drawn from now on, and
+        /// reported to Vela only later. Setting the value in effect changes
+        /// nothing, and mpv reports nothing.
+        fn someone_sets(&mut self, option: &str, value: &str) {
+            self.trail.push(format!("someone else sets {option}={value}"));
+            let index = TARGET_OPTIONS
+                .iter()
+                .position(|name| *name == option)
+                .expect("one of the three target options");
+            if self.mpv.applied[index] != value {
+                self.mpv.applied[index] = value.to_string();
+                self.mpv.by_others[index] = true;
+                self.mpv.untold[index] = true;
+            }
+        }
+
+        /// mpv reports `option` to Vela under its latest registration, with
+        /// its value as it is now. Only once every answer waiting has been
+        /// read: mpv sends what is queued first.
+        fn reports(&mut self, option: usize) -> Change {
+            assert!(self.mpv.answers.is_empty(), "answers come first");
+            let registration = self.mpv.registration(option).expect("observed");
+            let value = self.mpv.applied[option].clone();
+            self.trail.push(format!(
+                "mpv reports {}={value} under {registration}",
+                TARGET_OPTIONS[option]
+            ));
+            self.mpv.reported[option] = value.clone();
+            self.mpv.fresh.borrow_mut()[option] = false;
+            self.mpv.untold[option] = false;
+            let change = target_changed(
+                registration,
+                TARGET_OPTIONS[option],
+                Some(&value),
+                &mut self.tagging,
+                &self.mpv,
+                &mut self.surface,
+                self.now,
+            );
+            self.record(change);
+            change
+        }
+
         /// Vela reads mpv's queue empty, as every turn of the play's loop
-        /// does: every answer waiting, and then nothing, which makes room.
+        /// does: every answer waiting, then every change, and then nothing,
+        /// which makes room.
         fn drains(&mut self) {
             self.reads();
+            for option in self.mpv.to_report() {
+                self.reports(option);
+            }
             self.trail.push("vela has read mpv's queue empty".to_string());
             self.mpv.room.set(None);
             drained(&mut self.tagging, &self.mpv, &mut self.surface, self.now);
@@ -1264,6 +1637,7 @@ mod tests {
         fn settle(&mut self) {
             while !self.mpv.asked.borrow().is_empty()
                 || !self.mpv.answers.is_empty()
+                || !self.mpv.to_report().is_empty()
                 || self.tagging.waiting_for_room()
             {
                 while self.applies() {}
@@ -1316,7 +1690,12 @@ mod tests {
         }
 
         /// mpv's picture is presented: what mpv drew it for must be what the
-        /// surface now says it is.
+        /// surface now says it is, from the moment Vela has been told of
+        /// every change someone else made. Before that, mpv may already
+        /// draw for a change it has not reported yet, and nothing can hold
+        /// that frame back (a change made in the middle of a play). A
+        /// change mpv has no report left to make about is no excuse: Vela
+        /// will never be told of it.
         fn show(&mut self) {
             assert!(
                 !self.tagging.changing(),
@@ -1324,6 +1703,21 @@ mod tests {
                 self.trail
             );
             self.present();
+            self.presented = Presented::Video(self.surface.committed.map(|target| target.peak));
+            let to_report = self.mpv.to_report();
+            if (0..TARGET_OPTIONS.len())
+                .any(|option| self.mpv.untold[option] && to_report.contains(&option))
+            {
+                self.trail.push("presented before Vela was told: not checked".to_string());
+                self.unchecked += 1;
+                return;
+            }
+            self.checked += 1;
+            self.agree();
+        }
+
+        /// What mpv draws for is what the surface has committed.
+        fn agree(&self) {
             let drawn: Vec<&str> = self.mpv.applied.iter().map(String::as_str).collect();
             match self.surface.committed {
                 Some(target) => assert_eq!(
@@ -1333,46 +1727,81 @@ mod tests {
                     target.peak,
                     self.trail
                 ),
-                None => assert_eq!(drawn, AUTO, "the surface is untagged: {:#?}", self.trail),
+                // Untagged: mpv's own choice, or what someone else set,
+                // which Vela leaves alone in standard range.
+                None => {
+                    for (option, value) in drawn.iter().enumerate() {
+                        assert!(
+                            *value == "auto" || self.mpv.by_others[option],
+                            "the surface is untagged and mpv draws for {}={value}: {:#?}",
+                            TARGET_OPTIONS[option],
+                            self.trail
+                        );
+                    }
+                }
             }
-            self.presented = Presented::Video(self.surface.committed.map(|target| target.peak));
         }
     }
 
-    /// Something the compositor does, in the order a script gives.
+    /// Something the compositor, or someone else, does, in the order a
+    /// script gives.
     #[derive(Debug, Clone, Copy)]
-    enum Compositor {
+    enum Act {
+        /// The compositor describes the output.
         Describes(Presentation),
+        /// The compositor answers the last request for a description.
         Answers(bool),
+        /// Someone else sets one of mpv's targets.
+        Sets(&'static str, &'static str),
     }
 
     impl Rig {
-        fn act(&mut self, act: Compositor) {
+        fn act(&mut self, act: Act) {
             match act {
-                Compositor::Describes(wanted) => {
+                Act::Describes(wanted) => {
                     self.describes(wanted);
                 }
-                Compositor::Answers(made) => {
+                Act::Answers(made) => {
                     self.answers(made);
                 }
+                Act::Sets(option, value) => self.someone_sets(option, value),
             }
         }
     }
 
     /// Run `script` against `rig` in every order the real pieces allow:
-    /// between any two of the compositor's steps mpv may apply any number of
+    /// between any two of the script's steps mpv may apply any number of
     /// asks and Vela may read any number of answers, or read mpv's queue
-    /// empty when a change is waiting for room in it, and a frame is offered
-    /// after every single step, once with mpv always having one and once
-    /// paused. Every presented frame is checked (`Rig::show`); at every end
-    /// nothing is left in flight or pending, and `end` checks the rest.
-    /// Returns how many distinct states were reached.
-    fn every_order(rig: &Rig, script: &[Compositor], end: &dyn Fn(&Rig)) -> usize {
+    /// empty when a change is waiting for room in it, and once no answer is
+    /// waiting mpv may report any option it has a report to make about (its
+    /// value changed since mpv last read it, or it was observed anew);
+    /// a frame is offered after every single step, once with mpv always
+    /// having one and once paused. Every presented frame is checked
+    /// (`Rig::show`); at every end nothing is left in flight, pending or
+    /// unreported, what mpv draws for agrees with the surface whatever was
+    /// or was not reported, nothing was put back unless someone else set a
+    /// target, and `end` checks the rest. Returns how many distinct states
+    /// were reached.
+    fn every_order(rig: &Rig, script: &[Act], end: &dyn Fn(&Rig)) -> usize {
+        let others = script.iter().any(|act| matches!(act, Act::Sets(..)));
+        let restorations = rig.tagging.restorations.len();
+        let end = |rig: &Rig| {
+            rig.agree();
+            if !others {
+                assert_eq!(
+                    rig.tagging.restorations.len(),
+                    restorations,
+                    "nothing is put back that nobody else set: {:#?}",
+                    rig.trail
+                );
+            }
+            end(rig);
+        };
         let mut seen = HashSet::new();
         for playing in [true, false] {
             let mut rig = rig.clone();
             rig.playing = playing;
-            explore(rig, script, &mut seen, &mut HashSet::new(), end);
+            explore(rig, script, &mut seen, &mut HashSet::new(), &end);
         }
         seen.len()
     }
@@ -1381,7 +1810,7 @@ mod tests {
     /// again is a play that goes round without end, which no order may do.
     fn explore(
         rig: Rig,
-        script: &[Compositor],
+        script: &[Act],
         seen: &mut HashSet<String>,
         path: &mut HashSet<String>,
         end: &dyn Fn(&Rig),
@@ -1414,9 +1843,17 @@ mod tests {
             moved.drains();
             moves.push((moved, script));
         }
+        if rig.mpv.answers.is_empty() {
+            for option in rig.mpv.to_report() {
+                let mut moved = rig.clone();
+                moved.reports(option);
+                moves.push((moved, script));
+            }
+        }
         if moves.is_empty() {
             let mut rig = rig;
             assert!(!rig.tagging.changing(), "nothing is left in flight: {:#?}", rig.trail);
+            assert!(rig.mpv.to_report().is_empty(), "nothing is left unreported: {:#?}", rig.trail);
             // One more turn with nothing new from mpv.
             rig.frame(false);
             assert_eq!(rig.surface.pending, None, "nothing is left unpresented: {:#?}", rig.trail);
@@ -1432,13 +1869,13 @@ mod tests {
         path.remove(&state);
     }
 
-    use Compositor::{Answers, Describes};
+    use Act::{Answers, Describes, Sets};
 
-    fn hdr_at(peak: u32) -> Compositor {
+    fn hdr_at(peak: u32) -> Act {
         Describes(Presentation::Hdr(target(peak)))
     }
 
-    const SDR: Compositor = Describes(Presentation::Sdr);
+    const SDR: Act = Describes(Presentation::Sdr);
 
     /// The end a script must reach: what is presented, with what mpv draws
     /// for, and how many times HDR was reported refused.
@@ -1459,7 +1896,7 @@ mod tests {
 
     #[test]
     fn every_presented_frame_agrees_with_its_surface_in_every_order() {
-        let scripts: [(&[Compositor], Option<u32>); 7] = [
+        let scripts: [(&[Act], Option<u32>); 7] = [
             (&[hdr_at(356), Answers(true)], Some(356)),
             // The brightness slider moves.
             (&[hdr_at(356), Answers(true), hdr_at(1137), Answers(true)], Some(1137)),
@@ -1646,7 +2083,15 @@ mod tests {
         assert_eq!(answer(requests[0], false), Change::Nothing);
         // The other two, in the other order.
         assert_eq!(answer(requests[2], true), Change::Nothing, "one option is unanswered");
-        assert_eq!(answer(requests[1], true), Change::Hdr(356));
+        assert_eq!(answer(requests[1], true), Change::Nothing, "none is reported afresh yet");
+        // Each option was observed anew once, under its own ask's number.
+        assert_eq!(rig.tagging.observing, [requests[0], requests[1], requests[2]]);
+        for (option, request) in requests.iter().enumerate() {
+            assert_eq!(rig.mpv.registration(option), Some(*request));
+        }
+        assert_eq!(rig.mpv.registrations.borrow().len(), 3, "the earlier ones are dropped");
+        rig.drains();
+        assert_eq!(rig.finished, Change::Hdr(356));
     }
 
     #[test]
@@ -1664,6 +2109,10 @@ mod tests {
         // All three applied and answered; not read yet.
         assert_eq!(rig.frame(true), Frame::Hold);
         rig.reads();
+        // Read, and not yet reported afresh: someone else may have changed
+        // one of them in the same pass (review finding hd-2).
+        assert_eq!(rig.frame(true), Frame::Hold);
+        rig.drains();
         assert_eq!(rig.frame(true), Frame::Show);
         assert_eq!(rig.presented, Presented::Video(Some(356)));
     }
@@ -1843,6 +2292,593 @@ mod tests {
         assert_eq!(rig.frame(true), Frame::HoldAndBlack);
     }
 
+    // ---- someone else changes mpv's targets (review finding hd-2)
+
+    const TRC: &str = "target-trc";
+    const PRIM: &str = "target-prim";
+    const PEAK: &str = "target-peak";
+
+    /// Someone else's value for each option, unlike anything Vela asks for.
+    const OTHERS: [(&str, &str); 3] = [(TRC, "bt.1886"), (PRIM, "bt.709"), (PEAK, "400")];
+
+    #[test]
+    fn mpv_is_asked_to_report_each_of_its_three_targets_once() {
+        let mpv = FakeMpv::new();
+        assert!(observe_targets(&mpv));
+        assert_eq!(*mpv.observed.borrow(), [TRC, PRIM, PEAK]);
+    }
+
+    #[test]
+    fn someone_elses_change_is_put_back_in_every_order() {
+        let scripts: [(&[Act], Option<u32>); 9] = [
+            // After HDR is shown, each option in turn.
+            (&[hdr_at(356), Answers(true), Sets(TRC, "bt.1886")], Some(356)),
+            (&[hdr_at(356), Answers(true), Sets(PRIM, "bt.709")], Some(356)),
+            (&[hdr_at(356), Answers(true), Sets(PEAK, "400")], Some(356)),
+            // Two options, one after the other.
+            (
+                &[hdr_at(356), Answers(true), Sets(TRC, "bt.1886"), Sets(PEAK, "400")],
+                Some(356),
+            ),
+            // While the description is being made, before HDR is asked for.
+            (&[hdr_at(356), Sets(PEAK, "400"), Answers(true)], Some(356)),
+            // While a newer peak is on its way.
+            (
+                &[hdr_at(356), Answers(true), hdr_at(1137), Sets(PRIM, "bt.709"), Answers(true)],
+                Some(1137),
+            ),
+            // HDR switched off afterwards: mpv's own choice again.
+            (&[hdr_at(356), Answers(true), Sets(TRC, "bt.1886"), SDR], None),
+            // Set back to the value Vela was last told about, which mpv
+            // never reports when it reads the option only after both: the
+            // old peak while the brightness moves, and the first value of a
+            // play while HDR is first asked for.
+            (
+                &[hdr_at(356), Answers(true), hdr_at(1137), Answers(true), Sets(PEAK, "356")],
+                Some(1137),
+            ),
+            (&[hdr_at(356), Answers(true), Sets(TRC, "auto")], Some(356)),
+        ];
+        for (script, peak) in scripts {
+            let states = every_order(&Rig::plain(), script, &ends_at(peak, 0));
+            assert!(states > 4 * script.len(), "{script:?} is run in more than one order");
+        }
+    }
+
+    #[test]
+    fn in_standard_range_someone_elses_change_is_left_alone_in_every_order() {
+        for (option, value) in OTHERS {
+            let script = [SDR, Sets(option, value)];
+            every_order(&Rig::plain(), &script, &|end: &Rig| {
+                assert_eq!(end.mpv.asks.get(), 0, "nothing is asked of mpv: {:#?}", end.trail);
+                assert_eq!(end.tagging.in_effect(), Presentation::Sdr);
+                assert_eq!(end.surface.committed, None);
+            });
+        }
+    }
+
+    /// Vela's asks so far.
+    fn asks(rig: &Rig) -> usize {
+        rig.mpv.asks.get()
+    }
+
+    // The finding's case: a profile in the user's configuration that mpv
+    // applies as the file loads, after set-up has settled HDR and before
+    // the first frame (reported a fraction of a millisecond after the file
+    // was handed over, measured with the shipped library).
+    #[test]
+    fn a_profile_applied_as_the_file_loads_is_undone_before_the_first_frame() {
+        let mut rig = Rig::plain();
+        rig.describes(Presentation::Hdr(target(356)));
+        rig.answers(true);
+        rig.settle();
+        // The file is handed over; the profile is applied and reported.
+        rig.someone_sets(TRC, "bt.1886");
+        rig.drains();
+        assert_eq!(asks(&rig), 6, "the three targets asked for again");
+        assert_eq!(rig.surface.pending, Some(Some(target(356))), "the tag is not touched");
+        // The first frame of the file is drawn and held.
+        assert_eq!(rig.frame(true), Frame::Hold);
+        rig.settle();
+        assert_eq!(rig.frame(true), Frame::Show);
+        assert_eq!((rig.checked, rig.unchecked), (2, 0), "every frame presented is checked");
+        ends_at(Some(356), 0)(&rig);
+    }
+
+    #[test]
+    fn a_change_in_the_middle_of_a_play_is_put_back() {
+        for (option, value) in OTHERS {
+            let mut rig = Rig::showing(356);
+            let checked = rig.checked;
+            rig.someone_sets(option, value);
+            // Drawn for the change before mpv has reported it: nothing can
+            // hold this one back.
+            assert_eq!(rig.frame(true), Frame::Show);
+            assert_eq!(rig.unchecked, 1);
+            rig.drains();
+            assert_eq!(asks(&rig), 6, "{option}");
+            assert_eq!(rig.frame(true), Frame::Hold, "held from the moment Vela knows");
+            rig.settle();
+            assert_eq!(rig.frame(true), Frame::Show);
+            assert_eq!(rig.checked, checked + 1);
+            ends_at(Some(356), 0)(&rig);
+        }
+    }
+
+    #[test]
+    fn a_change_put_back_is_presented_on_a_paused_picture() {
+        let mut rig = Rig::showing(356);
+        rig.someone_sets(PEAK, "400");
+        rig.drains();
+        assert_eq!(rig.frame(false), Frame::Nothing);
+        rig.settle();
+        assert_eq!(rig.frame(false), Frame::Show, "the paused picture, drawn for HDR again");
+        ends_at(Some(356), 0)(&rig);
+    }
+
+    /// mpv reports `option` as `value` under the registration its reports
+    /// count under now.
+    fn report_as(rig: &mut Rig, option: &str, value: Option<&str>) -> Change {
+        let index = TARGET_OPTIONS.iter().position(|name| *name == option).unwrap_or(0);
+        let registration = rig.tagging.observing[index];
+        target_changed(registration, option, value, &mut rig.tagging, &rig.mpv, &mut rig.surface, rig.now)
+    }
+
+    #[test]
+    fn a_value_that_is_velas_own_changes_nothing() {
+        let mut rig = Rig::showing(356);
+        // The peak is compared as a number.
+        for (option, value) in [(TRC, "pq"), (PRIM, "bt.2020"), (PEAK, "356"), (PEAK, "356.000000")] {
+            assert_eq!(report_as(&mut rig, option, Some(value)), Change::Nothing);
+        }
+        assert_eq!(asks(&rig), 3);
+        assert!(!rig.tagging.changing());
+        // And an option that is not one of the three is nobody's business.
+        report_as(&mut rig, "target-colorspace-hint", Some("yes"));
+        assert_eq!(asks(&rig), 3);
+    }
+
+    // A value mpv cannot read is not one Vela asked for: while HDR is in
+    // effect it is put back, as any other would be. mpv says it cannot read
+    // a property it does not have (format 0); these three it always has, so
+    // this is the safe side of something that should not happen.
+    #[test]
+    fn a_value_mpv_cannot_read_is_put_back() {
+        for option in [TRC, PRIM, PEAK] {
+            let mut rig = Rig::showing(356);
+            report_as(&mut rig, option, None);
+            assert_eq!(asks(&rig), 6, "{option}");
+            assert!(rig.tagging.changing());
+            rig.settle();
+            assert_eq!(rig.frame(true), Frame::Show);
+            ends_at(Some(356), 0)(&rig);
+        }
+    }
+
+    // Reports under a registration since replaced are not mpv's word on the
+    // option any more.
+    #[test]
+    fn a_report_under_a_replaced_registration_is_ignored() {
+        let mut rig = Rig::showing(356);
+        // The first registrations, made before any change.
+        for (option, name) in TARGET_OPTIONS.iter().enumerate() {
+            let replaced = request(0, option);
+            assert_ne!(rig.tagging.observing[option], replaced);
+            let change = target_changed(
+                replaced,
+                name,
+                Some("bt.1886"),
+                &mut rig.tagging,
+                &rig.mpv,
+                &mut rig.surface,
+                rig.now,
+            );
+            assert_eq!(change, Change::Nothing);
+        }
+        assert_eq!(asks(&rig), 3);
+        assert!(!rig.tagging.changing());
+    }
+
+    #[test]
+    fn velas_own_changes_reported_after_its_answers_change_nothing() {
+        let mut rig = Rig::plain();
+        rig.describes(Presentation::Hdr(target(356)));
+        rig.answers(true);
+        while rig.applies() {}
+        rig.reads();
+        assert!(rig.tagging.changing(), "answered, and not yet reported afresh");
+        // mpv reports the three values it took, each under the registration
+        // made at its answer.
+        assert_eq!(rig.mpv.to_report(), [0, 1, 2]);
+        rig.drains();
+        assert!(!rig.tagging.changing());
+        assert_eq!(asks(&rig), 3, "nothing asked again");
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(Some(356), 0)(&rig);
+    }
+
+    // mpv reports an option's value as it was when it read it. Until it has
+    // answered Vela's latest ask for that option, the value is an earlier
+    // one, or one that ask is about to replace.
+    #[test]
+    fn a_value_reported_before_velas_latest_ask_for_it_is_answered_is_ignored() {
+        for (option, value) in [(PEAK, "356"), (PEAK, "auto"), (TRC, "bt.1886")] {
+            let mut rig = Rig::showing(356);
+            rig.describes(Presentation::Hdr(target(1137)));
+            rig.answers(true);
+            assert!(rig.tagging.changing());
+            report_as(&mut rig, option, Some(value));
+            rig.settle();
+            assert_eq!(asks(&rig), 6, "{option}={value} is not asked about again");
+            assert_eq!(rig.frame(true), Frame::Show);
+            ends_at(Some(1137), 0)(&rig);
+        }
+    }
+
+    #[test]
+    fn someone_elses_change_after_velas_answer_is_put_back_when_the_change_finishes() {
+        // mpv answers in the order asked, so the peak's answer, the last,
+        // finishes the change: only the first two can be answered while it
+        // is still in flight.
+        for (index, (option, value)) in OTHERS.into_iter().enumerate().take(2) {
+            let mut rig = Rig::showing(356);
+            rig.describes(Presentation::Hdr(target(1137)));
+            rig.answers(true);
+            // mpv takes Vela's asks up to this option's and answers them.
+            for _ in 0..=index {
+                rig.applies();
+            }
+            rig.reads();
+            rig.someone_sets(option, value);
+            rig.reports(index);
+            assert!(rig.tagging.changing(), "{option}");
+            assert_eq!(asks(&rig), 6, "nothing more asked while the change is in flight");
+            // The rest of the change is answered and reported.
+            while rig.applies() {}
+            rig.drains();
+            assert!(rig.tagging.changing(), "{option}: asked again instead of finished");
+            assert_eq!(asks(&rig), 9, "{option}");
+            assert_eq!(rig.frame(true), Frame::Hold);
+            rig.settle();
+            assert_eq!(rig.frame(true), Frame::Show);
+            ends_at(Some(1137), 0)(&rig);
+        }
+    }
+
+    // mpv reads an option at the end of a pass of its core and reports it
+    // only when it differs from what it read before. Something else setting
+    // the old value back in the same pass as Vela's ask is applied leaves
+    // nothing to report under the registration Vela had: measured with the
+    // shipped library while a file plays, for a set up to 20 ms after Vela's
+    // ask, every time. The registration made at the answer reports it.
+    #[test]
+    fn a_value_set_back_in_the_same_pass_as_velas_ask_is_seen_and_put_back() {
+        let mut rig = Rig::showing(356);
+        rig.describes(Presentation::Hdr(target(1137)));
+        rig.answers(true);
+        while rig.applies() {}
+        // Set back to what Vela was last told, before mpv has read the peak.
+        rig.someone_sets(PEAK, "356");
+        rig.reads();
+        assert_eq!(rig.frame(true), Frame::Hold, "not finished on the answers alone");
+        rig.settle();
+        assert_eq!(asks(&rig), 9, "the brightness change is asked for again");
+        assert_eq!(rig.frame(true), Frame::Show);
+        assert_eq!(rig.unchecked, 0, "no frame went unchecked");
+        rig.pass(Duration::from_secs(30));
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(Some(1137), 0)(&rig);
+    }
+
+    // Something that keeps setting a target, once in the same pass as Vela's
+    // restoration: measured with the shipped library, that went silent after
+    // one restoration while mpv drew someone else's target under a PQ tag.
+    // Seen every time, it is a fight, and Vela gives up.
+    #[test]
+    fn something_that_sets_again_within_a_restoration_is_still_seen() {
+        let mut rig = Rig::showing(356);
+        rig.someone_sets(TRC, "bt.1886");
+        rig.drains();
+        assert_eq!(asks(&rig), 6, "put back once");
+        rig.applies();
+        rig.someone_sets(TRC, "bt.1886");
+        rig.settle();
+        assert_eq!(asks(&rig), 9, "and once more: it was set again with Vela's ask");
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(Some(356), 0)(&rig);
+        // Three more restorations, and then a sixth gives up.
+        for _ in 0..4 {
+            assert!(!rig.tagging.given_up);
+            rig.pass(Duration::from_millis(5));
+            rig.someone_sets(TRC, "bt.1886");
+            rig.settle();
+            rig.frame(true);
+        }
+        assert!(rig.tagging.given_up, "five in ten seconds and then a sixth");
+        ends_at(None, 1)(&rig);
+        assert_eq!(rig.unchecked, 0, "no frame went unchecked");
+    }
+
+    // The reports that count while a change is in flight are those under
+    // the registration made at that change's answer for the option: one
+    // made earlier says nothing about whether Vela's ask holds, though
+    // another option of the same change has been answered.
+    #[test]
+    fn a_report_of_one_option_before_its_answer_is_ignored_though_another_is_answered() {
+        let mut rig = Rig::showing(356);
+        rig.describes(Presentation::Hdr(target(1137)));
+        rig.answers(true);
+        // target-trc is applied, answered and read; target-peak is not yet
+        // applied when someone else sets it, and mpv reports that.
+        rig.applies();
+        rig.reads();
+        rig.someone_sets(PEAK, "400");
+        rig.reports(2);
+        rig.settle();
+        assert_eq!(asks(&rig), 6, "Vela's ask for the peak replaces it");
+        assert!(rig.tagging.restorations.is_empty());
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(Some(1137), 0)(&rig);
+    }
+
+    // A refusal decides the change: standard range, without first asking
+    // for HDR again because something else changed an option meanwhile.
+    #[test]
+    fn a_refused_change_goes_to_standard_range_though_someone_else_changed_an_option() {
+        let mut rig = Rig::showing(356);
+        rig.mpv.refuses = Some(PEAK);
+        rig.describes(Presentation::Hdr(target(1137)));
+        rig.answers(true);
+        rig.applies();
+        rig.reads();
+        rig.someone_sets(TRC, "bt.1886");
+        rig.reports(0);
+        rig.settle();
+        assert_eq!(asks(&rig), 9, "the HDR asks, then the three auto asks only");
+        assert!(rig.tagging.restorations.is_empty());
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(None, 1)(&rig);
+    }
+
+    // The rig itself: a frame is excused from the check only while mpv still
+    // has a report to make about someone else's change. Set and set back
+    // before mpv read it, there is none, and every later frame is checked.
+    #[test]
+    fn a_frame_presented_after_a_change_mpv_will_never_report_is_checked() {
+        let mut rig = Rig::showing(356);
+        let checked = rig.checked;
+        rig.someone_sets(TRC, "bt.1886");
+        assert_eq!(rig.frame(true), Frame::Show);
+        assert_eq!((rig.checked, rig.unchecked), (checked, 1), "a report is still to come");
+        rig.someone_sets(TRC, "pq");
+        assert!(rig.mpv.to_report().is_empty() && rig.mpv.untold[0]);
+        assert_eq!(rig.frame(true), Frame::Show);
+        assert_eq!((rig.checked, rig.unchecked), (checked + 1, 1), "none is to come");
+    }
+
+    // mpv will not observe an option afresh (it does that only for a format
+    // it does not have, by its source): what it draws for cannot be known,
+    // so HDR counts as refused. Standard range needs no such report.
+    #[test]
+    fn a_change_whose_option_cannot_be_observed_afresh_is_refused() {
+        let mut rig = Rig::plain();
+        rig.mpv.refuses_to_observe = true;
+        rig.describes(Presentation::Hdr(target(356)));
+        rig.answers(true);
+        rig.settle();
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(None, 1)(&rig);
+        assert_eq!(rig.finished, Change::HdrRefused);
+
+        let mut rig = Rig::showing(356);
+        rig.mpv.refuses_to_observe = true;
+        rig.describes(Presentation::Sdr);
+        rig.settle();
+        assert_eq!(rig.finished, Change::Sdr);
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(None, 0)(&rig);
+    }
+
+    #[test]
+    fn putting_a_change_back_never_touches_the_surface() {
+        // The surface cannot be tagged any more, and HDR is still shown.
+        let mut rig = Rig::showing(356);
+        rig.surface.cannot_tag = true;
+        rig.someone_sets(TRC, "bt.1886");
+        rig.settle();
+        assert_eq!(rig.surface.pending, None, "neither tagged nor untagged");
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(Some(356), 0)(&rig);
+
+        // A newer description is on its way, so tagging would fail: the
+        // surface still says 356 and so does mpv, until the new one is made.
+        let mut rig = Rig::showing(356);
+        assert_eq!(rig.describes(Presentation::Hdr(target(1137))), Step::Describe(target(1137)));
+        rig.someone_sets(PEAK, "400");
+        rig.settle();
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(Some(356), 0)(&rig);
+        assert_eq!(rig.answers(true), Step::ShowHdr(target(1137)));
+        rig.settle();
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(Some(1137), 0)(&rig);
+    }
+
+    /// Someone else changes the peak once more, a second after the last
+    /// time, and mpv answers everything.
+    fn changed_again(rig: &mut Rig, after: Duration) {
+        rig.pass(after);
+        let value = if rig.mpv.applied[2] == "400" { "500" } else { "400" };
+        rig.someone_sets(PEAK, value);
+        rig.settle();
+        rig.frame(true);
+    }
+
+    #[test]
+    fn five_restorations_in_ten_seconds_are_made_and_a_sixth_gives_up() {
+        let mut rig = Rig::showing(356);
+        for turn in 1..=5 {
+            changed_again(&mut rig, Duration::from_secs(1));
+            assert_eq!(asks(&rig), 3 + 3 * turn, "restoration {turn}");
+            ends_at(Some(356), 0)(&rig);
+        }
+        changed_again(&mut rig, Duration::from_secs(1));
+        assert_eq!(asks(&rig), 21, "three times auto, not the targets again");
+        // Standard range on both sides, the ordinary way.
+        ends_at(None, 1)(&rig);
+        assert_eq!(rig.surface.committed, None);
+    }
+
+    // The window is ten seconds: a restoration ten seconds after the first
+    // of five no longer counts that one; one a moment sooner still does.
+    #[test]
+    fn the_window_for_counting_restorations_is_ten_seconds() {
+        for (sixth, gives_up) in [(5900, true), (6000, false)] {
+            let mut rig = Rig::showing(356);
+            for _ in 0..5 {
+                changed_again(&mut rig, Duration::from_secs(1));
+            }
+            // The first was at one second, the fifth at five: the sixth
+            // comes 9.9 or 10 seconds after the first.
+            changed_again(&mut rig, Duration::from_millis(sixth));
+            if gives_up {
+                ends_at(None, 1)(&rig);
+            } else {
+                assert_eq!(asks(&rig), 21, "restored a sixth time");
+                ends_at(Some(356), 0)(&rig);
+            }
+        }
+    }
+
+    #[test]
+    fn restorations_spread_out_in_time_are_all_made() {
+        let mut rig = Rig::showing(356);
+        // Six in a minute, never more than five in ten seconds.
+        for turn in 1..=6 {
+            changed_again(&mut rig, Duration::from_secs(10));
+            assert_eq!(asks(&rig), 3 + 3 * turn, "restoration {turn}");
+            ends_at(Some(356), 0)(&rig);
+        }
+        // The window slides: five close together, ten seconds after those.
+        for turn in 7..=11 {
+            let after = if turn == 7 { 10_000 } else { 1500 };
+            changed_again(&mut rig, Duration::from_millis(after));
+            assert_eq!(asks(&rig), 3 + 3 * turn, "restoration {turn}");
+        }
+        ends_at(Some(356), 0)(&rig);
+        // The sixth within ten seconds is not.
+        changed_again(&mut rig, Duration::from_millis(1500));
+        ends_at(None, 1)(&rig);
+    }
+
+    #[test]
+    fn once_given_up_standard_range_stays_for_the_rest_of_the_play() {
+        let mut rig = Rig::showing(356);
+        for _ in 0..5 {
+            changed_again(&mut rig, Duration::from_secs(1));
+        }
+        // A new description is on its way as Vela gives up.
+        assert_eq!(rig.describes(Presentation::Hdr(target(1137))), Step::Describe(target(1137)));
+        changed_again(&mut rig, Duration::from_secs(1));
+        ends_at(None, 1)(&rig);
+        let given_up = asks(&rig);
+        assert_eq!(rig.answers(true), Step::Nothing, "the description arriving changes nothing");
+        // Nothing the compositor says brings HDR back, for as long as the play lasts.
+        rig.pass(Duration::from_secs(60));
+        for wanted in [target(356), target(1137)] {
+            assert_eq!(rig.describes(Presentation::Hdr(wanted)), Step::Nothing);
+        }
+        assert_eq!(rig.describes(Presentation::Sdr), Step::Nothing);
+        // And later changes are left alone.
+        for (option, value) in [(TRC, "pq"), (PRIM, "bt.2020"), (PEAK, "1000")] {
+            rig.someone_sets(option, value);
+        }
+        rig.settle();
+        assert_eq!(asks(&rig), given_up);
+        assert_eq!(rig.frame(true), Frame::Show);
+        assert_eq!(rig.presented, Presented::Video(None));
+    }
+
+    // mpv's queue for Vela fills as a change is put back (review finding
+    // hd-3's rule): an HDR change that cannot be sent counts as refused, so
+    // both sides go to standard range at once, and the way there is asked
+    // again once the queue has been read empty.
+    #[test]
+    fn a_restoration_that_cannot_be_sent_goes_to_standard_range_in_every_order() {
+        for room in 0..TARGET_OPTIONS.len() {
+            let rig = Rig::showing(356);
+            rig.mpv.fills_after(room);
+            every_order(&rig, &[Sets(TRC, "bt.1886")], &|end: &Rig| {
+                ends_at(None, 1)(end);
+                // An HDR description of the same output is tried again.
+                let mut again = end.clone();
+                assert_eq!(
+                    again.tagging.output_described(Presentation::Hdr(target(356))),
+                    Step::Describe(target(356)),
+                    "{:#?}",
+                    end.trail
+                );
+            });
+        }
+    }
+
+    // Giving up the same way: the way to standard range waits, held, for
+    // room, and standard range stays.
+    #[test]
+    fn a_give_up_that_cannot_be_sent_waits_for_room_and_stays() {
+        let mut rig = Rig::showing(356);
+        for _ in 0..5 {
+            changed_again(&mut rig, Duration::from_secs(1));
+        }
+        rig.mpv.fills_after(0);
+        rig.pass(Duration::from_secs(1));
+        rig.someone_sets(PEAK, "400");
+        // The change is reported; the queue has not been read empty yet.
+        rig.reads();
+        rig.reports(2);
+        assert_eq!(asks(&rig), 21, "three auto asks, none sent");
+        assert!(rig.tagging.waiting_for_room());
+        assert_eq!(rig.surface.pending, Some(None), "untagged, not yet presented");
+        assert_eq!(rig.frame(true), Frame::Hold);
+        rig.drains();
+        assert_eq!(asks(&rig), 24, "asked again once there is room");
+        rig.settle();
+        assert_eq!(rig.frame(true), Frame::Show);
+        ends_at(None, 1)(&rig);
+        assert_eq!(rig.describes(Presentation::Hdr(target(356))), Step::Nothing, "latched");
+    }
+
+    #[test]
+    fn standard_range_is_never_defended() {
+        // Never HDR.
+        let mut rig = Rig::plain();
+        rig.describes(Presentation::Sdr);
+        for (option, value) in OTHERS {
+            rig.someone_sets(option, value);
+        }
+        rig.settle();
+        assert_eq!(asks(&rig), 0);
+        assert_eq!(rig.frame(true), Frame::Show);
+        // HDR switched off.
+        let mut rig = Rig::showing(356);
+        rig.describes(Presentation::Sdr);
+        rig.settle();
+        let asked = asks(&rig);
+        rig.someone_sets(TRC, "bt.1886");
+        rig.settle();
+        assert_eq!(asks(&rig), asked);
+        // HDR refused by mpv.
+        let mut rig = Rig::new(FakeMpv::refusing(PEAK), FakeSurface::default());
+        rig.describes(Presentation::Hdr(target(356)));
+        rig.answers(true);
+        rig.settle();
+        ends_at(None, 1)(&rig);
+        let asked = asks(&rig);
+        rig.someone_sets(TRC, "bt.1886");
+        rig.settle();
+        assert_eq!(asks(&rig), asked);
+    }
+
     // ---- against the library Vela ships (review finding hd-3)
     //
     // No fake can say whether libmpv.rs's hand-written table, its reading
@@ -1856,7 +2892,8 @@ mod tests {
     use super::super::libmpv::{Event, LibMpv, Player, LIBRARY_FILE};
     use std::path::{Path, PathBuf};
 
-    fn shipped_player() -> Player {
+    /// The shipped library's file.
+    fn shipped_library() -> PathBuf {
         let directory = std::env::var_os("VELA_LIBMPV_DIR")
             .filter(|dir| !dir.is_empty())
             .map(PathBuf::from)
@@ -1865,7 +2902,11 @@ mod tests {
             });
         let directory = std::fs::canonicalize(&directory)
             .unwrap_or_else(|_| panic!("no libmpv set at {}", directory.display()));
-        let lib = LibMpv::load(&directory.join(LIBRARY_FILE))
+        directory.join(LIBRARY_FILE)
+    }
+
+    fn shipped_player() -> Player {
+        let lib = LibMpv::load(&shipped_library())
             .unwrap_or_else(|reason| panic!("the shipped library did not load: {reason}"));
         let player = Player::create(std::sync::Arc::new(lib)).expect("a player");
         // No window, no sound, nobody's configuration, and nothing to play.
@@ -1890,7 +2931,7 @@ mod tests {
         while answers.len() < requests.len() && Instant::now() < deadline {
             match player.wait_for_event(Duration::from_millis(100)) {
                 Event::Answer { request, taken } => answers.push((request, taken)),
-                Event::None | Event::Other => {}
+                Event::None | Event::Other | Event::TargetChanged { .. } => {}
                 Event::Shutdown => panic!("mpv shut down"),
             }
         }
@@ -1964,6 +3005,24 @@ mod tests {
                     }
                 }
                 Event::None => drained(tagging, player, surface, Instant::now()),
+                Event::TargetChanged {
+                    registration,
+                    option,
+                    value,
+                } => {
+                    let change = target_changed(
+                        registration,
+                        &option,
+                        value.as_deref(),
+                        tagging,
+                        player,
+                        surface,
+                        Instant::now(),
+                    );
+                    if change != Change::Nothing {
+                        finished = change;
+                    }
+                }
                 Event::Other => {}
                 Event::Shutdown => panic!("mpv shut down"),
             }
@@ -2063,9 +3122,407 @@ mod tests {
         loop {
             match player.wait_for_event(Duration::from_millis(100)) {
                 Event::Shutdown => break,
-                Event::None | Event::Other | Event::Answer { .. } => {}
+                Event::None | Event::Other | Event::Answer { .. } | Event::TargetChanged { .. } => {}
             }
             assert!(Instant::now() < deadline, "mpv says it has shut down");
+        }
+    }
+
+    // ---- against the library Vela ships (review finding hd-2)
+
+    /// What mpv says, in order, for as long as `limit`, or until `enough`
+    /// says that is enough: answers as (request, taken), changes as (option,
+    /// value). Then a moment longer, so that anything that follows is seen.
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    enum Said {
+        Answer(u64, bool),
+        Change(String, Option<String>),
+    }
+
+    fn said(player: &Player, enough: impl Fn(&[Said]) -> bool) -> Vec<Said> {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut said = Vec::new();
+        let mut after: Option<Instant> = None;
+        loop {
+            let now = Instant::now();
+            if after.is_some_and(|after| now >= after) || now >= deadline {
+                return said;
+            }
+            match player.wait_for_event(Duration::from_millis(20)) {
+                Event::Answer { request, taken } => said.push(Said::Answer(request, taken)),
+                Event::TargetChanged { option, value, .. } => said.push(Said::Change(option, value)),
+                Event::None | Event::Other => {}
+                Event::Shutdown => panic!("mpv shut down"),
+            }
+            if after.is_none() && enough(&said) {
+                after = Some(Instant::now() + Duration::from_millis(300));
+            }
+        }
+    }
+
+    fn change(option: &str, value: &str) -> Said {
+        Said::Change(option.to_string(), Some(value.to_string()))
+    }
+
+    /// A player reporting its targets, with what it said at first read.
+    fn observing_player() -> Player {
+        let player = shipped_player();
+        while player.wait_for_event(Duration::from_millis(50)) != Event::None {}
+        assert!(observe_targets(&player), "mpv reports its targets");
+        let first = said(&player, |said| said.len() >= 3);
+        assert_eq!(first, [change(TRC, "auto"), change(PRIM, "auto"), change(PEAK, "auto")]);
+        player
+    }
+
+    #[test]
+    #[ignore = "needs the shipped libmpv set: npm run test:libmpv"]
+    fn real_library_reports_each_target_once_when_it_is_first_observed() {
+        // The three values as they are, and nothing more.
+        observing_player();
+    }
+
+    #[test]
+    #[ignore = "needs the shipped libmpv set: npm run test:libmpv"]
+    fn real_library_reports_a_change_made_another_way_as_its_text() {
+        let player = observing_player();
+        for (option, value) in [(TRC, "bt.1886"), (PRIM, "bt.709"), (PEAK, "400"), (PEAK, "auto")] {
+            // The way a command on mpv's IPC socket sets it.
+            player.command(&["set", option, value]).expect("a set command");
+            assert_eq!(said(&player, |said| !said.is_empty()), [change(option, value)]);
+        }
+        // Setting the value already in effect is not a change.
+        player.command(&["set", TRC, "bt.1886"]).expect("a set command");
+        assert_eq!(said(&player, |_| true), []);
+    }
+
+    #[test]
+    #[ignore = "needs the shipped libmpv set: npm run test:libmpv"]
+    fn real_library_reports_velas_own_asks_after_their_answers_and_only_what_changed() {
+        let player = observing_player();
+        for _ in 0..10 {
+            for (request, option, value) in [(1, TRC, "pq"), (2, PRIM, "auto"), (3, PEAK, "1137")] {
+                assert!(player.ask(request, option, value));
+            }
+            let order = said(&player, |said| said.len() >= 5);
+            assert_eq!(
+                order,
+                [
+                    Said::Answer(1, true),
+                    Said::Answer(2, true),
+                    Said::Answer(3, true),
+                    change(TRC, "pq"),
+                    change(PEAK, "1137"),
+                ],
+                "target-prim was auto already"
+            );
+            for (request, option) in [(4, TRC), (5, PRIM), (6, PEAK)] {
+                assert!(player.ask(request, option, "auto"));
+            }
+            let order = said(&player, |said| said.len() >= 5);
+            assert_eq!(
+                order,
+                [
+                    Said::Answer(4, true),
+                    Said::Answer(5, true),
+                    Said::Answer(6, true),
+                    change(TRC, "auto"),
+                    change(PEAK, "auto"),
+                ]
+            );
+        }
+    }
+
+    // What `target_changed` relies on to tell Vela's own values from someone
+    // else's: under the registration made when Vela read mpv's answer to its
+    // latest ask for an option, mpv never reports a value other than the one
+    // asked for, unless something else set it. Here nothing else does, over
+    // hundreds of changes, many asked for before the one before was
+    // answered, read the way the play reads them. If this ever fails, that
+    // rule is wrong. What it cannot show: with no file playing, mpv applies
+    // a change's three asks in one pass and answers them together, so a
+    // mistake that takes one option's answer for another's goes unseen
+    // here (one that finished a change on its first answer passed, tried
+    // for review finding hd-2). The tests of the rig above hold that, in
+    // every order.
+    #[test]
+    #[ignore = "needs the shipped libmpv set: npm run test:libmpv"]
+    fn real_library_never_reports_an_older_value_once_the_latest_ask_is_answered() {
+        let player = shipped_player();
+        while player.wait_for_event(Duration::from_millis(50)) != Event::None {}
+        // The first values are not read first: they too must not come late.
+        assert!(observe_targets(&player));
+        let mut tagging = Tagging::new();
+        let mut surface = TakesEverything;
+        // What the latest change asks for: the one in flight, or else the
+        // last one to finish.
+        let mut latest = values(Goal::Sdr { refused: false });
+        let follow = |tagging: &Tagging, latest: &mut [String; 3]| {
+            if let Some(pending) = tagging.pending {
+                *latest = values(pending.goal);
+            }
+        };
+        let (mut after_answer, mut before_answer) = (0, 0);
+        let mut read = |tagging: &mut Tagging, until_empty: bool, latest: &mut [String; 3]| loop {
+            follow(tagging, latest);
+            match player.next_event() {
+                Event::None => {
+                    drained(tagging, &player, &mut surface, Instant::now());
+                    follow(tagging, latest);
+                    return;
+                }
+                Event::Answer { request, taken } => {
+                    assert!(taken);
+                    answered(request, taken, tagging, &player, &mut surface, Instant::now());
+                }
+                Event::TargetChanged {
+                    registration,
+                    option,
+                    value,
+                } => {
+                    let index = TARGET_OPTIONS.iter().position(|name| *name == option).unwrap();
+                    // The reports `target_changed` acts on: under the latest
+                    // registration, made when the latest change's ask for
+                    // this option was answered, or the last finished one's.
+                    let counts = registration == tagging.observing[index]
+                        && tagging
+                            .pending
+                            .is_none_or(|pending| registration == request(pending.number, index));
+                    let differs = value.as_deref() != Some(latest[index].as_str());
+                    if counts {
+                        after_answer += 1;
+                        assert!(
+                            !differs,
+                            "{option}={value:?} reported after the answer to the ask for {}",
+                            latest[index]
+                        );
+                    } else if differs {
+                        before_answer += 1;
+                    }
+                    target_changed(
+                        registration,
+                        &option,
+                        value.as_deref(),
+                        tagging,
+                        &player,
+                        &mut surface,
+                        Instant::now(),
+                    );
+                }
+                Event::Other => {}
+                Event::Shutdown => panic!("mpv shut down"),
+            }
+            if !until_empty {
+                follow(tagging, latest);
+                return;
+            }
+        };
+        let turns = 1200_u32;
+        for turn in 0..turns {
+            let wanted = if turn % 11 == 10 {
+                Presentation::Sdr
+            } else {
+                Presentation::Hdr(target(100 + (turn * 37) % 2000))
+            };
+            let step = tagging.output_described(wanted);
+            carry_out(step, &mut tagging, &player, &mut TakesEverything, Instant::now());
+            let step = tagging.description_ready();
+            carry_out(step, &mut tagging, &player, &mut TakesEverything, Instant::now());
+            follow(&tagging, &mut latest);
+            // Read nothing, one event, two, or everything, so that changes
+            // are asked for while earlier ones are still being answered; and
+            // give mpv a little time, or none. Every fourth change is read
+            // to its end, as a play's change mostly is.
+            for _ in 0..turn % 3 {
+                read(&mut tagging, false, &mut latest);
+            }
+            if turn % 4 == 3 {
+                let deadline = Instant::now() + Duration::from_secs(1);
+                while tagging.changing() && Instant::now() < deadline {
+                    read(&mut tagging, true, &mut latest);
+                }
+                std::thread::sleep(Duration::from_micros(u64::from(turn % 3) * 100));
+                read(&mut tagging, true, &mut latest);
+            }
+            std::thread::sleep(Duration::from_micros(u64::from(turn % 5) * 40));
+        }
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while tagging.changing() && Instant::now() < deadline {
+            read(&mut tagging, true, &mut latest);
+        }
+        assert!(!tagging.changing(), "mpv answered every ask");
+        for _ in 0..20 {
+            std::thread::sleep(Duration::from_millis(10));
+            read(&mut tagging, true, &mut latest);
+        }
+        assert_eq!(tagging.restorations.len(), 0, "nothing was put back");
+        for (option, value) in TARGET_OPTIONS.iter().zip(&latest) {
+            assert_eq!(player.property(option).as_deref(), Some(value.as_str()), "{option}");
+        }
+        eprintln!(
+            "{turns} changes asked for in {} transitions; values reported after the latest answer: {after_answer}; other values before it: {before_answer}",
+            tagging.transitions
+        );
+        assert!(after_answer > 250, "the case this is about happened: {after_answer}");
+        assert!(before_answer > 0, "and so did the one the rule ignores: {before_answer}");
+    }
+
+    /// Someone else: a second client of the same player, as a script or a
+    /// command on mpv's IPC socket is, setting a target without waiting.
+    /// Only the tests need one, so its functions are looked up here.
+    struct SomeoneElse {
+        raw: *mut RawHandle,
+        set: SetAsync,
+        destroy: Destroy,
+    }
+
+    use super::super::libmpv::RawHandle;
+    type CreateClient = unsafe extern "C" fn(*mut RawHandle, *const std::ffi::c_char) -> *mut RawHandle;
+    type SetAsync = unsafe extern "C" fn(
+        *mut RawHandle,
+        u64,
+        *const std::ffi::c_char,
+        std::ffi::c_int,
+        *mut std::ffi::c_void,
+    ) -> std::ffi::c_int;
+    type Destroy = unsafe extern "C" fn(*mut RawHandle);
+
+    impl SomeoneElse {
+        fn of(player: &Player) -> Self {
+            use std::os::unix::ffi::OsStrExt;
+            let path = std::ffi::CString::new(shipped_library().as_os_str().as_bytes()).unwrap();
+            // SAFETY: the library is already loaded (NOLOAD hands back that
+            // copy), and each name is looked up with the type mpv's client.h
+            // gives it.
+            unsafe {
+                let handle = libc::dlopen(path.as_ptr(), libc::RTLD_NOW | libc::RTLD_NOLOAD);
+                assert!(!handle.is_null(), "the shipped library is loaded");
+                let symbol = |name: &std::ffi::CStr| {
+                    let address = libc::dlsym(handle, name.as_ptr());
+                    assert!(!address.is_null(), "{name:?}");
+                    address
+                };
+                let create =
+                    std::mem::transmute::<*mut std::ffi::c_void, CreateClient>(symbol(c"mpv_create_client"));
+                let raw = create(player.raw(), c"someone-else".as_ptr());
+                assert!(!raw.is_null(), "a second client");
+                SomeoneElse {
+                    raw,
+                    set: std::mem::transmute::<*mut std::ffi::c_void, SetAsync>(symbol(
+                        c"mpv_set_property_async",
+                    )),
+                    destroy: std::mem::transmute::<*mut std::ffi::c_void, Destroy>(symbol(c"mpv_destroy")),
+                }
+            }
+        }
+
+        fn sets(&self, option: &str, value: &str) {
+            let option = std::ffi::CString::new(option).unwrap();
+            let value = std::ffi::CString::new(value).unwrap();
+            let mut data = value.as_ptr();
+            // SAFETY: a live handle, and a string passed as client.h says.
+            let code = unsafe {
+                (self.set)(self.raw, 1, option.as_ptr(), 1, (&mut data as *mut *const std::ffi::c_char).cast())
+            };
+            assert!(code >= 0, "sent");
+        }
+    }
+
+    impl Drop for SomeoneElse {
+        fn drop(&mut self) {
+            // SAFETY: a live client handle, not used again.
+            unsafe { (self.destroy)(self.raw) };
+        }
+    }
+
+    /// Hand everything mpv says to `hdr`, the way a play does, at the time
+    /// `at` on Vela's clock, until no change is in flight and mpv has said
+    /// nothing for a while.
+    fn read_until_quiet(
+        player: &Player,
+        tagging: &mut Tagging,
+        surface: &mut impl Describable,
+        at: Instant,
+    ) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut quiet_since: Option<Instant> = None;
+        let now = at;
+        loop {
+            let real = Instant::now();
+            assert!(real < deadline, "mpv went quiet");
+            match player.wait_for_event(Duration::from_millis(20)) {
+                Event::None => {
+                    drained(tagging, player, surface, now);
+                    if tagging.changing() {
+                        quiet_since = None;
+                    } else if real.duration_since(*quiet_since.get_or_insert(real))
+                        >= Duration::from_millis(200)
+                    {
+                        return;
+                    }
+                }
+                Event::Answer { request, taken } => {
+                    quiet_since = None;
+                    answered(request, taken, tagging, player, surface, now);
+                }
+                Event::TargetChanged {
+                    registration,
+                    option,
+                    value,
+                } => {
+                    quiet_since = None;
+                    target_changed(registration, &option, value.as_deref(), tagging, player, surface, now);
+                }
+                Event::Other => {}
+                Event::Shutdown => panic!("mpv shut down"),
+            }
+        }
+    }
+
+    // Review finding hd-2: something else sets a target back to the value
+    // Vela was last told about, at once after Vela's ask, so that mpv's core
+    // applies both in one pass. mpv then reads the option once, finds the
+    // value it read before, and has no change to report under the
+    // registration Vela had. The registration made at the answer reports
+    // it, and Vela puts it back.
+    #[test]
+    #[ignore = "needs the shipped libmpv set: npm run test:libmpv"]
+    fn real_library_reports_a_value_set_back_in_the_same_pass_as_velas_ask() {
+        let player = shipped_player();
+        while player.wait_for_event(Duration::from_millis(50)) != Event::None {}
+        assert!(observe_targets(&player));
+        let mut tagging = Tagging::new();
+        let mut surface = TakesEverything;
+        let someone = SomeoneElse::of(&player);
+        // The compositor describes the output at `peak`, and the description
+        // is made at once: the way a play asks mpv for it.
+        let show = |peak: u32, tagging: &mut Tagging, surface: &mut TakesEverything, now: Instant| {
+            let step = tagging.output_described(Presentation::Hdr(target(peak)));
+            carry_out(step, tagging, &player, surface, now);
+            let step = tagging.description_ready();
+            assert_eq!(step, Step::ShowHdr(target(peak)));
+            carry_out(step, tagging, &player, surface, now);
+        };
+        let start = Instant::now();
+        let mut peaks = [356, 1137];
+        show(peaks[0], &mut tagging, &mut surface, start);
+        read_until_quiet(&player, &mut tagging, &mut surface, start);
+        assert!(tagging.restorations.is_empty());
+        // Turns ten seconds apart on Vela's clock, so that none of them is a
+        // fight. mpv applies asks in the order they reach it, from every
+        // client, so someone else's value lands after Vela's.
+        for turn in 1..=10_u32 {
+            peaks.reverse();
+            let now = start + Duration::from_secs(u64::from(turn) * 10);
+            show(peaks[0], &mut tagging, &mut surface, now);
+            someone.sets("target-peak", &peaks[1].to_string());
+            read_until_quiet(&player, &mut tagging, &mut surface, now);
+            assert_eq!(
+                player.property("target-peak").as_deref(),
+                Some(peaks[0].to_string().as_str()),
+                "turn {turn}: Vela's peak is put back"
+            );
+            assert_eq!(tagging.in_effect(), Presentation::Hdr(target(peaks[0])), "turn {turn}");
+            assert_eq!(tagging.restorations, [now], "turn {turn}: put back once");
         }
     }
 }

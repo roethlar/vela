@@ -51,7 +51,10 @@ A full `--embedded` run (no scenario named) first runs
 `npm run test:libmpv`: Rust tests, ignored in an ordinary `cargo test`,
 that load that set without a window and check what the player relies on
 mpv for when it changes HDR targets (each ask answered with its own
-request; a refused value answered as refused; the shutdown event). No
+request; a refused value answered as refused; the shutdown event; a
+change of a target reported, whoever made it, and never with an older
+value once Vela's latest ask for it is answered; a target set back by
+another client in the same pass as Vela's ask reported and put back). No
 scenario can: weston never makes a play change mpv's target. If they fail,
 or cannot load the set, the run fails before any scenario. A run of named
 scenarios skips them and says so; `npm run test:libmpv` runs them alone.

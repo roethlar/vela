@@ -515,8 +515,34 @@ test('mpv is told what it draws for in one place, together with the surface', ()
   assert.equal(count(code(libmpv), '(self.lib.set_property_async)('), 1);
   assert.match(
     libmpv,
-    /impl super::hdr::Targetable for Player \{[\s\S]{0,600}fn ask\(&self, request: u64, option: &str, value: &str\) -> bool \{[\s\S]{0,600}let mut data: \*const c_char = c_value\.as_ptr\(\);[\s\S]{0,300}\(self\.lib\.set_property_async\)\(\s+self\.raw,\s+request,\s+c_option\.as_ptr\(\),\s+FORMAT_STRING,\s+\(&mut data as \*mut \*const c_char\)\.cast\(\),\s+\)\s+\};[\s\S]{0,120}code >= 0\s+\}\s+\}/,
+    /impl super::hdr::Targetable for Player \{[\s\S]{0,600}fn ask\(&self, request: u64, option: &str, value: &str\) -> bool \{[\s\S]{0,600}let mut data: \*const c_char = c_value\.as_ptr\(\);[\s\S]{0,300}\(self\.lib\.set_property_async\)\(\s+self\.raw,\s+request,\s+c_option\.as_ptr\(\),\s+FORMAT_STRING,\s+\(&mut data as \*mut \*const c_char\)\.cast\(\),\s+\)\s+\};[\s\S]{0,120}code >= 0\s+\}\n/,
   );
+  // mpv reports changes of its targets to the options `hdr` names, as text
+  // (review finding hd-2): one observation call, made under the
+  // registration `hdr` gives, one call that drops a registration, and
+  // nothing in libmpv.rs names which options.
+  assert.equal(count(code(libmpv), 'symbol!("mpv_observe_property")'), 1);
+  assert.equal(count(code(libmpv), '(self.lib.observe_property)('), 1);
+  assert.match(
+    libmpv,
+    /fn observe\(&self, registration: u64, option: &str\) -> bool \{[\s\S]{0,300}\(self\.lib\.observe_property\)\(self\.raw, registration, c_option\.as_ptr\(\), FORMAT_STRING\)\s+\};\s+code >= 0\s+\}/,
+  );
+  assert.equal(count(code(libmpv), 'symbol!("mpv_unobserve_property")'), 1);
+  assert.equal(count(code(libmpv), '(self.lib.unobserve_property)('), 1);
+  assert.match(
+    code(libmpv),
+    /fn unobserve\(&self, registration: u64\) \{\s+unsafe \{ \(self\.lib\.unobserve_property\)\(self\.raw, registration\) \};\s+\}/,
+  );
+  assert.match(
+    hdr,
+    /pub\(crate\) fn observe_targets\(mpv: &impl Targetable\) -> bool \{\s+\(0\.\.TARGET_OPTIONS\.len\(\)\)\.all\(\|option\| mpv\.observe\(request\(0, option\), TARGET_OPTIONS\[option\]\)\)\s+\}/,
+  );
+  // A property change is read in one place, which copies its name and text
+  // and keeps the registration it was made under.
+  const shippedLibmpv = code(libmpv.slice(0, libmpv.indexOf('#[cfg(test)]\nmod tests')));
+  assert.equal(count(shippedLibmpv, 'Event::TargetChanged {'), 1);
+  assert.match(shippedLibmpv, /if event_id == EVENT_PROPERTY_CHANGE \{\s+return unsafe \{ property_change\(reply_userdata, data\.cast\(\)\) \};\s+\}/);
+  assert.match(libmpv, /^const EVENT_PROPERTY_CHANGE: c_int = 22;$/m);
   // And that call is all `ask` does with mpv: its whole body, comments
   // aside, is this. A waiting call added to it in any form (a `set`
   // command, a property read) is the regression itself.
@@ -571,7 +597,7 @@ test('mpv is told what it draws for in one place, together with the surface', ()
     assert.equal(count(functionBody(session, 'fn set_up(', 'set_up'), reached), 1, reached);
     assert.equal(count(methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run'), reached), 1, reached);
   }
-  for (const direct of ['.describe(', '.tag(', '.untag(', '.ask(', '.set_target(']) {
+  for (const direct of ['.describe(', '.tag(', '.untag(', '.ask(', '.observe(', '.unobserve(', '.set_target(']) {
     assert.equal(count(code(session), direct), 0, `the session never calls ${direct} itself`);
   }
   // Nothing in the module is switched off from the compiler's view: a part
@@ -692,7 +718,7 @@ test("what the compositor says about the display is followed from a play's start
     /let capabilities = Capabilities \{\s+can_describe: surface\.colour_support\(\),\s+ten_bit_window: window\.depth == 10,\s+\};\s+let mut tagging = Tagging::new\(\);/,
   );
   const settle = setUp.search(
-    /if capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+let deadline = Instant::now\(\) \+ COLOUR_LIMIT_AT_START;\s+let mut exchanges = 0;\s+while !tagging\.settled\(\) && Instant::now\(\) < deadline \{\s+if tagging\.changing\(\) \{[\s\S]{0,400}?let left = if tagging\.waiting_for_room\(\) \{\s+Duration::ZERO\s+\} else \{\s+deadline\.saturating_duration_since\(Instant::now\(\)\)\s+\};\s+match player\.wait_for_event\(left\) \{\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut tagging,\s+&player,\s+&mut surface,\s+Instant::now\(\),\s+\)\),\s+Event::Shutdown => return Err\([^\n]*\),\s+Event::None => \{\s+hdr::drained\(&mut tagging, &player, &mut surface, Instant::now\(\)\)\s+\}\s+Event::Other => \{\}\s+\}\s+\} else if exchanges < COLOUR_EXCHANGES_AT_START \{\s+surface\.roundtrip\(\)\?;\s+exchanges \+= 1;\s+\} else \{\s+break;\s+\}\s+follow_colour\(&player, &mut surface, capabilities, &mut tagging, Instant::now\(\)\);\s+\}\s+\}/,
+    /if capabilities\.hdr_possible\(\) \{\s+surface\.ask_about_output\(\);\s+let deadline = Instant::now\(\) \+ COLOUR_LIMIT_AT_START;\s+let mut exchanges = 0;\s+while !tagging\.settled\(\) && Instant::now\(\) < deadline \{\s+if tagging\.changing\(\) \{[\s\S]{0,400}?let left = if tagging\.waiting_for_room\(\) \{\s+Duration::ZERO\s+\} else \{\s+deadline\.saturating_duration_since\(Instant::now\(\)\)\s+\};\s+match player\.wait_for_event\(left\) \{\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut tagging,\s+&player,\s+&mut surface,\s+Instant::now\(\),\s+\)\),\s+Event::Shutdown => return Err\([^\n]*\),\s+Event::None => \{\s+hdr::drained\(&mut tagging, &player, &mut surface, Instant::now\(\)\)\s+\}\s+Event::TargetChanged \{\s+registration,\s+option,\s+value,\s+\} => say\(hdr::target_changed\(\s+registration,\s+&option,\s+value\.as_deref\(\),\s+&mut tagging,\s+&player,\s+&mut surface,\s+Instant::now\(\),\s+\)\),\s+Event::Other => \{\}\s+\}\s+\} else if exchanges < COLOUR_EXCHANGES_AT_START \{\s+surface\.roundtrip\(\)\?;\s+exchanges \+= 1;\s+\} else \{\s+break;\s+\}\s+follow_colour\(&player, &mut surface, capabilities, &mut tagging, Instant::now\(\)\);\s+\}\s+\}/,
   );
   assert.notEqual(settle, -1);
   assert.match(session, /^const COLOUR_LIMIT_AT_START: Duration = Duration::from_secs\(1\);$/m);
@@ -742,10 +768,11 @@ test('the running play never waits for mpv and does with each frame what hdr dec
   // loop is the one they decide for.
   const run = methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run');
   // Events are read without waiting, every kind named, none swallowed by a
-  // wildcard, and mpv's answers go to `hdr`.
+  // wildcard, and mpv's answers and its reports of a changed target go to
+  // `hdr`.
   assert.match(
     run,
-    /loop \{\s+match self\.player\.next_event\(\) \{\s+Event::None => \{\s+hdr::drained\(&mut self\.tagging, &self\.player, &mut self\.surface, now\);\s+break;\s+\}\s+(?:\/\/[^\n]*\n\s+)*Event::Shutdown => return,\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::Other => \{\}\s+\}\s+\}/,
+    /loop \{\s+match self\.player\.next_event\(\) \{\s+Event::None => \{\s+hdr::drained\(&mut self\.tagging, &self\.player, &mut self\.surface, now\);\s+break;\s+\}\s+(?:\/\/[^\n]*\n\s+)*Event::Shutdown => return,\s+Event::Answer \{ request, taken \} => say\(hdr::answered\(\s+request,\s+taken,\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::TargetChanged \{\s+registration,\s+option,\s+value,\s+\} => say\(hdr::target_changed\(\s+registration,\s+&option,\s+value\.as_deref\(\),\s+&mut self\.tagging,\s+&self\.player,\s+&mut self\.surface,\s+now,\s+\)\),\s+Event::Other => \{\}\s+\}\s+\}/,
   );
   assert.doesNotMatch(code(run), /_ =>/);
   assert.doesNotMatch(code(run), /wait_for_event|\.property\(|\.command\(|set_option|roundtrip/);
@@ -765,14 +792,23 @@ test('the running play never waits for mpv and does with each frame what hdr dec
       '        if event.is_null() {',
       '            return Event::None;',
       '        }',
-      '        let (event_id, error, reply_userdata) =',
-      '            unsafe { ((*event).event_id, (*event).error, (*event).reply_userdata) };',
+      '        let (event_id, error, reply_userdata, data) = unsafe {',
+      '            (',
+      '                (*event).event_id,',
+      '                (*event).error,',
+      '                (*event).reply_userdata,',
+      '                (*event).data,',
+      '            )',
+      '        };',
+      '        if event_id == EVENT_PROPERTY_CHANGE {',
+      '            return unsafe { property_change(reply_userdata, data.cast()) };',
+      '        }',
       '        classify(event_id, error, reply_userdata)',
     ].join('\n'),
   );
   assert.match(
     libmpv,
-    /pub\(crate\) enum Event \{[\s\S]*?None,[\s\S]*?Shutdown,[\s\S]*?Answer \{ request: u64, taken: bool \},[\s\S]*?Other,\s+\}/,
+    /pub\(crate\) enum Event \{[\s\S]*?None,[\s\S]*?Shutdown,[\s\S]*?Answer \{ request: u64, taken: bool \},[\s\S]*?TargetChanged \{\s+registration: u64,\s+option: String,\s+value: Option<String>,\s+\},[\s\S]*?Other,\s+\}/,
   );
   assert.match(libmpv, /EVENT_SET_PROPERTY_REPLY => Event::Answer \{\s+request: reply_userdata,\s+taken: error >= 0,\s+\},/);
   // Every frame goes through the one decision, taken after the events are
@@ -798,13 +834,78 @@ test('the running play never waits for mpv and does with each frame what hdr dec
   assert.match(shippedSession, /fn load\(&self, url: &str\) -> Result<\(\), String> \{\s+self\.player\s+\.command\(&\["loadfile", url\]\)/);
 });
 
+test("mpv's reports of a changed target reach hdr from the start of a play to its end, and nothing else", () => {
+  // Review finding hd-2: something other than Vela can change mpv's
+  // targets. The unit tests in hdr.rs decide what is done about it; this
+  // proves mpv is asked to report the change and every report reaches them.
+  const setUp = functionBody(session, 'fn set_up(', 'set_up');
+  // Observed once, straight after mpv has started, and before the colour is
+  // settled (the first report is read there).
+  assert.equal(count(code(session), 'hdr::observe_targets('), 1);
+  assert.match(
+    setUp,
+    /player\s+\.initialize\(\)\s+\.map_err\(\|reason\| format!\("mpv could not start \(\{reason\}\)"\)\)\?;\s+(?:\/\/[^\n]*\n\s+)*if !hdr::observe_targets\(&player\) \{\s+return Err\([^\n]*\);\s+\}/,
+  );
+  const observed = setUp.indexOf('if !hdr::observe_targets(&player) {');
+  const settled = setUp.indexOf('surface.ask_about_output();');
+  assert.ok(observed !== -1 && settled !== -1 && observed < settled);
+  // Every report goes to `hdr::target_changed`, in set-up and in the running
+  // play, and to nothing else: the session decides nothing about it.
+  const shippedSession = code(session.slice(0, session.indexOf('#[cfg(test)]\nmod tests')));
+  // Each report goes there with the registration it was made under, and
+  // what a finished change changed is said, as for an answer.
+  assert.equal(count(shippedSession, 'TargetChanged'), 2);
+  assert.equal(
+    (shippedSession.match(/Event::TargetChanged \{\s+registration,\s+option,\s+value,\s+\} => say\(hdr::target_changed\(\s+registration,\s+&option,\s+value\.as_deref\(\),/g) ?? []).length,
+    2,
+  );
+  assert.equal(count(shippedSession, 'hdr::target_changed('), 2);
+  assert.equal(count(setUp, 'hdr::target_changed('), 1);
+  assert.equal(count(methodBody(session, '    fn run(&mut self, shared: &Shared) {', 'Live::run'), 'hdr::target_changed('), 1);
+  // The play's thread reads no target itself.
+  assert.doesNotMatch(shippedSession, /\.property\("target/);
+  // What mpv reports came from the user's configuration or from whatever
+  // set it, and none of it may be written anywhere. This holds the ordinary
+  // way that would go wrong: a value put into a line `hdr` writes, or a
+  // macro that prints what it is given. It is a tripwire for that mistake,
+  // read from the text; it is not a proof that no code could be written to
+  // get round it (a comment inside a macro's name, a renamed module), and
+  // review has to hold the rest.
+  // Rust lets spaces and line breaks stand between a macro's name, its `!`
+  // and its bracket, so they are taken out before anything is matched.
+  const shippedHdr = code(hdr.slice(0, hdr.indexOf('#[cfg(test)]\nmod tests'))).replace(
+    /\b([A-Za-z_]\w*)\s*!\s*([([{])/g,
+    '$1!$2',
+  );
+  // Any other macro could write or panic with a value in it (`dbg!`, an
+  // `assert!` with a message, `unreachable!`, ...), so the shipped code uses
+  // only these two; `if !(...)` and the like are negations, not macros.
+  const keywords = new Set(['if', 'while', 'match', 'return', 'in', 'else', 'let', 'mut', 'break', 'as']);
+  const macros = [...shippedHdr.matchAll(/\b([A-Za-z_]\w*)!([([{])/g)]
+    .map((found) => found[1])
+    .filter((name) => !keywords.has(name));
+  assert.ok(macros.includes('matches'));
+  assert.deepEqual([...new Set(macros)].filter((name) => name !== 'matches' && name !== 'eprintln'), [], 'hdr uses no other macro');
+  // Every `eprintln` the scan finds, whatever its bracket, is one fixed line.
+  const lines = macros.filter((name) => name === 'eprintln');
+  const fixed = shippedHdr.match(/\beprintln!\(\s*"[^"{}\\]*"\s*,?\s*\);/g) ?? [];
+  assert.ok(lines.length >= 3);
+  assert.equal(fixed.length, lines.length, 'every line hdr writes is fixed text');
+  // The plain other routes to a stream, a file, a process or a panic are
+  // refused by name as well.
+  assert.doesNotMatch(
+    shippedHdr,
+    /\b(?:io|fs|process|panic|env)::|\b(?:stderr|stdout|write_all|write_fmt|write_str|panic_any|unwrap|expect|expect_err|unwrap_err|libc|extern|unsafe)\b|\.write\(|\blog::|\btracing::/,
+  );
+});
+
 test('the shipped library is tested itself, in every full embedded E2E run', () => {
   // What the player relies on mpv for when it changes HDR targets can only
   // be shown against the real library (hdr.rs, "against the library Vela
   // ships"). Those tests are ignored in an ordinary `cargo test`, so they
   // must be run somewhere routinely: here.
   const realTests = hdr.match(/#\[ignore = "needs the shipped libmpv set: npm run test:libmpv"\]\n    fn real_library_\w+\(\)/g) ?? [];
-  assert.equal(realTests.length, 5);
+  assert.equal(realTests.length, 10);
   assert.match(hdr, /\.unwrap_or_else\(\|_\| panic!\("no libmpv set at \{\}", directory\.display\(\)\)\);/, 'a missing set fails them');
   const pkg = JSON.parse(read('package.json'));
   assert.equal(

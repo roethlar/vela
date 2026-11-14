@@ -458,6 +458,11 @@ fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Res
     player
         .initialize()
         .map_err(|reason| format!("mpv could not start ({reason})"))?;
+    // From here on mpv reports every change of its targets, whoever makes
+    // it, and `hdr` decides what to do about it (review finding hd-2).
+    if !hdr::observe_targets(&player) {
+        return Err("mpv would not report what it draws for".to_string());
+    }
     // mpv says "success" for an options file it could not read or parse.
     // These two are near the end of Vela's list and nothing works without
     // them, so reading them back shows the list arrived.
@@ -498,6 +503,19 @@ fn set_up(start: &Start, mut surface: VideoSurface, shared: &Arc<Shared>) -> Res
                     Event::None => {
                         hdr::drained(&mut tagging, &player, &mut surface, Instant::now())
                     }
+                    Event::TargetChanged {
+                        registration,
+                        option,
+                        value,
+                    } => say(hdr::target_changed(
+                        registration,
+                        &option,
+                        value.as_deref(),
+                        &mut tagging,
+                        &player,
+                        &mut surface,
+                        Instant::now(),
+                    )),
                     Event::Other => {}
                 }
             } else if exchanges < COLOUR_EXCHANGES_AT_START {
@@ -610,6 +628,19 @@ impl Live {
                     Event::Answer { request, taken } => say(hdr::answered(
                         request,
                         taken,
+                        &mut self.tagging,
+                        &self.player,
+                        &mut self.surface,
+                        now,
+                    )),
+                    Event::TargetChanged {
+                        registration,
+                        option,
+                        value,
+                    } => say(hdr::target_changed(
+                        registration,
+                        &option,
+                        value.as_deref(),
                         &mut self.tagging,
                         &self.player,
                         &mut self.surface,

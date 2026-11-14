@@ -92,11 +92,21 @@ const EVENT_NONE: c_int = 0;
 const EVENT_SHUTDOWN: c_int = 1;
 /// `MPV_EVENT_SET_PROPERTY_REPLY`: the answer to `mpv_set_property_async`.
 const EVENT_SET_PROPERTY_REPLY: c_int = 4;
+/// `MPV_EVENT_PROPERTY_CHANGE`: an observed property has changed.
+const EVENT_PROPERTY_CHANGE: c_int = 22;
 /// `MPV_FORMAT_STRING`.
 const FORMAT_STRING: c_int = 1;
 
+/// `mpv_event_property`, the data of a property change.
+#[repr(C)]
+struct RawProperty {
+    name: *const c_char,
+    format: c_int,
+    data: *mut c_void,
+}
+
 /// What mpv has to say, as far as the play acts on it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum Event {
     /// Nothing is waiting.
     None,
@@ -105,6 +115,16 @@ pub(crate) enum Event {
     /// The answer to an ask ([`super::hdr::Targetable::ask`]) made with
     /// `request`: whether mpv took the value.
     Answer { request: u64, taken: bool },
+    /// One of mpv's targets has changed, by Vela's ask or by anything else,
+    /// or is reported afresh. The only properties Vela observes are those
+    /// `hdr` names ([`super::hdr::Targetable::observe`]); `registration` is
+    /// the one this report was made under. `value` is the value as text, or
+    /// `None` when mpv cannot say.
+    TargetChanged {
+        registration: u64,
+        option: String,
+        value: Option<String>,
+    },
     /// Anything else, which the play does not act on.
     Other,
 }
@@ -123,6 +143,44 @@ fn classify(event_id: c_int, error: c_int, reply_userdata: u64) -> Event {
     }
 }
 
+/// Read a property change made under `registration` (the event's
+/// `reply_userdata`): the property's name and its value as text, both
+/// copied, since mpv reuses them at the next call on its handle.
+///
+/// # Safety
+/// `property` is NULL or the data of an `MPV_EVENT_PROPERTY_CHANGE` that has
+/// not yet been replaced by another call on its handle.
+unsafe fn property_change(registration: u64, property: *const RawProperty) -> Event {
+    if property.is_null() {
+        return Event::Other;
+    }
+    // SAFETY: the caller's contract.
+    let property = unsafe { &*property };
+    if property.name.is_null() {
+        return Event::Other;
+    }
+    // SAFETY: a NUL-terminated name owned by mpv (client.h).
+    let option = unsafe { CStr::from_ptr(property.name) }
+        .to_string_lossy()
+        .into_owned();
+    // A string's data is the address of a `char *` (client.h,
+    // `MPV_FORMAT_STRING`); a property mpv cannot read has format 0 and no
+    // data.
+    let value = if property.format == FORMAT_STRING && !property.data.is_null() {
+        // SAFETY: as just said.
+        let text = unsafe { *(property.data as *const *const c_char) };
+        (!text.is_null())
+            .then(|| unsafe { CStr::from_ptr(text) }.to_string_lossy().into_owned())
+    } else {
+        None
+    };
+    Event::TargetChanged {
+        registration,
+        option,
+        value,
+    }
+}
+
 type Callback = Option<unsafe extern "C" fn(ctx: *mut c_void)>;
 
 /// The loaded library and the functions Vela calls in it.
@@ -134,6 +192,8 @@ pub(crate) struct LibMpv {
     initialize: unsafe extern "C" fn(*mut RawHandle) -> c_int,
     set_property_async:
         unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int, *mut c_void) -> c_int,
+    observe_property: unsafe extern "C" fn(*mut RawHandle, u64, *const c_char, c_int) -> c_int,
+    unobserve_property: unsafe extern "C" fn(*mut RawHandle, u64) -> c_int,
     command: unsafe extern "C" fn(*mut RawHandle, *mut *const c_char) -> c_int,
     get_property_string: unsafe extern "C" fn(*mut RawHandle, *const c_char) -> *mut c_char,
     wait_event: unsafe extern "C" fn(*mut RawHandle, c_double) -> *mut RawEvent,
@@ -246,6 +306,8 @@ impl LibMpv {
             set_option_string: symbol!("mpv_set_option_string"),
             initialize: symbol!("mpv_initialize"),
             set_property_async: symbol!("mpv_set_property_async"),
+            observe_property: symbol!("mpv_observe_property"),
+            unobserve_property: symbol!("mpv_unobserve_property"),
             command: symbol!("mpv_command"),
             get_property_string: symbol!("mpv_get_property_string"),
             wait_event: symbol!("mpv_wait_event"),
@@ -426,8 +488,19 @@ impl Player {
         if event.is_null() {
             return Event::None;
         }
-        let (event_id, error, reply_userdata) =
-            unsafe { ((*event).event_id, (*event).error, (*event).reply_userdata) };
+        let (event_id, error, reply_userdata, data) = unsafe {
+            (
+                (*event).event_id,
+                (*event).error,
+                (*event).reply_userdata,
+                (*event).data,
+            )
+        };
+        if event_id == EVENT_PROPERTY_CHANGE {
+            // SAFETY: this event's data is an `mpv_event_property`, read
+            // before the next call on this handle.
+            return unsafe { property_change(reply_userdata, data.cast()) };
+        }
         classify(event_id, error, reply_userdata)
     }
 
@@ -484,6 +557,29 @@ impl super::hdr::Targetable for Player {
         };
         // A negative code: the ask was not sent and no answer will come.
         code >= 0
+    }
+
+    /// Observe one of those options as text under `registration`. mpv reports
+    /// its value as it next reads it, and then every change of it, whoever
+    /// makes it, as [`Event::TargetChanged`]. Neither this nor `unobserve`
+    /// waits for mpv's core (client.c: they mark the property and wake the
+    /// core), so both are safe on the thread that draws.
+    fn observe(&self, registration: u64, option: &str) -> bool {
+        let Ok(c_option) = c_string("an option name", option) else {
+            return false;
+        };
+        // SAFETY: a live handle and a valid C string, which mpv copies.
+        let code = unsafe {
+            (self.lib.observe_property)(self.raw, registration, c_option.as_ptr(), FORMAT_STRING)
+        };
+        code >= 0
+    }
+
+    /// Stop the reports made under `registration`.
+    fn unobserve(&self, registration: u64) {
+        // SAFETY: a live handle. The count of registrations removed is of no
+        // use here: none is not an error.
+        unsafe { (self.lib.unobserve_property)(self.raw, registration) };
     }
 }
 
@@ -720,9 +816,56 @@ mod tests {
         );
         assert_eq!(classify(1, 0, 0), Event::Shutdown);
         assert_eq!(classify(0, 0, 0), Event::None);
-        // Anything else, such as a property change (22) or idle (11).
-        for other in [2, 3, 6, 11, 22, 24] {
+        // Anything else, such as idle (11). A property change (22) is read
+        // by `property_change`, never here.
+        for other in [2, 3, 6, 11, 24] {
             assert_eq!(classify(other, 0, 9), Event::Other, "{other}");
         }
+    }
+
+    #[test]
+    fn a_property_change_is_read_as_its_name_and_its_text() {
+        let name = CString::new("an-option").unwrap();
+        let text = CString::new("bt.1886").unwrap();
+        let mut data: *const c_char = text.as_ptr();
+        let mut property = RawProperty {
+            name: name.as_ptr(),
+            format: FORMAT_STRING,
+            data: (&mut data as *mut *const c_char).cast(),
+        };
+        // SAFETY: a property laid out as mpv lays it out, alive for the call.
+        let read = |property: &RawProperty| unsafe { property_change(57, property) };
+        assert_eq!(
+            read(&property),
+            Event::TargetChanged {
+                registration: 57,
+                option: "an-option".to_string(),
+                value: Some("bt.1886".to_string())
+            }
+        );
+        // A property mpv cannot read: format 0, no data.
+        property.format = 0;
+        property.data = std::ptr::null_mut();
+        assert_eq!(
+            read(&property),
+            Event::TargetChanged {
+                registration: 57,
+                option: "an-option".to_string(),
+                value: None
+            }
+        );
+        // Any other format is not text, and is not read as text.
+        property.format = 4;
+        property.data = (&mut data as *mut *const c_char).cast();
+        assert_eq!(
+            read(&property),
+            Event::TargetChanged {
+                registration: 57,
+                option: "an-option".to_string(),
+                value: None
+            }
+        );
+        // SAFETY: NULL is allowed.
+        assert_eq!(unsafe { property_change(57, std::ptr::null()) }, Event::Other);
     }
 }
