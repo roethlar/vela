@@ -101,7 +101,12 @@ npm run e2e -- playback        # run one scenario by name
 The E2E venue needs `tauri-driver`, Xvfb, ffmpeg, mpv, bsdtar, and curl. The
 first run downloads the pinned WebKitWebDriver described in
 [tests/e2e/README.md](../tests/e2e/README.md); artifacts land under
-`tests/e2e/artifacts/`.
+`tests/e2e/artifacts/`. The app it runs is the debug binary in Cargo's
+target directory, as Cargo reports it when asked from `src-tauri/`, where
+`tauri build` runs Cargo (`src-tauri/target/debug/vela` unless
+`CARGO_TARGET_DIR`, a relative one taken from `src-tauri/`, or a Cargo
+configuration's `target-dir`, read from `src-tauri/` upwards, moves it), with
+or without `--skip-build`.
 
 ## The shipped libmpv set
 

@@ -12,6 +12,16 @@ npm run e2e -- smoke           # run one scenario by name
 npm run e2e -- --embedded      # the same suite, played in the embedded player
 ```
 
+- The app binary is the one Cargo builds: the runner asks Cargo where
+  (`cargo metadata`, with the environment the build gets, run in
+  `src-tauri/` where `tauri build` runs Cargo) and starts
+  `<target directory>/debug/vela`, which is `src-tauri/target/debug/vela`
+  unless `CARGO_TARGET_DIR` (a relative one is taken from `src-tauri/`, as
+  the build takes it) or a Cargo configuration's `target-dir` (read from
+  `src-tauri/` upwards, `src-tauri/.cargo/config.toml` included) moves it; with
+  `--skip-build` too. It prints the path it runs, stops when Cargo cannot
+  say, and stops when `CARGO_BUILD_TARGET` is set (the binary would then be
+  under `<target directory>/<target>/debug/`).
 - Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
   (`xorg-server-xvfb`), `bsdtar`, `curl`, `openssl`, and — for the playback-driving
   scenarios — `ffmpeg` and `mpv`. Server flows run against in-process mock
@@ -153,7 +163,15 @@ clean: it reads the scenarios, the known failures and the exemptions from
 the checkout, so it refuses runs of any other commit, and a dirty checkout.
 It also refuses a run made with `--skip-build`: such a run ran whatever
 binary was built last, of any code, so its commit says nothing about the
-app. It reads the two and fails when a scenario failed other than as its
+app. `built: true` in a results file means that the run ran the build and
+then started the binary at the path Cargo gave for the build's own
+environment, asked from `src-tauri/` where the build runs Cargo (recorded as
+`appBinary`). It does not prove that the build
+wrote that file: a Cargo configuration file's `build.target` (the
+environment's `CARGO_BUILD_TARGET` is refused) would send the build to
+`<target directory>/<target>/debug/` and leave an older binary at the path
+run; nor that nothing replaced the binary between the build and the
+scenarios. It reads the two and fails when a scenario failed other than as its
 recorded known failure, when a known failure passed (take it out) or failed
 with other text, when a scenario did not run, when the runs are of
 different or uncommitted states or not full, and when a row is shown in a
@@ -299,5 +317,6 @@ control takes no click: `showPlayerBar` in `helpers.mjs` moves the pointer
 over the view first. `cropscript` (ordinary venue, system mpv, no app) holds
 the crop script's own contract, as `markerpayload` does for the marker
 script. The debug app runs the scripts copied into
-`src-tauri/target/debug/mpv-scripts/` at build time, so after a change to a
+`<target directory>/debug/mpv-scripts/` (`src-tauri/target/debug/` unless
+moved, as for the binary above) at build time, so after a change to a
 script the scenarios that drive the app need a run without `--skip-build`.

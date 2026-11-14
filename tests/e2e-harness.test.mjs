@@ -5,7 +5,124 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { appBinaryFromMetadata, cargoMetadataCwd, METADATA_ARGS } from './e2e/app-binary.mjs';
 import { MpvIpc, mpvSocketSnapshot, setScenarioConfigRoot, socketOfScenario } from './e2e/mpv.mjs';
+
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+
+// The runner starts the binary where Cargo says it builds, not a fixed
+// src-tauri/target/debug/vela (review finding pa-6).
+test("the app binary is taken from Cargo's target directory", () => {
+  const metadata = (target, targets = [{ kind: ['staticlib', 'cdylib', 'rlib'], name: 'vela_lib' }, { kind: ['bin'], name: 'vela' }]) =>
+    JSON.stringify({ target_directory: target, packages: [{ name: 'vela', targets }] });
+  assert.equal(appBinaryFromMetadata(metadata('/elsewhere/target')), '/elsewhere/target/debug/vela');
+  assert.equal(appBinaryFromMetadata(metadata('/w/src-tauri/target')), '/w/src-tauri/target/debug/vela');
+  // When Cargo cannot say, the runner stops instead of guessing.
+  assert.throws(() => appBinaryFromMetadata('warning: something\n'), /Cargo's metadata is not JSON/);
+  assert.throws(() => appBinaryFromMetadata(metadata(undefined)), /names no absolute target directory \(target_directory is undefined\)/);
+  assert.throws(() => appBinaryFromMetadata(metadata('relative/target')), /names no absolute target directory/);
+  assert.throws(() => appBinaryFromMetadata(metadata('/t', [])), /names 0 binary targets, not the one app binary/);
+  assert.throws(
+    () => appBinaryFromMetadata(metadata('/t', [{ kind: ['bin'], name: 'a' }, { kind: ['bin'], name: 'b' }])),
+    /names 2 binary targets/,
+  );
+  // A build for a named target writes under <target>/<triple>/debug/.
+  assert.throws(
+    () => appBinaryFromMetadata(metadata('/t'), { CARGO_BUILD_TARGET: 'x86_64-unknown-linux-gnu' }),
+    /CARGO_BUILD_TARGET is "x86_64-unknown-linux-gnu": the build would write its binary under \/t\/x86_64-unknown-linux-gnu/,
+  );
+});
+
+// What Cargo really answers, with CARGO_TARGET_DIR set and without: the
+// question run.mjs asks, in the environment it asks it in.
+test('Cargo is asked where it builds, and CARGO_TARGET_DIR moves the answer', (t) => {
+  const ask = (env) =>
+    spawnSync('cargo', METADATA_ARGS, { cwd: cargoMetadataCwd(repoRoot), env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const { CARGO_TARGET_DIR: _unset, CARGO_BUILD_TARGET_DIR: _unset2, ...plain } = process.env;
+  const res = ask(plain);
+  if (res.error?.code === 'ENOENT') {
+    t.skip('cargo is not installed here');
+    return;
+  }
+  assert.equal(res.status, 0, res.stderr);
+  // src-tauri/target/debug/vela, unless a Cargo configuration of this
+  // machine moves it.
+  assert.match(appBinaryFromMetadata(res.stdout, plain), /^\/.*\/debug\/vela$/);
+  const moved = ask({ ...plain, CARGO_TARGET_DIR: '/nowhere/vela-target' });
+  assert.equal(moved.status, 0, moved.stderr);
+  assert.equal(appBinaryFromMetadata(moved.stdout, plain), '/nowhere/vela-target/debug/vela');
+});
+
+// tauri build runs `cargo build` in src-tauri/, so Cargo reads a
+// src-tauri/.cargo/config.toml there and takes a relative CARGO_TARGET_DIR
+// from there. The runner must ask from the same place, or it starts an older
+// binary than the one just built. A made-up project laid out as this one is
+// (<root>/src-tauri/Cargo.toml, with its own .cargo/config.toml) shows what
+// the runner's question answers (review finding pa-6).
+test("Cargo is asked from where the build runs it, so src-tauri's own Cargo configuration counts", (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-cargo-dir-'));
+  try {
+    const crate = path.join(root, 'src-tauri');
+    fs.mkdirSync(path.join(crate, 'src'), { recursive: true });
+    fs.mkdirSync(path.join(crate, '.cargo'));
+    fs.writeFileSync(
+      path.join(crate, 'Cargo.toml'),
+      '[package]\nname = "madeup"\nversion = "0.0.0"\nedition = "2021"\n\n[workspace]\n',
+    );
+    fs.writeFileSync(path.join(crate, 'src/main.rs'), 'fn main() {}\n');
+    const configured = path.join(root, 'configured-target');
+    fs.writeFileSync(path.join(crate, '.cargo/config.toml'), `[build]\ntarget-dir = ${JSON.stringify(configured)}\n`);
+    const { CARGO_TARGET_DIR: _unset, CARGO_BUILD_TARGET_DIR: _unset2, ...plain } = process.env;
+    const ask = (env) =>
+      spawnSync('cargo', METADATA_ARGS, { cwd: cargoMetadataCwd(root), env, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+    const res = ask(plain);
+    if (res.error?.code === 'ENOENT') {
+      t.skip('cargo is not installed here');
+      return;
+    }
+    assert.equal(res.status, 0, res.stderr);
+    assert.equal(appBinaryFromMetadata(res.stdout, plain), path.join(configured, 'debug/madeup'));
+    // A relative CARGO_TARGET_DIR is taken from src-tauri/, as the build takes it.
+    const relative = ask({ ...plain, CARGO_TARGET_DIR: 'alt' });
+    assert.equal(relative.status, 0, relative.stderr);
+    assert.equal(appBinaryFromMetadata(relative.stdout, plain), path.join(crate, 'alt/debug/madeup'));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// run.mjs asks Cargo through these helpers, from that directory: the test
+// above shows what the question answers, this that the runner asks it so.
+test('the runner asks Cargo from the directory the build runs it in', () => {
+  const run = fs.readFileSync(path.join(repoRoot, 'tests/e2e/run.mjs'), 'utf8');
+  assert.match(run, /spawnSync\('cargo', METADATA_ARGS, \{\s*cwd: cargoMetadataCwd\(repoRoot\),/);
+  assert.equal(cargoMetadataCwd('/r'), '/r/src-tauri');
+});
+
+// And the binary it starts is that answer, taken nowhere else. Asking Cargo
+// and then starting a fixed path anyway passed every test above (found when
+// the fix was checked before it landed), so the runner's own text is held to
+// it: one value is ever given to appBinary, Cargo's; every session is started
+// with it; and the runner names no target directory of its own.
+test("the runner takes the app binary from Cargo's answer, and starts that one", () => {
+  const run = fs.readFileSync(path.join(repoRoot, 'tests/e2e/run.mjs'), 'utf8');
+  assert.deepEqual(
+    [...run.matchAll(/\bappBinary\s*=(?!=)\s*([^;]*);/g)].map((m) => m[1].trim()),
+    ['appBinaryFromMetadata(res.stdout, buildEnv)'],
+    'appBinary is given one value, the path made from what Cargo answered',
+  );
+  assert.equal((run.match(/\b(?:let|const|var)\s+appBinary\b/g) ?? []).length, 1, 'appBinary is declared once');
+  const sessions = run.match(/\.newSession\(([^()]|\([^()]*\))*\)/g) ?? [];
+  assert.ok(sessions.length > 0, 'the runner starts a session');
+  assert.deepEqual([...new Set(sessions)], ['.newSession(appBinary)'], 'every session is started with that binary');
+  assert.doesNotMatch(
+    run,
+    /target\/debug|['"`]target['"`]|['"`]debug['"`]/,
+    'the runner puts no target directory together itself',
+  );
+});
 
 // Another process of this user that makes a socket of a play's name pattern
 // (a `cargo test` binary does) is not the scenario's play, however fresh its
