@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — row 2 includes the final stop. For Plex, `multiplex` waits for any timeline request and any progress request. With the final "stopped" timeline never sent, the periodic "playing" ones still satisfy it; the other scenario of row 2, `watchstate`, is Jellyfin's and cannot see it.
 **Status**: In progress
 **Branch**: —
-**Commit**: `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`
+**Commit**: `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e` (repair)
 
 ## Evidence
 
@@ -163,3 +163,70 @@ title: "The Plex coverage does not prove the final stopped timeline". Reviewer's
 - `guard_confirmed`: true. `capability_ok`: true.
 - Verdict: **reopened**. Comments, verbatim:
   - tests/e2e/judge.mjs:96 — The 2000 ms upper bound can reject correct playback: multiplex samples before stopPlayAsUser performs embedded UI waits, and showPlayerBar alone allows 3000 ms. Using the actual stop helper and Driver.waitFor with simulated controls appearing after 2250 ms produced a 7458 ms sample and a correct 9717 ms stop, which assertPlexStopped rejected. Conversely, an immediate stop at 7458 accepts an incorrect 8958 report. Observe the position through stopping, or stabilize it before sampling, and guard delayed controls explicitly; the recorded E2E runs do not cover this. Missing-stop, removed-bound, and wrong-seek mutations failed for their intended reasons; after restoration, all 26 tests passed.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right
+both ways: a correct stop that took longer than two seconds could be
+refused, and a report up to two seconds late was let through.
+
+### Repair (round 2), `d504a1e`
+
+The stopped report's time was held to mpv's position read once, before the
+stop began, with two seconds allowed after it. In the embedded player the
+stop is a click on the view's Close control; the control can take seconds
+to come up, and the play goes on meanwhile.
+
+Now the position is read all through the stop. `positionsWhile` in
+`tests/e2e/helpers.mjs` takes one reading before the stop begins and then
+one every 50 ms until the stop has acted, and hands each over; the last one
+is where the play was when it stopped, however long the stop took. A
+reading that does not answer within 300 ms (mpv has gone) is left out, and
+nothing is handed over once the stop has ended. `playAndQuit` takes
+`positionAtStop` for this, in place of `beforeStop`; `multiplex` is its
+only user. The reading before the stop is what the external player's stop
+leaves: that stop is mpv's own quit, and the scenario's connection goes
+with it at once. (The first form of this repair lacked that reading, and
+`multiplex` failed three runs of three in the external player with no
+position read at all; the end-to-end runs caught it before it landed.)
+
+The rule in `plexStopProblems` (`tests/e2e/judge.mjs`): the stopped
+report's time is within 500 ms of the last reading, either way, and short
+of the item's end. The sentences now say "mpv was last seen at N ms as it
+was stopped".
+
+Files: `tests/e2e/helpers.mjs`, `tests/e2e/judge.mjs`,
+`tests/e2e/scenarios/multiplex.mjs`, `tests/e2e-judge.test.mjs`.
+
+Guard, in `tests/e2e-judge.test.mjs`:
+
+- "the position is read all through a stop that takes long, and the report
+  is held to the last reading": the reviewer's case against a stand-in for
+  mpv (the play at 7458 ms when the stop begins, a stop that takes
+  2250 ms): the last reading is within 150 ms of where the stop acted; a
+  correct report at 9717 ms passes against it, and would not against the
+  reading from before the stop.
+- "reading the position ends with the stop, when mpv has gone, and when the
+  stop fails": mpv gone part way; nothing read after the stop; a stop that
+  ends the play at once still has the reading from before it; a stop that
+  fails is not swallowed.
+- "a stopped report away from where the play stopped fails": just over
+  500 ms late fails and exactly 500 ms passes; the reviewer's late report
+  (7458 read, 8958 reported) fails.
+- "multiplex has the position read through the stop of its play": the text
+  of `playAndQuit` and of the scenario.
+
+The cases that allowed two seconds were changed to half a second; that
+allowance was the defect.
+
+Red-proofs by the coordinating agent, the file put back and checked byte
+for byte after each: the allowance made two seconds again; the reading
+before the stop taken out; the readings during the stop taken out; the
+stop made without the reading. Each failed its test.
+
+End to end, on the repair's content: `multiplex` passed 3 runs of 3 in the
+external player and 4 of 4 in the embedded one (first reading about 7458
+to 7500 ms; reports 7458 external, 7783 embedded). `npm run check` was
+green before the commit (483 tests).
+
+Not covered: as listed above, with half a second in place of two. That
+`run()` passes `positionAtStop`, and the waits for the two reports, are
+still held by end-to-end runs and by the text test only.
