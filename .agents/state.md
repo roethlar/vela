@@ -85,9 +85,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       (`.agents/review/codereview-2026-11-14-embedded-parity.md`). All
       eight are FIXED on `main`, one commit each (`ade0278` to `9bcdfbc`,
       2026-11-14; tests only, no product code), and are going to codex for
-      verification one by one (`.agents/review/index.md`). The three that
-      changed scenarios (`pa-1`, `pa-7`, `pa-2`) each get a follow-up
-      first, being built on the local branch `pa-follow` (worktree under
+      verification one by one (`.agents/review/index.md`). Where each
+      stands (2026-11-14): `pa-8` and `pa-3` accepted and closed. `pa-4`
+      reopened once; its repair (`be3f1f4`, the watch rebuilt on what Node
+      itself reports) is back with codex. `pa-5` reopened three times,
+      each time on a narrower point; its record says why it has not gone
+      to the owner and what the next repair is (one description of the
+      whole results file, shared by the runner and the verdict), which
+      waits for `pa-6`. `pa-6` reopened once; its repair is being built on
+      the local branch `pa6-repair` (the runner is to start the binary
+      Cargo reports for the build, not a path it works out). The three
+      that changed scenarios (`pa-1`, `pa-7`, `pa-2`) each get a follow-up
+      first, being built on the local branch `pa-follow` (worktrees under
       `~/dev/vela-agent-keep/wt/`, not pushed): nothing that plain
       `node --test` runs fails when one of those fixes is taken out, and
       codex's sandbox cannot run the end-to-end suite, so it could not
@@ -135,8 +144,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the change. It is not a recorded known failure, so it fails a parity
   verdict when it strikes. Whether the product loses a change mpv has
   already reported, or the scenario asks for more than a user could do,
-  has not been settled; that is the next piece of work on the player
-  window.
+  has not been settled; it is being settled on the local branch
+  `ws-flake` (to be recorded as finding `pw-8`). Both full suites at
+  `ac25240`, the last of the seven fixes: embedded 49 of 50 (`pagefail`,
+  recorded), external 45 of 48 (the two recorded failures and
+  `windowsetting`), so the parity verdict failed there on that scenario
+  alone; it is to be run again once `pw-8` is fixed.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
