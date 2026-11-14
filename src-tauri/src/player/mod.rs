@@ -161,6 +161,20 @@ impl PlayerHandle {
         }
     }
 
+    /// Whether this is the EMBEDDED play of `session_id`. An embedded play
+    /// is put in the slot only once it has started, and so once the page has
+    /// been told its view opened. Asked under the slot's lock.
+    pub(crate) fn is_embedded_play(&self, session_id: &str) -> bool {
+        match self {
+            PlayerHandle::External(_) => {
+                let _ = session_id;
+                false
+            }
+            #[cfg(target_os = "linux")]
+            PlayerHandle::Embedded(session) => session.is_play(session_id),
+        }
+    }
+
     /// Non-blocking: has the player ended? `Ok(true)` only once its end is
     /// confirmed; a player that is still running is `Ok(false)`.
     pub(crate) fn has_ended(&mut self) -> std::io::Result<bool> {

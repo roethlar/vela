@@ -535,6 +535,136 @@ test('a play the backend replaces keeps fullscreen (case 8)', () => {
   assert.deepEqual(fullscreenLeftAt([opened('a'), opened('b'), closed('a'), ended('a', false)]), []);
 });
 
+// pc-2, reopened: a play that replaced the one showing (a step-down, a play
+// the user or the page starts, a playlist's next play) fails to start. The
+// old play's own report says "not over" when it comes while the replacement
+// is still installed, and "over" when it comes after the failure was undone;
+// the failed launch reports the old play's run over. The page leaves at the
+// first report that says so, in every order of the three events.
+const failedReplacement = (sessionId) => ({ kind: 'ended', payload: { sessionId, runOver: true } });
+
+test('a play that replaced the one showing and fails to start leaves fullscreen at once, in every order, whoever started it', () => {
+  const orders = [
+    // The old play's report while the replacement is installed.
+    [[opened('a'), ended('a', false), failedReplacement('a'), closed('a')], 2],
+    [[opened('a'), ended('a', false), closed('a'), failedReplacement('a')], 3],
+    [[opened('a'), closed('a'), ended('a', false), failedReplacement('a')], 3],
+    // Its report after the failure was undone.
+    [[opened('a'), failedReplacement('a'), ended('a', true), closed('a')], 1],
+    [[opened('a'), failedReplacement('a'), closed('a'), ended('a', true)], 1],
+    [[opened('a'), closed('a'), failedReplacement('a'), ended('a', true)], 2],
+    // Its report read the state before the failure, and arrives after.
+    [[opened('a'), failedReplacement('a'), ended('a', false), closed('a')], 1],
+    [[opened('a'), closed('a'), failedReplacement('a'), ended('a', false)], 2],
+  ];
+  for (const [events, at] of orders) {
+    const left = fullscreenLeftAt(events);
+    assert.equal(left[0], at, JSON.stringify(events));
+  }
+});
+
+test("a failed replacement's report leaves nothing while another play's view shows, and miscounts nothing after", () => {
+  assert.deepEqual(fullscreenLeftAt([opened('a'), opened('c'), failedReplacement('a'), closed('a')]), []);
+  // A later play's first report of a clean end is still only its first.
+  assert.deepEqual(
+    fullscreenLeftAt([
+      opened('a'),
+      ended('a', false),
+      failedReplacement('a'),
+      closed('a'),
+      opened('b'),
+      ended('b', false),
+      closed('b'),
+      ended('b', false),
+    ]),
+    [2],
+  );
+});
+
+// pc-2: a launch whose play started in the embedded player (its view was
+// announced) and then failed reports that play run over too, right after the
+// replaced play's report. With the new play's view showing, the replaced
+// play's report leaves nothing; the new play's own leaves, in every order.
+test("a failed launch whose own view opened leaves fullscreen at once, in every order", () => {
+  const orders = [
+    [[opened('a'), opened('n'), closed('a'), ended('a', false), failedReplacement('a'), failedReplacement('n'), closed('n')], 5],
+    [[opened('a'), opened('n'), ended('a', false), failedReplacement('a'), closed('n'), failedReplacement('n'), closed('a')], 5],
+    [[opened('a'), opened('n'), closed('n'), closed('a'), ended('a', false), failedReplacement('a'), failedReplacement('n')], 5],
+    [[opened('a'), ended('a', false), opened('n'), failedReplacement('a'), failedReplacement('n'), closed('a'), closed('n')], 4],
+    [[opened('a'), opened('n'), failedReplacement('a'), failedReplacement('n'), ended('a', true), closed('a'), closed('n')], 3],
+    // A first play: nothing replaced, only its own report.
+    [[opened('n'), failedReplacement('n'), closed('n')], 1],
+    [[opened('n'), closed('n'), failedReplacement('n')], 2],
+  ];
+  for (const [events, at] of orders) {
+    assert.equal(fullscreenLeftAt(events)[0], at, JSON.stringify(events));
+  }
+});
+
+test('a launch that fails after replacing a play reports that play run over, and no other path does', () => {
+  // The sequence itself (the replaced play read before anything is
+  // installed, the report given only when the launch fails and nothing is
+  // playing) is run by the Rust tests of `install_and_launch`. What is held
+  // here is the wiring around it: the play path starts every play through
+  // it, hands it the function that really sends the report, and sends no
+  // such report of its own anywhere else.
+  const testsAt = commands.indexOf('\n#[cfg(test)]\nmod tests {');
+  assert.notEqual(testsAt, -1, 'the command layer has its test module');
+  const shipped = commands.slice(0, testsAt);
+  const playPath = shipped.slice(shipped.indexOf('\nasync fn play_by_key_locked('));
+  const playBody = playPath.slice(0, playPath.indexOf('\n}\n'));
+  assert.match(
+    playBody,
+    shape(`let stop = install_and_launch(
+        state,
+        PlayInstall {`),
+  );
+  assert.match(
+    playBody,
+    shape(`launch,
+        |end| report_playback_ended(state, end),
+    )
+    .await
+    .map_err(PlayFailure::fatal)?;`),
+  );
+  // What sends it: `playback-ended`, with the value it is given.
+  assert.match(
+    shipped,
+    shape(`fn report_playback_ended(state: &AppState, end: serde_json::Value) {
+        if let Some(app) = state.app_handle.get() {
+            use tauri::Emitter;
+            let _ = app.emit("playback-ended", end);
+        }
+    }`),
+  );
+  // Nothing else in the command layer sends it or reads the play to report:
+  // the play path's only `playback-ended` is its tracker's own report, and a
+  // play that fails at its resolve, or starts, sends nothing more.
+  assert.equal(shipped.split('report_playback_ended(').length - 1, 2, 'defined once and passed once');
+  assert.equal(shipped.split('replaced_embedded_session(').length - 1, 2, 'defined once and read once');
+  assert.match(
+    shipped,
+    shape(`let replaced = replaced_embedded_session(state, install.session_id).await;`),
+  );
+  assert.equal(shipped.split('"playback-ended"').length - 1, 2, "the tracker's report and the failed launch's");
+  assert.equal(playBody.split('"playback-ended"').length - 1, 1, "the play path's own is the tracker's report");
+  assert.match(playBody, /let run_over = tracker_end_is_run_over\([\s\S]{0,400}"playback-ended",\s+serde_json::json!\(\{/);
+  // The tracker's verdict is the function the Rust tests run, which notes an
+  // end told "the run goes on" for the launch to find: the tracker calls it,
+  // and nothing else does.
+  assert.equal(shipped.split('tracker_end_is_run_over(').length - 1, 2, 'defined once and called once, by the tracker');
+  // What it reports: a session and the flag, nothing else.
+  assert.match(
+    commands,
+    shape(`.map(|session| {
+        serde_json::json!({
+            "sessionId": session,
+            "runOver": true,
+        })
+    })`),
+  );
+});
+
 test('a report that does not say the run is over never leaves on its own', () => {
   assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), endedAgain()]), []);
   assert.deepEqual(
@@ -551,12 +681,9 @@ test("the tracker's report of an end names its session and says whether the run 
   // there.
   assert.match(
     commands,
-    shape(`let run_over = end_is_run_over(
+    shape(`let run_over = tracker_end_is_run_over(
+        &app.state::<AppState>(),
         advance.saw_eof(&session_id),
-        app.state::<AppState>()
-            .active_playback_session
-            .blocking_lock()
-            .as_deref(),
         &session_id,
     );
     let _ = app.emit(

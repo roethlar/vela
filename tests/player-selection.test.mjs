@@ -67,6 +67,11 @@ test('once a play has installed its session, only the launch-failure path ends i
   // that the stretch from the installation to the arm is exactly these lines,
   // none of which can fail. (A panic is not an early return: release builds
   // abort on one, `panic = "abort"`, so no half-started Vela is left running.)
+  //
+  // The installation, the run of `launch` and the arm live in one function,
+  // `install_and_launch`, which the play path calls once with the block
+  // (review finding pc-2: so that a Rust test runs that very sequence). The
+  // play path itself installs nothing.
   const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
   const statements = (text) =>
     text
@@ -74,45 +79,103 @@ test('once a play has installed its session, only the launch-failure path ends i
       .map((line) => line.trim())
       .filter((line) => line && !line.startsWith('//'));
 
-  const installing = '    let previous_cursor = {\n';
-  const undoing = '    let stop = match launched {\n';
-  const from = body.indexOf(installing);
-  const to = body.indexOf(undoing);
-  assert.notEqual(from, -1, 'the play must still install its playlist position and session');
-  assert.ok(to > from, 'and must still end in the arm that undoes them');
-  assert.equal(body.indexOf(installing, from + 1), -1);
-  assert.equal(body.indexOf(undoing, to + 1), -1);
-  assert.deepEqual(statements(body.slice(from, to)), [
-    'let previous_cursor = {',
-    'let mut cursor = state.playlist_cursor.lock().await;',
-    'std::mem::replace(&mut *cursor, new_cursor)',
-    '};',
-    'install_playback_session(state, session_id, item, run_kind, next_affinity).await;',
-    'let launched: Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String> = launch.await;',
+  const calling = '    let stop = install_and_launch(\n';
+  const from = body.indexOf(calling);
+  assert.notEqual(from, -1, 'the play must still install and start itself through install_and_launch');
+  assert.equal(body.indexOf('install_and_launch(', from + calling.length), -1, 'once');
+  const callEnd = body.indexOf(';\n', from);
+  assert.deepEqual(statements(body.slice(from, callEnd + 1)), [
+    'let stop = install_and_launch(',
+    'state,',
+    'PlayInstall {',
+    'session_id,',
+    'item,',
+    'run_kind,',
+    'affinity_source_id: next_affinity,',
+    'cursor,',
+    'transcode_session: transcode_session.as_deref(),',
+    '},',
+    'launch,',
+    '|end| report_playback_ended(state, end),',
+    ')',
+    '.await',
+    '.map_err(PlayFailure::fatal)?;',
   ]);
+  for (const installs of ['install_playback_session', 'playlist_cursor', 'undo_failed_launch', 'launch.await']) {
+    assert.equal(body.indexOf(installs), -1, `the play path itself has no ${installs}`);
+  }
 
-  // `launch` is the block, defined once, before anything is installed.
+  // `launch` is the block, defined once, before anything is installed, and
+  // handed over once, unrun.
   const defined = body.indexOf('    let launch = async {\n');
   assert.notEqual(defined, -1, 'the steps that start the play are one block');
   assert.ok(defined < from, 'written before the installation');
   assert.equal(body.split('let launch =').length - 1, 1, 'written once');
-  assert.equal(body.split('launch.await').length - 1, 1, 'and run once, by the line above');
+  assert.equal(
+    [...statements(body).join('\n').matchAll(/\blaunch\b/g)].length,
+    2,
+    'and named only where it is written and handed over',
+  );
 
-  // The arm, whole: stop the transcode, clear the session, put the playlist
-  // position back, and only then report the failure.
-  const arm = body.slice(to);
-  const reported = arm.indexOf('            return Err(PlayFailure::fatal(message));\n        }\n    };\n');
-  assert.notEqual(reported, -1, 'the arm ends by reporting the failure');
-  assert.deepEqual(statements(arm.slice(0, reported)), [
-    'let stop = match launched {',
-    'Ok(stop) => stop,',
+  // The installation, the launch and the arm, whole: note the play being
+  // replaced, install, run the launch, and on failure undo it and tell the
+  // page about the replaced play when there is something to tell (review
+  // finding pc-2), then report the failure.
+  const installAndLaunch = functionBody(commands, 'async fn install_and_launch<', 'install_and_launch');
+  const opens = installAndLaunch.indexOf('\n{\n');
+  assert.notEqual(opens, -1, 'install_and_launch opens its body on a line of its own');
+  const sequence = installAndLaunch.slice(opens);
+  assert.deepEqual(statements(sequence), [
+    '{',
+    'let replaced = replaced_embedded_session(state, install.session_id).await;',
+    'state',
+    '.ends_told_run_goes_on',
+    '.lock()',
+    '.unwrap_or_else(|e| e.into_inner())',
+    '.clear();',
+    'let previous_cursor = {',
+    'let mut cursor = state.playlist_cursor.lock().await;',
+    'std::mem::replace(&mut *cursor, install.cursor)',
+    '};',
+    'install_playback_session(',
+    'state,',
+    'install.session_id,',
+    'install.item,',
+    'install.run_kind,',
+    'install.affinity_source_id,',
+    ')',
+    '.await;',
+    'match launch.await {',
+    'Ok(stop) => Ok(stop),',
     'Err(message) => {',
-    'if let Some(session) = transcode_session.as_deref() {',
+    'let ends = undo_failed_launch(',
+    'state,',
+    'install.session_id,',
+    'install.transcode_session,',
+    'previous_cursor,',
+    'replaced.as_deref(),',
+    ')',
+    '.await;',
+    'for end in ends {',
+    'report_end(end);',
+    '}',
+    'Err(message)',
+    '}',
+    '}',
+  ]);
+  // The undo, whole: stop the transcode, clear the session, put the playlist
+  // position back, and say what to report.
+  const undo = functionBody(commands, 'async fn undo_failed_launch(', 'undo_failed_launch');
+  const undoBody = undo.slice(undo.indexOf(') -> Vec<serde_json::Value> {\n'));
+  assert.deepEqual(statements(undoBody), [
+    ') -> Vec<serde_json::Value> {',
+    'if let Some(session) = transcode_session {',
     'if let Some(record) = take_active_transcode(&state.active_transcode, session) {',
     'stop_transcode_record(record).await;',
     '}',
     '}',
     'clear_playback_session_if(state, session_id).await;',
+    '{',
     'let mut cursor = state.playlist_cursor.lock().await;',
     'if cursor',
     '.as_ref()',
@@ -120,6 +183,27 @@ test('once a play has installed its session, only the launch-failure path ends i
     '{',
     '*cursor = previous_cursor;',
     '}',
+    '}',
+    'let replaced_told_goes_on = replaced.filter(|replaced| {',
+    'state',
+    '.ends_told_run_goes_on',
+    '.lock()',
+    '.unwrap_or_else(|e| e.into_inner())',
+    '.iter()',
+    '.any(|ended| ended == replaced)',
+    '});',
+    'let own_view_shown = state',
+    '.current_child',
+    '.lock()',
+    '.unwrap_or_else(|e| e.into_inner())',
+    '.as_ref()',
+    '.is_some_and(|player| player.is_embedded_play(session_id));',
+    'let active = state.active_playback_session.lock().await;',
+    'failed_launch_ends(',
+    'replaced_told_goes_on,',
+    'own_view_shown.then_some(session_id),',
+    'active.as_deref(),',
+    ')',
   ]);
 
   // The player setting is read before anything is resolved or installed.

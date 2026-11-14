@@ -99,6 +99,14 @@ pub struct AppState {
     /// (an Automatic step-down) stays in the same player even if the setting
     /// changed in between.
     pub(crate) active_playback_player: AsyncMutex<Option<(String, player::PlayerKind)>>,
+    /// Plays whose tracker reported their end while another play was the
+    /// active one, so told the page their run goes on. Added to by the
+    /// tracker's own thread (a plain thread) while it holds
+    /// `active_playback_session`; read and emptied by a launch on the async
+    /// command task, never across an await. A launch that fails after it
+    /// stopped one of these plays owes the page the report that the run is
+    /// over (review finding pc-2).
+    pub(crate) ends_told_run_goes_on: Mutex<Vec<String>>,
     /// Which embedded-player fallback the user has already been told about.
     pub(crate) embedded_fallback_notices: Arc<Mutex<player::FallbackNotices>>,
     /// The embedded player's side of the app: whether it can run here, and
@@ -123,6 +131,42 @@ pub struct AppState {
     /// Materialized merged children for the currently-open show or season.
     /// Continuation pages window the same source set and ordering as page 0.
     pub merged_children_snapshot: AsyncMutex<Option<commands::MergedChildrenSnapshot>>,
+}
+
+#[cfg(test)]
+impl AppState {
+    /// The state as `run` builds it, with no sources, a ready durable gate
+    /// and no app, for unit tests of code that takes the whole state.
+    pub(crate) fn for_tests() -> Self {
+        AppState {
+            registry: AsyncMutex::new(SourceRegistry::default()),
+            durable_gate: AsyncMutex::new(durable::DurableGate::ready()),
+            tracking_stop: Mutex::new(None),
+            current_child: Arc::new(Mutex::new(None)),
+            shutting_down: Arc::new(AtomicBool::new(false)),
+            active_transcode: Arc::new(Mutex::new(None)),
+            step_down: Arc::new(commands::StepDownQueue::default()),
+            reap_queue: Arc::new(Mutex::new(Vec::new())),
+            play_lock: AsyncMutex::new(()),
+            watch_edit_lock: AsyncMutex::new(()),
+            source_lock: AsyncMutex::new(()),
+            plex_link_sessions: AsyncMutex::new(Default::default()),
+            playback_advance: Arc::new(commands::PlaybackAdvance::default()),
+            playlist_cursor: AsyncMutex::new(None),
+            active_playback_session: AsyncMutex::new(None),
+            active_playback_item: AsyncMutex::new(None),
+            active_playback_player: AsyncMutex::new(None),
+            ends_told_run_goes_on: Mutex::new(Vec::new()),
+            embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
+            embedded: Arc::new(player::EmbeddedHost::new()),
+            playback_run: AsyncMutex::new(None),
+            playback_choices: AsyncMutex::new(Default::default()),
+            playback_window_session: Mutex::new(None),
+            app_handle: std::sync::OnceLock::new(),
+            merged_snapshot: AsyncMutex::new(None),
+            merged_children_snapshot: AsyncMutex::new(None),
+        }
+    }
 }
 
 /// Decide, before any window exists, how this run of Vela creates its window,
@@ -168,6 +212,7 @@ pub fn run() {
         active_playback_session: AsyncMutex::new(None),
         active_playback_item: AsyncMutex::new(None),
         active_playback_player: AsyncMutex::new(None),
+        ends_told_run_goes_on: Mutex::new(Vec::new()),
         embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
         embedded: Arc::new(player::EmbeddedHost::new()),
         playback_run: AsyncMutex::new(None),
