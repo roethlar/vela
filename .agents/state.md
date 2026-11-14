@@ -87,7 +87,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       2026-11-14; tests only, no product code), and are going to codex for
       verification one by one (`.agents/review/index.md`). Where each
       stands (2026-11-14, afternoon): `pa-8`, `pa-3` and `pa-2` accepted
-      and closed. The other five were reopened and repaired, each record
+      and closed, `pa-6` closed too. The other five were reopened and repaired, each record
       says on what: `pa-1` three times (third repair `8ed9acb` with codex;
       its record says that a fourth reopen goes to the owner),
       `pa-7` twice (its third repair is being built by helper agents on
@@ -98,9 +98,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       owner": the rounds are not getting narrower; three ways on, the agent
       recommends taking it as it is), `pa-5` four times (its record says
       why it did not go to the owner and when it will; its fourth repair is
-      being written by codex, see below), `pa-6` twice (its second repair,
-      `3d2ecca`, was written by codex and reviewed by the agent, and is
-      not sent to codex; see below). The three that changed scenarios (`pa-1`,
+      being written by codex, see below), `pa-6` twice, and CLOSED: its second repair,
+      `3d2ecca`, was written by codex and reviewed by the agent (see
+      below). The three that changed scenarios (`pa-1`,
       `pa-7`, `pa-2`) each got follow-up commits so that plain
       `node --test` holds the fix (`17d415f` to `2a42345`): codex's sandbox
       cannot run the end-to-end suite. Notes kept
@@ -133,9 +133,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     written); and `pw-7`'s fourth (waiting its turn). Codex cannot be the
     reviewer of code it wrote, so for these the agent reviews (reads the
     diff, runs the checks and the end-to-end runs codex's sandbox cannot,
-    red-proves the tests) and lands them; their records say so. Whether
-    the agent's review may stand in for codex's there is the owner's to
-    confirm; nobody has asked for it to be done differently.
+    red-proves the tests) and lands them; their records say so. The owner
+    DECIDED on 2026-11-14 that the agent's review closes a finding whose
+    last repair codex wrote (`.agents/decisions.md`, that date). `pa-6` is
+    closed under it.
   After the embedded plan's slices came
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved: LANDED
   2026-11-14 at `9815e10` as one commit, Vela 1.0.64 (not released, not

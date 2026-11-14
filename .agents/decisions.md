@@ -2131,3 +2131,39 @@ Agent's reading (not the owner's words):
 - A custom `--fullscreen`, `--window-maximized` or `--geometry` in the
   Advanced options or in `mpv.conf` decides only the first play of a run,
   and only in the "Default" choice once a window has been saved.
+
+## 2026-11-14 - Coding tasks may go to codex; a repair codex wrote is closed by the working agent's review
+
+Status: APPROVED (owner, 2026-11-14).
+
+Decision:
+The working agent may hand coding tasks to codex and review what codex
+writes. Owner, 2026-11-14: "can you dispatch some coding tasks to codex
+using the gpt-6-astra max model/effort, then review its work? I want to
+see if we can make some progress by splitting effort." Codex is called
+plainly for these, as it is for reviews (decision 2026-07-26); on
+`continuum` a plain call resolves to gpt-6-astra at max effort.
+
+For a finding whose last repair codex wrote, the working agent's review is
+the review that closes it. The owner chose this on 2026-11-14 ("My review
+closes them") over two other ways put to them: a fresh codex session
+verifying the repair, and the owner reading each one personally. That
+review is: reading the diff, the full check, red-proofs of the agent's
+own, and the end-to-end runs codex's sandbox cannot make. The finding's
+record carries it, and the index says "codex wrote it; reviewed by the
+agent".
+
+Everything else stands. Code the working agent or its helper agents wrote
+is reviewed by codex and never by a Claude harness.
+
+Reason:
+What a review is for is that the author and the reviewer are different
+parties. When codex is the author, the working agent is the other party.
+A codex session verifying codex's repair would be the same family checking
+its own work, which is what the decision of 2026-07-26 rules out in the
+other direction. Codex's sandbox also cannot run the end-to-end suite,
+and the working agent can.
+
+Supersedes:
+Nothing. It qualifies "Never review Vela's code with a Claude harness"
+(2026-07-26) for one case only: a repair that codex itself wrote.

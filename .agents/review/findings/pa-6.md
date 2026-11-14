@@ -361,3 +361,9 @@ Known gaps:
 - The limits of the file-identity check (device, inode, size and
   modification time, not content) and of `--skip-build` stand as recorded
   in round 2.
+
+**Closed, 2026-11-14.** The owner decided that day that a finding whose
+last repair codex wrote is closed by the working agent's review
+(`.agents/decisions.md`, 2026-11-14, "Coding tasks may go to codex").
+Round 3 above is such a repair, and the review recorded with it closes
+this finding.
