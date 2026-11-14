@@ -45,7 +45,8 @@
 #     the pinned mpv release with that release's client API version, and every
 #     library of the set in the process came from the unpacked package
 #     (check-libmpv.py);
-#   * a pacman package also has every licence text where Arch keeps licences.
+#   * a pacman package also has every licence text where Arch keeps licences,
+#     each a file of the package itself that every user may read.
 #
 # With --without-libmpv the package must contain NO part of the set (a default
 # build): nothing named like the set anywhere in it and, with --set, no file
@@ -256,12 +257,14 @@ unpack() {
 
 # not_enterable ROOT DIR: of the directories from the top of DIR (a path
 # relative to ROOT) down to DIR itself, the first that not every user may
-# enter, printed; nothing when every user may enter them all.
+# enter, printed; nothing when every user may enter them all. The walk ends
+# without a word at a directory the package does not have.
 not_enterable() {
   local root="$1" rest="$2" walked=""
   while [ -n "$rest" ]; do
     walked="${walked:+$walked/}${rest%%/*}"
     case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+    [ -d "$root/$walked" ] || return 0
     if [ -z "$(find "$root/$walked" -maxdepth 0 -type d -perm -001 -print 2>/dev/null)" ]; then
       printf '%s\n' "$walked"
       return 0
@@ -272,7 +275,8 @@ not_enterable() {
 # The package must contain the set, whole, where Vela will look for it.
 check_with() {
   local package="$1" root="$2" set="$2/$SET_PATH"
-  local stray real_root real_set closed pins have line out status kind component path texts
+  local stray real_root real_set closed pins have line out status kind component path texts copy closed_dir
+  local -A told=()
 
   if [ ! -d "$set" ]; then
     fail "place: the package has no $SET_PATH, and Vela looks for the set nowhere else"
@@ -377,8 +381,25 @@ check_with() {
         while read -r kind component path; do
           [ "$kind" = licence ] || continue
           texts=$((texts + 1))
-          cmp -s "$set/$path" "$root/$ARCH_LICENCES/$component/${path##*/}" \
-            || fail "licences: $ARCH_LICENCES/$component/${path##*/} is missing or is not the set's $path"
+          copy="$ARCH_LICENCES/$component/${path##*/}"
+          # Each copy has to be what the set's text is to an installed
+          # package: a file of the package itself (a link would lead, on the
+          # user's machine, wherever it points there, or nowhere), that every
+          # user may read, below directories every user may enter.
+          if [ -L "$root/$copy" ] || [ "$(realpath -m -- "$root/$copy")" != "$real_root/$copy" ]; then
+            fail "licences: $copy is a symbolic link, or is reached through one; a licence text must be a file of the package itself"
+            continue
+          fi
+          closed_dir="$(not_enterable "$root" "${copy%/*}")"
+          if [ -n "$closed_dir" ] && [ -z "${told[$closed_dir]:-}" ]; then
+            fail "licences: $closed_dir cannot be entered by every user (other users have '$(stat -c %A "$root/$closed_dir" | cut -c8-10)'), and a licence text is below it"
+            told[$closed_dir]=1
+          fi
+          if [ ! -f "$root/$copy" ] || ! cmp -s "$set/$path" "$root/$copy"; then
+            fail "licences: $copy is missing or is not the set's $path"
+          elif [ -z "$(find "$root/$copy" -maxdepth 0 -perm -004 -print)" ]; then
+            fail "licences: $copy cannot be read by every user (other users have '$(stat -c %A "$root/$copy" | cut -c8-10)')"
+          fi
         done < "$set/MANIFEST"
       fi
       if [ "$texts" -eq 0 ]; then

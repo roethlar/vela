@@ -256,8 +256,13 @@ test('the Arch package installs the set where the loader reads it, with its lice
   );
   has(
     checkPackage,
-    '\n          cmp -s "$set/$path" "$root/$ARCH_LICENCES/$component/${path##*/}" \\\n            || fail "licences: ',
+    '\n          copy="$ARCH_LICENCES/$component/${path##*/}"\n',
     'and the check looks for each of them there',
+  );
+  has(
+    checkPackage,
+    '\n          if [ ! -f "$root/$copy" ] || ! cmp -s "$set/$path" "$root/$copy"; then\n            fail "licences: ',
+    'and compares it with the text in the set',
   );
 });
 
@@ -935,7 +940,8 @@ const setFilesOf = (manifest, differing = {}) => {
 //   archLicences  what differs in the directory Arch keeps licences in:
 //                 { component: other text, or null to leave it out };
 //                 null for no such directory at all
-const packageWith = (t, manifest, { files = {}, archLicences = {}, modes = {}, kind = 'pkg.tar.zst' } = {}) => {
+//   links         links to add anywhere in the package ({ path: target })
+const packageWith = (t, manifest, { files = {}, archLicences = {}, modes = {}, links = {}, kind = 'pkg.tar.zst' } = {}) => {
   const inSet = setFilesOf(manifest, files);
   const inArchDirectory = {};
   for (const line of manifest.split('\n')) {
@@ -954,7 +960,7 @@ const packageWith = (t, manifest, { files = {}, archLicences = {}, modes = {}, k
         Object.entries(inArchDirectory).map(([name, contents]) => [`usr/share/licenses/vela/libmpv/${name}`, contents]),
       ),
     },
-    {},
+    links,
     modes,
   );
 };
@@ -1499,6 +1505,59 @@ test('the package check compares the set in the package with the pins, the set i
       assert.deepEqual(run.stdout.match(/^FAIL licences: .*$/gm), [
         "FAIL licences: usr/share/licenses/vela/libmpv/mpv/LICENSE.LGPL is missing or is not the set's licenses/mpv/LICENSE.LGPL",
       ]);
+    });
+  }
+
+  // A copy with the right text is not enough: installed, it has to be there,
+  // and every user has to be able to read it.
+  const archCopy = 'usr/share/licenses/vela/libmpv/mpv/LICENSE.LGPL';
+  const outsideCopy = (t) => {
+    const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-outside-')));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(directory, 'LICENSE.LGPL'), licenceOf('mpv'));
+    return path.join(directory, 'LICENSE.LGPL');
+  };
+  const notAFile = `FAIL licences: ${archCopy} is a symbolic link, or is reached through one; a licence text must be a file of the package itself`;
+  const licenceCopies = {
+    'a link out of the package, by absolute path': (t) => [{ archLicences: { mpv: null }, links: { [archCopy]: outsideCopy(t) } }, [notAFile]],
+    'a link out of the package, by a relative path': (t) => {
+      // From the copy's directory in the unpacked package, as many steps up
+      // as it takes to leave the temporary directory, then down to the text.
+      const target = `${'../'.repeat(40)}${outsideCopy(t).slice(1)}`;
+      return [{ archLicences: { mpv: null }, links: { [archCopy]: target } }, [notAFile]];
+    },
+    "a link to the set's own copy, inside the package": () => [
+      { archLicences: { mpv: null }, links: { [archCopy]: '../../../../../lib/Vela/libmpv/licenses/mpv/LICENSE.LGPL' } },
+      [notAFile],
+    ],
+    'a directory of copies that is a link out of the package': (t) => [
+      { archLicences: { mpv: null }, links: { 'usr/share/licenses/vela/libmpv/mpv': path.dirname(outsideCopy(t)) } },
+      [notAFile],
+    ],
+    'a copy only its owner may read': () => [
+      { modes: { [archCopy]: 0o600 } },
+      [`FAIL licences: ${archCopy} cannot be read by every user (other users have '---')`],
+    ],
+    'a directory of copies that other users may not enter': () => [
+      { modes: { 'usr/share/licenses/vela/libmpv/mpv': 0o700 } },
+      [
+        "FAIL licences: usr/share/licenses/vela/libmpv/mpv cannot be entered by every user (other users have '---'), and a licence text is below it",
+      ],
+    ],
+    'the directory of all of them closed: said once': () => [
+      { modes: { 'usr/share/licenses': 0o700 } },
+      [
+        "FAIL licences: usr/share/licenses cannot be entered by every user (other users have '---'), and a licence text is below it",
+      ],
+    ],
+  };
+  for (const [what, make] of Object.entries(licenceCopies)) {
+    await t.test(`a licence copy: ${what}`, (t) => {
+      const [options, lines] = make(t);
+      const run = checkPackageRun([packageWith(t, right, options).file]);
+      assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+      assert.deepEqual(run.stdout.match(/^FAIL licences: .*$/gm), lines);
+      assert.doesNotMatch(run.stdout, /^ok   licences:/m);
     });
   }
 

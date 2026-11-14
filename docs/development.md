@@ -297,7 +297,9 @@ directory (nothing is installed) and requires that:
   its start-up code, so a package that has failed any of the checks above is
   not loaded at all; a line that begins `skip load` says so;
 - an Arch package also has every licence text under
-  `usr/share/licenses/vela/libmpv`.
+  `usr/share/licenses/vela/libmpv`, each a file of the package itself (not a
+  symbolic link, nor reached through one), readable by every user, below
+  directories every user may enter.
 
 It needs `bsdtar` and Python 3, and, because it really loads the library, the
 system libraries the set leans on (the `system` lines of the `MANIFEST`). An
