@@ -4898,9 +4898,10 @@ struct PlaybackSelection {
     raw_item_key: String,
     version_id: Option<String>,
     item: ItemDto,
-    /// The player the play asks for (`select_playback_version`), read with
-    /// the settings the copy was chosen with.
-    player: crate::player::PlayerKind,
+    /// The player the play will run in, and why not the one asked for when
+    /// it falls back (`select_playback_version`): decided with the settings
+    /// the copy was chosen with, before the copy was ranked for its screen.
+    player: crate::player::PlayerChoice,
     /// The screen the copy was ranked for, when a Compatible choice was made
     /// from a play's observation. The play opens there (review finding pw-1).
     ranked_screen: Option<RankedScreen>,
@@ -5052,9 +5053,11 @@ fn compatibility_display(
 
 /// What a Compatible choice ranks for, and, when it ranks for a play's
 /// observation, the screen that is (`RankedScreen`), for the play to open
-/// on. `upcoming` is the player the play asks for; should an embedded play
-/// fall back to mpv's own window when it starts, its copy has been chosen
-/// for Vela's screen.
+/// on. `upcoming` is the player the play will run in: the one asked for, or
+/// mpv's own window when the embedded player cannot run (review finding
+/// pw-2). Should an embedded play that could run fall back to mpv's own
+/// window when it starts after all, its copy has been chosen for Vela's
+/// screen.
 async fn playback_compatibility_target(
     state: &AppState,
     replace_session: Option<&str>,
@@ -5199,8 +5202,24 @@ async fn select_playback_version(
     // the play on (review finding pw-2). This is before anything is resolved
     // or installed, so a settings file that cannot be read fails the play
     // while there is still nothing to undo (review finding sel-1).
-    let upcoming_player =
+    let wanted_player =
         player.unwrap_or_else(|| crate::player::PlayerKind::from_setting(cfg.player.as_deref()));
+    // Which player the play will really run in (decisions D1 and D3 of
+    // `.agents/plans/embedded-player.md`): what is asked for, and mpv's own
+    // window whenever the embedded player cannot run. Decided here, once,
+    // and carried to the launch, because the screen a Compatible copy is
+    // ranked for is the screen of the player that runs the play, not of the
+    // one asked for (review finding pw-2). Whether the embedded player can
+    // run is asked only for a play that wants it (the answer comes from the
+    // window). A play that can run embedded now and then cannot start there
+    // after all still falls back at the start (`EmbeddedFallback`).
+    let embedded_available = match wanted_player {
+        crate::player::PlayerKind::External => Ok(()),
+        crate::player::PlayerKind::Embedded => {
+            crate::player::embedded_availability(&state.embedded, state.app_handle.get()).await
+        }
+    };
+    let upcoming_player = crate::player::choose(wanted_player, &embedded_available);
     let policy = crate::selection::PlaybackSourcePolicy::from_config(
         cfg.playback_source_policy.as_deref(),
     )
@@ -5358,7 +5377,7 @@ async fn select_playback_version(
         }
     }
     let (target, ranked_screen) = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
-        match playback_compatibility_target(state, replace_session, upcoming_player, &cfg).await? {
+        match playback_compatibility_target(state, replace_session, upcoming_player.kind, &cfg).await? {
             Some((target, ranked_screen)) => (Some(target), ranked_screen),
             None => (None, None),
         }
@@ -5561,15 +5580,16 @@ async fn play_by_key_locked(
     // the server is never asked for markers at all.
     let skip_policies = SkipPolicies::load()?;
     let include_markers = skip_policies.any_enabled();
-    // Which player this play asks for: the one it replaces when it is an
-    // automatic relaunch, otherwise the user's setting. Read once, by the
-    // choice of copy above, before anything is resolved or installed: a
+    // Which player runs this play: what it asks for (the one it replaces when
+    // it is an automatic relaunch, otherwise the user's setting), and mpv's
+    // own window whenever the embedded player cannot run. Decided once, by
+    // the choice of copy above, before anything is resolved or installed: a
     // settings file that cannot be read then fails the play while there is
     // still nothing to undo. Past the point where the session is installed,
     // the only way out is the launch-failure path at the end of this
     // function, which undoes it (review finding sel-1). The copy was chosen
     // for the screen this player shows the play on (review finding pw-2).
-    let wanted_player = selection.player;
+    let player_choice = selection.player.clone();
     // How this play's window opens if it is the first external play of this
     // run: the player window setting. Read here for the same reason as the
     // player above; used only when this run has no window of its own yet.
@@ -5751,19 +5771,10 @@ async fn play_by_key_locked(
             .into_iter()
             .filter(|marker| !skip_policy_for(marker.kind, &skip_policies).is_off())
             .collect();
-        // Which player runs this play (decisions D1 and D3 of
-        // `.agents/plans/embedded-player.md`): what was asked for above, and the
-        // external player whenever the embedded one cannot run. A fallback never
-        // fails the play; it is explained once, in one line, on the player that
-        // did start.
-        let embedded_available = match wanted_player {
-            // Nothing is asked of the window for a play that does not want it.
-            crate::player::PlayerKind::External => Ok(()),
-            crate::player::PlayerKind::Embedded => {
-                crate::player::embedded_availability(&state.embedded, state.app_handle.get()).await
-            }
-        };
-        let player_choice = crate::player::choose(wanted_player, &embedded_available);
+        // The player chosen above runs this play (decisions D1 and D3 of
+        // `.agents/plans/embedded-player.md`). A fallback never fails the
+        // play; it is explained once, in one line, on the player that did
+        // start.
         *state.active_playback_player.lock().await = Some((session_id.to_string(), player_choice.kind));
         // What this play does about explaining a fallback: once per run of Vela,
         // and never from an automatic relaunch (`player::FallbackNotices::plan`).
@@ -8812,6 +8823,36 @@ mod tests {
             compatibility_display(&external, None, crate::player::PlayerKind::Embedded),
             None
         );
+    }
+
+    #[test]
+    fn a_play_that_cannot_run_embedded_is_ranked_for_the_mpv_window_it_opens() {
+        // Review finding pw-2, a play the setting sends to the embedded
+        // player while it cannot run (here: chosen after this run started).
+        // The play runs in mpv's own window, which opens on the last mpv
+        // window's screen, DP-1; its copy is ranked for DP-1 too. The steps
+        // are the play path's, in its order: the player is chosen, then the
+        // copy is ranked for that player's screen, then the window opens.
+        use crate::player::PlayerKind::{Embedded, External};
+        let slot = std::sync::Mutex::new(published([observed_window_session("last", External)]));
+        let choice = crate::player::choose(
+            Embedded,
+            &Err(crate::player::EmbeddedUnavailable::NeedsRestart),
+        );
+        assert_eq!(choice.kind, External);
+        let observed = compatibility_display(&slot.lock().unwrap(), None, choice.kind)
+            .expect("the copy is ranked for the mpv window's screen");
+        let ranked = Some(RankedScreen::of(&observed));
+        let (_, inherited) = opening_window(&slot.lock().unwrap(), Default::default());
+        assert_eq!(
+            screen_to_open_on(ranked, inherited).as_deref(),
+            Some("DP-1"),
+            "the play opens on the screen its copy was ranked for"
+        );
+        // The same play when the embedded player can run is shown in Vela's
+        // window and ranked for the screen holding it.
+        let choice = crate::player::choose(Embedded, &Ok(()));
+        assert_eq!(compatibility_display(&slot.lock().unwrap(), None, choice.kind), None);
     }
 
     #[test]

@@ -32,38 +32,42 @@ test('every play chooses its player from the setting and what can run', () => {
   const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
   // What is wanted: the launch's own player when it replaces a running play,
   // otherwise the saved setting. Read once, from the settings the copy is
-  // chosen with, so that a Compatible choice is made for the screen that
-  // player shows the play on (review finding pw-2), and carried to the
-  // launch.
+  // chosen with.
   const select = functionBody(commands, 'async fn select_playback_version(', 'select_playback_version');
   assert.match(
     select,
-    /let upcoming_player =\s+player\.unwrap_or_else\(\|\| crate::player::PlayerKind::from_setting\(cfg\.player\.as_deref\(\)\)\);/,
+    /let wanted_player =\s+player\.unwrap_or_else\(\|\| crate::player::PlayerKind::from_setting\(cfg\.player\.as_deref\(\)\)\);/,
   );
+  // Whether the embedded player can run is asked only for a play that wants
+  // it (the answer comes from the window), and asked of the real host.
+  assert.match(
+    select,
+    /let embedded_available = match wanted_player \{\s+crate::player::PlayerKind::External => Ok\(\(\)\),\s+crate::player::PlayerKind::Embedded => \{\s+crate::player::embedded_availability\(&state\.embedded, state\.app_handle\.get\(\)\)\.await\s+\}\s+\};/,
+  );
+  // The choice: one call, with that availability, made once, before the
+  // copy is ranked, so that a Compatible choice is made for the screen of
+  // the player that will run the play, not the one asked for (review
+  // finding pw-2), and carried to the launch.
+  const choose = 'let upcoming_player = crate::player::choose(wanted_player, &embedded_available);';
+  const at = select.indexOf(choose);
+  assert.notEqual(at, -1, 'the choice of copy must choose the player with player::choose');
+  assert.equal(select.indexOf('player::choose(', at + choose.length), -1, 'chosen exactly once');
+  const ranks = select.indexOf('playback_compatibility_target(state, replace_session, upcoming_player.kind, &cfg)');
+  assert.notEqual(ranks, -1, 'the copy is ranked for the player that will run the play');
+  assert.ok(at < ranks, 'chosen before the copy is ranked');
   assert.equal(select.split('player: upcoming_player,').length - 1, 2, 'both ready selections carry it');
-  assert.match(select, /playback_compatibility_target\(state, replace_session, upcoming_player, &cfg\)/);
   assert.match(
     body,
     /let selection = select_playback_version\(\s+state,\s+item,\s+replace_session,\s+explicit_source_id,\s+prior_affinity\.as_deref\(\),\s+server_owned,\s+player,\s+\)\s+\.await\?;/,
   );
-  assert.match(body, /let wanted_player = selection\.player;/);
+  assert.match(body, /let player_choice = selection\.player\.clone\(\);/);
   assert.doesNotMatch(body, /from_setting\(/, 'the play path reads the player setting once, with the copy');
-  // Whether the embedded player can run is asked only for a play that wants
-  // it (the answer comes from the window), and asked of the real host.
-  assert.match(
-    body,
-    /let embedded_available = match wanted_player \{[\s\S]{0,120}crate::player::PlayerKind::External => Ok\(\(\)\),\s+crate::player::PlayerKind::Embedded => \{\s+crate::player::embedded_availability\(&state\.embedded, state\.app_handle\.get\(\)\)\.await\s+\}\s+\};/,
-  );
-  // The choice: one call, with that availability, made once.
-  const choose = 'crate::player::choose(wanted_player, &embedded_available)';
-  const at = body.indexOf(choose);
-  assert.notEqual(at, -1, 'the play path must choose its player with player::choose');
-  assert.equal(body.indexOf('player::choose(', at + choose.length), -1, 'chosen exactly once');
+  assert.doesNotMatch(body, /player::choose\(/, 'and does not choose the player a second time');
+  assert.doesNotMatch(body, /embedded_availability\(/, 'or ask the window a second time');
   // ...and it reaches the launch, together with the one-line explanation.
   const spec = body.slice(body.indexOf('let spec = playback::PlaySpec {'));
   assert.match(spec, /^let spec = playback::PlaySpec \{\n\s+player: player_choice\.kind,/);
   assert.match(spec, /osd_notice: osd_notice\.or\(fallback_notice\),/);
-  assert.ok(at < body.indexOf('let spec = playback::PlaySpec {'), 'chosen before the launch is described');
 });
 
 test('once a play has installed its session, only the launch-failure path ends it early', () => {
@@ -205,7 +209,7 @@ test('once a play has installed its session, only the launch-failure path ends i
   assert.ok(read < resolved, 'the player setting is read before the stream is resolved');
   assert.ok(read < from, 'and before anything is installed');
   assert.equal(body.indexOf('let selection = select_playback_version(', read + 1), -1, 'and only once');
-  assert.equal(body.split('let wanted_player').length - 1, 1, 'and bound once');
+  assert.equal(body.split('let player_choice').length - 1, 1, 'and bound once');
 });
 
 test('a fallback is explained once, and only by a play that started', () => {
