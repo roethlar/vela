@@ -93,8 +93,11 @@ async function launch(driver) {
 // the end, or a skip that landed short could have played the rest unseen.
 // Time is counted from before the play is told to resume, on a clock that
 // cannot go back, and a sample's time is taken when its read has answered,
-// so a slow resume and a slow read both count against the window. The
-// samples either side of the jump are logged.
+// so a slow resume and a slow read both count against the window. Each
+// sample also keeps when its read was asked for: the gap across the jump
+// runs from there, because an answer that waited to be read holds a
+// position older than the time it was read at. The samples either side of
+// the jump are logged.
 // Exported for tests/e2e-judge.test.mjs, which drives it with a stand-in for
 // mpv to see that its verdict is the one it acts on.
 const JUMP_WINDOW_MS = 5000;
@@ -143,8 +146,11 @@ export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd, { clock 
     maxGapMs: MAX_GAP_MS,
   };
   for (;;) {
+    // Taken before the read is sent: the position it answers with was true
+    // no earlier than this, however long the answer then waits to be read.
+    const askedMs = Math.floor(clock.now() - resumeAskedAt);
     const t = await mpv.getProp('time-pos').catch(() => null);
-    samples.push({ t, ms: Math.round(clock.now() - resumeAskedAt) });
+    samples.push({ t, askedMs, ms: Math.ceil(clock.now() - resumeAskedAt) });
     const verdict = skipJumpVerdict(samples, rule);
     if (verdict?.ok === true) {
       console.log(

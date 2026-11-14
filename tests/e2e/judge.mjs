@@ -10,8 +10,8 @@
 // finding pa-1; markers.mjs, proveSkippedPast). The play was put at `startS`,
 // just ahead of the range [rangeStart, rangeEnd] (seconds), and resumed; each
 // sample is `{ t, ms }`: its position in seconds (null for a read that
-// failed) and the milliseconds since the play resumed. The samples are judged
-// in order:
+// failed) and the milliseconds since the play resumed (and `askedMs`, below).
+// The samples are judged in order:
 // - one at or past the range's end, taken inside the window, decides it: the
 //   skip happened, and the last position seen before it (`before`) and the
 //   sample past the end (`after`, at `ms`) are returned. Taken after the
@@ -30,15 +30,29 @@
 // failed) a skip that landed short of the end could have played the rest
 // unseen (verification round 2). `ms` is taken when a read has answered,
 // from a clock started before the play was told to resume, so a slow read
-// and a slow resume both count.
+// and a slow resume both count. A sample also carries `askedMs`, when its
+// read was asked for, and the gap runs from when the position before the
+// jump was ASKED for to when the one past the end was ANSWERED: an answer
+// can wait to be read (the test's process busy, a reply held in a buffer),
+// and the position in it is then older than the time it was read at; the
+// position was true no earlier than its read was asked for, and no later
+// than it was answered (verification round 3). A sample without both
+// times, in that order, is refused.
 // Returns null while undecided, `{ ok: true, before, after, ms }` or
 // `{ ok: false, why }`.
 export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowMs, marginS, maxGapMs }) {
   let before = startS;
-  // When `before` was seen: the start, when the play was told to resume.
-  let beforeMs = 0;
+  // The earliest `before` can have been true: when its read was asked for;
+  // for the start, when the play was told to resume.
+  let beforeAskedMs = 0;
   let last = null;
-  for (const { t, ms } of samples) {
+  for (const { t, askedMs, ms } of samples) {
+    if (!(Number.isFinite(askedMs) && Number.isFinite(ms) && askedMs <= ms)) {
+      throw new Error(
+        'skipJumpVerdict: a sample needs the time its read was asked for (askedMs) and the time it was answered (ms), ' +
+          `in that order: ${JSON.stringify({ t, askedMs, ms })}`,
+      );
+    }
     if (t != null && t >= rangeEnd) {
       if (ms > windowMs) {
         return {
@@ -49,11 +63,11 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
             `it is ${t} (the sample before was ${before} s)`,
         };
       }
-      if (ms - beforeMs > maxGapMs) {
+      if (ms - beforeAskedMs > maxGapMs) {
         return {
           ok: false,
           why:
-            `the play was not watched across the jump: ${ms - beforeMs} ms lie between the position seen before it ` +
+            `the play was not watched across the jump: ${ms - beforeAskedMs} ms lie between the position seen before it ` +
             `(${before} s) and the one past the range's end (${t} s), more than the ${maxGapMs} ms allowed; ` +
             'a skip that landed short of the end could have played the rest unseen',
         };
@@ -71,7 +85,7 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
     }
     if (t != null) {
       before = t;
-      beforeMs = ms;
+      beforeAskedMs = askedMs;
     }
     last = t;
     if (ms > windowMs) {

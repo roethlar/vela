@@ -17,9 +17,13 @@ const MARKERS = { startS: 1, rangeStart: 2, rangeEnd: 12, windowMs: 5000, margin
 
 // The verdicts as the scenario asks for them, after each sample: the first
 // one given, and the index of the sample it was given at.
+// A sample written `{ t, ms }` was asked for and answered at `ms`; one whose
+// answer waited says when it was asked for (`askedMs`).
+const timed = (samples) => samples.map((sample) => ({ askedMs: sample.ms, ...sample }));
 function decide(samples, rule = MARKERS) {
-  for (let i = 0; i < samples.length; i++) {
-    const verdict = skipJumpVerdict(samples.slice(0, i + 1), rule);
+  const all = timed(samples);
+  for (let i = 0; i < all.length; i++) {
+    const verdict = skipJumpVerdict(all.slice(0, i + 1), rule);
     if (verdict) return { at: i, verdict };
   }
   return { at: null, verdict: null };
@@ -62,7 +66,7 @@ test('pa-1: a skip that lands inside the range fails at that sample, even when a
   assert.equal(verdict.ok, false);
   assert.match(verdict.why, /it was seen inside the range at 9 s \(the sample before was 1\.9 s\), 1000 ms after resuming/);
   // Judged with every sample in hand, it is still that failure.
-  assert.deepEqual(skipJumpVerdict(samples, MARKERS), verdict, 'a sample past the end after one inside the range must not pass');
+  assert.deepEqual(skipJumpVerdict(timed(samples), MARKERS), verdict, 'a sample past the end after one inside the range must not pass');
 });
 
 test('pa-1: one jump across the range passes, and names the samples either side of it', () => {
@@ -131,6 +135,42 @@ test('pa-1: a crossing counts only if the play was watched across it', () => {
   // A first sample that is the jump is measured from the resume.
   assert.equal(decide([{ t: 12.1, ms: 500 }]).verdict.ok, true);
   assert.match(decide([{ t: 12.1, ms: 501 }]).verdict.why, /^the play was not watched across the jump: 501 ms lie between the position seen before it \(1 s\)/);
+});
+
+test('pa-1: the gap across the jump runs from when the position before it was asked for', () => {
+  // Verification round 3: a read asked for at 900 ms was answered with
+  // 1.91 s and the answer then waited 3300 ms to be read; the skip had
+  // landed at 9 s meanwhile and the play ran on. Timed by when they were
+  // read, the two samples are 101 ms apart; the positions are 3.4 s apart.
+  const upTo = (ms) => Array.from({ length: ms / 100 }, (_, k) => ({ t: 1 + (k + 1) / 10, ms: 100 * (k + 1) }));
+  const waited = decide([...upTo(800), { t: 1.91, askedMs: 900, ms: 4205 }, { t: 12.31, askedMs: 4305, ms: 4306 }]).verdict;
+  assert.equal(
+    waited.why,
+    "the play was not watched across the jump: 3406 ms lie between the position seen before it (1.91 s) and the one past the range's end (12.31 s), " +
+      'more than the 500 ms allowed; a skip that landed short of the end could have played the rest unseen',
+  );
+  // The same two readings with the first one asked for late: it was read
+  // when the play was there, and the jump was watched.
+  assert.equal(decide([...upTo(800), { t: 1.91, askedMs: 4200, ms: 4205 }, { t: 12.31, askedMs: 4305, ms: 4306 }]).verdict.ok, true);
+  // At the limit: asked for at 900, the one past the end answered at 1400 and at 1401.
+  assert.equal(decide([...upTo(800), { t: 1.9, askedMs: 900, ms: 1200 }, { t: 12, askedMs: 1300, ms: 1400 }]).verdict.ok, true);
+  assert.match(
+    decide([...upTo(800), { t: 1.9, askedMs: 900, ms: 1200 }, { t: 12, askedMs: 1300, ms: 1401 }]).verdict.why,
+    /^the play was not watched across the jump: 501 ms lie between/,
+  );
+  // A failed read's times are not the position's: the gap still runs from
+  // the last position seen.
+  assert.match(
+    decide([...upTo(800), { t: 1.9, askedMs: 900, ms: 905 }, { t: null, askedMs: 1000, ms: 1300 }, { t: 12, askedMs: 1400, ms: 1405 }]).verdict.why,
+    /^the play was not watched across the jump: 505 ms lie between the position seen before it \(1\.9 s\)/,
+  );
+});
+
+test('pa-1: a sample without the time it was asked for, or asked for after it was answered, is refused', () => {
+  assert.throws(() => skipJumpVerdict([{ t: 1.5, ms: 500 }], MARKERS), /^Error: skipJumpVerdict: a sample needs the time its read was asked for \(askedMs\) and the time it was answered \(ms\), in that order: \{"t":1\.5,"ms":500\}$/);
+  assert.throws(() => skipJumpVerdict([{ t: 1.5, askedMs: 501, ms: 500 }], MARKERS), /in that order: \{"t":1\.5,"askedMs":501,"ms":500\}$/);
+  assert.throws(() => skipJumpVerdict([{ t: null, askedMs: 100 }], MARKERS), /in that order/);
+  assert.equal(skipJumpVerdict([{ t: 1.5, askedMs: 500, ms: 500 }], MARKERS), null);
 });
 
 test('pa-1: a failed read past the window ends it, and says the position is unknown', () => {
@@ -244,9 +284,12 @@ test('pa-1: the markers scenario fails a play that never crosses the range, once
 // per second from the moment mpv is told to resume, a skip is a jump of the
 // position, and an answer can be slow. `timeline` gives the position at a
 // time since the resume was asked for; `slow` gives how long the answer to a
-// read begun at that time takes (0 if not given); `resumeAnswerMs` how long
-// the answer to the resume takes.
-function madeUpTime(timeline, { slow = () => 0, resumeAnswerMs = 0, failing = () => false } = {}) {
+// read begun at that time takes (0 if not given); `held` how long that
+// answer, once given, then waits before the scenario gets to read it (the
+// test's process busy, a reply held in a buffer: the position in it does not
+// change while it waits); `resumeAnswerMs` how long the answer to the resume
+// takes.
+function madeUpTime(timeline, { slow = () => 0, held = () => 0, resumeAnswerMs = 0, failing = () => false } = {}) {
   let now = 1000;
   let resumeAskedAt = null;
   let paused = false;
@@ -264,8 +307,11 @@ function madeUpTime(timeline, { slow = () => 0, resumeAnswerMs = 0, failing = ()
       const begun = now - resumeAskedAt;
       now += slow(begun);
       if (failing(begun)) throw new Error('mpv: no reply to get_property');
-      // What mpv answers is the position when it answers.
-      return timeline(now - resumeAskedAt);
+      // What mpv answers is the position when it answers...
+      const answer = timeline(now - resumeAskedAt);
+      // ...and the scenario may get to read that answer only later.
+      now += held(begun);
+      return answer;
     },
     async setProp(name, value) {
       if (name === 'pause') {
@@ -313,14 +359,37 @@ test('pa-1: a skip that lands short and plays the rest behind a slow read, or be
   await assert.rejects(prove(failedReads), /^Error: auto-skip: the intro range: the play was not watched across the jump: 3\d\d\d ms lie between/);
 });
 
+test('pa-1: a skip that lands short behind an answer that waits to be read fails', async () => {
+  // Verification round 3, through the scenario's own loop: the read asked
+  // for at 900 ms is answered at once (1.9 s) and the answer waits 3300 ms;
+  // the skip lands at 9 s at 1000 ms and the play goes on. The next read,
+  // 100 ms after the first was at last read, is past the end.
+  const landsShort = (ms) => (ms < 1000 ? 1 + ms / 1000 : 9 + (ms - 1000) / 1000);
+  const waits = madeUpTime(landsShort, { held: (begun) => (begun >= 900 && begun < 1000 ? 3300 : 0) });
+  await assert.rejects(
+    prove(waits),
+    /^Error: auto-skip: the intro range: the play was not watched across the jump: 3400 ms lie between the position seen before it \(1\.9 s\) and the one past the range's end \(12\.3 s\), more than the 500 ms allowed/,
+  );
+  // Every answer waiting a little is still watching: 150 ms each, with the
+  // 100 ms between reads, puts 400 ms across the jump.
+  const skips = (ms) => (ms < 1000 ? 1 + ms / 1000 : 12 + (ms - 1000) / 1000);
+  await prove(madeUpTime(skips, { held: () => 150 }));
+  // 250 ms each puts 600 ms across it: the proof does not hold, and says so.
+  await assert.rejects(prove(madeUpTime(skips, { held: () => 250 })), /the play was not watched across the jump: 600 ms lie between/);
+});
+
 test('pa-1: a real skip passes in made-up time, and a watched one a little slow still does', async (t) => {
   const logged = [];
   t.mock.method(console, 'log', (line) => logged.push(line));
   const skips = (ms) => (ms < 1000 ? 1 + ms / 1000 : 12 + (ms - 1000) / 1000);
   await prove(madeUpTime(skips));
-  // Reads that each take 300 ms: the jump is still seen within the gap allowed.
-  await prove(madeUpTime(skips, { slow: () => 300 }));
+  // Reads that each take 150 ms: 400 ms lie between asking for the position
+  // before the jump and the answer past it, inside the gap allowed.
+  await prove(madeUpTime(skips, { slow: () => 150 }));
   assert.equal(logged.length, 2, JSON.stringify(logged));
+  // Reads that each take 300 ms put 700 ms there: too slow to say that the
+  // play was watched across the jump, though it was a real skip.
+  await assert.rejects(prove(madeUpTime(skips, { slow: () => 300 })), /the play was not watched across the jump: 700 ms lie between/);
   assert.match(logged[0], /^auto-skip: the intro range: from 1\.00 s, last sample before the jump 1\.9\d s, first after 12\.\d\d s, 1\d\d\d ms after the play resumed$/);
 });
 
