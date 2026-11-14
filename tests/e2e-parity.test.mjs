@@ -408,6 +408,27 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
     verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'other', shown: [] } }) }, [race]),
     /not with its known failure/,
   );
+  // A known failure counts only when it failed: skipped, or with no status or
+  // one nobody writes, it was not seen to fail, whatever text it carries
+  // (review finding pa-5).
+  const knownAs = (status) =>
+    verdict({
+      ...good,
+      external: run('external', { ...passing('a', ['1']), b: { status, error: 'AssertionError: the known text', shown: [] } }),
+    });
+  assert.match(knownAs('skip'), /^b was skipped in the external run, so it has no result there$/m);
+  assert.match(knownAs(undefined), /^b has no result in the external run: its status is undefined, neither pass nor fail$/m);
+  assert.match(knownAs('FAIL'), /^b has no result in the external run: its status is "FAIL", neither pass nor fail$/m);
+  assert.match(knownAs('failed'), /its status is "failed", neither pass nor fail/);
+  assert.equal(knownAs('fail'), '');
+  // The same for a scenario that is no known failure: only 'pass' passes.
+  const otherAs = (status) =>
+    verdict({ ...good, embedded: run('embedded', { ...passing('b', ['2']), a: { status, error: null, shown: ['1'] } }) });
+  assert.match(otherAs('skip'), /^a was skipped in the embedded run, so it has no result there$/m);
+  assert.match(otherAs(undefined), /^a has no result in the embedded run: its status is undefined, neither pass nor fail$/m);
+  assert.match(otherAs('passed'), /^a has no result in the embedded run: its status is "passed", neither pass nor fail$/m);
+  assert.match(otherAs('fail'), /^a failed in the embedded player: null$/m);
+  assert.equal(otherAs('pass'), '');
   // Row 2 in the external player is RED (only b claims it, a known failure);
   // without the record it is a failure like any other.
   assert.match(verdict(good, []), /b failed in the external player/);

@@ -193,8 +193,18 @@ export function verdictProblems(
     for (const scenario of scenarios.filter((s) => runsIn(s, player))) {
       const result = ran[scenario.name];
       const known = knownFailures.find((k) => k.scenario === scenario.name && k.player === player);
+      // Only 'pass' and 'fail' are results of a scenario that ran. Anything
+      // else (a skip, no status, a status nobody writes) is a problem in its
+      // own words, whatever error text it carries: a skipped known failure
+      // that kept its text is not a failure seen (review finding pa-5).
       if (!result) {
         problems.push(`${scenario.name} did not run in the ${player} run`);
+      } else if (result.status !== 'pass' && result.status !== 'fail') {
+        problems.push(
+          result.status === 'skip'
+            ? `${scenario.name} was skipped in the ${player} run, so it has no result there`
+            : `${scenario.name} has no result in the ${player} run: its status is ${JSON.stringify(result.status)}, neither pass nor fail`,
+        );
       } else if (known) {
         if (result.status === 'pass') {
           if (!known.intermittent) {
@@ -203,7 +213,7 @@ export function verdictProblems(
         } else if (!String(result.error ?? '').includes(known.failsWith)) {
           problems.push(`${scenario.name} failed in the ${player} player, but not with its known failure: ${result.error}`);
         }
-      } else if (result.status !== 'pass') {
+      } else if (result.status === 'fail') {
         problems.push(`${scenario.name} failed in the ${player} player: ${result.error}`);
       }
     }
