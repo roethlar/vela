@@ -10048,6 +10048,49 @@ mod tests {
     }
 
     #[test]
+    fn the_winner_is_selected_by_its_source_and_its_version() {
+        // The attack on the fourth repair, finding 3: two servers number
+        // their copies alike (Plex media ids are per server), and the winner
+        // is the second server's "1". It is that server's copy that is
+        // selected and routed, not the first one listed with that id.
+        let copy = |source: &str, width, height| crate::selection::PlaybackCandidate {
+            source_id: source.to_string(),
+            version_id: "1".to_string(),
+            width,
+            height,
+            hdr: false,
+            bitrate: 10,
+            direct_play_rank: 0,
+            locality: crate::locality::EndpointLocality::Lan,
+        };
+        let candidates = [copy("first", 3840, 2160), copy("second", 1920, 1080)];
+        let mut probed = HashMap::from([
+            ("first".to_string(), "first-raw".to_string()),
+            ("second".to_string(), "second-raw".to_string()),
+        ]);
+        let selection = selection_for_winner(
+            versions_of(&candidates),
+            &mut probed,
+            &candidates[1],
+            &catalog_item("first:title", "movie", 1, false),
+            crate::player::choose(crate::player::PlayerKind::External, &Ok(())),
+            PlayDestination::DecidedAtLaunch,
+        )
+        .unwrap_or_else(|_| panic!("the winner is selected"));
+        assert_eq!(
+            (
+                selection.source_id.as_str(),
+                selection.raw_item_key.as_str(),
+                selection.version_id.as_deref(),
+                selection.item.rating_key.as_str(),
+                selection.item.source_id.as_str(),
+            ),
+            ("second", "second-raw", Some("1"), "second:title", "second"),
+            "the second server's copy, by the key it was probed with"
+        );
+    }
+
+    #[test]
     fn a_failed_launch_keeps_the_previous_record() {
         let slot = std::sync::Mutex::new(published([observed_window_session(
             "earlier",
