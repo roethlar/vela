@@ -4328,6 +4328,61 @@ fn window_to_remember(
         })
 }
 
+/// One change to the settings, run by `config::update` inside its serialized
+/// load, change and save; passed in this form so that a test can run it
+/// against settings of its own, and step in before it runs.
+type SettingsChange<'a> = Box<dyn FnOnce(&mut config::AppConfig) -> Result<(), String> + 'a>;
+
+/// Run INSIDE a settings change: hand to the settings the window of the play
+/// `session_id`, or of the latest play when `None`, while that play is still
+/// the latest (`window_to_remember`). Returns whether the stored window
+/// changed.
+///
+/// Both questions, whether the play is still the latest and how its window
+/// was left, are answered here, under the settings lock, and not before it
+/// was waited for (review finding pw-5): a write that waited for the lock
+/// writes what is true when it runs, so a play's end and Vela's exit, in
+/// either order, cannot replace a later look at a window with an earlier
+/// one, and an older play's end cannot write over a newer play's window.
+/// The record's lock (and the observation's, inside it) is held only to
+/// look, never across the settings file being written. Lock order: the
+/// settings lock, then the record, then the observation; nothing that holds
+/// the record or an observation takes the settings lock.
+fn remember_window_in(
+    cfg: &mut config::AppConfig,
+    record: &std::sync::Mutex<PlaybackWindowRecord>,
+    session_id: Option<&str>,
+) -> bool {
+    let ended = {
+        let record = record.lock().unwrap_or_else(|e| e.into_inner());
+        match session_id {
+            Some(session_id) => window_to_remember(&record, session_id),
+            None => record
+                .latest()
+                .and_then(|latest| window_to_remember(&record, &latest.session_id)),
+        }
+    };
+    ended.is_some_and(|(player, window, screen)| {
+        config::remember_mpv_window(cfg, player, window, screen.as_deref())
+    })
+}
+
+/// What a play's end writes, in ONE settings change: `finish` (its recents
+/// stamp) and, while it is still the latest play, its window
+/// (`remember_window_in`, which decides that inside the change).
+fn write_play_end<'a>(
+    update: impl FnOnce(SettingsChange<'a>) -> Result<(), String>,
+    record: &'a std::sync::Mutex<PlaybackWindowRecord>,
+    session_id: &'a str,
+    finish: impl FnOnce(&mut config::AppConfig) + 'a,
+) -> Result<(), String> {
+    update(Box::new(move |cfg| {
+        finish(cfg);
+        remember_window_in(cfg, record, Some(session_id));
+        Ok(())
+    }))
+}
+
 /// When Vela quits, the latest play's window is kept for the next run, under
 /// the same rules as at the end of a play. A play still showing when Vela
 /// quits, or one whose end still waits on its final check-in with the server,
@@ -4335,38 +4390,29 @@ fn window_to_remember(
 /// end callback runs. The settings are written only when the stored window
 /// changes, so quitting after a play's end has stored it writes nothing.
 pub(crate) fn remember_window_on_exit(latest: &std::sync::Mutex<PlaybackWindowRecord>) {
-    remember_window_on_exit_with(latest, config::load_config, |player, window, screen| {
-        let _ = config::update(move |cfg| {
-            config::remember_mpv_window(cfg, player, window, screen.as_deref());
-            Ok(())
-        });
-    });
+    remember_window_on_exit_with(latest, config::load_config, |change| config::update(change));
 }
 
 /// `remember_window_on_exit` with the settings read and the settings write
 /// passed in, so a test can see when quitting writes and when it does not.
-fn remember_window_on_exit_with(
-    latest: &std::sync::Mutex<PlaybackWindowRecord>,
+/// The read only spares a write that would change nothing; what is written
+/// is decided again inside the write (`remember_window_in`).
+fn remember_window_on_exit_with<'a>(
+    latest: &'a std::sync::Mutex<PlaybackWindowRecord>,
     load: impl FnOnce() -> std::io::Result<config::AppConfig>,
-    store: impl FnOnce(crate::player::PlayerKind, playback::PlaybackWindowState, Option<String>),
+    update: impl FnOnce(SettingsChange<'a>) -> Result<(), String>,
 ) {
-    let ended = {
-        let latest = latest.lock().unwrap_or_else(|e| e.into_inner());
-        latest
-            .latest()
-            .and_then(|session| window_to_remember(&latest, &session.session_id))
-    };
-    let Some((player, window, screen)) = ended else {
-        return;
-    };
     // Settings that cannot be read are left alone; the write below would
     // refuse them too.
     let changes = match load() {
-        Ok(mut cfg) => config::remember_mpv_window(&mut cfg, player, window, screen.as_deref()),
+        Ok(mut cfg) => remember_window_in(&mut cfg, latest, None),
         Err(_) => false,
     };
     if changes {
-        store(player, window, screen);
+        let _ = update(Box::new(move |cfg| {
+            remember_window_in(cfg, latest, None);
+            Ok(())
+        }));
     }
 }
 
@@ -5837,18 +5883,16 @@ async fn play_by_key_locked(
                 // in the same write as the recents stamp: at the end of a play
                 // and never on a timer. The IPC connection has closed by now,
                 // so this is the final state. The start gate above has opened,
-                // so a play that started has been published.
-                let ended = window_to_remember(
-                    &latest_window.lock().unwrap_or_else(|e| e.into_inner()),
+                // so a play that started has been published. Whether it is
+                // still the latest play is decided inside the write.
+                let _ = write_play_end(
+                    |change| config::update(change),
+                    &latest_window,
                     &session_id,
+                    move |cfg| {
+                        crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
+                    },
                 );
-                let _ = config::update(move |cfg| {
-                    crate::recents::finish_session(cfg, &key, &finishing_session, position_ms, now_ms);
-                    if let Some((player, window, screen)) = ended {
-                        config::remember_mpv_window(cfg, player, window, screen.as_deref());
-                    }
-                    Ok(())
-                });
                 if let Some(app) = &app {
                     use tauri::Manager;
                     // A plain thread outside any runtime: the active
@@ -8400,25 +8444,143 @@ mod tests {
             "latest",
             crate::player::PlayerKind::External,
         )]));
+        // What quitting writes, when it writes: the settings it read, changed.
         let quit_with = |load: std::io::Result<config::AppConfig>| {
+            let read = load.as_ref().ok().cloned();
             let mut stored = None;
             remember_window_on_exit_with(
                 &latest,
                 || load,
-                |player, window, screen| stored = Some((player, window, screen)),
+                |change| {
+                    let mut cfg = read.expect("a write follows only a read");
+                    change(&mut cfg)?;
+                    stored = Some(cfg);
+                    Ok(())
+                },
             );
             stored
         };
         // Nothing stored yet: quitting stores the latest play's window.
-        let mut cfg = config::AppConfig::default();
-        let (player, window, screen) =
-            quit_with(Ok(cfg.clone())).expect("quitting stores a window not yet stored");
-        config::remember_mpv_window(&mut cfg, player, window, screen.as_deref());
-        assert!(cfg.mpv_window.is_some());
+        let cfg = quit_with(Ok(config::AppConfig::default()))
+            .expect("quitting stores a window not yet stored");
+        assert_eq!(
+            cfg.mpv_window,
+            Some(config::MpvWindow {
+                fullscreen: Some(true),
+                maximized: Some(false),
+                screen: Some("DP-1".to_string()),
+                ..Default::default()
+            })
+        );
         // That play's end (or an earlier quit) already stored it: no write.
-        assert_eq!(quit_with(Ok(cfg)), None);
+        assert!(quit_with(Ok(cfg)).is_none());
         // Settings that cannot be read are left alone.
-        assert_eq!(quit_with(Err(std::io::Error::other("unreadable"))), None);
+        assert!(quit_with(Err(std::io::Error::other("unreadable"))).is_none());
+    }
+
+    /// Settings held in memory and changed one change at a time, as
+    /// `config::update` changes the file under its lock.
+    #[derive(Default)]
+    struct HeldSettings(std::sync::Mutex<config::AppConfig>);
+
+    impl HeldSettings {
+        fn read(&self) -> std::io::Result<config::AppConfig> {
+            Ok(self.0.lock().unwrap().clone())
+        }
+
+        fn update(&self, change: SettingsChange<'_>) -> Result<(), String> {
+            change(&mut self.0.lock().unwrap())
+        }
+
+        fn window(&self) -> Option<config::MpvWindow> {
+            self.0.lock().unwrap().mpv_window.clone()
+        }
+    }
+
+    fn report_windowed(observation: &playback::WindowStateObservation) {
+        observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "fullscreen",
+            "data": false
+        }));
+    }
+
+    #[test]
+    fn an_older_plays_end_cannot_save_over_a_newer_plays_window() {
+        // Review finding pw-5, the reviewer's first probe: play A's end is
+        // about to write; while it waits for the settings lock, play B starts
+        // and B's end saves B's window; then A's write runs. It still writes
+        // A's recents stamp, and not A's window.
+        let settings = HeldSettings::default();
+        let slot = std::sync::Mutex::new(published([observed_window_session(
+            "A",
+            crate::player::PlayerKind::External,
+        )]));
+        let finished = std::cell::Cell::new(false);
+        write_play_end(
+            |change| {
+                slot.lock().unwrap().publish(windowed_session("B"));
+                write_play_end(|change| settings.update(change), &slot, "B", |_| {}).unwrap();
+                settings.update(change)
+            },
+            &slot,
+            "A",
+            |_| finished.set(true),
+        )
+        .unwrap();
+        assert!(finished.get(), "the older play's recents stamp is still written");
+        assert_eq!(
+            settings.window(),
+            Some(config::MpvWindow {
+                fullscreen: Some(false),
+                maximized: Some(false),
+                screen: Some("HDMI-1".to_string()),
+                ..Default::default()
+            }),
+            "the newer play's window must stay"
+        );
+    }
+
+    #[test]
+    fn an_exit_that_waited_cannot_save_an_earlier_look_over_the_plays_end() {
+        // Review finding pw-5, the reviewer's second probe: quitting looks at
+        // the play's window (full screen) and waits for the settings lock;
+        // meanwhile the play reports that it left full screen and its end
+        // saves that. Quitting then writes what is true when it writes.
+        let settings = HeldSettings::default();
+        let play = observed_window_session("play", crate::player::PlayerKind::External);
+        let slot = std::sync::Mutex::new(published([play.clone()]));
+        remember_window_on_exit_with(
+            &slot,
+            || settings.read(),
+            |change| {
+                report_windowed(&play.observation);
+                write_play_end(|change| settings.update(change), &slot, "play", |_| {}).unwrap();
+                settings.update(change)
+            },
+        );
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
+    }
+
+    #[test]
+    fn a_plays_end_that_waited_cannot_save_an_earlier_look_over_an_exit() {
+        // The other order: the play's end waits for the settings lock while
+        // a later report arrives and quitting saves it.
+        let settings = HeldSettings::default();
+        let play = observed_window_session("play", crate::player::PlayerKind::External);
+        let slot = std::sync::Mutex::new(published([play.clone()]));
+        write_play_end(
+            |change| {
+                report_windowed(&play.observation);
+                remember_window_on_exit_with(&slot, || settings.read(), |change| settings.update(change));
+                settings.update(change)
+            },
+            &slot,
+            "play",
+            |_| {},
+        )
+        .unwrap();
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
     }
 
     #[test]

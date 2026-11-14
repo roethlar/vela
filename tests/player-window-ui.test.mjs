@@ -104,7 +104,7 @@ test('the play path opens its window from the run or the setting, and hands it o
   );
   assert.match(
     commands,
-    /if !recents_ready\.wait_succeeded\(\) \{[\s\S]{0,1600}let ended = window_to_remember\(\s*&latest_window[\s\S]{0,200}&session_id,\s*\);\s*let _ = config::update\(move \|cfg\| \{[\s\S]{0,300}if let Some\(\(player, window, screen\)\) = ended \{\s*config::remember_mpv_window\(cfg, player, window, screen\.as_deref\(\)\);/,
+    /if !recents_ready\.wait_succeeded\(\) \{[\s\S]{0,1800}let _ = write_play_end\(\s*\|change\| config::update\(change\),\s*&latest_window,\s*&session_id,\s*move \|cfg\| \{\s*crate::recents::finish_session\(cfg, &key, &finishing_session, position_ms, now_ms\);\s*\},\s*\);/,
     'the end of a play must hand its final window to the settings',
   );
   // Quitting Vela hands the latest play's window over too: a play still
@@ -119,7 +119,7 @@ test('the play path opens its window from the run or the setting, and hands it o
   // settings read and write.
   assert.match(
     commands,
-    /pub\(crate\) fn remember_window_on_exit\(latest: [^)]*\) \{\s*remember_window_on_exit_with\(latest, config::load_config, \|player, window, screen\| \{\s*let _ = config::update\(move \|cfg\| \{\s*config::remember_mpv_window\(cfg, player, window, screen\.as_deref\(\)\);\s*Ok\(\(\)\)\s*\}\);\s*\}\);\s*\}\n/,
+    /pub\(crate\) fn remember_window_on_exit\(latest: [^)]*\) \{\s*remember_window_on_exit_with\(latest, config::load_config, \|change\| config::update\(change\)\);\s*\}\n/,
     'quitting must decide what to write through remember_window_on_exit_with',
   );
   assert.match(

@@ -448,21 +448,42 @@ test('only a play that started writes the window record, in one place', () => {
   );
   assert.equal(uses(production, 'window_slot'), 2, 'the slot goes only to publish_started_play');
   assert.equal(uses(production, 'latest_window'), 2, 'the end callback only reads the record');
+  // ...and hands it to write_play_end, which looks at it only inside the
+  // settings change (review finding pw-5), through remember_window_in.
   assert.match(
     production,
-    /let ended = window_to_remember\(\s+&latest_window\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\),\s+&session_id,\s+\);/,
+    /let _ = write_play_end\(\s+\|change\| config::update\(change\),\s+&latest_window,\s+&session_id,\s+move \|cfg\| \{/,
   );
+  const writeEnd = functionBody(commands, "fn write_play_end<'a>(", 'write_play_end');
+  assert.match(
+    writeEnd,
+    /\) -> Result<\(\), String> \{\s+update\(Box::new\(move \|cfg\| \{\s+finish\(cfg\);\s+remember_window_in\(cfg, record, Some\(session_id\)\);\s+Ok\(\(\)\)\s+\}\)\)\s*$/,
+  );
+  const rememberIn = functionBody(commands, 'fn remember_window_in(', 'remember_window_in');
+  assert.equal(rememberIn.split('.lock()').length - 1, 1, 'the record is looked at once');
+  assert.match(
+    rememberIn,
+    /let ended = \{\s+let record = record\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+match session_id \{[\s\S]*?\}\s+\};\s+ended\.is_some_and\(/,
+    'and let go of before the settings are changed',
+  );
+  assert.doesNotMatch(rememberIn, /\.take\(\)|\.publish\(|=\s*(?:None|Some\()/, 'and only read');
   const publish = functionBody(commands, 'fn publish_started_play<T>(', 'publish_started_play');
   assert.match(
     publish,
     /after_successful_play\(played, \|\| \{\s+window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.publish\(launched\);\s+on_success\(\);\s+\}\)/,
   );
   assert.equal(uses(production, 'window_session'), 2, 'publish_started_play writes it once');
-  // Quitting Vela reads it once, to hand the latest window over.
-  const onExit = functionBody(commands, 'fn remember_window_on_exit_with(', 'remember_window_on_exit_with');
-  assert.equal(onExit.split('.lock()').length - 1, 1);
-  assert.match(onExit, /let latest = latest\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+latest\s+\.latest\(\)\s+\.and_then\(/);
-  assert.doesNotMatch(onExit, /\.take\(\)|=\s*(?:None|Some\()/);
+  // Quitting Vela reads it, through remember_window_in only, to hand the
+  // latest window over: once to see whether there is anything to write, and
+  // again inside the write (review finding pw-5).
+  const onExit = functionBody(commands, "fn remember_window_on_exit_with<'a>(", 'remember_window_on_exit_with');
+  assert.equal(onExit.split('.lock()').length - 1, 0);
+  assert.match(onExit, /Ok\(mut cfg\) => remember_window_in\(&mut cfg, latest, None\),/);
+  assert.match(
+    onExit,
+    /if changes \{\s+let _ = update\(Box::new\(move \|cfg\| \{\s+remember_window_in\(cfg, latest, None\);\s+Ok\(\(\)\)\s+\}\)\);\s+\}/,
+  );
+  assert.doesNotMatch(onExit, /\.take\(\)|\.publish\(|=\s*(?:None|Some\()/);
   // In lib.rs: the field, its empty start (in the app, and in the state a
   // unit test builds), and that exit read.
   assert.equal(uses(lib, 'playback_window_session'), 4);
