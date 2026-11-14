@@ -9804,7 +9804,7 @@ mod tests {
         .unwrap_or_else(|_| panic!("the winner is selected"));
         assert_eq!(selection.version_id.as_deref(), Some("1080p-sdr"));
         let resolved = tauri::async_runtime::block_on(resolve_selected(
-            &VersionedSource,
+            &VersionedSource::default(),
             &selection,
             false,
             config::PLAYBACK_QUALITY_ORIGINAL,
@@ -9888,8 +9888,14 @@ mod tests {
             .collect()
     }
 
-    /// A source whose stream for a version names that version.
-    struct VersionedSource;
+    /// A source whose stream for a version names that version, and which
+    /// records what each resolution was asked with: the key, the duration,
+    /// the version (`None`: the source's own copy), whether markers were
+    /// asked for, and the quality.
+    #[derive(Default)]
+    struct VersionedSource {
+        asked: std::sync::Mutex<Vec<(String, Option<u64>, Option<String>, bool, String)>>,
+    }
 
     #[async_trait::async_trait]
     impl crate::source::MediaSource for VersionedSource {
@@ -9932,20 +9938,34 @@ mod tests {
         async fn resolve_stream(
             &self,
             key: &str,
-            _duration_ms: Option<u64>,
-            _include_markers: bool,
-            _quality: &str,
+            duration_ms: Option<u64>,
+            include_markers: bool,
+            quality: &str,
         ) -> Result<crate::source::StreamResolution, String> {
+            self.asked.lock().unwrap().push((
+                key.to_string(),
+                duration_ms,
+                None,
+                include_markers,
+                quality.to_string(),
+            ));
             Ok(Self::stream(format!("https://media.invalid/{key}/default")))
         }
         async fn resolve_stream_version(
             &self,
             key: &str,
-            _duration_ms: Option<u64>,
+            duration_ms: Option<u64>,
             version_id: &str,
-            _include_markers: bool,
-            _quality: &str,
+            include_markers: bool,
+            quality: &str,
         ) -> Result<crate::source::StreamResolution, String> {
+            self.asked.lock().unwrap().push((
+                key.to_string(),
+                duration_ms,
+                Some(version_id.to_string()),
+                include_markers,
+                quality.to_string(),
+            ));
             assert_eq!(key, "title", "resolved by the key its source was probed with");
             Ok(Self::stream(format!("https://media.invalid/server/{version_id}")))
         }
@@ -9978,13 +9998,53 @@ mod tests {
             screen: PlayDestination::DecidedAtLaunch,
         };
         let resolved = tauri::async_runtime::block_on(resolve_selected(
-            &VersionedSource,
+            &VersionedSource::default(),
             &selection,
             false,
             config::PLAYBACK_QUALITY_ORIGINAL,
         ))
         .unwrap();
         assert_eq!(resolved.url, "https://media.invalid/title/default");
+    }
+
+    #[test]
+    fn a_selection_is_resolved_with_the_plays_duration_markers_and_quality() {
+        // The attack on the fourth repair, finding 4: each arm of
+        // resolve_selected hands the source the selected item's duration and
+        // the play's markers and quality, as they are given.
+        let mut item = catalog_item("server:title", "movie", 1, false);
+        item.duration_ms = Some(5_400_000);
+        let selection = |version_id: Option<&str>| PlaybackSelection {
+            source_id: "server".to_string(),
+            raw_item_key: "title".to_string(),
+            version_id: version_id.map(str::to_string),
+            item: item.clone(),
+            player: crate::player::choose(crate::player::PlayerKind::External, &Ok(())),
+            screen: PlayDestination::DecidedAtLaunch,
+        };
+        for version_id in [Some("1080p-sdr"), None] {
+            for (include_markers, quality) in [(true, "1080p-8"), (false, config::PLAYBACK_QUALITY_ORIGINAL)] {
+                let source = VersionedSource::default();
+                tauri::async_runtime::block_on(resolve_selected(
+                    &source,
+                    &selection(version_id),
+                    include_markers,
+                    quality,
+                ))
+                .unwrap();
+                assert_eq!(
+                    source.asked.into_inner().unwrap(),
+                    vec![(
+                        "title".to_string(),
+                        Some(5_400_000),
+                        version_id.map(str::to_string),
+                        include_markers,
+                        quality.to_string(),
+                    )],
+                    "version {version_id:?}, markers {include_markers}, quality {quality}"
+                );
+            }
+        }
     }
 
     #[test]
