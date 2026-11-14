@@ -1791,6 +1791,43 @@ test('the package check calls check-libmpv.py on the unpacked set, and passes a 
     assert.equal(without.status, 0, `${without.stdout}\n${without.stderr}`);
   });
 
+  await t.test('a temporary directory named through a link, whose own name has a line break: refused the same', (t) => {
+    // The name the check is given has no line break. The directory it leads
+    // to has one, and that is the name /proc/self/maps would show.
+    const standIn = checkBesideStandIn(t, { lines: [...itsOk, 'RESULT PASS'], status: 0 });
+    const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-tmp-link-')));
+    t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+    const real = path.join(scratch, 'with a\nline break');
+    fs.mkdirSync(real);
+    const link = path.join(scratch, 'plain');
+    fs.symlinkSync(real, link);
+    const good = ['--set', referenceWith(t, right), packageWith(t, right).file];
+    const run = checkPackageRun(good, standIn.script, { TMPDIR: link });
+    assert.equal(run.status, 2, `${run.stdout}\n${run.stderr}`);
+    assert.match(
+      run.stderr,
+      /^check-package: the temporary directory .+\/with a\nline break\/.+ has a line break in its name, which \/proc\/self\/maps does not show as it is; set TMPDIR to another directory\n$/,
+    );
+    assert.equal(run.stdout, '', 'no package is judged');
+    assert.equal(standIn.wasCalled(), false);
+    assert.deepEqual(fs.readdirSync(real), [], 'what the check made there is removed');
+    const without = checkPackageRun(['--without-libmpv', pacmanPackage(t, {}).file], standIn.script, { TMPDIR: link });
+    assert.equal(without.status, 0, `${without.stdout}\n${without.stderr}`);
+    // The other way round, a name with a line break that leads to a directory
+    // without one, stays refused: the check's own tools are handed the name
+    // as it was given.
+    const ordinary = path.join(scratch, 'ordinary');
+    fs.mkdirSync(ordinary);
+    const odd = path.join(scratch, 'named with a\nline break');
+    fs.symlinkSync(ordinary, odd);
+    const other = checkPackageRun(good, standIn.script, { TMPDIR: odd });
+    assert.equal(other.status, 2, `${other.stdout}\n${other.stderr}`);
+    assert.match(other.stderr, /^check-package: the temporary directory .+\/named with a\nline break\/.+ has a line break in its name, /);
+    assert.equal(other.stdout, '');
+    assert.equal(standIn.wasCalled(), false);
+    assert.deepEqual(fs.readdirSync(ordinary), []);
+  });
+
   // Loading the library runs its start-up code. A package that has failed a
   // check before the load is not known to hold the set's code, so
   // check-libmpv.py is not even started for it.

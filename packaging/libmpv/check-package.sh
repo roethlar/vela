@@ -187,10 +187,16 @@ case "$tmp" in /*) ;; *) tmp="$PWD/$tmp" ;; esac
 # The load is seen to come from the unpacked set in /proc/self/maps, which
 # writes a line break in a file's name as the four characters "\012". Such a
 # name cannot be told from one that has those four characters, so a set below
-# a temporary directory with a line break in its name could never pass.
-case "$tmp" in
-  *$'\n'*) [ "$without" -eq 1 ] || die "the temporary directory $tmp has a line break in its name, which /proc/self/maps does not show as it is; set TMPDIR to another directory" ;;
-esac
+# a temporary directory with a line break in its name could never pass. The
+# name that file shows is the directory's own, with every link on the way to
+# it followed, so that name is looked at too: a TMPDIR without a line break
+# can lead to a directory that has one.
+real_tmp="$(cd -- "$tmp" && pwd -P)" || die "the temporary directory $tmp cannot be entered"
+for name in "$tmp" "$real_tmp"; do
+  case "$name" in
+    *$'\n'*) [ "$without" -eq 1 ] || die "the temporary directory $name has a line break in its name, which /proc/self/maps does not show as it is; set TMPDIR to another directory" ;;
+  esac
+done
 
 failed=0   # this package
 pass() { printf 'ok   %s\n' "$*"; }
