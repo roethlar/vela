@@ -37,17 +37,33 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     design, with what was measured against the shipped library, is
     `.agents/review/hd-3-hd-2.design.md`. The slice's acceptance is a
     by-eye comparison only the owner can make.
-  - Slice 5 (controls, cropping) is designed
-    (`.agents/plans/embedded-player.slice5-design.md`) and is being written
-    on the local branches `slice5` and `slice5-page` (worktrees beside the
-    clone); nothing of it is on `main`, and it lands after `hd-3` and
-    `hd-2`. Its cropping script is built under an
-    assumption the owner has not ruled on (the plan's "For the owner",
-    item 3, which conflicts with a 2026-07-05 rule in
-    `.agents/decisions.md`); it stays hidden with the rest.
-  - Then Slice 6 (parity). The owner's by-eye checks and the switch-on
-    (Settings control, release notes, version bump) are NOT the agent's
-    to do.
+  - WHERE THE UNLANDED WORK IS (2026-11-13, evening). Several pieces are
+    finished on local branches of this clone (worktrees beside it, named
+    `~/dev/vela-*-wt`) and are NOT on `main` and not pushed. Each was
+    written by helper agents from a recorded design, attacked by other
+    helpers and repaired; none has yet been verified by the agent that
+    coordinates, reviewed by codex, or landed. Land them in this order:
+    - `hd-2` (branch `hd-2`, head `353b871`, on top of the `hd-3` fix):
+      mpv's three HDR targets are observed and put back when something
+      else changes them. Its helpers left one low finding open, about how
+      far a source-text test reaches.
+    - Packaging the mpv library into the Linux packages, opt-in (branch
+      `embedded-packaging`): `scripts/build.sh --with-libmpv`. Its repair
+      pass was cut off by a usage limit on 2026-11-13 and is being redone.
+    - Slice 5, controls and cropping (branch `slice5`, head `e057ae4`;
+      design `.agents/plans/embedded-player.slice5-design.md`). Its helpers
+      report the full check and its new embedded scenarios passing. Its
+      cropping script is built under an assumption the owner has not ruled
+      on (the plan's "For the owner", item 3); it stays hidden with the
+      rest. It was branched before the `hd-3` fix and has to be merged
+      with it.
+    - Then Slice 6 (parity). What was found out for it is
+      `.agents/plans/embedded-player.slice6-notes.md`: why each scenario
+      that fails in the embedded venue fails (none is a defect of the
+      embedded player; two are the test compositor), what proves each
+      inventory row in each player, and a design for the parity guard.
+    The owner's by-eye checks and the switch-on (Settings control, release
+    notes, version bump) are NOT the agent's to do.
   - Active review loop: see `.agents/review/index.md`. One finding
     (`ps-2`) is with the owner after four reopens
     (`.agents/review/ps-2.contested.md`).
@@ -58,11 +74,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     to codex, and no agent is cut short. Later the same day the owner
     asked that agents started from then on run on Opus 5.5.
   Next in the queue after this plan:
-  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved. Since
-  2026-11-13 they are being written ahead on the local branch `geometry`
-  (a worktree beside the clone) while the embedded slices are in review.
-  Nothing of it is on `main`, and it lands only after the embedded plan's
-  slices, as the owner ordered ("Both, embedded first").
+  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved. All
+  three are written on the local branch `geometry` (head `a711082`, a
+  worktree beside the clone), attacked and repaired by helpers, not yet
+  verified by the coordinating agent, not reviewed by codex. Nothing of it
+  is on `main`, and it lands only after the embedded plan's slices, as the
+  owner ordered ("Both, embedded first"); the version bump and release
+  notes are made at that landing.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
@@ -310,6 +328,20 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   installed there. Slice 5 of the embedded-player plan adds a line for its
   own new script and deliberately leaves this one alone until the owner
   answers.
+- The external player does not check the media server's TLS certificate
+  (found 2026-11-13 by a run, unfixed, the owner has not been asked yet).
+  The system's mpv up to 0.41 defaults to `tls-verify=no` and Vela does
+  not set it, so mpv fetches the stream, and sends the stream's token,
+  without verifying whom it is talking to; Vela's own client does verify.
+  The mpv shipped for the embedded player (0.42) verifies by default, but
+  against its own TLS library's trust store, which is not always the one
+  Vela's client uses (`SSL_CERT_FILE` is honoured by one and not the
+  other): a server on a private CA then browses and will not play, with no
+  message. Details: `.agents/plans/embedded-player.slice6-notes.md`.
+  Proposed (needs a plan and a go: it changes playback for users whose
+  server certificate mpv's library does not accept): assert
+  `--tls-verify=yes` in the external launch after the user's options, and
+  decide what the embedded player should trust.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). One cause of the continuation flakes
   is gone since 2026-11-13: scenarios sought in a file the moment mpv named
