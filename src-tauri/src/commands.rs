@@ -9280,6 +9280,26 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_compatible_target_counts_the_size_observed_on_the_decided_screen() {
+        // The attack on the fourth repair, finding 2: the size mpv observed
+        // on the decided output counts over its listed size. The last play
+        // was observed on DP-1 at 2560x1440, which is listed at 4K; Vela's
+        // window is on HDMI-1.
+        use crate::player::PlayerKind::External;
+        let screens = screens_with("HDMI-1", &two_screens());
+        let record = published([session_observed_on("last", External, &["DP-1"], Some((2560, 1440)))]);
+        let screen = screen_for_play(&record, None, External, None, &screens);
+        assert_eq!(screen.name.as_deref(), Some("DP-1"));
+        assert!(screen.observed.is_some(), "the name was taken from the observation");
+        let target = target_for(&screen, &screens, display::HdrState::Disabled);
+        assert_eq!(
+            (target.width, target.height),
+            (2560, 1440),
+            "the size observed on the decided output counts"
+        );
+    }
+
     /// The copy a Compatible choice gives and where the play is shown.
     fn compatible_choice(
         screen: &PlayScreen,
