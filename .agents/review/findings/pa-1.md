@@ -199,3 +199,23 @@ run check` was green before the commit (480 tests), and the test file
 passes inside `codex sandbox` in workspace-write mode.
 
 Not covered: as listed above.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 13:24 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da33-5930-74c2-85ac-acbd60524ed4`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:16 UTC, finished 13:23 UTC.
+- Reviewed head `716abc6c1f633736466b5a60634b953eeb89fb90`, base
+  `26660a9547f0003923fae99d831fe7dda32d97a2` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenarios/markers.mjs:117 — The clock starts after the resume reply. With ordinary playback, a 9400 ms resume-reply delay followed by an 1800 ms position read certified 12.22 s after 11219 real milliseconds, reporting only 1809 ms. The only seek was setup to 1 s. Start timing before issuing the resume so its response latency counts.
+  - tests/e2e/judge.mjs:43 — Observation gaps still hide short landings. A stand-in that skips to 9 s at 1000 ms, then plays normally, passed at 4220 ms and 12.22 s when a read begun around 900 ms took 3300 ms. Failed reads spanning the same interval also passed. Lua consumes the marker before seeking, so this continuation accurately models a short landing without another skip. Require sufficient observation coverage or independent landing evidence, with regression tests.
+  - tests/e2e/scenarios/markers.mjs:131 — Date.now permits clock adjustments to defeat the deadline. With ordinary playback, a 9400 ms read delay and a simulated seven-second clock rollback, the scenario certified 12.21 s after 11213 real milliseconds while reporting 4212 ms. Use a monotonic elapsed clock.
+  - tests/e2e-judge.test.mjs:238 — The slow-read fixture jumps from approximately 2.04 s to 12.3 s at 5200 ms; it models a late jump, not ordinary playback. Use an honest playback function for the no-skip regression. The existing deadline guards do bite: reverting the repair failed both named tests, and restoring it passed all 29 tests. Restoration was verified byte for byte.
+  - tests/e2e/judge.mjs:34 — A correct jump around one second can now fail if observation is delayed roughly four additional seconds. A 4300 ms read begun around 900 ms reproduced rejection at 5225 ms. This is conservative timeout behavior, not a separate reopening reason. The E2E scenario and Lua were read; the E2E suite was not run.
