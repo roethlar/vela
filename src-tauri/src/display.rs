@@ -256,8 +256,16 @@ pub(crate) fn profile_basis(
             && value.screen_name().map(String::as_str) == name
             && (value.width_px.is_some() || value.height_px.is_some())
     });
+    // The screen holding Vela's window is that very monitor, even where
+    // another output carries the same name (two screens of one model).
     let output = name
-        .and_then(|name| screens.output_called(name))
+        .and_then(|name| {
+            if screens.velas.as_deref() == Some(name) {
+                screens.velas_output.as_ref()
+            } else {
+                screens.output_called(name)
+            }
+        })
         .or(screens.velas_output.as_ref());
     let width_px = observed
         .and_then(|value| value.width_px)
@@ -372,6 +380,13 @@ fn screens_from(
     platform: Vec<Output>,
 ) -> Screens {
     let velas_output = velas.as_ref().map(output_of);
+    let velas_name = velas.and_then(|velas| velas.mpv_name).map(|name| {
+        velas_output
+            .as_ref()
+            .and_then(|own| connector_of(&name, own, &platform))
+            .map(str::to_string)
+            .unwrap_or(name)
+    });
     let connected = monitors.map(|monitors| {
         platform
             .into_iter()
@@ -379,10 +394,37 @@ fn screens_from(
             .collect::<Vec<_>>()
     });
     Screens {
-        velas: velas.and_then(|velas| velas.mpv_name),
+        velas: velas_name,
         velas_output,
         connected,
     }
+}
+
+/// The concrete name of the screen holding Vela's window, from the system's
+/// own list of outputs (second review of finding pw-1). On Wayland Tauri
+/// names a screen by its model, which two screens of one model share; the
+/// compositor lists each output by its connector name ("DP-3") first, which
+/// is what mpv takes and names no other screen. It is taken when exactly one
+/// listed output carries Vela's screen's name, or, of several that do,
+/// exactly one is also of its size; otherwise there is none to take, and the
+/// name stays as Tauri gives it.
+fn connector_of<'a>(name: &str, own: &Output, platform: &'a [Output]) -> Option<&'a str> {
+    let carrying: Vec<&Output> = platform.iter().filter(|output| output.is_called(name)).collect();
+    let output = match carrying.as_slice() {
+        [one] => *one,
+        several => {
+            let sized: Vec<&Output> = several
+                .iter()
+                .copied()
+                .filter(|output| output.width_px == own.width_px && output.height_px == own.height_px)
+                .collect();
+            match sized.as_slice() {
+                [one] => *one,
+                _ => return None,
+            }
+        }
+    };
+    output.names.first().map(String::as_str)
 }
 
 fn descriptor(monitor: &tauri::Monitor) -> MonitorDescriptor {
@@ -1227,6 +1269,63 @@ mod tests {
         assert_eq!(unlisted.connected, None);
         assert_eq!(unlisted.velas.as_deref(), Some("HDMI-1"));
         assert_eq!(screens_from(None, None, Vec::new()), Screens::default());
+    }
+
+    // Second review of finding pw-1: on Wayland Tauri names a screen by its
+    // model, so two screens of one model share a name. The screen holding
+    // Vela's window is named by its own connector, and its profile is its own.
+    #[test]
+    fn two_screens_of_one_model_are_told_apart() {
+        let left = monitor("XG27UQDMS", "XG27UQDMS", 3840, 2160, 0);
+        let right = monitor("XG27UQDMS", "XG27UQDMS", 2560, 1440, 3840);
+        let both = vec![left.clone(), right.clone()];
+        let compositor = vec![
+            listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
+            listed(&["DP-2", "XG27UQDMS"], 2560, 1440, None),
+        ];
+        let on_right = screens_from(Some(right.clone()), Some(both.clone()), compositor.clone());
+        assert_eq!(on_right.velas.as_deref(), Some("DP-2"), "the connector of Vela's own screen");
+        let basis = profile_basis(on_right.velas.as_deref(), None, &on_right);
+        assert_eq!(size(&basis), (Some("DP-2"), 2560, 1440));
+        assert_eq!(basis.position, Some((3840, 0)));
+        assert_eq!(
+            size(&profile_basis(Some("DP-1"), None, &on_right)),
+            (Some("DP-1"), 3840, 2160),
+            "the other screen, by its connector, is its own"
+        );
+        assert!(on_right.is_connected("DP-1") && on_right.is_connected("DP-2"));
+        let on_left = screens_from(Some(left), Some(both.clone()), compositor);
+        assert_eq!(on_left.velas.as_deref(), Some("DP-1"));
+        assert_eq!(size(&profile_basis(Some("DP-1"), None, &on_left)), (Some("DP-1"), 3840, 2160));
+
+        // Two of one model and one size, neither the size Tauri gives Vela's
+        // screen (a scaled desktop): nothing tells which is Vela's, so the
+        // name stays the model's, and the profile is still that of the
+        // monitor holding Vela's window, not the first listed of that model.
+        let alike = vec![
+            listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
+            listed(&["DP-2", "XG27UQDMS"], 3840, 2160, None),
+        ];
+        let untold = screens_from(Some(right.clone()), Some(both.clone()), alike);
+        assert_eq!(untold.velas.as_deref(), Some("XG27UQDMS"));
+        let basis = profile_basis(untold.velas.as_deref(), None, &untold);
+        assert_eq!(size(&basis), (Some("XG27UQDMS"), 2560, 1440));
+        assert_eq!(basis.position, Some((3840, 0)));
+
+        // One output of that model: its connector, whatever size it lists.
+        let one = screens_from(
+            Some(right.clone()),
+            Some(vec![right.clone()]),
+            vec![listed(&["DP-3", "XG27UQDMS"], 5120, 2880, None)],
+        );
+        assert_eq!(one.velas.as_deref(), Some("DP-3"));
+        // A compositor that gives no connector names: the model stays.
+        let nameless = screens_from(
+            Some(right.clone()),
+            Some(vec![right]),
+            vec![listed(&["XG27UQDMS"], 2560, 1440, None)],
+        );
+        assert_eq!(nameless.velas.as_deref(), Some("XG27UQDMS"));
     }
 
     #[cfg(target_os = "macos")]
