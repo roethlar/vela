@@ -78,7 +78,7 @@ pub struct PlaybackWindowState {
     pub fullscreen: Option<bool>,
     pub maximized: Option<bool>,
     /// The window's size, width then height, as mpv reported it
-    /// (`osd-width`/`osd-height`) while the window was neither fullscreen nor
+    /// (`osd-dimensions`) while the window was neither fullscreen nor
     /// maximized, or else the size the play was opened with. Kept while the
     /// window is fullscreen or maximized, and from one play to the next when
     /// a play never shows its window at another size, so a play that opens
@@ -106,9 +106,6 @@ const WINDOWED_SIZE_SETTLE: Duration = Duration::from_millis(1000);
 struct WindowTracker {
     fullscreen: Option<bool>,
     maximized: Option<bool>,
-    /// The latest `osd-width` and `osd-height`. They arrive as two events.
-    width: Option<u32>,
-    height: Option<u32>,
     /// A size reported while the window was neither fullscreen nor
     /// maximized, and when, not yet long enough ago to be confirmed.
     candidate: Option<((u32, u32), Instant)>,
@@ -119,8 +116,11 @@ struct WindowTracker {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum WindowChange {
     Flag(WindowProperty, bool),
-    Width(u32),
-    Height(u32),
+    /// A width and a height that mpv reported together, in one
+    /// `osd-dimensions` event. A size is never put together from two
+    /// reports (review finding pw-3): one half of it could be the other
+    /// half of a size the window never was.
+    Size(u32, u32),
 }
 
 impl WindowTracker {
@@ -157,22 +157,18 @@ impl WindowTracker {
                     self.candidate = None;
                 }
             }
-            WindowChange::Width(width) => self.observe_size(Some(width), self.height, now),
-            WindowChange::Height(height) => self.observe_size(self.width, Some(height), now),
+            WindowChange::Size(width, height) => self.observe_size(width, height, now),
         }
     }
 
-    fn observe_size(&mut self, width: Option<u32>, height: Option<u32>, now: Instant) {
-        self.width = width;
-        self.height = height;
+    fn observe_size(&mut self, width: u32, height: u32, now: Instant) {
         // While fullscreen or maximized the size is the screen's or the
         // work area's, not the window's.
         if self.fullscreen_or_maximized() {
             return;
         }
-        let (Some(width), Some(height)) = (width, height) else {
-            return;
-        };
+        // A size outside the bounds (a player with no window reports 0x0)
+        // changes nothing: not the candidate, not the confirmed size.
         if !usable_windowed_size(width, height) {
             return;
         }
@@ -275,15 +271,21 @@ enum WindowProperty {
 }
 
 /// Accept only owned property-change events of the exact JSON type: booleans
-/// for the two flags, whole numbers for the window size. Observe-property
-/// command replies, nulls, numeric/string coercions, and unrelated properties
-/// must not invent state.
+/// for the two flags, and for the window size an `osd-dimensions` object
+/// whose `w` and `h` are both whole numbers that fit a u32. Observe-property
+/// command replies, nulls, numeric/string coercions, a size missing either
+/// half, and unrelated properties must not invent state.
 fn window_property_change(value: &serde_json::Value) -> Option<WindowChange> {
     if value.get("event")?.as_str()? != "property-change" {
         return None;
     }
     let data = value.get("data")?;
-    let dimension = || data.as_u64().and_then(|value| u32::try_from(value).ok());
+    let dimension = |key: &str| {
+        data.as_object()?
+            .get(key)?
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
+    };
     match value.get("name")?.as_str()? {
         "fullscreen" => Some(WindowChange::Flag(
             WindowProperty::Fullscreen,
@@ -293,8 +295,9 @@ fn window_property_change(value: &serde_json::Value) -> Option<WindowChange> {
             WindowProperty::Maximized,
             data.as_bool()?,
         )),
-        "osd-width" => dimension().map(WindowChange::Width),
-        "osd-height" => dimension().map(WindowChange::Height),
+        // mpv sends `{"w":800,"h":450,"par":1.0,...}`, and `w` and `h` of 0
+        // while there is no video output.
+        "osd-dimensions" => Some(WindowChange::Size(dimension("w")?, dimension("h")?)),
         _ => None,
     }
 }
@@ -1018,8 +1021,7 @@ fn spawn_position_reader(
                   {\"command\":[\"observe_property\",4,\"display-names\"]}\n\
                   {\"command\":[\"observe_property\",5,\"display-width\"]}\n\
                   {\"command\":[\"observe_property\",6,\"display-height\"]}\n\
-                  {\"command\":[\"observe_property\",7,\"osd-width\"]}\n\
-                  {\"command\":[\"observe_property\",8,\"osd-height\"]}\n",
+                  {\"command\":[\"observe_property\",7,\"osd-dimensions\"]}\n",
             );
 
             let mut line = String::new();
@@ -2584,22 +2586,30 @@ mod tests {
             .expect("read timeout");
         let mut requests = BufReader::new(mpv.try_clone().expect("clone"));
         let mut observed = Vec::new();
-        while !(observed.iter().any(|name| name == "osd-width")
-            && observed.iter().any(|name| name == "osd-height"))
-        {
+        while !observed.iter().any(|name| name == "osd-dimensions") {
             let mut line = String::new();
             requests
                 .read_line(&mut line)
-                .expect("the reader asks for osd-width and osd-height");
+                .expect("the reader asks for osd-dimensions");
             let request: serde_json::Value = serde_json::from_str(&line).expect("a command");
             assert_eq!(request["command"][0], "observe_property");
             observed.push(request["command"][2].as_str().expect("a name").to_string());
         }
 
+        // As mpv sends them: a window, then a size that is not usable (the
+        // window going away), which must leave the size before it.
         for value in [
-            event("osd-width", serde_json::json!(1024)),
-            event("osd-height", serde_json::json!(576)),
+            event(
+                "osd-dimensions",
+                serde_json::json!({ "w": 1024, "h": 576, "par": 1.0, "aspect": 1.777778,
+                                    "mt": 0, "mb": 0, "ml": 0, "mr": 0 }),
+            ),
             event("time-pos", serde_json::json!(3.0)),
+            event(
+                "osd-dimensions",
+                serde_json::json!({ "w": 1024, "h": 0, "par": 0.0, "aspect": 0.0,
+                                    "mt": 0, "mb": 0, "ml": 0, "mr": 0 }),
+            ),
         ] {
             writeln!(mpv, "{value}").expect("write");
         }
@@ -2628,8 +2638,7 @@ mod tests {
         let reported = position_reported_after(&[
             event("display-width", serde_json::json!(3840)),
             event("display-height", serde_json::json!(2160)),
-            event("osd-width", serde_json::json!(1280)),
-            event("osd-height", serde_json::json!(720)),
+            event("osd-dimensions", serde_json::json!({ "w": 1280, "h": 720 })),
             event("fullscreen", serde_json::json!(true)),
         ]);
         assert_eq!(
@@ -2733,44 +2742,62 @@ mod tests {
             })),
             Some(WindowChange::Flag(WindowProperty::Maximized, false))
         );
+        // The size is one report holding both halves, as mpv 0.41 sends it.
         assert_eq!(
             window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "id": 7,
+                "name": "osd-dimensions",
+                "data": { "w": 1280, "h": 720, "par": 1.0, "aspect": 1.777778,
+                          "mt": 0, "mb": 0, "ml": 0, "mr": 0 }
+            })),
+            Some(WindowChange::Size(1280, 720))
+        );
+        // No video output: parsed as it is, and refused by the bounds.
+        assert_eq!(
+            window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "osd-dimensions",
+                "data": { "w": 0, "h": 0, "par": 0.0, "aspect": 0.0 }
+            })),
+            Some(WindowChange::Size(0, 0))
+        );
+
+        let dimensions = |data: serde_json::Value| {
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-dimensions",
+                "data": data
+            })
+        };
+        for rejected in [
+            serde_json::json!({ "request_id": 7, "data": { "w": 1280, "h": 720 } }),
+            // Half a size is never a size (review finding pw-3): the two
+            // separate properties are not read at all.
+            serde_json::json!({
                 "event": "property-change",
                 "name": "osd-width",
                 "data": 1280
-            })),
-            Some(WindowChange::Width(1280))
-        );
-        assert_eq!(
-            window_property_change(&serde_json::json!({
+            }),
+            serde_json::json!({
                 "event": "property-change",
                 "name": "osd-height",
                 "data": 720
-            })),
-            Some(WindowChange::Height(720))
-        );
-
-        for rejected in [
-            serde_json::json!({ "request_id": 7, "data": 1280 }),
-            serde_json::json!({
-                "event": "property-change",
-                "name": "osd-width",
-                "data": "1280"
             }),
+            dimensions(serde_json::json!({ "w": 1280 })),
+            dimensions(serde_json::json!({ "h": 720 })),
+            dimensions(serde_json::json!({ "w": "1280", "h": 720 })),
+            dimensions(serde_json::json!({ "w": 1280, "h": -720 })),
+            dimensions(serde_json::json!({ "w": 1280.5, "h": 720 })),
+            dimensions(serde_json::json!({ "w": 1280, "h": 4_294_967_296_u64 })),
+            dimensions(serde_json::json!({ "w": null, "h": 720 })),
+            dimensions(serde_json::json!([1280, 720])),
+            dimensions(serde_json::json!(1280)),
+            dimensions(serde_json::Value::Null),
             serde_json::json!({
-                "event": "property-change",
-                "name": "osd-height",
-                "data": -720
-            }),
-            serde_json::json!({
-                "event": "property-change",
-                "name": "osd-width",
-                "data": 1280.5
-            }),
-            serde_json::json!({
-                "event": "property-change",
-                "name": "osd-height",
-                "data": 4_294_967_296_u64
+                "event": "end-file",
+                "name": "osd-dimensions",
+                "data": { "w": 1280, "h": 720 }
             }),
             serde_json::json!({
                 "event": "property-change",
@@ -2799,7 +2826,7 @@ mod tests {
                 "data": true
             }),
         ] {
-            assert_eq!(window_property_change(&rejected), None);
+            assert_eq!(window_property_change(&rejected), None, "{rejected}");
         }
     }
 
@@ -2853,8 +2880,7 @@ mod tests {
         }
 
         fn size(tracker: &mut WindowTracker, width: u32, height: u32, at: u64) {
-            tracker.apply(WindowChange::Width(width), t(at));
-            tracker.apply(WindowChange::Height(height), t(at));
+            tracker.apply(WindowChange::Size(width, height), t(at));
         }
 
         fn flag(tracker: &mut WindowTracker, property: WindowProperty, on: bool, at: u64) {
@@ -2862,13 +2888,79 @@ mod tests {
         }
 
         #[test]
-        fn a_reported_size_becomes_the_candidate_only_when_both_dimensions_are_known() {
+        fn a_reported_size_becomes_the_candidate() {
             let mut tracker = WindowTracker::default();
-            tracker.apply(WindowChange::Width(1280), t(0));
-            assert_eq!(tracker.candidate, None, "the height is not known yet");
-            tracker.apply(WindowChange::Height(720), t(10));
+            size(&mut tracker, 1280, 720, 10);
             assert_eq!(tracker.candidate, Some(((1280, 720), t(10))));
             assert_eq!(tracker.confirmed, None, "not confirmed yet");
+        }
+
+        // Review finding pw-3. After 800x450, a size that is not usable must
+        // not lend either of its halves to the size carried on: the size
+        // stays the one the window really had.
+        #[test]
+        fn an_unusable_report_after_a_size_leaves_that_size() {
+            for unusable in [
+                // The reviewer's two sequences, as one report each now
+                // carries both halves: width 1024 with a height of 89; and
+                // width 1024 with a height of 0, then width 0.
+                vec![(1024, 89)],
+                vec![(1024, 0), (0, 0)],
+                vec![(0, 0)],
+                vec![(0, 450), (1024, 0)],
+                vec![(159, 450)],
+                vec![(16385, 450), (800, 16385)],
+            ] {
+                // Confirmed, then the unusable reports.
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, 800, 450, 0);
+                tracker.tick(t(1000));
+                assert_eq!(tracker.confirmed, Some((800, 450)));
+                for (width, height) in &unusable {
+                    size(&mut tracker, *width, *height, 1500);
+                }
+                assert_eq!(tracker.candidate, None, "{unusable:?}");
+                assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)), "{unusable:?}");
+                tracker.tick(t(5000));
+                assert_eq!(tracker.confirmed, Some((800, 450)), "{unusable:?}");
+
+                // A candidate not yet confirmed, then the unusable reports:
+                // the candidate stands, with its own time.
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, 800, 450, 0);
+                for (width, height) in &unusable {
+                    size(&mut tracker, *width, *height, 100);
+                }
+                assert_eq!(tracker.candidate, Some(((800, 450), t(0))), "{unusable:?}");
+                assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)), "{unusable:?}");
+                tracker.tick(t(1000));
+                assert_eq!(tracker.confirmed, Some((800, 450)), "{unusable:?}");
+            }
+        }
+
+        // From an existing size, a usable and an unusable report in either
+        // order: the usable one is the size, whole.
+        #[test]
+        fn usable_and_unusable_reports_in_either_order() {
+            for (first, second) in [
+                ((1024, 576), (0, 0)),
+                ((0, 0), (1024, 576)),
+                ((1024, 576), (1280, 89)),
+                ((1280, 89), (1024, 576)),
+            ] {
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, 800, 450, 0);
+                tracker.tick(t(1000));
+                size(&mut tracker, first.0, first.1, 2000);
+                size(&mut tracker, second.0, second.1, 2100);
+                assert_eq!(
+                    tracker.snapshot().windowed_size,
+                    Some((1024, 576)),
+                    "{first:?} then {second:?}"
+                );
+                tracker.tick(t(4000));
+                assert_eq!(tracker.confirmed, Some((1024, 576)), "{first:?} then {second:?}");
+            }
         }
 
         #[test]
@@ -2992,9 +3084,11 @@ mod tests {
             let event = |name: &str, data: serde_json::Value| {
                 serde_json::json!({ "event": "property-change", "name": name, "data": data })
             };
+            let dimensions = |w: u32, h: u32| {
+                event("osd-dimensions", serde_json::json!({ "w": w, "h": h }))
+            };
             observation.apply_ipc_event_at(&event("fullscreen", true.into()), t(0));
-            observation.apply_ipc_event_at(&event("osd-width", 1920.into()), t(0));
-            observation.apply_ipc_event_at(&event("osd-height", 1080.into()), t(0));
+            observation.apply_ipc_event_at(&dimensions(1920, 1080), t(0));
             observation.apply_ipc_event_at(&event("time-pos", 12.5.into()), t(5000));
             assert_eq!(
                 observation.snapshot(),
@@ -3006,12 +3100,10 @@ mod tests {
             );
             // A play with no window (it reports 0x0) hands it on too.
             let observation = WindowStateObservation::opened_at(Some((800, 450)));
-            observation.apply_ipc_event_at(&event("osd-width", 0.into()), t(0));
-            observation.apply_ipc_event_at(&event("osd-height", 0.into()), t(0));
+            observation.apply_ipc_event_at(&dimensions(0, 0), t(0));
             assert_eq!(observation.snapshot().windowed_size, Some((800, 450)));
             // Its own windowed size wins.
-            observation.apply_ipc_event_at(&event("osd-width", 1024.into()), t(100));
-            observation.apply_ipc_event_at(&event("osd-height", 576.into()), t(100));
+            observation.apply_ipc_event_at(&dimensions(1024, 576), t(100));
             assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
             observation.apply_ipc_event_at(&event("time-pos", 13.into()), t(1200));
             observation.apply_ipc_event_at(&event("fullscreen", true.into()), t(1300));
@@ -3031,8 +3123,10 @@ mod tests {
             let event = |name: &str, data: serde_json::Value| {
                 serde_json::json!({ "event": "property-change", "name": name, "data": data })
             };
-            observation.apply_ipc_event_at(&event("osd-width", 800.into()), t(0));
-            observation.apply_ipc_event_at(&event("osd-height", 450.into()), t(0));
+            let dimensions = |w: u32, h: u32| {
+                event("osd-dimensions", serde_json::json!({ "w": w, "h": h }))
+            };
+            observation.apply_ipc_event_at(&dimensions(800, 450), t(0));
             observation.apply_ipc_event_at(&event("time-pos", 12.5.into()), t(1000));
             assert_eq!(
                 observation.state.lock().expect("tracker").confirmed,
@@ -3040,8 +3134,7 @@ mod tests {
                 "a time-pos event a second later confirms the size"
             );
             // The maximized size, then the flag: the confirmed size stays.
-            observation.apply_ipc_event_at(&event("osd-width", 1920.into()), t(2000));
-            observation.apply_ipc_event_at(&event("osd-height", 1050.into()), t(2000));
+            observation.apply_ipc_event_at(&dimensions(1920, 1050), t(2000));
             observation.apply_ipc_event_at(&event("window-maximized", true.into()), t(2010));
             assert_eq!(
                 observation.snapshot(),
