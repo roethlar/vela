@@ -12,9 +12,12 @@
 // sample is `{ t, ms }`: its position in seconds (null for a read that
 // failed) and the milliseconds since the play resumed. The samples are judged
 // in order:
-// - one at or past the range's end decides it: the skip happened, and the
-//   last position seen before it (`before`) and the sample past the end
-//   (`after`, at `ms`) are returned;
+// - one at or past the range's end, taken inside the window, decides it: the
+//   skip happened, and the last position seen before it (`before`) and the
+//   sample past the end (`after`, at `ms`) are returned. Taken after the
+//   window it fails: by then ordinary playback has had time to get there,
+//   and one slow read of the position is enough to see nothing in between
+//   (review finding pa-1, verification round 1);
 // - one at or past rangeStart + marginS, short of the end, fails: the play
 //   was seen inside the range, so whatever crossed it was not one jump (the
 //   margin allows for the sample that sees the play just past the start,
@@ -27,7 +30,18 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
   let before = startS;
   let last = null;
   for (const { t, ms } of samples) {
-    if (t != null && t >= rangeEnd) return { ok: true, before, after: t, ms };
+    if (t != null && t >= rangeEnd) {
+      if (ms > windowMs) {
+        return {
+          ok: false,
+          why:
+            `the position was first seen past the range's end (${rangeEnd} s) ${ms} ms after playing on from ` +
+            `${startS.toFixed(2)} s, after the ${windowMs} ms in which only a skip can get it there; ` +
+            `it is ${t} (the sample before was ${before} s)`,
+        };
+      }
+      return { ok: true, before, after: t, ms };
+    }
     if (t != null && t >= rangeStart + marginS) {
       return {
         ok: false,

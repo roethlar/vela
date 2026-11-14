@@ -83,15 +83,28 @@ test("pa-1: the range's end passes at exactly its value, and the margin ends at 
   assert.match(atMargin.verdict.why, /seen inside the range at 3 s/);
 });
 
-test('pa-1: the end is judged before the window, and the first sample may be the jump', () => {
-  // A jump seen at the first sample past the window still passes: a sample
-  // past the end decides it before the window is looked at.
+test('pa-1: a crossing counts only inside the window, and the first sample may be the jump', () => {
+  // A position first seen past the end after the window is no proof of a
+  // skip: by then ordinary playback has had time to get there. (This test
+  // once required the opposite, a pass at 5050 ms; the reviewer showed a
+  // play with no skip certified that way, through one slow read.)
   const held = Array.from({ length: 50 }, (_, k) => ({ t: 1, ms: 100 * k }));
-  assert.deepEqual(
-    decide([...held, { t: 12.2, ms: 5050 }]),
-    { at: 50, verdict: { ok: true, before: 1, after: 12.2, ms: 5050 } },
-    'a jump at the first sample past the window must pass',
-  );
+  assert.deepEqual(decide([...held, { t: 12.2, ms: 5050 }]), {
+    at: 50,
+    verdict: {
+      ok: false,
+      why:
+        "the position was first seen past the range's end (12 s) 5050 ms after playing on from 1.00 s, " +
+        'after the 5000 ms in which only a skip can get it there; it is 12.2 (the sample before was 1 s)',
+    },
+  });
+  // At exactly the window's end it still counts.
+  assert.deepEqual(decide([...held, { t: 12.2, ms: 5000 }]).verdict, { ok: true, before: 1, after: 12.2, ms: 5000 });
+  // The reviewer's trace: ordinary playback, then one read that took
+  // 9400 ms, and the next sample past the end with no skip at all.
+  const slow = decide([...playing(1, 5), { t: 12.26, ms: 11256 }]);
+  assert.equal(slow.verdict.ok, false, 'a play with no skip, seen past the end after one slow read, must fail');
+  assert.match(slow.verdict.why, /^the position was first seen past the range's end \(12 s\) 11256 ms after playing on from 1\.00 s, after the 5000 ms/);
   // With no sample before the jump, the sample before it is where the play
   // was put.
   assert.deepEqual(
@@ -131,10 +144,13 @@ test('pa-1: a read that failed changes nothing', () => {
 // A seek to 1 s lands at `landsAt` (the scenario takes anything from 0.9 to
 // 1.5 s as the start, as a real seek may land on a frame near it), so that a
 // verdict judged from a start other than the one seen shows.
-function standInMpv(positionAt, { landsAt = 1 } = {}) {
+// `slowRead`, if given, makes one read of the position, the first at or after
+// `slowRead.at` ms since the resume, take `slowRead.ms` to answer.
+function standInMpv(positionAt, { landsAt = 1, slowRead = null } = {}) {
   let paused = false;
   let pos = 0.5;
   let resumedAt = null;
+  let slowed = false;
   const made = Date.now();
   return {
     async getProp(name) {
@@ -143,7 +159,14 @@ function standInMpv(positionAt, { landsAt = 1 } = {}) {
       // it (a timer left running would keep the test process alive).
       if (Date.now() - made > 10000) return new Promise(() => {});
       if (name === 'pause') return paused;
-      if (name === 'time-pos') return paused || resumedAt == null ? pos : positionAt(Date.now() - resumedAt);
+      if (name === 'time-pos') {
+        if (paused || resumedAt == null) return pos;
+        if (slowRead && !slowed && Date.now() - resumedAt >= slowRead.at) {
+          slowed = true;
+          await new Promise((r) => setTimeout(r, slowRead.ms));
+        }
+        return positionAt(Date.now() - resumedAt);
+      }
       throw new Error(`the stand-in has no property ${name}`);
     },
     async setProp(name, value) {
@@ -204,6 +227,19 @@ test('pa-1: the markers scenario fails a play that never crosses the range, once
     proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12),
     /^Error: auto-skip: the intro range: the position must be past the range's end \(12 s\) within 5000 ms of playing on from 1\.25 s, which only a skip can do; it is 1\.25$/,
     'the scenario must fail, by the window, a play that is never past the range',
+  );
+});
+
+test('pa-1: the markers scenario fails a play first seen past the range after the window, through one slow read', STAND_IN, async () => {
+  // The play creeps on, short of the range's margin, and is past the end
+  // only 5.2 s after resuming, which no skip explains; one read of the
+  // position, begun half a second in, takes 4.9 s, so no sample is taken in
+  // between and the first one after it is past the end. About 5.5 s.
+  const mpv = standInMpv((ms) => (ms < 5200 ? 1 + ms / 5000 : 12.3), { slowRead: { at: 500, ms: 4900 } });
+  await assert.rejects(
+    proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12),
+    /^Error: auto-skip: the intro range: the position was first seen past the range's end \(12 s\) \d+ ms after playing on from 1\.00 s, after the 5000 ms in which only a skip can get it there; it is 12\.3 /,
+    'the scenario must fail a crossing first seen after the window',
   );
 });
 
