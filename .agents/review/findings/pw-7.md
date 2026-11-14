@@ -342,3 +342,19 @@ Not covered:
   weaknesses (round 2's list).
 - The tests run the component's own code extracted from it; only the probe
   ran the real Svelte runtime.
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-14 13:53 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da4c-2479-7d90-96c9-1a3557d50844`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:43 UTC, finished 13:52 UTC.
+- Reviewed head `1430f2effeda7c1e84ad1fd2512b6d21bf2d37f9`, base
+  `bf563e6b42909e457cdde5afe92da78df5e55c45` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src/lib/Settings.svelte:30 — Save replies are treated as backend write order. Reproduced against both pins: A applies fullscreen and closes with its reply pending; reopened B loads fullscreen, saves default, and receives confirmation; A's delayed reply then changes B's selection and confirmed mode to fullscreen although the backend holds default. A refused retry also restores fullscreen. The base keeps B on default. Serialize saves across component lifetimes or use backend-ordered revisions, and guard this sequence with write application separated from reply delivery; the current test backend combines them. All 10 existing tests pass after restoration.
