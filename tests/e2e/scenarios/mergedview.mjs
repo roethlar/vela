@@ -16,6 +16,15 @@ let mockB;
 
 async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
   const before = mpvSocketSnapshot();
+  // The card must be on the page before the menu is opened on it. Seen once
+  // (embedded player, 2026-11-14): right after the play before had been
+  // stopped the card was not there, and the script below failed on nothing
+  // ("null is not an object"). Why it was gone for that moment is not
+  // established; a card that stays gone still fails here, by this wait.
+  await driver.waitFor(
+    `return !!document.querySelector('button.poster[aria-label^="Mock Movie"]')`,
+    'the merged card on the page',
+  );
   await driver.exec(
     `const el = document.querySelector('button.poster[aria-label^="Mock Movie"]');
      const r = el.getBoundingClientRect();

@@ -886,3 +886,18 @@ for (const [file, owner, socket, count, next, branch = null, occurrences = 1] of
     }
   });
 }
+
+// mergedview opens a context menu on its card by a script, which fails on a
+// card that is not on the page (seen once, right after a play was stopped).
+test('mergedview waits for its card to be on the page before it opens the menu on it', () => {
+  const source = fs.readFileSync(new URL('./e2e/scenarios/mergedview.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('\nasync function playFromMenu(');
+  assert.notEqual(start, -1, 'playFromMenu exists');
+  // Comments out, so that a wait that is only described does not count.
+  const body = source.slice(start, source.indexOf('\n}\n', start)).replace(/^\s*\/\/[^\n]*\n/gm, '');
+  assert.match(
+    body,
+    /const before = mpvSocketSnapshot\(\);\n {2}await driver\.waitFor\(\n {4}`return !!document\.querySelector\('button\.poster\[aria-label\^="Mock Movie"\]'\)`,\n {4}'the merged card on the page',\n {2}\);\n {2}await driver\.exec\(\n {4}`const el = document\.querySelector\('button\.poster\[aria-label\^="Mock Movie"\]'\);/,
+    'the wait for the card comes directly before the script that uses it, unconditionally, and for the same card',
+  );
+});
