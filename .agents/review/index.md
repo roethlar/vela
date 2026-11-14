@@ -1,5 +1,20 @@
 # Review status
 
+**Embedded player, packaging review, 2026-11-14 (open):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `2f0d191..4b8293e`: `findings`. Six candidates, six
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-libmpv-packaging.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pk-1 | HIGH     | Checking an AppImage runs it                                           | `[ ]`  | — | codex/default/standard |
+| pk-2 | HIGH     | The libraries of a set that failed its checks are loaded anyway        | `[ ]`  | — | codex/default/standard |
+| pk-3 | MEDIUM   | A plain Arch build can put an older package, with the set in it, into dist/ | `[ ]`  | — | codex/default/standard |
+| pk-4 | MEDIUM   | A package whose directories above the set cannot be entered still passes | `[ ]`  | — | codex/default/standard |
+| pk-5 | MEDIUM   | Licence copies of an Arch package may be links out of it, or unreadable, and pass | `[ ]`  | — | codex/default/standard |
+| pk-6 | MEDIUM   | A temporary directory with a space in its name fails a good package    | `[ ]`  | — | codex/default/standard |
+
 **Embedded player Slice 5 review, 2026-11-14 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `0aeeff0..3d2fef6`: `findings`. Two candidates, two

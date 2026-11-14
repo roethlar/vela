@@ -44,8 +44,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     coordinates, reviewed by codex, or landed. Land them in this order:
     - (Packaging the mpv library into the Linux packages LANDED at
       `4b8293e`, opt-in: `scripts/build.sh --with-libmpv`. Released packages
-      do not contain it; the release workflow is untouched. With codex
-      for its review.)
+      do not contain it; the release workflow is untouched. Its codex
+      review returned SIX findings, `pk-1` to `pk-6`, all admitted and
+      being fixed: `.agents/review/index.md`. Two are HIGH and concern the
+      package check running or loading what it checks; until they are
+      fixed, do not run `packaging/libmpv/check-package.sh` on a package
+      you did not build.)
     - (Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
       log. Its codex review returned TWO findings, `pc-1` and `pc-2`, both
       admitted and being fixed: `.agents/review/index.md`. Its cropping
