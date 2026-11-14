@@ -286,3 +286,19 @@ end can pass (it was "about a tenth of a second" before; the rule now says
 what it guarantees, not what usually happens). The proof is conservative
 the other way: a correct skip fails if the machine is so slow that half a
 second passes between two readings around the jump.
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-14 14:05 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da54-74e7-7092-be08-e9bfc81b290e`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:52 UTC, finished 14:02 UTC.
+- Reviewed head `9dfad5e2aa5cb758a987ee9db338597d2fdfbee2`, base
+  `2d9012b67e5a6c965655773c2fe735e988da700d` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenarios/markers.mjs:147 — Buffered replies can still hide short landings. Using the unchanged helper, real MpvIpc and real clock, a socket stand-in answered 1.91 s at 905 ms, then the response waited through a 3300 ms event-loop stall. Playback skipped to 9 s at 1000 ms and continued normally. The helper timestamped the buffered sample around 4205 ms and accepted 12.31 s at 4306 ms: its apparent observation gap was only 101 ms, despite a landing three seconds short. Keep completion timestamps for deadlines, but conservatively bound coverage using request/response intervals or independent observation timestamps. Add a buffered-response regression; madeUpTime currently computes the position after its delay and misses this case. Guard mutations failed as expected, and all 37 tests passed after byte-for-byte restoration.
