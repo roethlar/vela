@@ -39,8 +39,33 @@ export function runBounded(args, { input = '', deadline }) {
       settled = true;
       clearTimeout(timer);
       clearTimeout(afterDeadline);
-      if (killed || held) for (const fd of [0, 1, 2, 3]) child.stdio[fd].destroy();
-      resolve({ status, signal, killed, held, ms: Date.now() - started, stdout: out[1], stderr: out[2], channel: out[3] });
+      // Whether the process itself has ended. After a kill, that it has is
+      // not taken on trust (`ended`).
+      const ended = child.exitCode !== null || child.signalCode !== null;
+      // Nothing the import started in the watch's process group outlives the
+      // check: the group is ended on every way out, a clean one too. `left`
+      // says there was still something in it to end.
+      let left = false;
+      try {
+        process.kill(-child.pid, 'SIGKILL');
+        left = true;
+      } catch {
+        // No such process: the group is empty.
+      }
+      if (killed || held || left) for (const fd of [0, 1, 2, 3]) child.stdio[fd].destroy();
+      resolve({
+        pid: child.pid,
+        status,
+        signal,
+        killed,
+        held,
+        ended,
+        left,
+        ms: Date.now() - started,
+        stdout: out[1],
+        stderr: out[2],
+        channel: out[3],
+      });
     };
     const timer = setTimeout(() => {
       held = child.exitCode !== null || child.signalCode !== null;
@@ -63,7 +88,19 @@ export function runBounded(args, { input = '', deadline }) {
       if (settled || child.pid !== undefined) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ status: null, signal: null, killed: false, ms: Date.now() - started, stdout: '', stderr: String(err), channel: '' });
+      resolve({
+        pid: undefined,
+        status: null,
+        signal: null,
+        killed: false,
+        held: false,
+        ended: true,
+        left: false,
+        ms: Date.now() - started,
+        stdout: '',
+        stderr: String(err),
+        channel: '',
+      });
     });
   });
 }
@@ -73,16 +110,24 @@ export function runBounded(args, { input = '', deadline }) {
 // `{ error }` saying how the run went wrong. The report is taken only from
 // the watch's own channel, only if it is the one line there and carries this
 // run's secret, and only if the process then ended by itself with status 0.
-export async function importWatched(pairs, { deadline = 60000 } = {}) {
+// `ran`, if given, is handed what runBounded returned (the process's id among
+// it), for a test that goes on to check what is left of the process.
+export async function importWatched(pairs, { deadline = 60000, ran = null } = {}) {
   const secret = crypto.randomBytes(32).toString('hex');
   const run = await runBounded(['--permission-audit', '--allow-fs-read=*', watchFile, ...pairs], {
     input: `${secret}\n`,
     deadline,
   });
+  if (ran) ran(run);
   const tail = run.stderr.trim() ? `; its standard error: ${run.stderr.trim().slice(-2000)}` : '';
   if (run.held) {
     return {
       error: `the watch's process ended, but something the import started still held its pipes ${deadline} ms after the start${tail}`,
+    };
+  }
+  if (run.killed && !run.ended) {
+    return {
+      error: `the import never let its process end: it was still running after ${deadline} ms, and had not ended a moment after it was sent SIGKILL${tail}`,
     };
   }
   if (run.killed) {
@@ -96,8 +141,8 @@ export async function importWatched(pairs, { deadline = 60000 } = {}) {
   if (run.channel === '') {
     return {
       error:
-        "the watch's process ended (status 0) without making its report: something ended it before it had nothing " +
-        `left to do (process.exit), or took its beforeExit listener away${tail}`,
+        "the watch's process ended (status 0) without making its report: its exit listener was taken away, or its " +
+        `report's descriptor closed${tail}`,
     };
   }
   if (lines.length !== 2 || lines[1] !== '' || !lines[0].startsWith(`${secret} `)) {
@@ -108,6 +153,14 @@ export async function importWatched(pairs, { deadline = 60000 } = {}) {
   try {
     const report = JSON.parse(lines[0].slice(secret.length + 1));
     if (report === null || typeof report !== 'object' || Array.isArray(report)) throw new Error('not an object');
+    // A process the import started was still running in the watch's group
+    // when the watch's own had ended and reported (it has been ended).
+    if (run.left && report.error === undefined) {
+      return {
+        ...report,
+        error: "the import left a process running in the watch's process group after the watch's own had ended; it was ended (SIGKILL)",
+      };
+    }
     return report;
   } catch (err) {
     return { error: `the watch's report could not be read: ${err.message}` };

@@ -276,19 +276,28 @@ test('a module that forges the report, ends the process, or takes the report awa
     )} + '\\n');`;
   const cases = {
     exitseven: [`${forged('exitseven')}\nprocess.exit(7);`, /^the watch's process ended with status 7, not 0/],
-    exitzero: [`${forged('exitzero')}\nprocess.exit(0);`, /^the watch's process ended \(status 0\) without making its report: .*process\.exit.*beforeExit listener/],
-    nobeforeexit: [`${forged('nobeforeexit')}\nprocess.removeAllListeners('beforeExit');`, /^the watch's process ended \(status 0\) without making its report/],
+    exitzero: [`${forged('exitzero')}\nprocess.exit(0);`, /^the process was ended \(process\.exit\) before the import had finished$/],
+    nobeforeexit: [
+      `${forged('nobeforeexit')}\nprocess.removeAllListeners('beforeExit');`,
+      /^the process ended without its event loop having been seen with nothing left to do: .*beforeExit listener was taken away$/,
+    ],
+    // The watch's own last word taken away: nothing arrives at all.
+    noexit: [
+      `${forged('noexit')}\nprocess.removeAllListeners('exit');`,
+      /^the watch's process ended \(status 0\) without making its report: its exit listener was taken away/,
+    ],
     // On the report's own descriptor, without the secret.
     forgedchannel: [
       `fs.writeSync(3, 'not-the-secret ' + ${JSON.stringify(JSON.stringify({ loaded: ['forgedchannel'], calls: [] }))} + '\\n');`,
       /^the watch's report channel held something other than one report carrying this run's secret/,
     ],
     // The one line there, shaped as the watch writes it, with a made-up
-    // secret, and the process ended before the watch could add its own.
+    // secret, and the watch kept from adding its own: only the secret tells
+    // this line from a report.
     forgedsecret: [
       `fs.writeSync(3, '0'.repeat(64) + ' ' + ${JSON.stringify(
         JSON.stringify({ loaded: ['forgedsecret'], calls: [], permission: [], resources: [], newHandles: 0, envChanged: false, sharedChanged: [] }),
-      )} + '\\n');\nprocess.exit(0);`,
+      )} + '\\n');\nprocess.removeAllListeners('exit');\nprocess.exit(0);`,
       /^the watch's report channel held something other than one report carrying this run's secret/,
     ],
     // An exit status left for the end, after the report.
@@ -313,6 +322,93 @@ test('a module that forges the report, ends the process, or takes the report awa
   }
 });
 
+// Whether nothing is left of a process group, looked at for up to two seconds
+// (a kill takes a moment to be carried out).
+async function groupGone(pid) {
+  const until = Date.now() + 2000;
+  for (;;) {
+    try {
+      process.kill(-pid, 0);
+    } catch (err) {
+      if (err.code === 'ESRCH') return true;
+    }
+    if (Date.now() > until) return false;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+}
+
+// A test's own tidying up, whatever the check did, so that a check that fails
+// to end a group fails its test and does not keep this file's process waiting.
+function endGroup(pid) {
+  if (!pid) return;
+  try {
+    process.kill(-pid, 'SIGKILL');
+  } catch {
+    // Nothing left.
+  }
+}
+
+// What a module leaves for the end of the process is seen too (review finding
+// pa-4, verification round 2: a beforeExit listener that took itself off the
+// list and wrote a moment later came after the report, which was clean). The
+// report is made when the process ends, so each of these is in it.
+test('the import watch sees what a module does when the process is about to end', async () => {
+  const late = "fs.appendFileSync(new URL('./late.txt', import.meta.url), 'x');";
+  await seenByTheWatch({
+    beforeexitwrite: [
+      "import fs from 'node:fs';",
+      `process.prependOnceListener('beforeExit', async () => { await Promise.resolve(); ${late} });`,
+      'fs FileSystemWrite',
+    ],
+    beforeexittimer: [
+      '',
+      "let started = false; process.on('beforeExit', () => { if (!started) { started = true; setTimeout(() => {}, 1); } });",
+      'resource Timeout',
+    ],
+    exitprepended: ["import fs from 'node:fs';", `process.prependOnceListener('exit', () => { ${late} });`, 'fs FileSystemWrite'],
+    exitlistener: ["import fs from 'node:fs';", `process.on('exit', () => { ${late} });`, 'process listeners of exit changed'],
+  });
+});
+
+// A call the permission system refuses without publishing anything is recorded
+// as a call: a module that tries process.binding and acts only where it
+// succeeds would act in the runner and not under the watch.
+test('the import watch records a call to process.binding, which the permission system refuses in silence', async () => {
+  await seenByTheWatch({
+    bindingcall: ['', "try { process.binding('fs'); } catch {}", 'process.binding(fs)'],
+  });
+});
+
+// A process the import starts in the watch's own group, with nothing of the
+// check's pipes, lets the watch end and report; it must not live on after the
+// check (verification round 2). The check ends the group, says so, and the
+// test looks.
+test("a process the import leaves running in the watch's group is ended with the check", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
+  let run;
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'leaveschild.mjs'),
+      "import { spawn } from 'node:child_process';\n" +
+        "spawn(process.execPath, ['-e', 'setTimeout(() => {}, 30000)'], { stdio: 'ignore' }).unref();\n" +
+        "export default { name: 'leaveschild', rows: [], noRows: 'made up', async run() {} };\n",
+    );
+    const watched = await importWatched([dir, ''], {
+      ran: (r) => {
+        run = r;
+      },
+    });
+    assert.match(watched.error ?? '', /^the import left a process running in the watch's process group after the watch's own had ended; it was ended \(SIGKILL\)$/);
+    assert.ok(watched.permission.some((entry) => entry.startsWith('child ')), `the watch saw it started: ${JSON.stringify(watched.permission)}`);
+    assert.equal(run.left, true);
+    assert.equal(await groupGone(run.pid), true, "nothing of the watch's process group is left");
+    assert.match(importRefusal(watched) ?? '', /^the watched import failed: the import left a process running/);
+  } finally {
+    endGroup(run?.pid);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // The watch reports only once its process has nothing left to do; an import
 // that keeps it busy for good must fail, not hang the test or pass. The
 // process is killed with SIGKILL at the deadline, so one that ignores SIGTERM
@@ -332,10 +428,25 @@ test('an import that keeps its process busy for good, or stops it, fails at the 
       fs.mkdirSync(one);
       fs.writeFileSync(path.join(one, `${name}.mjs`), `${act}\nexport default { name: '${name}', rows: [], noRows: 'made up', async run() {} };\n`);
       const started = Date.now();
-      const watched = await importWatched([one, ''], { deadline });
-      const took = Date.now() - started;
-      assert.match(watched.error ?? '', /^the import never let its process end: it was still running after 1000 ms and was killed \(SIGKILL\)/, name);
-      assert.ok(took < deadline + 2000, `${name}: the failure took ${took} ms, past the deadline of ${deadline} ms`);
+      let run;
+      try {
+        const watched = await importWatched([one, ''], {
+          deadline,
+          ran: (r) => {
+            run = r;
+          },
+        });
+        const took = Date.now() - started;
+        assert.match(watched.error ?? '', /^the import never let its process end: it was still running after 1000 ms and was killed \(SIGKILL\)/, name);
+        assert.ok(took < deadline + 2000, `${name}: the failure took ${took} ms, past the deadline of ${deadline} ms`);
+        // The kill is not taken on trust: the process has ended, and
+        // nothing of its group is left (verification round 2: with a signal
+        // a process can ignore in place of SIGKILL, this test still passed).
+        assert.equal(run.ended, true, `${name}: the process had ended when the check returned`);
+        assert.equal(await groupGone(run.pid), true, `${name}: nothing of the watch's process group is left`);
+      } finally {
+        endGroup(run?.pid);
+      }
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

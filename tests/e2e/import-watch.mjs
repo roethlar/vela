@@ -28,10 +28,14 @@
 //     environment, the global object's names and the built-in prototypes are
 //     compared at the end.
 //
-// The nets are never taken down. The report is written only when the event
-// loop has nothing left to do ('beforeExit'), so an act an import puts off
-// runs under them. A process that never gets there, or ends any other way,
-// makes no report, and import-check.mjs fails it.
+// The nets are never taken down. The report is written when the process
+// ends ('exit'), the last moment there is, and only if the event loop was
+// seen with nothing left to do before that ('beforeExit'): an act an import
+// puts off runs under the nets, and so does what a module's own listener
+// does when the process is about to end, or puts off once more from there
+// (review finding pa-4, verification round 2: a report made at the first
+// 'beforeExit' came before such work). A process that never gets there, or
+// ends any other way, makes no clean report, and import-check.mjs fails it.
 //
 // Only Node's own modules, and the replacement helper, which imports nothing,
 // are imported statically: the loader and the scenarios come after the nets.
@@ -117,7 +121,11 @@ const FD_CALLS = ['write', 'writev', 'ftruncate', 'fchmod', 'fchown', 'futimes',
 instrument(fs, [...FD_CALLS, ...FD_CALLS.map((name) => `${name}Sync`)], 'fs', record);
 // Signals (process.kill calls process._kill, which a module can call itself;
 // _debugProcess signals another process), the working directory and umask.
-instrument(process, ['kill', '_kill', '_debugProcess', 'chdir', 'umask'], 'process', record);
+// And Node's internal bindings: the permission system refuses process.binding
+// outright, with nothing published, so a module that tries it, and acts only
+// where it succeeds, would act in the runner and not here. The call itself
+// is what is recorded.
+instrument(process, ['kill', '_kill', '_debugProcess', 'chdir', 'umask', 'binding', '_linkedBinding'], 'process', record);
 // A wait on shared memory settles later through the engine alone: no
 // resource, no check.
 instrument(Atomics, ['waitAsync'], 'Atomics', record);
@@ -148,17 +156,34 @@ const processListeners = () => new Map(process.eventNames().map((event) => [even
 let loaded = null;
 let newHandles = null;
 let failed = null;
-let reported = false;
-// `on`, not `once`: a once-listener is removed before it runs, which would
-// read as a listener the import took away.
+// Whether the event loop was ever seen with nothing left to do. `on`, not
+// `once`, for both listeners: a once-listener is removed before it runs,
+// which would read as a listener the import took away.
+let idle = false;
 process.on('beforeExit', () => {
-  if (reported) return;
-  reported = true;
+  idle = true;
+});
+// These two listeners are the first on their events, added before any
+// module of the suite is imported. What a module's own listener does before
+// this one runs has been seen by the nets; a listener a module adds after
+// this one is still on the list when this one runs, and is reported as a
+// listener added.
+process.on('exit', () => {
   const seen = { calls, permission, resources };
   if (failed !== null) return report({ error: failed, ...seen });
-  if (loaded === null) return report({ error: 'the import never finished: something it awaited never settled', ...seen });
-  // Read now, when everything the import put off has run, as well as what
-  // the import did itself.
+  if (loaded === null) {
+    return report({ error: 'the process was ended (process.exit) before the import had finished', ...seen });
+  }
+  if (!idle) {
+    return report({
+      error:
+        'the process ended without its event loop having been seen with nothing left to do: process.exit was called ' +
+        "after the import, or the watch's beforeExit listener was taken away",
+      ...seen,
+    });
+  }
+  // Read now, at the end, when everything the import did, put off, or left
+  // for the end of the process has run.
   const listenersAfter = processListeners();
   for (const event of new Set([...listenersBefore.keys(), ...listenersAfter.keys()])) {
     const [a, b] = [listenersBefore.get(event) ?? [], listenersAfter.get(event) ?? []];

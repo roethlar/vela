@@ -115,16 +115,21 @@ any scenario is imported and are never taken down:
   diagnostics channel the watch listens to. An attempt that fails, or sits
   inside a try/catch, is published like any other, because the check comes
   first. Audit mode lets the act go ahead, so an import does under the watch
-  what it does in the runner, but for two kinds of call, which are refused
-  with `ERR_ACCESS_DENIED` even in audit mode (seen on Node 26.13):
-  `process.binding`, and the calls on an open descriptor that Node's
-  documentation says the permission system cannot tie to a path (`fchmod`,
-  `fchown`, `futimes`, `fsync`, `fdatasync`).
+  what it does in the runner, with three exceptions (seen on Node 26.13).
+  Two kinds of call are refused with `ERR_ACCESS_DENIED` even in audit mode,
+  with nothing published: `process.binding`, and the calls on an open
+  descriptor that Node's documentation says the permission system cannot tie
+  to a path (`fchmod`, `fchown`, `futimes`, `fsync`, `fdatasync`). Each has
+  a recording replacement (below), so a module that tries one is seen
+  trying, whether or not it goes on. And the `node:path` module object is
+  frozen, so a module that assigns to it fails to import under the watch,
+  which fails the test.
 - Recording replacements for what neither of those sees: the `fs` calls on a
   descriptor that is already open (`write`, `writev`, `ftruncate` and the
   five above, and their `Sync` forms; Node's documentation says such calls
   bypass the permission system), signals (`process.kill`, `process._kill`,
-  `process._debugProcess`), `process.chdir` and `process.umask`, and
+  `process._debugProcess`), `process.chdir` and `process.umask`,
+  `process.binding` and `process._linkedBinding`, and
   `Atomics.waitAsync`, which the engine settles with no resource at all. A
   replacement keeps the original's name, length, prototype chain and every
   own property (symbols too, `util.promisify.custom` and Node's own); a
@@ -133,22 +138,30 @@ any scenario is imported and are never taken down:
   `util.promisify.custom` and changed what an import did (review finding
   pa-4). The process's listeners (so a signal handler, by any route), the
   environment, the global object's names and the built-in prototypes are
-  compared once the process has nothing left to do, and the handles open just
-  after the import are counted.
+  compared when the process ends, and the handles open just after the
+  import are counted.
 
-The process reports only once it has nothing left to do, so an act an import
-puts off is seen when it runs. The report goes on a pipe of its own
+The process reports when it ends, the last moment there is, and only if its
+event loop was seen with nothing left to do before that. So an act an import
+puts off is seen when it runs, and so is what a module's own listener does
+when the process is about to end, or puts off once more from there (a
+listener a module adds for the end itself is seen as a listener added). The
+report goes on a pipe of its own
 (descriptor 3), as one line carrying a secret the test makes for each run and
 hands the watch on its standard input; the watch keeps it in its own module
 scope. The test takes that line and nothing else, and only from a process
 that ended by itself with status 0: a module that prints a report, ends the
 process early (with any status, or a signal), or takes the watch's
-`beforeExit` listener away fails, saying how. A process still running at the
-deadline (60 s) is killed, with its process group, by SIGKILL, so one that
-ignores SIGTERM or has stopped itself fails as surely as one that keeps busy.
-A process that has ended by then while something it started, in a group of
-its own, still holds its pipes fails too, a moment after the deadline: the
-test does not wait for whatever holds them.
+`beforeExit` or `exit` listener away fails, saying how. A process still
+running at the deadline (60 s) is killed, with its process group, by SIGKILL,
+so one that ignores SIGTERM or has stopped itself fails as surely as one that
+keeps busy; that it has ended is looked at, not taken on trust. A process
+that has ended by then while something it started, in a group of its own,
+still holds its pipes fails too, a moment after the deadline: the test does
+not wait for whatever holds them. And nothing an import starts in the
+watch's own group outlives the check: the group is ended on every way out,
+and an import that left a process running there fails, also when the watch
+itself ended cleanly.
 The test file imports the scenarios itself only once the report has cleared
 them (`stopUnlessCleared`); otherwise it stops at once with the report, and
 imports nothing.
@@ -165,11 +178,16 @@ server, a UDP socket and a child made with `new`; a worker; a write that
 fails inside a try/catch; a signal; a write to standard error by descriptor;
 `Atomics.waitAsync`; that a replaced `fs.write` still promisifies to its two
 fields; that a printed report with `process.exit(7)`, with
-`process.exit(0)`, or with the `beforeExit` listeners removed, a forged line
-on the report's pipe, `process.exitCode`, and a signal to itself each fail;
-that a busy process, one that ignores SIGTERM and one that stops itself each
-fail within two seconds of a one-second deadline, as does one that ended
-after starting a process of its own group that holds the pipes; and, by
+`process.exit(0)`, or with the `beforeExit` or the `exit` listeners removed,
+a forged line on the report's pipe, `process.exitCode`, and a signal to
+itself each fail; that what a module's own `beforeExit` or `exit` listener
+does, or puts off, at the end of the process is seen; that a call to
+`process.binding` is recorded; that a busy process, one that ignores SIGTERM
+and one that stops itself each fail within two seconds of a one-second
+deadline, have ended, and leave nothing of their group behind, as does one
+that ended after starting a process of its own group that holds the pipes;
+that a process left running in the watch's own group is ended and fails the
+import; and, by
 running the same arrangement in a process of its own, that a failed import
 stops the file before it imports a busy scenario, and, from the test file's
 own text, that its top clears the scenarios before it imports any. The other
