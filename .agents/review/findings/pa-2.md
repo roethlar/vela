@@ -1,7 +1,7 @@
 # pa-2: the external player's cropping is tested in automatic mode only, and the row says off, manual and automatic
 
 **Severity**: MEDIUM — row 9 is "Autocrop off / manual / auto". In the external player `autocrop` is the only scenario that stands for it, and it sets automatic mode and nothing else. A manual toggle that does nothing, or an Off that still crops, leaves the row shown and the verdict passing; the embedded player's scenario does exercise manual cropping, so the parity claimed is one-sided.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `9bcdfbc`, `a9ed237`, `2a42345`
 
@@ -175,3 +175,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "Row 9 credits external crop modes that are never exercised". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 12:37 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da0a-0759-7101-83d9-9ef0d991ac77`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 12:30 UTC, finished 12:37 UTC.
+- Reviewed head `2a42345091b17ed54fb89ab281882e7e85f7f505`, base
+  `17d9a81d9446f11e405751e27a7de73c61b8b9e0` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
