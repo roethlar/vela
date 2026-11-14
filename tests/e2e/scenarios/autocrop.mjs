@@ -1,4 +1,5 @@
-// Autocrop in the external player, all three modes of Settings (row 9).
+// Autocrop in the external player, all three modes of Settings (row 9, split
+// by mode: 9a Off, 9b Manual, 9c Auto; each is shown at the end of its legs).
 //
 // Auto: the app must inject the stock autocrop.lua with its own trigger
 // DISABLED plus Vela's vela-autocrop.lua shim, and the shim must fire
@@ -185,10 +186,10 @@ export default {
   onlyPlayer: 'external',
   onlyPlayerWhy:
     "the stock autocrop.lua and Vela's shim are loaded only by the external launch; the embedded player crops with vela-crop.lua, which embeddedcrop shows",
-  rows: ['9'],
+  rows: ['9a', '9b', '9c'],
   testOnly: [
     {
-      row: '9',
+      row: '9b',
       player: 'external',
       via: 'mpvInput',
       route: "mpv's `keypress C` command (Shift+C) over the IPC socket, twice, in the Manual leg",
@@ -233,6 +234,8 @@ export default {
     mock.state.checkins.length = 0; // fresh Stopped gate for this leg
     await playAndAssertCrop(driver, 'resume', { minStart: 4 });
     await screenshot('02-resume-cropped');
+    // The end of its proof of Auto (row 9c) in this player (proof.mjs).
+    shown('9c');
 
     // Leg 3 — Off (review finding pa-2): nothing is loaded, so nothing crops
     // by itself, and mpv's window has no crop key.
@@ -246,6 +249,8 @@ export default {
       );
       assert.deepEqual(await cropKeyBindings(mpv), [], "off: no key of mpv's window crops");
     });
+    // The end of its proof of Off (row 9a).
+    shown('9a');
 
     // Leg 4 — Manual (review finding pa-2): nothing crops by itself; the
     // user's Shift+C in mpv's window crops, and pressing it again takes the
@@ -276,7 +281,7 @@ export default {
         { timeoutMs: 5000 },
       );
     });
-    // The end of its proof of its rows in this player (proof.mjs).
-    shown('9');
+    // The end of its proof of Manual (row 9b).
+    shown('9b');
   },
 };

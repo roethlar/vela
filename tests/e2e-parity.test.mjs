@@ -549,9 +549,48 @@ test("the inventory holds every row of the plan's behaviour inventory, and nothi
 test('the inventory is exactly these rows, split exactly so', () => {
   assert.deepEqual(
     INVENTORY.map((row) => row.id),
-    ['1', '2', '3', '4', '5', '6', '7', '8a', '8b', '9', '10', '11', '12a', '12b', '13a', '13b', '14'],
+    ['1', '2', '3', '4', '5', '6', '7', '8a', '8b', '9a', '9b', '9c', '10', '11', '12a', '12b', '13a', '13b', '14'],
   );
-  assert.deepEqual(SPLITS, { 8: ['8a', '8b'], 12: ['12a', '12b'], 13: ['13a', '13b'] });
+  assert.deepEqual(SPLITS, { 8: ['8a', '8b'], 9: ['9a', '9b', '9c'], 12: ['12a', '12b'], 13: ['13a', '13b'] });
+});
+
+// Row 9 is split by mode, so that a mode one player's scenario does not
+// exercise is a part not shown there (review finding pa-2). The scenarios'
+// declarations are copied, never edited: with the claim of 9a (Off) taken
+// from the one scenario that shows it in a player, the parity check must name
+// that row and player.
+const withoutClaim = (name, row) => {
+  const one = scenarios.find((s) => s.name === name);
+  assert.ok(one?.rows.includes(row), `${name} claims row ${row}`);
+  return scenarios.map((s) => (s === one ? { ...s, rows: s.rows.filter((r) => r !== row) } : s));
+};
+
+test("each mode of row 9 is a part of its own: autocrop's Off taken away leaves 9a unshown in the external player", () => {
+  assert.deepEqual(parityProblems(withoutClaim('autocrop', '9a'), { repoRoot }), [
+    'row 9a is shown in the embedded player but neither shown nor exempted in the external player',
+  ]);
+});
+
+test("each mode of row 9 is a part of its own: embeddedcrop's Off taken away leaves 9a unshown in the embedded player", () => {
+  assert.deepEqual(parityProblems(withoutClaim('embeddedcrop', '9a'), { repoRoot }), [
+    'row 9a is shown in the external player but neither shown nor exempted in the embedded player',
+  ]);
+});
+
+test('a mode of row 9 dropped from the inventory, or row 9 made whole again, is refused', () => {
+  const numbers = planRowNumbers(fs.readFileSync(path.join(repoRoot, '.agents/plans/embedded-player.md'), 'utf8'));
+  assert.deepEqual(inventoryProblems(INVENTORY.filter((row) => row.id !== '9a'), numbers), [
+    'part 9a of split plan row 9 is not in the inventory',
+  ]);
+  const whole = INVENTORY.flatMap((row) =>
+    row.id === '9a' ? [{ id: '9', behaviour: 'Autocrop off / manual / auto' }] : row.id.startsWith('9') ? [] : [row],
+  );
+  assert.deepEqual(inventoryProblems(whole, numbers), [
+    'plan row 9 is in the inventory both whole and split (its parts are 9a, 9b, 9c)',
+    'part 9a of split plan row 9 is not in the inventory',
+    'part 9b of split plan row 9 is not in the inventory',
+    'part 9c of split plan row 9 is not in the inventory',
+  ]);
 });
 
 // The reviewer's injection: row 8b (the skip button) deleted from the

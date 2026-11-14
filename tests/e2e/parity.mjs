@@ -21,7 +21,9 @@ export const INVENTORY = [
   { id: '7', behaviour: 'Stream auth header never in argv/URL/title' },
   { id: '8a', behaviour: 'Skip markers: automatic skip' },
   { id: '8b', behaviour: 'Skip markers: the skip button' },
-  { id: '9', behaviour: 'Autocrop off / manual / auto' },
+  { id: '9a', behaviour: 'Autocrop: off' },
+  { id: '9b', behaviour: 'Autocrop: manual' },
+  { id: '9c', behaviour: 'Autocrop: auto' },
   { id: '10', behaviour: 'Automatic quality step-down relaunch' },
   { id: '11', behaviour: 'Unrequested-play notice' },
   { id: '12a', behaviour: 'A new play stops the previous one' },
@@ -35,12 +37,16 @@ export const ROW_IDS = INVENTORY.map((row) => row.id);
 
 // The plan's rows that are split, and into exactly which parts (the plan's
 // Slice 6 log: "Three of the plan's rows are split where their halves are
-// proven differently (8, 12, 13)"). The inventory must hold every part of a
+// proven differently (8, 12, 13)"). Row 9 is split by mode, Off, Manual and
+// Auto, so that each mode is a part a scenario must show in each player and
+// the scenario that stands for it must reach the end of that mode's leg
+// (review finding pa-2). The inventory must hold every part of a
 // split row and no other part, and an unsplit row whole, so that half of a
 // row cannot be dropped, or a part made up, by editing INVENTORY alone
 // (scenario-loader.mjs, inventoryProblems; review finding pa-3).
 export const SPLITS = {
   8: ['8a', '8b'],
+  9: ['9a', '9b', '9c'],
   12: ['12a', '12b'],
   13: ['13a', '13b'],
 };

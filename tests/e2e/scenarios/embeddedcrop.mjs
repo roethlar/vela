@@ -136,8 +136,10 @@ export default {
   name: 'embeddedcrop',
   onlyPlayer: 'embedded',
   onlyPlayerWhy:
-    "vela-crop.lua and the view's Crop control are the embedded player's; autocrop shows row 9 in the external player",
-  rows: ['9'],
+    "vela-crop.lua and the view's Crop control are the embedded player's; autocrop shows rows 9a, 9b and 9c in the external player",
+  // Row 9 split by mode: 9a Off, 9b Manual, 9c Auto, each shown at the end
+  // of its legs.
+  rows: ['9a', '9b', '9c'],
 
   async seed({ configRoot }) {
     configRootPath = configRoot;
@@ -189,6 +191,8 @@ export default {
       throw err;
     }
     await stop(driver, mpv, socketPath, 'automatic, resumed');
+    // The end of its proof of Auto (row 9c) in this player (proof.mjs).
+    shown('9c');
 
     // 3. Manual: nothing by itself past the delay; the Crop control crops and
     //    the C key takes the crop away again.
@@ -230,6 +234,8 @@ export default {
       throw err;
     }
     await stop(driver, mpv, socketPath, 'manual');
+    // The end of its proof of Manual (row 9b).
+    shown('9b');
 
     // 4. Off (review finding pa-2): no crop script, so the view offers no Crop
     //    control, its C key crops nothing, and nothing crops by itself, held
@@ -260,7 +266,7 @@ export default {
       throw err;
     }
     await stop(driver, mpv, socketPath, 'off');
-    // The end of its proof of its rows in this player (proof.mjs).
-    shown('9');
+    // The end of its proof of Off (row 9a).
+    shown('9a');
   },
 };

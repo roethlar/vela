@@ -53,12 +53,15 @@ problem). A scenario's default export may hold only these keys:
 - `rows`: required. The rows of the players' behaviour inventory
   (`parity.mjs`, from `.agents/plans/embedded-player.md`) the scenario
   shows, as strings: `'1'` … `'14'`, with row 8 split into `'8a'` (automatic
-  skip) and `'8b'` (the skip button) and row 12 into `'12a'` (a new play
+  skip) and `'8b'` (the skip button), row 9 by mode into `'9a'` (Off),
+  `'9b'` (Manual) and `'9c'` (Auto), row 12 into `'12a'` (a new play
   stops the previous one) and `'12b'` (app exit stops playback), and row 13
   into `'13a'` (the Advanced mpv arguments) and `'13b'` (own-config mode). A
   scenario that shows none says `rows: []` and why, in `noRows`. A scenario
   that declares rows calls `shown(<rows>)` (from `proof.mjs`) where its proof
-  of them ends, today the last statement of `run()`; the runner fails a
+  of them ends: mostly the last statement of `run()`, and in a scenario
+  whose legs prove different rows (`autocrop`, `embeddedcrop`), the end of
+  each row's last leg, never before its last check; the runner fails a
   scenario that returns without having reported every row it declares, or
   reports one it does not declare. So a `run()` that returns early in one
   player, or does nothing, fails there instead of counting.
@@ -362,10 +365,13 @@ and reads the outcome from mpv over its IPC socket:
   the Crop control in manual mode; `C` takes the crop away. With cropping
   Off the view offers no Crop control and nothing crops, `C` included. It is
   the embedded counterpart of `autocrop`, which covers the stock script of
-  the external player in the same three modes and is external-only; its
-  Manual leg presses Shift+C through mpv's input commands over IPC
-  (`mpvInput`, declared in its `testOnly`), so row 9 is marked there as shown
-  only through a test-only route.
+  the external player in the same three modes and is external-only. Row 9
+  is split by mode (9a Off, 9b Manual, 9c Auto), and each scenario reports
+  each mode shown at the end of that mode's legs, so a mode that is not
+  exercised, or whose leg does not get to its end, is not shown in that
+  player. `autocrop`'s Manual leg presses Shift+C through mpv's input
+  commands over IPC (`mpvInput`, declared in its `testOnly`), so row 9b is
+  marked in the external player as shown only through a test-only route.
 - `embeddedfullscreenend`: fullscreen asked for through the view's control,
   then each way a play can end: a playlist's clean end with the next play
   started by the backend keeps it across the gap; an end in an error (the

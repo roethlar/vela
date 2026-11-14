@@ -126,7 +126,7 @@ async function staysUncropped(ipc, ms, what, { measuring = false } = {}) {
 export default {
   name: 'cropscript',
   rows: [],
-  noRows: "the contract of vela-crop.lua, run in the system's mpv without the app; cropping in the app (row 9) is autocrop's and embeddedcrop's",
+  noRows: "the contract of vela-crop.lua, run in the system's mpv without the app; cropping in the app (rows 9a, 9b and 9c) is autocrop's and embeddedcrop's",
 
   async run({ repoRoot, configRoot }) {
     const script = path.join(repoRoot, 'src-tauri/resources/mpv-scripts/vela-crop.lua');
