@@ -113,7 +113,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     when its file ends in the external player"); the order of events left
     open in `pc-2`;
     the Arch package not installing `vela-markers.lua` (FIXED); the lockfile-only
-    `npm audit fix`. Their entries under Blockers still say "needs a go":
+    `npm audit fix` (FIXED; GitHub CI's Frontend job should pass again from
+    that commit on: look before relying on it). Their entries under Blockers still say "needs a go":
     read them with this point until each is fixed and its entry removed.
   - Active review loop: see `.agents/review/index.md`. Nothing is waiting
     for the owner there: `ps-2` closed as it stands (it is about a test),
@@ -447,25 +448,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
     precondition (120 cards instead of 60). None of those commits touches
     the page; this is the race above, not a regression.
-- GitHub CI on `main` is RED since 2026-11-13 about 19:10 local, and not
-  because of a commit: its `Frontend` job fails at `npm audit
-  --audit-level=moderate`. Two moderate advisories against SvelteKit were
-  published that day (`@sveltejs/kit` GHSA-pfhg-q3qv-9q6r, GHSA-27mw-82g8-phjj
-  and GHSA-mw6w-2fmv-pvw3; `@sveltejs/adapter-static` GHSA-jf9x-2fg2-hx4w),
-  and the gate fails closed on them by the 2026-11-02 decision. Because
-  that step comes first, the job does not reach `npm run check` or the
-  build; the Rust, libmpv and cargo-audit jobs pass. Every commit since
-  was checked locally (`npm run check`, the build, the Rust set). The fix
-  is prepared and NOT landed, because it changes the dependencies Vela is
-  built with and nobody has said go: a plain `npm audit fix` (no
-  `--force`), lockfile only, on the local branch `npm-audit-fix`: kit
-  2.70.3 to 2.70.4, adapter-static 3.0.10 to 3.0.11 (both published
-  2026-11-05), vite-plugin-svelte 7.2.0 to 7.3.1, and two small transitive
-  packages. With it `npm audit --audit-level=moderate` passes (the four
-  known low deepmerge findings remain), and `npm run check` and the build
-  pass. Vela is not exposed meanwhile: the advisories concern the Node and
-  Vercel adapters and server-side form handling, and Vela ships a static
-  page.
 - CI does not exercise the package check (2026-11-14, the owner has not
   been asked yet). `tests/libmpv-packaging.test.mjs` needs `bsdtar` to
   build and unpack its stand-in packages; GitHub's runner image does not
