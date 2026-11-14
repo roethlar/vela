@@ -17,7 +17,7 @@ import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
 import workerThreads from 'node:worker_threads';
-import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS } from './e2e/parity.mjs';
+import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS, SPLITS } from './e2e/parity.mjs';
 import { beginProof, endProof, TEST_ONLY_ROUTES, testOnlyRoute } from './e2e/proof.mjs';
 import {
   coverage,
@@ -210,14 +210,63 @@ test("the inventory holds every row of the plan's behaviour inventory, and nothi
   assert.deepEqual(inventoryProblems(INVENTORY, numbers), []);
 });
 
+// The list of rows itself, pinned here: dropping or adding a row, or a part of
+// a split one, takes a change to this literal as well as to parity.mjs and the
+// plan (review finding pa-3).
+test('the inventory is exactly these rows, split exactly so', () => {
+  assert.deepEqual(
+    INVENTORY.map((row) => row.id),
+    ['1', '2', '3', '4', '5', '6', '7', '8a', '8b', '9', '10', '11', '12a', '12b', '13a', '13b', '14'],
+  );
+  assert.deepEqual(SPLITS, { 8: ['8a', '8b'], 12: ['12a', '12b'], 13: ['13a', '13b'] });
+});
+
+// The reviewer's injection: row 8b (the skip button) deleted from the
+// inventory together with the scenarios that claim it. Every other check
+// still passes on that; the inventory check must not (review finding pa-3).
+test('half of a split row deleted with its scenarios is refused', () => {
+  const plan = fs.readFileSync(path.join(repoRoot, '.agents/plans/embedded-player.md'), 'utf8');
+  const without8b = INVENTORY.filter((row) => row.id !== '8b');
+  const notClaiming8b = scenarios.filter((s) => !s.rows.includes('8b'));
+  assert.ok(notClaiming8b.length < scenarios.length, 'no scenario claims row 8b');
+  assert.deepEqual(parityProblems(notClaiming8b, { inventory: without8b, repoRoot }), []);
+  assert.deepEqual(inventoryProblems(without8b, planRowNumbers(plan)), [
+    'part 8b of split plan row 8 is not in the inventory',
+  ]);
+});
+
 test('the inventory check refuses a dropped, a made-up and a half-split row', () => {
   const plan = ['1', '2', '3'];
   const rows = (...ids) => ids.map((id) => ({ id }));
-  assert.deepEqual(inventoryProblems(rows('1', '2a', '2b', '3'), plan), []);
-  assert.match(inventoryProblems(rows('1', '3'), plan).join('\n'), /plan row 2 is not in the inventory/);
-  assert.match(inventoryProblems(rows('1', '2', '3', '4'), plan).join('\n'), /"4" is no row of the plan/);
-  assert.match(inventoryProblems(rows('1', '2', '2a', '3'), plan).join('\n'), /both whole and split/);
-  assert.match(inventoryProblems(rows('1', '2', '3'), []).join('\n'), /table was not found/);
+  const split2 = { 2: ['2a', '2b'] };
+  assert.deepEqual(inventoryProblems(rows('1', '2a', '2b', '3'), plan, split2), []);
+  assert.deepEqual(inventoryProblems(rows('1', '2', '3'), plan, {}), []);
+  assert.match(inventoryProblems(rows('1', '3'), plan, {}).join('\n'), /plan row 2 is not in the inventory/);
+  assert.match(inventoryProblems(rows('1', '2', '3', '4'), plan, {}).join('\n'), /"4" is no row of the plan/);
+  assert.match(inventoryProblems(rows('1', '2', '2a', '2b', '3'), plan, split2).join('\n'), /both whole and split/);
+  assert.match(inventoryProblems(rows('1', '2', '3'), [], {}).join('\n'), /table was not found/);
+  // A split row with a part missing, either one, or both (review finding pa-3).
+  assert.deepEqual(inventoryProblems(rows('1', '2a', '3'), plan, split2), ['part 2b of split plan row 2 is not in the inventory']);
+  assert.deepEqual(inventoryProblems(rows('1', '2b', '3'), plan, split2), ['part 2a of split plan row 2 is not in the inventory']);
+  assert.deepEqual(inventoryProblems(rows('1', '3'), plan, split2), [
+    'part 2a of split plan row 2 is not in the inventory',
+    'part 2b of split plan row 2 is not in the inventory',
+  ]);
+  // A part that is not approved: of an unsplit row, or a third part of a split one.
+  assert.deepEqual(inventoryProblems(rows('1', '2', '3a', '3'), plan, {}), [
+    'inventory row "3a" is no approved part of plan row 3 (SPLITS in parity.mjs)',
+  ]);
+  assert.deepEqual(inventoryProblems(rows('1', '2a', '2b', '2c', '3'), plan, split2), [
+    'inventory row "2c" is no approved part of plan row 2 (SPLITS in parity.mjs)',
+  ]);
+  // An unsplit row in parts, which SPLITS does not approve.
+  assert.deepEqual(inventoryProblems(rows('1', '2a', '2b', '3'), plan, {}), [
+    'plan row 2 is not in the inventory',
+    'inventory row "2a" is no approved part of plan row 2 (SPLITS in parity.mjs)',
+    'inventory row "2b" is no approved part of plan row 2 (SPLITS in parity.mjs)',
+  ]);
+  // A split recorded for a row the plan does not have.
+  assert.match(inventoryProblems(rows('1', '2', '3'), plan, { 4: ['4a', '4b'] }).join('\n'), /split row 4 is no row of the plan/);
   assert.deepEqual(
     planRowNumbers('# P\n\n## Behaviour inventory (x)\n\n| # | B |\n| --- | --- |\n| 1 | a |\n| 2 | b |\n\n## Slices\n\n| 9 | not a row |\n'),
     ['1', '2'],

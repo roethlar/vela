@@ -81,7 +81,11 @@ Every row of the inventory must be shown by a scenario in both players, or
 carry a recorded exemption in `parity.mjs` (`EXEMPTIONS`) for the player
 where it is not. `tests/e2e-parity.test.mjs` (part of `npm run check`)
 fails when the inventory is not the plan's (every row of the table in
-`.agents/plans/embedded-player.md`, whole or split, and nothing else), when
+`.agents/plans/embedded-player.md`, and nothing else: a row whole, or, for
+the rows `SPLITS` in `parity.mjs` records as split, every one of the parts
+it approves and no other part), when the list of row ids is not the one the
+test itself spells out (so a row or a part cannot come or go without a
+change to the test as well), when
 a row is shown in one player and neither shown nor exempted in the other,
 when a row has nothing at all, and when an exemption names a row or player
 that does not exist or excuses a row that a scenario already shows (it is

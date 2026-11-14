@@ -7,7 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS, ROW_IDS } from './parity.mjs';
+import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS, ROW_IDS, SPLITS } from './parity.mjs';
 import { TEST_ONLY_ROUTES } from './proof.mjs';
 
 const FUNCTION_KEYS = ['seed', 'environment', 'cleanup', 'run'];
@@ -287,21 +287,36 @@ export function planRowNumbers(planText) {
 }
 
 // Everything wrong with the inventory against the plan's rows: every plan row
-// must be in it, whole (`'7'`) or split (`'8a'`, `'8b'`), and it may hold
-// nothing else. So a row cannot be dropped, or one made up, by editing
-// parity.mjs alone (guard finding atk-4).
-export function inventoryProblems(inventory, planNumbers) {
+// must be in it, whole (`'7'`) or, where `splits` (parity.mjs, SPLITS) says it
+// is split, as every one of its approved parts (`'8a'`, `'8b'`); it may hold
+// nothing else. So a row cannot be dropped, half of a split row dropped, or a
+// row or part made up, by editing parity.mjs's INVENTORY alone (guard finding
+// atk-4; review finding pa-3).
+export function inventoryProblems(inventory, planNumbers, splits = SPLITS) {
   const problems = [];
   if (planNumbers.length === 0) problems.push("the plan's behaviour inventory table was not found");
   const ids = inventory.map((row) => row.id);
+  for (const n of Object.keys(splits)) {
+    if (planNumbers.length > 0 && !planNumbers.includes(n)) problems.push(`split row ${n} is no row of the plan`);
+  }
   for (const n of planNumbers) {
-    const parts = ids.filter((id) => new RegExp(`^${n}[a-z]?$`).test(id));
-    if (parts.length === 0) problems.push(`plan row ${n} is not in the inventory`);
-    else if (parts.length > 1 && parts.includes(n)) problems.push(`plan row ${n} is in the inventory both whole and split`);
+    const approved = Object.hasOwn(splits, n) ? splits[n] : null;
+    if (approved) {
+      if (ids.includes(n)) problems.push(`plan row ${n} is in the inventory both whole and split (its parts are ${approved.join(', ')})`);
+      for (const part of approved) {
+        if (!ids.includes(part)) problems.push(`part ${part} of split plan row ${n} is not in the inventory`);
+      }
+    } else if (!ids.includes(n)) {
+      problems.push(`plan row ${n} is not in the inventory`);
+    }
   }
   for (const id of ids) {
     const n = /^(\d+)[a-z]?$/.exec(id)?.[1];
-    if (!n || !planNumbers.includes(n)) problems.push(`inventory row ${JSON.stringify(id)} is no row of the plan`);
+    if (!n || !planNumbers.includes(n)) {
+      problems.push(`inventory row ${JSON.stringify(id)} is no row of the plan`);
+    } else if (id !== n && !(Object.hasOwn(splits, n) && splits[n].includes(id))) {
+      problems.push(`inventory row ${JSON.stringify(id)} is no approved part of plan row ${n} (SPLITS in parity.mjs)`);
+    }
   }
   return problems;
 }

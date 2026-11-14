@@ -33,6 +33,18 @@ export const INVENTORY = [
 
 export const ROW_IDS = INVENTORY.map((row) => row.id);
 
+// The plan's rows that are split, and into exactly which parts (the plan's
+// Slice 6 log: "Three of the plan's rows are split where their halves are
+// proven differently (8, 12, 13)"). The inventory must hold every part of a
+// split row and no other part, and an unsplit row whole, so that half of a
+// row cannot be dropped, or a part made up, by editing INVENTORY alone
+// (scenario-loader.mjs, inventoryProblems; review finding pa-3).
+export const SPLITS = {
+  8: ['8a', '8b'],
+  12: ['12a', '12b'],
+  13: ['13a', '13b'],
+};
+
 // Scenarios that fail in a player because of a recorded PRODUCT defect, which
 // this test work may not fix. Such a scenario does NOT show its rows in that
 // player: a row/player pair whose only scenarios are known failures is printed
