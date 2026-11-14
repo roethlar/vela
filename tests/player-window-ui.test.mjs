@@ -119,8 +119,20 @@ test('the play path opens its window from the run or the setting, and hands it o
   // settings read and write.
   assert.match(
     commands,
-    /pub\(crate\) fn remember_window_on_exit\(latest: [^)]*\) \{\s*remember_window_on_exit_with\(latest, config::load_config, \|change\| config::update\(change\)\);\s*\}\n/,
+    /pub\(crate\) fn remember_window_on_exit\(latest: [^{]*\) \{\s*let latest = latest\.clone\(\);\s*hand_over_within\(EXIT_WINDOW_HANDOVER_LIMIT, move \|\| \{\s*remember_window_on_exit_with\(&latest, config::load_config, \|change\| config::update\(change\)\);\s*\}\);\s*\}\n/,
     'quitting must decide what to write through remember_window_on_exit_with',
+  );
+  // ...on a thread of its own, waited for a short time and no longer
+  // (review finding pw-4; hand_over_within is unit-tested in commands.rs).
+  assert.match(commands, /\nconst EXIT_WINDOW_HANDOVER_LIMIT: Duration = Duration::from_secs\(2\);\n/);
+  const handOver = commands.slice(
+    commands.indexOf('\nfn hand_over_within('),
+    commands.indexOf('\n}\n', commands.indexOf('\nfn hand_over_within(')),
+  );
+  assert.match(
+    handOver,
+    /let started = std::thread::Builder::new\(\)[\s\S]*?\.spawn\(move \|\| \{\s*hand_over\(\);\s*let _ = done\.send\(\(\)\);\s*\}\);\s*started\.is_ok\(\) && finished\.recv_timeout\(limit\)\.is_ok\(\)$/,
+    'the exit waits for the hand-over with a limit',
   );
   assert.match(
     commands,

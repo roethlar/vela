@@ -513,6 +513,8 @@ pub fn run() {
                 player::embedded::wait_for_unfinished_plays(std::time::Duration::from_secs(2));
                 // How the latest play left its window, for the next run: a
                 // play still showing now never reaches its own end callback.
+                // Waited for briefly, on a thread of its own: a settings
+                // write that cannot finish in time is let go of.
                 commands::remember_window_on_exit(&state.playback_window_session);
                 let stop = state
                     .tracking_stop

@@ -4389,8 +4389,39 @@ fn write_play_end<'a>(
 /// would otherwise never hand it over: the process ends before that play's
 /// end callback runs. The settings are written only when the stored window
 /// changes, so quitting after a play's end has stored it writes nothing.
-pub(crate) fn remember_window_on_exit(latest: &std::sync::Mutex<PlaybackWindowRecord>) {
-    remember_window_on_exit_with(latest, config::load_config, |change| config::update(change));
+///
+/// Quitting never waits for this without limit (review finding pw-4): it
+/// runs on a thread of its own, and the exit waits for it at most
+/// `EXIT_WINDOW_HANDOVER_LIMIT` before it lets the process go
+/// (`hand_over_within`).
+pub(crate) fn remember_window_on_exit(latest: &std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>) {
+    let latest = latest.clone();
+    hand_over_within(EXIT_WINDOW_HANDOVER_LIMIT, move || {
+        remember_window_on_exit_with(&latest, config::load_config, |change| config::update(change));
+    });
+}
+
+/// How long quitting waits for the latest play's window to reach the
+/// settings: short, like the wait for embedded plays beside it in the exit
+/// handler. The write waits for the settings lock, which another Vela can
+/// hold, and for the disk.
+const EXIT_WINDOW_HANDOVER_LIMIT: Duration = Duration::from_secs(2);
+
+/// Run `hand_over` on a thread of its own and wait for it at most `limit`.
+/// Returns whether it finished in time. When it has not, the caller goes on
+/// and the process can end while it still waits or writes: the settings file
+/// is replaced only by renaming a complete temporary file over it
+/// (`storage::save_json`, through `config::update`), so a write cut off by the
+/// process ending leaves the old file whole.
+fn hand_over_within(limit: Duration, hand_over: impl FnOnce() + Send + 'static) -> bool {
+    let (done, finished) = std::sync::mpsc::channel();
+    let started = std::thread::Builder::new()
+        .name("vela-exit-window".to_string())
+        .spawn(move || {
+            hand_over();
+            let _ = done.send(());
+        });
+    started.is_ok() && finished.recv_timeout(limit).is_ok()
 }
 
 /// `remember_window_on_exit` with the settings read and the settings write
@@ -8476,6 +8507,61 @@ mod tests {
         assert!(quit_with(Ok(cfg)).is_none());
         // Settings that cannot be read are left alone.
         assert!(quit_with(Err(std::io::Error::other("unreadable"))).is_none());
+    }
+
+    #[test]
+    fn quitting_waits_for_the_window_hand_over_only_so_long() {
+        // Review finding pw-4: another Vela holds the settings lock. Quitting
+        // returns once the limit has passed; the hand-over goes on waiting,
+        // and writes once the lock is free. Real settings files, in a folder
+        // of the test's own.
+        let dir = std::env::temp_dir().join(format!("vela-exit-window-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let lock_path = dir.join("config.lock");
+        let held = crate::storage::open_private_lock(&lock_path).unwrap();
+        held.lock().unwrap();
+
+        let record = std::sync::Arc::new(std::sync::Mutex::new(published([
+            observed_window_session("latest", crate::player::PlayerKind::External),
+        ])));
+        let (wrote, written) = std::sync::mpsc::channel();
+        let (returned, quit) = std::sync::mpsc::channel();
+        let limit = Duration::from_millis(200);
+        {
+            let (path, lock_path) = (path.clone(), lock_path.clone());
+            std::thread::spawn(move || {
+                let started = Instant::now();
+                let finished = hand_over_within(limit, move || {
+                    remember_window_on_exit_with(
+                        &record,
+                        || Ok(config::AppConfig::default()),
+                        |change| config::update_at(&path, &lock_path, change),
+                    );
+                    let _ = wrote.send(());
+                });
+                let _ = returned.send((finished, started.elapsed()));
+            });
+        }
+        let (finished, waited) = quit
+            .recv_timeout(Duration::from_secs(5))
+            .expect("quitting must not wait for a settings lock somebody else holds");
+        assert!(!finished, "the hand-over cannot have finished while the lock is held");
+        assert!(waited >= limit && waited < Duration::from_secs(2), "waited {waited:?}");
+        assert!(written.try_recv().is_err());
+
+        held.unlock().unwrap();
+        written
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the hand-over still writes once the lock is free");
+        let saved: config::AppConfig = crate::storage::load_json(&path).unwrap();
+        assert_eq!(saved.mpv_window.and_then(|window| window.fullscreen), Some(true));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_hand_over_that_finishes_in_time_is_waited_for() {
+        assert!(hand_over_within(Duration::from_secs(10), || {}));
     }
 
     /// Settings held in memory and changed one change at a time, as
