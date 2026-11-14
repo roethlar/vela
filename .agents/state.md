@@ -110,7 +110,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   owner's acceptance steps on real desktops, none of them done. Going back
   to an older Vela after playing anything in 1.0.64 needs Settings
   recovery (the release note says so). Its codex review, one hunt per
-  slice: `.agents/review/index.md`.
+  slice, returned SEVEN findings, `pw-1` to `pw-7`, all admitted
+  (`.agents/review/codereview-2026-11-14-player-window.md`): the Prefer
+  Compatible policy can rank for a different screen than the window opens
+  on; a size can be carried that the window never had; quitting waits
+  without limit for the settings file; an older window can be saved over a
+  newer one; and three smaller ones. They are being fixed on two local
+  branches of this clone, `pw-core` and `pw-edge` (worktrees under
+  `~/dev/vela-agent-keep/wt/`), not on `main`, not pushed. Do not release
+  1.0.64 before they have landed.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
