@@ -364,3 +364,26 @@ Known gaps, besides the disagreement:
   (`select_playback_version` needs a running app); the late fallback's
   test builds the choice of copy by hand and runs the real
   `playback::play`.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 14:18 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da5d-a2e6-7560-87ca-2c8d8bebb381`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 14:02 UTC, finished 14:18 UTC.
+- Reviewed head `eb2f1c274b240a5dc9abc26e6c7b90657af9e74c`, base
+  `9a28219dbabd0a92b941eb34497e62f0c2f0f0b2` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/display.rs:212 — Any named output makes the list authoritative, even when connector aliases could not be read. On Wayland, platform_outputs converts errors to an empty list while Tauri still supplies model names. A connected, remembered DP-1 is then rejected and playback moves to Vela's screen; subsequent observations can replace the remembered destination. A temporary probe reproduced this. Preserve unknown connectivity when alias enumeration is incomplete.
+  - src-tauri/src/display.rs:368 — The new connectivity check exposes a macOS translation failure. Locked tao 0.35.3 supplies names such as 'Monitor #123' and scales CoreGraphics dimensions/positions; mac_screen_matches compares localized names and unscaled CoreGraphics values. On HiDPI monitors the translation can therefore return None, leaving remembered mpv names absent from the supposedly complete connected list. Correct the translation before rejecting those names. This conclusion is from source inspection and a missing-alias probe; macOS was not run.
+  - src-tauri/src/display.rs:419 — connector_of compares Tauri/GDK geometry against raw Wayland mode dimensions, which need not share units under fractional scaling. With same-model outputs, this can identify the other connector rather than remain ambiguous. A temporary probe representing 3840x2160 at 150% as Tauri's 5120x2880 selected the other, native 5120x2880 output. Use a reliable native identity or normalize geometry before disambiguating.
+  - src-tauri/src/display.rs:982 — The newly ranked output dimensions ignore wl_output's transform. For a saved portrait output other than Vela's monitor, profile_basis takes the platform entry first and ranks for its unrotated mode. A temporary probe returned 1920x1080 for a 1080x1920 destination. Account for rotation before using these dimensions for compatibility selection.
+  - src-tauri/src/commands.rs:5348 — Freezing the screen for Best, Fastest and Ask introduces a window-continuity regression: a screen report arriving during resolution is now ignored even though these policies have no display-dependent ranking to preserve. Slice 1 explicitly requires sampling after resolution. Retain that behavior for these policies, or obtain an explicit owner decision changing the promise.
+  - tests/player-window-ui.test.mjs:218 — The production ranking connection remains insufficiently guarded. I inserted a shadow PlayScreen in compatibility_target using screens.velas while leaving the selected launch destination untouched. This restores ranking-for-Vela/launching-on-another-screen, yet all 67 prescribed Rust tests and 20 Node tests passed. Exercise the actual target-construction path with injectable display data and require this mutation to fail.
+  - src-tauri/src/commands.rs:5693 — The carried-name approach repairs the ordinary moving-Vela and saved-screen cases, and reversing observation names now fails the behavioral guard. I do not require post-resolution reranking or automatic post-open relaunch to close pw-1; the documented hot-unplug/compositor limitation is an acceptable boundary. The pre-resolution identity and connectivity defects above still require repair.
+  - src-tauri/src/commands.rs:9172 — Guard proof confirmed: dropping Vela's name, disabling connectivity filtering, reversing observation names, ignoring the saved screen, and dropping the launch screen each failed the corresponding guard. After restoration, all 67 Rust and 20 Node tests passed. Tracked files are restored; embedded playback and E2E were inspected, not run.
