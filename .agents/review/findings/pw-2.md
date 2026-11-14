@@ -257,3 +257,20 @@ target from `profile_basis`, the screen put into the play's description),
 because `select_playback_version` needs a running app; the link from the
 choice of copy to the launch is held by source text. The disagreement on
 ranking or resolving again is `pw-1`'s (its record, "Not built").
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 14:29 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da6c-2bb7-7911-bece-533f3ec5909d`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 14:18 UTC, finished 14:29 UTC.
+- Reviewed head `eb2f1c274b240a5dc9abc26e6c7b90657af9e74c`, base
+  `9a28219dbabd0a92b941eb34497e62f0c2f0f0b2` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/commands.rs:9416 — The carried-screen fallback repair works within the documented placement limits, but round-1's selection-to-fallback guard remains incomplete. This test checks the helper's winner, then launches embedded_spec() with a fixed URL, copying only the destination. Removing `&& version.version_id == winner.version_id` at line 5437 makes production select the first version on the winning source—potentially 4K HDR instead of the ranked 1080p SDR—yet all 661 Rust tests and 20 prescribed Node tests passed. Exercise the production winner-to-selection/resolution handoff and assert that fallback receives the selected version's stream.
+  - src-tauri/src/commands.rs:9332 — Guard failures confirmed for forcing Best, dropping the fallback screen, restoring the original embedded-screen mistake, and removing the embedded-successor condition. After restoring all mutations, 661 Rust tests passed (10 ignored) and all 20 prescribed Node tests passed; tracked files are unchanged. Embedded/display and E2E behavior was inspected, not executed.
