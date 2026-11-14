@@ -212,7 +212,12 @@ pub struct WindowStateObservation {
 }
 
 /// How far the window-state reader of one play has got. An observation no
-/// reader was started for (an embedded play's, a test's) stays `NotStarted`.
+/// reader was started for stays `NotStarted`: one made by a test, or the
+/// `Default` handle. Every launched play starts a reader, an embedded one's
+/// too (`spawn_position_reader`, through `start_tracking_plex`,
+/// `start_tracking_jellyfin` or `spawn_end_watcher`); Vela's exit waits only
+/// for the reader of the last play in mpv's own window because it looks only
+/// at that play (`PlaybackWindowRecord::last_external`).
 #[derive(Debug, Default)]
 struct ReaderProgress {
     phase: Mutex<ReaderPhase>,
