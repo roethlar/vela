@@ -25,38 +25,38 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     Its codex review returned NINE findings (`ec-1` to `ec-9`), all
     admitted and all fixed, one commit each, and codex has verified all
     nine (`.agents/review/index.md`).
-    NOT yet done in Slice 3: packaging the library into the Linux packages.
-    That is being built as an opt-in on the local branch
-    `embedded-packaging` (a worktree beside the clone); nothing of it is on
-    `main` yet, and the release workflow is not touched.
+    Packaging the library into the Linux packages landed later, as an
+    opt-in (below); released packages do not contain it, and the release
+    workflow is not touched.
   - Slice 4 (HDR) landed at `e8db400`. Its codex review returned THREE
-    findings (`hd-1` to `hd-3`): `hd-1` and `hd-3` are fixed and verified
-    by codex; `hd-2` is fixed and with codex (`.agents/review/index.md`).
+    findings (`hd-1` to `hd-3`), all three fixed and verified by codex
+    (`.agents/review/index.md`).
     Their design, with what was measured against the shipped library and
     what the fixes changed about it, is
     `.agents/review/hd-3-hd-2.design.md`. The slice's acceptance is a
     by-eye comparison only the owner can make.
-  - WHERE THE UNLANDED WORK IS (2026-11-13, evening). Several pieces are
-    finished on local branches of this clone (worktrees beside it, named
-    `~/dev/vela-*-wt`) and are NOT on `main` and not pushed. Each was
-    written by helper agents from a recorded design, attacked by other
-    helpers and repaired; none has yet been verified by the agent that
-    coordinates, reviewed by codex, or landed. Land them in this order:
-    - (Packaging the mpv library into the Linux packages LANDED at
+  - WHERE THINGS STAND (2026-11-14). What has landed since Slice 4, and
+    what is still on local branches of this clone (worktrees beside it;
+    NOT on `main`, not pushed):
+    - Packaging the mpv library into the Linux packages LANDED at
       `4b8293e`, opt-in: `scripts/build.sh --with-libmpv`. Released packages
       do not contain it; the release workflow is untouched. Its codex
       review returned SIX findings, `pk-1` to `pk-6`, all admitted and
-      being fixed: `.agents/review/index.md`. Two are HIGH and concern the
-      package check running or loading what it checks; until they are
-      fixed, do not run `packaging/libmpv/check-package.sh` on a package
-      you did not build.)
-    - (Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
-      log. Its codex review returned TWO findings, `pc-1` and `pc-2`, both
-      admitted, fixed (`a909c20`, `4118fea`) and with codex:
-      `.agents/review/index.md`. Its cropping
-      script is built under an assumption the owner has not ruled on: the
-      plan's "For the owner", item 3.)
-    - Then Slice 6 (parity), being written since the evening of
+      fixed on `main` (`53f2ecd` to `1348782`: thirteen commits, three of
+      them for defects found while the fixes were attacked), and with
+      codex for verification: `.agents/review/index.md`. Since those
+      commits the check never runs an AppImage, and it loads a package's
+      library only when the package holds, byte for byte, the set named
+      with `--set`.
+    - Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
+      log. Its codex review returned TWO findings, both admitted and fixed
+      (`a909c20`, `4118fea`). codex verified `pc-1` and REOPENED `pc-2`: a
+      quality step-down whose replacement fails to start still leaves the
+      window fullscreen for 50 seconds. Its repair is being written on the
+      local branch `pc-2-r2`. The slice's cropping script is built under
+      an assumption the owner has not ruled on: the plan's "For the
+      owner", item 3.
+    - Slice 6 (parity) is next, being written since the evening of
       2026-11-13 on the local branch `slice6` (tests and harness only; no
       product code). What was found out for it is
       `.agents/plans/embedded-player.slice6-notes.md`: why each scenario
@@ -76,9 +76,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     asked that agents started from then on run on Opus 5.5.
   Next in the queue after this plan:
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved. All
-  three are written on the local branch `geometry` (head `a711082`, a
-  worktree beside the clone), attacked and repaired by helpers, not yet
-  verified by the coordinating agent, not reviewed by codex. Nothing of it
+  three are written on the local branch `geometry` (a worktree beside the
+  clone), attacked and repaired by helpers, and verified there by the
+  coordinating agent (the full check, both E2E venues, injections of its
+  own); not yet reviewed by codex. Nothing of it
   is on `main`, and it lands only after the embedded plan's slices, as the
   owner ordered ("Both, embedded first"); the version bump and release
   notes are made at that landing.

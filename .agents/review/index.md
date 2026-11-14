@@ -8,12 +8,12 @@ admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| pk-1 | HIGH     | Checking an AppImage runs it                                           | `[ ]`  | — | codex/default/standard |
-| pk-2 | HIGH     | The libraries of a set that failed its checks are loaded anyway        | `[ ]`  | — | codex/default/standard |
-| pk-3 | MEDIUM   | A plain Arch build can put an older package, with the set in it, into dist/ | `[ ]`  | — | codex/default/standard |
-| pk-4 | MEDIUM   | A package whose directories above the set cannot be entered still passes | `[ ]`  | — | codex/default/standard |
-| pk-5 | MEDIUM   | Licence copies of an Arch package may be links out of it, or unreadable, and pass | `[ ]`  | — | codex/default/standard |
-| pk-6 | MEDIUM   | A temporary directory with a space in its name fails a good package    | `[ ]`  | — | codex/default/standard |
+| pk-1 | HIGH     | Checking an AppImage runs it                                           | `[~]`  | `53f2ecd`, `3d1593e` | codex/default/standard |
+| pk-2 | HIGH     | The libraries of a set that failed its checks are loaded anyway        | `[~]`  | `12fa2fa`, `9b12157` (and `1348782`) | codex/default/standard |
+| pk-3 | MEDIUM   | A plain Arch build can put an older package, with the set in it, into dist/ | `[~]`  | `26910e5`, `07ebee4` | codex/default/standard |
+| pk-4 | MEDIUM   | A package whose directories above the set cannot be entered still passes | `[~]`  | `2faadcf` | codex/default/standard |
+| pk-5 | MEDIUM   | Licence copies of an Arch package may be links out of it, or unreadable, and pass | `[~]`  | `8876601` (and `547726c`) | codex/default/standard |
+| pk-6 | MEDIUM   | A temporary directory with a space in its name fails a good package    | `[~]`  | `25fb666`, `a60f802` (and `3e008bf`) | codex/default/standard |
 
 **Embedded player Slice 5 review, 2026-11-14 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

@@ -1,9 +1,9 @@
 # pk-3: a plain Arch build can put an older package, with the set in it, into dist/
 
 **Severity**: MEDIUM — after an opt-in build and a version change, `scripts/build.sh` without the flag copies every package it finds in `packaging/arch/` to `dist/`, the older one with the whole set included. A build that was not asked for the set then hands one out.
-**Status**: Open
+**Status**: In progress
 **Branch**: —
-**Commit**: —
+**Commit**: `26910e5`, `07ebee4`
 
 ## Evidence
 
@@ -17,15 +17,42 @@ Reviewer's suggested direction, verbatim: "Collect only the current makepkg outp
 
 ## What
 
+A build without `--with-libmpv` on Arch copied every package file it found beside the PKGBUILD into `dist/`. An earlier package left there, one built WITH the library set, was handed out again by a build that was meant to have none.
+
+Reproduced before anything was changed, with the build's test fixture: a default Arch build with a `vela-0.9.0` package (with the set) beside the PKGBUILD ended with both `vela-0.9.0-1-x86_64.pkg.tar.zst` and `vela-1.0.0-1-x86_64.pkg.tar.zst` in `dist/`, and `makepkg` was never asked what it had made.
+
 ## Approach
+
+Two commits: the fix (`26910e5`), and what the attack on it found (`07ebee4`).
+
+- **Every Arch build takes exactly what `makepkg --packagelist` names** (`26910e5`), with or without the flag, and fails when a named file is not there. Before, only the opt-in build did. Builds that are not Arch are unchanged.
+- **A build whose `makepkg` cannot name its package fails** (`07ebee4`). After the first commit such a build handed out nothing and still reported success; a release script that trusts the exit status would have gone on with an empty `dist/`. It now exits 1 with a message that says so, both when `makepkg --packagelist` fails and when it names nothing.
+
+Written by one helper agent, attacked by another, repaired by a third; then landed, read and injected by the coordinating agent.
 
 ## Files changed
 
+- `scripts/build.sh` — the Arch branch of collecting what was built.
+- `tests/libmpv-packaging.test.mjs` — the `build.sh` fixture: an older package beside the new one; `PKGDEST` elsewhere; a named package missing; `makepkg` failing, and naming nothing.
+- `docs/development.md`.
+
 ## Guard proof
+
+Run 2026-11-14 by the coordinating agent in a disposable worktree at `1348782`, one injection at a time, restored from the commit each time; `node --test tests/libmpv-packaging.test.mjs` (187 tests; unchanged: 186 pass, 1 skipped).
+
+| Injection | Result |
+| --- | --- |
+| Every package file beside the PKGBUILD is taken again (the original defect) | FAIL, 12 tests, among them `beside this build's package`, `a default Arch build hands out the package it made, and not an earlier one with the set` and `an older package beside the new one is neither checked nor copied` |
+| A build whose `makepkg` names nothing reports success | FAIL `makepkg cannot say which package it made: nothing is handed out, and that is a failure` and `makepkg cannot say which package it made: nothing is checked, and that is a failure` |
+
+The helpers ran, each alone and each failing its named tests: the old condition put back (6 tests; `dist/` holds `vela-0.9.0-1-x86_64.pkg.tar.zst`); `build.sh` as it was before the second commit (`nothing matched`, status 0); and a version that fails only when `makepkg` itself fails (the names-nothing case still fails, so each of the two cases bites on its own).
 
 ## Coder dispute (if any)
 
 ## Known gaps
+
+- **Not run against a real `makepkg` build**: the tests drive `build.sh` with a stand-in. By hand, the real `makepkg --packagelist` in `packaging/arch` prints one absolute path, and neither the PKGBUILD nor this machine's `makepkg.conf` makes a debug package.
+- The older `find` branch for Arch in `build.sh` can no longer be reached; it was left, to keep the commit to its finding.
 
 ## Reviewer comments
 

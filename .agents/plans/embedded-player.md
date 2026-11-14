@@ -1696,3 +1696,43 @@ codex over `0aeeff0..3d2fef6` returned two findings, both admitted
 
 Both are with codex. The records have the guard proofs and what is not
 covered.
+
+### 2026-11-14 — the packaging review: six findings fixed; `pc-1` verified, `pc-2` reopened
+
+codex over `2f0d191..4b8293e` returned six findings about the package
+check and the build script, all admitted
+(`.agents/review/codereview-2026-11-14-libmpv-packaging.md`). They are
+fixed on `main` in thirteen commits, `53f2ecd` to `1348782`: one per
+finding, a second one for four of them after helpers attacked the fixes,
+and three for defects that attack found which are older than the fixes.
+
+- `pk-1`: the check reads an AppImage with `unsquashfs` and never runs it.
+- `pk-2`: nothing of a set that failed a check is loaded; and a package is
+  checked for the set only with `--set`, so what is loaded is byte for
+  byte what the builder built.
+- `pk-3`: an Arch build hands out only the package `makepkg` names, and
+  fails when it names none.
+- `pk-4`: every directory above the set must be one every user may enter.
+- `pk-5`: an Arch package's licence copies must be readable files of the
+  package itself.
+- `pk-6`: a temporary directory with spaces in its name no longer fails a
+  good package; one with a line break in it is refused, with the reason.
+- Older than the fixes: a relative temporary directory beginning with a
+  dash broke the check; a package that was only a link to the machine's
+  own `/usr` counted as Vela; a named pipe in a package hung the check.
+
+The coordinating agent put each defect back, one at a time (sixteen
+injections: thirteen by hand, three by taking a commit back out); each
+failed its named tests. The real opt-in Arch package passes the check with
+`--set`, fails `--without-libmpv`, and is refused without `--set`. All six
+are with codex. Still owed: one run of the AppImage reading against a real
+`unsquashfs` (squashfs-tools is not on this machine; that test skips), and
+CI runs none of the package tests until its runner has `bsdtar`
+(`.agents/state.md`, Blockers).
+
+Slice 5's review: codex verified `pc-1` and REOPENED `pc-2`. The case it
+names was in the record as a known gap: a quality step-down whose
+replacement fails to start. The old play reports while the replacement is
+installed and says the run goes on; the failure is then only logged, and
+the window stays fullscreen until the 50-second backstop. Its repair is
+being written on the local branch `pc-2-r2`.

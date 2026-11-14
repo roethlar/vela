@@ -71,3 +71,34 @@ Per-finding records: `.agents/review/findings/pk-1.md` to `pk-6.md`.
   which nobody had asked of it until the reviewer's prompt did.
 - Not covered: a real AppImage (none can be built on this host), and any
   build (the reviewer's sandbox has no network).
+
+## Fixes (2026-11-14)
+
+On `main`, thirteen commits, in the order the work was done. One helper
+agent wrote the six fixes on a local branch, a second attacked them (ten
+findings of its own), a third repaired them; the
+coordinating agent brought them onto `main` one finding per commit, with
+the packaging tests green at every step, and put each defect back by hand
+to see its tests fail.
+
+| Commit | For | What |
+| --- | --- | --- |
+| `53f2ecd` | `pk-1` | The check reads an AppImage with `unsquashfs`, from where its ELF program ends, and never runs it |
+| `12fa2fa` | `pk-2` | Nothing of a set that has failed a check is loaded |
+| `26910e5` | `pk-3` | A plain Arch build hands out only the package `makepkg` made |
+| `2faadcf` | `pk-4` | Every directory above the set must be one every user may enter |
+| `8876601` | `pk-5` | An Arch package's licence copies must be readable files of the package |
+| `25fb666` | `pk-6` | The whole path is read from a line of `/proc/self/maps` |
+| `3d1593e` | `pk-1`, after the attack | An AppImage whose name begins with a dash; the escape test holds a deb's unpackings too |
+| `9b12157` | `pk-2`, after the attack | A package is checked for the set only with `--set` (without it, a package whose own MANIFEST matched its altered library was loaded) |
+| `07ebee4` | `pk-3`, after the attack | An Arch build whose `makepkg` cannot name its package fails |
+| `a60f802` | `pk-6`, after the attack | A temporary directory with a line break in its name is refused |
+| `3e008bf` | older than the fixes | A relative temporary directory beginning with a dash broke the check |
+| `547726c` | older than the fixes | A package that was only a link to the machine's own `/usr` counted as a package of Vela |
+| `1348782` | older than the fixes | A named pipe in a package hung the check |
+
+The last three have no finding of their own: the reviewer did not raise
+them. Each is sent to the reviewer together with the finding whose code it
+touches (`3e008bf` with `pk-6`, `547726c` with `pk-5`, `1348782` with
+`pk-2`), named in that dispatch as a commit to evaluate, and described in
+that finding's record.
