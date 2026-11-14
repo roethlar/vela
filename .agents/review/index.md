@@ -9,7 +9,7 @@ admitted, none declined. Record:
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
 | hd-1 | MEDIUM   | An old description of the output can replace a newer one               | `[x]`  | `499a0d3` | codex/default/standard |
-| hd-2 | MEDIUM   | A profile mpv applies by itself when a file loads can undo the HDR target | `[~]`  | `7639c0a` | codex/default/standard |
+| hd-2 | MEDIUM   | A profile mpv applies by itself when a file loads can undo the HDR target | `[x]`  | `7639c0a` | codex/default/standard |
 | hd-3 | MEDIUM   | The drawing thread waits for mpv each time it sets the HDR target      | `[x]`  | `0e7adca` | codex/default/standard |
 
 **Embedded player Slice 3 review, 2026-11-13 (open):** codereview codex

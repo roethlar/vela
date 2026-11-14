@@ -1,7 +1,7 @@
 # hd-2: a profile mpv applies by itself when a file loads can undo the HDR target
 
 **Severity**: MEDIUM — mpv then draws something other than what the surface is tagged as, which is wrong brightness and colour for the whole play. It needs own-configuration mode and a protocol or extension profile in the user's mpv.conf that sets one of the three target options.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `7639c0a`
 
@@ -76,3 +76,24 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `74f44b6..e8db400`, 2026-11-13 08:38 UTC
 (`.agents/review/codereview-2026-11-13-embedded-hdr.md`). Reviewer's
 title: "Apply protected HDR targets after automatic file profiles". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 00:26 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d760-24e8-7b63-b7dd-ead34f90bd3f`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 00:06 UTC, finished 00:12 UTC.
+- Reviewed head `7639c0a52f4188aa9d7e120c12eb0d1ae7346568`, base
+  `695e4311b1937188897073ba3a4ec6052b6bd76a` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  - src-tauri/src/player/embedded/hdr.rs:2370 — Disabling restoration failed the named file-load guard. Removing fresh observation also failed the same-pass guards, including against the shipped library. All passed after restoring the pinned head.
+  - src-tauri/src/player/embedded/hdr.rs:3489 — Verification passed: 130 embedded Rust tests, 17 Node tests, and all 10 real-library tests using /home/michael/dev/vela/.libmpv/out/libmpv.
+  - tests/e2e/README.md:33 — Embedded playback and E2E code reviewed; execution unavailable without a display, Wayland compositor, or GPU.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
