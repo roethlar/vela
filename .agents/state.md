@@ -88,14 +88,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       verification one by one (`.agents/review/index.md`). Where each
       stands (2026-11-14, afternoon): `pa-8`, `pa-3` and `pa-2` accepted
       and closed. The other five were reopened and repaired, each record
-      says on what: `pa-1` once (repair `716abc6` with codex), `pa-7` once
-      (repair `d504a1e` with codex), `pa-4` three times, and HALTED FOR THE OWNER at
-      the third (its record, "Halted for the owner": the rounds are not
-      getting narrower; three ways on, the agent recommends taking it as it
-      is), `pa-5` three times (third repair `bf86854` with codex;
-      its record says why it did not go to the owner at the third reopen
-      and when it will), `pa-6` twice (its third repair is being written
-      by codex, see below). The three that changed scenarios (`pa-1`,
+      says on what: `pa-1` twice (second repair `9dfad5e` with codex),
+      `pa-7` once (repair `d504a1e` with codex), `pa-4` three times, and
+      HALTED FOR THE OWNER at the third (its record, "Halted for the
+      owner": the rounds are not getting narrower; three ways on, the agent
+      recommends taking it as it is), `pa-5` four times (its record says
+      why it did not go to the owner and when it will; its fourth repair is
+      being written by codex, see below), `pa-6` twice (its third repair is
+      being written by codex, see below). The three that changed scenarios (`pa-1`,
       `pa-7`, `pa-2`) each got follow-up commits so that plain
       `node --test` holds the fix (`17d415f` to `2a42345`): codex's sandbox
       cannot run the end-to-end suite. Notes kept
@@ -117,14 +117,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     coding tasks to be handed to codex (gpt-6-astra at max effort, which is
     what a plain call resolves to on `continuum`) and reviewed by the
     agent, "to see if we can make some progress by splitting effort".
-    Three are with codex, one at a time, each in a worktree of its own
-    under `~/dev/vela-agent-keep/wt/` (`cx-pw9a`, `cx-race`, `cx-pa6r3`),
-    uncommitted there: the first half of `pw-9`; the other end-to-end
-    scenarios checked for the race `pw-8` had, with the wait in one
-    helper; and `pa-6`'s third repair. Codex cannot be the reviewer of
-    code it wrote, so for these the agent reviews (reads the diff, runs
-    the checks and the end-to-end runs codex's sandbox cannot, red-proves
-    the tests) and lands them; their records will say so.
+    Four were handed over, one at a time, each in a worktree of its own
+    under `~/dev/vela-agent-keep/wt/` (`cx-pw9a`, `cx-race`, `cx-pa6r3`,
+    `cx-pa5r5`), uncommitted there until the agent lands them: the first
+    half of `pw-9` (LANDED at `0b313a2`); the other end-to-end scenarios
+    checked for the race `pw-8` had, with the wait in one helper;
+    `pa-6`'s third repair; and `pa-5`'s fourth. Codex cannot be the
+    reviewer of code it wrote, so for these the agent reviews (reads the
+    diff, runs the checks and the end-to-end runs codex's sandbox cannot,
+    red-proves the tests) and lands them; their records say so. Whether
+    the agent's review may stand in for codex's there is the owner's to
+    confirm; nobody has asked for it to be done differently.
   After the embedded plan's slices came
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved: LANDED
   2026-11-14 at `9815e10` as one commit, Vela 1.0.64 (not released, not
@@ -144,7 +147,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (`55be8fc` to `ac25240`, ten commits, 2026-11-14; no version change, no
   release note). Where each stands with codex (2026-11-14, afternoon):
   `pw-6`, `pw-5`, `pw-4` and `pw-3` accepted and closed. `pw-7` reopened
-  once (repair `0ee2e0d` with codex). `pw-1` and `pw-2` reopened, both on
+  twice (second repair `1430f2e` with codex). `pw-1` and `pw-2` reopened, both on
   which screen a Compatible copy is ranked for and opened on; one repair
   for both is being built on the local branch `pw12-repair` (the screen
   decided once, by name, before the copy is chosen). It changes two things
@@ -162,12 +165,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   external run in four, and four of five full runs, and the parity verdict
   with it. The cause was the scenario, which changed and ended a play
   before Vela had connected to mpv; fixed at `26660a9`, with codex. `pw-9`,
-  OPEN: a play whose mpv ends before Vela has connected is not seen to
-  have ended for five seconds, and hands the next play no fullscreen
-  state. Its first half (seeding the opening state) is within the plan and
-  with codex as a coding task; its second half (the reader giving up
-  sooner) changes when tracking gives up for every play and waits for the
-  owner's word.
+  HALF OPEN: a play whose mpv ends before Vela has connected is not seen
+  to have ended for five seconds, and handed the next play no fullscreen
+  state. Its first half (seeding the opening state, so the next play gets
+  it) is FIXED at `0b313a2`, written by codex and reviewed by the agent;
+  its second half (the reader giving up sooner) changes when tracking
+  gives up for every play and waits for the owner's word.
   The parity verdict has not passed on `main` since the fixes began to
   land. Full runs: at `8cf3a05` it failed on `windowsetting` alone; at
   `26660a9` (with `pw-8` fixed) the external suite was clean but for the
