@@ -219,3 +219,53 @@ Not covered: the top of a results file is read for `player`, `full`,
 `built`, `head`, `dirty` and `scenarios` only; what else the runner writes
 there (`appBinary`, `finishedAt`, `changedDuringRun`) is not read by the
 verdict and not checked.
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-14 10:51 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9a6-a75f-7fe3-931d-a4655a154b03`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 10:42 UTC, finished 10:50 UTC.
+- Reviewed head `0d8ccbd231ecda7b39051e79d7cbc560f4e1f6ee`, base
+  `ac2524072c877789edf96dbdedf8dbeb2affcc27` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenario-loader.mjs:158 — Impossible proof lists still count. In otherwise valid full-run JSON fixtures, external markers.shown=['8a','8a'], autocrop.routes=['mpvInput','mpvInput'], and embeddedownconfig.routes=['not-a-route'] retaining its fail status and known error each independently return no problems. proof.mjs serializes Sets and rejects unregistered routes, so the runner cannot emit these results. Validate uniqueness in both lists and registered route membership before either passes or known failures count, and add regression assertions.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right: a
+list with the same entry twice, and a route nobody registered, are things
+the runner cannot write (`proof.mjs` keeps sets and refuses an unknown
+route), and the verdict still took them.
+
+This is the third reopen. After the second, this record said a third would
+go to the owner, as `pc-2` did. The coordinating agent does not send it,
+and says why here so that the owner can overrule it:
+
+- The rule for stopping is about work that has stalled: rounds with no
+  delta that can be checked. Each round here closed what was raised and
+  was narrower than the one before (a skipped known failure; an error that
+  is not text; a pass with an error and a malformed list; a list with a
+  duplicate and an unregistered route). `pc-2` was different: each repair
+  there opened a new race in what a user sees.
+- It is a matter of how strictly a test tool reads its own results file.
+  Nothing a user of Vela sees depends on it, and the owner asked to be
+  brought only what does.
+
+What three rounds do show is that checking one more field each time does
+not end. The next repair is therefore not another field. It is one
+description of the whole results file that the runner writes, used by the
+runner to write it and by the verdict to refuse anything else: every key
+at the top and in each result, its type, the lists without duplicates, the
+routes among the registered ones, and the combinations the runner cannot
+produce. It waits for the repair of `pa-6`, which changes what the runner
+writes at the top of that file, so that the description is written once.
+
+The stop that holds from here: if the reviewer reopens that repair for
+anything other than a mistake in it (that is, by asking the verdict to
+tell a hand-made file that is exactly like the runner's from a real one,
+which no check of the file can do), the finding goes to the owner as
+contested.
