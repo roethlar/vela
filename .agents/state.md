@@ -53,19 +53,21 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       against a real `unsquashfs` (in a container; `pk-1`'s record).
     - Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
       log. Its codex review returned TWO findings, both admitted and fixed
-      (`a909c20`, `4118fea`). codex verified `pc-1` and has REOPENED
-      `pc-2` TWICE: a play that replaces another and then fails to start
-      could still leave the window fullscreen for 50 seconds. The third
-      repair landed at `060a5fd` and is with codex. It works on a
-      different rule from the first two: what the page is told after a
-      failed launch is decided from the app's state at that moment
-      (nothing playing, no play active, the page holding the player's
-      fullscreen), not from which reports of a play's end happened to come
-      first. The page's own rule for leaving fullscreen, and a source
-      choice that ends without a play, changed with it
-      (`.agents/review/findings/pc-2.md`, "Repair (round 3)"). If the
-      reviewer reopens it a third time, stop and bring it to the owner, as
-      `ps-2` was. The slice's cropping script
+      (`a909c20`, `4118fea`). codex verified `pc-1`. `pc-2` is HALTED FOR
+      THE OWNER since 2026-11-14, after a third reopen; do not repair it
+      further without the owner's word. Three repairs are on `main`
+      (`4118fea`, `c872dad`, `060a5fd`). The third changed the rule: what
+      the page is told when a run ends is decided from the app's state at
+      that moment, not from which reports of a play's end came first. It
+      closed all four orders of events the reviewer had named, and the
+      reviewer then reopened it for one order the third repair itself
+      introduced: a source choice the user opened by hand, cancelled in the
+      moment between a play's clean end and Vela dealing with that end,
+      takes the window out of fullscreen just before the next play starts.
+      Nothing is left fullscreen with nothing playing any more. The record
+      says what would close it and puts the question
+      (`.agents/review/findings/pc-2.md`, "Halted for the owner"). The
+      slice's cropping script
       is built under
       an assumption the owner has not ruled on: the plan's "For the
       owner", item 3.
@@ -78,9 +80,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       inventory row in each player, and a design for the parity guard.
     The owner's by-eye checks and the switch-on (Settings control, release
     notes, version bump) are NOT the agent's to do.
-  - Active review loop: see `.agents/review/index.md`. One finding
-    (`ps-2`) is with the owner after four reopens
-    (`.agents/review/ps-2.contested.md`).
+  - Active review loop: see `.agents/review/index.md`. Two findings are
+    with the owner: `ps-2`, contested after four reopens
+    (`.agents/review/ps-2.contested.md`), and `pc-2`, halted after three
+    (its record, "Halted for the owner").
   - On 2026-11-13 the owner switched on multi-agent workflows for the
     session that is doing this work. The agent reads that as the approval
     the 2026-08-20 constraint below asks for before more than one Claude
