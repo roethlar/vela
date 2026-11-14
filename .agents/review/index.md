@@ -18,7 +18,7 @@ Seven candidates, seven admitted, none declined. Record:
 | pw-8 | MEDIUM   | The end-to-end scenario for the player window fails about one external run in four, and the parity verdict with it (the scenario's fault) | `[~]`  | `26660a9`, `71395c3` (the other scenarios) | codex/default/standard |
 | pw-9 | MEDIUM   | When mpv ends before Vela has connected to it, the play's end is held back five seconds, and the next play of a full-screen run opens windowed | `[~]`  | `0b313a2` (first half) | codex wrote it; reviewed by the agent |
 
-**Embedded player Slice 6 review (the parity tests), 2026-11-14 (open):** codereview codex
+**Embedded player Slice 6 review (the parity tests), 2026-11-14 (closed 2026-11-14):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `ab95c49..ac3e563`: `findings`. Eight candidates, eight
 admitted, none declined. Record:
@@ -26,13 +26,13 @@ admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| pa-1 | MEDIUM   | The automatic-skip test passes by ordinary playback, without a skip    | `[~]`  | `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6`, `9dfad5e`, `8ed9acb` | codex/default/standard esc:T5(ceiling) |
+| pa-1 | MEDIUM   | The automatic-skip test passes by ordinary playback, without a skip    | `[x]`  | `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6`, `9dfad5e`, `8ed9acb` | codex/default/standard esc:T5(ceiling) |
 | pa-2 | MEDIUM   | The external player's cropping is tested in automatic mode only; the row says off, manual, auto | `[x]`  | `9bcdfbc`, `a9ed237`, `2a42345` | codex/default/standard |
 | pa-3 | MEDIUM   | Half of a split row can be deleted and the guard still says the plan's list is all there | `[x]`  | `ddbb743` | codex/default/standard |
-| pa-4 | MEDIUM   | A timer started through Node's timer modules is not seen by the import watch | `[~]`  | `c294a09`, `be3f1f4`, `cc85c2d` | codex/default/standard esc:T5(ceiling) |
-| pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[~]`  | `115cbaa`, `dbb91b4`, `0d8ccbd`, `bf86854` | codex/default/standard esc:T5(ceiling) |
+| pa-4 | MEDIUM   | A timer started through Node's timer modules is not seen by the import watch | `[x]`  | `c294a09`, `be3f1f4`, `cc85c2d` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
+| pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[x]`  | `115cbaa`, `dbb91b4`, `0d8ccbd`, `bf86854` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
 | pa-6 | MEDIUM   | A run can say it built the app it ran when it built elsewhere and ran an older binary | `[x]`  | `f00cdc4`, `8cf3a05`, `3d2ecca` | codex/default/standard esc:T5(ceiling); the last repair: codex wrote it; reviewed by the agent |
-| pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[~]`  | `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e` | codex/default/standard esc:T5(ceiling) |
+| pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[x]`  | `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`, `d504a1e` | codex/default/standard esc:T5(ceiling); closed as it stands by the owner, 2026-11-14 |
 | pa-8 | LOW      | A name every object has, such as toString, is accepted as a test-only route | `[x]`  | `ade0278` | codex/default/standard |
 
 **Embedded player, packaging review, 2026-11-14 (closed 2026-11-14, all six verified):** codereview codex

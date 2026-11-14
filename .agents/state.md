@@ -83,35 +83,31 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       review returned EIGHT findings, `pa-1` to `pa-8`, all admitted, all
       about tests that can pass without what they stand for
       (`.agents/review/codereview-2026-11-14-embedded-parity.md`). All
-      eight are FIXED on `main`, one commit each (`ade0278` to `9bcdfbc`,
-      2026-11-14; tests only, no product code), and are going to codex for
-      verification one by one (`.agents/review/index.md`). Where each
-      stands (2026-11-14, afternoon): `pa-8`, `pa-3` and `pa-2` accepted
-      and closed, `pa-6` closed too. The other five were reopened and repaired, each record
-      says on what: `pa-1` three times (third repair `8ed9acb` with codex;
-      its record says that a fourth reopen goes to the owner),
-      `pa-7` twice (its third repair is being built by helper agents on
-      the local branch `pa7-r3`: the play is paused and moved before it is
-      stopped, so that where it stopped does not depend on when anything
-      is read), `pa-4` three times, and
-      HALTED FOR THE OWNER at the third (its record, "Halted for the
-      owner": the rounds are not getting narrower; three ways on, the agent
-      recommends taking it as it is), `pa-5` four times (its record says
-      why it did not go to the owner and when it will; its fourth repair is
-      being written by codex, see below), `pa-6` twice, and CLOSED: its second repair,
-      `3d2ecca`, was written by codex and reviewed by the agent (see
-      below). The three that changed scenarios (`pa-1`,
-      `pa-7`, `pa-2`) each got follow-up commits so that plain
-      `node --test` holds the fix (`17d415f` to `2a42345`): codex's sandbox
-      cannot run the end-to-end suite. Notes kept
+      eight were fixed on `main` (tests only, no product code), and that
+      review is CLOSED (2026-11-14; `.agents/review/index.md`). Codex
+      accepted `pa-8`, `pa-3`, `pa-2` and, after four rounds, `pa-1`.
+      `pa-6` closed on the agent's review of a repair codex wrote. The
+      owner closed `pa-4`, `pa-5` and `pa-7` as they stand, when setting
+      tests aside until a release is in view (next point); codex's last
+      comments on those three are known limits in their records. A
+      further repair of `pa-5` (codex, worktree `cx-pa5r5`) and of `pa-7`
+      (helper agents, local branch `pa7-r3`) was being written at that
+      moment; neither was reviewed or landed, and both exist only in
+      worktrees on `continuum`. Notes kept
       from the work: `.agents/plans/embedded-player.slice6-notes.md`.
     The owner's by-eye checks and the switch-on (Settings control, release
     notes, version bump) are NOT the agent's to do.
-  - Active review loop: see `.agents/review/index.md`. Three findings are
+  - OWNER, 2026-11-14: TESTS ARE NOT A PRIORITY until the app is done and
+    a release is in view (`.agents/decisions.md`, that date; read it
+    before doing anything about tests). Keep the checks and the
+    end-to-end suite green and run them before calling work done; give a
+    product fix the test that shows it; spend no review round and no
+    repair on a finding, or a reviewer's comment, that is about tests
+    alone: write it into the record for the release's test pass.
+  - Active review loop: see `.agents/review/index.md`. Two findings are
     with the owner: `ps-2`, contested after four reopens
-    (`.agents/review/ps-2.contested.md`), `pc-2`, halted after three
-    (its record, "Halted for the owner"), and `pa-4`, halted after three
-    (the same heading in its record).
+    (`.agents/review/ps-2.contested.md`), and `pc-2`, halted after three
+    (its record, "Halted for the owner").
   - On 2026-11-13 the owner switched on multi-agent workflows for the
     session that is doing this work. The agent reads that as the approval
     the 2026-08-20 constraint below asks for before more than one Claude
@@ -129,8 +125,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     scenarios checked for the race `pw-8` had, with the wait in one helper
     (LANDED at `71395c3`: sixteen scenario files changed; the survey and
     the agent's review are `.agents/review/pw-8.other-scenarios.md`);
-    `pa-6`'s second repair (LANDED at `3d2ecca`); `pa-5`'s fourth (being
-    written); and `pw-7`'s fourth (waiting its turn). Codex cannot be the
+    `pa-6`'s second repair (LANDED at `3d2ecca`); `pa-5`'s fourth (set
+    aside unlanded when the owner put tests off); and `pw-7`'s fourth
+    (being written). Codex cannot be the
     reviewer of code it wrote, so for these the agent reviews (reads the
     diff, runs the checks and the end-to-end runs codex's sandbox cannot,
     red-proves the tests) and lands them; their records say so. The owner

@@ -1,7 +1,7 @@
 # pa-1: a play left running reaches the end of the marker by itself, so the automatic-skip test passes without a skip
 
 **Severity**: MEDIUM — `markers`, the only scenario that stands for automatic skipping (row 8a) in either player, waits up to 14 and 16 seconds for a running play to be past second 12. Ordinary playback gets there in that time, so the row is counted as shown, and the parity verdict passes, with automatic skipping broken.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6` (repair), `9dfad5e` (second repair)
 
@@ -377,3 +377,22 @@ Not covered: a skip that lands up to half a second short of the range's
 end can pass, as before. The proof fails a correct skip when the machine
 is so slow that half a second passes between asking for one reading and
 having the next.
+
+### Verification round 4 (repair-delta redispatch), recorded 2026-11-14 14:39 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da76-7f47-78f2-90a6-71f8f8e905ab`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 14:29 UTC, finished 14:36 UTC.
+- Reviewed head `8ed9acb37d19bef9fb92a6c093bfba9ed5185980`, base
+  `32e972eed40515b876e3a462eb67ca35b4419338` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

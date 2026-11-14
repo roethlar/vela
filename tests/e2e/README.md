@@ -127,15 +127,18 @@ any scenario is imported and are never taken down:
   diagnostics channel the watch listens to. An attempt that fails, or sits
   inside a try/catch, is published like any other, because the check comes
   first. Audit mode lets the act go ahead, so an import does under the watch
-  what it does in the runner, with three exceptions (seen on Node 26.13).
-  Two kinds of call are refused with `ERR_ACCESS_DENIED` even in audit mode,
-  with nothing published: `process.binding`, and the calls on an open
-  descriptor that Node's documentation says the permission system cannot tie
-  to a path (`fchmod`, `fchown`, `futimes`, `fsync`, `fdatasync`). Each has
-  a recording replacement (below), so a module that tries one is seen
-  trying, whether or not it goes on. And the `node:path` module object is
-  frozen, so a module that assigns to it fails to import under the watch,
-  which fails the test.
+  what it does in the runner, with exceptions; these were seen on Node
+  26.13, and the list is not known to be complete. Two kinds of call are
+  refused with `ERR_ACCESS_DENIED` even in audit mode, with nothing
+  published: `process.binding`, and the calls on an open descriptor that
+  Node's documentation says the permission system cannot tie to a path
+  (`fchmod`, `fchown`, `futimes`, `fsync`, `fdatasync`). Each has a
+  recording replacement (below), so a module that tries one is seen trying,
+  whether or not it goes on. `process.report.writeReport(path)` is refused
+  too, though its check is published. And the `node:path` module object is
+  frozen, so an assignment to it throws: a module that makes one fails to
+  import under the watch, which fails the test, unless it catches the
+  failure (see "What is not seen").
 - Recording replacements for what neither of those sees: the `fs` calls on a
   descriptor that is already open (`write`, `writev`, `ftruncate` and the
   five above, and their `Sync` forms; Node's documentation says such calls
@@ -157,7 +160,8 @@ The process reports when it ends, the last moment there is, and only if its
 event loop was seen with nothing left to do before that. So an act an import
 puts off is seen when it runs, and so is what a module's own listener does
 when the process is about to end, or puts off once more from there (a
-listener a module adds for the end itself is seen as a listener added). The
+listener a module adds for the end itself is seen as a listener added), with
+the two exceptions under "What is not seen". The
 report goes on a pipe of its own
 (descriptor 3), as one line carrying a secret the test makes for each run and
 hands the watch on its standard input; the watch keeps it in its own module
@@ -215,6 +219,26 @@ the watch is for. Nor is the watch a defence against a module written to
 defeat the watch itself: one that reaches into the watch's process to forge
 its secret, unsubscribes its channels or patches the engine under it. Such a
 module could do the same damage from its `run()`, which nothing watches.
+
+Five more things are known not to be seen. The reviewer of finding pa-4
+showed each in its third verification, and the owner closed the finding with
+them standing (2026-11-14); each needs a module written to be odd:
+
+- A listener for the process's `exit` that a module puts in front of the
+  others to run once (`process.prependOnceListener('exit', ...)`) and that
+  puts its work off once more: the listener has taken itself away before
+  the listeners are compared, and its work runs after the report.
+- A `beforeExit` listener, added to run once, that ends the process itself
+  with `process.exit(0)`: the loop had been seen idle before, so the report
+  is clean.
+- A module that tries, inside a try/catch, something audit mode refuses or
+  freezes (an assignment to a property of `node:path`, say) and acts only
+  when it works: under the watch the attempt fails quietly and nothing is
+  done; in the runner it works and the act is done.
+- The group the watch runs in is ended by its number, also after the first
+  process of the group has been reaped. Should the system have given that
+  number to another group in between, that group would be signalled.
+- What audit mode changes is listed above as seen, not as proved complete.
 
 ## Parity
 

@@ -2167,3 +2167,46 @@ and the working agent can.
 Supersedes:
 Nothing. It qualifies "Never review Vela's code with a Claude harness"
 (2026-07-26) for one case only: a repair that codex itself wrote.
+
+## 2026-11-14 - Tests are not a priority until the app is done and a release is in view
+
+Status: APPROVED (owner, 2026-11-14).
+
+Decision:
+Owner, 2026-11-14: "tests are not a priority. once the entire app is done
+and we're looking at a release, then we can start to think about tests."
+It followed "this has been going for a day, and I need to speed it up",
+said when the loop on two codex reviews had spent most of a day on
+findings about tests that could be fooled.
+
+What follows from it. The first point is the owner's own choice of that
+day; the others are the working agent's reading of the words above, for
+the owner to correct:
+
+- The open findings about tests alone are closed as they stand: `pa-4`,
+  `pa-5` and `pa-7` of the embedded-parity review. Codex's last comments
+  on them stay in their records as known limits. Minutes earlier, asked
+  how far to take them, the owner had chosen "Finish what's in flight,
+  then close"; the statement above goes further, so the repairs then
+  being written for `pa-5` and `pa-7` were neither reviewed nor landed.
+- Until the owner says a release is in view: the checks and the
+  end-to-end suite that exist are kept green and are still run before
+  work is called done; a fix to product code gets the test that shows it;
+  and no review round and no repair is spent on a finding, or on a
+  reviewer's comment, that is about tests alone (a guard that could be
+  stronger, a test that could be made to pass wrongly). Such comments are
+  written into the finding's record for the release's test pass.
+- New test machinery and the hardening of the suite itself wait for that
+  pass.
+
+Reason:
+The owner's, in their words above. Codex had reopened the four findings
+about tests three, three, four and two times, each round for a more
+contrived way a test could be fooled, at one to two hours a round, while
+faults in product code waited behind them.
+
+Supersedes:
+For the time being, whatever in `.agents/repo-guidance.md`, "Guard
+discipline", would have a finding about tests alone repaired round after
+round. That section still governs the tests a change to product code
+gets.

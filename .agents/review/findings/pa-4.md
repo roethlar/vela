@@ -460,3 +460,17 @@ nothing watching. The watch exists to catch a mistake at import.
    piece of work.
 
 Until the owner says, nothing more is done on this finding.
+
+### Closed as it stands, by the owner (2026-11-14)
+
+The owner took the first of the three ways put to them above: the finding
+closes as it is on `main` (`cc85c2d`), and the five comments of round 3
+are known limits. They are written out in `tests/e2e/README.md`, "What is
+not seen" (a listener for the process's end put in front to run once that
+puts its work off again; a `beforeExit` listener that ends the process
+itself; an attempt inside a try/catch at something audit mode refuses or
+freezes; the group ended by a number that could have been given away; the
+list of what audit mode changes not being proved complete), and the two
+sentences of the README that round 3 showed to say too much are put
+right. The decision is in `.agents/decisions.md`, 2026-11-14, "Tests are not a priority until the app
+is done and a release is in view". No further repair is made.

@@ -136,6 +136,12 @@ Rules the command list doesn't carry on its own:
 
 ### Guard discipline (earned the hard way, r17-r24 of library-refresh-scan)
 
+**Owner, 2026-11-14: tests are not a priority until the app is done and a
+release is in view** (`.agents/decisions.md`, that date). Until the owner
+says otherwise, this section governs the tests a change to product code
+gets, and nothing more: do not spend review rounds or repairs on findings
+that are about tests alone; record them for the release's test pass.
+
 Carved out of `.agents/state.md` 2026-07-14 so it survives that entry's
 rotation. The evidence is the `## Code review log` in
 `.agents/plans/library-refresh-scan.md`; the summary is in

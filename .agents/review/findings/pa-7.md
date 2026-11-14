@@ -247,3 +247,18 @@ still held by end-to-end runs and by the text test only.
 - Verdict: **reopened**. Comments, verbatim:
   - tests/e2e/helpers.mjs:476 — The last reading still need not represent the stop. stopPlayAsUser closes this connection immediately after requesting quit/click/key, then allows 4000 ms for termination; subsequent sampling cannot observe playback during that interval. Neither player guarantees termination within 500 ms. A simulated 900 ms delay using the actual stop helper and MpvIpc produced last/final positions of 7459/8360 ms externally and 7610/8560 ms embedded: correct reports failed, while stale reports passed. start_tracking_plex obtains its final position from an independent observer that can continue receiving updates after this connection closes. Keep observation alive through termination or stabilize playback before sampling, and guard delayed stop handling explicitly.
   - tests/e2e-judge.test.mjs:495 — The no-late-reading assertion snapshots the count after positionsWhile returns, but that helper awaits its watcher before returning. Removing the watcher’s running check left all 32 tests passing while a probe delivered a reading at 150 ms after the action ended at 120 ms. Assert against action completion inside the callback, including an outstanding read. The allowance, initial-reading, ongoing-reading and wiring mutations did fail their guards; after restoring the pinned code, all 32 tests passed.
+
+### Closed as it stands, by the owner (2026-11-14)
+
+The owner set tests aside that day until the app is done and a release is
+in view (`.agents/decisions.md`, 2026-11-14, "Tests are not a priority
+until the app is done and a release is in view"), and this finding, which
+is about tests alone, closes as it is on `main`. The comments of the last
+verification round above are not repaired; they are its known limits, to
+be taken up, if at all, in the release's test pass.
+
+A third repair, by helper agents (the play paused and moved before it is
+stopped), was being written when the owner said so. It was not reviewed and
+not landed, and exists only on the local branch `pa7-r3`
+(worktree `~/dev/vela-agent-keep/wt/pa7-r3`) on `continuum`, not pushed; it may
+not be there later.

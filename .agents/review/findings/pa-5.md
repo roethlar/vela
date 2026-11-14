@@ -365,3 +365,17 @@ runner can write, from its code, and a description that takes exactly
 those. The coordinating agent reviews what comes back and lands it. Codex
 cannot be the reviewer of a repair it wrote, so that review stands in
 place of a fifth verification.
+
+### Closed as it stands, by the owner (2026-11-14)
+
+The owner set tests aside that day until the app is done and a release is
+in view (`.agents/decisions.md`, 2026-11-14, "Tests are not a priority
+until the app is done and a release is in view"), and this finding, which
+is about tests alone, closes as it is on `main`. The comments of the last
+verification round above are not repaired; they are its known limits, to
+be taken up, if at all, in the release's test pass.
+
+A fourth repair, by codex as a coding task, was being written when the owner said so. It was not reviewed and
+not landed, and exists only as uncommitted changes in the worktree
+`~/dev/vela-agent-keep/wt/cx-pa5r5` on `continuum`, not pushed; it may
+not be there later.
