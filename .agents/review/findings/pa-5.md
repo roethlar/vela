@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — for a scenario recorded as a known failure, the verdict compares the error text of any result that is not a pass. A result marked skipped that carries the recorded text is accepted, so the verdict can pass on a run in which the scenario never ran.
 **Status**: In progress
 **Branch**: —
-**Commit**: `115cbaa`
+**Commit**: `115cbaa`, `dbb91b4` (repair)
 
 ## Evidence
 
@@ -81,3 +81,62 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "A skipped known failure is accepted as an observed failure". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 10:04 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d980-fb9e-7d81-8c71-591f9b5697a1`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 10:01 UTC, finished 10:04 UTC.
+- Reviewed head `115cbaad15c2fcca76b69239265a29733be12f30`, base
+  `ade0278604e39994346c4983f923316e5a36bfc1` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenario-loader.mjs:213 — String(result.error) still accepts malformed failure evidence. With otherwise valid full-run fixtures, external embeddedownconfig with status 'fail' and error [KNOWN_FAILURES[0].failsWith] returns no problems; nested arrays also pass. The runner writes string errors, so require typeof result.error === 'string' before matching and add a regression assertion. The recorded skip guard failed when the fix was reverted and passed after restoration.
+
+Orchestrator: a valid verdict, reopened on one comment, and the comment is
+right. The match on the error text took anything that turns into text
+holding the recorded words. The runner only ever writes text there
+(`String(err?.message ?? err)` in `tests/e2e/run.mjs`).
+
+### Repair (round 2), `dbb91b4`
+
+The reviewer's point is one case of something wider in the same function:
+`verdictProblems` gave a results file the benefit of the doubt wherever it
+read one. The repair takes from the file only what the runner writes:
+
+- A known failure's error must be text. Anything else reads "<name> failed
+  in the <player> player, but its error is not text (...): the runner
+  writes text, so this is not its known failure seen".
+- A row counts as shown only from a list. `shown` given as text matched one
+  row's id inside another's ("12" holds "1" and "2").
+- A scenario's result is looked up among the file's own names only, so a
+  scenario whose name every object answers to has no result unless the
+  file holds one.
+- Results that are not an object by scenario name hold none ("the <player>
+  results hold no scenarios by name").
+- A file that does not say `dirty: false` is not taken as clean, and one
+  that does not say `full: true` is not taken as a full run (`built` was
+  already read this way).
+
+What the runner writes is unchanged, and so is the verdict on any file it
+wrote: the parity test's own fixtures and the rest of `npm run check` pass
+as before.
+
+Files: `tests/e2e/scenario-loader.mjs`, `tests/e2e-parity.test.mjs`.
+
+Guard: the verdict test gained a case for each of the six rules: a known
+failure whose error is a list with the text, a nested list, an object, null,
+nothing, and a number; `shown` as the text "12"; a scenario named
+`constructor`; results given as a list and as null; `dirty` missing and 0;
+`full` given as "yes". Red-proofs by the coordinating agent, one rule taken
+out at a time, the file put back and checked byte for byte after each: all
+six made the verdict test fail, and it passed once restored. `npm run
+check` was green before the commit (422 tests).
+
+Not covered: `routes` in a result is not read by the verdict, so its shape
+is not checked. An ordinary scenario's failure is a problem whatever its
+error is, so that branch asks nothing of the error.
