@@ -4096,6 +4096,17 @@ impl PlaybackAdvance {
         self.changed.notify_one();
     }
 
+    /// Whether mpv has reported a clean end of file for `session_id` that has
+    /// not yet been joined with its tracker's end.
+    pub(crate) fn saw_eof(&self, session_id: &str) -> bool {
+        self.signals
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .eof
+            .iter()
+            .any(|held| held == session_id)
+    }
+
     fn mark_ended(&self, completion: PlaybackCompletion) {
         let mut signals = self
             .signals
@@ -4143,6 +4154,17 @@ impl PlaybackAdvance {
             changed.await;
         }
     }
+}
+
+/// Whether a play's end, as its tracker reports it, is the end of its run:
+/// no further play of the run is coming. What follows a clean end of file
+/// is decided by the completion dispatcher, not here. A play that is no
+/// longer the active one has been replaced: its successor is installed
+/// before it is stopped (a step-down, a play the backend or the user
+/// started). Any other end (an error, a quit that was not the page's, mpv
+/// dying) ends the run.
+fn end_is_run_over(clean_eof: bool, active_session: Option<&str>, ended_session: &str) -> bool {
+    !clean_eof && active_session.is_none_or(|active| active == ended_session)
 }
 
 fn cursor_matches_session(cursor: Option<&PlaylistCursor>, session_id: &str) -> bool {
@@ -5169,7 +5191,10 @@ async fn play_by_key_locked(
         // check-in. That keeps quit/error progress current; a joined clean EOF gets
         // a second, authoritative refresh from the async dispatcher after exact-
         // session completion curation and any backend-owned successor start.
-        // Payloads carry ids only — never URLs or tokens.
+        // This first one also names its session and says whether the run is
+        // over (`end_is_run_over`): an end that is not clean reaches no
+        // dispatcher, and the page leaves the run's fullscreen on it.
+        // Payloads carry ids and a flag only — never URLs or tokens.
         let on_end: Option<playback::EndNotify> = {
             use tauri::Emitter;
             let app = state.app_handle.get().cloned();
@@ -5213,9 +5238,25 @@ async fn play_by_key_locked(
                     Ok(())
                 });
                 if let Some(app) = &app {
+                    use tauri::Manager;
+                    // A plain thread outside any runtime: the lock is waited
+                    // for here, and held only to read it.
+                    let run_over = end_is_run_over(
+                        advance.saw_eof(&session_id),
+                        app.state::<AppState>()
+                            .active_playback_session
+                            .blocking_lock()
+                            .as_deref(),
+                        &session_id,
+                    );
                     let _ = app.emit(
                         "playback-ended",
-                        serde_json::json!({ "sourceId": source_id, "itemKey": item_key.clone() }),
+                        serde_json::json!({
+                            "sourceId": source_id,
+                            "itemKey": item_key.clone(),
+                            "sessionId": session_id.clone(),
+                            "runOver": run_over,
+                        }),
                     );
                 }
                 advance.mark_ended(PlaybackCompletion {
@@ -6327,37 +6368,68 @@ fn emit_source_choice_required(state: &AppState, request_id: &str) {
     }
 }
 
-/// Handle one fully-finished clean EOF. Returns true only when the exact active
-/// single item or playlist genuinely ended, authorizing the frontend to apply
-/// Continue Playing. The UUID prevents queued older work from replacing a
-/// newer manual play.
-pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> bool {
+/// What follows a clean end of file, as [`advance_playlist`] leaves it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AfterCleanEnd {
+    /// The run genuinely ended: the frontend may apply Continue Playing.
+    ContinuePlaying,
+    /// A successor was started or is being chosen, or another play replaced
+    /// this one.
+    Successor,
+    /// The backend could not start the run's successor, and nothing replaced
+    /// the play: the run is over.
+    RunOver,
+}
+
+/// The run's successor could not be started: the run is over unless another
+/// play has replaced the ended one meanwhile.
+async fn successor_failed(state: &AppState, ended_session: &str) -> AfterCleanEnd {
+    clear_playlist_cursor_if(state, ended_session).await;
+    let active = state.active_playback_session.lock().await;
+    if end_is_run_over(false, active.as_deref(), ended_session) {
+        AfterCleanEnd::RunOver
+    } else {
+        AfterCleanEnd::Successor
+    }
+}
+
+async fn finish_or_replaced(state: &AppState, ended_session: &str) -> AfterCleanEnd {
+    if finish_sequence_if_current(state, ended_session).await {
+        AfterCleanEnd::ContinuePlaying
+    } else {
+        AfterCleanEnd::Successor
+    }
+}
+
+/// Handle one fully-finished clean EOF. Says `ContinuePlaying` only when the
+/// exact active single item or playlist genuinely ended, authorizing the
+/// frontend to apply Continue Playing, and `RunOver` when a playlist's
+/// successor could not be started. The UUID prevents queued older work from
+/// replacing a newer manual play.
+pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> AfterCleanEnd {
     if state
         .playback_choices
         .lock()
         .await
         .has_manual_pending(Instant::now())
     {
-        return false;
+        return AfterCleanEnd::Successor;
     }
     let cursor = state.playlist_cursor.lock().await.clone();
     let Some(cursor) = cursor else {
-        return finish_sequence_if_current(state, ended_session).await;
+        return finish_or_replaced(state, ended_session).await;
     };
     if cursor.session_id != ended_session {
-        return false;
+        return AfterCleanEnd::Successor;
     };
     if cursor.owner == PlaylistOwner::Server {
         let items = match fetch_server_playlist_items(state, &cursor.playlist_id).await {
             Ok(items) => items,
-            Err(_) => {
-                clear_playlist_cursor_if(state, ended_session).await;
-                return false;
-            }
+            Err(_) => return successor_failed(state, ended_session).await,
         };
         let next_index = cursor.index.saturating_add(1);
         if next_index >= items.len() {
-            return finish_sequence_if_current(state, ended_session).await;
+            return finish_or_replaced(state, ended_session).await;
         }
         let result = match play_server_playlist_entries(
             state,
@@ -6369,15 +6441,16 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
         )
         .await
         {
-            Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => false,
+            Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => {
+                AfterCleanEnd::Successor
+            }
             Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
                 emit_source_choice_required(state, &request.request_id);
-                false
+                AfterCleanEnd::Successor
             }
             Err(error) => {
                 eprintln!("vela: server playlist auto-advance stopped: {error}");
-                clear_playlist_cursor_if(state, ended_session).await;
-                false
+                successor_failed(state, ended_session).await
             }
         };
         return result;
@@ -6385,10 +6458,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
     let lookup = cursor.playlist_id.clone();
     let playlist = match playlist_store(move || crate::playlists::get(&lookup)).await {
         Ok(playlist) => playlist,
-        Err(_) => {
-            clear_playlist_cursor_if(state, ended_session).await;
-            return false;
-        }
+        Err(_) => return successor_failed(state, ended_session).await,
     };
     let next_index = next_playlist_index(
         playlist.items.iter().map(|entry| entry.id.as_str()),
@@ -6396,7 +6466,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
         &cursor,
     );
     if next_index >= playlist.items.len() {
-        return finish_sequence_if_current(state, ended_session).await;
+        return finish_or_replaced(state, ended_session).await;
     }
     // Use the same freshly-read snapshot that produced `next_index`. A second
     // read here would let an edit between the reads invalidate the stable-entry
@@ -6411,15 +6481,16 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> b
     )
     .await
     {
-        Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => false,
+        Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => {
+            AfterCleanEnd::Successor
+        }
         Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
             emit_source_choice_required(state, &request.request_id);
-            false
+            AfterCleanEnd::Successor
         }
         Err(error) => {
             eprintln!("vela: playlist auto-advance stopped: {error}");
-            clear_playlist_cursor_if(state, ended_session).await;
-            false
+            successor_failed(state, ended_session).await
         }
     }
 }
@@ -7530,6 +7601,39 @@ mod tests {
         advance.mark_ended(completed.clone());
         assert_eq!(advance.take_ready(), Some(completed));
         assert_eq!(advance.take_ready(), None);
+    }
+
+    // pc-2: the tracker's end says whether a clean end of file was seen for
+    // exactly its session, and that sighting lasts until the two are joined.
+    #[test]
+    fn playback_advance_says_whether_a_clean_end_was_seen_for_a_session() {
+        let advance = PlaybackAdvance::default();
+        assert!(!advance.saw_eof("one"));
+        advance.mark_eof("one".to_string());
+        assert!(advance.saw_eof("one"));
+        assert!(!advance.saw_eof("other"));
+        advance.mark_ended(completion("one", "test:one"));
+        assert!(advance.take_ready().is_some());
+        assert!(!advance.saw_eof("one"), "joined, the sighting is gone");
+    }
+
+    // pc-2: which ends of a play end its run, by how the play ended. The
+    // page leaves the run's fullscreen on these and only these.
+    #[test]
+    fn an_end_is_the_end_of_the_run_only_when_it_is_not_clean_and_nothing_replaced_the_play() {
+        // A clean end: the dispatcher decides what follows (a playlist's next
+        // play, Continue Playing, or nothing), so the tracker's end does not.
+        assert!(!end_is_run_over(true, Some("a"), "a"));
+        // An error, a quit over mpv's socket, mpv dying: the play is still
+        // the active one, and nothing follows it.
+        assert!(end_is_run_over(false, Some("a"), "a"));
+        // A step-down or any other replacement installs the new play before
+        // the old one is stopped: the old one's end is not the run's.
+        assert!(!end_is_run_over(false, Some("b"), "a"));
+        assert!(!end_is_run_over(true, Some("b"), "a"));
+        // No play is active (a replacement that failed to start has been
+        // taken back): nothing follows.
+        assert!(end_is_run_over(false, None, "a"));
     }
 
     #[test]

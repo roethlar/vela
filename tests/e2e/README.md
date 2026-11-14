@@ -70,7 +70,7 @@ Vela's own options;
 and checks that the same play carries on in the external player while the
 late one stays out of it.
 
-The player view's controls have three scenarios of their own, all
+The player view's controls have four scenarios of their own, all
 embedded-only. Each drives the page for real (WebDriver clicks, and keys and
 pointer moves through WebDriver's Actions, which arrive as trusted events)
 and reads the outcome from mpv over its IPC socket:
@@ -88,6 +88,15 @@ and reads the outcome from mpv over its IPC socket:
   the Crop control in manual mode; `C` takes the crop away. It is the
   embedded counterpart of `autocrop`, which covers the stock script of the
   external player and is external-only.
+- `embeddedfullscreenend`: fullscreen asked for through the view's control,
+  then each way a play can end: a playlist's clean end with the next play
+  started by the backend keeps it across the gap; an end in an error (the
+  mock server refuses the stream), mpv told to quit over its socket, a clean
+  end with no successor, Close, and a playlist's clean end whose next play
+  the backend cannot start (the mock resolves no stream) each leave it
+  within 2.5 s of the view
+  going, far below the page's 50 s backstop. It prints the lifecycle events
+  the page received for each, in order.
 
 The controls hide after three seconds of playing untouched, and a hidden
 control takes no click: `showPlayerBar` in `helpers.mjs` moves the pointer

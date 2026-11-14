@@ -301,7 +301,8 @@ pub fn run() {
                     }
 
                     use tauri::Emitter;
-                    if commands::advance_playlist(&state, &completion.session_id).await {
+                    let after = commands::advance_playlist(&state, &completion.session_id).await;
+                    if after == commands::AfterCleanEnd::ContinuePlaying {
                         // Terminal policy reads the literal carousel that was
                         // rendered before this event. Publish continuation before
                         // any refresh or slow server synchronization can replace it.
@@ -322,6 +323,9 @@ pub fn run() {
                     // eligible hub items are visible without a manual refresh.
                     // This remains unconditional on server success: local
                     // curation and any backend-owned successor are already final.
+                    // It names its session and says whether the run is over (a
+                    // playlist whose successor could not be started): the page
+                    // leaves the run's fullscreen on it. Ids and a flag only.
                     let source_id = completion
                         .item_key
                         .split_once(':')
@@ -332,6 +336,8 @@ pub fn run() {
                         serde_json::json!({
                             "sourceId": source_id,
                             "itemKey": completion.item_key.clone(),
+                            "sessionId": completion.session_id.clone(),
+                            "runOver": after == commands::AfterCleanEnd::RunOver,
                         }),
                     );
                 }

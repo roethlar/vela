@@ -7,7 +7,7 @@
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
   import PlayerView from "$lib/PlayerView.svelte";
-  import { nextPlayerSession } from "$lib/playerView";
+  import { endLeavesPlayerFullscreen, nextPlayerSession, type PlaybackEnd } from "$lib/playerView";
   import { setPlayerFullscreen } from "$lib/playerControls";
   import PlaylistsView from "$lib/PlaylistsView.svelte";
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
@@ -55,7 +55,8 @@
   let windowFullscreen = $state(false);
   let playerAskedFullscreen = false;
   // The ends reported since the last view closed: a clean end reports two,
-  // the second after the run's successor (if any) has been decided.
+  // the second after the run's successor (if any) has been decided; any
+  // other end reports one, which says whether the run is over.
   let endsSinceViewClosed = 0;
   let playerFullscreenBackstop: ReturnType<typeof setTimeout> | undefined;
   // How long a play may take to start (the backend's `START_LIMIT` for the
@@ -103,13 +104,20 @@
     return continuationsRunning > 0 || continuationSession !== null || sourceChoiceRequest !== null;
   }
 
-  // A play ended. The first report of a clean end comes before the backend
-  // has decided on a successor, so only a later one, with no view showing and
-  // nothing pending here, means the run is over (an end that is not clean
-  // reports once and is left to the backstop).
-  function playbackEnded(): Promise<unknown> {
+  // A play ended. An end that is not clean says so in its one report; the
+  // first report of a clean end comes before the backend has decided on a
+  // successor, so only a later one means the run is over: one that says so
+  // (the successor could not be started), or one with no view showing and
+  // nothing pending here (the rule is in $lib/playerView).
+  function playbackEnded(event: { payload: PlaybackEnd }): Promise<unknown> {
     endsSinceViewClosed++;
-    if (playerSession === null && endsSinceViewClosed >= 2 && !continuationPending()) {
+    if (
+      endLeavesPlayerFullscreen(event.payload ?? {}, {
+        showing: playerSession,
+        endsSinceViewChanged: endsSinceViewClosed,
+        continuationPending: continuationPending(),
+      })
+    ) {
       leavePlayerFullscreen();
     }
     return refreshWatchState();
@@ -527,10 +535,10 @@
       await tick();
       durableHeading?.focus();
     }).then((un) => (unlistenDurableFault = un));
-    listen("playback-ended", playbackEnded).then((un) => (unlistenPlaybackEnded = un));
+    listen<PlaybackEnd>("playback-ended", playbackEnded).then((un) => (unlistenPlaybackEnded = un));
     // The in-window player's own lifecycle, each event naming its session
     // (the rule for them is in $lib/playerView). `playback-ended` is not used
-    // for this; it names no session and can fire twice.
+    // for this; it is about the play, not its view, and can fire twice.
     listen<{ sessionId: string }>("player-opened", ({ payload }) => {
       playerSession = nextPlayerSession(playerSession, {
         kind: "opened",

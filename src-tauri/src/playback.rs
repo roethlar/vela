@@ -383,6 +383,55 @@ fn another_ipc_path(taken: &str) -> Result<String, String> {
 /// `playback-ended` Tauri event); this module stays UI-framework-free.
 pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
 
+/// The longest an end notice waits for the EOF watcher. mpv writes its
+/// `end-file` before it closes the socket the watcher reads, and a watcher
+/// still trying to connect gives up once the end is known, so the watcher
+/// stops within moments of the end; this only bounds one that does not.
+const EOF_WATCHER_WAIT: Duration = Duration::from_secs(1);
+
+/// The EOF watcher's half of [`eof_watch`]: `watching` is dropped when the
+/// watcher stops, and nothing is ever sent on it.
+struct EofWatching {
+    watching: std::sync::mpsc::Sender<()>,
+    ended: Arc<AtomicBool>,
+}
+
+/// The end notice's half of [`eof_watch`].
+struct EofWait {
+    stopped: std::sync::mpsc::Receiver<()>,
+    ended: Arc<AtomicBool>,
+}
+
+/// The two halves that let an end notice wait for one EOF watcher: the
+/// notice tells the watcher the play has ended (so one still trying to
+/// connect gives up), and learns when the watcher has stopped.
+fn eof_watch() -> (EofWatching, EofWait) {
+    let (watching, stopped) = std::sync::mpsc::channel();
+    let ended = Arc::new(AtomicBool::new(false));
+    (
+        EofWatching {
+            watching,
+            ended: ended.clone(),
+        },
+        EofWait { stopped, ended },
+    )
+}
+
+/// `notify`, called once the EOF watcher of `wait` has stopped, or after
+/// [`EOF_WATCHER_WAIT`].
+fn after_eof_watcher(notify: EndNotify, wait: EofWait) -> EndNotify {
+    let EofWait { stopped, ended } = wait;
+    let stopped = Mutex::new(stopped);
+    Arc::new(move |position_ms| {
+        ended.store(true, Ordering::Relaxed);
+        let _ = stopped
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .recv_timeout(EOF_WATCHER_WAIT);
+        notify(position_ms);
+    })
+}
+
 /// See [`PlaySpec::on_notice_shown`].
 pub type NoticeShown = Arc<dyn Fn() + Send + Sync>;
 
@@ -557,11 +606,13 @@ pub fn play(
     // progress target. Failure to spawn the watcher is non-fatal — playback
     // still works, just without sequence advancement.
     let state_session = session_id.clone();
+    let (eof_watching, eof_wait) = eof_watch();
     if let Err(e) = spawn_eof_watcher(
         ipc_path.clone(),
         stop_flag.clone(),
         advance.clone(),
         session_id,
+        eof_watching,
     ) {
         eprintln!("vela: couldn't spawn mpv EOF watcher: {e}");
     }
@@ -624,6 +675,18 @@ pub fn play(
         }
     }
 
+    // An embedded play is told of its end only once the EOF watcher has
+    // stopped reading, so whoever is told knows whether the end was a clean
+    // end of file: the page leaves the run's fullscreen at an end that is not
+    // (pc-2), and a clean end read late would cost a run going on its
+    // fullscreen. A play in the external player is told as before.
+    let on_end = match started_player {
+        crate::player::PlayerKind::Embedded => {
+            on_end.map(|notify| after_eof_watcher(notify, eof_wait))
+        }
+        crate::player::PlayerKind::External => on_end,
+    };
+
     // Route the end-of-session notifier: tracked sessions fire it from their
     // tracker tail (after the final server write, so a refresh triggered by it
     // sees the new state); untracked sessions fire it when mpv exits. The match
@@ -683,15 +746,24 @@ pub fn play(
 /// errored (`error`), or otherwise-stopped exits never fire the notifier — so
 /// closing the player stops playback. Separate from the progress reader so it
 /// runs for every source even when no progress tracker is active.
+///
+/// `watching` is dropped when the watcher stops, by any way (and at once if
+/// it cannot be started); a watcher not yet connected when it is told the
+/// play has ended gives up at its next failed try.
 fn spawn_eof_watcher(
     socket_path: String,
     stop_flag: Arc<AtomicBool>,
     advance: Arc<crate::commands::PlaybackAdvance>,
     session_id: String,
+    watching: EofWatching,
 ) -> std::io::Result<()> {
     std::thread::Builder::new()
         .name("mpv-eof-watcher".into())
         .spawn(move || {
+            let EofWatching {
+                watching: _watching,
+                ended,
+            } = watching;
             // Brief connect retries: mpv may not have opened the socket yet.
             let mut stream = None;
             for _ in 0..50 {
@@ -703,6 +775,9 @@ fn spawn_eof_watcher(
                         stream = Some(s);
                         break;
                     }
+                    // The play is over and its socket gone: no end of file
+                    // will come.
+                    Err(_) if ended.load(Ordering::Relaxed) => return,
                     Err(_) => std::thread::sleep(Duration::from_millis(100)),
                 }
             }
@@ -1797,6 +1872,207 @@ mod tests {
         assert_eq!(started.player, crate::player::PlayerKind::External);
         assert!(!asked_for_state, "no reporter connected to the external player");
         assert!(states.lock().unwrap().is_empty());
+    }
+
+    /// An end notifier that writes down whether `advance` knew of a clean end
+    /// of file for `session` when it ran.
+    #[cfg(target_os = "linux")]
+    fn noting_clean_end(
+        advance: &Arc<crate::commands::PlaybackAdvance>,
+        session: &'static str,
+    ) -> (Arc<Mutex<Option<bool>>>, EndNotify) {
+        let seen = Arc::new(Mutex::new(None));
+        let notify: EndNotify = {
+            let seen = seen.clone();
+            let advance = advance.clone();
+            Arc::new(move |_position_ms| {
+                *seen.lock().unwrap() = Some(advance.saw_eof(session));
+            })
+        };
+        (seen, notify)
+    }
+
+    /// Plays mpv's side of a play's end on `listener`: the position reader
+    /// loses the player first, and the EOF watcher is sent the clean
+    /// `end-file` only 400 ms later, as when the watcher's thread is slow to
+    /// read it. Returns what the end notifier knew (`noting_clean_end`).
+    #[cfg(target_os = "linux")]
+    fn end_with_a_late_clean_end_of_file(
+        listener: std::os::unix::net::UnixListener,
+        seen: &Arc<Mutex<Option<bool>>>,
+    ) -> Option<bool> {
+        use std::io::{Read, Write};
+        listener.set_nonblocking(true).unwrap();
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        let (mut watcher, mut reader) = (None, None);
+        while (watcher.is_none() || reader.is_none()) && std::time::Instant::now() < deadline {
+            let Ok((stream, _)) = listener.accept() else {
+                std::thread::sleep(Duration::from_millis(10));
+                continue;
+            };
+            stream.set_nonblocking(false).unwrap();
+            stream.set_read_timeout(Some(Duration::from_millis(300))).unwrap();
+            // The position reader asks for properties at once; the EOF
+            // watcher only listens.
+            let mut asked = [0u8; 256];
+            match (&stream).read(&mut asked) {
+                Ok(read) if read > 0 => reader = Some(stream),
+                _ => watcher = Some(stream),
+            }
+        }
+        let mut watcher = watcher.expect("the EOF watcher connected");
+        drop(reader.expect("the position reader connected"));
+        std::thread::sleep(Duration::from_millis(400));
+        let _ = watcher.write_all(b"{\"event\":\"end-file\",\"reason\":\"eof\"}\n");
+        while seen.lock().unwrap().is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let known = *seen.lock().unwrap();
+        known
+    }
+
+    // pc-2: an embedded play's end is reported once the EOF watcher has
+    // read what mpv said, so a clean end read late is still known as clean
+    // (the page keeps a run's fullscreen across a clean end, and leaves it
+    // at any other).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_embedded_play_reports_its_end_once_a_clean_end_of_file_has_been_read() {
+        let listener = Arc::new(Mutex::new(None));
+        let launcher = ListeningLauncher {
+            listener: listener.clone(),
+        };
+        let advance = Arc::new(crate::commands::PlaybackAdvance::default());
+        let (seen, on_end) = noting_clean_end(&advance, "late-eof-session");
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &embedded_spec(),
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &advance,
+            "late-eof-session".to_string(),
+            Some(on_end),
+            None,
+        );
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let started = result.unwrap_or_else(|reason| panic!("the play starts: {reason}"));
+        let (bound, path) = listener.lock().unwrap().take().expect("the launch was started");
+        let known = end_with_a_late_clean_end_of_file(bound, &seen);
+        started.stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&path);
+        assert_eq!(known, Some(true), "the end was reported, and as clean");
+    }
+
+    // pc-2: a play in the external player is told of its end as before, at
+    // once, without waiting for the EOF watcher.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_external_play_reports_its_end_without_waiting_for_the_eof_watcher() {
+        let (program, arguments) = stand_in_for_mpv("external-end-not-delayed");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let advance = Arc::new(crate::commands::PlaybackAdvance::default());
+        let (seen, on_end) = noting_clean_end(&advance, "external-end-session");
+        let mut spec = embedded_spec();
+        spec.player = crate::player::PlayerKind::External;
+        let slot = Arc::new(Mutex::new(None));
+        let result = play(
+            &spec,
+            ProgressTarget::None,
+            Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: None,
+            },
+            &advance,
+            "external-end-session".to_string(),
+            Some(on_end),
+            None,
+        );
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        let socket = started_with
+            .lines()
+            .rev()
+            .find_map(|argument| argument.strip_prefix("--input-ipc-server="))
+            .expect("the external player is given a socket")
+            .to_string();
+        let bound = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let known = end_with_a_late_clean_end_of_file(bound, &seen);
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_file(&socket);
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play starts: {reason}"));
+        started.stop.store(true, Ordering::Relaxed);
+        assert_eq!(started.player, crate::player::PlayerKind::External);
+        assert_eq!(known, Some(false), "the end was reported before the late end of file was read");
+    }
+
+    /// An end notifier that writes down that it ran, behind an EOF watcher
+    /// started on `socket` for a play no one stops.
+    #[cfg(target_os = "linux")]
+    fn end_behind_an_eof_watcher(socket: &std::path::Path, session: &str) -> (Arc<AtomicBool>, EndNotify) {
+        let (watching, wait) = eof_watch();
+        spawn_eof_watcher(
+            socket.to_string_lossy().into_owned(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(crate::commands::PlaybackAdvance::default()),
+            session.to_string(),
+            watching,
+        )
+        .unwrap();
+        let reported = Arc::new(AtomicBool::new(false));
+        let notify: EndNotify = {
+            let reported = reported.clone();
+            Arc::new(move |_position_ms| reported.store(true, Ordering::Relaxed))
+        };
+        (reported, after_eof_watcher(notify, wait))
+    }
+
+    // pc-2: an EOF watcher still trying to connect when the play's end is
+    // known gives up, so the end is reported at once, not after the wait.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_end_is_not_held_by_an_eof_watcher_that_never_connected() {
+        let socket = std::env::temp_dir().join(format!("vela-test-no-mpv-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        let (reported, on_end) = end_behind_an_eof_watcher(&socket, "never-connected");
+        let started = std::time::Instant::now();
+        on_end(0);
+        let took = started.elapsed();
+        assert!(reported.load(Ordering::Relaxed), "the end was reported");
+        assert!(took < Duration::from_millis(500), "the end was held {took:?}");
+    }
+
+    // pc-2: the wait for an EOF watcher that does not stop is bounded, far
+    // below what the page would notice as a window kept fullscreen.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_end_waits_at_most_a_second_for_an_eof_watcher_that_does_not_stop() {
+        let socket = std::env::temp_dir().join(format!("vela-test-silent-mpv-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        let (reported, on_end) = end_behind_an_eof_watcher(&socket, "silent");
+        // Connected, and told nothing: the watcher reads on.
+        let (silent, _) = listener.accept().unwrap();
+        let started = std::time::Instant::now();
+        on_end(0);
+        let took = started.elapsed();
+        drop(silent);
+        let _ = std::fs::remove_file(&socket);
+        assert!(reported.load(Ordering::Relaxed), "the end was reported");
+        assert!(took < Duration::from_millis(1500), "the end was held {took:?}");
     }
 
     // The lock on the player slot is the one the exit handler waits for on
