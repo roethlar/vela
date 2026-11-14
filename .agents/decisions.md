@@ -2247,3 +2247,27 @@ Supersedes:
 For obvious faults, "No code change without an approved plan" as this
 repo applied it to faults found outside a plan, and the notes "needs a
 go" on the entries named above.
+
+## 2026-11-14 - The player checks the server's certificate, with a setting to turn it off
+
+Status: APPROVED (owner, 2026-11-14). Plan: `.agents/plans/tls-verify.md`.
+
+Decision:
+The player is told to check the media server's certificate, in mpv's own
+window and in the embedded player, and Settings gets a control that turns
+the check off. The owner chose this ("Verify, with a setting to turn it
+off") over checking with no way out, and over leaving things as they
+were.
+
+Reason:
+The system's mpv up to 0.41 does not check by default and Vela did not
+ask it to, so the stream's sign-in token went out without knowing who
+received it, while Vela's own client checked. Checking can stop playback
+for a server whose certificate mpv's TLS library does not accept (a
+private authority Vela's client trusts and mpv does not), so a user in
+that position needs a way on: naming the authority to mpv, or the
+setting.
+
+Supersedes:
+Nothing. It answers the entry "The external player does not check the
+media server's TLS certificate" under Blockers in `.agents/state.md`.

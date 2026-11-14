@@ -502,10 +502,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Vela's client uses (`SSL_CERT_FILE` is honoured by one and not the
   other): a server on a private CA then browses and will not play, with no
   message. Details: `.agents/plans/embedded-player.slice6-notes.md`.
-  Proposed (needs a plan and a go: it changes playback for users whose
-  server certificate mpv's library does not accept): assert
-  `--tls-verify=yes` in the external launch after the user's options, and
-  decide what the embedded player should trust.
+  DECIDED by the owner on 2026-11-14: the player checks, and a setting
+  turns the check off. Plan `.agents/plans/tls-verify.md`, being built;
+  this entry goes when it has landed.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). One cause of the continuation flakes
   is gone since 2026-11-13: scenarios sought in a file the moment mpv named
