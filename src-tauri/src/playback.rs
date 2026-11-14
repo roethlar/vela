@@ -68,14 +68,138 @@ pub enum ProgressTarget {
     None,
 }
 
-/// Runtime mpv window state that may be carried to an exact automatic
-/// successor. `None` means mpv has not reported the property, which is distinct
+/// Runtime mpv window state that is carried to the next play in this run of
+/// Vela, and, when the player window setting remembers it, to the first play
+/// of the next run (`config::MpvWindow`). `None` means mpv has not reported the property, which is distinct
 /// from an explicit `false` and therefore leaves configured launch options
 /// authoritative.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlaybackWindowState {
     pub fullscreen: Option<bool>,
     pub maximized: Option<bool>,
+    /// The window's size, width then height, as mpv reported it
+    /// (`osd-width`/`osd-height`) while the window was neither fullscreen nor
+    /// maximized, or else the size the play was opened with. Kept while the
+    /// window is fullscreen or maximized, and from one play to the next when
+    /// a play never shows its window at another size, so a play that opens
+    /// fullscreen still knows the size to return to. `None` when no usable
+    /// size is known.
+    pub windowed_size: Option<(u32, u32)>,
+}
+
+/// A reported window size is used only inside these bounds, in each
+/// dimension. Anything outside is not a window anyone sized: a player with
+/// no window reports 0, and a broken report must not open a huge window.
+const MIN_WINDOWED_SIZE: (u32, u32) = (160, 90);
+const MAX_WINDOWED_DIMENSION: u32 = 16384;
+
+/// How long a reported size must stand, with the window neither fullscreen
+/// nor maximized, before it counts as the windowed size. On X11 the size of
+/// a maximized window can be reported just before the maximized flag; the
+/// wait lets that flag arrive and discard the size.
+const WINDOWED_SIZE_SETTLE: Duration = Duration::from_millis(1000);
+
+/// The window state one mpv process reports, and the rule that turns its
+/// size reports into a windowed size. Pure: the caller passes the time of
+/// each event, so the rule is tested without mpv or a clock.
+#[derive(Debug, Clone, Copy, Default)]
+struct WindowTracker {
+    fullscreen: Option<bool>,
+    maximized: Option<bool>,
+    /// The latest `osd-width` and `osd-height`. They arrive as two events.
+    width: Option<u32>,
+    height: Option<u32>,
+    /// A size reported while the window was neither fullscreen nor
+    /// maximized, and when, not yet long enough ago to be confirmed.
+    candidate: Option<((u32, u32), Instant)>,
+    /// The last size that was confirmed as the windowed size.
+    confirmed: Option<(u32, u32)>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WindowChange {
+    Flag(WindowProperty, bool),
+    Width(u32),
+    Height(u32),
+}
+
+impl WindowTracker {
+    fn fullscreen_or_maximized(&self) -> bool {
+        self.fullscreen == Some(true) || self.maximized == Some(true)
+    }
+
+    /// Any event from the player, at `now`. A candidate that has stood for
+    /// the settle time with the window neither fullscreen nor maximized
+    /// becomes the windowed size; this runs before the event's own change,
+    /// so a flag that turns on later than that does not discard it.
+    fn tick(&mut self, now: Instant) {
+        if let Some((size, at)) = self.candidate {
+            if !self.fullscreen_or_maximized()
+                && now.saturating_duration_since(at) >= WINDOWED_SIZE_SETTLE
+            {
+                self.confirmed = Some(size);
+                self.candidate = None;
+            }
+        }
+    }
+
+    fn apply(&mut self, change: WindowChange, now: Instant) {
+        self.tick(now);
+        match change {
+            WindowChange::Flag(property, enabled) => {
+                match property {
+                    WindowProperty::Fullscreen => self.fullscreen = Some(enabled),
+                    WindowProperty::Maximized => self.maximized = Some(enabled),
+                }
+                // The size just reported may be the fullscreen or maximized
+                // one, reported before this flag.
+                if enabled {
+                    self.candidate = None;
+                }
+            }
+            WindowChange::Width(width) => self.observe_size(Some(width), self.height, now),
+            WindowChange::Height(height) => self.observe_size(self.width, Some(height), now),
+        }
+    }
+
+    fn observe_size(&mut self, width: Option<u32>, height: Option<u32>, now: Instant) {
+        self.width = width;
+        self.height = height;
+        // While fullscreen or maximized the size is the screen's or the
+        // work area's, not the window's.
+        if self.fullscreen_or_maximized() {
+            return;
+        }
+        let (Some(width), Some(height)) = (width, height) else {
+            return;
+        };
+        if !usable_windowed_size(width, height) {
+            return;
+        }
+        if self.candidate.map(|(size, _)| size) != Some((width, height)) {
+            self.candidate = Some(((width, height), now));
+        }
+    }
+
+    /// The state for the next play. A candidate not yet confirmed counts
+    /// when the window is neither fullscreen nor maximized: the user resized
+    /// it and quit within the settle time.
+    fn snapshot(&self) -> PlaybackWindowState {
+        let pending = self
+            .candidate
+            .filter(|_| !self.fullscreen_or_maximized())
+            .map(|(size, _)| size);
+        PlaybackWindowState {
+            fullscreen: self.fullscreen,
+            maximized: self.maximized,
+            windowed_size: pending.or(self.confirmed),
+        }
+    }
+}
+
+pub(crate) fn usable_windowed_size(width: u32, height: u32) -> bool {
+    (MIN_WINDOWED_SIZE.0..=MAX_WINDOWED_DIMENSION).contains(&width)
+        && (MIN_WINDOWED_SIZE.1..=MAX_WINDOWED_DIMENSION).contains(&height)
 }
 
 /// Per-launch observation handle. Each IPC reader owns a fresh handle so a
@@ -83,13 +207,30 @@ pub struct PlaybackWindowState {
 /// published state.
 #[derive(Debug, Clone, Default)]
 pub struct WindowStateObservation {
-    state: Arc<Mutex<PlaybackWindowState>>,
+    state: Arc<Mutex<WindowTracker>>,
     display: Arc<Mutex<crate::display::ObservedDisplay>>,
 }
 
 impl WindowStateObservation {
+    /// A fresh handle for a play whose window opens at `windowed_size`. That
+    /// size counts as confirmed until the play reports a windowed size of its
+    /// own, so a play that stays fullscreen or maximized, or never shows a
+    /// window, hands the same size on instead of none.
+    pub fn opened_at(windowed_size: Option<(u32, u32)>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(WindowTracker {
+                confirmed: windowed_size,
+                ..WindowTracker::default()
+            })),
+            display: Arc::default(),
+        }
+    }
+
     pub fn snapshot(&self) -> PlaybackWindowState {
-        *self.state.lock().unwrap_or_else(|e| e.into_inner())
+        self.state
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .snapshot()
     }
 
     pub(crate) fn display_snapshot(&self) -> crate::display::ObservedDisplay {
@@ -99,12 +240,18 @@ impl WindowStateObservation {
             .clone()
     }
 
+    /// One event from the player's IPC connection, any event: every one
+    /// moves the window-size rule's clock on, not only the window's own.
     pub(crate) fn apply_ipc_event(&self, value: &serde_json::Value) {
-        if let Some((property, enabled)) = window_property_change(value) {
+        self.apply_ipc_event_at(value, Instant::now());
+    }
+
+    fn apply_ipc_event_at(&self, value: &serde_json::Value, now: Instant) {
+        {
             let mut state = self.state.lock().unwrap_or_else(|e| e.into_inner());
-            match property {
-                WindowProperty::Fullscreen => state.fullscreen = Some(enabled),
-                WindowProperty::Maximized => state.maximized = Some(enabled),
+            match window_property_change(value) {
+                Some(change) => state.apply(change, now),
+                None => state.tick(now),
             }
         }
         if let Some(change) = display_property_change(value) {
@@ -127,19 +274,29 @@ enum WindowProperty {
     Maximized,
 }
 
-/// Accept only owned boolean property-change events. Observe-property command
-/// replies, nulls, numeric/string coercions, and unrelated properties must not
-/// invent state.
-fn window_property_change(value: &serde_json::Value) -> Option<(WindowProperty, bool)> {
+/// Accept only owned property-change events of the exact JSON type: booleans
+/// for the two flags, whole numbers for the window size. Observe-property
+/// command replies, nulls, numeric/string coercions, and unrelated properties
+/// must not invent state.
+fn window_property_change(value: &serde_json::Value) -> Option<WindowChange> {
     if value.get("event")?.as_str()? != "property-change" {
         return None;
     }
-    let property = match value.get("name")?.as_str()? {
-        "fullscreen" => WindowProperty::Fullscreen,
-        "window-maximized" => WindowProperty::Maximized,
-        _ => return None,
-    };
-    Some((property, value.get("data")?.as_bool()?))
+    let data = value.get("data")?;
+    let dimension = || data.as_u64().and_then(|value| u32::try_from(value).ok());
+    match value.get("name")?.as_str()? {
+        "fullscreen" => Some(WindowChange::Flag(
+            WindowProperty::Fullscreen,
+            data.as_bool()?,
+        )),
+        "window-maximized" => Some(WindowChange::Flag(
+            WindowProperty::Maximized,
+            data.as_bool()?,
+        )),
+        "osd-width" => dimension().map(WindowChange::Width),
+        "osd-height" => dimension().map(WindowChange::Height),
+        _ => None,
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -235,11 +392,13 @@ pub struct PlaySpec {
     /// stock script above is never loaded there. `None` when it could not be
     /// resolved — that play is then uncropped.
     pub crop_script: Option<String>,
-    /// Actual state sampled from the exact automatic predecessor. Manual plays
-    /// and unknown properties use the default (both `None`).
+    /// Actual state sampled from the last play that started, manual or
+    /// automatic. The first play of a run gets what the player window setting
+    /// says (`config::first_window_of_run`); unknown properties stay `None`.
     pub inherited_window_state: PlaybackWindowState,
-    /// Native output containing Vela's window for a manual play, or the exact
-    /// observed predecessor output for an automatic successor.
+    /// The output the last play's window was observed on (for the first play
+    /// of a run, the one the setting remembers), or, when there is none, the
+    /// native output containing Vela's window.
     pub screen_name: Option<String>,
     /// Fresh handle populated by this launch's IPC reader and published by the
     /// command layer only after the full launch succeeds.
@@ -858,7 +1017,9 @@ fn spawn_position_reader(
                   {\"command\":[\"observe_property\",3,\"window-maximized\"]}\n\
                   {\"command\":[\"observe_property\",4,\"display-names\"]}\n\
                   {\"command\":[\"observe_property\",5,\"display-width\"]}\n\
-                  {\"command\":[\"observe_property\",6,\"display-height\"]}\n",
+                  {\"command\":[\"observe_property\",6,\"display-height\"]}\n\
+                  {\"command\":[\"observe_property\",7,\"osd-width\"]}\n\
+                  {\"command\":[\"observe_property\",8,\"osd-height\"]}\n",
             );
 
             let mut line = String::new();
@@ -873,8 +1034,9 @@ fn spawn_position_reader(
                     Err(_) => break,
                 }
                 // Only `time-pos` is a position. Every other observed property
-                // above is either non-numeric or a display dimension, and a
-                // dimension read as a position corrupts the resume point.
+                // above is either non-numeric or a display or window
+                // dimension, and a dimension read as a position corrupts the
+                // resume point.
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     if let Some(ms) = position_property_change(&v) {
                         last_t_ms_r.store(ms, Ordering::Relaxed);
@@ -2393,6 +2555,70 @@ mod tests {
         last_t_ms.load(Ordering::Relaxed)
     }
 
+    /// The real reader asks mpv for the window size and hands what mpv
+    /// reports to the window rule: a size reported before the player closes
+    /// is the windowed size of that play, and is not a position.
+    #[cfg(unix)]
+    #[test]
+    fn the_reader_subscribes_to_the_window_size_and_records_it() {
+        use std::io::Write as _;
+        use std::os::unix::net::UnixListener;
+
+        let dir = crate::player::launch::private_runtime_dir().expect("runtime dir");
+        let socket = dir.join(format!("ipc-size-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&socket);
+        let listener = UnixListener::bind(&socket).expect("bind");
+
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        let (last_t_ms, done) = spawn_position_reader(
+            socket.to_string_lossy().to_string(),
+            0,
+            stop.clone(),
+            observation.clone(),
+        )
+        .expect("reader");
+
+        let (mut mpv, _) = listener.accept().expect("accept");
+        mpv.set_read_timeout(Some(Duration::from_secs(5)))
+            .expect("read timeout");
+        let mut requests = BufReader::new(mpv.try_clone().expect("clone"));
+        let mut observed = Vec::new();
+        while !(observed.iter().any(|name| name == "osd-width")
+            && observed.iter().any(|name| name == "osd-height"))
+        {
+            let mut line = String::new();
+            requests
+                .read_line(&mut line)
+                .expect("the reader asks for osd-width and osd-height");
+            let request: serde_json::Value = serde_json::from_str(&line).expect("a command");
+            assert_eq!(request["command"][0], "observe_property");
+            observed.push(request["command"][2].as_str().expect("a name").to_string());
+        }
+
+        for value in [
+            event("osd-width", serde_json::json!(1024)),
+            event("osd-height", serde_json::json!(576)),
+            event("time-pos", serde_json::json!(3.0)),
+        ] {
+            writeln!(mpv, "{value}").expect("write");
+        }
+        mpv.flush().expect("flush");
+        drop(requests);
+        drop(mpv);
+        for _ in 0..200 {
+            if done.load(Ordering::Relaxed) {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        stop.store(true, Ordering::Relaxed);
+        let _ = std::fs::remove_file(&socket);
+        assert!(done.load(Ordering::Relaxed), "the reader finished");
+        assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+        assert_eq!(last_t_ms.load(Ordering::Relaxed), 3000);
+    }
+
     /// The end-to-end shape of the bug: mpv announces the display before it
     /// announces a position, and the play dies there. The tracker only skips
     /// its write when the position is still zero, so this must stay zero.
@@ -2402,6 +2628,8 @@ mod tests {
         let reported = position_reported_after(&[
             event("display-width", serde_json::json!(3840)),
             event("display-height", serde_json::json!(2160)),
+            event("osd-width", serde_json::json!(1280)),
+            event("osd-height", serde_json::json!(720)),
             event("fullscreen", serde_json::json!(true)),
         ]);
         assert_eq!(
@@ -2488,14 +2716,14 @@ mod tests {
     }
 
     #[test]
-    fn window_property_parser_accepts_only_named_boolean_change_events() {
+    fn window_property_parser_accepts_only_named_typed_change_events() {
         assert_eq!(
             window_property_change(&serde_json::json!({
                 "event": "property-change",
                 "name": "fullscreen",
                 "data": true
             })),
-            Some((WindowProperty::Fullscreen, true))
+            Some(WindowChange::Flag(WindowProperty::Fullscreen, true))
         );
         assert_eq!(
             window_property_change(&serde_json::json!({
@@ -2503,10 +2731,52 @@ mod tests {
                 "name": "window-maximized",
                 "data": false
             })),
-            Some((WindowProperty::Maximized, false))
+            Some(WindowChange::Flag(WindowProperty::Maximized, false))
+        );
+        assert_eq!(
+            window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "osd-width",
+                "data": 1280
+            })),
+            Some(WindowChange::Width(1280))
+        );
+        assert_eq!(
+            window_property_change(&serde_json::json!({
+                "event": "property-change",
+                "name": "osd-height",
+                "data": 720
+            })),
+            Some(WindowChange::Height(720))
         );
 
         for rejected in [
+            serde_json::json!({ "request_id": 7, "data": 1280 }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-width",
+                "data": "1280"
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-height",
+                "data": -720
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-width",
+                "data": 1280.5
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "osd-height",
+                "data": 4_294_967_296_u64
+            }),
+            serde_json::json!({
+                "event": "property-change",
+                "name": "fullscreen",
+                "data": 1
+            }),
             serde_json::json!({ "request_id": 2, "data": true }),
             serde_json::json!({
                 "event": "property-change",
@@ -2548,6 +2818,7 @@ mod tests {
             PlaybackWindowState {
                 fullscreen: Some(true),
                 maximized: None,
+                windowed_size: None,
             }
         );
 
@@ -2566,8 +2837,221 @@ mod tests {
             PlaybackWindowState {
                 fullscreen: Some(false),
                 maximized: Some(true),
+                windowed_size: None,
             }
         );
+    }
+
+    // The windowed-size rule, driven with explicit times. `t(ms)` is a fixed
+    // origin plus `ms`, so nothing here waits or reads a clock.
+    mod windowed_size {
+        use super::super::*;
+
+        fn t(ms: u64) -> Instant {
+            static ORIGIN: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+            *ORIGIN.get_or_init(Instant::now) + Duration::from_millis(ms)
+        }
+
+        fn size(tracker: &mut WindowTracker, width: u32, height: u32, at: u64) {
+            tracker.apply(WindowChange::Width(width), t(at));
+            tracker.apply(WindowChange::Height(height), t(at));
+        }
+
+        fn flag(tracker: &mut WindowTracker, property: WindowProperty, on: bool, at: u64) {
+            tracker.apply(WindowChange::Flag(property, on), t(at));
+        }
+
+        #[test]
+        fn a_reported_size_becomes_the_candidate_only_when_both_dimensions_are_known() {
+            let mut tracker = WindowTracker::default();
+            tracker.apply(WindowChange::Width(1280), t(0));
+            assert_eq!(tracker.candidate, None, "the height is not known yet");
+            tracker.apply(WindowChange::Height(720), t(10));
+            assert_eq!(tracker.candidate, Some(((1280, 720), t(10))));
+            assert_eq!(tracker.confirmed, None, "not confirmed yet");
+        }
+
+        #[test]
+        fn a_candidate_is_confirmed_by_a_later_event_a_second_after_it() {
+            let mut tracker = WindowTracker::default();
+            flag(&mut tracker, WindowProperty::Fullscreen, false, 0);
+            size(&mut tracker, 800, 450, 100);
+            tracker.tick(t(1099));
+            assert_eq!(tracker.confirmed, None, "999 ms is not long enough");
+            tracker.tick(t(1100));
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+            assert_eq!(tracker.candidate, None);
+            // Confirmed before the window went fullscreen, so it is kept as
+            // the size to return to.
+            flag(&mut tracker, WindowProperty::Fullscreen, true, 5000);
+            assert_eq!(
+                tracker.snapshot(),
+                PlaybackWindowState {
+                    fullscreen: Some(true),
+                    maximized: None,
+                    windowed_size: Some((800, 450)),
+                }
+            );
+        }
+
+        // mpv reports width and height apart, and may report the same size
+        // again: a repeat keeps the time the candidate first stood.
+        #[test]
+        fn a_repeated_size_keeps_the_candidates_time() {
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            size(&mut tracker, 800, 450, 900);
+            tracker.tick(t(1000));
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+        }
+
+        #[test]
+        fn a_flag_turning_on_discards_the_unconfirmed_candidate() {
+            // X11 reports the maximized size just before the flag.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            tracker.tick(t(2000));
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+            size(&mut tracker, 1920, 1050, 3000);
+            flag(&mut tracker, WindowProperty::Maximized, true, 3050);
+            assert_eq!(tracker.candidate, None);
+            // A second later, still maximized: nothing is confirmed.
+            tracker.tick(t(5000));
+            assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)));
+
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            flag(&mut tracker, WindowProperty::Fullscreen, true, 20);
+            assert_eq!(tracker.snapshot().windowed_size, None);
+        }
+
+        #[test]
+        fn sizes_reported_while_fullscreen_or_maximized_are_ignored() {
+            for property in [WindowProperty::Fullscreen, WindowProperty::Maximized] {
+                let mut tracker = WindowTracker::default();
+                flag(&mut tracker, property, true, 0);
+                size(&mut tracker, 1920, 1080, 100);
+                assert_eq!(tracker.candidate, None);
+                tracker.tick(t(5000));
+                assert_eq!(tracker.snapshot().windowed_size, None, "{property:?}");
+            }
+        }
+
+        #[test]
+        fn an_unconfirmed_candidate_counts_at_snapshot_unless_a_flag_is_on() {
+            // Resized and quit within the second.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            size(&mut tracker, 1024, 576, 1500);
+            assert_eq!(tracker.confirmed, Some((800, 450)));
+            assert_eq!(tracker.snapshot().windowed_size, Some((1024, 576)));
+
+            // The snapshot does not accept a candidate while a flag is on.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            tracker.maximized = Some(true);
+            assert_eq!(tracker.snapshot().windowed_size, None);
+        }
+
+        #[test]
+        fn a_size_outside_the_bounds_is_not_recorded() {
+            for (width, height) in [
+                (0, 0),
+                (159, 450),
+                (800, 89),
+                (16385, 450),
+                (800, 16385),
+            ] {
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, width, height, 0);
+                tracker.tick(t(2000));
+                assert_eq!(
+                    tracker.snapshot().windowed_size,
+                    None,
+                    "{width}x{height}"
+                );
+            }
+            // A report outside the bounds changes nothing already recorded.
+            let mut tracker = WindowTracker::default();
+            size(&mut tracker, 800, 450, 0);
+            size(&mut tracker, 0, 0, 100);
+            assert_eq!(tracker.snapshot().windowed_size, Some((800, 450)));
+            for (width, height) in [(160, 90), (16384, 16384)] {
+                let mut tracker = WindowTracker::default();
+                size(&mut tracker, width, height, 0);
+                assert_eq!(tracker.snapshot().windowed_size, Some((width, height)));
+            }
+        }
+
+        // A play opened at a size, that stays fullscreen and reports only the
+        // screen's size, hands that size on; a windowed size it reports
+        // itself replaces it.
+        #[test]
+        fn a_play_hands_on_the_size_it_was_opened_at_until_it_reports_its_own() {
+            let observation = WindowStateObservation::opened_at(Some((800, 450)));
+            let event = |name: &str, data: serde_json::Value| {
+                serde_json::json!({ "event": "property-change", "name": name, "data": data })
+            };
+            observation.apply_ipc_event_at(&event("fullscreen", true.into()), t(0));
+            observation.apply_ipc_event_at(&event("osd-width", 1920.into()), t(0));
+            observation.apply_ipc_event_at(&event("osd-height", 1080.into()), t(0));
+            observation.apply_ipc_event_at(&event("time-pos", 12.5.into()), t(5000));
+            assert_eq!(
+                observation.snapshot(),
+                PlaybackWindowState {
+                    fullscreen: Some(true),
+                    maximized: None,
+                    windowed_size: Some((800, 450)),
+                }
+            );
+            // A play with no window (it reports 0x0) hands it on too.
+            let observation = WindowStateObservation::opened_at(Some((800, 450)));
+            observation.apply_ipc_event_at(&event("osd-width", 0.into()), t(0));
+            observation.apply_ipc_event_at(&event("osd-height", 0.into()), t(0));
+            assert_eq!(observation.snapshot().windowed_size, Some((800, 450)));
+            // Its own windowed size wins.
+            observation.apply_ipc_event_at(&event("osd-width", 1024.into()), t(100));
+            observation.apply_ipc_event_at(&event("osd-height", 576.into()), t(100));
+            assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+            observation.apply_ipc_event_at(&event("time-pos", 13.into()), t(1200));
+            observation.apply_ipc_event_at(&event("fullscreen", true.into()), t(1300));
+            assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+            // Opened with no size, nothing is invented.
+            assert_eq!(
+                WindowStateObservation::opened_at(None).snapshot(),
+                PlaybackWindowState::default()
+            );
+        }
+
+        // Through the IPC event path the reader uses: the observation feeds
+        // every event to the rule, the ones that are not the window's too.
+        #[test]
+        fn the_observation_confirms_on_any_later_event() {
+            let observation = WindowStateObservation::default();
+            let event = |name: &str, data: serde_json::Value| {
+                serde_json::json!({ "event": "property-change", "name": name, "data": data })
+            };
+            observation.apply_ipc_event_at(&event("osd-width", 800.into()), t(0));
+            observation.apply_ipc_event_at(&event("osd-height", 450.into()), t(0));
+            observation.apply_ipc_event_at(&event("time-pos", 12.5.into()), t(1000));
+            assert_eq!(
+                observation.state.lock().expect("tracker").confirmed,
+                Some((800, 450)),
+                "a time-pos event a second later confirms the size"
+            );
+            // The maximized size, then the flag: the confirmed size stays.
+            observation.apply_ipc_event_at(&event("osd-width", 1920.into()), t(2000));
+            observation.apply_ipc_event_at(&event("osd-height", 1050.into()), t(2000));
+            observation.apply_ipc_event_at(&event("window-maximized", true.into()), t(2010));
+            assert_eq!(
+                observation.snapshot(),
+                PlaybackWindowState {
+                    fullscreen: None,
+                    maximized: Some(true),
+                    windowed_size: Some((800, 450)),
+                }
+            );
+        }
     }
 
     #[test]

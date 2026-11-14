@@ -24,6 +24,7 @@
   };
 
   type AutocropMode = "off" | "manual" | "auto";
+  type PlayerWindowMode = "remember" | "fullscreen" | "default";
   type SkipPolicy = "off" | "button" | "autoskip";
   type QualityTier = {
     id: string;
@@ -173,6 +174,11 @@
   let continuePlaying = $state<ContinuePlayingMode>("only-tv");
   let continuePlayingBusy = $state(false);
 
+  // How the first mpv window after Vela starts opens. Remember matches the
+  // backend's missing-field default.
+  let playerWindowMode = $state<PlayerWindowMode>("remember");
+  let playerWindowBusy = $state(false);
+
   // Duplicate-copy selection and the display profile used by Compatible.
   let playbackPreferences = $state<PlaybackPreferences | null>(null);
   let playbackSourcePolicy = $state<PlaybackSourcePolicy>("best");
@@ -247,11 +253,12 @@
   async function load() {
     const seq = ++loadSeq;
     try {
-      const [s, mp, adv, continueMode, playbackPrefs] = await Promise.all([
+      const [s, mp, adv, continueMode, windowMode, playbackPrefs] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<MpvInfo>("check_mpv"),
         invoke<MpvAdvanced>("get_mpv_advanced"),
         invoke<ContinuePlayingMode>("get_continue_playing"),
+        invoke<PlayerWindowMode>("get_mpv_window_mode"),
         invoke<PlaybackPreferences>("get_playback_preferences"),
       ]);
       if (seq !== loadSeq) return;
@@ -267,6 +274,7 @@
       skipCredits = adv.skipCredits;
       skipCommercials = adv.skipCommercials;
       continuePlaying = continueMode;
+      playerWindowMode = windowMode;
       applyPlaybackPreferences(playbackPrefs);
     } catch (e) {
       if (seq === loadSeq) err = String(e);
@@ -406,6 +414,21 @@
       err = String(e);
     } finally {
       continuePlayingBusy = false;
+    }
+  }
+
+  async function savePlayerWindowMode() {
+    if (playerWindowBusy) return;
+    playerWindowBusy = true;
+    err = null;
+    try {
+      playerWindowMode = await invoke<PlayerWindowMode>("set_mpv_window_mode", {
+        mode: playerWindowMode,
+      });
+    } catch (e) {
+      err = String(e);
+    } finally {
+      playerWindowBusy = false;
     }
   }
 
@@ -628,6 +651,30 @@
         <div class="btnrow">
           <button class="primary" disabled={continuePlayingBusy} onclick={saveContinuePlaying}>
             {continuePlayingBusy ? "Saving…" : "Save Continue Playing"}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h3>Player window</h3>
+      <div class="form">
+        <div class="field">
+          <label for="player-window">After Vela starts, the first video opens</label>
+          <select id="player-window" bind:value={playerWindowMode}>
+            <option value="remember">As you last left it</option>
+            <option value="fullscreen">Full screen</option>
+            <option value="default">Default — as mpv and your options say</option>
+          </select>
+          <p class="muted small">
+            Each later video opens the way you left the one before it: full
+            screen, maximized, its screen and its size. This only chooses how
+            the first one opens.
+          </p>
+        </div>
+        <div class="btnrow">
+          <button class="primary" disabled={playerWindowBusy} onclick={savePlayerWindowMode}>
+            {playerWindowBusy ? "Saving…" : "Save player window"}
           </button>
         </div>
       </div>

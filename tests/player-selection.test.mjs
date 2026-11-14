@@ -16,6 +16,9 @@ const commands = read('src-tauri/src/commands.rs');
 const playback = read('src-tauri/src/playback.rs');
 const lib = read('src-tauri/src/lib.rs');
 const config = read('src-tauri/src/config.rs');
+// Where a play that started publishes what it leaves behind.
+const successCall =
+  'let played = publish_started_play(played, window_slot, launched_window_session, || {';
 
 function functionBody(source, signature, what) {
   const start = source.indexOf(`\n${signature}`);
@@ -232,10 +235,10 @@ test('a fallback is explained once, and only by a play that started', () => {
   assert.equal(notice.split('on_shown()').length - 1, 1, 'reported in one place only');
   // A started play with nothing to fall back from forgets, inside the success
   // continuation and never before the launch.
-  const success = body.slice(body.indexOf('let played = after_successful_play(played, || {'));
+  const success = body.slice(body.indexOf(successCall));
   assert.match(
     success,
-    /^let played = after_successful_play\(played, \|\| \{[\s\S]{0,400}if notice_plan\.forget_when_started && !fell_back \{\s+state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.forget\(\);\s+\}/,
+    /^let played = publish_started_play\(played, window_slot, launched_window_session, \|\| \{[\s\S]{0,400}if notice_plan\.forget_when_started && !fell_back \{\s+state\s+\.embedded_fallback_notices\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.forget\(\);\s+\}/,
   );
   // The notice state is touched in exactly four places in the whole command
   // layer: the plan and the shown-callback before the launch, a second plan
@@ -244,7 +247,7 @@ test('a fallback is explained once, and only by a play that started', () => {
   // launch succeeded. Anything else would tell the user at the wrong time.
   const uses = [...commands.matchAll(/embedded_fallback_notices/g)].map((use) => use.index);
   assert.equal(uses.length, 4, 'no other code reads or writes the notice state');
-  const successAt = commands.indexOf('let played = after_successful_play(played, || {');
+  const successAt = commands.indexOf(successCall);
   const launchAt = commands.indexOf('playback::play(\n');
   assert.ok(uses.slice(0, 3).every((use) => use < launchAt), 'planned before the launch');
   assert.ok(uses[3] > launchAt && uses[3] > successAt, 'forgotten only after it succeeded');
@@ -380,9 +383,78 @@ test('a play the embedded player cannot start goes on in the external player', (
     body,
     /let fell_back = played\s+\.as_ref\(\)\s+\.is_ok_and\(\|started\| started\.player != player_choice\.kind\);\s+if fell_back \{\s+\*state\.active_playback_player\.lock\(\)\.await =\s+Some\(\(session_id\.to_string\(\), crate::player::PlayerKind::External\)\);\s+\}\s+let played = played\.map\(\|started\| started\.stop\);/,
   );
-  assert.ok(
-    body.indexOf('let fell_back = played') < body.indexOf('let played = after_successful_play(played, || {'),
+  assert.ok(body.indexOf('let fell_back = played') < body.indexOf(successCall));
+});
+
+test('the window record names the player that ran the play', () => {
+  // The next play opens its mpv window as the last one left it, but only an
+  // external play has such a window (the rule is unit-tested in
+  // commands.rs). The record names the player the play started in, which is
+  // the external one when an embedded play fell back.
+  const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
+  assert.match(
+    body,
+    /let played = played\.map\(\|started\| started\.stop\);\s+let started_player = if fell_back \{\s+crate::player::PlayerKind::External\s+\} else \{\s+player_choice\.kind\s+\};/,
   );
+  assert.match(
+    body,
+    /let launched_window_session = PlaybackWindowSession \{\s+session_id: session_id\.to_string\(\),\s+player: started_player,\s+observation: window_observation,\s+\};/,
+  );
+  assert.ok(body.indexOf('let launched_window_session') < body.indexOf(successCall));
+});
+
+test('only a play that started writes the window record, in one place', () => {
+  // The next play opens its window from this record, so a launch that fails
+  // must leave the last started play's record in place: the record is
+  // written in publish_started_play's success continuation and nowhere else
+  // (the helper itself is unit-tested in commands.rs). Every other use is
+  // listed here exactly, as a read, so a clear or an early publish on the
+  // launch path cannot be added beside them.
+  const production = commands.slice(0, commands.indexOf('\n#[cfg(test)]\nmod tests {'));
+  const uses = (source, name) => [...source.matchAll(new RegExp(`\\b${name}\\b`, 'g'))].length;
+  const reads = [
+    // Settings shows the display the last play observed.
+    /let observed = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\)\s+\.as_ref\(\)\s+\.map\(\|session\| session\.observation\.display_snapshot\(\)\);/g,
+    // A Compatible choice is made for that display.
+    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+compatibility_display\(current\.as_ref\(\), replace_session\)\s+\};/g,
+    // The launch opens its window from it.
+    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+opening_window\(current\.as_ref\(\), first_of_run\)\s+\};/g,
+    // The end callback hands the play's window to the settings.
+    /let latest_window = state\.playback_window_session\.clone\(\);/g,
+    // The one writer, given the slot.
+    /let window_slot = &state\.playback_window_session;\s+let played = publish_started_play\(played, window_slot, launched_window_session, \|\| \{/g,
+  ];
+  for (const read of reads) {
+    assert.equal([...production.matchAll(read)].length, 1, `expected exactly once: ${read}`);
+  }
+  assert.equal(
+    uses(production, 'playback_window_session'),
+    reads.length,
+    'no other command-layer code may touch the window record',
+  );
+  assert.equal(uses(production, 'window_slot'), 2, 'the slot goes only to publish_started_play');
+  assert.equal(uses(production, 'latest_window'), 2, 'the end callback only reads the record');
+  assert.match(
+    production,
+    /let ended = window_to_remember\(\s+latest_window\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.as_ref\(\),\s+&session_id,\s+\);/,
+  );
+  const publish = functionBody(commands, 'fn publish_started_play<T>(', 'publish_started_play');
+  assert.match(
+    publish,
+    /after_successful_play\(played, \|\| \{\s+\*window_session\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\) = Some\(launched\);\s+on_success\(\);\s+\}\)/,
+  );
+  assert.equal(uses(production, 'window_session'), 2, 'publish_started_play writes it once');
+  // Quitting Vela reads it once, to hand the latest window over.
+  const onExit = functionBody(commands, 'fn remember_window_on_exit_with(', 'remember_window_on_exit_with');
+  assert.equal(onExit.split('.lock()').length - 1, 1);
+  assert.match(onExit, /let latest = latest\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+latest\s+\.as_ref\(\)\s+\.and_then\(/);
+  assert.doesNotMatch(onExit, /\.take\(\)|=\s*(?:None|Some\()/);
+  // In lib.rs: the field, its empty start (in the app, and in the state a
+  // unit test builds), and that exit read.
+  assert.equal(uses(lib, 'playback_window_session'), 4);
+  assert.equal([...lib.matchAll(/playback_window_session: Arc::new\(Mutex::new\(None\)\),/g)].length, 2);
+  assert.equal(lib.split('pub(crate) fn for_tests() -> Self {').length - 1, 1);
+  assert.match(lib, /commands::remember_window_on_exit\(&state\.playback_window_session\);/);
 });
 
 test('the player setting is validated, and not yet shown to users', () => {

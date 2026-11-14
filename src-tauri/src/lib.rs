@@ -127,8 +127,10 @@ pub struct AppState {
     /// provider sessions, and auth headers never enter this store or its DTOs.
     pub(crate) playback_choices: AsyncMutex<commands::PlaybackChoiceRequests>,
     /// Window-state observer for the latest successfully launched mpv session.
-    /// Exact automatic replacements may snapshot it; manual plays never do.
-    pub(crate) playback_window_session: Mutex<Option<commands::PlaybackWindowSession>>,
+    /// Every later play in this run snapshots it, manual or automatic. Shared
+    /// with each play's end callback, which remembers its window for the next
+    /// run only while it is still the latest.
+    pub(crate) playback_window_session: Arc<Mutex<Option<commands::PlaybackWindowSession>>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
@@ -170,7 +172,7 @@ impl AppState {
             embedded: Arc::new(player::EmbeddedHost::new()),
             playback_run: AsyncMutex::new(None),
             playback_choices: AsyncMutex::new(Default::default()),
-            playback_window_session: Mutex::new(None),
+            playback_window_session: Arc::new(Mutex::new(None)),
             app_handle: std::sync::OnceLock::new(),
             merged_snapshot: AsyncMutex::new(None),
             merged_children_snapshot: AsyncMutex::new(None),
@@ -227,7 +229,7 @@ pub fn run() {
         embedded: Arc::new(player::EmbeddedHost::new()),
         playback_run: AsyncMutex::new(None),
         playback_choices: AsyncMutex::new(Default::default()),
-        playback_window_session: Mutex::new(None),
+        playback_window_session: Arc::new(Mutex::new(None)),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
         merged_children_snapshot: AsyncMutex::new(None),
@@ -412,6 +414,8 @@ pub fn run() {
             commands::set_mpv_advanced,
             commands::get_continue_playing,
             commands::set_continue_playing,
+            commands::get_mpv_window_mode,
+            commands::set_mpv_window_mode,
             commands::get_playback_preferences,
             commands::set_playback_preferences,
             commands::install_mpv,
@@ -505,6 +509,9 @@ pub fn run() {
                 // moment here, bounded, before the process goes.
                 #[cfg(target_os = "linux")]
                 player::embedded::wait_for_unfinished_plays(std::time::Duration::from_secs(2));
+                // How the latest play left its window, for the next run: a
+                // play still showing now never reaches its own end callback.
+                commands::remember_window_on_exit(&state.playback_window_session);
                 let stop = state
                     .tracking_stop
                     .lock()

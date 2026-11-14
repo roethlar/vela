@@ -77,6 +77,38 @@ hands audio-output selection to that file. Custom mpv options are appended
 after Vela's defaults and can override the audio output, HDR defaults, or other
 playback behavior, so change them deliberately.
 
+Within one run of Vela, each play opens the mpv window the way the previous
+play left it: fullscreen or not, maximized or not, on the same screen, and
+at the same size when it is not fullscreen or maximized. This applies to
+plays you start yourself as well as
+to the next item of a playlist or Continue Playing. What Vela carries over
+takes precedence over custom mpv options and `mpv.conf`: a custom
+`--fullscreen` or `--window-maximized` is overridden, and a custom
+`--geometry` gives way to the carried size. With Player window set to
+Default, your options still decide how the first play of a run opens; with
+As you last left it, the saved window does once there is one.
+
+Settings → Player → Player window chooses how that first play opens:
+
+- **As you last left it** (the default): as the last play of the previous run
+  left its window — fullscreen, maximized, screen, and size. Quit from
+  fullscreen, and the next run opens fullscreen. Vela saves this in
+  `config.json` when each play ends, and when you quit Vela with a video
+  still playing.
+- **Full screen**: fullscreen, whatever the last run did.
+- **Default**: mpv's own default, or your custom mpv options or `mpv.conf`,
+  decide fullscreen, maximized and size. Vela still asks mpv to open on the
+  screen that holds Vela's window, as it always has.
+
+If the saved screen is no longer connected, mpv opens on its default screen.
+Switching away from As you last left it deletes the saved window.
+
+Vela 1.0.58 to 1.0.60 refuse a `config.json` that holds these settings, and
+in the default mode Vela saves the window after the first video you play,
+even if you never open the setting. Going back to one of those releases
+after playing anything therefore stops at Settings recovery, where starting
+fresh settings resets every setting except your server connections.
+
 Black-bar cropping is Off by default. Manual mode runs on `Shift+C`; Automatic
 mode attempts every video. Automatic crop detection can be unreliable with HDR
 on some GPU/Wayland combinations and may occasionally hang mpv, so Manual is

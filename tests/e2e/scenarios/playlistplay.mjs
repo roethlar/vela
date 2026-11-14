@@ -1,6 +1,6 @@
 // Playlist playback context: arbitrary start, same-key tracker replacement,
 // live edit re-read, mixed-source advancement, unavailable skip, silent
-// resume, exact-session window-state inheritance, dispatcher-owned recents,
+// resume, window-state inheritance by every play, dispatcher-owned recents,
 // and byte-identical read-only playback.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -325,10 +325,12 @@ export default {
     await clickRowAction(driver, 'Beta Start', 'Play');
     const secondBeta = await nextMpv(mockB.port, 'b0');
     await secondBeta.mpv.setProp('pause', true);
+    // The configured options say yes/yes, so no/no here can only come from
+    // the first player's observed window: a manual play inherits it too.
     await waitForWindowState(
       secondBeta.mpv,
-      { fullscreen: true, maximized: true },
-      'the manual replacement to use configured window state instead of inheriting',
+      { fullscreen: false, maximized: false },
+      'the manual replacement to inherit the first player\'s window state over configured yes',
     );
     firstBeta.mpv.close();
     const replacement = await pollUntil(() => {
@@ -448,6 +450,19 @@ export default {
       { fullscreen: false, maximized: false },
       'the automatic successor to inherit explicit windowed state over configured yes',
     );
+    // With --vo=null a player has no window and reports its size as 0x0. The
+    // predecessor started neither fullscreen nor maximized, so that report
+    // reached the size rule, and 0x0 is not a size: nothing is passed. A real
+    // windowed size cannot be produced in this venue, so only this side is
+    // checked here. The external player only: the embedded launch is handed
+    // no window state at all (as for the steps above).
+    if (windowStates) {
+      assert.equal(
+        await editedNext.mpv.getProp('geometry'),
+        '',
+        'a 0x0 size report from a player with no window must not become --geometry',
+      );
+    }
     // mpv names its file before it has a position in it. In the external
     // player the window-state wait above used to give it that moment; in the
     // embedded one there is no such wait, so the position is waited for.

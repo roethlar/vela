@@ -202,6 +202,18 @@ test("durable settings reads never default or disappear through Result helpers",
     fs.readFileSync("src-tauri/src/lib.rs", "utf8"),
     /load_config\(\)\.unwrap_or_else/,
   );
+  // Nor at the end of a longer chain: every statement that reads the
+  // settings, up to its `;`, keeps the error.
+  for (const source of [backend, lib]) {
+    for (const call of source.matchAll(/load_config\(\)/g)) {
+      const statement = source.slice(call.index, source.indexOf(";", call.index) + 1);
+      assert.doesNotMatch(
+        statement,
+        /\.(?:ok|unwrap_or_default|unwrap_or)\s*\(/,
+        `a settings read must not turn an unreadable file into a default: ${statement}`,
+      );
+    }
+  }
 });
 
 test("boot checks the durable gate before any normal app request", () => {

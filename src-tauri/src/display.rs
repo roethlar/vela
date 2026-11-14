@@ -164,9 +164,10 @@ fn current_monitor(app: &tauri::AppHandle) -> Option<MonitorDescriptor> {
     })
 }
 
-/// The current Vela-window output name is passed to mpv for a manual launch.
-/// Wayland compositors may still choose a different output; the observed mpv
-/// output then becomes authoritative for successors.
+/// The current Vela-window output name is passed to mpv for a play that has
+/// no observed output to inherit (the first play of a run). Wayland
+/// compositors may still choose a different output; the observed mpv output
+/// then becomes authoritative for every later play.
 pub(crate) async fn current_screen_name(app: &tauri::AppHandle) -> Option<String> {
     let monitor = current_monitor(app)?;
     platform_screen_name(app, monitor).await

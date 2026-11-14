@@ -26,6 +26,20 @@ async function executable(file, body) {
 
 const posixBashUnavailable = process.platform === "win32" ? "requires a POSIX /bin/bash" : false;
 
+// `npm run check` names each test file, and CI runs that script. A file left
+// out of the list would stop running without anything failing.
+test("npm run check runs every test file in tests/", async () => {
+  const pkg = JSON.parse(await readFile(path.join(repoRoot, "package.json"), "utf8"));
+  const listed = new Set(pkg.scripts.check.match(/tests\/[\w.-]+\.test\.mjs/g) ?? []);
+  const files = (await readdir(path.join(repoRoot, "tests")))
+    .filter((name) => name.endsWith(".test.mjs"))
+    .map((name) => `tests/${name}`);
+  assert.ok(files.length > 0);
+  for (const file of files) {
+    assert.ok(listed.has(file), `${file} is not in the check script`);
+  }
+});
+
 test("an explicit Linux build collects only fresh requested bundles", { skip: posixBashUnavailable }, async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), "vela-build-script-"));
   t.after(() => rm(root, { recursive: true, force: true }));

@@ -486,8 +486,15 @@ fn embedded_default_args() -> Vec<LaunchArg> {
 /// Explicit inherited flags follow user/autocrop options so observed runtime
 /// state wins under mpv's last-value-wins option handling. Unknown properties
 /// are omitted, preserving normal configuration behavior.
+///
+/// The windowed size comes first, before the two flags: a play that opens
+/// fullscreen or maximized still gets it, and its window returns to that
+/// size when the user leaves fullscreen.
 fn window_state_args(state: PlaybackWindowState) -> Vec<LaunchArg> {
-    let mut args = Vec::with_capacity(2);
+    let mut args = Vec::with_capacity(3);
+    if let Some((width, height)) = state.windowed_size {
+        args.push(LaunchArg::set("geometry", format!("{width}x{height}")));
+    }
     if let Some(maximized) = state.maximized {
         args.push(LaunchArg::set(
             "window-maximized",
@@ -1193,6 +1200,7 @@ mod tests {
             window_state_args(PlaybackWindowState {
                 fullscreen: Some(true),
                 maximized: None,
+                windowed_size: None,
             }),
             vec!["--fullscreen=yes"]
         );
@@ -1200,9 +1208,44 @@ mod tests {
             window_state_args(PlaybackWindowState {
                 fullscreen: Some(false),
                 maximized: Some(true),
+                windowed_size: None,
             }),
             vec!["--window-maximized=yes", "--fullscreen=no"]
         );
+    }
+
+    // The windowed size is passed before the flags, so a play that opens
+    // fullscreen still has a size to return to; an unknown size passes
+    // nothing.
+    #[test]
+    fn the_windowed_size_comes_before_the_window_flags() {
+        assert_eq!(
+            window_state_args(PlaybackWindowState {
+                fullscreen: Some(true),
+                maximized: Some(false),
+                windowed_size: Some((1024, 576)),
+            }),
+            vec![
+                "--geometry=1024x576",
+                "--window-maximized=no",
+                "--fullscreen=yes"
+            ]
+        );
+        assert_eq!(
+            window_state_args(PlaybackWindowState {
+                fullscreen: None,
+                maximized: None,
+                windowed_size: Some((800, 450)),
+            }),
+            vec!["--geometry=800x450"]
+        );
+        assert!(window_state_args(PlaybackWindowState {
+            fullscreen: Some(false),
+            maximized: Some(false),
+            windowed_size: None,
+        })
+        .iter()
+        .all(|arg| !arg.starts_with("--geometry")));
     }
 
     #[test]
@@ -1213,6 +1256,105 @@ mod tests {
         );
         assert_eq!(screen_name_arg(Some("  ")), None);
         assert_eq!(screen_name_arg(None), None);
+    }
+
+    /// The window options of the launch the first play of a run gets with
+    /// `cfg`: the player window setting, through the launch description.
+    fn first_play_window_args(cfg: &crate::config::AppConfig) -> Vec<String> {
+        let (inherited_window_state, screen_name) =
+            crate::config::first_window_of_run(cfg).expect("a valid setting");
+        let spec = PlaySpec {
+            inherited_window_state,
+            screen_name,
+            ..plain_spec(PlayerKind::External, "https://media.invalid/video.mkv")
+        };
+        let plan = build_launch(&spec, cfg, "/tmp/vela-window-test/mpv.sock")
+            .expect("the launch is described");
+        cli(plan.args.clone())
+            .into_iter()
+            .filter(|arg| {
+                [
+                    "--geometry=",
+                    "--window-maximized=",
+                    "--fullscreen=",
+                    "--screen-name=",
+                ]
+                .iter()
+                .any(|option| arg.starts_with(option))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn the_first_play_of_a_run_opens_as_the_player_window_setting_says() {
+        use crate::config::{AppConfig, MpvWindow};
+        let stored = |window: MpvWindow| AppConfig {
+            mpv_extra_args: Some("--vo=null".to_string()),
+            mpv_window: Some(window),
+            ..Default::default()
+        };
+        // Remember (the default): the last run quit from fullscreen.
+        assert_eq!(
+            first_play_window_args(&stored(MpvWindow {
+                fullscreen: Some(true),
+                ..Default::default()
+            })),
+            ["--fullscreen=yes"]
+        );
+        assert_eq!(
+            first_play_window_args(&stored(MpvWindow {
+                fullscreen: Some(false),
+                maximized: Some(false),
+                screen: Some("DP-3".to_string()),
+                width: Some(1280),
+                height: Some(720),
+            })),
+            [
+                "--geometry=1280x720",
+                "--window-maximized=no",
+                "--fullscreen=no",
+                "--screen-name=DP-3"
+            ]
+        );
+        assert!(first_play_window_args(&AppConfig::default()).is_empty());
+        // Full screen, with nothing stored.
+        assert_eq!(
+            first_play_window_args(&AppConfig {
+                mpv_window_mode: Some("fullscreen".to_string()),
+                ..Default::default()
+            }),
+            ["--fullscreen=yes"]
+        );
+        // Default: nothing from Vela, whatever is stored.
+        assert!(first_play_window_args(&AppConfig {
+            mpv_window_mode: Some("default".to_string()),
+            ..stored(MpvWindow {
+                fullscreen: Some(true),
+                screen: Some("DP-3".to_string()),
+                ..Default::default()
+            })
+        })
+        .is_empty());
+    }
+
+    // A stored screen that is gone (a monitor unplugged since) is passed as
+    // any other name is: mpv reports "Screen name ... not found!" and opens on
+    // its default screen (probed with mpv 0.41 on Xvfb), so the launch must
+    // neither fail nor drop the rest of the window.
+    #[test]
+    fn a_stored_screen_that_no_longer_exists_does_not_stop_the_launch() {
+        let cfg = crate::config::AppConfig {
+            mpv_window: Some(crate::config::MpvWindow {
+                fullscreen: Some(true),
+                screen: Some("unplugged-since".to_string()),
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        assert_eq!(
+            first_play_window_args(&cfg),
+            ["--fullscreen=yes", "--screen-name=unplugged-since"]
+        );
     }
 
     #[test]
@@ -1277,6 +1419,7 @@ mod tests {
             inherited_window_state: PlaybackWindowState {
                 fullscreen: Some(true),
                 maximized: Some(false),
+                windowed_size: Some((1024, 576)),
             },
             screen_name: Some("DP-3".to_string()),
             markers_script: Some(markers.clone()),

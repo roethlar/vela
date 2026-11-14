@@ -8,6 +8,26 @@
   mark; a server with no playlists to show takes no space, and the heading
   disappears when there are none.
 - Emby's experimental status is now shown on its row in Settings.
+- Within one run of Vela, open every video's mpv window the way the previous
+  one was left: full screen or not, maximized or not, and on the same screen.
+  This includes videos you start yourself, not only the next item of a
+  playlist or Continue Playing. Custom mpv options such as `--fullscreen` now
+  decide only how the first video of a run opens.
+- Keep the mpv window's size from one video to the next as well. A video that
+  opens full screen or maximized returns to that size when you leave full
+  screen. The window's position is not carried. After the first video of a
+  run, the carried size takes precedence over a custom `--geometry`.
+- Add Settings → Player → Player window, which chooses how the first video
+  opens after Vela starts: "As you last left it" (the default; quit from full
+  screen and the next session opens full screen), "Full screen", or "Default"
+  (mpv and your own options decide).
+- With the Prefer Compatible source policy, choose the copy for the screen the
+  video will open on, which is now the screen of the previous player window.
+- Going back to an earlier Vela after playing anything in this version stops
+  at Settings recovery. The player window is saved in `config.json` after the
+  first video you play, even if you never open the new setting, and Vela
+  1.0.58 to 1.0.60 refuse a settings file that holds it. Starting fresh
+  settings there resets every setting except your server connections.
 
 ## Fixes
 

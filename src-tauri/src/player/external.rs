@@ -452,6 +452,7 @@ mod tests {
             inherited_window_state: PlaybackWindowState {
                 fullscreen: Some(true),
                 maximized: Some(false),
+                windowed_size: Some((1024, 576)),
             },
             screen_name: Some("DP-3".to_string()),
             markers_script: Some(markers.clone()),
@@ -532,6 +533,7 @@ mod tests {
                 "--script-opts-append=vela-markers-intro-policy=button".to_string(),
                 "--script-opts-append=vela-markers-credits-policy=autoskip".to_string(),
                 "--script-opts-append=vela-markers-commercial-policy=off".to_string(),
+                "--geometry=1024x576".to_string(),
                 "--window-maximized=no".to_string(),
                 "--fullscreen=yes".to_string(),
                 "--screen-name=DP-3".to_string(),
