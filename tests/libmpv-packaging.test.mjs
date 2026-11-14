@@ -1713,6 +1713,26 @@ test('the package check calls check-libmpv.py on the unpacked set, and passes a 
     assert.equal(standIn.called().library, library);
   });
 
+  await t.test('a temporary directory whose name has a line break: refused before anything is unpacked', (t) => {
+    // /proc/self/maps writes the line break as "\012", and the set's
+    // libraries would then seem to come from elsewhere: a good package failed.
+    const standIn = checkBesideStandIn(t, { lines: [...itsOk, 'RESULT PASS'], status: 0 });
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela libmpv\ntmp with a line break ')));
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    const good = packageWith(t, right).file;
+    const run = checkPackageRun(['--set', referenceWith(t, right), good], standIn.script, { TMPDIR: tmp });
+    assert.equal(run.status, 2, `${run.stdout}\n${run.stderr}`);
+    assert.match(
+      run.stderr,
+      /^check-package: the temporary directory .+\ntmp with a line break .+ has a line break in its name, which \/proc\/self\/maps does not show as it is; set TMPDIR to another directory\n$/,
+    );
+    assert.equal(run.stdout, '', 'no package is judged');
+    assert.equal(standIn.wasCalled(), false);
+    // Nothing is loaded without the set, so there it does not matter.
+    const without = checkPackageRun(['--without-libmpv', pacmanPackage(t, {}).file], standIn.script, { TMPDIR: tmp });
+    assert.equal(without.status, 0, `${without.stdout}\n${without.stderr}`);
+  });
+
   // Loading the library runs its start-up code. A package that has failed a
   // check before the load is not known to hold the set's code, so
   // check-libmpv.py is not even started for it.
@@ -1994,8 +2014,14 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
     'real_open = open',
     'def open_or_maps(file, *arguments, **options):',
     '    if file == "/proc/self/maps":',
-    '        return io.StringIO("".join(f"7f0000000000-7f0000001000 r-xp 00000000 00:00 0    {path}\\n"',
-    '                                   for path in say["mapped"]))',
+    // As the kernel writes it: mappings of no file among those of files,
+    // with no name at all (with a space after the inode or without) or with
+    // one in brackets.
+    '        return io.StringIO("7f0000002000-7f0000003000 rw-p 00000000 00:00 0 \\n"',
+    '                           "7f0000003000-7f0000004000 ---p 00000000 00:00 0\\n"',
+    '                           "55d000000000-55d000021000 rw-p 00000000 00:00 0                          [heap]\\n"',
+    '                           + "".join(f"7f0000000000-7f0000001000 r-xp 00000000 00:00 0    {path}\\n"',
+    '                                     for path in say["mapped"]))',
     '    return real_open(file, *arguments, **options)',
     'module.open = open_or_maps',
     'sys.argv = ["check-libmpv.py", sys.argv[2]] + say["arguments"]',

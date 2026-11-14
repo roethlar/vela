@@ -61,7 +61,8 @@
 # has a FAIL line that says so). Needs bsdtar (libarchive) to unpack,
 # unsquashfs (squashfs-tools, 4.4 or later) for an AppImage and, to load the library,
 # Python 3 and the system libraries the set's MANIFEST lists. The temporary
-# directory (TMPDIR) must be one a library can be loaded from. What is
+# directory (TMPDIR) must be one a library can be loaded from, with no line
+# break in its name. What is
 # unpacked there is removed when the check ends, also when it is cancelled (it
 # then ends with status 129, 130 or 143, as the signal has it).
 set -euo pipefail
@@ -179,6 +180,13 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 tmp="$(mktemp -d)"
+# The load is seen to come from the unpacked set in /proc/self/maps, which
+# writes a line break in a file's name as the four characters "\012". Such a
+# name cannot be told from one that has those four characters, so a set below
+# a temporary directory with a line break in its name could never pass.
+case "$tmp" in
+  *$'\n'*) [ "$without" -eq 1 ] || die "the temporary directory $tmp has a line break in its name, which /proc/self/maps does not show as it is; set TMPDIR to another directory" ;;
+esac
 
 failed=0   # this package
 pass() { printf 'ok   %s\n' "$*"; }
