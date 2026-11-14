@@ -13,7 +13,7 @@
     "build:arch": "npm run tauri -- build --no-bundle && cd packaging/arch && makepkg -f",
     "build:linux": "tauri build --bundles deb,rpm",
     "preview": "vite preview",
-    "check": "node --test tests/build-script.test.mjs tests/js-toolchain-check.test.mjs tests/mpv-lifecycle.test.mjs tests/player-selection.test.mjs tests/embedded-player.test.mjs tests/player-view.test.mjs tests/player-command.test.mjs tests/player-controls.test.mjs tests/server-identity-ui.test.mjs tests/clean-eof-refresh-order.test.mjs tests/config-integrity.test.mjs tests/dependency-policy.test.mjs tests/live-release-safety.test.mjs tests/release-workflow.test.mjs tests/watch-edit-position.test.mjs tests/ui-foundation.test.mjs tests/image-reveal.test.mjs tests/ui-motion.test.mjs tests/transcoding-ui.test.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check": "node --test tests/build-script.test.mjs tests/js-toolchain-check.test.mjs tests/mpv-lifecycle.test.mjs tests/player-selection.test.mjs tests/embedded-player.test.mjs tests/player-view.test.mjs tests/player-command.test.mjs tests/player-controls.test.mjs tests/server-identity-ui.test.mjs tests/clean-eof-refresh-order.test.mjs tests/config-integrity.test.mjs tests/dependency-policy.test.mjs tests/live-release-safety.test.mjs tests/release-workflow.test.mjs tests/watch-edit-position.test.mjs tests/ui-foundation.test.mjs tests/image-reveal.test.mjs tests/ui-motion.test.mjs tests/transcoding-ui.test.mjs tests/libmpv-packaging.test.mjs && svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "e2e": "node tests/e2e/run.mjs",
     "test:libmpv": "cargo test --manifest-path src-tauri/Cargo.toml --locked --lib player::embedded::hdr::tests::real_library -- --ignored",
     "tauri": "tauri",

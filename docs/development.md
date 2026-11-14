@@ -174,8 +174,9 @@ packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
 ### Trying the embedded player
 
 Experimental, Linux on Wayland only, and not offered anywhere in the app:
-there is no Settings control for it and no package ships its library yet.
-The plan and its state are in `.agents/plans/embedded-player.md`.
+there is no Settings control for it and no released package ships its
+library. A package you build yourself can carry it; see "Packaging the set"
+below. The plan and its state are in `.agents/plans/embedded-player.md`.
 
 1. Build the set (above), or download CI's.
 2. Add `"player": "embedded"` to `~/.config/vela/config.json`.
@@ -217,6 +218,160 @@ per-script option files or key bindings.
 `npm run e2e -- --embedded` runs the E2E suite in this player; see
 [tests/e2e/README.md](../tests/e2e/README.md).
 
+### Packaging the set
+
+No package contains the set unless its builder asks for it. A default build
+of the deb, rpm, AppImage or Arch package is the package it has always been,
+and neither the release workflow nor CI asks. The way to ask is a switch on
+the build script, for trying the embedded player in an installed Vela. (It
+is not the only way in: see the Arch package below.)
+
+```bash
+scripts/build-libmpv.sh --container               # once: fills .libmpv/out/libmpv
+scripts/build.sh --with-libmpv                    # this host's default package, with the set
+scripts/build.sh --bundles deb,rpm --with-libmpv  # or the bundles you name
+scripts/build.sh --with-libmpv=/path/to/a/set     # a set kept somewhere else
+```
+
+What the switch does depends on who makes the package:
+
+- **deb, rpm and AppImage** are made by Tauri's bundler. The script passes it
+  `--config src-tauri/tauri.libmpv.conf.json`, a configuration laid over
+  `tauri.conf.json` for that one build, which adds `.libmpv/out/libmpv/` to
+  the bundle's resources as `libmpv/`. `tauri.conf.json` itself does not
+  mention the set. For a set in another directory the script writes the same
+  overlay with that directory in it to a temporary file.
+- **The Arch package** is made by `packaging/arch/PKGBUILD`, which installs
+  the set when `VELA_PACKAGE_LIBMPV` names its directory, and puts each
+  licence text under `/usr/share/licenses/vela/libmpv/` as well. makepkg
+  cannot pass a PKGBUILD an argument, so the build script sets that variable
+  for it, and clears it on a default build. makepkg does not strip a package
+  that carries the set: stripping rewrites the set's libraries.
+
+  That variable is all the PKGBUILD goes by, so it is a second way to ask,
+  and one without a check. `npm run build:arch`, or makepkg run by hand, in a
+  shell where `VELA_PACKAGE_LIBMPV` is set packages the set, and neither runs
+  `check-package.sh`; only `scripts/build.sh --with-libmpv` does. makepkg
+  then prints a line that begins `==> VELA_PACKAGE_LIBMPV is set`, with the
+  command to check the package yourself. Do not keep the variable exported.
+
+Either way the set ends up in `/usr/lib/Vela/libmpv/`, the one directory an
+installed Vela loads it from (in an AppImage, the same path under the
+AppImage's own root).
+
+The set's directory is named on the command line and not taken from
+`VELA_LIBMPV_DIR`. That variable belongs to a running development build
+(above), and a developer may keep it exported, pointing at a set built
+outside the container. A package build that obeyed it would ship that set
+without having been asked to ship anything.
+
+**The check.** The embedded player has no other library to fall back on, so
+a package that was built to carry the set and lacks part of it installs
+without complaint and then never plays embedded. A `--with-libmpv` build
+therefore is not finished until `packaging/libmpv/check-package.sh` has
+passed every package it produced; if one fails, the build fails and nothing
+is copied to `dist/`. The script unpacks the package into a temporary
+directory (nothing is installed) and requires that:
+
+- the set is in `usr/lib/Vela/libmpv`, as files of the package and not
+  through a symbolic link;
+- every user may read every file of it. An installed package belongs to
+  root and Vela runs as whoever starts it. Tauri's rpm bundler copies a
+  resource's permissions from the build tree as they are (its deb bundler and
+  the PKGBUILD set them), so a set copied under a strict umask makes an rpm
+  whose libraries no user can load. If the check says so, `chmod -R a+rX` the
+  set and build again;
+- its `MANIFEST` is the one of the set the build was given. Run by hand
+  without `--set`, the check cannot compare the two and prints a line that
+  begins `skip` in place of this one; such a package is known to hold a set
+  that is whole and loads, not to hold the set you built. `--set` with
+  nothing after it stops the check;
+- its components are the versions `packaging/libmpv/versions.txt` pins, so a
+  set left over from before a bump is not shipped;
+- every file the `MANIFEST` lists is present and unmodified, and nothing
+  else is there;
+- `libmpv.so.2` loads from the unpacked package, says it is the pinned mpv
+  release with that release's client API version, and every library of the
+  set in the process came from the unpacked package;
+- an Arch package also has every licence text under
+  `usr/share/licenses/vela/libmpv`.
+
+It needs `bsdtar` and Python 3, and, because it really loads the library, the
+system libraries the set leans on (the `system` lines of the `MANIFEST`). The
+build script asks it before building anything (`check-package.sh
+--preflight`) whether it can run here: the first two, and its own record of
+the pinned mpv's client API version. A machine that cannot check then stops
+at once and not after the release build. If the check cannot judge the
+packages for another reason, the build fails too and says that the packages
+could not be checked, which is not the same as a package that failed. It
+can be run by hand, and it has a second mode for the opposite question, that
+a package built without the switch holds no part of the set, by name and,
+given a set to compare with, by contents:
+
+```bash
+packaging/libmpv/check-package.sh --set .libmpv/out/libmpv dist/*.deb
+packaging/libmpv/check-package.sh --without-libmpv --set .libmpv/out/libmpv dist/*.deb
+```
+
+In either mode a file fails if it cannot be unpacked, or if what comes out of
+it is not Vela (it has no `usr/bin/vela`). An empty file, for one, unpacks
+without complaint and certainly holds no part of the set.
+
+On an Arch host `packaging/arch/` keeps the packages of earlier builds, and a
+default build copies every one of them to `dist/`, as it always has. A
+`--with-libmpv` build does not: it asks makepkg which package this build made
+(`makepkg --packagelist`), checks that one and copies that one alone, from
+wherever makepkg was told to put it (`PKGDEST`). An older package that
+carries the set can therefore not pass in place of the new one. If makepkg
+writes its packages under an ending the check does not know (it knows
+`.pkg.tar.zst` and `.pkg.tar.xz`), the check fails the package and says so.
+
+Not done yet:
+
+- **Released packages do not contain the set.** `.github/workflows/release.yml`
+  and `ci.yml` use none of the above, so that the switch is a decision and not
+  a side effect. `tests/libmpv-packaging.test.mjs` holds that as far as words
+  can: `release.yml` does not mention the set at all, and `ci.yml` mentions it
+  only in its `libmpv` job, which builds the set and no package. A step that
+  brought the set in without naming it would get past that test, so a change
+  to either workflow still has to be read. Switching it on is the owner's
+  step, taken together with the Settings control.
+  The release workflow will then have to:
+  1. get the set built from the release commit's pins into
+     `.libmpv/out/libmpv`. Only CI's `libmpv` job builds it today, and CI does
+     not run on a tag;
+  2. in the Linux `bundle` job, add
+     `--config src-tauri/tauri.libmpv.conf.json` to the `tauri-action`
+     arguments for Linux only, and run `check-package.sh --set
+     .libmpv/out/libmpv` on the deb, the rpm and the AppImage. `tauri-action`
+     uploads to the draft release in the same step that builds, so a failed
+     check comes after the upload unless building and uploading are split;
+  3. in the `arch` job, set `VELA_PACKAGE_LIBMPV` to the set's absolute
+     path for `npm run build:arch` (that job does not go through
+     `scripts/build.sh`) and run the check on the package;
+  4. install what the check needs on both runners: `bsdtar`, Python 3, and
+     the system libraries the set loads.
+- **CI does not run the tests of the check.** Most of
+  `tests/libmpv-packaging.test.mjs` runs `check-package.sh` on packages it
+  makes itself, and for that it needs `bsdtar`, as the check does. Where
+  `bsdtar` is missing those tests are skipped and the output says so. `npm
+  run check` runs in the `frontend` job of `ci.yml`, which installs nothing,
+  and the software list of GitHub's `ubuntu-latest` image does not name
+  `bsdtar`. So on CI they are most likely skipped, and a green run there
+  holds nothing about the check. To have CI hold it, the `frontend` job
+  needs `sudo apt-get install -y libarchive-tools` before `npm run check`.
+  That is a change to a workflow, and so the owner's.
+- **No AppImage with the set has been built.** The check handles the format,
+  but that path has never met a real AppImage. It expects the program at
+  `usr/bin/vela` and the set at `usr/lib/Vela/libmpv` under the AppImage's own
+  root, as Tauri lays an AppImage out, and whether the AppImage tooling leaves
+  the set's libraries exactly as they are is not known. The check is what
+  will say.
+- **The packages' licence field** (`bundle.license` in `tauri.conf.json`,
+  `license=` in the PKGBUILD) still names only Vela's licence and the
+  bundled script's. A package with the set carries every licence text; the
+  field has to name those licences once the set ships.
+
 ### Bumping a component
 
 1. Edit the component's line in `packaging/libmpv/versions.txt`: version, URL,
@@ -224,7 +379,10 @@ per-script option files or key bindings.
 2. For an mpv bump, check that both hunks of the patch still apply and still
    mean what the patch header says. Read mpv's `meson.build` changes for new
    dependencies; the build names every feature it wants and turns the rest
-   off.
+   off. Then read `MPV_CLIENT_API_VERSION` in the new release's
+   `include/mpv/client.h` and bring `CLIENT_API_OF_MPV` and `CLIENT_API` in
+   `packaging/libmpv/check-package.sh` up to date; the package check refuses
+   to run, and `npm run check` fails, until they name the new release.
 3. `scripts/build-libmpv.sh --container`, then the three container checks
    above.
 4. `npm run check`. `tests/dependency-policy.test.mjs` compares the pins with

@@ -8,7 +8,8 @@ without a GPU:
     (libraries, licence texts, the build patch) present and unmodified,
     nothing unlisted, no symbolic link, and a file named as its licence
     text for every shipped component;
-  * the library loads and reports the pinned mpv version;
+  * the library loads and reports the pinned mpv version (and, with
+    --expect-client-api, the client API version that release has);
   * every loaded library of the set really comes from the set's directory;
   * each given clip DECODES to what was recorded for it: the same number of
     video frames with the same contents (the decoders are bit-exact, so the
@@ -19,7 +20,8 @@ without a GPU:
   * (with --https URL) a fetch over HTTPS works through the machine's GnuTLS
     and trust store.
 
-usage: check-libmpv.py LIBMPV_DIR [--expect-mpv VERSION] [--https URL]
+usage: check-libmpv.py LIBMPV_DIR [--expect-mpv VERSION]
+                       [--expect-client-api MAJOR.MINOR] [--https URL]
                        [--broken CLIP]... [--record] [CLIP...]
 
 Recorded results live in expected.json next to the clips. --record prints
@@ -184,11 +186,13 @@ def main():
         print(__doc__)
         return 2
     libdir = os.path.realpath(args.pop(0))
-    expect, https, clips, broken, record = None, None, [], [], False
+    expect, expect_api, https, clips, broken, record = None, None, None, [], [], False
     while args:
         a = args.pop(0)
         if a == "--expect-mpv":
             expect = args.pop(0)
+        elif a == "--expect-client-api":
+            expect_api = args.pop(0)
         elif a == "--https":
             https = args.pop(0)
         elif a == "--broken":
@@ -229,7 +233,15 @@ def main():
     lib.mpv_error_string.restype = ctypes.c_char_p
     lib.mpv_error_string.argtypes = [ctypes.c_int]
     v = lib.mpv_client_api_version()
-    print(f"ok   load: {path} (client API {v >> 16}.{v & 0xffff})")
+    api = f"{v >> 16}.{v & 0xffff}"
+    # The file that was asked for loaded; whether it is the library that was
+    # meant is a second question. The client API version belongs to the mpv
+    # release, so a library from another release, the machine's own for one,
+    # usually gives itself away here.
+    good = expect_api is None or api == expect_api
+    print(f"{'ok  ' if good else 'FAIL'} load: {path} (client API {api})"
+          + ("" if good else f" (expected {expect_api})"))
+    ok = ok and good
 
     def prop(h, name):
         p = lib.mpv_get_property_string(h, name.encode())

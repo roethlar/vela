@@ -8,6 +8,28 @@ license=('MIT' 'GPL2')
 # Vela's release profile already strips the binary, so the makepkg debug split
 # finds no symbols — skip it (no empty -debug package, no gdb-add-index warning).
 options=('!debug')
+# The libmpv set of the experimental embedded player goes into this package
+# only when the builder asks for it: scripts/build.sh --with-libmpv names the
+# set's directory in VELA_PACKAGE_LIBMPV, because makepkg cannot pass a
+# PKGBUILD an argument. Without it this is the package it has always been.
+#
+# The variable is all there is to the asking on this side. Set by anyone, for
+# `npm run build:arch` or for makepkg run by hand, it packages the set just
+# the same. scripts/build.sh clears it on a build without --with-libmpv;
+# those other two ways of building do not, so do not keep it exported.
+#
+# makepkg strips every library it packages, and it has no way to leave some
+# out. The set's libraries were stripped when they were built and had their
+# names rewritten afterwards; stripped again they still load, but every one
+# comes out as a different file, and the set is shipped exactly as its MANIFEST
+# records it. (That is checked, but not from here: scripts/build.sh
+# --with-libmpv runs packaging/libmpv/check-package.sh on the package once it
+# is built, and a stripped library fails it.) So a package with the set is not
+# stripped. Vela's own binary loses nothing: its release profile has stripped
+# it already.
+if [ -n "${VELA_PACKAGE_LIBMPV:-}" ]; then
+  options+=('!strip')
+fi
 depends=('webkit2gtk-4.1' 'libsoup3' 'mpv' 'hicolor-icon-theme')
 source=()
 sha256sums=()
@@ -44,4 +66,37 @@ package() {
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/PROVENANCE.md" "$pkgdir/usr/lib/Vela/mpv-scripts/PROVENANCE.md"
   # GPL license text for the bundled script (Arch license convention).
   install -Dm644 "$repo/src-tauri/resources/mpv-scripts/LICENSE.GPL" "$pkgdir/usr/share/licenses/$pkgname/LICENSE.GPL"
+
+  # The libmpv set of the embedded player, only when the builder asked for it
+  # (see the top of this file). Every file of the directory goes to
+  # /usr/lib/Vela/libmpv/, which is where the deb/rpm bundles put it and the
+  # one place the loader reads: Tauri's resource directory plus "libmpv".
+  # Nothing is left out or chosen here, and nothing is checked here either.
+  # Whether the package holds the set as its MANIFEST records it is found out
+  # afterwards, by packaging/libmpv/check-package.sh, and only
+  # scripts/build.sh --with-libmpv runs that. makepkg run any other way with
+  # the variable set (npm run build:arch, or by hand) makes a package with the
+  # set that nobody has checked.
+  if [ -n "${VELA_PACKAGE_LIBMPV:-}" ]; then
+    local libmpv="$VELA_PACKAGE_LIBMPV" file kind component path
+    if [ ! -f "$libmpv/MANIFEST" ] || [ ! -f "$libmpv/libmpv.so.2" ]; then
+      echo "VELA_PACKAGE_LIBMPV names $libmpv, which holds no libmpv set" >&2
+      return 1
+    fi
+    # Said out loud, because nothing else would say it. The variable alone
+    # puts the set into the package, whoever set it and for whatever reason,
+    # and makepkg prints nothing about what package() installs.
+    echo "==> VELA_PACKAGE_LIBMPV is set: packaging the libmpv set from $libmpv"
+    echo "    Only scripts/build.sh --with-libmpv checks the package afterwards. Built any other way, check it yourself:"
+    echo "    packaging/libmpv/check-package.sh --set $libmpv <the package>"
+    while IFS= read -r -d '' file; do
+      install -Dm644 "$libmpv/$file" "$pkgdir/usr/lib/Vela/libmpv/$file"
+    done < <(cd "$libmpv" && find . -type f -printf '%P\0')
+    # The licence text of every shipped library, also where Arch keeps
+    # licences. The MANIFEST says which files those are.
+    while read -r kind component path; do
+      [ "$kind" = licence ] || continue
+      install -Dm644 "$libmpv/$path" "$pkgdir/usr/share/licenses/$pkgname/libmpv/$component/${path##*/}"
+    done < "$libmpv/MANIFEST"
+  fi
 }
