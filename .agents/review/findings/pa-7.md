@@ -148,3 +148,18 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "The Plex coverage does not prove the final stopped timeline". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 12:32 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da01-4575-78d3-9528-b557aedcdc75`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 12:21 UTC, finished 12:30 UTC.
+- Reviewed head `2a42345091b17ed54fb89ab281882e7e85f7f505`, base
+  `25287b6a6d1edc30d96c59bef88c17ab3810d6a2` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/judge.mjs:96 — The 2000 ms upper bound can reject correct playback: multiplex samples before stopPlayAsUser performs embedded UI waits, and showPlayerBar alone allows 3000 ms. Using the actual stop helper and Driver.waitFor with simulated controls appearing after 2250 ms produced a 7458 ms sample and a correct 9717 ms stop, which assertPlexStopped rejected. Conversely, an immediate stop at 7458 accepts an incorrect 8958 report. Observe the position through stopping, or stabilize it before sampling, and guard delayed controls explicitly; the recorded E2E runs do not cover this. Missing-stop, removed-bound, and wrong-seek mutations failed for their intended reasons; after restoration, all 26 tests passed.
