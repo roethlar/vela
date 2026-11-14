@@ -12,7 +12,7 @@ Seven candidates, seven admitted, none declined. Record:
 | pw-2 | MEDIUM   | A play in the embedded player is ranked for the previous mpv window's screen | `[~]`  | `6bb2db6`, `577fe5b` | codex/default/standard |
 | pw-3 | MEDIUM   | A width and a height never reported together can be carried as the window's size | `[~]`  | `2dd9eb7` | codex/default/standard |
 | pw-4 | MEDIUM   | Quitting Vela waits, without limit, for the settings file to be written | `[~]`  | `5de1305` | codex/default/standard |
-| pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[~]`  | `cbd93ae` | codex/default/standard |
+| pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[x]`  | `cbd93ae` | codex/default/standard |
 | pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[x]`  | `55be8fc`, `0e5ea59` | codex/default/standard |
 | pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[~]`  | `ac25240` | codex/default/standard |
 

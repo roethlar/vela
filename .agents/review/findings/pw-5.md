@@ -1,7 +1,7 @@
 # pw-5: an older play's window, or an earlier look at the current one, can be saved over a newer one
 
 **Severity**: MEDIUM — whether a play is still the latest is checked, and its window is read, before the settings lock is taken; the write then uses what was read. A play whose end is slow can write after a newer play has saved, and the exit handler can write an earlier look at a window over the later one the play's own end has just saved. The next run then opens with the older fullscreen, screen or size.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `cbd93ae`
 
@@ -164,3 +164,23 @@ generation pass over `f1e0c9c..9815e10` with Slice 3 of the plan as its
 mandate, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`). Reviewer's
 title: "Captured window snapshots can overwrite newer saved state". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 11:25 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9c7-4c0a-79a1-9340-bd3b9d78401c`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 11:17 UTC, finished 11:23 UTC.
+- Reviewed head `0e5ea592532c476cafe6a1142dc6de68d2f57ef1`, base
+  `530e9a544cf0b7f2f3f4837aec093b1d5b3f0492` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  - src-tauri/src/commands.rs:8650 — Both snapshot regressions reproduced the expected failures across all three interleaving guards. Reverting callback wiring also failed both Node pins. After restoration, all 76 Rust and 13 Node tests passed.
+  - tests/e2e/scenarios/windowsetting.mjs:115 — Embedded playback and E2E were reviewed without execution. Separate-client fullscreen readback does not synchronize Vela's observer; the recorded flakes do not establish a remaining pw-5 write-ordering defect.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
