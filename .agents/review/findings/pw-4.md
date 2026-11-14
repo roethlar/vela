@@ -1,7 +1,7 @@
 # pw-4: quitting Vela waits, without limit, for the settings file to be written
 
 **Severity**: MEDIUM — when Vela exits with a play's window to save, the exit handler reads and writes the settings file on the spot. That waits for the settings lock (which another Vela process can hold) and for the disk, with no deadline, on the thread that is closing the app. A stalled writer or filesystem keeps Vela from exiting.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `5de1305`
 
@@ -146,3 +146,21 @@ generation pass over `f1e0c9c..9815e10` with Slice 3 of the plan as its
 mandate, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`). Reviewer's
 title: "Exit performs an unbounded synchronous config write". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 11:34 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9cc-31d7-7fe0-a74e-d73f7a7f7ab8`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 11:23 UTC, finished 11:33 UTC.
+- Reviewed head `0e5ea592532c476cafe6a1142dc6de68d2f57ef1`, base
+  `530e9a544cf0b7f2f3f4837aec093b1d5b3f0492` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
