@@ -349,15 +349,22 @@ if [ "$mode" = arch ]; then
   # the set from a build that was not asked for it, or one that would be
   # checked and pass while the package this build made went unchecked. So
   # makepkg is asked which package this build made, and that one is checked
-  # and copied: it has to be there.
+  # and copied: it has to be there. A build that cannot say what it made has
+  # made nothing that can be handed out, and that is a failed build.
+  packagelist="$(cd "$bundle_dir" && makepkg --packagelist)" || packagelist=""
   while IFS= read -r f; do
+    [ -n "$f" ] || continue
     [ -f "$f" ] || {
       echo "==> makepkg names $f as the package of this build, and it is not there; see the build's output above" >&2
       exit 1
     }
     artifacts+=("$f")
-  done < <(cd "$bundle_dir" && makepkg --packagelist)
-  [ "${#artifacts[@]}" -eq 0 ] || bundle_dir="$(dirname "${artifacts[0]}")"
+  done <<< "$packagelist"
+  [ "${#artifacts[@]}" -gt 0 ] || {
+    echo "==> makepkg did not say which package this build made (makepkg --packagelist), so none is handed out; see the build's output above" >&2
+    exit 1
+  }
+  bundle_dir="$(dirname "${artifacts[0]}")"
 else
   for d in "${subdirs[@]}"; do
     if [ "$d" = "." ]; then dir="$bundle_dir"; else dir="$bundle_dir/$d"; fi

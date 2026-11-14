@@ -323,7 +323,8 @@ function executable(file, body) {
 // between the Tauri bundles and the Arch package.
 // `archPackage` is where the stand-in for the Arch build leaves its package,
 // and where the stand-in for makepkg says this build's package is (null: it
-// cannot say); a path that is not absolute is inside the fixture.
+// fails; false: it names nothing); a path that is not absolute is inside the
+// fixture.
 function buildFixture(
   t,
   {
@@ -397,7 +398,7 @@ esac
     `#!/bin/sh
 printf 'makepkg %s (in %s)\\n' "$*" "\${PWD#${root}/}" >> "${calls}"
 [ "$*" = --packagelist ] || exit 64
-${makepkgNames === null ? 'exit 1' : `printf '%s\\n' "${path.resolve(root, makepkgNames)}"`}
+${makepkgNames === null ? 'exit 1' : makepkgNames === false ? 'exit 0' : `printf '%s\\n' "${path.resolve(root, makepkgNames)}"`}
 `,
   );
   // The package check. Asked beforehand whether it can run, it records the
@@ -508,12 +509,19 @@ test('a default Arch build hands out the package it made, and not an earlier one
     assert.deepEqual(fixture.dist(), []);
   });
 
-  await t.test('makepkg cannot say which package it made: nothing is handed out', () => {
-    const fixture = withOlder({ makepkgNames: null });
-    const built = fixture.run([]);
-    assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
-    assert.match(built.stdout, /nothing matched/);
-    assert.deepEqual(fixture.dist(), []);
+  await t.test('makepkg cannot say which package it made: nothing is handed out, and that is a failure', () => {
+    // It fails, or it names nothing.
+    for (const makepkgNames of [null, false]) {
+      const fixture = withOlder({ makepkgNames });
+      fixture.leaveEarlierBuild();
+      const built = fixture.run([]);
+      assert.equal(built.status, 1, `${built.stdout}\n${built.stderr}`);
+      assert.match(
+        built.stderr,
+        /^==> makepkg did not say which package this build made \(makepkg --packagelist\), so none is handed out; see the build's output above$/m,
+      );
+      assert.deepEqual(fixture.dist(), []);
+    }
   });
 });
 
@@ -758,7 +766,7 @@ test('--with-libmpv on Arch checks and hands out the package this build made, an
     const fixture = withOlder({ makepkgNames: null });
     const built = fixture.run(['--with-libmpv']);
     assert.equal(built.status, 1, `${built.stdout}\n${built.stderr}`);
-    assert.match(built.stderr, /--with-libmpv: the build left no package to check/);
+    assert.match(built.stderr, /^==> makepkg did not say which package this build made /m);
     assert.deepEqual(checked(fixture), []);
     assert.deepEqual(fixture.dist(), []);
   });

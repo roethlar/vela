@@ -334,7 +334,8 @@ made (`makepkg --packagelist`) and copies that one alone to `dist/`, from
 wherever makepkg was told to put it (`PKGDEST`); a `--with-libmpv` build
 checks it first. An older package that carries the set can therefore not
 pass in place of the new one, nor be handed out by a build that was not
-asked for the set. If makepkg
+asked for the set. If makepkg cannot say which package it made, the build
+fails and copies nothing. If makepkg
 writes its packages under an ending the check does not know (it knows
 `.pkg.tar.zst` and `.pkg.tar.xz`), the check fails the package and says so.
 
