@@ -49,7 +49,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       for its review; see the plan's log. Its cropping script is built
       under an assumption the owner has not ruled on: the plan's "For the
       owner", item 3.)
-    - Then Slice 6 (parity). What was found out for it is
+    - Then Slice 6 (parity), being written since the evening of
+      2026-11-13 on the local branch `slice6` (tests and harness only; no
+      product code). What was found out for it is
       `.agents/plans/embedded-player.slice6-notes.md`: why each scenario
       that fails in the embedded venue fails (none is a defect of the
       embedded player; two are the test compositor), what proves each
