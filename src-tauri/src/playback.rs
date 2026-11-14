@@ -644,12 +644,20 @@ fn another_ipc_path(taken: &str) -> Result<String, String> {
     }
 }
 
-/// Fired exactly once when a playback session ends — after the final server
-/// check-in for tracked sessions, or at mpv exit for untracked ones — with
-/// the last observed playback position in ms (0 when none was read). The
-/// caller wires this to recents recording + UI notification (a
-/// `playback-ended` Tauri event); this module stays UI-framework-free.
-pub type EndNotify = Arc<dyn Fn(u64) + Send + Sync>;
+/// What Vela observed before a play ended. Contains no mpv diagnostic text,
+/// which can carry stream URLs and credentials.
+#[derive(Default)]
+pub struct PlaybackEnd {
+    pub position_ms: u64,
+    /// No loaded file or position was observed before the IPC reader ended.
+    /// This is deliberately not a diagnosis: mpv can fail before IPC connects,
+    /// and its file errors do not reliably identify a refused certificate.
+    pub failed_to_start: bool,
+}
+
+/// Fired once after the final server check-in, or at mpv exit for untracked
+/// sessions. The caller records recents and notifies the UI.
+pub type EndNotify = Arc<dyn Fn(PlaybackEnd) + Send + Sync>;
 
 /// The longest an end notice waits for the EOF watcher. mpv writes its
 /// `end-file` before it closes the socket the watcher reads, and a watcher
@@ -1067,19 +1075,39 @@ fn spawn_eof_watcher(
     Ok(())
 }
 
-/// send buffer), publishing the latest position into the returned counter. The
-/// `done` flag is set when mpv exits or the connection drops. Does NO network I/O,
-/// so it's shared by every backend's poster.
+/// Position and startup evidence from the shared IPC reader.
+struct PositionReader {
+    last_t_ms: Arc<AtomicU64>,
+    done: Arc<AtomicBool>,
+    start_unconfirmed: Arc<AtomicBool>,
+}
+
+impl PositionReader {
+    fn end(&self, stop_flag: &AtomicBool) -> PlaybackEnd {
+        PlaybackEnd {
+            position_ms: self.last_t_ms.load(Ordering::Relaxed),
+            failed_to_start: self.done.load(Ordering::Acquire)
+                && self.start_unconfirmed.load(Ordering::Relaxed)
+                && !stop_flag.load(Ordering::Relaxed),
+        }
+    }
+}
+
+/// Observe position and window state without server I/O. `done` is set when
+/// the IPC connection ends or cannot be made; startup evidence lets the UI
+/// explain a play that ended before opening, even when IPC never connected.
 fn spawn_position_reader(
     socket_path: String,
     initial_ms: u64,
     stop_flag: Arc<AtomicBool>,
     window_observation: WindowStateObservation,
-) -> std::io::Result<(Arc<AtomicU64>, Arc<AtomicBool>)> {
+) -> std::io::Result<PositionReader> {
     let last_t_ms = Arc::new(AtomicU64::new(initial_ms));
     let done = Arc::new(AtomicBool::new(false));
     let last_t_ms_r = last_t_ms.clone();
     let done_r = done.clone();
+    let start_unconfirmed = Arc::new(AtomicBool::new(true));
+    let start_unconfirmed_r = start_unconfirmed.clone();
     // Taken before the thread, so that a thread that cannot be started marks
     // the reader finished too (its closure is dropped unrun).
     let finishes = window_observation.reader_started();
@@ -1154,13 +1182,26 @@ fn spawn_position_reader(
                 if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                     if let Some(ms) = position_property_change(&v) {
                         last_t_ms_r.store(ms, Ordering::Relaxed);
+                        start_unconfirmed_r.store(false, Ordering::Relaxed);
+                    }
+                    // A very short file can end before a position arrives.
+                    // An observed deliberate quit/stop also needs no warning.
+                    if v["event"] == "file-loaded"
+                        || (v["event"] == "end-file"
+                            && matches!(v["reason"].as_str(), Some("eof" | "quit" | "stop")))
+                    {
+                        start_unconfirmed_r.store(false, Ordering::Relaxed);
                     }
                     window_observation.apply_ipc_event(&v);
                 }
             }
-            done_r.store(true, Ordering::Relaxed);
+            done_r.store(true, Ordering::Release);
         })?;
-    Ok((last_t_ms, done))
+    Ok(PositionReader {
+        last_t_ms,
+        done,
+        start_unconfirmed,
+    })
 }
 
 /// Called when Automatic decides this play needs a lower tier. Carries the
@@ -1372,7 +1413,7 @@ fn start_tracking_plex(
     window_observation: WindowStateObservation,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let (last_t_ms, done) =
+    let reading =
         spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
 
     std::thread::Builder::new()
@@ -1401,8 +1442,8 @@ fn start_tracking_plex(
                     Err(_) => return,
                 };
 
-                while wait_tick(&stop_flag, &done) {
-                    let t = last_t_ms.load(Ordering::Relaxed);
+                while wait_tick(&stop_flag, &reading.done) {
+                    let t = reading.last_t_ms.load(Ordering::Relaxed);
                     if let Err(e) = rt.block_on(crate::plex_api::update_timeline(
                         &client,
                         &info.server_base,
@@ -1421,7 +1462,7 @@ fn start_tracking_plex(
                 // Authoritative final position. Skip if we never read a real position
                 // (mpv failed to start / exited immediately) so we don't clobber an
                 // existing resume point with 0.
-                let t = last_t_ms.load(Ordering::Relaxed);
+                let t = reading.last_t_ms.load(Ordering::Relaxed);
                 if t > 0 {
                     let _ = rt.block_on(crate::plex_api::update_timeline(
                         &client,
@@ -1447,7 +1488,7 @@ fn start_tracking_plex(
                 }
             })();
             if let Some(on_end) = on_end {
-                on_end(last_t_ms.load(Ordering::Relaxed));
+                on_end(reading.end(&stop_flag));
             }
         })?;
     Ok(())
@@ -1465,7 +1506,7 @@ fn start_tracking_jellyfin(
     window_observation: WindowStateObservation,
     on_end: Option<EndNotify>,
 ) -> std::io::Result<()> {
-    let (last_t_ms, done) =
+    let reading =
         spawn_position_reader(socket_path, start_ms, stop_flag.clone(), window_observation)?;
 
     std::thread::Builder::new()
@@ -1523,21 +1564,21 @@ fn start_tracking_jellyfin(
                     }
                 };
 
-                post("", last_t_ms.load(Ordering::Relaxed), None); // Start
-                while wait_tick(&stop_flag, &done) {
+                post("", reading.last_t_ms.load(Ordering::Relaxed), None); // Start
+                while wait_tick(&stop_flag, &reading.done) {
                     post(
                         "/Progress",
-                        last_t_ms.load(Ordering::Relaxed),
+                        reading.last_t_ms.load(Ordering::Relaxed),
                         Some("TimeUpdate"),
                     );
                 }
                 // Always post Stopped — including at position 0 — since we posted Start.
                 // Otherwise a fast mpv exit (before any IPC position arrives) would leave
                 // a stale "now playing" session on the server.
-                post("/Stopped", last_t_ms.load(Ordering::Relaxed), None);
+                post("/Stopped", reading.last_t_ms.load(Ordering::Relaxed), None);
             })();
             if let Some(on_end) = on_end {
-                on_end(last_t_ms.load(Ordering::Relaxed));
+                on_end(reading.end(&stop_flag));
             }
         })?;
     Ok(())
@@ -1556,7 +1597,7 @@ fn spawn_end_watcher(
 ) -> std::io::Result<()> {
     // Reuse the shared position reader: its `done` flag doubles as the EOF
     // signal (set when mpv exits / the socket drops).
-    let (last_t_ms, done) =
+    let reading =
         spawn_position_reader(socket_path, 0, stop_flag.clone(), window_observation)?;
     let Some(on_end) = on_end else {
         return Ok(());
@@ -1564,13 +1605,13 @@ fn spawn_end_watcher(
     std::thread::Builder::new()
         .name("mpv-end-watcher".into())
         .spawn(move || {
-            while !done.load(Ordering::Relaxed) && !stop_flag.load(Ordering::Relaxed) {
+            while !reading.done.load(Ordering::Relaxed) && !stop_flag.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(100));
             }
             // Fire even when the session was replaced or mpv exited before a
             // position arrived (position 0): the session is over either way,
             // and a spurious refresh is harmless.
-            on_end(last_t_ms.load(Ordering::Relaxed));
+            on_end(reading.end(&stop_flag));
         })?;
     Ok(())
 }
@@ -2331,7 +2372,7 @@ mod tests {
         let _ = std::fs::remove_file(&socket);
         let (reported, on_end) = end_behind_an_eof_watcher(&socket, "never-connected");
         let started = std::time::Instant::now();
-        on_end(0);
+        on_end(PlaybackEnd::default());
         let took = started.elapsed();
         assert!(reported.load(Ordering::Relaxed), "the end was reported");
         assert!(took < Duration::from_millis(500), "the end was held {took:?}");
@@ -2349,7 +2390,7 @@ mod tests {
         // Connected, and told nothing: the watcher reads on.
         let (silent, _) = listener.accept().unwrap();
         let started = std::time::Instant::now();
-        on_end(0);
+        on_end(PlaybackEnd::default());
         let took = started.elapsed();
         drop(silent);
         let _ = std::fs::remove_file(&socket);
@@ -2648,7 +2689,9 @@ mod tests {
         let listener = UnixListener::bind(&socket).expect("bind");
 
         let stop = Arc::new(AtomicBool::new(false));
-        let (last_t_ms, done) = spawn_position_reader(
+        let PositionReader {
+            last_t_ms, done, ..
+        } = spawn_position_reader(
             socket.to_string_lossy().to_string(),
             0,
             stop.clone(),
@@ -2691,7 +2734,9 @@ mod tests {
 
         let observation = WindowStateObservation::default();
         let stop = Arc::new(AtomicBool::new(false));
-        let (last_t_ms, done) = spawn_position_reader(
+        let PositionReader {
+            last_t_ms, done, ..
+        } = spawn_position_reader(
             socket.to_string_lossy().to_string(),
             0,
             stop.clone(),

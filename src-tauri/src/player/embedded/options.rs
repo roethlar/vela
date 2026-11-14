@@ -167,6 +167,48 @@ mod tests {
     }
 
     #[test]
+    fn tls_verification_is_last_in_the_embedded_options_in_both_states() {
+        for verify in [None, Some(true), Some(false)] {
+            for headers in [false, true] {
+                let expected = if verify.unwrap_or(true) { "yes" } else { "no" };
+                let conflicting = if verify.unwrap_or(true) { "no" } else { "yes" };
+                let cfg = crate::config::AppConfig {
+                    mpv_tls_verify: verify,
+                    mpv_use_own_config: Some(true),
+                    mpv_extra_args: Some(format!(
+                        "--tls-verify={conflicting}\n--include=/test/user.conf\n--tls-ca-file=/test/private-ca.pem"
+                    )),
+                    ..Default::default()
+                };
+                let mut spec = crate::playback::embedded_spec();
+                if headers {
+                    spec.http_headers.push(("X-Test".into(), "fixture".into()));
+                }
+                let plan =
+                    crate::player::launch::build_launch(&spec, &cfg, "/tmp/vela-tls-test/mpv.sock")
+                        .unwrap();
+                let applied = steps(&plan.args);
+                assert!(applied.contains(&Step::Options(format!(
+                    "tls-verify=%{}%{conflicting}\n",
+                    conflicting.len()
+                ))));
+                assert!(applied.contains(&Step::Include("/test/user.conf".into())));
+                assert!(applied.contains(&Step::Options(
+                    "tls-ca-file=%20%/test/private-ca.pem\n".into()
+                )));
+                assert_eq!(
+                    applied.last(),
+                    Some(&Step::Options(format!(
+                        "tls-verify=%{}%{expected}\n",
+                        expected.len()
+                    ))),
+                    "the setting is applied after every user option and include"
+                );
+            }
+        }
+    }
+
+    #[test]
     fn a_value_is_written_with_its_length_in_bytes() {
         assert_eq!(line("vo", Some("libmpv")), "vo=%6%libmpv\n");
         assert_eq!(line("no-ytdl", None), "no-ytdl\n");

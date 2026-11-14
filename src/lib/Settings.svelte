@@ -1,6 +1,16 @@
 <script module lang="ts">
   type PlayerWindowMode = "remember" | "fullscreen" | "default";
 
+  // Shared across openings, so closing Settings during a read or save cannot
+  // let a later opening race it or lose its confirmation. One request at a time.
+  const playerTls = $state({
+    verify: true,
+    skip: false,
+    loaded: false,
+    busy: false,
+    error: null as string | null,
+  });
+
   // The Player window mode as the backend last confirmed it, kept for the
   // app and not for one opening of Settings: Settings is mounted afresh each
   // time it opens, and a save sent from one opening can be confirmed after
@@ -128,6 +138,40 @@
     closeBtn?.focus();
   });
   onDestroy(() => prevFocus?.focus());
+
+  onMount(() => {
+    void loadPlayerTls();
+  });
+
+  async function loadPlayerTls() {
+    if (playerTls.busy) return;
+    playerTls.busy = true;
+    playerTls.error = null;
+    try {
+      playerTls.verify = await invoke<boolean>("get_mpv_tls_verify");
+      playerTls.skip = !playerTls.verify;
+      playerTls.loaded = true;
+    } catch {
+      playerTls.loaded = false;
+      playerTls.error = "Could not read the certificate setting. Close Settings and try again.";
+    } finally {
+      playerTls.busy = false;
+    }
+  }
+
+  async function savePlayerTls() {
+    if (playerTls.busy || !playerTls.loaded) return;
+    playerTls.busy = true;
+    playerTls.error = null;
+    try {
+      playerTls.verify = await invoke<boolean>("set_mpv_tls_verify", { verify: !playerTls.skip });
+    } catch {
+      playerTls.error = "Could not save the certificate setting. Your previous setting is still in use.";
+    } finally {
+      playerTls.skip = !playerTls.verify;
+      playerTls.busy = false;
+    }
+  }
 
   function trapFocus(e: KeyboardEvent) {
     if (e.key !== "Tab" || !panel) return;
@@ -770,6 +814,33 @@
 
     <section>
       <h3>mpv player</h3>
+      <div class="form">
+        <label class="check">
+          <input
+            type="checkbox"
+            id="player-skip-certificate-checks"
+            bind:checked={playerTls.skip}
+            disabled={playerTls.busy || !playerTls.loaded}
+            aria-describedby="player-certificate-help"
+          />
+          Skip server certificate checks
+        </label>
+        <p id="player-certificate-help" class="muted small">
+          The player checks HTTPS server certificates by default. Turning this check off
+          sends your sign-in token without knowing who receives it. For a server signed
+          by a private authority, you can instead name that authority's certificate file
+          to mpv with <code>tls-ca-file</code> in Advanced options or your own mpv configuration.
+          Applies to the next video; plain HTTP is unchanged.
+        </p>
+        <div class="btnrow">
+          <button class="primary" disabled={playerTls.busy || !playerTls.loaded} onclick={savePlayerTls}>
+            {playerTls.busy ? (playerTls.loaded ? "Saving…" : "Loading…") : "Save certificate setting"}
+          </button>
+        </div>
+        {#if playerTls.error}
+          <p class="warn small" role="alert">{playerTls.error}</p>
+        {/if}
+      </div>
       {#if mpv}
         <p class="muted small">
           {#if mpv.available}

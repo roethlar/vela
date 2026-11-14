@@ -960,6 +960,18 @@ pub(crate) fn build_launch_for(
     if spec.start_seconds > 0.0 {
         args.push(LaunchArg::set("start", spec.start_seconds.to_string()));
     }
+    // Last, including after the auth include: an external CLI include can
+    // reapply options from the user's profile (67536da). Neither state of
+    // this setting may be overridden by that or by Advanced options. Leave
+    // tls-ca-file and the player's trust store entirely to mpv/the user.
+    args.push(LaunchArg::set(
+        "tls-verify",
+        if cfg.mpv_tls_verify.unwrap_or(true) {
+            "yes"
+        } else {
+            "no"
+        },
+    ));
 
     Ok(LaunchPlan {
         args,
@@ -1484,6 +1496,7 @@ mod tests {
             "--force-window=no".to_string(),
             format!("--include={}", include_path.to_string_lossy()),
             "--start=123.5".to_string(),
+            "--tls-verify=yes".to_string(),
         ]
         .to_vec();
         assert_eq!(cli(plan.args.iter().cloned()), expected);
@@ -1518,6 +1531,7 @@ mod tests {
                 "--force-media-title=Vela",
                 "--vo=libmpv",
                 "--force-window=no",
+                "--tls-verify=yes",
             ]
         );
         assert!(plan.env.is_empty());

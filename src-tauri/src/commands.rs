@@ -1162,6 +1162,21 @@ pub fn get_mpv_window_mode() -> Result<String, String> {
         .map(|mode| mode.as_str().to_string())
 }
 
+#[tauri::command]
+pub fn get_mpv_tls_verify() -> Result<bool, String> {
+    let cfg = config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+    Ok(cfg.mpv_tls_verify != Some(false))
+}
+
+#[tauri::command]
+pub fn set_mpv_tls_verify(verify: bool) -> Result<bool, String> {
+    config::update(move |cfg| {
+        cfg.mpv_tls_verify = Some(verify);
+        Ok(())
+    })?;
+    Ok(verify)
+}
+
 /// Set how the first player window of a run opens. Remember is the default
 /// and is stored as no value. Leaving remember removes the stored window in
 /// the same write, so nothing of it is kept or read again.
@@ -5849,6 +5864,13 @@ async fn play_by_key_locked(
         .map_err(|_| "could not read Vela settings".to_string())
         .and_then(|cfg| config::first_window_of_run(&cfg))
         .map_err(PlayFailure::fatal)?;
+    // Whether the player is told to check the server's certificate
+    // (`mpv_tls_verify`; plan tls-verify). Read like the settings above: a
+    // settings file that cannot be read fails the play, it is never guessed.
+    let certificate_check_on = config::load_config()
+        .map_err(|_| "could not read Vela settings".to_string())
+        .map(|cfg| cfg.mpv_tls_verify != Some(false))
+        .map_err(PlayFailure::fatal)?;
     // The quality for this play, resolved once here so the sources never read
     // config themselves. A one-off menu choice wins for this launch only; it is
     // validated against the same closed set the setting uses, so a value the
@@ -6078,6 +6100,12 @@ async fn play_by_key_locked(
                 }
             }
         };
+        // Whether the player checks a certificate for this play: an `https`
+        // stream with the check on (`mpv_tls_verify`). Only then is a play
+        // that ended before it was seen to start reported as one whose
+        // certificate may have been refused; any other early end is
+        // reported as it always was.
+        let certificate_checked = certificate_check_on && resolved.url.starts_with("https://");
         let spec = playback::PlaySpec {
             player: player_choice.kind,
             url: resolved.url,
@@ -6127,7 +6155,7 @@ async fn play_by_key_locked(
         // This first one also names its session and says whether the run is
         // over (`end_is_run_over`): an end that is not clean reaches no
         // dispatcher, and the page leaves the run's fullscreen on it.
-        // Payloads carry ids and a flag only — never URLs or tokens.
+        // Payloads carry ids and flags only — never URLs or tokens.
         let on_end: Option<playback::EndNotify> = {
             use tauri::Emitter;
             let latest_window = state.playback_window_session.clone();
@@ -6143,7 +6171,8 @@ async fn play_by_key_locked(
             let advance = state.playback_advance.clone();
             let transcode_slot = state.active_transcode.clone();
             let transcode_session = transcode_session.clone();
-            Some(std::sync::Arc::new(move |position_ms: u64| {
+            Some(std::sync::Arc::new(move |end: playback::PlaybackEnd| {
+                let position_ms = end.position_ms;
                 // Stop the server-side transcode first: it costs the user's server
                 // real work, and the recents/event bookkeeping below must not be
                 // able to skip it by returning early. This runs on the tracker's
@@ -6224,6 +6253,7 @@ async fn play_by_key_locked(
                             "itemKey": item_key.clone(),
                             "sessionId": session_id.clone(),
                             "runOver": run_over,
+                            "failedToStart": run_over && end.failed_to_start && certificate_checked,
                         }),
                     );
                 }

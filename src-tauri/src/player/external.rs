@@ -544,6 +544,7 @@ mod tests {
                 "--include=<AUTH INCLUDE>".to_string(),
                 "--idle=no".to_string(),
                 "--start=123.5".to_string(),
+                "--tls-verify=yes".to_string(),
                 "--".to_string(),
                 "https://media.invalid/video/stream.mkv?x=1".to_string(),
             ],
@@ -758,6 +759,51 @@ mod tests {
         assert!(String::from_utf8_lossy(&output.stdout).contains("Exiting... (End of file)"));
     }
 
+    // Auth-include fixtures stay in /tmp, never the Windows user's config.
+    #[cfg(not(windows))]
+    #[test]
+    fn tls_verification_is_last_on_the_external_command_line_in_both_states() {
+        for verify in [None, Some(true), Some(false)] {
+            for headers in [false, true] {
+                let expected = if verify.unwrap_or(true) { "yes" } else { "no" };
+                let conflicting = if verify.unwrap_or(true) { "no" } else { "yes" };
+                let cfg = crate::config::AppConfig {
+                    mpv_tls_verify: verify,
+                    mpv_use_own_config: Some(true),
+                    mpv_extra_args: Some(format!(
+                        "--tls-verify={conflicting}\n--include=/test/user.conf\n--tls-ca-file=/test/private-ca.pem"
+                    )),
+                    ..Default::default()
+                };
+                let mut spec = recorded_spec("https://media.invalid/video");
+                if headers {
+                    spec.http_headers.push(("X-Test".into(), "fixture".into()));
+                }
+                let plan = build_launch(&spec, &cfg, "/tmp/vela-tls-test/mpv.sock").unwrap();
+                let args = command_args(&command("mpv", &plan));
+                assert!(args.contains(&format!("--tls-verify={conflicting}")));
+                assert!(args.contains(&"--include=/test/user.conf".to_string()));
+                assert_eq!(
+                    args.iter()
+                        .filter(|arg| arg.starts_with("--tls-ca-file="))
+                        .map(String::as_str)
+                        .collect::<Vec<_>>(),
+                    ["--tls-ca-file=/test/private-ca.pem"],
+                    "the user's trust file is left alone"
+                );
+                assert_eq!(
+                    &args[args.len() - 3..],
+                    [
+                        format!("--tls-verify={expected}"),
+                        "--".into(),
+                        spec.url.clone(),
+                    ],
+                    "the setting follows every user option and the auth include"
+                );
+            }
+        }
+    }
+
     #[test]
     fn the_minimal_external_command_line_is_exactly_the_recorded_one() {
         // Nothing optional: the expert's own mpv config, no Advanced options,
@@ -792,6 +838,7 @@ mod tests {
                 "--input-ipc-server=/tmp/vela-recorded/min.sock",
                 "--force-media-title=Vela",
                 "--title=Vela",
+                "--tls-verify=yes",
                 "--",
                 "edl://not-a-url-with-a-dash",
             ]

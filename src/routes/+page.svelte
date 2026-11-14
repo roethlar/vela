@@ -116,7 +116,7 @@
   // play's view shows; the dispatcher's report of a clean end says whether a
   // successor is coming, and with none and nothing pending here the run is
   // over (the rule is in $lib/playerView).
-  function playbackEnded(event: { payload: PlaybackEnd }): Promise<unknown> {
+  async function playbackEnded(event: { payload: PlaybackEnd }): Promise<void> {
     const end = event.payload ?? {};
     playerSessionEnded = showingPlayEnded(playerSession, playerSessionEnded, playerSession, end);
     if (
@@ -128,7 +128,13 @@
     ) {
       leavePlayerFullscreen();
     }
-    return refreshWatchState();
+    await refreshWatchState();
+    if (end.failedToStart === true) {
+      // Sent only for an https stream whose certificate the player checks.
+      const said = "The player ended before playback could be confirmed. For HTTPS streams, check the server's certificate and Settings → mpv player → Skip server certificate checks. If your server uses a private authority, name its certificate file to mpv with tls-ca-file in Advanced options or your own mpv configuration.";
+      if (detailView) detailStatus = said;
+      else setError(said);
+    }
   }
 
   onDestroy(() => {

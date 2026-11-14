@@ -24,7 +24,12 @@ export function nextPlayerSession(current: string | null, event: PlayerViewEvent
 // only that report carries `successor`, always as true or false: true when
 // another play is active or one is being chosen. It also says the run is over
 // when the successor could not be started or no play is active at all.
-export type PlaybackEnd = { sessionId?: unknown; runOver?: unknown; successor?: unknown };
+export type PlaybackEnd = {
+  sessionId?: unknown;
+  runOver?: unknown;
+  successor?: unknown;
+  failedToStart?: unknown;
+};
 
 export type PlayEndContext = {
   /** The session whose view shows now. */

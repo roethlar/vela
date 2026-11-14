@@ -87,11 +87,11 @@ test('the page shows the player view for exactly the session the events name', (
   );
   // `playback-ended` fires twice after a clean end; it never decides which
   // view shows. Besides the watch-state refresh, it can end fullscreen for a
-  // run that is over (the tests below).
+  // run that is over (the tests below), and report a play that never opened.
   assert.match(page, /listen<PlaybackEnd>\("playback-ended", playbackEnded\)/);
   assert.match(
     page,
-    /function playbackEnded\(event: \{ payload: PlaybackEnd \}\): Promise<unknown> \{[\s\S]*?\n\s+return refreshWatchState\(\);\s+\}/,
+    /async function playbackEnded\(event: \{ payload: PlaybackEnd \}\): Promise<void> \{[\s\S]*?\n\s+await refreshWatchState\(\);\s+if \(end\.failedToStart === true\) \{/,
   );
   // The view is keyed by session, so a successor gets a fresh one; what it
   // knows of fullscreen comes from the page, which outlives it.
@@ -813,7 +813,7 @@ test('a report that does not say the run is over never leaves on its own', () =>
 });
 
 test("the tracker's report of an end names its session and says whether the run is over", () => {
-  // The one emit of the tracker's end, whole: ids and a flag, the flag from
+  // The one emit of the tracker's end, whole: ids and flags, runOver from
   // the rule `end_is_run_over` (tested in Rust) on what the backend knows
   // there.
   assert.match(
@@ -830,6 +830,7 @@ test("the tracker's report of an end names its session and says whether the run 
             "itemKey": item_key.clone(),
             "sessionId": session_id.clone(),
             "runOver": run_over,
+            "failedToStart": run_over && end.failed_to_start && certificate_checked,
         }),
     );
     }

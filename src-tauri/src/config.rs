@@ -42,6 +42,11 @@ pub struct AppConfig {
     /// `~/.config/mpv/mpv.conf`. It also leaves macOS audio-output selection to
     /// that config. Off by default for a reproducible launch.
     pub mpv_use_own_config: Option<bool>,
+    /// Check the media server's TLS certificate in the player. Missing (or
+    /// null) means true; only an explicit false disables checking. Applied
+    /// after the user's options and includes, without choosing a CA store.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mpv_tls_verify: Option<bool>,
     /// Black-bar cropping via mpv's bundled `autocrop.lua`, three-state:
     /// `"off"` (default; nothing injected), `"manual"` (script loaded with
     /// `autocrop-auto=no` — crops only on an explicit in-player `Shift+C`), or
@@ -1592,6 +1597,57 @@ mod tests {
         chosen.validate().expect("a known player value is valid");
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    // Exercise the ordinary durable settings path with an old document.
+    #[test]
+    fn tls_verification_round_trips_defaults_on_and_rejects_bad_values() {
+        let (path, lock, _, _, root) = temp_paths("tls-verify");
+        let legacy = serde_json::json!({
+            "local_folders": [{"id":"old", "name":"Movies", "path":"/media", "kind":"movie"}],
+            "smb_mounts": [{"id":"smb", "name":"NAS", "server":"nas", "share":"media",
+                "username":"user", "password":"fixture", "mountpoint":"/media", "local_folder_id":"old"}],
+            "ssh_mounts": [{"id":"ssh", "name":"NAS", "host":"nas", "username":"user",
+                "remote_path":"/media", "mountpoint":"/ssh", "local_folder_id":"old"}]
+        });
+        fs::write(&path, serde_json::to_vec(&legacy).unwrap()).unwrap();
+        let old = load_unmigrated_at(&path).unwrap();
+        assert_eq!(old.mpv_tls_verify, None);
+        assert!(old.mpv_tls_verify.unwrap_or(true));
+        let preserved = serde_json::to_value(&old).unwrap();
+        for verify in [false, true] {
+            update_at(&path, &lock, |cfg| {
+                cfg.mpv_tls_verify = Some(verify);
+                Ok(())
+            })
+            .unwrap();
+            // An unrelated later settings save must keep the choice too.
+            update_at(&path, &lock, |cfg| {
+                cfg.continue_playing = Some("off".into());
+                Ok(())
+            })
+            .unwrap();
+            let saved = load_unmigrated_at(&path).unwrap();
+            assert_eq!(saved.mpv_tls_verify, Some(verify));
+            let saved = serde_json::to_value(&saved).unwrap();
+            for field in ["local_folders", "smb_mounts", "ssh_mounts"] {
+                assert_eq!(saved[field], preserved[field]);
+            }
+        }
+        fs::write(&path, br#"{"mpv_tls_verify":null}"#).unwrap();
+        assert!(load_unmigrated_at(&path)
+            .unwrap()
+            .mpv_tls_verify
+            .unwrap_or(true));
+        let invalid = br#"{"mpv_tls_verify":"no"}"#;
+        fs::write(&path, invalid).unwrap();
+        assert_eq!(
+            load_unmigrated_at(&path).err().unwrap().kind(),
+            io::ErrorKind::InvalidData
+        );
+        assert!(update_at(&path, &lock, |_| Ok(())).is_err());
+        assert_eq!(fs::read(&path).unwrap(), invalid);
+        fs::remove_dir_all(root).unwrap();
     }
 
     // Slice 3 of `.agents/plans/mpv-window-geometry.md`. A config from before
