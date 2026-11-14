@@ -178,6 +178,11 @@
   // backend's missing-field default.
   let playerWindowMode = $state<PlayerWindowMode>("remember");
   let playerWindowBusy = $state(false);
+  // The mode the backend last said it holds, from loading or from the last
+  // save that succeeded. A save that fails puts the control back to it, so
+  // the control never shows a choice that was not saved (review finding
+  // pw-7).
+  let playerWindowSaved: PlayerWindowMode = "remember";
 
   // Duplicate-copy selection and the display profile used by Compatible.
   let playbackPreferences = $state<PlaybackPreferences | null>(null);
@@ -274,7 +279,7 @@
       skipCredits = adv.skipCredits;
       skipCommercials = adv.skipCommercials;
       continuePlaying = continueMode;
-      playerWindowMode = windowMode;
+      playerWindowMode = playerWindowSaved = windowMode;
       applyPlaybackPreferences(playbackPrefs);
     } catch (e) {
       if (seq === loadSeq) err = String(e);
@@ -422,10 +427,12 @@
     playerWindowBusy = true;
     err = null;
     try {
-      playerWindowMode = await invoke<PlayerWindowMode>("set_mpv_window_mode", {
+      const saved = await invoke<PlayerWindowMode>("set_mpv_window_mode", {
         mode: playerWindowMode,
       });
+      playerWindowMode = playerWindowSaved = saved;
     } catch (e) {
+      playerWindowMode = playerWindowSaved;
       err = String(e);
     } finally {
       playerWindowBusy = false;

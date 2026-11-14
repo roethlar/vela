@@ -196,6 +196,89 @@ test('a play opens on the screen its Compatible copy was ranked for', () => {
   assert.equal([...playBody.matchAll(/\bscreen_name\b/g)].length, 2, 'untouched in between');
 });
 
+// Review finding pw-7: a save that fails puts the control back to the mode
+// the backend holds. Runs the component's own load and save functions, with
+// their types stripped, against a fake backend.
+test('a failed save of the player window setting puts the control back to the saved mode', async () => {
+  if (!settings.includes('id="player-window"')) return; // Withheld is always safe.
+  // What is run below is what the control shows and what its button calls.
+  assert.match(settings, /<select id="player-window" bind:value=\{playerWindowMode\}>/);
+  assert.match(settings, /onclick=\{savePlayerWindowMode\}/);
+  const ts = (await import('typescript')).default;
+  const script = settings.slice(
+    settings.indexOf('<script lang="ts">') + '<script lang="ts">'.length,
+    settings.indexOf('</script>'),
+  );
+  const functionSource = (name) => {
+    const start = script.indexOf(`\n  async function ${name}(`);
+    assert.ok(start >= 0, `${name} exists`);
+    let depth = 0;
+    for (let at = script.indexOf('{', start); at < script.length; at += 1) {
+      if (script[at] === '{') depth += 1;
+      if (script[at] === '}' && (depth -= 1) === 0) return script.slice(start, at + 1);
+    }
+    throw new Error(`${name} has no end`);
+  };
+  const load = functionSource('load');
+  // Everything load assigns is declared here; only the player window state
+  // is taken from the component as it is written.
+  const assigned = [...new Set([...load.matchAll(/^\s+(\w+) = /gm)].map((match) => match[1]))];
+  const declarations = [...script.matchAll(/^ {2}let playerWindow\w*[^;]*;$/gm)].map((match) => match[0]);
+  assert.ok(declarations.length >= 2, 'the player window state is declared');
+  const source = ts.transpileModule(
+    [
+      'let err = null;',
+      'let loadSeq = 0;',
+      `let ${assigned.filter((name) => !name.startsWith('playerWindow') && name !== 'err').join(', ')};`,
+      'function applyPlaybackPreferences() {}',
+      ...declarations,
+      load,
+      functionSource('savePlayerWindowMode'),
+      'return {',
+      '  load, savePlayerWindowMode,',
+      '  get mode() { return playerWindowMode; }, set mode(value) { playerWindowMode = value; },',
+      '  get err() { return err; },',
+      '};',
+    ].join('\n'),
+    { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
+  ).outputText;
+
+  const backend = { mode: 'default', refuse: false };
+  const invoke = async (command, args) => {
+    if (command === 'get_mpv_window_mode') return backend.mode;
+    if (command === 'set_mpv_window_mode') {
+      if (backend.refuse) throw new Error('the settings could not be saved');
+      backend.mode = args.mode;
+      return backend.mode;
+    }
+    return {};
+  };
+  const control = new Function('invoke', '$state', source)(invoke, (value) => value);
+
+  // The mode comes from loading; a refused save goes back to it.
+  await control.load();
+  assert.equal(control.mode, 'default');
+  control.mode = 'fullscreen';
+  backend.refuse = true;
+  await control.savePlayerWindowMode();
+  assert.equal(control.mode, 'default', 'a refused save must show what the backend holds');
+  assert.match(control.err, /could not be saved/, 'and say why');
+  assert.equal(backend.mode, 'default');
+
+  // The mode comes from the last save that succeeded; a refused one goes
+  // back to it.
+  backend.refuse = false;
+  control.mode = 'fullscreen';
+  await control.savePlayerWindowMode();
+  assert.equal(control.mode, 'fullscreen');
+  assert.equal(control.err, null);
+  backend.refuse = true;
+  control.mode = 'remember';
+  await control.savePlayerWindowMode();
+  assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  assert.equal(backend.mode, 'fullscreen');
+});
+
 test('the remembered window never holds a position', () => {
   const struct = config.match(/pub struct MpvWindow \{([\s\S]*?)\n\}/);
   assert.ok(struct, 'the stored window type exists');
