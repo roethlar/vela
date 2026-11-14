@@ -522,11 +522,16 @@ fn output_of(named: &NamedMonitor) -> Output {
 /// Outputs the system lists by names Tauri does not give. On Wayland, Tauri
 /// names an output by its model ("XG27UQDMS") and mpv by its connector
 /// ("DP-3"); the compositor gives both. A list that could not be read is
-/// incomplete, so nothing is then known to be connected.
+/// incomplete, so nothing is then known to be connected. A session that
+/// says it is Wayland while its WAYLAND_DISPLAY is empty names no Wayland
+/// display: Vela's window and mpv are then on X11, which name a screen
+/// alike, and there is nothing to add (the end-to-end venue runs so, under
+/// Xvfb inside a Wayland desktop). `wayland_session` itself, which the HDR
+/// query also uses, is left as it was.
 #[cfg(target_os = "linux")]
 async fn platform_outputs() -> PlatformOutputs {
     tauri::async_runtime::spawn_blocking(|| {
-        if !wayland_session() {
+        if !wayland_session() || !names_a_display(std::env::var_os("WAYLAND_DISPLAY").as_deref()) {
             return PlatformOutputs::NoneToAdd;
         }
         wayland_hdr::outputs().unwrap_or(PlatformOutputs::Incomplete(Vec::new()))
@@ -538,6 +543,12 @@ async fn platform_outputs() -> PlatformOutputs {
 #[cfg(not(target_os = "linux"))]
 async fn platform_outputs() -> PlatformOutputs {
     PlatformOutputs::NoneToAdd
+}
+
+/// Whether a WAYLAND_DISPLAY value names a display: set, and not empty.
+#[cfg(target_os = "linux")]
+fn names_a_display(value: Option<&std::ffi::OsStr>) -> bool {
+    value.is_some_and(|value| !value.is_empty())
 }
 
 #[cfg(target_os = "linux")]
@@ -1457,6 +1468,16 @@ mod tests {
                 assert!(screens.is_connected(name), "{why}: {name} is taken");
             }
         }
+    }
+
+    // An empty WAYLAND_DISPLAY names no display, so the compositor's list is
+    // not asked for (the end-to-end venue: Xvfb inside a Wayland desktop).
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_empty_wayland_display_names_none() {
+        assert!(names_a_display(Some(std::ffi::OsStr::new("wayland-1"))));
+        assert!(!names_a_display(Some(std::ffi::OsStr::new(""))));
+        assert!(!names_a_display(None));
     }
 
     // The compositor's list is complete only when every output has its

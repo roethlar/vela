@@ -287,7 +287,7 @@ test('a Compatible play is shown on the screen its copy was ranked for, any othe
   // event carries reaches the list (comment 4).
   assert.match(
     bodyOf(display, 'async fn platform_outputs() -> PlatformOutputs {'),
-    /if !wayland_session\(\) \{\s+return PlatformOutputs::NoneToAdd;\s+\}\s+wayland_hdr::outputs\(\)\.unwrap_or\(PlatformOutputs::Incomplete\(Vec::new\(\)\)\)\s+\}\)\s+\.await\s+\.unwrap_or\(PlatformOutputs::Incomplete\(Vec::new\(\)\)\)$/,
+    /if !wayland_session\(\) \|\| !names_a_display\(std::env::var_os\("WAYLAND_DISPLAY"\)\.as_deref\(\)\) \{\s+return PlatformOutputs::NoneToAdd;\s+\}\s+wayland_hdr::outputs\(\)\.unwrap_or\(PlatformOutputs::Incomplete\(Vec::new\(\)\)\)\s+\}\)\s+\.await\s+\.unwrap_or\(PlatformOutputs::Incomplete\(Vec::new\(\)\)\)$/,
   );
   assert.match(display, /wl_output::Event::Geometry \{\s+model, transform, \.\.\s+\} => \{\s+output\.model = Some\(model\);\s+output\.transform = Some\(transform\);\s+\}/);
   assert.match(display, /Ok\(listed\(\s+state\s+\.outputs\s+\.iter\(\)\s+\.map\(\|output\| Described \{\s+name: output\.name\.clone\(\),\s+model: output\.model\.clone\(\),\s+width: output\.width,\s+height: output\.height,\s+transform: output\.transform,\s+\}\)/);
