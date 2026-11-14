@@ -1,7 +1,7 @@
 # pk-5: the licence copies of an Arch package may be links out of the package, or unreadable, and pass
 
 **Severity**: MEDIUM — the licence texts under `usr/share/licenses/vela/libmpv` are compared by content only. Links to files outside the package pass (and dangle once installed), and so do copies no ordinary user can read. The licence texts are a condition of shipping the set.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `8876601` (and `547726c`)
 
@@ -64,3 +64,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `2f0d191..4b8293e`, 2026-11-14 01:05 UTC
 (`.agents/review/codereview-2026-11-14-libmpv-packaging.md`). Reviewer's
 title: "Validate containment and accessibility of Arch licence copies". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 03:19 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d7fe-c0ba-7952-a289-b406f064fa9f`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 02:59 UTC, finished 03:09 UTC.
+- Reviewed head `13487828af78d0e8a5a4c1ae181efe8dc3981da7`, base
+  `8e6299e6403d7467705206c691ab7e50099dbf9c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

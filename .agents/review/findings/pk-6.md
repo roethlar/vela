@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — with `TMPDIR` set to a path containing a space, the isolation step reads the wrong part of each line of `/proc/self/maps` and reports the set's own libraries as foreign. A correct package fails, and with it an opt-in build.
 **Status**: In progress
 **Branch**: —
-**Commit**: `25fb666`, `a60f802` (and `3e008bf`)
+**Commit**: `25fb666`, `a60f802`, `b26f6b6` (and `3e008bf`)
 
 ## Evidence
 
@@ -63,3 +63,61 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `2f0d191..4b8293e`, 2026-11-14 01:05 UTC
 (`.agents/review/codereview-2026-11-14-libmpv-packaging.md`). Reviewer's
 title: "Handle spaces in the temporary library path". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 03:19 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d807-a83f-7fd2-b7ba-294c6a69d27e`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 03:09 UTC, finished 03:16 UTC.
+- Reviewed head `13487828af78d0e8a5a4c1ae181efe8dc3981da7`, base
+  `8e6299e6403d7467705206c691ab7e50099dbf9c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - packaging/libmpv/check-package.sh:191 — The newline refusal checks the unresolved path. With TMPDIR set to a newline-free symlink targeting a directory containing a newline, the supplied real set was unpacked and loaded, then rejected with status 1 and FAIL isolation instead of status 2 and the TMPDIR diagnostic. Resolve the temporary directory before checking for newlines, and cover this alias case.
+
+### Repair (round 2), `b26f6b6`
+
+The reviewer's case: the refusal of a temporary directory with a line break
+in its name looked only at the name the check was given. A `TMPDIR` with no
+line break in it that is a link to a directory with one passed the refusal;
+the package was then unpacked and its library loaded, and a good package
+failed the isolation check with status 1, which is exactly what the refusal
+exists to prevent. Reproduced before the change by a new test (the check
+went on and judged the package).
+
+The check now also takes the directory's own name, with every link on the
+way to it followed (`cd` there, `pwd -P`), and refuses when either name has
+a line break. The message names the one that has it. A name with a line
+break that leads to a directory without one stays refused, as before the
+repair: the check's own tools are handed the name as it was given.
+
+Files: `packaging/libmpv/check-package.sh`, `tests/libmpv-packaging.test.mjs`
+(the new case `a temporary directory named through a link, whose own name
+has a line break: refused the same`, which holds both directions, that
+nothing is left behind in the directory, and that `--without-libmpv` is not
+affected).
+
+Guard proof for round 2, run 2026-11-14 by the coordinating agent at
+`b26f6b6`, each injection restored from the commit;
+`node --test tests/libmpv-packaging.test.mjs` (189 tests):
+
+| Injection | Result |
+| --- | --- |
+| Unchanged | PASS (188; 1 skipped, the real-squashfs test) |
+| The new case before the fix was written | FAIL: the package was judged (`ok   load`), status 0 where 2 is expected |
+| Only the name as given is looked at (the reviewer's case) | FAIL the new case, at the link-to-a-line-break half |
+| Only the name it leads to is looked at | FAIL the new case, at the line-break-name-to-a-plain-directory half |
+
+By hand, the reviewer's case with the real opt-in Arch package and the real
+set: status 2 and the message, naming the directory with the line break,
+before anything is unpacked; nothing left behind. The same package under
+the default temporary directory: `RESULT PASS`.
+
+The full check was run at the repair's content before the second direction
+was added to the test (577 Rust tests; `npm audit` fails on `main` for a
+reason of its own, see `.agents/state.md`, Blockers); after that addition,
+the packaging test file alone.
