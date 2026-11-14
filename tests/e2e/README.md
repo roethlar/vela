@@ -76,40 +76,100 @@ problem). A scenario's default export may hold only these keys:
   TEST-ONLY ROUTES: it is not shown the way a user of that player would.
 
 Importing a scenario must do nothing: the runner imports all of them before
-it runs any. The parity test imports them in a process of its own
-(`import-watch.mjs`), with the ways of acting on the machine it knows
-watched, and fails if any is used. The watch is in place before the loader
-or any scenario is imported, and it is never taken down: the process reports
-only once it has nothing left to do, so an act an import puts off (a promise
-that settles later) is seen when it runs, and an import that keeps the
-process busy for good fails. Watched: processes
-(child_process, cluster), worker threads, sockets and servers (net, dgram,
-http, https, fetch), every fs call that writes, removes or changes a file or
-its metadata, and opening one other than to read; timers and put-off
-callbacks, by every route it knows to them (the global `setTimeout`,
-`setInterval`, `setImmediate` and `queueMicrotask`; the same three of
-`node:timers`, however imported or required; `setTimeout`, `setInterval`,
-`setImmediate` and `scheduler.wait`/`scheduler.yield` of
-`node:timers/promises`; `AbortSignal.timeout`; `process.nextTick`;
-`Atomics.waitAsync`), so that an unreferenced timer, which holds no handle,
-is seen too; sockets, servers and children made with `new` (`connect` of
-`net.Socket`, `listen` of `net.Server`, `bind`/`connect`/`send` of
-`dgram.Socket`, `spawn` of `ChildProcess`); DNS queries (`node:dns` and its
-`promises`, of the module or of a `Resolver`); file watchers (`fs.watch`,
-`fs.watchFile`, `fs.promises.watch`); signal handlers, by any route, since
-the process's listeners are compared, as well as the calls of `process.on`,
-`once`, `addListener` and `prependListener`; process.exit/kill/chdir/umask;
-and it fails on any change to the environment, to the global object's names
-or to a built-in prototype, read once the process has nothing left to do,
-and on a handle still open just after the import. The test proves, each
-with a made-up module of its own, that every timer route above is seen, that
-an act put off past the import is seen, and that one route of each other
-new kind is: a socket, a server, a UDP socket and a child made with `new`, a
-DNS lookup (callback and promise) and a resolver's query (both kinds),
-`fs.watch` and `fs.watchFile`, and a signal handler added through
-`EventEmitter.prototype.on`. The other names listed are watched the same way
-but not each proved. A way not in that list is not seen: a native addon,
-say, or a module of Node's own not named here.
+it runs any. The watch on that is there to catch a mistake: a scenario module
+that acts on the machine when it is imported, or puts an act off past its
+import, by any use of Node's API however it is spelled. The parity test
+imports the scenarios in a process of its own (`import-watch.mjs`, run by
+`import-check.mjs`) under three nets, which are in place before the loader or
+any scenario is imported and are never taken down:
+
+- Resources. Every async resource Node creates is recorded by its type
+  (`node:async_hooks`), whatever JavaScript route made it: a timer
+  (`Timeout`, referenced or not, from the globals, `node:timers`,
+  `node:timers/promises` or its scheduler, `AbortSignal.timeout`, or a
+  promisified `setTimeout`), an `Immediate`, a callback put off with
+  `process.nextTick` (`TickObject`) or `queueMicrotask` (`Microtask`), a
+  socket, a server, a file watcher, a DNS query, a child, a worker. Promises
+  are the one type allowed: importing the real scenarios makes thousands of
+  them and nothing else (measured), and a promise acts on nothing.
+- Node's permission system, in audit mode with reading allowed
+  (`--permission-audit --allow-fs-read=*`). Node checks inside itself, under
+  any function a module can reach, every write, creation, removal or change
+  of a file by path, every child process, worker thread, network use and DNS
+  query, addon, WASI instance and inspector, and publishes each on a
+  diagnostics channel the watch listens to. An attempt that fails, or sits
+  inside a try/catch, is published like any other, because the check comes
+  first. Audit mode lets the act go ahead, so an import does under the watch
+  what it does in the runner, but for two kinds of call, which are refused
+  with `ERR_ACCESS_DENIED` even in audit mode (seen on Node 26.13):
+  `process.binding`, and the calls on an open descriptor that Node's
+  documentation says the permission system cannot tie to a path (`fchmod`,
+  `fchown`, `futimes`, `fsync`, `fdatasync`).
+- Recording replacements for what neither of those sees: the `fs` calls on a
+  descriptor that is already open (`write`, `writev`, `ftruncate` and the
+  five above, and their `Sync` forms; Node's documentation says such calls
+  bypass the permission system), signals (`process.kill`, `process._kill`,
+  `process._debugProcess`), `process.chdir` and `process.umask`, and
+  `Atomics.waitAsync`, which the engine settles with no resource at all. A
+  replacement keeps the original's name, length, prototype chain and every
+  own property (symbols too, `util.promisify.custom` and Node's own); a
+  property that is a function is replaced by a recording one. No timer
+  function is replaced: a replaced `setTimeout` once lost its
+  `util.promisify.custom` and changed what an import did (review finding
+  pa-4). The process's listeners (so a signal handler, by any route), the
+  environment, the global object's names and the built-in prototypes are
+  compared once the process has nothing left to do, and the handles open just
+  after the import are counted.
+
+The process reports only once it has nothing left to do, so an act an import
+puts off is seen when it runs. The report goes on a pipe of its own
+(descriptor 3), as one line carrying a secret the test makes for each run and
+hands the watch on its standard input; the watch keeps it in its own module
+scope. The test takes that line and nothing else, and only from a process
+that ended by itself with status 0: a module that prints a report, ends the
+process early (with any status, or a signal), or takes the watch's
+`beforeExit` listener away fails, saying how. A process still running at the
+deadline (60 s) is killed, with its process group, by SIGKILL, so one that
+ignores SIGTERM or has stopped itself fails as surely as one that keeps busy.
+A process that has ended by then while something it started, in a group of
+its own, still holds its pipes fails too, a moment after the deadline: the
+test does not wait for whatever holds them.
+The test file imports the scenarios itself only once the report has cleared
+them (`stopUnlessCleared`); otherwise it stops at once with the report, and
+imports nothing.
+
+The test proves each of these with a made-up module of its own, never among
+the scenarios: every timer route named above, the reviewer's two (a
+`scheduler.wait` taken from the scheduler's prototype, and
+`setTimeout[util.promisify.custom]`), and that `util.promisify(setTimeout)`
+still resolves under the watch; an act put off behind two file reads; a
+signal handler added through `process.on` and through
+`EventEmitter.prototype.on`; a DNS lookup (callback and promise) and a
+resolver's query (both kinds); `fs.watch` and `fs.watchFile`; a socket, a
+server, a UDP socket and a child made with `new`; a worker; a write that
+fails inside a try/catch; a signal; a write to standard error by descriptor;
+`Atomics.waitAsync`; that a replaced `fs.write` still promisifies to its two
+fields; that a printed report with `process.exit(7)`, with
+`process.exit(0)`, or with the `beforeExit` listeners removed, a forged line
+on the report's pipe, `process.exitCode`, and a signal to itself each fail;
+that a busy process, one that ignores SIGTERM and one that stops itself each
+fail within two seconds of a one-second deadline, as does one that ended
+after starting a process of its own group that holds the pipes; and, by
+running the same arrangement in a process of its own, that a failed import
+stops the file before it imports a busy scenario, and, from the test file's
+own text, that its top clears the scenarios before it imports any. The other
+routes are seen the same way and not each proved.
+
+What is not seen: a callback the engine alone puts off (a
+`FinalizationRegistry`, say) that has not run by the time the event loop is
+empty; what a worker thread does once it is made (the permission system does
+not pass to it; making it is seen); acts the list above does not name, such
+as `process.setuid` or setting `process.title`; and writing through the
+standard streams, which may or may not show as a resource and is not what
+the watch is for. Nor is the watch a defence against a module written to
+defeat the watch itself: one that reaches into the watch's process to forge
+its secret, unsubscribes its channels or patches the engine under it. Such a
+module could do the same damage from its `run()`, which nothing watches.
 
 ## Parity
 

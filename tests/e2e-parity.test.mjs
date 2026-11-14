@@ -5,12 +5,13 @@
 // their own default export, read here through the loader the runner uses.
 // Nothing reads JavaScript source: the scenarios are imported.
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { importRefusal, importWatched, runBounded, stopUnlessCleared } from './e2e/import-check.mjs';
+import { recording } from './e2e/import-watch-record.mjs';
 import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS, SPLITS } from './e2e/parity.mjs';
 import { beginProof, endProof, TEST_ONLY_ROUTES, testOnlyRoute } from './e2e/proof.mjs';
 import {
@@ -33,28 +34,16 @@ const liveDir = path.join(repoRoot, 'tests/e2e/live');
 
 // Importing a scenario must do nothing: the runner imports every one of them
 // before it runs any. tests/e2e/import-watch.mjs imports them in a process of
-// its own, with every way of acting on the machine it knows replaced by one
-// that records the call, and reports what it saw once that process has
-// nothing left to do, so that what an import puts off is seen as well as what
-// it does at once (review finding pa-4). `pairs` are directories and the
-// prefix their scenarios are loaded with.
-function importWatched(pairs, { timeout = 60000 } = {}) {
-  const res = spawnSync(process.execPath, [path.join(repoRoot, 'tests/e2e/import-watch.mjs'), ...pairs], {
-    encoding: 'utf8',
-    timeout,
-  });
-  if (res.error?.code === 'ETIMEDOUT' || res.signal) {
-    return { error: `the import never let its process end (${res.error?.code ?? res.signal}): it left something running`, calls: [] };
-  }
-  const line = res.stdout.trim().split('\n').at(-1) ?? '';
-  try {
-    return JSON.parse(line);
-  } catch {
-    return { error: `the watch reported nothing it could read (exit ${res.status}): ${res.stderr.trim()}`, calls: [] };
-  }
-}
-
-const imported = importWatched([scenarioDir, '', liveDir, 'live-']);
+// its own, under three nets (the async resources Node creates, the checks of
+// Node's permission system, and recording replacements for the few acts
+// neither sees), and reports what they saw once that process has nothing
+// left to do, so that what an import puts off is seen as well as what it does
+// at once (review finding pa-4). tests/e2e/import-check.mjs runs it and judges
+// its report. This file imports the scenarios itself only once that report
+// has cleared them: a scenario that fails the watch is never imported here,
+// where it could hang the test or act in it.
+const imported = await importWatched([scenarioDir, '', liveDir, 'live-']);
+stopUnlessCleared(imported);
 const scenarios = await loadScenarios(scenarioDir);
 const live = await loadScenarios(liveDir, { prefix: 'live-' });
 
@@ -64,72 +53,20 @@ test('importing a scenario has no side effects', () => {
   // cannot pass.
   assert.deepEqual(imported.loaded, [...scenarios, ...live].map((s) => s.name));
   assert.deepEqual(imported.calls, [], 'a scenario module acted on the machine when it was imported');
+  assert.deepEqual(imported.permission, [], 'a scenario module did what the permission system checks when it was imported');
+  assert.deepEqual(imported.resources, [], 'a scenario module made a timer, a handle or a put-off callback when it was imported');
   assert.equal(imported.newHandles, 0, 'a scenario module left something running when it was imported');
   assert.equal(imported.envChanged, false, 'a scenario module changed the environment when it was imported');
   assert.deepEqual(imported.sharedChanged, [], 'a scenario module changed the global object or a built-in when it was imported');
 });
 
-// Each route to a timer, taken by a made-up scenario module at import, must be
-// seen by the watch above (review finding pa-4). The modules are written to a
-// directory of their own, never among the scenarios, and loaded through the
-// loader the runner uses.
-test('the import watch sees a timer started by any route, and what an import puts off', async () => {
-  const routes = {
-    timerssettimeout: ["import { setTimeout } from 'node:timers';", 'setTimeout(() => {}, 1);', 'timers.setTimeout()'],
-    timersunref: ["import { setTimeout } from 'node:timers';", 'setTimeout(() => {}, 60000).unref();', 'timers.setTimeout()'],
-    timersdefault: ["import timers from 'node:timers';", 'timers.setTimeout(() => {}, 60000).unref();', 'timers.setTimeout()'],
-    timersrequire: [
-      "import { createRequire } from 'node:module';",
-      "createRequire(import.meta.url)('node:timers').setTimeout(() => {}, 60000).unref();",
-      'timers.setTimeout()',
-    ],
-    timerssetinterval: [
-      "import { setInterval, clearInterval } from 'node:timers';",
-      'clearInterval(setInterval(() => {}, 60000));',
-      'timers.setInterval()',
-    ],
-    timerssetimmediate: ["import { setImmediate } from 'node:timers';", 'setImmediate(() => {});', 'timers.setImmediate()'],
-    promisesdelay: ["import { setTimeout as delay } from 'node:timers/promises';", 'await delay(1);', 'timers/promises.setTimeout()'],
-    promisesoftimers: ["import { promises } from 'node:timers';", 'await promises.setTimeout(1);', 'timers/promises.setTimeout()'],
-    promisesunawaited: [
-      "import { setTimeout as delay } from 'node:timers/promises';",
-      'delay(60000, undefined, { ref: false }).catch(() => {});',
-      'timers/promises.setTimeout()',
-    ],
-    promisessetinterval: [
-      "import { setInterval } from 'node:timers/promises';",
-      'const ticks = setInterval(1); await ticks.next(); await ticks.return();',
-      'timers/promises.setInterval()',
-    ],
-    promisessetimmediate: ["import { setImmediate } from 'node:timers/promises';", 'await setImmediate();', 'timers/promises.setImmediate()'],
-    schedulerwait: ["import { scheduler } from 'node:timers/promises';", 'await scheduler.wait(1);', 'timers/promises.scheduler.wait()'],
-    scheduleryield: ["import { scheduler } from 'node:timers/promises';", 'await scheduler.yield();', 'timers/promises.scheduler.yield()'],
-    globalunref: ['', 'setTimeout(() => {}, 60000).unref();', 'global.setTimeout()'],
-    globalsetinterval: ['', 'clearInterval(setInterval(() => {}, 60000));', 'global.setInterval()'],
-    globalsetimmediate: ['', 'setImmediate(() => {});', 'global.setImmediate()'],
-    aborttimeout: ['', 'AbortSignal.timeout(60000);', 'AbortSignal.timeout()'],
-    // Callbacks put off without a timer, which run after the import too.
-    nexttick: ['', 'process.nextTick(() => {});', 'process.nextTick()'],
-    microtask: ['', 'queueMicrotask(() => {});', 'global.queueMicrotask()'],
-    // A wait on shared memory, which settles later with no timer and no handle.
-    atomicswaitasync: ['', 'Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);', 'Atomics.waitAsync()'],
-    // An act put off through a route the watch does not record (reading a
-    // file), which runs after the import has returned: the watch must still
-    // be up then. Two reads in a row put it well after the import.
-    deferredwrite: [
-      "import fs from 'node:fs';",
-      'const self = new URL(import.meta.url);\n' +
-        "fs.promises.readFile(self).then(() => fs.promises.readFile(self)).then(() => fs.writeFileSync(new URL('./written.txt', self), 'x'));",
-      'fs.writeFileSync()',
-    ],
-  };
-  seenByTheWatch(routes);
-});
-
 // Each made-up module, `name: [imports, act, expected]`, is written to a
-// directory of its own under a temporary one and imported under the watch,
-// which must record `expected`.
-function seenByTheWatch(routes) {
+// directory of its own under a temporary one, never among the scenarios, and
+// imported under the watch through the loader the runner uses. What the watch
+// saw is listed as its calls, its permission checks (`<scope> <permission>
+// <resource>`), and the types of resource it saw made (`resource <type>`);
+// one of them must be `expected` or begin with it.
+async function seenByTheWatch(routes) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
   try {
     for (const [name, [imports, act, expected]] of Object.entries(routes)) {
@@ -139,87 +76,412 @@ function seenByTheWatch(routes) {
         path.join(one, `${name}.mjs`),
         `${imports}\n${act}\nexport default { name: '${name}', rows: [], noRows: 'made up', async run() {} };\n`,
       );
-      const watched = importWatched([one, '']);
+      const watched = await importWatched([one, '']);
       assert.equal(watched.error, undefined, `${name}: ${watched.error}`);
       assert.deepEqual(watched.loaded, [name]);
-      assert.ok(watched.calls.includes(expected), `${name}: ${JSON.stringify(watched.calls)} should include ${expected}`);
+      const seen = [...watched.calls, ...watched.permission, ...watched.resources.map((type) => `resource ${type}`)];
+      assert.ok(
+        seen.some((entry) => (expected instanceof RegExp ? expected.test(entry) : entry === expected || entry.startsWith(`${expected} `))),
+        `${name}: ${JSON.stringify(seen)} should include ${expected}`,
+      );
+      assert.notEqual(importRefusal(watched), null, `${name}: the report cleared it`);
     }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 }
 
+// What a module writes, at a path of its own directory.
+const writeBeside = "fs.writeFileSync(new URL('./written.txt', import.meta.url), 'x')";
+
+// Each route to a timer, taken by a made-up scenario module at import, must be
+// seen by the watch (review finding pa-4). A timer is a resource of Node's,
+// whichever function made it, and an unreferenced one is made all the same.
+test('the import watch sees a timer started by any route, and what an import puts off', async () => {
+  await seenByTheWatch({
+    timerssettimeout: ["import { setTimeout } from 'node:timers';", 'setTimeout(() => {}, 1);', 'resource Timeout'],
+    timersunref: ["import { setTimeout } from 'node:timers';", 'setTimeout(() => {}, 60000).unref();', 'resource Timeout'],
+    timersdefault: ["import timers from 'node:timers';", 'timers.setTimeout(() => {}, 60000).unref();', 'resource Timeout'],
+    timersrequire: [
+      "import { createRequire } from 'node:module';",
+      "createRequire(import.meta.url)('node:timers').setTimeout(() => {}, 60000).unref();",
+      'resource Timeout',
+    ],
+    timerssetinterval: [
+      "import { setInterval, clearInterval } from 'node:timers';",
+      'clearInterval(setInterval(() => {}, 60000));',
+      'resource Timeout',
+    ],
+    timerssetimmediate: ["import { setImmediate } from 'node:timers';", 'setImmediate(() => {});', 'resource Immediate'],
+    promisesdelay: ["import { setTimeout as delay } from 'node:timers/promises';", 'await delay(1);', 'resource Timeout'],
+    promisesoftimers: ["import { promises } from 'node:timers';", 'await promises.setTimeout(1);', 'resource Timeout'],
+    promisesunawaited: [
+      "import { setTimeout as delay } from 'node:timers/promises';",
+      'delay(60000, undefined, { ref: false }).catch(() => {});',
+      'resource Timeout',
+    ],
+    promisessetinterval: [
+      "import { setInterval } from 'node:timers/promises';",
+      'const ticks = setInterval(1); await ticks.next(); await ticks.return();',
+      'resource Timeout',
+    ],
+    promisessetimmediate: ["import { setImmediate } from 'node:timers/promises';", 'await setImmediate();', 'resource Immediate'],
+    schedulerwait: ["import { scheduler } from 'node:timers/promises';", 'await scheduler.wait(1);', 'resource Timeout'],
+    scheduleryield: ["import { scheduler } from 'node:timers/promises';", 'await scheduler.yield();', 'resource Immediate'],
+    globalunref: ['', 'setTimeout(() => {}, 60000).unref();', 'resource Timeout'],
+    globalsetinterval: ['', 'clearInterval(setInterval(() => {}, 60000));', 'resource Timeout'],
+    globalsetimmediate: ['', 'setImmediate(() => {});', 'resource Immediate'],
+    aborttimeout: ['', 'AbortSignal.timeout(60000);', 'resource Timeout'],
+    // Callbacks put off without a timer, which run after the import too.
+    nexttick: ['', 'process.nextTick(() => {});', 'resource TickObject'],
+    microtask: ['', 'queueMicrotask(() => {});', 'resource Microtask'],
+    // A wait on shared memory, which settles later with no timer and no handle.
+    atomicswaitasync: ['', 'Atomics.waitAsync(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1);', 'Atomics.waitAsync()'],
+    // An act put off through a route that is no act (reading a file), which
+    // runs after the import has returned: the watch must still be up then.
+    // Two reads in a row put it well after the import.
+    deferredwrite: [
+      "import fs from 'node:fs';",
+      `const self = new URL(import.meta.url);\nfs.promises.readFile(self).then(() => fs.promises.readFile(self)).then(() => ${writeBeside});`,
+      'fs FileSystemWrite',
+    ],
+  });
+});
+
+// The reviewer's demonstrations against the first fix (review finding pa-4,
+// verification round 1), as near to verbatim as a module can put them: a
+// timer through the scheduler's prototype, and through setTimeout's own
+// promisified form, each writing a file when it fires. Neither was seen,
+// because only named functions were replaced, and the replacement of
+// setTimeout had lost `util.promisify.custom`, which changed what the import
+// did. Now the timer is seen as made, and the promisified form still works.
+test("the import watch sees the reviewer's timer routes, and changes nothing they do", async () => {
+  await seenByTheWatch({
+    prototypewait: [
+      "import fs from 'node:fs';\nimport { scheduler } from 'node:timers/promises';",
+      `Object.getPrototypeOf(scheduler).wait.call(scheduler, 500, { ref: false }).then(() => ${writeBeside});`,
+      'resource Timeout',
+    ],
+    promisifycustom: [
+      "import fs from 'node:fs';\nimport { promisify } from 'node:util';",
+      `setTimeout[promisify.custom]?.(300, undefined, { ref: false }).then(() => ${writeBeside});`,
+      'resource Timeout',
+    ],
+    // Awaited at import, so that the import fails (and the probe with it)
+    // unless the promisified setTimeout resolves under the watch as it does
+    // in the runner.
+    promisifyworks: [
+      "import { promisify } from 'node:util';",
+      "if (setTimeout[promisify.custom] === undefined) throw new Error('setTimeout has no promisify.custom');\n" +
+        "if ((await promisify(setTimeout)(1, 'v')) !== 'v') throw new Error('promisify(setTimeout) did not resolve to its value');",
+      'resource Timeout',
+    ],
+    // A function the watch does replace keeps what promisify reads from it:
+    // fs.write resolves to an object of two fields, which only Node's own
+    // symbol on the function gives.
+    replacedkeepsproperties: [
+      "import fs from 'node:fs';\nimport { promisify } from 'node:util';",
+      "const r = await promisify(fs.write)(2, '');\n" +
+        "if (r === null || typeof r !== 'object' || !('buffer' in r)) throw new Error(`promisify(fs.write) gave ${JSON.stringify(r)}`);\n" +
+        "if (fs.write.name !== 'write') throw new Error(`fs.write is named ${fs.write.name}`);",
+      'fs.write(2)',
+    ],
+  });
+});
+
 // Acts reached other than through the module functions the watch first
 // covered, each found unseen once (review finding pa-4): a signal handler
 // added through the EventEmitter prototype, a DNS query, a file watcher that
-// holds no handle, and a socket, server or child made with `new`. Every
-// address is this machine's, and each is closed or cancelled at once. The
-// call is what the watch records, so each probe takes a refusal as well as a
-// success: where no socket is allowed (a sandbox answers EPERM to a listen
-// on this machine's own address) the probe still ends and the call is seen.
-test('the import watch sees a signal handler, a DNS query, a file watcher, and a socket or child made with new', () => {
-  seenByTheWatch({
+// holds no handle, and a socket, server or child made with `new`; and acts
+// that an error stops or a try/catch hides. Every address is this machine's,
+// and each is closed or cancelled at once. Each probe takes a refusal as well
+// as a success: where no socket is allowed (a sandbox answers EPERM to a
+// listen on this machine's own address) the probe still ends and the attempt
+// is seen, since the permission system's check comes before the attempt.
+test('the import watch sees a signal handler, a DNS query, a file watcher, and a socket or child made with new', async () => {
+  await seenByTheWatch({
     prototypelistener: [
       "import { EventEmitter } from 'node:events';",
       "EventEmitter.prototype.on.call(process, 'SIGUSR2', () => {});",
       'process listeners of SIGUSR2 changed',
     ],
-    processon: ['', "process.on('SIGUSR2', () => {});", 'process.on(SIGUSR2)'],
-    dnslookup: ["import dns from 'node:dns';", "dns.lookup('localhost', () => {});", 'dns.lookup(localhost)'],
-    dnspromises: ["import dns from 'node:dns';", "await dns.promises.lookup('localhost').catch(() => {});", 'dns.promises.lookup(localhost)'],
+    processon: ['', "process.on('SIGUSR2', () => {});", 'process listeners of SIGUSR2 changed'],
+    dnslookup: ["import dns from 'node:dns';", "dns.lookup('localhost', () => {});", 'net Net localhost'],
+    dnspromises: ["import dns from 'node:dns';", "await dns.promises.lookup('localhost').catch(() => {});", 'net Net localhost'],
     dnsresolver: [
       "import { Resolver } from 'node:dns';",
       "const r = new Resolver(); r.setServers(['127.0.0.1']); r.resolve4('vela.invalid', () => {}); r.cancel();",
-      'dns.Resolver.resolve4(vela.invalid)',
+      'net Net vela.invalid',
     ],
     dnspromisesresolver: [
       "import dns from 'node:dns';",
       "const r = new dns.promises.Resolver(); r.setServers(['127.0.0.1']); const q = r.resolve4('vela.invalid').catch(() => {}); r.cancel(); await q;",
-      'dns.promises.Resolver.resolve4(vela.invalid)',
+      'net Net vela.invalid',
     ],
     watchfile: [
       "import fs from 'node:fs';",
       'const self = new URL(import.meta.url); fs.watchFile(self, { persistent: false }, () => {}); fs.unwatchFile(self);',
-      'fs.watchFile()',
+      'resource STATWATCHER',
     ],
-    fswatch: ["import fs from 'node:fs';", 'try { fs.watch(new URL(import.meta.url), { persistent: false }).close(); } catch {}', 'fs.watch()'],
+    fswatch: ["import fs from 'node:fs';", 'try { fs.watch(new URL(import.meta.url), { persistent: false }).close(); } catch {}', 'resource FSEVENTWRAP'],
     socketnew: [
       "import net from 'node:net';",
       "const s = new net.Socket(); s.on('error', () => {}); s.connect(9, '127.0.0.1'); s.destroy();",
-      'net.Socket.connect()',
+      // Destroyed before it got to connect: the socket was made all the same.
+      'resource TCPWRAP',
     ],
     servernew: [
       "import net from 'node:net';",
       "const s = new net.Server(); await new Promise((r) => { s.on('error', r); s.listen(0, '127.0.0.1', r); }); s.close();",
-      'net.Server.listen()',
+      // A listen is checked with no resource named.
+      'net Net',
     ],
     udpnew: [
       "import dgram from 'node:dgram';",
       "const s = new dgram.Socket('udp4'); await new Promise((r) => { s.on('error', r); s.bind(0, '127.0.0.1', r); }); s.close();",
-      'dgram.Socket.bind()',
+      'net Net 127.0.0.1',
     ],
     childnew: [
       "import { ChildProcess } from 'node:child_process';",
       "const c = new ChildProcess(); c.on('error', () => {}); try { c.spawn({ file: '/nonexistent/vela-probe', args: ['/nonexistent/vela-probe'], envPairs: [], stdio: 'ignore' }); } catch {}",
-      'child_process.ChildProcess.spawn()',
+      'child ChildProcess',
     ],
+    // A write that fails (its directory does not exist), inside a try/catch:
+    // the permission system's check comes first, and is seen.
+    caughtwrite: ["import fs from 'node:fs';", "try { fs.writeFileSync('/nonexistent/vela-probe/x', 'x'); } catch {}", 'fs FileSystemWrite /nonexistent/vela-probe/x'],
+    worker: [
+      "import { Worker } from 'node:worker_threads';",
+      "await new Worker('', { eval: true }).terminate();",
+      'worker WorkerThreads',
+    ],
+    // A signal, to this process, of a kind that does nothing.
+    signal: ['', 'process.kill(process.pid, 0);', /^process\.kill\(\d+\)$/],
+    // A write to a descriptor that is already open.
+    fdwrite: ["import { writeSync } from 'node:fs';", "writeSync(2, '');", 'fs.writeSync(2)'],
   });
 });
 
-// The watch reports only once its process has nothing left to do; an import
-// that keeps it busy for good must fail, not hang the test or pass.
-test('an import that keeps its process busy for good fails', () => {
+// The report is taken only from the watch's own channel, with this run's
+// secret, from a process that ended by itself with status 0 (review finding
+// pa-4, verification round 1: a module printed a clean report and ended the
+// process, and passed). Each module below writes a file, which the watch
+// would see, and then tries to keep it from reporting.
+test('a module that forges the report, ends the process, or takes the report away fails', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
+  // A clean report as the watch writes it, on standard output.
+  const forged = (name) =>
+    `process.stdout.write(${JSON.stringify(
+      JSON.stringify({ loaded: [name], calls: [], permission: [], resources: [], newHandles: 0, envChanged: false, sharedChanged: [] }),
+    )} + '\\n');`;
+  const cases = {
+    exitseven: [`${forged('exitseven')}\nprocess.exit(7);`, /^the watch's process ended with status 7, not 0/],
+    exitzero: [`${forged('exitzero')}\nprocess.exit(0);`, /^the watch's process ended \(status 0\) without making its report: .*process\.exit.*beforeExit listener/],
+    nobeforeexit: [`${forged('nobeforeexit')}\nprocess.removeAllListeners('beforeExit');`, /^the watch's process ended \(status 0\) without making its report/],
+    // On the report's own descriptor, without the secret.
+    forgedchannel: [
+      `fs.writeSync(3, 'not-the-secret ' + ${JSON.stringify(JSON.stringify({ loaded: ['forgedchannel'], calls: [] }))} + '\\n');`,
+      /^the watch's report channel held something other than one report carrying this run's secret/,
+    ],
+    // The one line there, shaped as the watch writes it, with a made-up
+    // secret, and the process ended before the watch could add its own.
+    forgedsecret: [
+      `fs.writeSync(3, '0'.repeat(64) + ' ' + ${JSON.stringify(
+        JSON.stringify({ loaded: ['forgedsecret'], calls: [], permission: [], resources: [], newHandles: 0, envChanged: false, sharedChanged: [] }),
+      )} + '\\n');\nprocess.exit(0);`,
+      /^the watch's report channel held something other than one report carrying this run's secret/,
+    ],
+    // An exit status left for the end, after the report.
+    exitcode: ['process.exitCode = 3;', /^the watch's process ended with status 3, not 0/],
+    // Ended by a signal it sends itself.
+    signalled: ["process.kill(process.pid, 'SIGTERM');", /^the watch's process was ended by the signal SIGTERM/],
+  };
   try {
-    fs.writeFileSync(
-      path.join(dir, 'busy.mjs'),
-      "setInterval(() => {}, 1000);\nexport default { name: 'busy', rows: [], noRows: 'made up', async run() {} };\n",
-    );
-    const watched = importWatched([dir, ''], { timeout: 3000 });
-    assert.match(watched.error ?? '', /^the import never let its process end/);
+    for (const [name, [act, expected]] of Object.entries(cases)) {
+      const one = path.join(dir, name);
+      fs.mkdirSync(one);
+      fs.writeFileSync(
+        path.join(one, `${name}.mjs`),
+        `import fs from 'node:fs';\n${writeBeside};\n${act}\nexport default { name: '${name}', rows: [], noRows: 'made up', async run() {} };\n`,
+      );
+      const watched = await importWatched([one, '']);
+      assert.match(watched.error ?? '', expected, `${name}: ${JSON.stringify(watched)}`);
+      assert.match(importRefusal(watched) ?? '', /^the watched import failed: /, name);
+    }
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+});
+
+// The watch reports only once its process has nothing left to do; an import
+// that keeps it busy for good must fail, not hang the test or pass. The
+// process is killed with SIGKILL at the deadline, so one that ignores SIGTERM
+// or has stopped itself fails as soon (review finding pa-4, verification
+// round 1: both outlived a deadline that sent SIGTERM).
+test('an import that keeps its process busy for good, or stops it, fails at the deadline', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
+  const deadline = 1000;
+  const cases = {
+    busy: 'setInterval(() => {}, 1000);',
+    ignoresterm: "process.on('SIGTERM', () => {});\nconst until = Date.now() + 60000;\nwhile (Date.now() < until);",
+    stopsitself: "process.kill(process.pid, 'SIGSTOP');",
+  };
+  try {
+    for (const [name, act] of Object.entries(cases)) {
+      const one = path.join(dir, name);
+      fs.mkdirSync(one);
+      fs.writeFileSync(path.join(one, `${name}.mjs`), `${act}\nexport default { name: '${name}', rows: [], noRows: 'made up', async run() {} };\n`);
+      const started = Date.now();
+      const watched = await importWatched([one, ''], { deadline });
+      const took = Date.now() - started;
+      assert.match(watched.error ?? '', /^the import never let its process end: it was still running after 1000 ms and was killed \(SIGKILL\)/, name);
+      assert.ok(took < deadline + 2000, `${name}: the failure took ${took} ms, past the deadline of ${deadline} ms`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// A process an import starts in a group of its own is not killed with the
+// watch's, and holds the pipes the check reads for as long as it lives. The
+// check must say so a moment after the deadline, not wait for it to end.
+// (The process started here ends by itself eight seconds on.)
+test('a process the import starts outside its group, holding the pipes, does not hang the check', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
+  const deadline = 1000;
+  try {
+    fs.writeFileSync(
+      path.join(dir, 'holdspipes.mjs'),
+      "import { spawn } from 'node:child_process';\n" +
+        "spawn(process.execPath, ['-e', 'setTimeout(() => {}, 8000)'], { detached: true, stdio: 'inherit' }).unref();\n" +
+        "export default { name: 'holdspipes', rows: [], noRows: 'made up', async run() {} };\n",
+    );
+    const started = Date.now();
+    const watched = await importWatched([dir, ''], { deadline });
+    const took = Date.now() - started;
+    assert.match(
+      watched.error ?? '',
+      /^the watch's process ended, but something the import started still held its pipes 1000 ms after the start/,
+    );
+    assert.ok(took < deadline + 2000, `the failure took ${took} ms, past the deadline of ${deadline} ms`);
+    assert.match(importRefusal(watched) ?? '', /^the watched import failed: the watch's process ended, but something/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// This file's own top: the scenarios are imported into this process only
+// after the watched import of the same two directories has cleared them.
+// The test further down runs a copy of that arrangement; this holds the
+// arrangement itself.
+test('this file imports the scenarios only after the watched import has cleared them', () => {
+  const own = fs.readFileSync(fileURLToPath(import.meta.url), 'utf8');
+  const cleared = own.indexOf('\nstopUnlessCleared(imported);\n');
+  const firstImport = own.search(/\bawait loadScenarios\(/);
+  assert.ok(cleared > 0, 'the top of the file stops unless the watched import cleared the scenarios');
+  assert.ok(firstImport > cleared, 'no scenario is imported before that');
+  assert.ok(
+    own.slice(0, cleared).endsWith("\nconst imported = await importWatched([scenarioDir, '', liveDir, 'live-']);"),
+    'what is cleared is the watched import of the two scenario directories',
+  );
+  assert.equal(own.split('\nstopUnlessCleared(imported);\n').length, 2, 'and it is asked once, there');
+});
+
+// The decision this file takes before it imports any scenario itself, on
+// made-up reports: only a report of an import that loaded something and saw
+// nothing clears it.
+test('the scenarios are imported here only on a clean report of the watched import', () => {
+  const clean = { loaded: ['a'], calls: [], permission: [], resources: [], newHandles: 0, envChanged: false, sharedChanged: [] };
+  assert.equal(importRefusal(clean), null);
+  assert.equal(stopUnlessCleared(clean), clean);
+  const refused = (report, pattern) => {
+    assert.match(importRefusal(report) ?? '', pattern, JSON.stringify(report));
+    const because = 'no scenario was imported into this process, because ';
+    assert.throws(
+      () => stopUnlessCleared(report),
+      (err) => err.message.startsWith(because) && pattern.test(err.message.slice(because.length)),
+    );
+  };
+  refused({ error: 'the import never let its process end: x' }, /^the watched import failed: the import never let its process end: x$/);
+  refused({ ...clean, error: 'boom' }, /^the watched import failed: boom$/);
+  refused(null, /^the watch made no report/);
+  refused({ ...clean, loaded: [] }, /it loaded no scenario/);
+  refused({ ...clean, loaded: undefined }, /it loaded no scenario/);
+  refused({ ...clean, calls: ['fs.writeSync(2)'] }, /it acted on the machine: fs\.writeSync\(2\)/);
+  refused({ ...clean, permission: ['fs FileSystemWrite /x'] }, /it did what the permission system checks: fs FileSystemWrite \/x/);
+  refused({ ...clean, resources: ['Timeout'] }, /it made async resources other than promises: Timeout/);
+  refused({ ...clean, resources: undefined }, /its report has no list of resources/);
+  refused({ ...clean, sharedChanged: ['globalThis'] }, /changed the global object or a built-in: globalThis/);
+  refused({ ...clean, newHandles: 1 }, /it left 1 handles open/);
+  refused({ ...clean, envChanged: true }, /it changed the environment/);
+  refused({ ...clean, envChanged: undefined }, /it changed the environment/);
+});
+
+// The same arrangement as the top of this file, run in a process of its own
+// over a made-up scenario that keeps its process busy for good (the
+// reviewer's injection, a referenced setInterval): it must stop at the
+// refusal, without importing the scenario, and end, not hang.
+test('a watched import that fails stops the file before it imports any scenario', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-parity-watch-'));
+  try {
+    const scenariosHere = path.join(dir, 'scenarios');
+    fs.mkdirSync(scenariosHere);
+    fs.writeFileSync(
+      path.join(scenariosHere, 'busy.mjs'),
+      "setInterval(() => {}, 1000);\nexport default { name: 'busy', rows: [], noRows: 'made up', async run() {} };\n",
+    );
+    const url = (file) => JSON.stringify(new URL(file, import.meta.url).href);
+    fs.writeFileSync(
+      path.join(dir, 'arrangement.mjs'),
+      `import { importWatched, stopUnlessCleared } from ${url('./e2e/import-check.mjs')};\n` +
+        `import { loadScenarios } from ${url('./e2e/scenario-loader.mjs')};\n` +
+        `const imported = await importWatched([${JSON.stringify(scenariosHere)}, ''], { deadline: 1000 });\n` +
+        'stopUnlessCleared(imported);\n' +
+        `await loadScenarios(${JSON.stringify(scenariosHere)});\n` +
+        "console.log('the scenarios were imported into this process');\n",
+    );
+    const run = await runBounded([path.join(dir, 'arrangement.mjs')], { deadline: 15000 });
+    assert.equal(run.killed, false, `the arrangement hung until it was killed after ${run.ms} ms: ${run.stdout}${run.stderr}`);
+    assert.equal(run.status, 1, run.stderr);
+    assert.match(run.stderr, /no scenario was imported into this process, because the watched import failed: the import never let its process end/);
+    assert.doesNotMatch(run.stdout, /imported into this process/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// The recording replacement keeps what the function is: its name, its length,
+// its prototype chain, every own property (symbols too), a function-valued
+// property replaced by one that records and calls the original, and `new`.
+test('a recording replacement keeps everything the original function has', () => {
+  const custom = Symbol('custom');
+  function original(a, b) {
+    return this?.k ?? a + b;
+  }
+  const helper = (x) => x * 2;
+  original[custom] = helper;
+  original.data = [1];
+  Object.defineProperty(original, 'hidden', { value: 'h', enumerable: false, writable: false, configurable: true });
+  original.prototype.method = function () {
+    return 'm';
+  };
+  const calls = [];
+  const watched = recording(original, 'x.original', (label, args) => calls.push(`${label}:${args.join(',')}`));
+  assert.equal(watched.name, 'original');
+  assert.equal(watched.length, 2);
+  assert.deepEqual(Reflect.ownKeys(watched).sort((a, b) => String(a).localeCompare(String(b))), Reflect.ownKeys(original).sort((a, b) => String(a).localeCompare(String(b))));
+  assert.equal(watched.data, original.data);
+  assert.deepEqual(Object.getOwnPropertyDescriptor(watched, 'hidden'), Object.getOwnPropertyDescriptor(original, 'hidden'));
+  assert.equal(Object.getPrototypeOf(watched), Object.getPrototypeOf(original));
+  assert.equal(watched(1, 2), 3);
+  assert.equal(watched.call({ k: 'this' }, 1, 2), 'this');
+  assert.equal(watched[custom](4), 8);
+  assert.notEqual(watched[custom], helper);
+  assert.equal(new watched(1, 2).method(), 'm');
+  assert.ok(new watched(1, 2) instanceof original);
+  assert.deepEqual(calls, ['x.original:1,2', 'x.original:1,2', 'x.original.Symbol(custom):4', 'x.original:1,2', 'x.original:1,2']);
+  // A function without a prototype of its own gets a replacement without one.
+  const arrow = recording(() => 1, 'arrow', () => {});
+  assert.equal(Object.hasOwn(arrow, 'prototype'), false);
 });
 
 test('every scenario says which rows it stands for, in a way the loader understands', () => {

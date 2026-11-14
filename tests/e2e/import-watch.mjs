@@ -1,52 +1,129 @@
 // Importing a scenario must do nothing: the runner imports every one of them
-// before it runs any. tests/e2e-parity.test.mjs runs this file as a process of
-// its own, `node import-watch.mjs <dir> <prefix> [<dir> <prefix> ...]`, which
-// replaces every way of acting on the machine it knows by one that records the
-// call, then imports the scenarios of each directory through the runner's
-// loader, and prints on its standard output, as one line of JSON, what it saw.
+// before it runs any. tests/e2e/import-check.mjs runs this file as a process
+// of its own, `node --permission-audit --allow-fs-read=* import-watch.mjs
+// <dir> <prefix> [<dir> <prefix> ...]`, with a secret on its standard input
+// and a pipe of its own on descriptor 3. It imports the scenarios of each
+// directory through the runner's loader, under three nets, and reports what
+// they saw on descriptor 3, as one line: the secret, a space, and JSON.
 //
-// The watch is never taken down. What an import puts off (a promise that
-// settles later, a callback of a route not watched) runs after the import has
-// returned, and a watch taken down at that point would not see it (review
-// finding pa-4). So the report is written only when the event loop has
-// nothing left to do ('beforeExit'): every put-off action has run by then,
-// under the watch. Something that keeps the loop busy for good never lets the
-// process end; the test that runs this file stops it and fails.
+// The nets look where Node itself sees an act, not at a list of functions a
+// module might call (review finding pa-4: a list of routes always misses one,
+// and a replaced function is not the same function):
+//  1. Every async resource Node creates from before the loader is imported to
+//     the report is recorded by its type (node:async_hooks). A timer, an
+//     immediate, a put-off callback, a socket, a file watcher, a DNS query,
+//     a child's pipe: each is a resource, whatever JavaScript route made it.
+//  2. Node's permission system runs in audit mode, with reading allowed: every
+//     other check it makes (writing a file by path, a child process, a worker
+//     thread, the network and DNS, an addon, WASI, the inspector) is
+//     published on a diagnostics channel, which this file listens to. The
+//     check is made inside Node, under any function a module can reach, and
+//     an attempt inside a try/catch is published like any other. Audit mode
+//     lets the act go ahead, so an import does here what it does in the
+//     runner.
+//  3. The few acts neither sees (a write to a descriptor already open, a
+//     signal sent, the working directory or umask changed, a wait on shared
+//     memory) go through recording replacements that keep everything the
+//     original has (import-watch-record.mjs). The process's listeners, the
+//     environment, the global object's names and the built-in prototypes are
+//     compared at the end.
 //
-// Only Node's own modules are imported statically here: the loader and the
-// scenarios are imported after the watch is in place, so no module of the
-// suite can have taken a function before it was replaced.
-import childProcess from 'node:child_process';
-import cluster from 'node:cluster';
-import dgram from 'node:dgram';
-import dns from 'node:dns';
+// The nets are never taken down. The report is written only when the event
+// loop has nothing left to do ('beforeExit'), so an act an import puts off
+// runs under them. A process that never gets there, or ends any other way,
+// makes no report, and import-check.mjs fails it.
+//
+// Only Node's own modules, and the replacement helper, which imports nothing,
+// are imported statically: the loader and the scenarios come after the nets.
+import asyncHooks from 'node:async_hooks';
+import diagnosticsChannel from 'node:diagnostics_channel';
 import fs from 'node:fs';
-import http from 'node:http';
-import https from 'node:https';
 import module from 'node:module';
-import net from 'node:net';
-import timers from 'node:timers';
-import timersPromises from 'node:timers/promises';
-import workerThreads from 'node:worker_threads';
+import { instrument } from './import-watch-record.mjs';
 
-// Taken before the watch: how the report is written, and when.
+// The secret that marks this run's report, read before anything else is
+// imported, and kept in this module's scope only. The parent writes it and
+// closes the pipe.
+const readSecret = () => {
+  const buffer = Buffer.alloc(256);
+  let text = '';
+  for (;;) {
+    let n;
+    try {
+      n = fs.readSync(0, buffer);
+    } catch (err) {
+      if (err.code === 'EAGAIN') continue;
+      throw err;
+    }
+    if (n === 0) break;
+    text += buffer.toString('utf8', 0, n);
+  }
+  return text.trim();
+};
+const secret = readSecret();
+if (!/^[0-9a-f]{64}$/.test(secret)) {
+  fs.writeSync(2, 'import-watch: no secret on standard input\n');
+  process.exit(2);
+}
+// Taken before the nets: how the report is written.
 const writeSync = fs.writeSync;
-const report = (value) => writeSync(1, `${JSON.stringify(value)}\n`);
+const report = (value) => writeSync(3, `${secret} ${JSON.stringify(value)}\n`);
 const pairs = process.argv.slice(2);
 
+// Node's assert module, which the scenarios import, makes the process's
+// standard-error stream when it is loaded, and that stream is a resource of
+// its own (a PIPEWRAP when the parent reads it through a pipe). It is made
+// here, before the first net, so that it is not counted against them. A
+// write to it is still a resource (a TickObject), and standard output is
+// left to be made by whoever first prints.
+void process.stderr;
+
+// Net 1. The only type of resource that importing the real scenarios makes
+// (measured: about 4,000 of them, and nothing else, once the error stream
+// exists) is a promise: every import is one, and every async function call.
+// A promise acts on nothing; what one is put off to do is an act the nets
+// see when it runs. Any other type is reported, Timeout and Immediate first
+// among them, and TickObject and Microtask too: neither the loader nor any
+// scenario puts a callback off with process.nextTick or queueMicrotask.
+const ALLOWED_RESOURCES = new Set(['PROMISE']);
+const resources = [];
+const hook = asyncHooks.createHook({
+  init(_id, type) {
+    if (!ALLOWED_RESOURCES.has(type) && !resources.includes(type)) resources.push(type);
+  },
+});
+hook.enable();
+
+// Net 2.
+const permission = [];
+for (const scope of ['fs', 'net', 'child', 'worker', 'addon', 'wasi', 'ffi', 'inspector', 'openssl-store']) {
+  diagnosticsChannel.subscribe(`node:permission-model:${scope}`, (message) => {
+    permission.push(`${scope} ${message?.permission} ${message?.resource}`);
+  });
+}
+
+// Net 3.
 const calls = [];
-const watch = (object, names, label) => {
-  for (const name of names) {
-    if (typeof object[name] !== 'function') continue;
-    const original = object[name];
-    object[name] = function watched(...args) {
-      // Opening a file to read it is how modules are loaded at all.
-      const readOnly = (name === 'openSync' || name === 'open') && [undefined, 'r', 0].includes(args[1]);
-      if (!readOnly) calls.push(`${label}.${name}(${typeof args[0] === 'string' ? args[0] : ''})`);
-      return original.apply(this, args);
-    };
-  }
+const record = (label, args) => {
+  const first = args[0];
+  calls.push(`${label}(${typeof first === 'string' || typeof first === 'number' ? first : ''})`);
 };
+// Calls on a descriptor already open are not checked by the permission
+// system (its documentation says so; fchmod, fchown, futimes, fsync and
+// fdatasync are refused outright there, with nothing published, so a refusal
+// caught by a module would not be seen either). Standard output and error,
+// and the report's own descriptor, are open from the start.
+const FD_CALLS = ['write', 'writev', 'ftruncate', 'fchmod', 'fchown', 'futimes', 'fsync', 'fdatasync'];
+instrument(fs, [...FD_CALLS, ...FD_CALLS.map((name) => `${name}Sync`)], 'fs', record);
+// Signals (process.kill calls process._kill, which a module can call itself;
+// _debugProcess signals another process), the working directory and umask.
+instrument(process, ['kill', '_kill', '_debugProcess', 'chdir', 'umask'], 'process', record);
+// A wait on shared memory settles later through the engine alone: no
+// resource, no check.
+instrument(Atomics, ['waitAsync'], 'Atomics', record);
+// Named imports of the built-in modules (`import { writeSync } from
+// 'node:fs'`) see the replacements only after this.
+module.syncBuiltinESMExports();
 
 // What an import could change in this process for every later module: the
 // global object's own names, and the built-in prototypes' properties.
@@ -63,23 +140,23 @@ const shared = () => {
 };
 const sameDescriptor = (a, b) =>
   !a || !b ? a === b : ['value', 'get', 'set', 'writable', 'enumerable', 'configurable'].every((k) => Object.is(a[k], b[k]));
+// Every listener on the process, by event: a signal handler can be added
+// through process.on or through EventEmitter.prototype.on called on the
+// process, so the listeners themselves are compared, whatever the route.
+const processListeners = () => new Map(process.eventNames().map((event) => [event, process.rawListeners(event)]));
 
 let loaded = null;
 let newHandles = null;
 let failed = null;
-let handlesBefore, envBefore, sharedBefore, listenersBefore;
-// Every listener on the process, by event: a signal handler can be added
-// through EventEmitter.prototype.on called on the process as well as through
-// process.on, so the listeners themselves are compared, whatever the route.
-const processListeners = () => new Map(process.eventNames().map((event) => [event, process.rawListeners(event)]));
 let reported = false;
 // `on`, not `once`: a once-listener is removed before it runs, which would
 // read as a listener the import took away.
 process.on('beforeExit', () => {
   if (reported) return;
   reported = true;
-  if (failed !== null) return report({ error: failed, calls });
-  if (loaded === null) return report({ error: 'the import never finished: something it awaited never settled', calls });
+  const seen = { calls, permission, resources };
+  if (failed !== null) return report({ error: failed, ...seen });
+  if (loaded === null) return report({ error: 'the import never finished: something it awaited never settled', ...seen });
   // Read now, when everything the import put off has run, as well as what
   // the import did itself.
   const listenersAfter = processListeners();
@@ -95,73 +172,13 @@ process.on('beforeExit', () => {
     const [a, b] = [sharedBefore.get(key), sharedAfter.get(key)];
     if (key === 'globalThis' ? a !== b : !sameDescriptor(a, b)) sharedChanged.push(key);
   }
-  report({ loaded, calls, newHandles, envChanged: JSON.stringify(process.env) !== envBefore, sharedChanged });
+  report({ loaded, ...seen, newHandles, envChanged: JSON.stringify(process.env) !== envBefore, sharedChanged });
 });
 
-watch(childProcess, ['spawn', 'spawnSync', 'exec', 'execSync', 'execFile', 'execFileSync', 'fork'], 'child_process');
-watch(cluster, ['fork', 'setupPrimary', 'setupMaster'], 'cluster');
-watch(net, ['createServer', 'createConnection', 'connect'], 'net');
-watch(dgram, ['createSocket'], 'dgram');
-watch(http, ['createServer', 'request', 'get'], 'http');
-watch(https, ['createServer', 'request', 'get'], 'https');
-// The same acts reached without those functions: a socket or a server made
-// with `new` and then connected or listening (a TLS socket or an HTTP server
-// is one of these too), a child made with `new ChildProcess()` and spawned,
-// and a DNS query, of the module or of a resolver of its own.
-watch(net.Socket.prototype, ['connect'], 'net.Socket');
-watch(net.Server.prototype, ['listen'], 'net.Server');
-watch(dgram.Socket.prototype, ['bind', 'connect', 'send'], 'dgram.Socket');
-watch(childProcess.ChildProcess.prototype, ['spawn'], 'child_process.ChildProcess');
-const DNS_QUERIES = [
-  'lookup', 'lookupService', 'resolve', 'resolve4', 'resolve6', 'resolveAny', 'resolveCaa', 'resolveCname',
-  'resolveMx', 'resolveNaptr', 'resolveNs', 'resolvePtr', 'resolveSoa', 'resolveSrv', 'resolveTlsa', 'resolveTxt',
-  'reverse',
-];
-watch(dns, DNS_QUERIES, 'dns');
-watch(dns.promises, DNS_QUERIES, 'dns.promises');
-watch(dns.Resolver.prototype, DNS_QUERIES, 'dns.Resolver');
-watch(dns.promises.Resolver.prototype, DNS_QUERIES, 'dns.promises.Resolver');
-// Every fs call that changes a file, a directory or its metadata; opening
-// is watched too, except to read.
-const FS_WRITERS = [
-  'writeFile', 'appendFile', 'write', 'writev', 'mkdir', 'mkdtemp', 'rm', 'rmdir', 'unlink', 'rename',
-  'copyFile', 'cp', 'symlink', 'link', 'truncate', 'ftruncate', 'chmod', 'fchmod', 'lchmod', 'chown',
-  'fchown', 'lchown', 'utimes', 'futimes', 'lutimes', 'open',
-];
-// A file watcher acts on nothing, but it is left running, and one made with
-// `persistent: false` holds no handle.
-watch(fs, [...FS_WRITERS, ...FS_WRITERS.map((name) => `${name}Sync`), 'createWriteStream', 'watch', 'watchFile'], 'fs');
-watch(fs.promises, [...FS_WRITERS, 'watch'], 'fs.promises');
-watch(globalThis, ['fetch', 'setTimeout', 'setInterval', 'setImmediate', 'queueMicrotask'], 'global');
-// The timer modules are other routes to the same timers (review finding
-// pa-4): `import { setTimeout } from 'node:timers'`, an awaited delay from
-// node:timers/promises, its scheduler, and a signal that aborts itself
-// after a delay. An unreferenced timer (`.unref()`) holds no handle, so only
-// the call shows it.
-watch(timers, ['setTimeout', 'setInterval', 'setImmediate'], 'timers');
-watch(timersPromises, ['setTimeout', 'setInterval', 'setImmediate'], 'timers/promises');
-watch(timersPromises.scheduler, ['wait', 'yield'], 'timers/promises.scheduler');
-watch(AbortSignal, ['timeout'], 'AbortSignal');
-// A wait on shared memory that settles later, with no timer and no handle.
-watch(Atomics, ['waitAsync'], 'Atomics');
-watch(process, ['on', 'once', 'addListener', 'prependListener', 'kill', 'exit', 'chdir', 'umask', 'nextTick'], 'process');
-// A worker thread runs code of its own, which can do any of the above out of
-// this thread's sight (review finding atk-8); its construction is the act.
-const OriginalWorker = workerThreads.Worker;
-workerThreads.Worker = class WatchedWorker extends OriginalWorker {
-  constructor(...args) {
-    calls.push(`worker_threads.Worker(${typeof args[0] === 'string' ? args[0].slice(0, 80) : ''})`);
-    super(...args);
-  }
-};
-// Named imports of the built-in modules (`import { spawnSync } from
-// 'node:child_process'`) see the replacements only after this.
-module.syncBuiltinESMExports();
-
-handlesBefore = process.getActiveResourcesInfo().length;
-envBefore = JSON.stringify(process.env);
-sharedBefore = shared();
-listenersBefore = processListeners();
+const handlesBefore = process.getActiveResourcesInfo().length;
+const envBefore = JSON.stringify(process.env);
+const sharedBefore = shared();
+const listenersBefore = processListeners();
 try {
   const { loadScenarios } = await import('./scenario-loader.mjs');
   const names = [];
