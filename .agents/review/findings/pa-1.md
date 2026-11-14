@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — `markers`, the only scenario that stands for automatic skipping (row 8a) in either player, waits up to 14 and 16 seconds for a running play to be past second 12. Ordinary playback gets there in that time, so the row is counted as shown, and the parity verdict passes, with automatic skipping broken.
 **Status**: In progress
 **Branch**: —
-**Commit**: `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6` (repair)
+**Commit**: `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6` (repair), `9dfad5e` (second repair)
 
 ## Evidence
 
@@ -219,3 +219,70 @@ Not covered: as listed above.
   - tests/e2e/scenarios/markers.mjs:131 — Date.now permits clock adjustments to defeat the deadline. With ordinary playback, a 9400 ms read delay and a simulated seven-second clock rollback, the scenario certified 12.21 s after 11213 real milliseconds while reporting 4212 ms. Use a monotonic elapsed clock.
   - tests/e2e-judge.test.mjs:238 — The slow-read fixture jumps from approximately 2.04 s to 12.3 s at 5200 ms; it models a late jump, not ordinary playback. Use an honest playback function for the no-skip regression. The existing deadline guards do bite: reverting the repair failed both named tests, and restoring it passed all 29 tests. Restoration was verified byte for byte.
   - tests/e2e/judge.mjs:34 — A correct jump around one second can now fail if observation is delayed roughly four additional seconds. A 4300 ms read begun around 900 ms reproduced rejection at 5225 ms. This is conservative timeout behavior, not a separate reopening reason. The E2E scenario and Lua were read; the E2E suite was not run.
+
+Orchestrator: a valid verdict, reopened on four comments (a fifth says
+the proof is now conservative, which the reviewer does not hold against
+it). All four are right: they are about how the proof counts time and what
+it does not see between two readings. It is the second reopen of this
+finding.
+
+### Repair (round 3), `9dfad5e`
+
+- **Where time starts.** The clock started when mpv had answered the
+  resume, so a slow answer was not counted. It now starts before the
+  resume is asked for (`proveSkippedPast` in
+  `tests/e2e/scenarios/markers.mjs`).
+- **Which clock.** The wall clock can be set back. The proof now reads the
+  process's monotonic clock (`performance.now()`).
+- **When a reading counts.** A reading's time is taken when its read has
+  answered, so a slow read counts against the window too.
+- **What lies between two readings.** A crossing counts only if at most
+  500 ms lie between the position seen before it and the one past the
+  range's end (`skipJumpVerdict` in `tests/e2e/judge.mjs`, `maxGapMs`).
+  In a longer gap, whether from one slow read or from reads that failed,
+  a skip that landed short could have played the rest unseen, and the leg
+  fails: "the play was not watched across the jump: N ms lie between ...".
+- **An honest test.** The test added in round 2 made the position creep
+  and then jump, which is not ordinary playback. The scenario's loop now
+  takes its clock as a parameter, and the tests run it in made-up time
+  against a play that goes at one second per second from the moment mpv is
+  told to resume, where a skip is a jump of the position and an answer can
+  be slow. That test is replaced by these.
+
+Files: `tests/e2e/scenarios/markers.mjs`, `tests/e2e/judge.mjs`,
+`tests/e2e-judge.test.mjs`.
+
+Guard, in `tests/e2e-judge.test.mjs`:
+
+- "the time a slow answer to the resume takes counts against the window"
+  (the reviewer's first trace: 9400 ms for the resume, then 1800 ms for a
+  read, no skip).
+- "a skip that lands short and plays the rest behind a slow read, or
+  behind reads that fail, fails" (the second: a landing at 9 s, a read of
+  3300 ms; and the same with failing reads).
+- "ordinary playback seen past the range late, through one slow read,
+  fails".
+- "a real skip passes in made-up time, and a watched one a little slow
+  still does" (reads of 300 ms each).
+- "a crossing counts only if the play was watched across it" (the rule
+  itself: 500 ms passes, 501 fails; failed reads are not watching; a first
+  reading that is the jump is measured from the resume).
+- "the scenario counts time on a clock that cannot go back" (the text of
+  the scenario, and a real run).
+
+Red-proofs by the coordinating agent, the file put back and checked byte
+for byte after each: the clock started after the resume's answer again;
+the gap rule taken out; failed reads counted as watching; the wall clock
+again; the gap allowed made a millisecond more. Each failed its test.
+
+End to end, on the repair's content: `markers` passed 3 runs of 3 in the
+external player and 2 of 2 in the embedded one. In all ten legs the last
+reading before the jump was 1.88 to 1.92 s and the first after it 12.00 s,
+1004 to 1043 ms after the resume was asked for. `npm run check` was green
+before the commit.
+
+Not covered: a skip that lands up to half a second short of the range's
+end can pass (it was "about a tenth of a second" before; the rule now says
+what it guarantees, not what usually happens). The proof is conservative
+the other way: a correct skip fails if the machine is so slow that half a
+second passes between two readings around the jump.
