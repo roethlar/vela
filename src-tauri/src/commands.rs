@@ -4824,6 +4824,43 @@ struct PlaybackSelection {
     /// The player the play asks for (`select_playback_version`), read with
     /// the settings the copy was chosen with.
     player: crate::player::PlayerKind,
+    /// The screen the copy was ranked for, when a Compatible choice was made
+    /// from a play's observation. The play opens there (review finding pw-1).
+    ranked_screen: Option<RankedScreen>,
+}
+
+/// The screen a Compatible copy was ranked for, as it was when the ranking
+/// was made, from a play's observation (`compatibility_display`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum RankedScreen {
+    /// The screen the observation names.
+    Named(String),
+    /// The observation names no screen; the ranking then named the screen
+    /// holding Vela's window (`display::detect_profile`).
+    VelasScreen,
+}
+
+impl RankedScreen {
+    fn of(observed: &display::ObservedDisplay) -> Self {
+        observed
+            .names
+            .first()
+            .map_or(Self::VelasScreen, |name| Self::Named(name.clone()))
+    }
+}
+
+/// The screen a play's window opens on, by name; `None` asks for the screen
+/// holding Vela's window. A play whose copy was ranked for an observed screen
+/// opens on that screen: the screen is looked at once, where the copy is
+/// chosen, so that a report of another screen arriving while the stream is
+/// resolved cannot send the window to a screen the copy was not chosen for
+/// (review finding pw-1). Any other play opens on the screen it inherits.
+fn screen_to_open_on(ranked: Option<RankedScreen>, inherited: Option<String>) -> Option<String> {
+    match ranked {
+        Some(RankedScreen::Named(name)) => Some(name),
+        Some(RankedScreen::VelasScreen) => None,
+        None => inherited,
+    }
 }
 
 enum PlaybackSelectionOutcome {
@@ -4936,15 +4973,17 @@ fn compatibility_display(
     .map(|session| session.observation.display_snapshot())
 }
 
-/// What a Compatible choice ranks for. `upcoming` is the player the play
-/// asks for; should an embedded play fall back to mpv's own window when it
-/// starts, its copy has been chosen for Vela's screen.
+/// What a Compatible choice ranks for, and, when it ranks for a play's
+/// observation, the screen that is (`RankedScreen`), for the play to open
+/// on. `upcoming` is the player the play asks for; should an embedded play
+/// fall back to mpv's own window when it starts, its copy has been chosen
+/// for Vela's screen.
 async fn playback_compatibility_target(
     state: &AppState,
     replace_session: Option<&str>,
     upcoming: crate::player::PlayerKind,
     cfg: &config::AppConfig,
-) -> Result<Option<crate::selection::CompatibilityTarget>, PlayFailure> {
+) -> Result<Option<(crate::selection::CompatibilityTarget, Option<RankedScreen>)>, PlayFailure> {
     let Some(app) = state.app_handle.get() else {
         return Ok(None);
     };
@@ -4955,14 +4994,18 @@ async fn playback_compatibility_target(
             .unwrap_or_else(|error| error.into_inner());
         compatibility_display(&current, replace_session, upcoming)
     };
+    let ranked_screen = observed.as_ref().map(RankedScreen::of);
     let detected = display::detect_profile(app, observed).await;
     let overrides = playback_display_overrides(cfg).map_err(PlayFailure::fatal)?;
     let effective = display::apply_overrides(&detected, overrides);
-    Ok(Some(crate::selection::CompatibilityTarget {
-        width: effective.width_px,
-        height: effective.height_px,
-        hdr: effective.hdr,
-    }))
+    Ok(Some((
+        crate::selection::CompatibilityTarget {
+            width: effective.width_px,
+            height: effective.height_px,
+            hdr: effective.hdr,
+        },
+        ranked_screen,
+    )))
 }
 
 fn playback_source_choices(
@@ -5189,6 +5232,7 @@ async fn select_playback_version(
             version_id: None,
             item: selected_item,
             player: upcoming_player,
+            ranked_screen: None,
             }),
             ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
         });
@@ -5236,10 +5280,13 @@ async fn select_playback_version(
             AskSourceDecision::NoCandidate => {}
         }
     }
-    let target = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
-        playback_compatibility_target(state, replace_session, upcoming_player, &cfg).await?
+    let (target, ranked_screen) = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
+        match playback_compatibility_target(state, replace_session, upcoming_player, &cfg).await? {
+            Some((target, ranked_screen)) => (Some(target), ranked_screen),
+            None => (None, None),
+        }
     } else {
-        None
+        (None, None)
     };
     crate::selection::rank_candidates(&mut candidates, policy, target);
     let winner = candidates
@@ -5264,6 +5311,7 @@ async fn select_playback_version(
             version_id: Some(version.version_id),
             item: selected_item,
             player: upcoming_player,
+            ranked_screen,
         }),
         ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
     })
@@ -5495,12 +5543,15 @@ async fn play_by_key_locked(
             .unwrap_or_else(|e| e.into_inner());
         opening_window(&current, first_of_run)
     };
-    let screen_name = if inherited_screen_name.is_some() {
-        inherited_screen_name
-    } else if let Some(app) = state.app_handle.get() {
-        display::current_screen_name(app).await
-    } else {
-        None
+    // The screen, though, is the one the copy was ranked for when a
+    // Compatible choice looked at one before the stream was resolved
+    // (review finding pw-1).
+    let screen_name = match screen_to_open_on(selection.ranked_screen.clone(), inherited_screen_name) {
+        Some(name) => Some(name),
+        None => match state.app_handle.get() {
+            Some(app) => display::current_screen_name(app).await,
+            None => None,
+        },
     };
     // The size this window opens at stands until the play shows a windowed
     // size of its own, so a play that stays fullscreen hands it on.
@@ -8451,6 +8502,52 @@ mod tests {
             Some(vec!["DP-1".to_string()])
         );
         assert_eq!(compatibility_display(&both, None, Embedded), None);
+    }
+
+    #[test]
+    fn a_play_opens_on_the_screen_its_copy_was_ranked_for() {
+        // Review finding pw-1, the reviewer's probe: the copy is ranked for
+        // DP-1, where the last mpv window was; while the stream is resolved
+        // that mpv reports HDMI-1. The play opens on DP-1, the screen its copy
+        // was chosen for. The steps are the play path's, in its order.
+        use crate::player::PlayerKind::External;
+        let last = observed_window_session("last", External);
+        let slot = std::sync::Mutex::new(published([last.clone()]));
+        // Choosing the copy (`playback_compatibility_target`).
+        let observed = compatibility_display(&slot.lock().unwrap(), None, External)
+            .expect("the last mpv window's screen is ranked for");
+        let ranked = Some(RankedScreen::of(&observed));
+        assert_eq!(ranked, Some(RankedScreen::Named("DP-1".to_string())));
+        // A late report while the stream is resolved.
+        last.observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change",
+            "name": "display-names",
+            "data": ["HDMI-1"]
+        }));
+        // After resolution: the window's state is still looked at now...
+        let (window, inherited) = opening_window(&slot.lock().unwrap(), Default::default());
+        assert_eq!(window.fullscreen, Some(true));
+        assert_eq!(inherited.as_deref(), Some("HDMI-1"));
+        // ...and the screen is the one the copy was ranked for.
+        assert_eq!(
+            screen_to_open_on(ranked, inherited.clone()).as_deref(),
+            Some("DP-1"),
+            "the play must not open on a screen its copy was not chosen for"
+        );
+        // No Compatible ranking: the screen looked at after resolution.
+        assert_eq!(screen_to_open_on(None, inherited).as_deref(), Some("HDMI-1"));
+        // An observation that names no screen was ranked with the name of the
+        // screen holding Vela's window: the play opens there.
+        let unnamed = display::ObservedDisplay {
+            names: Vec::new(),
+            width_px: Some(1920),
+            height_px: Some(1080),
+        };
+        assert_eq!(RankedScreen::of(&unnamed), RankedScreen::VelasScreen);
+        assert_eq!(
+            screen_to_open_on(Some(RankedScreen::VelasScreen), Some("HDMI-1".to_string())),
+            None
+        );
     }
 
     #[test]

@@ -129,6 +129,42 @@ test('the play path opens its window from the run or the setting, and hands it o
   );
 });
 
+test('a play opens on the screen its Compatible copy was ranked for', () => {
+  // Review finding pw-1. The rule is unit-tested in commands.rs
+  // (a_play_opens_on_the_screen_its_copy_was_ranked_for); this guards that
+  // the screen looked at for the ranking is the one carried to the launch.
+  const target = commands.slice(
+    commands.indexOf('\nasync fn playback_compatibility_target('),
+    commands.indexOf('\nfn playback_source_choices('),
+  );
+  assert.match(
+    target,
+    /compatibility_display\(&current, replace_session, upcoming\)\s+\};\s+let ranked_screen = observed\.as_ref\(\)\.map\(RankedScreen::of\);\s+let detected = display::detect_profile\(app, observed\)\.await;/,
+    'the screen carried is the one the ranking looks at, taken once',
+  );
+  assert.match(target, /Ok\(Some\(\(\s+crate::selection::CompatibilityTarget \{[\s\S]{0,200}\},\s+ranked_screen,\s+\)\)\)/);
+  const select = commands.slice(
+    commands.indexOf('\nasync fn select_playback_version('),
+    commands.indexOf('\nstruct PlayLaunchRequest<'),
+  );
+  assert.match(
+    select,
+    /let \(target, ranked_screen\) = if policy == crate::selection::PlaybackSourcePolicy::Compatible \{\s+match playback_compatibility_target\([^)]*\)\.await\? \{\s+Some\(\(target, ranked_screen\)\) => \(Some\(target\), ranked_screen\),\s+None => \(None, None\),\s+\}\s+\} else \{\s+\(None, None\)\s+\};/,
+  );
+  assert.match(select, /player: upcoming_player,\s+ranked_screen,\s+\}\),/, 'the ranked selection carries it');
+  assert.match(select, /player: upcoming_player,\s+ranked_screen: None,\s+\}\),/, 'an unranked one carries none');
+  // The launch opens on it, after the window state is sampled.
+  const playPath = commands.slice(commands.indexOf('\nasync fn play_by_key_locked('));
+  const playBody = playPath.slice(0, playPath.indexOf('\n}\n'));
+  const sampledAt = playBody.indexOf('opening_window(&current, first_of_run)');
+  const screenAt = playBody.search(
+    /let screen_name = match screen_to_open_on\(selection\.ranked_screen\.clone\(\), inherited_screen_name\) \{\s+Some\(name\) => Some\(name\),\s+None => match state\.app_handle\.get\(\) \{\s+Some\(app\) => display::current_screen_name\(app\)\.await,\s+None => None,\s+\},\s+\};/,
+  );
+  assert.ok(sampledAt > 0 && screenAt > sampledAt, 'the screen is decided from the ranking after the sampling');
+  assert.match(playBody, /\n\s+screen_name,\n/, 'and handed to the launch');
+  assert.equal([...playBody.matchAll(/\bscreen_name\b/g)].length, 2, 'untouched in between');
+});
+
 test('the remembered window never holds a position', () => {
   const struct = config.match(/pub struct MpvWindow \{([\s\S]*?)\n\}/);
   assert.ok(struct, 'the stored window type exists');
