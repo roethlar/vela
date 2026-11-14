@@ -81,6 +81,34 @@ test("pa-1: the range's end passes at exactly its value, and the margin ends at 
   assert.match(atMargin.verdict.why, /seen inside the range at 3 s/);
 });
 
+test('pa-1: the end is judged before the window, and the first sample may be the jump', () => {
+  // A jump seen at the first sample past the window still passes: a sample
+  // past the end decides it before the window is looked at.
+  const held = Array.from({ length: 50 }, (_, k) => ({ t: 1, ms: 100 * k }));
+  assert.deepEqual(
+    decide([...held, { t: 12.2, ms: 5050 }]),
+    { at: 50, verdict: { ok: true, before: 1, after: 12.2, ms: 5050 } },
+    'a jump at the first sample past the window must pass',
+  );
+  // With no sample before the jump, the sample before it is where the play
+  // was put.
+  assert.deepEqual(
+    decide([{ t: 12.1, ms: 100 }], { ...MARKERS, startS: 1.25 }),
+    { at: 0, verdict: { ok: true, before: 1.25, after: 12.1, ms: 100 } },
+    'the sample before a jump seen first is the start',
+  );
+});
+
+test('pa-1: a failed read past the window ends it, and says the position is unknown', () => {
+  const held = Array.from({ length: 51 }, (_, k) => ({ t: 1, ms: 100 * k }));
+  const { at, verdict } = decide([...held, { t: null, ms: 5100 }]);
+  assert.equal(at, 51);
+  assert.equal(
+    verdict.why,
+    "the position must be past the range's end (12 s) within 5000 ms of playing on from 1.00 s, which only a skip can do; it is null",
+  );
+});
+
 test('pa-1: a read that failed changes nothing', () => {
   // A failed read just before each sample inside the window. (One past the
   // window ends it like any other sample, and says so: "it is null".)
@@ -98,7 +126,10 @@ test('pa-1: a read that failed changes nothing', () => {
 // position, once the play is resumed, is `positionAt(ms since the resume)`.
 // It must throw the verdict's failure and return on its pass: the scenario
 // acts on the verdict.
-function standInMpv(positionAt) {
+// A seek to 1 s lands at `landsAt` (the scenario takes anything from 0.9 to
+// 1.5 s as the start, as a real seek may land on a frame near it), so that a
+// verdict judged from a start other than the one seen shows.
+function standInMpv(positionAt, { landsAt = 1 } = {}) {
   let paused = false;
   let pos = 0.5;
   let resumedAt = null;
@@ -117,7 +148,7 @@ function standInMpv(positionAt) {
       if (name === 'pause') {
         paused = value;
         if (!value) resumedAt = Date.now();
-      } else if (name === 'time-pos') pos = value;
+      } else if (name === 'time-pos') pos = value === 1 ? landsAt : value;
       else throw new Error(`the stand-in has no property ${name}`);
     },
   };
@@ -144,7 +175,45 @@ test('pa-1: the markers scenario passes one jump across the range, and logs it',
   t.mock.method(console, 'log', (line) => logged.push(line));
   await proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12);
   assert.equal(logged.length, 1, `one line is logged: ${JSON.stringify(logged)}`);
-  assert.match(logged[0], /^auto-skip: the intro range: from 1\.00 s, last sample before the jump 1\.\d\d s, first after 12\.50 s, \d+ ms after the play resumed$/);
+  const line = logged[0].match(/^auto-skip: the intro range: from 1\.00 s, last sample before the jump (\d+\.\d\d) s, first after 12\.50 s, \d+ ms after the play resumed$/);
+  assert.ok(line, `the line logged: ${logged[0]}`);
+  // The play ran about 0.9 s before the jump, so the sample before it is
+  // well past the start (the start itself would mean it named the wrong one).
+  assert.ok(Number(line[1]) >= 1.3 && Number(line[1]) < 2, `the sample before the jump is the last one taken before it: ${logged[0]}`);
+});
+
+test('pa-1: the markers scenario judges from where the seek landed, and names the sample before the jump', STAND_IN, async (t) => {
+  // The seek lands at 1.25 s; the play runs 0.9 s, is seen just past the
+  // range's start (inside the margin) for 0.6 s, then is past the end.
+  const mpv = standInMpv((ms) => (ms < 900 ? 1.25 + ms / 1000 : ms < 1500 ? 2.6 : 12.5), { landsAt: 1.25 });
+  const logged = [];
+  t.mock.method(console, 'log', (line) => logged.push(line));
+  await proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12);
+  assert.equal(logged.length, 1, `one line is logged: ${JSON.stringify(logged)}`);
+  const line = logged[0].match(/^auto-skip: the intro range: from 1\.25 s, last sample before the jump (\d+\.\d\d) s, first after 12\.50 s, \d+ ms after the play resumed$/);
+  assert.ok(line, `the line logged: ${logged[0]}`);
+  assert.ok(Number(line[1]) >= 1.55 && Number(line[1]) <= 2.6, `the sample before the jump is the last one taken before it: ${logged[0]}`);
+});
+
+test('pa-1: the markers scenario fails a play that never crosses the range, once the window is over', STAND_IN, async () => {
+  // Held where the seek landed: no skip comes. About 5 s.
+  const mpv = standInMpv(() => 1.25, { landsAt: 1.25 });
+  await assert.rejects(
+    proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12),
+    /^Error: auto-skip: the intro range: the position must be past the range's end \(12 s\) within 5000 ms of playing on from 1\.25 s, which only a skip can do; it is 1\.25$/,
+    'the scenario must fail, by the window, a play that is never past the range',
+  );
+});
+
+test('pa-1: the markers scenario fails a skip that lands just past the margin', STAND_IN, async () => {
+  // The skip lands at 3.05 s, just past rangeStart + 1 s, and the play stays
+  // there: a wider margin would let the window end it instead.
+  const mpv = standInMpv((ms) => (ms < 900 ? 1.25 + ms / 1000 : 3.05), { landsAt: 1.25 });
+  await assert.rejects(
+    proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12),
+    /^Error: auto-skip: the intro range: the play must jump from the range's start \(2 s\) past its end \(12 s\) in one step; it was seen inside the range at 3\.05 s \(the sample before was [\d.]+ s\), \d+ ms after resuming from 1\.25 s$/,
+    'the scenario must fail a skip that lands just past the margin',
+  );
 });
 
 // multiplex.mjs's rule for Plex A's timeline reports of one stopped play: the
