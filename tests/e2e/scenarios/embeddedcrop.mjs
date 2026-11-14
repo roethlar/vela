@@ -6,8 +6,8 @@
 // autocrop.lua, which the external player uses and `autocrop` covers) with the
 // mode from Settings, and the player view's Crop control and `C` key reach it
 // through the backend. This is `autocrop`'s counterpart for the embedded
-// player: automatic cropping on a fresh and on a resumed play, and manual
-// cropping that waits for the user.
+// player: automatic cropping on a fresh and on a resumed play, manual
+// cropping that waits for the user, and Off, which crops nothing.
 //
 // The settle delay is shortened the way a user would, through the user's mpv
 // options. What is read back is mpv's own `video-crop`; a WebDriver screenshot
@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createConnection } from 'node:net';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { holdsFor, mockSource, openLibraryGrid, pollUntil, seedConfig, showPlayerBar } from '../helpers.mjs';
+import { PLAYER_VIEW_UP, holdsFor, mockSource, openLibraryGrid, pollUntil, seedConfig, showPlayerBar } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
 
@@ -66,10 +66,15 @@ const cropState = (mpv) => mpv.getProp('user-data/vela-crop/state').catch(() => 
 const videoCrop = (mpv) => mpv.getProp('video-crop');
 
 async function play(driver, verb) {
-  await driver.exec(
+  // The grid can be re-rendering when a play has just ended (its watch state
+  // refreshes): wait for the card, and open its menu in the same step.
+  await driver.waitFor(
     `const el = document.querySelector('button.poster[aria-label^="Letterbox Movie"]');
+     if (!el) return false;
      const r = el.getBoundingClientRect();
-     el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));`,
+     el.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.x + r.width / 2, clientY: r.y + r.height / 2 }));
+     return true;`,
+    'the movie card, to open its menu',
   );
   await driver.waitFor(`return !!document.querySelector('.ctxmenu')`, 'context menu (play)');
   const before = mpvSocketSnapshot();
@@ -225,6 +230,36 @@ export default {
       throw err;
     }
     await stop(driver, mpv, socketPath, 'manual');
+
+    // 4. Off (review finding pa-2): no crop script, so the view offers no Crop
+    //    control, its C key crops nothing, and nothing crops by itself, held
+    //    past the delay of this scenario's automatic mode (1 s) and the
+    //    script's default (5 s).
+    setMode('off');
+    ({ mpv, socketPath, first } = await play(driver, 'Play from Beginning'));
+    try {
+      assert.ok(first < 2, `off: a play from the beginning starts there (time-pos ${first})`);
+      await driver.waitFor(
+        PLAYER_VIEW_UP,
+        'off: the player view to be up',
+      );
+      const offHold = async () => {
+        const crop = await videoCrop(mpv);
+        if (crop !== '') return `video-crop became ${crop}`;
+        const state = await cropState(mpv);
+        if (state !== null) return `the crop script published the state ${state}`;
+        const control = await driver.exec(`return !!document.querySelector('.player button.crop')`);
+        if (control) return 'the view shows a Crop control';
+        return null;
+      };
+      await holdsFor(offHold, 3000, 'off: nothing is cropped and no Crop control is offered');
+      await driver.pressKeys('C');
+      await holdsFor(offHold, 5000, 'off: the C key crops nothing');
+    } catch (err) {
+      mpv.close();
+      throw err;
+    }
+    await stop(driver, mpv, socketPath, 'off');
     // The end of its proof of its rows in this player (proof.mjs).
     shown('9');
   },

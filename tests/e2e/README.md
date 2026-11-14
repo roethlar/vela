@@ -299,9 +299,13 @@ and reads the outcome from mpv over its IPC socket:
   play stays up. The script draws no button of its own there.
 - `embeddedcrop`: Vela's own `vela-crop.lua` crops a letterboxed clip by
   itself in automatic mode, on a fresh and on a resumed play, and only on
-  the Crop control in manual mode; `C` takes the crop away. It is the
-  embedded counterpart of `autocrop`, which covers the stock script of the
-  external player and is external-only.
+  the Crop control in manual mode; `C` takes the crop away. With cropping
+  Off the view offers no Crop control and nothing crops, `C` included. It is
+  the embedded counterpart of `autocrop`, which covers the stock script of
+  the external player in the same three modes and is external-only; its
+  Manual leg presses Shift+C through mpv's input commands over IPC
+  (`mpvInput`, declared in its `testOnly`), so row 9 is marked there as shown
+  only through a test-only route.
 - `embeddedfullscreenend`: fullscreen asked for through the view's control,
   then each way a play can end: a playlist's clean end with the next play
   started by the backend keeps it across the gap; an end in an error (the
