@@ -111,14 +111,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `pw-9`; the external player idling at the end of a file under the
     user's own mpv configuration (FIXED, see the commit "a video ends
     when its file ends in the external player"); the order of events left
-    open in `pc-2`;
+    open in `pc-2` (FIXED, and `pc-2` closed);
     the Arch package not installing `vela-markers.lua` (FIXED); the lockfile-only
     `npm audit fix` (FIXED; GitHub CI's Frontend job should pass again from
     that commit on: look before relying on it). Their entries under Blockers still say "needs a go":
     read them with this point until each is fixed and its entry removed.
   - Active review loop: see `.agents/review/index.md`. Nothing is waiting
     for the owner there: `ps-2` closed as it stands (it is about a test),
-    and `pc-2` is being repaired under the point above.
+    and `pc-2` closed with a fourth repair under the point above.
   - On 2026-11-13 the owner switched on multi-agent workflows for the
     session that is doing this work. The agent reads that as the approval
     the 2026-08-20 constraint below asks for before more than one Claude

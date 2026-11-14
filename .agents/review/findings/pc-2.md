@@ -612,3 +612,44 @@ and send it to the reviewer again?
 - **No, take the source-choice report out again**: the race goes, and what
   it fixed comes back: cancelling the source choice of a playlist's next
   entry leaves the library fullscreen until the 50-second backstop.
+
+### Repair (round 4), `c681cd4`: written by codex, reviewed by the coordinating agent. CLOSED.
+
+The owner said on 2026-11-14 that what is obviously broken is fixed
+without asking (`.agents/decisions.md`, that date), which answers the
+question above with "yes". The design under "What would close it" was
+handed to codex as a coding task and built as written:
+
+- `PendingPlaybackChoice` carries `run_waiting`: set for a choice made
+  for a play that follows another (`replace_session` is set), and set by
+  the dispatcher (`mark_manual_pending`, which replaces
+  `has_manual_pending` in `advance_playlist`) on a hand-opened choice it
+  meets at a clean end.
+- `cancel_choice` and `resolve_choice` report the end of the run only for
+  a choice the run was waiting for. A hand-opened choice the dispatcher
+  has not met reports nothing; a choice no longer held reports nothing.
+
+What each kind of choice reports when it ends without starting a play
+(always on condition that nothing is playing, no choice is waiting and
+the page holds the player's fullscreen): the dispatcher's successor and
+Continue Playing's, the end of the run, as before; a hand-opened choice
+the dispatcher has met, the same; a hand-opened choice it has not met,
+nothing (it could report the end too early before); an expired choice,
+nothing (the page's own 50-second backstop has left fullscreen by then).
+
+Guard: `in_every_order_the_page_leaves_fullscreen_exactly_when_the_run_is_over`
+now also cancels a hand-opened choice before and after the dispatch
+(42,942 orders, 742 distinct sequences). Codex saw it fail with the old
+reporting put back, on the order choice ends, view closes, tracker
+reports, reap, dispatch, next play starts; and pass with the fix. Two
+older expectations changed with the behaviour: an expired choice is now
+silent.
+
+The coordinating agent read the change, merged it onto `main` and ran the
+full check there (green: 690 Rust tests, 549 Node tests). End to end on that content: \mbeddedfullscreenend\, \playlistplay\, \sourcepolicy\, \continuetv\, \continueon\ and \mbeddedplay\ in the embedded player (6 of 6), and \sourcepolicy\, \playlistplay\ and \continuetv\ in the external one (3 of 3). It made
+no red-proofs of its own: the owner set work on tests aside that day.
+Under the owner's decision of 2026-11-14 ("Coding tasks may go to codex")
+this review closes the finding.
+
+Not checked: the dialog race in a real window (it needs a cancel inside
+about a second), and the timed expiry with its backstop.
