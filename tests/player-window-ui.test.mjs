@@ -234,10 +234,26 @@ test('a play is shown on the one screen decided before its copy is chosen', () =
   assert.equal(count(production, 'screen_for_play('), 2, 'decided in one place');
   assert.equal(count(production, 'profile_basis('), 1, 'ranked for in one place');
   const display = read('src-tauri/src/display.rs');
-  assert.equal(count(display, 'current_screen_name('), 2, "Vela's screen is looked up only by look_at_screens");
+  // The screens are asked of the system once, on a blocking thread and never
+  // on an async worker: the first thing look_at_screens does is that thread,
+  // and both Vela's monitor and the list come from its one answer, which
+  // screens_from puts together with the system's own list of outputs.
+  const look = bodyOf(display, 'pub(crate) async fn look_at_screens(');
   assert.match(
-    bodyOf(display, 'pub(crate) async fn look_at_screens('),
-    /let velas = current_screen_name\(app\)\.await;/,
+    look,
+    /\) -> Screens \{\s+let asked = \{\s+let app = app\.clone\(\);\s+tauri::async_runtime::spawn_blocking\(move \|\| \{\s+use tauri::Manager;\s+let window = app\.get_webview_window\("main"\)\?;\s+let velas = window\.current_monitor\(\)\.ok\(\)\.flatten\(\)\.map\(\|monitor\| descriptor\(&monitor\)\);\s+let all = window\s+\.available_monitors\(\)/,
+    'the system is asked once, on a blocking thread',
+  );
+  assert.doesNotMatch(look, /current_monitor\(app|current_screen_name/, 'and not again on the async worker');
+  assert.equal(count(look, 'current_monitor('), 1);
+  assert.match(look, /screens_from\(velas, monitors, platform_outputs\(\)\.await\)\s*$/, 'what was seen is put together');
+  assert.equal(count(display, 'current_screen_name'), 0, "Vela's screen is looked up only by look_at_screens");
+  assert.equal(count(display.slice(0, display.indexOf('\n#[cfg(test)]\nmod tests {')), 'screens_from('), 2);
+  // The HDR state is asked for the decided output, by its name, size and place.
+  assert.match(
+    bodyOf(display, 'pub(crate) async fn profile_of('),
+    /let hdr = native_hdr_state\(\s+app,\s+basis\.name\.clone\(\),\s+basis\.width_px,\s+basis\.height_px,\s+basis\.position,\s+\)\s+\.await;/,
+    'the HDR state is the decided output\'s',
   );
 
   // The launch asks for the decided screen: no second look at where Vela's

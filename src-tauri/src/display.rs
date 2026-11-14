@@ -174,15 +174,6 @@ fn current_monitor(app: &tauri::AppHandle) -> Option<MonitorDescriptor> {
     })
 }
 
-/// The name of the output holding Vela's window, in the form mpv takes for
-/// `--screen-name`. A play that has no other screen to go to is shown there
-/// (`look_at_screens`). Wayland compositors may still choose a different
-/// output; the observed mpv output then counts for every later play.
-async fn current_screen_name(app: &tauri::AppHandle) -> Option<String> {
-    let monitor = current_monitor(app)?;
-    platform_screen_name(app, monitor).await
-}
-
 /// One output (screen) the app can see, by every name Vela or mpv may give
 /// it, with its own size, and where it is on the desktop when that is known.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -314,10 +305,14 @@ pub(crate) async fn profile_of(app: &tauri::AppHandle, basis: ProfileBasis) -> D
 }
 
 /// The screen holding Vela's window and the outputs connected now. The
-/// system is asked on a blocking thread, through Vela's window (Tauri hands
-/// the question to the window's own thread and waits for the answer).
+/// system is asked once, on a blocking thread, through Vela's window (Tauri
+/// hands the question to the window's own thread and waits for the answer,
+/// so it is never asked on an async worker); the name and the values of
+/// Vela's screen both come from that one answer. A play that has no other
+/// screen to go to is shown on Vela's screen. Wayland compositors may still
+/// choose a different output; the observed mpv output then counts for every
+/// later play.
 pub(crate) async fn look_at_screens(app: &tauri::AppHandle) -> Screens {
-    let velas = current_screen_name(app).await;
     let asked = {
         let app = app.clone();
         tauri::async_runtime::spawn_blocking(move || {
@@ -335,27 +330,56 @@ pub(crate) async fn look_at_screens(app: &tauri::AppHandle) -> Screens {
         .flatten()
     };
     let Some((velas_monitor, monitors)) = asked else {
-        return Screens {
-            velas,
-            ..Screens::default()
-        };
+        return Screens::default();
     };
-    let velas_output = match velas_monitor {
-        Some(monitor) => Some(output_of(app, monitor).await),
+    let velas = match velas_monitor {
+        Some(monitor) => Some(named_monitor(app, monitor).await),
         None => None,
     };
-    let connected = match monitors {
+    let monitors = match monitors {
         Some(monitors) => {
-            let mut outputs = platform_outputs().await;
+            let mut named = Vec::with_capacity(monitors.len());
             for monitor in monitors {
-                outputs.push(output_of(app, monitor).await);
+                named.push(named_monitor(app, monitor).await);
             }
-            Some(outputs)
+            Some(named)
         }
         None => None,
     };
+    screens_from(velas, monitors, platform_outputs().await)
+}
+
+/// A monitor Tauri gives, with the name mpv takes for it
+/// (`platform_screen_name`; the two differ on macOS).
+#[derive(Debug, Clone)]
+struct NamedMonitor {
+    monitor: MonitorDescriptor,
+    mpv_name: Option<String>,
+}
+
+async fn named_monitor(app: &tauri::AppHandle, monitor: MonitorDescriptor) -> NamedMonitor {
+    let mpv_name = platform_screen_name(app, monitor.clone()).await;
+    NamedMonitor { monitor, mpv_name }
+}
+
+/// What `look_at_screens` saw, put together: the monitor holding Vela's
+/// window, every monitor Tauri lists (`None` when they could not be listed),
+/// and the outputs the system lists by names Tauri does not give
+/// (`platform_outputs`). Kept apart from the asking so that a test can run it.
+fn screens_from(
+    velas: Option<NamedMonitor>,
+    monitors: Option<Vec<NamedMonitor>>,
+    platform: Vec<Output>,
+) -> Screens {
+    let velas_output = velas.as_ref().map(output_of);
+    let connected = monitors.map(|monitors| {
+        platform
+            .into_iter()
+            .chain(monitors.iter().map(output_of))
+            .collect::<Vec<_>>()
+    });
     Screens {
-        velas,
+        velas: velas.and_then(|velas| velas.mpv_name),
         velas_output,
         connected,
     }
@@ -373,11 +397,12 @@ fn descriptor(monitor: &tauri::Monitor) -> MonitorDescriptor {
 
 /// A monitor as an output: Tauri's name for it and mpv's (they differ on
 /// macOS, `platform_screen_name`).
-async fn output_of(app: &tauri::AppHandle, monitor: MonitorDescriptor) -> Output {
+fn output_of(named: &NamedMonitor) -> Output {
+    let monitor = &named.monitor;
     let mut names: Vec<String> = monitor.name.iter().cloned().collect();
-    if let Some(name) = platform_screen_name(app, monitor.clone()).await {
-        if !names.contains(&name) {
-            names.push(name);
+    if let Some(name) = &named.mpv_name {
+        if !names.contains(name) {
+            names.push(name.clone());
         }
     }
     Output {
@@ -1137,6 +1162,71 @@ mod tests {
             ..Default::default()
         };
         assert!(nameless.is_connected("HDMI-1"));
+    }
+
+    fn monitor(name: &str, mpv_name: &str, width_px: u32, height_px: u32, x: i32) -> NamedMonitor {
+        NamedMonitor {
+            monitor: MonitorDescriptor {
+                name: Some(name.to_string()),
+                width_px,
+                height_px,
+                position_x: x,
+                position_y: 0,
+            },
+            mpv_name: Some(mpv_name.to_string()),
+        }
+    }
+
+    fn listed(names: &[&str], width_px: u32, height_px: u32, position: Option<(i32, i32)>) -> Output {
+        Output {
+            names: names.iter().map(|name| name.to_string()).collect(),
+            width_px,
+            height_px,
+            position,
+        }
+    }
+
+    // Second review of finding pw-1: what look_at_screens saw is put together
+    // by a function a test can run. Vela's screen is named as mpv names it and
+    // has its own values; the outputs connected are the system's own list
+    // and every monitor Tauri lists, by both names.
+    #[test]
+    fn what_was_seen_of_the_screens_is_put_together() {
+        let studio = monitor("Studio Display", "Studio Display (7)", 5120, 2880, 0);
+        let hdmi = monitor("HDMI-1", "HDMI-1", 1920, 1080, 5120);
+        let compositor = listed(&["DP-3", "XG27UQDMS"], 3840, 2160, None);
+        let screens = screens_from(
+            Some(hdmi.clone()),
+            Some(vec![studio.clone(), hdmi.clone()]),
+            vec![compositor.clone()],
+        );
+        assert_eq!(screens.velas.as_deref(), Some("HDMI-1"));
+        assert_eq!(
+            screens.velas_output,
+            Some(listed(&["HDMI-1"], 1920, 1080, Some((5120, 0))))
+        );
+        assert_eq!(
+            screens.connected,
+            Some(vec![
+                compositor.clone(),
+                listed(&["Studio Display", "Studio Display (7)"], 5120, 2880, Some((0, 0))),
+                listed(&["HDMI-1"], 1920, 1080, Some((5120, 0))),
+            ])
+        );
+        for name in ["DP-3", "XG27UQDMS", "Studio Display", "Studio Display (7)", "HDMI-1"] {
+            assert!(screens.is_connected(name), "{name}");
+        }
+        assert!(!screens.is_connected("DP-1"));
+        // Vela's screen is named as mpv takes it, not as Tauri gives it.
+        let on_studio = screens_from(Some(studio), Some(vec![hdmi.clone()]), Vec::new());
+        assert_eq!(on_studio.velas.as_deref(), Some("Studio Display (7)"));
+        assert_eq!(on_studio.velas_output.map(|output| output.width_px), Some(5120));
+        // The monitors could not be listed: nothing is known to be connected,
+        // and Vela's screen is still named.
+        let unlisted = screens_from(Some(hdmi), None, vec![compositor]);
+        assert_eq!(unlisted.connected, None);
+        assert_eq!(unlisted.velas.as_deref(), Some("HDMI-1"));
+        assert_eq!(screens_from(None, None, Vec::new()), Screens::default());
     }
 
     #[cfg(target_os = "macos")]
