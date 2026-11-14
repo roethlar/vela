@@ -442,9 +442,7 @@ pub(crate) fn screens_from(
 ) -> Screens {
     let velas_output = velas.as_ref().map(output_of);
     let velas_name = velas.and_then(|velas| velas.mpv_name).map(|name| {
-        velas_output
-            .as_ref()
-            .and_then(|own| connector_of(&name, own, platform.outputs()))
+        connector_of(&name, platform.outputs())
             .map(str::to_string)
             .unwrap_or(name)
     });
@@ -475,27 +473,18 @@ pub(crate) fn screens_from(
 /// own list of outputs (second review of finding pw-1). On Wayland Tauri
 /// names a screen by its model, which two screens of one model share; the
 /// compositor lists each output by its connector name ("DP-3") first, which
-/// is what mpv takes and names no other screen. It is taken when exactly one
-/// listed output carries Vela's screen's name, or, of several that do,
-/// exactly one is also of its size; otherwise there is none to take, and the
-/// name stays as Tauri gives it.
-fn connector_of<'a>(name: &str, own: &Output, platform: &'a [Output]) -> Option<&'a str> {
-    let carrying: Vec<&Output> = platform.iter().filter(|output| output.is_called(name)).collect();
-    let output = match carrying.as_slice() {
-        [one] => *one,
-        several => {
-            let sized: Vec<&Output> = several
-                .iter()
-                .copied()
-                .filter(|output| output.width_px == own.width_px && output.height_px == own.height_px)
-                .collect();
-            match sized.as_slice() {
-                [one] => *one,
-                _ => return None,
-            }
-        }
-    };
-    output.names.first().map(String::as_str)
+/// is what mpv takes and names no other screen. It is taken only when
+/// exactly one listed output carries Vela's screen's name. When several do,
+/// none is taken and the name stays as Tauri gives it: nothing Tauri gives
+/// tells them apart reliably (third review of finding pw-1: Tauri's sizes
+/// are scaled where the compositor's modes are not, so a size can point at
+/// the other screen).
+fn connector_of<'a>(name: &str, platform: &'a [Output]) -> Option<&'a str> {
+    let mut carrying = platform.iter().filter(|output| output.is_called(name));
+    match (carrying.next(), carrying.next()) {
+        (Some(one), None) => one.names.first().map(String::as_str),
+        _ => None,
+    }
 }
 
 fn descriptor(monitor: &tauri::Monitor) -> MonitorDescriptor {
@@ -1476,11 +1465,15 @@ mod tests {
         );
     }
 
-    // Second review of finding pw-1: on Wayland Tauri names a screen by its
-    // model, so two screens of one model share a name. The screen holding
-    // Vela's window is named by its own connector, and its profile is its own.
+    // On Wayland Tauri names a screen by its model, so two screens of one
+    // model share a name. Second review of finding pw-1: the screen holding
+    // Vela's window is named by its own connector where one output carries
+    // the model. Third review, comment 3: where two do, no size or position
+    // tells them apart reliably (Tauri's sizes are scaled, the compositor's
+    // modes are not), so no connector is taken, the name stays the model's,
+    // and the profile is still that of the monitor holding Vela's window.
     #[test]
-    fn two_screens_of_one_model_are_told_apart() {
+    fn two_screens_of_one_model_give_no_connector() {
         let left = monitor("XG27UQDMS", "XG27UQDMS", 3840, 2160, 0);
         let right = monitor("XG27UQDMS", "XG27UQDMS", 2560, 1440, 3840);
         let both = vec![left.clone(), right.clone()];
@@ -1489,9 +1482,9 @@ mod tests {
             listed(&["DP-2", "XG27UQDMS"], 2560, 1440, None),
         ];
         let on_right = screens_from(Some(right.clone()), Some(both.clone()), Complete(compositor.clone()));
-        assert_eq!(on_right.velas.as_deref(), Some("DP-2"), "the connector of Vela's own screen");
+        assert_eq!(on_right.velas.as_deref(), Some("XG27UQDMS"), "no connector: the model stays");
         let basis = profile_basis(on_right.velas.as_deref(), None, &on_right);
-        assert_eq!(size(&basis), (Some("DP-2"), 2560, 1440));
+        assert_eq!(size(&basis), (Some("XG27UQDMS"), 2560, 1440), "Vela's own monitor's values");
         assert_eq!(basis.position, Some((3840, 0)));
         assert_eq!(
             size(&profile_basis(Some("DP-1"), None, &on_right)),
@@ -1499,23 +1492,37 @@ mod tests {
             "the other screen, by its connector, is its own"
         );
         assert!(on_right.is_connected("DP-1") && on_right.is_connected("DP-2"));
-        let on_left = screens_from(Some(left), Some(both.clone()), Complete(compositor));
-        assert_eq!(on_left.velas.as_deref(), Some("DP-1"));
+        assert!(on_right.is_connected("XG27UQDMS"));
+        let on_left = screens_from(Some(left.clone()), Some(both.clone()), Complete(compositor));
+        assert_eq!(on_left.velas.as_deref(), Some("XG27UQDMS"));
         assert_eq!(size(&profile_basis(Some("DP-1"), None, &on_left)), (Some("DP-1"), 3840, 2160));
+        let basis = profile_basis(on_left.velas.as_deref(), None, &on_left);
+        assert_eq!((size(&basis), basis.position), ((Some("XG27UQDMS"), 3840, 2160), Some((0, 0))));
 
-        // Two of one model and one size, neither the size Tauri gives Vela's
-        // screen (a scaled desktop): nothing tells which is Vela's, so the
-        // name stays the model's, and the profile is still that of the
-        // monitor holding Vela's window, not the first listed of that model.
-        let alike = vec![
-            listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
-            listed(&["DP-2", "XG27UQDMS"], 3840, 2160, None),
-        ];
-        let untold = screens_from(Some(right.clone()), Some(both.clone()), Complete(alike));
-        assert_eq!(untold.velas.as_deref(), Some("XG27UQDMS"));
-        let basis = profile_basis(untold.velas.as_deref(), None, &untold);
-        assert_eq!(size(&basis), (Some("XG27UQDMS"), 2560, 1440));
-        assert_eq!(basis.position, Some((3840, 0)));
+        // Every combination of sizes, for either output holding Vela's
+        // window: whatever the sizes, no connector. Among them the
+        // reviewer's probe: Vela's screen is DP-1, 3840x2160 shown at 150%,
+        // which Tauri gives as 5120x2880, beside a native 5120x2880 DP-2.
+        let sizes = [(3840, 2160), (2560, 1440), (5120, 2880), (1920, 1080)];
+        for first in sizes {
+            for second in sizes {
+                for tauri in sizes {
+                    let velas = monitor("XG27UQDMS", "XG27UQDMS", tauri.0, tauri.1, 0);
+                    let compositor = vec![
+                        listed(&["DP-1", "XG27UQDMS"], first.0, first.1, None),
+                        listed(&["DP-2", "XG27UQDMS"], second.0, second.1, None),
+                    ];
+                    let seen = screens_from(Some(velas.clone()), Some(vec![velas]), Complete(compositor));
+                    assert_eq!(
+                        seen.velas.as_deref(),
+                        Some("XG27UQDMS"),
+                        "outputs {first:?} and {second:?}, Tauri gives {tauri:?}"
+                    );
+                    let basis = profile_basis(seen.velas.as_deref(), None, &seen);
+                    assert_eq!(size(&basis), (Some("XG27UQDMS"), tauri.0, tauri.1));
+                }
+            }
+        }
 
         // One output of that model: its connector, whatever size it lists.
         let one = screens_from(
