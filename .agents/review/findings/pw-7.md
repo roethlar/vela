@@ -3,7 +3,7 @@
 **Severity**: LOW — the control is bound to the value being saved, and a failed save only shows the error. The select keeps showing a choice the backend does not hold, and playback follows the old one until a save succeeds.
 **Status**: In progress
 **Branch**: —
-**Commit**: `ac25240`, `0ee2e0d` (repair)
+**Commit**: `ac25240`, `0ee2e0d` (repair), `1430f2e` (second repair)
 
 ## Evidence
 
@@ -246,3 +246,99 @@ Not covered:
 - `guard_confirmed`: true. `capability_ok`: true.
 - Verdict: **reopened**. Comments, verbatim:
   - src/lib/Settings.svelte:288 — The counter cannot protect a reopened component from an earlier instance’s pending save. Reproduced with two instances of the extracted component code: A sends fullscreen; reopened B reads remember; A’s save confirms fullscreen; B’s load applies remember because B’s counter remains zero. A refused retry in B then restores remember although the backend holds fullscreen. Closing remains enabled during saves, and reopening remounts Settings. Synchronize outstanding saves and confirmed state across component lifetimes, and guard this interleaving. The existing six tests pass after restoration.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right.
+The count of confirmed saves lived in one opening of Settings, and Settings
+is mounted afresh each time it opens: a save sent from one opening and
+confirmed after it had closed was unknown to the next. It is the second
+reopen of this finding.
+
+### Repair (round 3), `1430f2e`
+
+What Vela last confirmed for the mode, and the count of confirmed saves,
+now belong to the app, not to one opening of Settings. They live in the
+component's module script (`<script module>` in `src/lib/Settings.svelte`),
+which runs once and is shared by every mounting:
+
+- `playerWindowConfirmed` holds the count and the mode last confirmed.
+- A load notes the shared count before it asks. If no save was confirmed
+  since, what it read becomes the confirmed mode; either way it then shows
+  the confirmed mode. So a load that was out while a save was confirmed,
+  from any opening, open or closed, shows that save's mode.
+- A confirmed save (`confirmPlayerWindowSave`) advances the count, records
+  the mode, and tells every opening that is mounted. Each opening
+  registers when it is made and stops when it is destroyed
+  (`followPlayerWindowMode`, `onDestroy`), so an open Settings that has
+  already loaded comes to show a save confirmed elsewhere, and a closed
+  one is never written to.
+- A new opening starts on the confirmed mode, and a refused save goes back
+  to it.
+
+How each order of events ends, every open control and its confirmed mode on
+what Vela holds:
+
+- The reviewer's: A sends fullscreen; Settings is closed and reopened as
+  B, which reads remember; A's save is confirmed; B's load completes. B
+  shows fullscreen, and a refused retry in B goes back to fullscreen. The
+  same with A still open.
+- B's load completes before A's save is confirmed: B shows remember, which
+  Vela held when it asked; the confirmation then brings B to fullscreen.
+- A closed, its save confirmed with no Settings open, then B opened: B
+  starts on fullscreen; its load agrees, and if its load fails it still
+  shows fullscreen with the error.
+- A save confirmed in one open Settings while another is open: the other
+  is told and shows it.
+- Two saves out at once, one from each: both end on the one confirmed
+  last.
+- A refused save in one while another is open: the first goes back to what
+  Vela holds; the other is untouched.
+- One opening only: as after the first repair.
+
+One thing a user can notice changes beyond the finding, on purpose. A
+choice made in the select and not yet saved used to be thrown away by any
+load (Settings loads again when a server is added or removed). It is now
+kept when the load, or another opening's save, confirms the mode this
+opening already knew, and replaced only when Vela's mode has really
+changed under it.
+
+Files: `src/lib/Settings.svelte`, `tests/player-window-ui.test.mjs`.
+
+How it was made: one helper agent (Claude Opus 5.5) on a local branch,
+which first checked on the installed Svelte (5.56.5), with a compiled probe
+on the real runtime, that the module script runs once, that showing and
+hiding the component makes a new instance each time over the same module
+state, and that a hidden instance is told nothing. The coordinating agent
+read the change and landed it as one commit.
+
+Guard, in `tests/player-window-ui.test.mjs`: the harness now runs the
+component's module script once and mounts its instance code as often as a
+test asks, against a made-up backend that holds answers back. New tests:
+"a save confirmed while a reopened Settings is loading is what it shows"
+(the reviewer's order, verbatim, and its variants); "a Settings opened
+after one that closed with its save out shows what that save confirmed";
+"a save confirmed in one open Settings reaches another, keeping an unsaved
+choice the save does not change"; "a refused save in one open Settings
+goes back to what the backend holds and leaves the other alone". The
+earlier tests pass unchanged.
+
+Red-proofs, each restored from a snapshot and compared: the count kept per
+opening again (the reviewer's test failed with `remember` where
+`fullscreen` was expected); the confirmed mode not shared; the other
+openings not told; the registration not ended when an opening closes; the
+unsaved choice always overwritten. On the code as it was, three of the new
+tests fail.
+
+Checks: `npm run check` (487 tests, no svelte-check error) and `npm run
+build` green before the commit; the test file passes inside `codex
+sandbox` in workspace-write mode.
+
+Not covered:
+
+- With two saves out at once, the control ends on the save whose answer
+  came last. That this is the one Vela applied last was not checked.
+- A closed opening whose own save or load answers still writes its own
+  variables, as before; nothing else writes into it.
+- The other values Settings loads are unchanged and have the same
+  weaknesses (round 2's list).
+- The tests run the component's own code extracted from it; only the probe
+  ran the real Svelte runtime.
