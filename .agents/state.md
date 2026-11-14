@@ -55,16 +55,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       log. Its codex review returned TWO findings, both admitted and fixed
       (`a909c20`, `4118fea`). codex verified `pc-1` and has REOPENED
       `pc-2` TWICE: a play that replaces another and then fails to start
-      can still leave the window fullscreen for 50 seconds. The second
-      repair (`c872dad`, on `main`) closed the order of events the reviewer
-      first named and left four others, which the reviewer then named. A
-      third repair is being written on the local branch `pc-2-r3`, on a
-      different rule: what the page is told after a failed launch is
-      decided from the app's state at that moment (nothing playing, no play
-      active, the page holding the player's fullscreen), not from which
-      reports of a play's end happened to come first. If the reviewer
-      reopens it a third time, stop and bring it to the owner, as `ps-2`
-      was (`.agents/review/findings/pc-2.md`). The slice's cropping script
+      could still leave the window fullscreen for 50 seconds. The third
+      repair landed at `060a5fd` and is with codex. It works on a
+      different rule from the first two: what the page is told after a
+      failed launch is decided from the app's state at that moment
+      (nothing playing, no play active, the page holding the player's
+      fullscreen), not from which reports of a play's end happened to come
+      first. The page's own rule for leaving fullscreen, and a source
+      choice that ends without a play, changed with it
+      (`.agents/review/findings/pc-2.md`, "Repair (round 3)"). If the
+      reviewer reopens it a third time, stop and bring it to the owner, as
+      `ps-2` was. The slice's cropping script
       is built under
       an assumption the owner has not ruled on: the plan's "For the
       owner", item 3.
