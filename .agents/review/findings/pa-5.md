@@ -333,3 +333,35 @@ runner writes.
 Not covered, by nature: a file made by hand that is exactly like one of
 the runner's. The commit named at the top is compared with the checkout by
 the verdict, not checked for its form.
+
+### Verification round 4 (repair-delta redispatch), recorded 2026-11-14 12:53 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da18-3058-7483-b44a-494dde5713f5`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 12:46 UTC, finished 12:52 UTC.
+- Reviewed head `bf86854ee5881558c7e14888abec6ef447d3584c`, base
+  `204495db2f965bc94f77dae1ff232259518a78a3` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenario-loader.mjs:335 — Failure/proof consistency is still unchecked. In otherwise valid full-run JSON fixtures, external embeddedownconfig with status 'fail', error KNOWN_FAILURES[0].failsWith, shown ['13b','14'], and routes [] returns no problems from either resultsFileProblems or verdictProblems. The runner cannot write this combination: scenario exceptions retain empty proof lists; run.mjs:172–179 retains nonempty lists only after scenario.run returns, then either passes or fails with the generated proof-validation error. Require failures with nonempty proof lists to have proofProblems and the corresponding generated error before accepting them as known failures, and add a regression assertion.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right:
+a failure that carries proof lists, with nothing wrong in them, is a
+combination the runner cannot write, and the description of round 4 took
+it. That is a gap in the description by its own claim, not the case this
+record set as the stop (a hand-made file exactly like the runner's), so it
+is repaired again.
+
+The repair is being written by codex. On 2026-11-14 the owner asked for
+coding tasks to be handed to codex and reviewed by the coordinating agent;
+this one suits it, since the rule to be completed is the reviewer's own.
+The task asks for a derivation, not one more check: every combination the
+runner can write, from its code, and a description that takes exactly
+those. The coordinating agent reviews what comes back and lands it. Codex
+cannot be the reviewer of a repair it wrote, so that review stands in
+place of a fifth verification.
