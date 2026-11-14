@@ -161,3 +161,33 @@ the intake"). Not a codex finding; codex verifies the fix like any other.
   - tests/e2e/scenarios/windowsetting.mjs:120 — The connection wait leaves a real connected-reader exit race. Exit kills mpv and persists without waiting for the reader to drain. A deterministic Rust probe paused the connected reader after receiving a complete fullscreen=true event; exit persistence returned with fullscreen=false. The recorded 2 ms margin is no scheduling guarantee. This defect should not remain: bound the reader-drain wait before taking the exit snapshot.
   - src-tauri/src/commands.rs:5925 — “The window-state reader has stopped by now” is false on cancellation. wait_tick and spawn_end_watcher can finish on stop_flag independently of done. The probe confirmed that the end callback can persist while the reader remains running. Qualify this claim.
   - tests/e2e-judge.test.mjs:454 — The skipped-wait guard is incomplete: inserting an unbraced `if (false)` immediately before the await leaves both tests passing. Executing that play() with stubs confirmed it returns without calling acceptedConnections. Exercise the wait’s execution rather than only matching its text. Removing the wait and corrupting the count each failed as expected; restoring the pinned files passed.
+
+Orchestrator: a valid verdict, reopened on three comments, and all three
+are right. The first is a fault in the product that the scenario's wait
+had left standing: when Vela quits it saves the window before its reader
+has read all that mpv sent. A repair is being built (2026-11-14) on a
+local branch by helper agents: quitting waits, for at most half a second
+and inside the two seconds it already allows, until the reader has
+finished; the comment the reviewer found untrue is put right; and the
+guard runs the scenario's own `play()`. It will be recorded here as
+"Repair (round 2)".
+
+### Follow-up to the known gaps: the other scenarios, `71395c3` (and `ad3b82d`)
+
+"Other scenarios were not gone through for the same race" no longer
+holds. Codex went through all of them as a coding task (the owner's
+request of 2026-11-14 to split the coding with codex) and the
+coordinating agent reviewed and landed the result:
+`.agents/review/pw-8.other-scenarios.md` has the rule, codex's survey of
+every scenario and helper, how it was checked, and what was not done. In
+short: the wait is one helper, `velaConnected`, used in sixteen files
+(three connections for a play in mpv's own window, four for an embedded
+one), each use held by a test; one full run of each suite passed but for
+the recorded failures and one fault of `mergedview`'s own, fixed at
+`ad3b82d`.
+
+This change also answers part of the reviewer's third comment: the
+`windowsetting` guard now reads the last two statements of `play()`, so
+a wait under an unbraced `if (false)` fails it, and the helper the
+scenario calls is itself run by tests. It still does not run `play()`;
+the repair does that.
