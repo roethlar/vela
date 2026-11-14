@@ -155,6 +155,25 @@ test('a play opens on the screen its Compatible copy was ranked for', () => {
     'the screen carried is the one the ranking looks at, taken once',
   );
   assert.match(target, /Ok\(Some\(\(\s+crate::selection::CompatibilityTarget \{[\s\S]{0,200}\},\s+ranked_screen,\s+\)\)\)/);
+  // The screen carried and the screen the ranking ranks for are named by
+  // one rule, ObservedDisplay::screen_name, also when an observation names
+  // several screens.
+  const rankedOf = commands.slice(
+    commands.indexOf('\nimpl RankedScreen {'),
+    commands.indexOf('\nfn screen_to_open_on('),
+  );
+  assert.match(rankedOf, /observed\s+\.screen_name\(\)\s+\.map_or\(Self::VelasScreen,/, 'the screen carried is named by screen_name');
+  assert.doesNotMatch(rankedOf, /\.names\b/, 'and by nothing else');
+  const display = read('src-tauri/src/display.rs');
+  const detectAt = display.indexOf('\npub(crate) async fn detect_profile(');
+  assert.notEqual(detectAt, -1, 'detect_profile exists');
+  const detect = display.slice(detectAt, display.indexOf('\n}\n', detectAt));
+  assert.match(
+    detect,
+    /let name = observed\s+\.as_ref\(\)\s+\.and_then\(\|value\| value\.screen_name\(\)\.cloned\(\)\)/,
+    'the ranking names the observed screen by screen_name',
+  );
+  assert.doesNotMatch(detect, /\.names\.(first|last|get|iter|into_iter)\(/, 'and by nothing else');
   const select = commands.slice(
     commands.indexOf('\nasync fn select_playback_version('),
     commands.indexOf('\nstruct PlayLaunchRequest<'),

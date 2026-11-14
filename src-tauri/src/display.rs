@@ -34,6 +34,16 @@ pub(crate) struct ObservedDisplay {
     pub height_px: Option<u32>,
 }
 
+impl ObservedDisplay {
+    /// The screen this observation names: the first of mpv's display names
+    /// (a window across several screens reports them all). The one rule for
+    /// every reader, so that a copy ranked for an observed screen and the
+    /// window opened for that copy name the same screen (review finding pw-1).
+    pub(crate) fn screen_name(&self) -> Option<&String> {
+        self.names.first()
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ResolutionOverride {
     P720,
@@ -274,7 +284,7 @@ pub(crate) async fn detect_profile(
 
     let name = observed
         .as_ref()
-        .and_then(|value| value.names.first().cloned())
+        .and_then(|value| value.screen_name().cloned())
         .or_else(|| monitor.as_ref().and_then(|value| value.name.clone()));
     let width_px = observed
         .as_ref()

@@ -4292,12 +4292,7 @@ fn inherited_window_state(record: &PlaybackWindowRecord) -> playback::PlaybackWi
 /// The screen the last external play's mpv window was on, for the next play.
 fn inherited_screen_name(record: &PlaybackWindowRecord) -> Option<String> {
     record.last_external().and_then(|last| {
-        last
-            .observation
-            .display_snapshot()
-            .names
-            .into_iter()
-            .next()
+        last.observation.display_snapshot().screen_name().cloned()
     })
 }
 
@@ -4323,7 +4318,7 @@ fn window_to_remember(
             (
                 latest.player,
                 latest.observation.snapshot(),
-                latest.observation.display_snapshot().names.into_iter().next(),
+                latest.observation.display_snapshot().screen_name().cloned(),
             )
         })
 }
@@ -4921,8 +4916,7 @@ enum RankedScreen {
 impl RankedScreen {
     fn of(observed: &display::ObservedDisplay) -> Self {
         observed
-            .names
-            .first()
+            .screen_name()
             .map_or(Self::VelasScreen, |name| Self::Named(name.clone()))
     }
 }
@@ -8806,6 +8800,20 @@ mod tests {
         assert_eq!(
             screen_to_open_on(Some(RankedScreen::VelasScreen), Some("HDMI-1".to_string())),
             None
+        );
+        // A window across two screens reports both names. The ranking
+        // (`display::detect_profile`) ranks for the first, by
+        // `ObservedDisplay::screen_name`; the play opens on that one.
+        let across = display::ObservedDisplay {
+            names: vec!["DP-1".to_string(), "HDMI-1".to_string()],
+            width_px: Some(3840),
+            height_px: Some(2160),
+        };
+        assert_eq!(across.screen_name().map(String::as_str), Some("DP-1"));
+        assert_eq!(
+            RankedScreen::of(&across),
+            RankedScreen::Named("DP-1".to_string()),
+            "the screen carried is the one the ranking names"
         );
     }
 
