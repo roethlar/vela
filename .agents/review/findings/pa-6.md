@@ -1,9 +1,9 @@
 # pa-6: a run can say it built the app it ran when it built somewhere else and ran an older binary
 
 **Severity**: MEDIUM — the results file records `built` whenever `--skip-build` was not given. The build honours `CARGO_TARGET_DIR` from the environment (and a Cargo configuration's target directory), while the runner always starts `src-tauri/target/debug/vela`. With the build redirected, an older binary at that path is run, recorded as built from the checked-out commit, and accepted by the verdict.
-**Status**: Open
+**Status**: In progress
 **Branch**: —
-**Commit**: —
+**Commit**: `f00cdc4`
 
 ## Evidence
 
@@ -17,15 +17,118 @@ Reviewer's suggested direction, verbatim: "Force the build to the directory used
 
 ## What
 
+The defect is as the reviewer describes: `tests/e2e/run.mjs` fixed the app
+binary at `src-tauri/target/debug/vela` and recorded `built: !skipBuild`,
+while the build honours `CARGO_TARGET_DIR` and a Cargo configuration's
+`target-dir`. This is in the rule the coordinating agent added just before
+Slice 6 landed.
+
+The helper who attacked the first fix found that it still had the defect in
+another form. It asked `cargo metadata` from the repository root, but
+`tauri build` runs Cargo in `src-tauri/`, and Cargo reads its configuration
+files upwards from the directory it runs in and takes a relative
+`CARGO_TARGET_DIR` from there. With a `src-tauri/.cargo/config.toml` naming
+a target directory, the build went to one place and the runner started an
+older binary from another: a `--skip-build` run of `smoke` with that file
+pointing at an empty directory passed.
+
 ## Approach
+
+The runner asks Cargo where it builds: `cargo metadata --format-version 1
+--no-deps --manifest-path Cargo.toml`, run in `src-tauri/` with a copy of
+the environment the build gets. It starts `<target_directory>/debug/<the
+one binary target>`, with `--skip-build` too. It prints the path it runs,
+records it in the results file as `appBinary`, stops with "cannot tell
+where Cargo builds the app" when Cargo cannot say, and says "app binary
+missing: <path>, where Cargo builds it" when the file is not there. It
+refuses `CARGO_BUILD_TARGET`, which would put the binary under
+`<target_directory>/<target>/debug/`.
+
+The step from Cargo's answer to the path is a new module with nothing else
+in it, `tests/e2e/app-binary.mjs` (`appBinaryFromMetadata`,
+`cargoMetadataCwd`, `METADATA_ARGS`). Asked from the same directory with
+the same environment, a relative `CARGO_TARGET_DIR` resolves as the build
+resolves it, so nothing is rewritten.
+
+`tests/e2e/README.md` and `docs/development.md` say where the binary is
+taken from and what `built: true` in a results file means: the run ran the
+build, then started the binary at the path Cargo gave. They also say what
+it does not prove.
+
+Made by a helper agent, attacked by a second, repaired by a third,
+confirmed by a fourth, and read and landed as one commit by the
+coordinating agent, which added one test. The confirming helper had found
+that no test failed when the runner asked Cargo and then started a fixed
+path anyway. The new test holds the runner's own text to it (below).
 
 ## Files changed
 
+- `tests/e2e/app-binary.mjs` (new)
+- `tests/e2e/run.mjs`
+- `tests/e2e-harness.test.mjs`
+- `tests/e2e/README.md`
+- `docs/development.md`
+
 ## Guard proof
+
+In `tests/e2e-harness.test.mjs`:
+
+- "the app binary is taken from Cargo's target directory": the step from
+  an answer to a path, and each refusal (no JSON, no or a relative target
+  directory, no or two binary targets, `CARGO_BUILD_TARGET`).
+- "Cargo is asked where it builds, and CARGO_TARGET_DIR moves the answer":
+  the real Cargo, asked as the runner asks.
+- "Cargo is asked from where the build runs it, so src-tauri's own Cargo
+  configuration counts": a made-up project laid out as this one, under a
+  temporary directory, whose `src-tauri/.cargo/config.toml` names a target
+  directory; the answer must follow it, and a relative `CARGO_TARGET_DIR`
+  must land under `src-tauri/`.
+- "the runner asks Cargo from the directory the build runs it in": the
+  runner's text.
+- "the runner takes the app binary from Cargo's answer, and starts that
+  one" (the coordinating agent's): in the runner's text, `appBinary` is
+  declared once and given one value, the one made from Cargo's answer;
+  every session is started with it; and the runner names no target
+  directory of its own.
+
+The two tests that ask Cargo skip only where `cargo` is not installed.
+
+Red-proofs, each restored afterwards:
+
+- The fixed path back; the `CARGO_BUILD_TARGET` check removed; the
+  target-directory check removed: each failed the unit test.
+- The question asked from the repository root again, in `app-binary.mjs`:
+  the made-up project answered `.../src-tauri/target/debug/madeup` instead
+  of `.../configured-target/debug/madeup`. In `run.mjs` only: the test of
+  the runner's text failed.
+- The coordinating agent, on its own test: Cargo asked and then a fixed
+  path given to `appBinary`; a session started with a path of its own; the
+  answer thrown away and a path put together from parts. Each failed "the
+  runner takes the app binary from Cargo's answer, and starts that one".
+- Real runs, external player, `--skip-build smoke`: with
+  `src-tauri/.cargo/config.toml` naming an empty directory the run stopped
+  with "app binary missing" naming that directory; the same with the
+  runner asking from the repository root passed on the old binary (the
+  defect); with the file removed the run passed and printed the usual path.
+
+`npm run check` was green at this commit (422 tests).
 
 ## Coder dispute (if any)
 
 ## Known gaps
+
+- A Cargo configuration file's `build.target` is not detected; only the
+  environment's `CARGO_BUILD_TARGET` is. In that setup an older binary at
+  `<target directory>/debug/` could still run. The README says so.
+- Nothing shows that the binary was not replaced between the build and the
+  scenarios.
+- No run was made that builds into a moved target directory (it would
+  compile everything again). That `tauri build` runs `cargo build` in
+  `src-tauri/` with the runner's environment rests on a helper's log of a
+  stand-in `cargo`, not on such a run.
+- The test of the runner's wiring reads the runner's text. It fails on the
+  plain ways of starting another binary; a deliberate way around it (a
+  second variable, a path built from character codes) would pass.
 
 ## Reviewer comments
 

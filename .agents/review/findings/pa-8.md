@@ -1,9 +1,9 @@
 # pa-8: a name every object has, such as toString, is accepted as a test-only route
 
 **Severity**: LOW — the loader and the recorder ask whether a route's name is `in` the table of test-only routes, which is also true of names every object inherits. A scenario declaring `via: 'toString'` is accepted, and `testOnlyRoute('toString')` is recorded as a known route. Nothing does this today; the check promises to refuse it.
-**Status**: Open
+**Status**: In progress
 **Branch**: —
-**Commit**: —
+**Commit**: `ade0278`
 
 ## Evidence
 
@@ -17,15 +17,63 @@ Reviewer's suggested direction, verbatim: "Check own-property membership, such a
 
 ## What
 
+The defect is as the reviewer describes. The loader (`scenarioProblems` in
+`tests/e2e/scenario-loader.mjs`) and the recorder (`testOnlyRoute` in
+`tests/e2e/proof.mjs`) both asked whether a route's name was `in` the table
+`TEST_ONLY_ROUTES`. `in` is also true of every name an object inherits, so
+`via: 'toString'` passed the loader and `testOnlyRoute('toString')` was
+recorded as a route taken.
+
 ## Approach
+
+Both places now look the name up among the table's own names only, and take
+nothing that is not a string: `typeof name === 'string' &&
+Object.hasOwn(TEST_ONLY_ROUTES, name)`. Nothing else changes.
+
+How it was made: a helper agent (Claude Opus 5.5) wrote the fix on a local
+branch, a second helper attacked it, a third confirmed it on the merged
+content, and the coordinating agent read the diff and landed it as one
+commit.
 
 ## Files changed
 
+- `tests/e2e/scenario-loader.mjs`
+- `tests/e2e/proof.mjs`
+- `tests/e2e-parity.test.mjs`
+
 ## Guard proof
+
+Two tests in `tests/e2e-parity.test.mjs`:
+
+- "the loader refuses a scenario it does not understand" now also refuses
+  `toString`, `constructor`, `__proto__` and `hasOwnProperty` as `via`.
+- New: "the recorder refuses a test-only route it does not name, an
+  inherited name included". The recorder must throw on each of those names
+  and record exactly the three real routes.
+
+Red-proofs, each made after the fix was committed and restored from the
+commit:
+
+- Loader back to `!(route.via in TEST_ONLY_ROUTES)`: the loader's test
+  failed with `[] should match /"via" is "toString", not one of the
+  test-only routes/`.
+- Recorder back to `!(id in TEST_ONLY_ROUTES)`: the recorder's test failed,
+  the recorded routes holding the inherited names.
+- The attacking helper's other form, `!TEST_ONLY_ROUTES[id]`, in each
+  place: the same two tests failed.
+- The confirming helper repeated the first two on the merged content: both
+  failed.
+
+`npm run check` was green at this commit (412 tests; one skipped, a
+packaging test that needs `mksquashfs`, which this machine does not have).
 
 ## Coder dispute (if any)
 
 ## Known gaps
+
+None known. The attacking helper looked for other lookups by name on a
+plain object in `tests/e2e/*.mjs` and found only `ran[name]` in the
+verdict, where a value that is no result is refused by the fix of `pa-5`.
 
 ## Reviewer comments
 

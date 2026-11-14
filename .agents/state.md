@@ -82,11 +82,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       rest of Slice 6 is the switch-on, which is the owner's. Its codex
       review returned EIGHT findings, `pa-1` to `pa-8`, all admitted, all
       about tests that can pass without what they stand for
-      (`.agents/review/codereview-2026-11-14-embedded-parity.md`); until
-      they are fixed the verdict's word on rows 2, 8a and 9 is weaker than
-      it reads. They are being fixed on two local branches of this clone,
-      `pa-guard` and `pa-scen` (worktrees under
-      `~/dev/vela-agent-keep/wt/`), not on `main`, not pushed. Notes kept
+      (`.agents/review/codereview-2026-11-14-embedded-parity.md`). All
+      eight are FIXED on `main`, one commit each (`ade0278` to `9bcdfbc`,
+      2026-11-14; tests only, no product code), and are going to codex for
+      verification one by one (`.agents/review/index.md`). The three that
+      changed scenarios (`pa-1`, `pa-7`, `pa-2`) each get a follow-up
+      first, being built on the local branch `pa-follow` (worktree under
+      `~/dev/vela-agent-keep/wt/`, not pushed): nothing that plain
+      `node --test` runs fails when one of those fixes is taken out, and
+      codex's sandbox cannot run the end-to-end suite, so it could not
+      see their guard fail. Notes kept
       from the work: `.agents/plans/embedded-player.slice6-notes.md`.
     The owner's by-eye checks and the switch-on (Settings control, release
     notes, version bump) are NOT the agent's to do.
@@ -118,7 +123,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   newer one; and three smaller ones. They are being fixed on two local
   branches of this clone, `pw-core` and `pw-edge` (worktrees under
   `~/dev/vela-agent-keep/wt/`), not on `main`, not pushed. Do not release
-  1.0.64 before they have landed.
+  1.0.64 before they have landed. Seen once since (2026-11-14, a helper's
+  full external run, 1 failure in 5 runs of it): the scenario
+  `windowsetting` timed out waiting for the window of the play still
+  showing when Vela quit to appear in `config.json`. It is not a recorded
+  known failure, and it can fail a parity verdict. The write at exit is
+  what `pw-4` changes; look at it again when that fix lands.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
