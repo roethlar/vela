@@ -54,9 +54,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     - Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
       log. Its codex review returned TWO findings, both admitted and fixed
       (`a909c20`, `4118fea`). codex verified `pc-1` and REOPENED `pc-2`: a
-      quality step-down whose replacement fails to start still leaves the
-      window fullscreen for 50 seconds. Its repair is being written on the
-      local branch `pc-2-r2`. The slice's cropping script is built under
+      quality step-down whose replacement fails to start still left the
+      window fullscreen for 50 seconds. Its repair landed at `c872dad` and
+      is with codex (`.agents/review/findings/pc-2.md`, "Repair (round
+      2)"). The slice's cropping script is built under
       an assumption the owner has not ruled on: the plan's "For the
       owner", item 3.
     - Slice 6 (parity) is next, being written since the evening of
