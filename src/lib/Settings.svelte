@@ -183,6 +183,11 @@
   // the control never shows a choice that was not saved (review finding
   // pw-7).
   let playerWindowSaved: PlayerWindowMode = "remember";
+  // How many saves of the mode the backend has confirmed. A load reads the
+  // mode at one moment and applies it later; a save confirmed in between is
+  // newer than what the load read, so the load then leaves the mode alone
+  // (review finding pw-7).
+  let playerWindowSaves = 0;
 
   // Duplicate-copy selection and the display profile used by Compatible.
   let playbackPreferences = $state<PlaybackPreferences | null>(null);
@@ -257,6 +262,7 @@
 
   async function load() {
     const seq = ++loadSeq;
+    const windowSaves = playerWindowSaves;
     try {
       const [s, mp, adv, continueMode, windowMode, playbackPrefs] = await Promise.all([
         invoke<Source[]>("get_sources"),
@@ -279,7 +285,9 @@
       skipCredits = adv.skipCredits;
       skipCommercials = adv.skipCommercials;
       continuePlaying = continueMode;
-      playerWindowMode = playerWindowSaved = windowMode;
+      if (windowSaves === playerWindowSaves) {
+        playerWindowMode = playerWindowSaved = windowMode;
+      }
       applyPlaybackPreferences(playbackPrefs);
     } catch (e) {
       if (seq === loadSeq) err = String(e);
@@ -430,6 +438,7 @@
       const saved = await invoke<PlayerWindowMode>("set_mpv_window_mode", {
         mode: playerWindowMode,
       });
+      playerWindowSaves += 1;
       playerWindowMode = playerWindowSaved = saved;
     } catch (e) {
       playerWindowMode = playerWindowSaved;

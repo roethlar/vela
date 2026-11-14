@@ -20,8 +20,11 @@ const config = read('src-tauri/src/config.rs');
 const lib = read('src-tauri/src/lib.rs');
 
 test('the player window control talks to the registered setting commands', () => {
-  const offered = settings.includes('id="player-window"');
-  if (!offered) return; // Withheld is always safe.
+  // The control is there, however its id is quoted; without it this test
+  // fails, it does not pass by default (review finding pw-7: an early return
+  // on a text search let a broken control through). The control itself is
+  // checked from the parsed component in the tests of a failed save, below.
+  assert.match(settings, /\bid=(["'])player-window\1/, 'Settings has the Player window control');
 
   // The control talks to the two commands, and both are registered.
   assert.match(settings, /invoke<PlayerWindowMode>\("get_mpv_window_mode"\)/);
@@ -196,44 +199,122 @@ test('a play opens on the screen its Compatible copy was ranked for', () => {
   assert.equal([...playBody.matchAll(/\bscreen_name\b/g)].length, 2, 'untouched in between');
 });
 
-// Review finding pw-7: a save that fails puts the control back to the mode
-// the backend holds. Runs the component's own load and save functions, with
-// their types stripped, against a fake backend.
-test('a failed save of the player window setting puts the control back to the saved mode', async () => {
-  if (!settings.includes('id="player-window"')) return; // Withheld is always safe.
-  // What is run below is what the control shows and what its button calls.
-  assert.match(settings, /<select id="player-window" bind:value=\{playerWindowMode\}>/);
-  assert.match(settings, /onclick=\{savePlayerWindowMode\}/);
+// Review finding pw-7: the control shows the mode the backend holds. The
+// component's own load and save functions are run, with their types
+// stripped, against a made-up backend. What is run and what is looked at are
+// found by parsing, not by searching the text, so that quoting, attribute
+// order or a copy left in a comment cannot change what is checked.
+const playerWindowParts = async () => {
+  const { parse } = await import('svelte/compiler');
   const ts = (await import('typescript')).default;
-  const script = settings.slice(
-    settings.indexOf('<script lang="ts">') + '<script lang="ts">'.length,
-    settings.indexOf('</script>'),
-  );
-  const functionSource = (name) => {
-    const start = script.indexOf(`\n  async function ${name}(`);
-    assert.ok(start >= 0, `${name} exists`);
-    let depth = 0;
-    for (let at = script.indexOf('{', start); at < script.length; at += 1) {
-      if (script[at] === '{') depth += 1;
-      if (script[at] === '}' && (depth -= 1) === 0) return script.slice(start, at + 1);
+  const ast = parse(settings, { modern: true });
+
+  // The control: one select with the id player-window, bound to
+  // playerWindowMode, and in its section one button, which saves it and is
+  // disabled while a save is under way. The control is offered, so it is
+  // required.
+  const elements = [];
+  const seen = new Set();
+  const walk = (node, section) => {
+    if (!node || typeof node !== 'object' || seen.has(node)) return;
+    seen.add(node);
+    if (node.type === 'RegularElement') {
+      elements.push({ node, section });
+      if (node.name === 'section') section = node;
     }
-    throw new Error(`${name} has no end`);
+    for (const key of Object.keys(node)) if (key !== 'parent') walk(node[key], section);
   };
-  const load = functionSource('load');
-  // Everything load assigns is declared here; only the player window state
-  // is taken from the component as it is written.
-  const assigned = [...new Set([...load.matchAll(/^\s+(\w+) = /gm)].map((match) => match[1]))];
-  const declarations = [...script.matchAll(/^ {2}let playerWindow\w*[^;]*;$/gm)].map((match) => match[0]);
-  assert.ok(declarations.length >= 2, 'the player window state is declared');
+  walk(ast.fragment, null);
+  const attribute = (node, name) => {
+    const found = node.attributes.filter((a) => a.type === 'Attribute' && a.name === name);
+    assert.ok(found.length <= 1, `<${node.name}> has one ${name}`);
+    return found[0];
+  };
+  const text = (a) =>
+    Array.isArray(a?.value) && a.value.every((part) => part.type === 'Text')
+      ? a.value.map((part) => part.data).join('')
+      : undefined;
+  const identifier = (a) => {
+    const tag = Array.isArray(a?.value) ? (a.value.length === 1 ? a.value[0] : undefined) : a?.value;
+    return tag?.type === 'ExpressionTag' && tag.expression.type === 'Identifier'
+      ? tag.expression.name
+      : undefined;
+  };
+  const selects = elements.filter(
+    ({ node }) => node.name === 'select' && text(attribute(node, 'id')) === 'player-window',
+  );
+  assert.equal(selects.length, 1, 'there is one select with the id player-window');
+  const [{ node: select, section }] = selects;
+  const binds = select.attributes.filter((a) => a.type === 'BindDirective');
+  assert.equal(binds.length, 1, 'the select has one binding');
+  assert.equal(binds[0].name, 'value');
+  assert.equal(binds[0].expression.type, 'Identifier');
+  assert.equal(binds[0].expression.name, 'playerWindowMode', 'the select shows playerWindowMode');
+  assert.ok(section, 'the select is in a section');
+  const buttons = elements.filter((e) => e.section === section && e.node.name === 'button');
+  assert.equal(buttons.length, 1, 'the section has one button');
+  const [{ node: button }] = buttons;
+  assert.equal(identifier(attribute(button, 'onclick')), 'savePlayerWindowMode', 'the button saves the mode');
+  assert.equal(identifier(attribute(button, 'disabled')), 'playerWindowBusy', 'and is disabled while saving');
+
+  // The script, from the parser, read by the TypeScript compiler. Only
+  // declarations are taken from it: a copy in a comment is not one.
+  const program = ast.instance.content;
+  const sourceFile = ts.createSourceFile(
+    'Settings.ts',
+    settings.slice(program.start, program.end),
+    ts.ScriptTarget.ES2022,
+    true,
+  );
+  const functions = new Map();
+  const visit = (node) => {
+    if (ts.isFunctionDeclaration(node) && node.name) {
+      const name = node.name.text;
+      functions.set(name, [...(functions.get(name) ?? []), node]);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sourceFile);
+  const declaration = (name) => {
+    const found = functions.get(name) ?? [];
+    assert.equal(found.length, 1, `${name} is declared once`);
+    return found[0];
+  };
+  const load = declaration('load');
+  const save = declaration('savePlayerWindowMode');
+  // The player window state, as the component declares it at its top level.
+  const state = sourceFile.statements.filter(
+    (statement) =>
+      ts.isVariableStatement(statement) &&
+      statement.declarationList.declarations.some(
+        (d) => ts.isIdentifier(d.name) && d.name.text.startsWith('playerWindow'),
+      ),
+  );
+  assert.ok(state.length >= 2, 'the player window state is declared');
+  // Everything else load assigns is declared here as a plain variable.
+  const assigned = new Set();
+  const assignments = (node) => {
+    if (
+      ts.isBinaryExpression(node) &&
+      node.operatorToken.kind === ts.SyntaxKind.EqualsToken &&
+      ts.isIdentifier(node.left)
+    ) {
+      assigned.add(node.left.text);
+    }
+    ts.forEachChild(node, assignments);
+  };
+  assignments(load);
+  const others = [...assigned].filter((name) => !name.startsWith('playerWindow') && name !== 'err');
+  const code = (node) => node.getText(sourceFile);
   const source = ts.transpileModule(
     [
       'let err = null;',
       'let loadSeq = 0;',
-      `let ${assigned.filter((name) => !name.startsWith('playerWindow') && name !== 'err').join(', ')};`,
+      others.length ? `let ${others.join(', ')};` : '',
       'function applyPlaybackPreferences() {}',
-      ...declarations,
-      load,
-      functionSource('savePlayerWindowMode'),
+      ...state.map(code),
+      code(load),
+      code(save),
       'return {',
       '  load, savePlayerWindowMode,',
       '  get mode() { return playerWindowMode; }, set mode(value) { playerWindowMode = value; },',
@@ -242,18 +323,49 @@ test('a failed save of the player window setting puts the control back to the sa
     ].join('\n'),
     { compilerOptions: { target: ts.ScriptTarget.ES2022 } },
   ).outputText;
+  return (invoke) => new Function('invoke', '$state', source)(invoke, (value) => value);
+};
 
-  const backend = { mode: 'default', refuse: false };
-  const invoke = async (command, args) => {
+// A made-up backend. Each read of the playback preferences, and each save,
+// can be held until the test lets it go; the mode a load gets is the one the
+// backend holds when the load asks, and a held save changes the backend only
+// when it is let go.
+const madeUpBackend = (mode) => {
+  const backend = { mode, refuse: false, holdLoads: false, holdSaves: false, held: [] };
+  const hold = (finish) =>
+    new Promise((resolve, reject) => {
+      backend.held.push(() => {
+        try {
+          resolve(finish());
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+  const set = (args) => {
+    if (backend.refuse) throw new Error('the settings could not be saved');
+    backend.mode = args.mode;
+    return backend.mode;
+  };
+  backend.invoke = async (command, args) => {
     if (command === 'get_mpv_window_mode') return backend.mode;
-    if (command === 'set_mpv_window_mode') {
-      if (backend.refuse) throw new Error('the settings could not be saved');
-      backend.mode = args.mode;
-      return backend.mode;
-    }
+    if (command === 'set_mpv_window_mode') return backend.holdSaves ? hold(() => set(args)) : set(args);
+    if (command === 'get_playback_preferences' && backend.holdLoads) return hold(() => ({}));
     return {};
   };
-  const control = new Function('invoke', '$state', source)(invoke, (value) => value);
+  // Lets the oldest held answer go, and waits until whoever waited on it has
+  // gone on.
+  backend.release = async () => {
+    backend.held.shift()();
+    for (let turn = 0; turn < 20; turn += 1) await Promise.resolve();
+  };
+  return backend;
+};
+
+test('a failed save of the player window setting puts the control back to the saved mode', async () => {
+  const build = await playerWindowParts();
+  const backend = madeUpBackend('default');
+  const control = build(backend.invoke);
 
   // The mode comes from loading; a refused save goes back to it.
   await control.load();
@@ -277,6 +389,127 @@ test('a failed save of the player window setting puts the control back to the sa
   await control.savePlayerWindowMode();
   assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
   assert.equal(backend.mode, 'fullscreen');
+});
+
+test('a load that read the mode before a save was confirmed does not put the older mode back', async () => {
+  const build = await playerWindowParts();
+
+  // A load reads remember and waits; a save of fullscreen is confirmed; the
+  // load completes; a second save is refused. The backend holds fullscreen,
+  // and so must the control, both times.
+  {
+    const backend = madeUpBackend('remember');
+    const control = build(backend.invoke);
+    backend.holdLoads = true;
+    const loading = control.load();
+    backend.holdLoads = false;
+    control.mode = 'fullscreen';
+    await control.savePlayerWindowMode();
+    assert.equal(backend.mode, 'fullscreen');
+    await backend.release();
+    await loading;
+    assert.equal(control.mode, 'fullscreen', 'a load must not undo a save confirmed after it read');
+    backend.refuse = true;
+    control.mode = 'default';
+    await control.savePlayerWindowMode();
+    assert.equal(backend.mode, 'fullscreen');
+    assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  }
+
+  // A load waits while a save is refused: what the load read is still what
+  // the backend holds.
+  {
+    const backend = madeUpBackend('default');
+    const control = build(backend.invoke);
+    backend.holdLoads = true;
+    const loading = control.load();
+    backend.holdLoads = false;
+    control.mode = 'fullscreen';
+    backend.refuse = true;
+    await control.savePlayerWindowMode();
+    await backend.release();
+    await loading;
+    assert.equal(control.mode, 'default', 'a load after a refused save shows what it read');
+    control.mode = 'fullscreen';
+    await control.savePlayerWindowMode();
+    assert.equal(control.mode, 'default', 'and a later refused save goes back to it');
+  }
+
+  // A save waits while a load reads the old mode and completes, then the
+  // save is confirmed; and the same with the load completing after it.
+  for (const loadFinishesFirst of [true, false]) {
+    const backend = madeUpBackend('default');
+    const control = build(backend.invoke);
+    control.mode = 'fullscreen';
+    backend.holdSaves = true;
+    const saving = control.savePlayerWindowMode();
+    backend.holdSaves = false;
+    backend.holdLoads = true;
+    const loading = control.load();
+    backend.holdLoads = false;
+    // held[0] is the save, held[1] the load.
+    if (loadFinishesFirst) {
+      backend.held.push(backend.held.shift());
+      await backend.release();
+      await loading;
+      assert.equal(control.mode, 'default', 'nothing confirmed yet: what the load read');
+      await backend.release();
+      await saving;
+    } else {
+      await backend.release();
+      await saving;
+      await backend.release();
+      await loading;
+    }
+    assert.equal(backend.mode, 'fullscreen');
+    assert.equal(control.mode, 'fullscreen', 'the confirmed save is what the control shows');
+    backend.refuse = true;
+    control.mode = 'remember';
+    await control.savePlayerWindowMode();
+    assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  }
+
+  // A save waits while a load reads the old mode, and is refused; the load
+  // completes after it. The backend never changed.
+  {
+    const backend = madeUpBackend('default');
+    const control = build(backend.invoke);
+    control.mode = 'fullscreen';
+    backend.holdSaves = true;
+    backend.refuse = true;
+    const saving = control.savePlayerWindowMode();
+    backend.holdSaves = false;
+    backend.holdLoads = true;
+    const loading = control.load();
+    backend.holdLoads = false;
+    await backend.release();
+    await saving;
+    await backend.release();
+    await loading;
+    assert.equal(backend.mode, 'default');
+    assert.equal(control.mode, 'default', 'the control shows what the backend holds');
+  }
+
+  // Two loads: the older completes last and changes nothing.
+  {
+    const backend = madeUpBackend('default');
+    const control = build(backend.invoke);
+    backend.holdLoads = true;
+    const older = control.load();
+    backend.mode = 'fullscreen';
+    const newer = control.load();
+    backend.holdLoads = false;
+    backend.held.push(backend.held.shift());
+    await backend.release();
+    await newer;
+    await backend.release();
+    await older;
+    assert.equal(control.mode, 'fullscreen', 'an overtaken load changes nothing');
+    backend.refuse = true;
+    control.mode = 'remember';
+    await control.savePlayerWindowMode();
+    assert.equal(control.mode, 'fullscreen', 'a refused save must show what the backend holds');
+  }
 });
 
 test('the remembered window never holds a position', () => {
