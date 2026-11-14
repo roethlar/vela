@@ -302,3 +302,78 @@ second passes between two readings around the jump.
 - `guard_confirmed`: true. `capability_ok`: true.
 - Verdict: **reopened**. Comments, verbatim:
   - tests/e2e/scenarios/markers.mjs:147 — Buffered replies can still hide short landings. Using the unchanged helper, real MpvIpc and real clock, a socket stand-in answered 1.91 s at 905 ms, then the response waited through a 3300 ms event-loop stall. Playback skipped to 9 s at 1000 ms and continued normally. The helper timestamped the buffered sample around 4205 ms and accepted 12.31 s at 4306 ms: its apparent observation gap was only 101 ms, despite a landing three seconds short. Keep completion timestamps for deadlines, but conservatively bound coverage using request/response intervals or independent observation timestamps. Add a buffered-response regression; madeUpTime currently computes the position after its delay and misses this case. Guard mutations failed as expected, and all 37 tests passed after byte-for-byte restoration.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right.
+It is the third reopen. The rounds have narrowed (four comments, then
+one), the comment names its own cure, and the cure is a rule that covers
+the kind and not the one trace, so one more repair is made. If it is
+reopened again, the finding goes to the owner: the finding as raised (a
+play with no skip passing the proof) has been closed since the first fix,
+and what is left is how far a proof by sampling can be pushed.
+
+### Repair (round 4), `8ed9acb`
+
+- **The fault.** The proof timed a sample by when its answer was READ. An
+  answer can wait before it is read (the test's process busy, a reply held
+  in a buffer), and the position in it is then older than its time says.
+  The reviewer's trace: asked at 900 ms, answered at once with 1.91 s, read
+  3300 ms later; the skip landed at 9 s at 1000 ms and the play ran on;
+  the next sample, 101 ms after that read, was past the end. A landing
+  three seconds short passed.
+- **The rule now.** Each sample keeps when its read was asked for
+  (`askedMs`) and when it was answered (`ms`). The position in it was true
+  no earlier than the first and no later than the second. The gap across
+  the jump therefore runs from when the position before it was ASKED for
+  to when the one past the end was ANSWERED, and must be at most 500 ms
+  (`skipJumpVerdict` in `tests/e2e/judge.mjs`). Whatever waits, on either
+  side, only makes that span longer, never shorter. The window is still
+  counted by the answers, which is the strict side for it.
+- **In the scenario** (`proveSkippedPast` in
+  `tests/e2e/scenarios/markers.mjs`): the asking time is taken before the
+  read is sent, rounded down; the answer's time after it, rounded up.
+- **No way round it.** `skipJumpVerdict` throws on a sample without both
+  times, or with them out of order.
+
+It is stricter on purpose: reads that each take 300 ms to answer no longer
+count as watching the jump (700 ms lie across it), though it is a real
+skip. At 150 ms each they do.
+
+Files: `tests/e2e/judge.mjs`, `tests/e2e/scenarios/markers.mjs`,
+`tests/e2e-judge.test.mjs`.
+
+Guard, in `tests/e2e-judge.test.mjs`:
+
+- "a skip that lands short behind an answer that waits to be read fails":
+  the reviewer's trace through the scenario's own loop, in made-up time.
+  The made-up world (`madeUpTime`) can now hold an answer back before the
+  scenario reads it, the position in it staying what it was when mpv
+  answered; the reviewer had noted that it could not. Also: every answer
+  waiting 150 ms still passes (400 ms across the jump); 250 ms each fails
+  (600 ms).
+- "the gap across the jump runs from when the position before it was asked
+  for": the rule on samples written out, at 500 and 501 ms, with the same
+  two readings asked for early (fails, 3406 ms) and late (passes), and
+  with a failed read in between (its times are not the position's).
+- "a sample without the time it was asked for, or asked for after it was
+  answered, is refused".
+- "a real skip passes in made-up time, and a watched one a little slow
+  still does" changed with the rule: its slow reads are 150 ms now, and it
+  also requires that 300 ms each fails.
+
+Red-proofs by the coordinating agent, the file restored and checked byte
+for byte after each: the gap counted from when the position before the
+jump was read (three tests fail); the scenario noting the asking time only
+once the read has answered (two); a sample without its asking time taken
+as asked for when answered; the order of the two times not checked; the
+gap allowed made a millisecond more. Each failed the test meant for it.
+
+End to end, on the repair's content: `markers` passed 3 runs of 3 in the
+external player and 2 of 2 in the embedded one; in all ten legs the last
+reading before the jump was 1.88 to 1.96 s and the first after it 12.00 to
+12.04 s, 1013 to 1057 ms after the resume was asked for. `npm run check`
+was green before the commit.
+
+Not covered: a skip that lands up to half a second short of the range's
+end can pass, as before. The proof fails a correct skip when the machine
+is so slow that half a second passes between asking for one reading and
+having the next.
