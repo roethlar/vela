@@ -267,3 +267,97 @@ Not covered:
 - Verdict: **reopened**. Comments, verbatim:
   - tests/e2e/app-binary.mjs:111 — Any JSON object with a string reason is swallowed as Cargo output. A non-Cargo diagnostic with reason: 'dependency-warning', emitted before a real Cargo build, disappeared from terminal output. Recognize Cargo message schemas and echo unmatched JSON; the existing output test only covers JSON without reason.
   - tests/e2e-harness.test.mjs:410 — The wiring guard still permits another executable. I added a helper importing Driver as Client, constructed it with an OLD binary, and shadowed driver inside runScenario's existing try block. Both accepted newSession calls then used that client, while all fifteen tests passed. A stubbed fetch confirmed the alternate application path. The guard checks spellings rather than the binding actually used.
+
+Orchestrator: a valid verdict, reopened on two comments, and both are
+right. It is the second reopen. Under the owner's request of 2026-11-14 to
+split the coding with codex, the repair was handed to codex as a coding
+task, and reviewed and landed by the coordinating agent. Codex cannot
+verify code it wrote, so this round is NOT sent to codex: the
+coordinating agent's review below stands in its place, and whether that
+is enough to close the finding is the owner's to confirm.
+
+### Repair (round 3), `3d2ecca`: written by codex, reviewed by the coordinating agent
+
+By the reviewer's comment:
+
+1. *Any JSON with a string reason is swallowed as Cargo output.* A line of
+   the build's standard output is now Cargo's only when it has the shape
+   of one of the four messages Cargo documents for
+   `--message-format=json` (`compiler-artifact`, `compiler-message`,
+   `build-script-executed`, `build-finished`): `cargoEnvelope` in
+   `tests/e2e/app-binary.mjs`. Codex took the shapes from the installed
+   Cargo's own reference (1.99.1, `reference/external-tools.html`, linked
+   from `cargo help build`) and from a real build with a build script and
+   a compiler warning. A line with another reason, or with one of these
+   reasons and the wrong shape, is echoed. The two kinds the runner does
+   not use are still taken off the terminal; the compiler's diagnostics
+   reach it through standard error (`json-render-diagnostics`).
+2. *The wiring guard still permits another executable.* It is held when
+   the code runs now. The located app is kept in one place, in the
+   locator's module (`setRunApp`, `getRunApp`): set once by the runner,
+   and only with the very object `locateAppBinary` returned (issued
+   objects are frozen and remembered in a private `WeakSet`); a second
+   setting, a copy, a made-up object or a result without a file throws.
+   `Driver` takes no app; every instance's `newSession` is an own property
+   that can be neither written nor reconfigured, starts the run's app
+   only, and checks the file's identity first as before. A second copy of
+   the driver module (another URL) shares the one place. The text checks
+   that remain hold what running code cannot: that the runner locates,
+   registers before any scenario and records the result's fields.
+
+Files: `tests/e2e/app-binary.mjs`, `tests/e2e/driver.mjs`,
+`tests/e2e/run.mjs`, `tests/e2e-harness.test.mjs`, `tests/e2e/README.md`.
+
+Guard: fourteen new tests in `tests/e2e-harness.test.mjs`, each ending
+"(pa-6)": non-Cargo JSON with a reason, including malformed Cargo
+envelopes, is echoed; each of Cargo's four messages is consumed, not
+echoed; the app artifact is found among mixed Cargo and non-Cargo output;
+an aliased second driver in another module cannot start another app (the
+reviewer's demonstration, run with `fetch` stubbed); subclasses and
+callers cannot replace the driver's session start; separate driver module
+URLs share the run's one app selection; the run's app can be set only
+once; only an unchanged `locateAppBinary` result can set it; a session
+before it is set is refused; a located result without a file cannot set
+it; a `--skip-build` result selects the app without claiming a build.
+Three older tests changed with what they pinned (the output test now
+feeds all four messages and non-Cargo JSON with reasons; the two that
+pinned the driver's spelling now exercise registration and each part of
+the file's identity).
+
+Red-proofs. Codex: 35, each restored from its own copy and compared byte
+for byte (its report lists them: the envelope check bypassed for each
+reason, each reason echoed, the selection made per instance again, the
+session start left writable or configurable, registration repeated,
+unauthenticated or without a file, each part of the identity left out,
+the runner's wiring changed, and more). The coordinating agent, on the
+merged content, nine more, each failing the test meant for it: any JSON
+with a reason taken as Cargo's (the round-2 defect); the app set a second
+time; anything set as the app; the located result left changeable; a
+session start that can be replaced; the file's identity not checked; a
+session with no app set falling back to a path of its own; the runner not
+registering what it located; the runner registering a copy.
+
+Checks by the coordinating agent on the merged content: `npm run check`
+green (533 Node tests). End to end: a built run in the external player
+(`smoke`, `sortpersist`, `configrecovery`, `replaceplay`, 4 of 4; the
+results file says `built: true` and "cargo's report of this run's
+build"); a `--skip-build` run (`smoke`, `sortpersist`, 2 of 2; `built:
+false`, "cargo metadata (nothing was built)"); a built run in the
+embedded player (`smoke`, `sortpersist`, `embeddedplay`, 3 of 3). `configrecovery`
+restarts the app twice, and starts it again through the same place.
+
+Known gaps:
+
+- Code that talks to the WebDriver server by itself, past `Driver`, can
+  still start another app. The README says so; a text check for a literal
+  session request outside the driver is a tripwire, not a wall.
+- The shapes are those of Cargo 1.99.1's reference. A Cargo that changes a
+  message's shape would have its lines echoed and no executable found:
+  the run then stops saying it cannot tell which app to run. It fails; it
+  does not start another binary.
+- The run with a moved target directory (`CARGO_TARGET_DIR`), made for
+  round 2, was not repeated; nothing in how the build is asked or where
+  its answer is read changed.
+- The limits of the file-identity check (device, inode, size and
+  modification time, not content) and of `--skip-build` stand as recorded
+  in round 2.
