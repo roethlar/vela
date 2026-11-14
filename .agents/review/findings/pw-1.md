@@ -1,7 +1,7 @@
 # pw-1: the copy is chosen for one screen and the window can open on another
 
 **Severity**: MEDIUM — with the Prefer Compatible source policy, the screen a copy is ranked for is read before the stream is resolved, and the screen the window opens on is read again after it. If the previous mpv window changes screen, or a late report of its screen arrives, in between, the play opens on the new screen with a copy chosen for the old one: the wrong resolution or HDR choice for that play.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `68d6211`, `7b34af2`
 
@@ -472,3 +472,22 @@ query's fallback by size still uses the unrotated mode (it predates this
 work); for a play decided at the launch the window's state and its screen
 are read a moment apart; each launch on Wayland makes one round trip to
 the compositor with no limit of its own.
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-14 19:05 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1db6c-2777-7be2-ba3b-463680259c11`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 18:57 UTC, finished 19:04 UTC.
+- Reviewed head `79384d9a6d7a5567aacc59b9f0281d098272d9e3`, base
+  `719db900d361bf7fea36e0e60e8d393f47c78727` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
