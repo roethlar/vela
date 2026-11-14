@@ -205,6 +205,54 @@ pub(crate) fn usable_windowed_size(width: u32, height: u32) -> bool {
 pub struct WindowStateObservation {
     state: Arc<Mutex<WindowTracker>>,
     display: Arc<Mutex<crate::display::ObservedDisplay>>,
+    /// Whether the reader filling this observation has finished, so that
+    /// Vela's exit can wait for what mpv had already sent (review finding
+    /// pw-8, `wait_for_reader`).
+    reader: Arc<ReaderProgress>,
+}
+
+/// How far the window-state reader of one play has got. An observation no
+/// reader was started for (an embedded play's, a test's) stays `NotStarted`.
+#[derive(Debug, Default)]
+struct ReaderProgress {
+    phase: Mutex<ReaderPhase>,
+    changed: std::sync::Condvar,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum ReaderPhase {
+    #[default]
+    NotStarted,
+    Reading,
+    Finished,
+}
+
+/// What `WindowStateObservation::wait_for_reader` found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ReaderWait {
+    /// No reader was ever started for this observation: nothing to wait for.
+    NoReader,
+    /// The reader had finished before the wait began: no wait at all.
+    AlreadyFinished,
+    /// The reader finished during the wait.
+    FinishedWithin,
+    /// The limit passed with the reader still running.
+    GaveUp,
+}
+
+/// Marks its observation's reader finished when it is dropped: on every way
+/// out of the reader's thread (the connection read to its end, never
+/// connected, told to stop, a panic unwinding it), and when the thread could
+/// not be started at all, since the closure that owns it is then dropped
+/// unrun. In a release build a panic aborts the whole process (`panic =
+/// "abort"`), so there that last way out ends Vela itself.
+pub(crate) struct ReaderFinishes(Arc<ReaderProgress>);
+
+impl Drop for ReaderFinishes {
+    fn drop(&mut self) {
+        *self.0.phase.lock().unwrap_or_else(|e| e.into_inner()) = ReaderPhase::Finished;
+        self.0.changed.notify_all();
+    }
 }
 
 impl WindowStateObservation {
@@ -223,6 +271,37 @@ impl WindowStateObservation {
                 ..WindowTracker::default()
             })),
             display: Arc::default(),
+            reader: Arc::default(),
+        }
+    }
+
+    /// A reader starts filling this observation. It is running until the
+    /// returned guard is dropped.
+    pub(crate) fn reader_started(&self) -> ReaderFinishes {
+        *self.reader.phase.lock().unwrap_or_else(|e| e.into_inner()) = ReaderPhase::Reading;
+        ReaderFinishes(self.reader.clone())
+    }
+
+    /// Wait at most `limit` for this observation's reader to finish, and not
+    /// at all when none was started or it has finished already. Holds no
+    /// other lock while it waits.
+    pub(crate) fn wait_for_reader(&self, limit: Duration) -> ReaderWait {
+        let phase = self.reader.phase.lock().unwrap_or_else(|e| e.into_inner());
+        match *phase {
+            ReaderPhase::NotStarted => ReaderWait::NoReader,
+            ReaderPhase::Finished => ReaderWait::AlreadyFinished,
+            ReaderPhase::Reading => {
+                let (phase, _) = self
+                    .reader
+                    .changed
+                    .wait_timeout_while(phase, limit, |phase| *phase == ReaderPhase::Reading)
+                    .unwrap_or_else(|e| e.into_inner());
+                if *phase == ReaderPhase::Reading {
+                    ReaderWait::GaveUp
+                } else {
+                    ReaderWait::FinishedWithin
+                }
+            }
         }
     }
 
@@ -981,9 +1060,15 @@ fn spawn_position_reader(
     let done = Arc::new(AtomicBool::new(false));
     let last_t_ms_r = last_t_ms.clone();
     let done_r = done.clone();
+    // Taken before the thread, so that a thread that cannot be started marks
+    // the reader finished too (its closure is dropped unrun).
+    let finishes = window_observation.reader_started();
     std::thread::Builder::new()
         .name("mpv-ipc-reader".into())
         .spawn(move || {
+            // Dropped last, on every way out of this thread, after the last
+            // event read has been applied (`ReaderFinishes`).
+            let _finishes = finishes;
             let mut stream = None;
             for _ in 0..50 {
                 if stop_flag.load(Ordering::Relaxed) {
@@ -2640,6 +2725,192 @@ mod tests {
         assert!(done.load(Ordering::Relaxed), "the reader finished");
         assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
         assert_eq!(last_t_ms.load(Ordering::Relaxed), 3000);
+    }
+
+    // Review finding pw-8: Vela's exit waits for the last external play's
+    // reader to finish. The reader says so through the observation, on
+    // every way out of its thread.
+
+    #[test]
+    fn an_observation_with_no_reader_is_not_waited_for() {
+        let observation = WindowStateObservation::default();
+        let started = Instant::now();
+        assert_eq!(observation.wait_for_reader(Duration::from_secs(10)), ReaderWait::NoReader);
+        assert!(started.elapsed() < Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_running_reader_is_waited_for_only_so_long() {
+        let observation = WindowStateObservation::default();
+        let reading = observation.reader_started();
+        let limit = Duration::from_millis(100);
+        let started = Instant::now();
+        assert_eq!(observation.wait_for_reader(limit), ReaderWait::GaveUp);
+        let waited = started.elapsed();
+        assert!(waited >= limit && waited < Duration::from_secs(2), "waited {waited:?}");
+        drop(reading);
+        assert_eq!(observation.wait_for_reader(limit), ReaderWait::AlreadyFinished);
+    }
+
+    #[test]
+    fn a_reader_that_finishes_during_the_wait_ends_it() {
+        let observation = WindowStateObservation::default();
+        let reading = observation.reader_started();
+        let reader = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            drop(reading);
+        });
+        let started = Instant::now();
+        assert_eq!(
+            observation.wait_for_reader(Duration::from_secs(10)),
+            ReaderWait::FinishedWithin
+        );
+        assert!(started.elapsed() < Duration::from_secs(5));
+        reader.join().unwrap();
+    }
+
+    #[test]
+    fn a_reader_that_panics_is_finished() {
+        let observation = WindowStateObservation::default();
+        let reading = observation.reader_started();
+        let reader = std::thread::spawn(move || {
+            let _reading = reading;
+            panic!("a reader that panics");
+        });
+        assert!(reader.join().is_err());
+        assert_eq!(
+            observation.wait_for_reader(Duration::from_secs(10)),
+            ReaderWait::AlreadyFinished
+        );
+    }
+
+    /// A socket path nothing listens on.
+    #[cfg(unix)]
+    fn nowhere(name: &str) -> String {
+        let dir = crate::player::launch::private_runtime_dir().expect("runtime dir");
+        let path = dir.join(format!("{name}-{}.sock", std::process::id()));
+        let _ = std::fs::remove_file(&path);
+        path.to_string_lossy().into_owned()
+    }
+
+    /// Whether the real reader says it finished: after the wait, the
+    /// observation reports it, never `NoReader` (it was started) and never
+    /// `GaveUp`.
+    fn reader_finished(observation: &WindowStateObservation, limit: Duration) -> bool {
+        matches!(
+            observation.wait_for_reader(limit),
+            ReaderWait::AlreadyFinished | ReaderWait::FinishedWithin
+        )
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_when_told_to_stop_before_it_connects() {
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_position_reader(nowhere("reader-stop"), 0, stop.clone(), observation.clone())
+            .expect("reader");
+        std::thread::sleep(Duration::from_millis(250));
+        assert_eq!(
+            observation.wait_for_reader(Duration::ZERO),
+            ReaderWait::GaveUp,
+            "still trying to connect"
+        );
+        stop.store(true, Ordering::Relaxed);
+        assert!(reader_finished(&observation, Duration::from_secs(2)));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_when_it_gives_up_connecting() {
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_position_reader(nowhere("reader-never"), 0, stop.clone(), observation.clone())
+            .expect("reader");
+        // Fifty tries, 100 ms apart.
+        assert!(reader_finished(&observation, Duration::from_secs(10)));
+        stop.store(true, Ordering::Relaxed);
+    }
+
+    /// A listening socket for the real reader, or `None` where the sandbox
+    /// refuses listening (the test then says so and checks nothing).
+    #[cfg(unix)]
+    fn listen(name: &str) -> Option<(std::os::unix::net::UnixListener, String)> {
+        let path = nowhere(name);
+        match std::os::unix::net::UnixListener::bind(&path) {
+            Ok(listener) => Some((listener, path)),
+            Err(error) => {
+                eprintln!("skipped: cannot listen on a Unix socket here: {error}");
+                None
+            }
+        }
+    }
+
+    /// Accept the reader and read its subscriptions, so that it is in its
+    /// reading loop.
+    #[cfg(unix)]
+    fn accept_reader(
+        listener: &std::os::unix::net::UnixListener,
+    ) -> std::os::unix::net::UnixStream {
+        let (mpv, _) = listener.accept().expect("accept");
+        mpv.set_read_timeout(Some(Duration::from_secs(5))).expect("read timeout");
+        let mut requests = BufReader::new(mpv.try_clone().expect("clone"));
+        let mut line = String::new();
+        while !line.contains("osd-dimensions") {
+            line.clear();
+            requests.read_line(&mut line).expect("a subscription");
+        }
+        mpv
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_at_the_end_of_its_connection_after_what_it_read() {
+        use std::io::Write as _;
+        let Some((listener, path)) = listen("reader-end") else { return };
+        let observation = WindowStateObservation::opened_at(PlaybackWindowState {
+            fullscreen: Some(false),
+            ..Default::default()
+        });
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_position_reader(path.clone(), 0, stop.clone(), observation.clone()).expect("reader");
+        let mut mpv = accept_reader(&listener);
+        assert_eq!(observation.wait_for_reader(Duration::ZERO), ReaderWait::GaveUp);
+        // mpv sends the change and goes, a moment after the wait has begun.
+        let player = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(100));
+            writeln!(mpv, "{}", event("fullscreen", serde_json::json!(true))).expect("write");
+            drop(mpv);
+        });
+        assert_eq!(
+            observation.wait_for_reader(Duration::from_secs(5)),
+            ReaderWait::FinishedWithin
+        );
+        assert_eq!(
+            observation.snapshot().fullscreen,
+            Some(true),
+            "the reader is finished only after applying what it read"
+        );
+        player.join().unwrap();
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_real_reader_is_finished_when_told_to_stop_while_connected() {
+        use std::io::Write as _;
+        let Some((listener, path)) = listen("reader-stop-connected") else { return };
+        let observation = WindowStateObservation::default();
+        let stop = Arc::new(AtomicBool::new(false));
+        spawn_position_reader(path.clone(), 0, stop.clone(), observation.clone()).expect("reader");
+        let mut mpv = accept_reader(&listener);
+        stop.store(true, Ordering::Relaxed);
+        // One line wakes the reader from its read; the connection stays open,
+        // so it can only stop on the flag.
+        writeln!(mpv, "{}", event("time-pos", serde_json::json!(1.0))).expect("write");
+        assert!(reader_finished(&observation, Duration::from_secs(5)));
+        drop(mpv);
+        let _ = std::fs::remove_file(&path);
     }
 
     /// The end-to-end shape of the bug: mpv announces the display before it

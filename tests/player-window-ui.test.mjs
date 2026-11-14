@@ -114,16 +114,46 @@ test('the play path opens its window from the run or the setting, and hands it o
     'quitting Vela must hand the latest window to the settings',
   );
   // What quitting writes, and when, is unit-tested through
-  // remember_window_on_exit_with; quitting must go through it with the real
-  // settings read and write.
+  // remember_window_on_exit_with and hand_over_window_on_exit; quitting must
+  // go through them with the real limits and the real settings read and
+  // write.
   assert.match(
     commands,
-    /pub\(crate\) fn remember_window_on_exit\(latest: [^{]*\) \{\s*let latest = latest\.clone\(\);\s*hand_over_within\(EXIT_WINDOW_HANDOVER_LIMIT, move \|\| \{\s*remember_window_on_exit_with\(&latest, config::load_config, \|change\| config::update\(change\)\);\s*\}\);\s*\}\n/,
-    'quitting must decide what to write through remember_window_on_exit_with',
+    /pub\(crate\) fn remember_window_on_exit\(latest: [^{]*\) \{\s*hand_over_window_on_exit\(\s*latest\.clone\(\),\s*EXIT_WINDOW_HANDOVER_LIMIT,\s*EXIT_READER_DRAIN_LIMIT,\s*config::load_config,\s*\|change\| config::update\(change\),\s*\);\s*\}\n/,
+    'quitting must go through hand_over_window_on_exit with the real limits and settings',
+  );
+  // ...which, on the hand-over's own thread and within its limit, first
+  // waits for the last external play's reader (review finding pw-8), then
+  // decides what to write.
+  const exitHandOverStart = commands.indexOf('\nfn hand_over_window_on_exit(');
+  assert.notEqual(exitHandOverStart, -1, 'the exit hand-over exists');
+  const exitHandOver = commands
+    .slice(exitHandOverStart, commands.indexOf('\n}\n', exitHandOverStart))
+    .replace(/\/\/[^\n]*/g, '');
+  assert.match(
+    exitHandOver,
+    /\) -> bool \{\s*hand_over_within\(limit, move \|\| \{\s*wait_for_last_external_reader\(&latest, reader_limit\);\s*remember_window_on_exit_with\(&latest, load, update\);\s*\}\)$/,
+    'the exit waits for the reader inside the hand-over, before it looks at the window',
   );
   // ...on a thread of its own, waited for a short time and no longer
   // (review finding pw-4; hand_over_within is unit-tested in commands.rs).
   assert.match(commands, /\nconst EXIT_WINDOW_HANDOVER_LIMIT: Duration = Duration::from_secs\(2\);\n/);
+  assert.match(commands, /\nconst EXIT_READER_DRAIN_LIMIT: Duration = Duration::from_millis\(500\);\n/);
+  // Vela's exit kills the player first, hands the window over second, and
+  // only then tells the tracking to stop: a connected reader is not stopped
+  // with lines unread, it reads to the end of the killed mpv's connection.
+  const exitStart = lib.indexOf('if let tauri::RunEvent::ExitRequested { .. } | tauri::RunEvent::Exit = event {');
+  assert.notEqual(exitStart, -1, 'the exit handler exists');
+  const exit = lib
+    .slice(exitStart, lib.indexOf('commands::take_any_active_transcode', exitStart))
+    .replace(/\/\/[^\n]*/g, '');
+  const kill = exit.search(/if let Some\(mut child\) = slot\.take\(\) \{\s*let _ = child\.remove_consumed_header_include\(\);\s*let _ = child\.kill\(\);/);
+  const handOverAt = exit.indexOf('commands::remember_window_on_exit(&state.playback_window_session);');
+  const stopAt = exit.search(/let stop = state\s*\.tracking_stop[\s\S]*?\.take\(\);\s*if let Some\(stop\) = stop \{\s*stop\.store\(true, Ordering::Relaxed\);/);
+  assert.ok(kill !== -1 && handOverAt !== -1 && stopAt !== -1, 'the exit kills, hands over and stops');
+  assert.ok(kill < handOverAt, 'the exit kills the player before it hands the window over');
+  assert.ok(handOverAt < stopAt, 'the exit hands the window over before it stops the tracking');
+  assert.equal(exit.split('tracking_stop').length, 2, 'the tracking is stopped in one place only');
   const handOver = commands.slice(
     commands.indexOf('\nfn hand_over_within('),
     commands.indexOf('\n}\n', commands.indexOf('\nfn hand_over_within(')),

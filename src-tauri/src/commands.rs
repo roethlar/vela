@@ -4387,18 +4387,71 @@ fn write_play_end<'a>(
 /// runs on a thread of its own, and the exit waits for it at most
 /// `EXIT_WINDOW_HANDOVER_LIMIT` before it lets the process go
 /// (`hand_over_within`).
+///
+/// Before it looks at the window, the hand-over waits, on that same thread,
+/// for the last external play's window-state reader to finish, at most
+/// `EXIT_READER_DRAIN_LIMIT` (review finding pw-8). The exit handler has
+/// just killed that play's mpv, so a connected reader reads what mpv had
+/// already sent and then the end of its connection; without the wait, a
+/// change mpv had sent and the reader had not yet applied was lost. There is
+/// no wait when there has been no play in mpv's own window this run, or when
+/// its reader has finished already.
 pub(crate) fn remember_window_on_exit(latest: &std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>) {
-    let latest = latest.clone();
-    hand_over_within(EXIT_WINDOW_HANDOVER_LIMIT, move || {
-        remember_window_on_exit_with(&latest, config::load_config, |change| config::update(change));
-    });
+    hand_over_window_on_exit(
+        latest.clone(),
+        EXIT_WINDOW_HANDOVER_LIMIT,
+        EXIT_READER_DRAIN_LIMIT,
+        config::load_config,
+        |change| config::update(change),
+    );
 }
 
 /// How long quitting waits for the last external play's window to reach the
 /// settings: short, like the wait for embedded plays beside it in the exit
 /// handler. The write waits for the settings lock, which another Vela can
-/// hold, and for the disk.
+/// hold, and for the disk. The wait for the reader is inside it.
 const EXIT_WINDOW_HANDOVER_LIMIT: Duration = Duration::from_secs(2);
+
+/// How long the exit's hand-over waits for the last external play's reader
+/// to finish. A connected reader of a killed mpv has only what is already in
+/// the socket left to read, which takes it well under a millisecond; this is
+/// for a machine under load, and leaves most of `EXIT_WINDOW_HANDOVER_LIMIT`
+/// to the settings write.
+const EXIT_READER_DRAIN_LIMIT: Duration = Duration::from_millis(500);
+const _: () = assert!(EXIT_READER_DRAIN_LIMIT.as_millis() < EXIT_WINDOW_HANDOVER_LIMIT.as_millis());
+
+/// `remember_window_on_exit` with its limits and the settings read and write
+/// passed in: the reader's wait, then the hand-over, both on the hand-over's
+/// own thread and both within `limit`. Returns whether it finished in time.
+fn hand_over_window_on_exit(
+    latest: std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+    limit: Duration,
+    reader_limit: Duration,
+    load: impl FnOnce() -> std::io::Result<config::AppConfig> + Send + 'static,
+    update: impl for<'a> FnOnce(SettingsChange<'a>) -> Result<(), String> + Send + 'static,
+) -> bool {
+    hand_over_within(limit, move || {
+        wait_for_last_external_reader(&latest, reader_limit);
+        remember_window_on_exit_with(&latest, load, update);
+    })
+}
+
+/// Wait at most `limit` for the reader of the last play in mpv's own window
+/// to finish. The record's lock is held only to find that play, never while
+/// waiting.
+fn wait_for_last_external_reader(
+    record: &std::sync::Mutex<PlaybackWindowRecord>,
+    limit: Duration,
+) -> playback::ReaderWait {
+    let observation = record
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .last_external()
+        .map(|last| last.observation.clone());
+    observation.map_or(playback::ReaderWait::NoReader, |observation| {
+        observation.wait_for_reader(limit)
+    })
+}
 
 /// Run `hand_over` on a thread of its own and wait for it at most `limit`.
 /// Returns whether it finished in time. When it has not, the caller goes on
@@ -8964,6 +9017,164 @@ mod tests {
     #[test]
     fn a_hand_over_that_finishes_in_time_is_waited_for() {
         assert!(hand_over_within(Duration::from_secs(10), || {}));
+    }
+
+    /// An external play opened windowed, its observation shared with the
+    /// record as the launch shares it.
+    fn windowed_play_in_record(
+        session_id: &str,
+        player: crate::player::PlayerKind,
+    ) -> (
+        playback::WindowStateObservation,
+        std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+    ) {
+        let observation = playback::WindowStateObservation::opened_at(playback::PlaybackWindowState {
+            fullscreen: Some(false),
+            maximized: Some(false),
+            windowed_size: None,
+        });
+        let record = std::sync::Arc::new(std::sync::Mutex::new(published([PlaybackWindowSession {
+            session_id: session_id.to_string(),
+            player,
+            observation: observation.clone(),
+        }])));
+        (observation, record)
+    }
+
+    /// The exit's hand-over with settings held in memory.
+    fn quit_into(
+        settings: &std::sync::Arc<HeldSettings>,
+        record: std::sync::Arc<std::sync::Mutex<PlaybackWindowRecord>>,
+        limit: Duration,
+        reader_limit: Duration,
+    ) -> (bool, Duration) {
+        let started = Instant::now();
+        let (read, write) = (settings.clone(), settings.clone());
+        let finished = hand_over_window_on_exit(
+            record,
+            limit,
+            reader_limit,
+            move || read.read(),
+            move |change| write.update(change),
+        );
+        (finished, started.elapsed())
+    }
+
+    #[test]
+    fn quitting_waits_for_a_reader_still_applying_what_mpv_sent() {
+        // Review finding pw-8, the reviewer's probe: the play's reader has
+        // received mpv's fullscreen=true and applies it only after a delay
+        // shorter than the limit. Quitting must save fullscreen.
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let reader = std::thread::spawn(move || {
+            std::thread::sleep(EXIT_READER_DRAIN_LIMIT / 5);
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change",
+                "name": "fullscreen",
+                "data": true
+            }));
+            drop(reading);
+        });
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, _) = quit_into(&settings, record, EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        reader.join().unwrap();
+        assert!(finished);
+        assert_eq!(
+            settings.window().and_then(|window| window.fullscreen),
+            Some(true),
+            "quitting must save the change the reader had received"
+        );
+    }
+
+    #[test]
+    fn quitting_hands_over_what_is_known_when_the_reader_never_finishes() {
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, waited) = quit_into(&settings, record, EXIT_WINDOW_HANDOVER_LIMIT, EXIT_READER_DRAIN_LIMIT);
+        assert!(finished, "the hand-over finishes once the reader's limit has passed");
+        assert!(
+            waited >= EXIT_READER_DRAIN_LIMIT && waited < EXIT_WINDOW_HANDOVER_LIMIT,
+            "waited {waited:?}"
+        );
+        assert_eq!(
+            settings.window().and_then(|window| window.fullscreen),
+            Some(false),
+            "what is known is saved"
+        );
+        drop(reading);
+    }
+
+    #[test]
+    fn quitting_waits_at_most_the_hand_over_limit_in_all() {
+        // Review finding pw-4's limit holds with the reader's wait inside it:
+        // a reader that never finishes and a settings write that never ends.
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let (_release, stuck) = std::sync::mpsc::channel::<()>();
+        let limit = EXIT_WINDOW_HANDOVER_LIMIT;
+        let started = Instant::now();
+        let finished = hand_over_window_on_exit(
+            record,
+            limit,
+            EXIT_READER_DRAIN_LIMIT,
+            || Ok(config::AppConfig::default()),
+            move |_| {
+                let _ = stuck.recv();
+                Ok(())
+            },
+        );
+        let waited = started.elapsed();
+        assert!(!finished, "the write cannot have finished");
+        assert!(
+            waited >= limit && waited < limit + Duration::from_millis(300),
+            "quitting waited {waited:?}, more than the hand-over's limit"
+        );
+        drop(reading);
+    }
+
+    #[test]
+    fn quitting_does_not_wait_for_a_reader_that_has_finished() {
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        drop(observation.reader_started());
+        assert_eq!(
+            wait_for_last_external_reader(&record, Duration::from_secs(10)),
+            playback::ReaderWait::AlreadyFinished
+        );
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, waited) =
+            quit_into(&settings, record, Duration::from_secs(20), Duration::from_secs(10));
+        assert!(finished);
+        assert!(waited < Duration::from_secs(1), "quitting waited {waited:?} for a finished reader");
+        assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
+    }
+
+    #[test]
+    fn quitting_does_not_wait_without_a_play_in_mpvs_own_window() {
+        // No play at all.
+        let empty = std::sync::Arc::new(std::sync::Mutex::new(PlaybackWindowRecord::default()));
+        assert_eq!(
+            wait_for_last_external_reader(&empty, Duration::from_secs(10)),
+            playback::ReaderWait::NoReader
+        );
+        let settings = std::sync::Arc::new(HeldSettings::default());
+        let (finished, waited) =
+            quit_into(&settings, empty, Duration::from_secs(20), Duration::from_secs(10));
+        assert!(finished && waited < Duration::from_secs(1), "waited {waited:?}");
+        assert_eq!(settings.window(), None);
+
+        // Only an embedded play, its reader still running: not waited for.
+        let (observation, record) = windowed_play_in_record("embedded", crate::player::PlayerKind::Embedded);
+        let reading = observation.reader_started();
+        assert_eq!(
+            wait_for_last_external_reader(&record, Duration::from_secs(10)),
+            playback::ReaderWait::NoReader
+        );
+        let (finished, waited) =
+            quit_into(&settings, record, Duration::from_secs(20), Duration::from_secs(10));
+        assert!(finished && waited < Duration::from_secs(1), "waited {waited:?}");
+        drop(reading);
     }
 
     /// Settings held in memory and changed one change at a time, as
