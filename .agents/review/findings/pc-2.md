@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — after an embedded play in fullscreen ends in an error, the player view goes and the library stays fullscreen until a 50-second backstop, with no successor coming.
 **Status**: In progress
 **Branch**: —
-**Commit**: `4118fea`, `c872dad`
+**Commit**: `4118fea`, `c872dad`, `060a5fd`
 
 ## Evidence
 
@@ -224,10 +224,12 @@ Not covered, and why:
   and the launch reports nothing; the tracker then reports "over" itself,
   which is right. But if a further play is installed before that tracker
   reports, the tracker says "goes on" under it, and if that play fails too,
-  it replaced nothing and reports nothing: the backstop. By reading.
+  it replaced nothing and reports nothing: the backstop. By reading. The
+  reviewer reopened the finding for this; closed in round 3 (below).
 - **A play that fell back to mpv's own window during a run in Vela's
   window**, replaced by a launch that fails, gets no report: it is recorded
-  as external. As before.
+  as external. As before. The reviewer reopened the finding for this too;
+  closed in round 3 (below).
 - **The error line of a play the user started** can be cleared by the
   refresh the new report triggers, when that play really replaced a running
   one and failed. The window is then out of fullscreen with the library
@@ -261,3 +263,275 @@ on a clean tree before anything was committed.
   - src-tauri/src/commands.rs:4347 — current_child is not durable evidence that this launch announced a view: the reaper at lib.rs:238 can clear the ended handle before this read, including during transcode teardown. With the predecessor's clean report preceding installation, a failed replacement whose own view opened then produces no terminal report. A deterministic reaper interleaving and page replay reproduced the backstop. Preserve the opened-view identity independently of the reapable slot; the stand-in launch currently omits this interleaving.
   - src-tauri/src/commands.rs:4337 — The acknowledged consecutive-failure gap remains this finding's failure. If B fails before A's tracker reports, then C installs, A reports runOver=false under C, and C fails, replaced is None and A's recorded end is ignored. The real helpers produced no terminal report; page replay retained fullscreen for 50 seconds in either close/report order. Preserve the outstanding terminal obligation across failed launches.
   - src-tauri/src/commands.rs:4264 — The acknowledged fallback gap also remains a defect: an external fallback can inherit an embedded run's fullscreen. If its replacement fails after its tracker reports runOver=false, this Embedded-only filter suppresses the terminal outcome. Replaying the old embedded report, old view close, and external fallback's report leaves fullscreen until the backstop. Preserve embedded-run ownership through fallback while keeping ordinary external-only playback unaffected.
+
+### Repair (round 3), `060a5fd`
+
+Each of the reviewer's four orders was first written as a test against the
+second repair's code, before anything was changed. All four failed, for
+the reasons the reviewer gave.
+
+**Why the second repair could not hold.** It decided what to tell the page
+from which reports of a play's end had already been made: a note the old
+play's tracker left, which play the new one replaced, what was in the
+player slot. The four orders are four different arrival orders of the same
+reports. A rule that hangs on the order has a hole for every order nobody
+listed, so this repair does not add four cases; it changes the rule.
+
+**The rule now: the state of the app decides.** A launch that failed after
+its session was installed is undone as before (`undo_failed_launch`) and
+then tells the page the run is over when three things hold at that moment
+(`report_failed_launch_end`, `failed_launch_ends_run`):
+
+1. **Nothing is playing.** The launch reads which player is in the slot
+   before it installs anything. Only that same player, still in the slot
+   and not ended, counts as playing afterwards (`nothing_playing`). An
+   empty slot, an ended player, or a player the launch itself started and
+   stopped all mean nothing plays. Players carry a serial number for this
+   (`player::new_serial`, `PlayerHandle::serial`).
+2. **No play is active.**
+3. **The page holds the player's fullscreen.** The backend now keeps the
+   page's claim (`AppState::player_fullscreen_held`). It is set where
+   `player_fullscreen` turns fullscreen on for the running embedded play,
+   under the slot's lock (`claim_player_fullscreen`); cleared where the
+   command turns it off, and where the window is seen to leave fullscreen
+   however that came about (`follow_fullscreen`). It outlasts the play
+   that asked, as the page's own claim does, also across a play that fell
+   back to mpv's own window.
+
+It then sends ONE `playback-ended` with `sessionId` and `runOver: true`,
+and nothing else in it. The session it names is the view the page is
+showing, or the launch's own when no view shows. Which view shows is kept
+in a record that changes in the same step as the `player-opened` and
+`player-closed` events are sent (`player::ViewRecord::announce`, the only
+sender of those events), and the report is sent under that record's lock
+(`ViewRecord::report`), so no opening or closing can come between the name
+it reads and the report.
+
+No tracker's report is read for any of this. Taken out: the second
+repair's note of ends told "the run goes on"
+(`AppState::ends_told_run_goes_on`), its reading of the replaced play
+(`replaced_embedded_session`, `replaced_view_session`,
+`failed_launch_ends`), and `PlayerHandle::is_embedded_play`.
+
+**The completion dispatcher** (`advance_playlist`) now says the run is
+over whenever the ended play is not the active one and NO play is active
+(`replaced_or_over`); it used to say a successor was coming. No play is
+active only after a failed launch was undone, so this is the reviewer's
+first order seen from the dispatcher's side. Its report
+(`clean_end_report`, which `lib.rs` now sends as it stands) also carries
+`successor`: true when another play is active or one is being chosen.
+
+**The page** (`endLeavesPlayerFullscreen`) no longer counts reports. The
+helpers' second attack found that counting left fullscreen at the FIRST
+report of a successor that plays in mpv's own window, because such a play
+opens no view to start the count again. The rule is now:
+
+| The report | The page leaves fullscreen |
+| --- | --- |
+| says the run is over | unless the view of a play that still plays shows |
+| is the dispatcher's, and says neither "over" nor "a successor is coming" | when no such view shows and the page is not itself starting a successor (Continue Playing) |
+| anything else (a play's own report that is not the end of the run; "a successor is coming") | never |
+
+A view "of a play that still plays" is told from a view that is only
+waiting to close: once a report has named the session whose view shows,
+that play has ended (`showingPlayEnded`). Every report of an end is sent
+after its play's player has ended.
+
+**The page's claim follows the backend's.** `player_fullscreen` answers
+whether the claim is held once the request is dealt with (a refused "on"
+changes nothing), and the page takes its own claim from that answer. The
+page sends its requests one at a time, each after the last was answered
+(`fullscreenRequests` in `playerControls.ts`), so the window is asked in
+the order the page asked. `player_fullscreen` also refuses a play that
+has been told to stop or has ended
+(`PlayerHandle::is_running_embedded_play`); a launch whose tracking could
+not be started leaves such a play in the slot.
+
+**A source choice that ends without a play** is the same failure by
+another door, and is closed here too. When a playlist's next entry needs
+the user to choose a source, the dispatcher says a successor is coming and
+the page keeps fullscreen while the dialog is up. Cancelling it, letting
+it expire, or choosing a source whose play is refused or fails before its
+session is installed, told the page nothing; only the backstop left
+fullscreen. The two commands now run through `cancel_choice` and
+`resolve_choice`, which report the end of the run from the same state:
+nothing is playing, no choice is still waiting, and the page holds the
+player's fullscreen (`report_choice_end`, `choice_end_ends_run`). A launch
+that failed after its session was installed has already reported
+(`PlayFailure::launched`), so the choice adds nothing then.
+
+The reviewer's comments, and where each is held:
+
+| Comment | Closed by | Test (`commands::run_over_tests`) |
+| --- | --- | --- |
+| 1, a clean end reported after the replacement failed | the launch reports from state; and the dispatcher, finding no play active, says the run is over by itself | `reviewer_1_a_clean_end_reported_after_a_failed_replacement` |
+| 2, the reaper empties the slot before the read | the view comes from the record kept with the events, not from the slot; an emptied slot means nothing plays | `reviewer_2_a_failed_launch_whose_view_opened_and_was_reaped` |
+| 3, two failed launches in a row | each failed launch decides from the state after its own undo | `reviewer_3_two_failed_launches_in_a_row` |
+| 4, a play that fell back to mpv's own window | the claim on fullscreen is kept by the backend and outlasts the fallback; no check of which player ran remains | `reviewer_4_a_play_that_fell_back_to_mpv_own_window` |
+
+**Every order, not a list of them.**
+`in_every_order_the_page_leaves_fullscreen_exactly_when_the_run_is_over`
+enumerates every order of a stated set of events and runs each on a fresh
+app state through the real functions: `install_and_launch` under the play
+lock, the tracker's verdict on a plain thread, `advance_playlist`, a
+reaper tick, `ViewRecord::announce`, `claim_player_fullscreen`,
+`cancel_choice` and `resolve_choice`. The events: the old play ending
+cleanly or being stopped, its tracker's report, its dispatch, its view
+closing, a reaper tick, the steps of a second launch (which fails, fails
+after its own view opened, fails before stopping the old player, starts in
+Vela's window, or starts in mpv's own window), that launch's view opening
+and closing, a third launch that fails, a dispatch that lands inside a
+launch, a successor being chosen (cancelled, expired, refused, its launch
+failing, or starting), and successors in mpv's own window following one
+another or stepped down. 42,838 orders. For each, the test keeps what was
+true when each event was sent, and asserts that the page leaves fullscreen
+at a report sent when nothing was playing or coming, never at one sent
+while something was, and that it has left by the end exactly when nothing
+plays. The 736 distinct sequences of events the page receives are kept in
+`tests/fixtures/run-over-orders.json`, compared byte for byte, and
+replayed by `tests/player-view.test.mjs` through the page's real helpers.
+
+**For somebody who only uses mpv's own window**, nothing they see
+changes. The claim is set only for a running embedded play, so it is never
+set, and neither a failed launch nor a source choice sends anything new
+(`a_failed_launch_sends_nothing_new_to_somebody_who_uses_mpv_own_window`,
+`a_choice_sends_nothing_new_to_somebody_who_uses_mpv_own_window`). The
+dispatcher's existing report, sent when it was before, can now say
+`runOver: true` where it said false, and carries `successor`. The page
+acts on both only by leaving a fullscreen it holds, which it never does
+without the embedded view. `continue-playing` is sent exactly when it was.
+
+Settled by the coordinating agent while landing this, as details of how it
+is built:
+
+- **`successor` is sent to both players' pages.** The brief for this
+  repair allowed only `runOver` to change for mpv's own window. The field
+  is what lets the page stop counting reports; it changes nothing that
+  user sees. Kept.
+- **The source choice is part of this finding.** It is the finding's
+  failure (the library fullscreen, nothing coming, until the backstop),
+  and the dispatcher's `successor` made it reachable from a playlist. It
+  could not be left for a later finding without landing a regression.
+- **A play in mpv's own window keeps the run's fullscreen only until the
+  backstop.** When the last view has closed and a successor plays in mpv's
+  own window for more than 50 seconds, the page's backstop takes Vela's
+  window out of fullscreen while that play goes on. The window that
+  changes is the one behind mpv's own; the play is not touched. Left as it
+  is.
+- `ViewRecord::announce` is built only on Linux, where its one caller is.
+
+Files: `src-tauri/src/commands.rs`, `src-tauri/src/run_over_tests.rs`
+(new: these tests, apart from the command layer), `src-tauri/src/lib.rs`,
+`src-tauri/src/player/mod.rs`, `control.rs`, `external.rs`,
+`embedded/host.rs`, `embedded/session.rs`; `src/lib/playerView.ts`,
+`src/lib/playerControls.ts`, `src/routes/+page.svelte`;
+`tests/fixtures/run-over-orders.json` (new), `tests/player-view.test.mjs`,
+`tests/player-controls.test.mjs`, `tests/player-command.test.mjs`,
+`tests/player-selection.test.mjs`, `tests/embedded-player.test.mjs`,
+`tests/dependency-policy.test.mjs` (its check that a source choice is
+taken once follows the code into `resolve_choice`).
+
+Written by one helper agent, attacked twice by two others (seventeen
+findings in all: two the same HIGH, a successor's source choice that never
+ended the run; fourteen fixed, one kept as the first decision above, two
+left as the gaps below), repaired after each attack, and checked by a
+further one, which ran nine injections of its own and both end-to-end
+venues. Then read in full, landed as one commit and injected again by the
+coordinating agent.
+
+Guard proof for round 3, run 2026-11-14 by the coordinating agent in the
+main clone at `060a5fd`, one injection at a time, each restored from the
+commit and the tree checked clean after it. Rust:
+`cargo +stable test --locked --lib -- commands:: player::control::tests`;
+Node: `node --test` on `tests/player-view.test.mjs`,
+`player-controls`, `player-selection`, `player-command`,
+`embedded-player` and `dependency-policy`.
+
+| Injection | Rust | Node |
+| --- | --- | --- |
+| Unchanged | PASS (131 tests) | PASS (105 tests) |
+| A failed launch hands no report on (the reopened defect) | FAIL all four `reviewer_*` tests, `in_every_order_…`, `a_choice_whose_launch_failed_is_reported_once` | FAIL `once a play has installed its session, only the launch-failure path ends it early` |
+| A failed launch reports whether or not the page holds fullscreen | FAIL `a_failed_launch_sends_nothing_new_to_somebody_who_uses_mpv_own_window`, `a_failed_launch_ends_the_run_only_when_all_three_hold` | |
+| Any player in the slot that has not ended counts as playing (the serial is not compared) | FAIL `a_play_the_launch_started_and_stopped_plays_nothing_before_it_has_ended`, `nothing_plays_unless_the_player_found_before_the_launch_still_runs` | |
+| With no play active the dispatcher still says a successor is coming | FAIL `reviewer_1_…`, `the_dispatcher_says_the_run_is_over_when_no_play_is_active`, `in_every_order_…` | |
+| The report names the launch's own session whatever view shows | FAIL `reviewer_1_…`, `the_view_record_follows_the_page_and_names_the_view_showing`, `in_every_order_…` | |
+| The window leaving fullscreen does not clear the backend's claim | (needs the running app) | FAIL `the window's real fullscreen reaches the page from GDK, followed once from setup`, `the page's claim on fullscreen is kept where it is asked for and where the window leaves it` |
+| The dispatcher's report never says a successor is coming | FAIL seven tests, among them `a_successor_in_mpv_own_window_keeps_fullscreen_until_the_run_is_over`, `a_successor_whose_view_has_not_opened_keeps_fullscreen`, `in_every_order_…` | FAIL `the dispatcher's report of a clean end names its session and says whether the run is over` |
+| A cancelled source choice reports nothing | FAIL `a_successor_being_chosen_keeps_fullscreen_and_a_choice_ended_without_a_play_ends_the_run`, `in_every_order_…` | FAIL `a source choice's end is reported from the state of the app, through the real commands` |
+| A chosen play that fails before it is installed reports nothing | FAIL the same two | FAIL the same |
+| The dispatcher's "neither" report leaves although the view of a running play shows | | FAIL `a clean end whose successor the backend starts keeps fullscreen across the gap (case 1)`, and case 3 |
+| A view whose play has ended still counts as a running play's | | FAIL `in every order the backend produces, the page leaves fullscreen at a report exactly when the run is over`, `a successor in mpv own window keeps fullscreen until a report says the run is over`, and case 3 |
+| The page ignores what the backend answers it holds | | FAIL `fullscreen for the player is held by the page and left on events` |
+| Fullscreen is granted to a play that is not the running embedded one | FAIL `the_page_claims_fullscreen_only_for_the_running_embedded_play`, `a_refused_request_for_fullscreen_is_answered_as_holding_nothing` | FAIL `fullscreen is asked of the window only for the running embedded play, after the lock` |
+| The fullscreen command answers what was asked, not what is held | (needs the running app) | FAIL the same, and `the page's claim on fullscreen is kept where it is asked for and where the window leaves it` |
+| A play told to stop may still take fullscreen | FAIL `player::control::tests::with_a_player::only_the_running_embedded_play_counts_as_running`, and the two claim tests | |
+| Fullscreen requests are sent at once, not one after the other | | FAIL `fullscreen requests reach the backend one at a time, in the order asked` |
+| `lib.rs` reports a clean end without the dispatcher's answer | (needs the running app) | FAIL `the dispatcher's report of a clean end names its session and says whether the run is over` |
+| The view's events are sent without the record | (needs the running app) | FAIL `the view record and the view events are one step` |
+| The play path does not mark a failed launch as already reported | PASS: the Rust tests hand `resolve_choice` a stand-in play, so only the source check sees the real call | FAIL `once a play has installed its session, only the launch-failure path ends it early`, `a launch that fails reports the run over only from the state of the app, and nothing else sends that report` |
+
+The helpers ran 56 injections of their own while writing it and nine more
+when checking it; each failed its named tests.
+
+Also run at the landed content: the full check (602 Rust tests; `npm
+audit` fails on `main` for a reason of its own, see `.agents/state.md`,
+Blockers). End to end, by the coordinating agent at
+`060a5fd`: three scenarios in the embedded venue (`embeddedfullscreenend`
+with its six legs, `embeddedcontrols`, `embeddedskip`), 3 of 3, no panic in
+the log. And by the checking helper, at the commit before the
+coordinating agent's last two edits (comments in the tests, and
+`announce` built only on Linux): the WHOLE suite in the external player,
+41 of 42, the one failure being `pagefail`, the recorded product race.
+
+Not covered, and why:
+
+- **No end-to-end leg for a launch that fails after its session is
+  installed.** It cannot be staged from outside the running app: a missing
+  mpv falls back to the one on the path, a broken configuration is caught
+  before installation, and the step-down is decided from mpv's own
+  figures. It would take a hook in the product for tests, which was not
+  added. Nor is there a leg for a source choice: it needs the same title
+  on two servers with the Ask policy, which the harness does not stage.
+- **A source choice ended in the instant another clean end is being
+  dispatched** (or while the page's own Continue Playing is deciding) can
+  report the run over just before a successor starts. That successor then
+  plays outside fullscreen. Fullscreen is lost, never held.
+- **A source choice that expires with its dialog still open** is reported
+  when the user next cancels or chooses, not at the moment it expires; the
+  dialog is on screen for all that time. One that expired before the page
+  ever fetched it (the page unresponsive for two minutes) is never
+  reported, and the backstop leaves.
+- **A clean end whose completion cannot be written** (a write error in
+  Vela's own state) sends no dispatcher report at all, as before this
+  finding; with nothing else playing, the backstop leaves.
+- **The page's claim and the backend's can differ in two ways, neither
+  reachable from the page's own controls, by reading.** Both need the
+  window's "left fullscreen" event to arrive after a newer "on" was
+  granted. Every "on" the page sends is decided on having seen the window
+  not fullscreen (`!fullscreen` in the key and the button), so the event
+  of any earlier "off" has been handled by then, by the backend first.
+  What is left is the user leaving fullscreen with the compositor's own
+  shortcut within the millisecond or so between an "on" being granted and
+  its answer reaching the page: the page then believes it holds a
+  fullscreen the window does not have.
+- **The enumeration's limits.** One reaper tick per order; an undo and
+  its report are one step; no third launch after a second that had its own
+  view or that started (the count of orders passes 100,000); the
+  dispatcher's playlist arms that need a server or the playlist store on
+  disk are composed from the real `install_and_launch` and
+  `after_successor` or `successor_failed`, not run whole. What "playing or
+  coming" means in it is the test's own model, and the Node replay checks
+  the page's helpers against that model, not the model itself. Time is not
+  in it, so neither is the backstop.
+- **What needs the running app is held by checks of the source text**:
+  `player_fullscreen` calling `claim_player_fullscreen` and answering its
+  `held`; `follow_fullscreen` clearing the claim; the host sending view
+  events only through the record; `lib.rs` sending `clean_end_report` as
+  it stands; the two commands going through `cancel_choice` and
+  `resolve_choice`. Each was seen to fail with its call taken out.
+- **A panic inside the launch** after a new player is in the slot counts
+  as nothing playing. Release builds abort on panic.
+- **Not built for macOS or Windows here**; the branches for them are by
+  reading.
+- **The error line of a play the user started** can still be cleared by
+  the refresh the report triggers, as in round 2.
