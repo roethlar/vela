@@ -250,4 +250,3 @@ where the text above is now wrong.
   the ask's own number, mpv then reports it once more as it reads it after
   the answer, and a change finishes only when all three options have been
   answered and reported afresh. Nothing depends on the order of events.
-
