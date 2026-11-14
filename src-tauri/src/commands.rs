@@ -9122,6 +9122,7 @@ mod tests {
                 .find(|output| output.names.iter().any(|name| name == velas))
                 .cloned(),
             connected: Some(connected.to_vec()),
+            seen: connected.to_vec(),
         }
     }
 
@@ -9233,6 +9234,49 @@ mod tests {
             make(overrides, display::HdrState::Enabled),
             ((1920, 1080, display::HdrState::Disabled), dp1),
             "the overrides go on top"
+        );
+    }
+
+    #[test]
+    fn a_compatible_target_is_the_decided_screens_when_what_is_connected_is_not_known() {
+        // The attack on the fourth repair, finding 1, its two probes, from
+        // what was seen through the decision of the screen to the target:
+        // the list is incomplete, so nothing is known to be connected, and
+        // the saved first screen is still ranked for its own size, not for
+        // Vela's screen.
+        use crate::player::PlayerKind::External;
+        use display::{NamedMonitor, PlatformOutputs};
+        let target_of = |screens: &display::Screens, saved: &str| {
+            let screen = screen_for_play(&PlaybackWindowRecord::default(), None, External, Some(saved), screens);
+            let target = tauri::async_runtime::block_on(compatibility_target_from(
+                &screen,
+                screens,
+                display::DisplayOverrides::default(),
+                async |_: &display::ProfileBasis| display::HdrState::Disabled,
+            ));
+            (screen.name, target.width, target.height)
+        };
+        // Wayland: Vela on a 1080p screen the compositor lists by model only.
+        let model = NamedMonitor::for_test("U2720Q", Some("U2720Q"), 1920, 1080, 0);
+        let wayland = display::screens_from(
+            Some(model.clone()),
+            Some(vec![model]),
+            PlatformOutputs::Incomplete(vec![
+                output(&["U2720Q"], 1920, 1080),
+                output(&["DP-1", "XG27UQDMS"], 3840, 2160),
+            ]),
+        );
+        assert_eq!(wayland.connected, None);
+        assert_eq!(target_of(&wayland, "DP-1"), (Some("DP-1".to_string()), 3840, 2160), "Wayland");
+        // macOS: one monitor without the name mpv takes for it.
+        let first = NamedMonitor::for_test("Monitor #1", None, 5120, 2880, 0);
+        let second = NamedMonitor::for_test("Monitor #2", Some("LG HDR 4K (7)"), 3840, 2160, 5120);
+        let mac = display::screens_from(Some(first.clone()), Some(vec![first, second]), PlatformOutputs::NoneToAdd);
+        assert_eq!(mac.connected, None);
+        assert_eq!(
+            target_of(&mac, "LG HDR 4K (7)"),
+            (Some("LG HDR 4K (7)".to_string()), 3840, 2160),
+            "macOS"
         );
     }
 
@@ -9460,6 +9504,7 @@ mod tests {
                 velas: Some(VELAS.to_string()),
                 velas_output: None,
                 connected: Some(vec![output(&[], 1920, 1080)]),
+                seen: vec![output(&[], 1920, 1080)],
             },
         ] {
             assert_eq!(
@@ -9472,6 +9517,7 @@ mod tests {
             velas: None,
             velas_output: None,
             connected: Some(vec![output(&["HDMI-1"], 1920, 1080)]),
+            seen: vec![output(&["HDMI-1"], 1920, 1080)],
         };
         assert_eq!(
             screen_for_play(&on_dp1, None, External, None, &nameless),

@@ -203,6 +203,12 @@ pub(crate) struct Screens {
     /// when that is not known: when the list is not known to be complete in
     /// the names mpv may use (`screens_from`).
     pub connected: Option<Vec<Output>>,
+    /// Every output that was seen (the system's own list, then Tauri's
+    /// monitors), complete or not. It gives a decided output its size
+    /// (`profile_basis`) even when what is connected is not known: an
+    /// incomplete list still gives the outputs it does list (fourth review of
+    /// finding pw-1). It never tells whether a name is connected.
+    pub seen: Vec<Output>,
 }
 
 impl Screens {
@@ -220,10 +226,7 @@ impl Screens {
     }
 
     fn output_called(&self, name: &str) -> Option<&Output> {
-        self.connected
-            .iter()
-            .flatten()
-            .find(|output| output.is_called(name))
+        self.seen.iter().find(|output| output.is_called(name))
     }
 }
 
@@ -245,9 +248,10 @@ pub(crate) struct ProfileBasis {
 /// It counts only when it names that very output first (its
 /// `screen_name`), as `detect_profile` counts an observation: its size then
 /// counts as the output's size now, and, as there, no desktop position is
-/// passed on with it. Otherwise the output's own size, from the outputs
-/// connected now, counts. An output the list does not have (it could not be
-/// listed) is given the values of the screen holding Vela's window, as
+/// passed on with it. Otherwise the output's own size, from the outputs seen
+/// (`Screens::seen`, whether or not that list is complete), counts. An
+/// output that was not seen is given the values of the screen holding Vela's
+/// window, as
 /// `detect_profile` gives a play that has observed nothing.
 pub(crate) fn profile_basis(
     name: Option<&str>,
@@ -454,22 +458,21 @@ pub(crate) fn screens_from(
         PlatformOutputs::NoneToAdd | PlatformOutputs::Complete(_) => true,
         PlatformOutputs::Incomplete(_) => false,
     };
-    let connected = monitors
-        .filter(|monitors| {
-            platform_complete && monitors.iter().all(|monitor| monitor.mpv_name.is_some())
-        })
-        .map(|monitors| {
-            platform
-                .outputs()
-                .iter()
-                .cloned()
-                .chain(monitors.iter().map(output_of))
-                .collect::<Vec<_>>()
-        });
+    let complete = platform_complete
+        && monitors
+            .as_ref()
+            .is_some_and(|monitors| monitors.iter().all(|monitor| monitor.mpv_name.is_some()));
+    let seen = platform
+        .outputs()
+        .iter()
+        .cloned()
+        .chain(monitors.iter().flatten().map(output_of))
+        .collect::<Vec<_>>();
     Screens {
         velas: velas_name,
         velas_output,
-        connected,
+        connected: complete.then(|| seen.clone()),
+        seen,
     }
 }
 
@@ -1261,7 +1264,8 @@ mod tests {
                 .iter()
                 .find(|output| output.is_called("HDMI-1"))
                 .cloned(),
-            connected: Some(connected),
+            connected: Some(connected.clone()),
+            seen: connected,
         }
     }
 
@@ -1659,6 +1663,71 @@ mod tests {
             Incomplete(vec![listed(&["XG27UQDMS"], 2560, 1440, None)]),
         );
         assert_eq!(nameless.velas.as_deref(), Some("XG27UQDMS"));
+    }
+
+    // Fourth review of finding pw-1 (the attack's finding 1): when what is
+    // connected is not known, the outputs that were seen still give a
+    // decided output its own size; it is not ranked for Vela's screen. Both
+    // of the attack's probes, and every other way of being incomplete.
+    #[test]
+    fn an_incomplete_list_still_gives_a_decided_output_its_size() {
+        // Wayland: Vela's 1080p screen is listed by its model only; the
+        // compositor lists DP-1 (4K) by its connector.
+        let model = monitor("U2720Q", "U2720Q", 1920, 1080, 0);
+        let wayland = screens_from(
+            Some(model.clone()),
+            Some(vec![model.clone()]),
+            Incomplete(vec![
+                listed(&["U2720Q"], 1920, 1080, None),
+                listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
+            ]),
+        );
+        assert_eq!(wayland.connected, None);
+        assert_eq!(
+            size(&profile_basis(Some("DP-1"), None, &wayland)),
+            (Some("DP-1"), 3840, 2160),
+            "Wayland: DP-1 is ranked for its own size"
+        );
+        // macOS: "Monitor #1" has no mpv name; "Monitor #2" is the saved
+        // "LG HDR 4K (7)".
+        let first = NamedMonitor::for_test("Monitor #1", None, 5120, 2880, 0);
+        let second = monitor("Monitor #2", "LG HDR 4K (7)", 3840, 2160, 5120);
+        let mac = screens_from(Some(first.clone()), Some(vec![first, second.clone()]), NoneToAdd);
+        assert_eq!(mac.connected, None);
+        assert_eq!(
+            size(&profile_basis(Some("LG HDR 4K (7)"), None, &mac)),
+            (Some("LG HDR 4K (7)"), 3840, 2160),
+            "macOS: the saved screen is ranked for its own size"
+        );
+        // The compositor's list could not be read: Tauri's monitors still
+        // give theirs.
+        let hdmi = monitor("HDMI-1", "HDMI-1", 1920, 1080, 0);
+        let unread = screens_from(
+            Some(hdmi.clone()),
+            Some(vec![hdmi.clone(), second.clone()]),
+            Incomplete(Vec::new()),
+        );
+        assert_eq!(unread.connected, None);
+        assert_eq!(
+            size(&profile_basis(Some("LG HDR 4K (7)"), None, &unread)),
+            (Some("LG HDR 4K (7)"), 3840, 2160),
+            "an unread compositor list"
+        );
+        // Tauri's monitors could not be listed: the compositor's list still
+        // gives its outputs.
+        let unlisted = screens_from(
+            Some(hdmi),
+            None,
+            Complete(vec![listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None)]),
+        );
+        assert_eq!(unlisted.connected, None);
+        assert_eq!(
+            size(&profile_basis(Some("DP-1"), None, &unlisted)),
+            (Some("DP-1"), 3840, 2160),
+            "Tauri's monitors unlisted"
+        );
+        // What was seen never tells what is connected: every name stands.
+        assert!(mac.is_connected("DP-9") && wayland.is_connected("DP-9"));
     }
 
     #[cfg(target_os = "macos")]
