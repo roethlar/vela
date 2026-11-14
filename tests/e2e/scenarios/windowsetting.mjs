@@ -83,6 +83,30 @@ export async function play({ driver, readConfigSafely }, io = APP_AND_MPV) {
   return { mpv, session: recent.session_id };
 }
 
+// Change fullscreen over the scenario's own connection, and go on only once
+// mpv has reported the change on that connection, as it reports it to Vela's
+// reader on Vela's (review finding pw-8). mpv answering "set" says the
+// property is set, not that the change has been sent to anyone; the scenario
+// then quits mpv or Vela at once, and a change not yet written to Vela's
+// connection when mpv is killed is one no wait in Vela can recover. This
+// narrows that gap to the time between mpv writing the change to this
+// connection and to Vela's; it does not close it (mpv delivers to each
+// client on its own).
+export async function setFullscreen(mpv, value) {
+  // Observed before the change, so the report below is of the change.
+  await mpv.observe('fullscreen');
+  await mpv.setProp('fullscreen', value);
+  await pollUntil(
+    async () => (await mpv.getProp('fullscreen').catch(() => null)) === value,
+    `fullscreen ${value} readback`,
+  );
+  await pollUntil(
+    () => mpv.reported('fullscreen') === value,
+    `fullscreen ${value} reported on the scenario's own connection`,
+    { intervalMs: 5 },
+  );
+}
+
 export default {
   name: 'windowsetting',
   // The setting is about the external player's own window.
@@ -135,14 +159,6 @@ export default {
     };
 
     const world = { driver, readConfigSafely };
-
-    async function setFullscreen(mpv, value) {
-      await mpv.setProp('fullscreen', value);
-      await pollUntil(
-        async () => (await mpv.getProp('fullscreen').catch(() => null)) === value,
-        `fullscreen ${value} readback`,
-      );
-    }
 
     // The end of a play is written in one go with its recents stamp: once the
     // stamp is there, so is anything the play remembers.

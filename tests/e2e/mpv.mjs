@@ -100,6 +100,10 @@ export class MpvIpc {
   #sock;
   #nextId = 1;
   #pending = new Map();
+  #nextObserveId = 1;
+  // The last value mpv reported on THIS connection for each property it was
+  // asked to observe (`observe`).
+  #reported = new Map();
 
   static async connect(socketPath, { timeoutMs = 10000 } = {}) {
     const deadline = Date.now() + timeoutMs;
@@ -139,7 +143,11 @@ export class MpvIpc {
           if (msg.error === 'success') resolve(msg.data);
           else reject(new Error(`mpv: ${msg.error}`));
         }
-        // events (no request_id) are ignored — assertions poll properties
+        // Of the events (no request_id), only the changes of properties this
+        // connection observes are kept; assertions otherwise poll properties.
+        if (msg.event === 'property-change' && typeof msg.name === 'string' && 'data' in msg) {
+          this.#reported.set(msg.name, msg.data);
+        }
       }
     });
     sock.on('error', () => {}); // quit() races the socket teardown by design
@@ -158,6 +166,18 @@ export class MpvIpc {
 
   getProp(name) {
     return this.cmd('get_property', name);
+  }
+
+  // Ask mpv to report changes of `name` on this connection, as Vela's own
+  // reader asks on its connection (`observe_property`).
+  observe(name) {
+    return this.cmd('observe_property', this.#nextObserveId++, name);
+  }
+
+  // The last value of `name` mpv reported on this connection, or undefined
+  // when it has reported none (or `name` is not observed).
+  reported(name) {
+    return this.#reported.get(name);
   }
 
   async setProp(name, value) {

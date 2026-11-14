@@ -11,7 +11,9 @@ import { acceptedConnections, plexStopProblems, skipJumpVerdict } from './e2e/ju
 import { velaConnected } from './e2e/helpers.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
 import { assertPlexStopped } from './e2e/scenarios/multiplex.mjs';
-import { play as playInWindowsetting } from './e2e/scenarios/windowsetting.mjs';
+import { play as playInWindowsetting, setFullscreen as setFullscreenInWindowsetting } from './e2e/scenarios/windowsetting.mjs';
+import { MpvIpc } from './e2e/mpv.mjs';
+import { EventEmitter } from 'node:events';
 import { positionsWhile } from './e2e/helpers.mjs';
 
 // markers.mjs's rule: the play resumed from 1 s ahead of a range at 2-12 s,
@@ -836,6 +838,60 @@ test('pw-8: windowsetting hands a play back only once Vela is connected to its m
   const played = await playing;
   assert.equal(played.mpv, mpv, 'the play is handed back once the three are there');
   assert.equal(played.session, 'this play');
+});
+
+// What remains outside Vela: between mpv answering the scenario's "set
+// fullscreen" and mpv writing that change to Vela's connection. The scenario
+// narrows it by waiting until mpv has reported the change on its own
+// connection, observed before the change.
+test('pw-8: windowsetting goes on after a fullscreen change only once mpv has reported it to the scenario', async () => {
+  const steps = [];
+  let fullscreen = false;
+  let reported;
+  const mpv = {
+    observe: async (name) => {
+      steps.push(`observe ${name}`);
+    },
+    setProp: async (name, value) => {
+      steps.push(`set ${name}`);
+      if (name === 'fullscreen') fullscreen = value;
+    },
+    getProp: async (name) => (name === 'fullscreen' ? fullscreen : null),
+    reported: (name) => (name === 'fullscreen' ? reported : undefined),
+  };
+  let done = false;
+  const changing = setFullscreenInWindowsetting(mpv, true).then(() => {
+    done = true;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  assert.deepEqual(steps, ['observe fullscreen', 'set fullscreen'], 'observed before the change');
+  assert.equal(done, false, 'it went on before mpv reported the change on its own connection');
+  reported = false;
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  assert.equal(done, false, 'a report of the old value is not the change');
+  reported = true;
+  await changing;
+});
+
+// MpvIpc keeps what mpv reports of the properties a connection observes.
+test('pw-8: MpvIpc keeps the last value mpv reported for an observed property', async () => {
+  const written = [];
+  const sock = new EventEmitter();
+  sock.write = (line) => written.push(JSON.parse(line));
+  const mpv = new MpvIpc(sock);
+  const observing = mpv.observe('fullscreen');
+  assert.deepEqual(written[0].command, ['observe_property', 1, 'fullscreen']);
+  sock.emit('data', `{"request_id":${written[0].request_id},"error":"success"}\n`);
+  await observing;
+  assert.equal(mpv.reported('fullscreen'), undefined, 'nothing reported yet');
+  sock.emit('data', '{"event":"property-change","id":1,"name":"fullscreen","data":false}\n{"event":"property-');
+  assert.equal(mpv.reported('fullscreen'), false);
+  // A line split across two reads, then a reply that is not an event.
+  sock.emit('data', 'change","id":1,"name":"fullscreen","data":true}\n{"request_id":99,"error":"success","data":false}\n');
+  assert.equal(mpv.reported('fullscreen'), true, 'the last report counts, a reply does not');
+  sock.emit('data', '{"event":"property-change","id":2,"name":"pause","data":false}\n');
+  assert.equal(mpv.reported('fullscreen'), true, 'another property is kept apart');
+  assert.equal(mpv.reported('pause'), false);
 });
 
 test('pw-8: velaConnected rejects invalid counts before reading the kernel table', async () => {
