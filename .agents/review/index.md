@@ -31,7 +31,7 @@ admitted, none declined. Record:
 | pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[~]`  | `115cbaa` | codex/default/standard |
 | pa-6 | MEDIUM   | A run can say it built the app it ran when it built elsewhere and ran an older binary | `[~]`  | `f00cdc4` | codex/default/standard |
 | pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[~]`  | `17d9a81` | codex/default/standard |
-| pa-8 | LOW      | A name every object has, such as toString, is accepted as a test-only route | `[~]`  | `ade0278` | codex/default/standard |
+| pa-8 | LOW      | A name every object has, such as toString, is accepted as a test-only route | `[x]`  | `ade0278` | codex/default/standard |
 
 **Embedded player, packaging review, 2026-11-14 (closed 2026-11-14, all six verified):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

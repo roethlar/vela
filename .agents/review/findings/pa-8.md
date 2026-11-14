@@ -1,7 +1,7 @@
 # pa-8: a name every object has, such as toString, is accepted as a test-only route
 
 **Severity**: LOW — the loader and the recorder ask whether a route's name is `in` the table of test-only routes, which is also true of names every object inherits. A scenario declaring `via: 'toString'` is accepted, and `testOnlyRoute('toString')` is recorded as a known route. Nothing does this today; the check promises to refuse it.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `ade0278`
 
@@ -81,3 +81,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "Inherited property names are accepted as test-only routes". Reviewer's severity: LOW.
+
+### Verification round 1, recorded 2026-11-14 10:01 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d97d-445e-7702-9b25-7637eeb0112c`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 09:57 UTC, finished 10:01 UTC.
+- Reviewed head `ade0278604e39994346c4983f923316e5a36bfc1`, base
+  `efbf30cedf74a39508a10f432d9e5019f7ec5d56` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
