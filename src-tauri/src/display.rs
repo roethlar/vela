@@ -199,14 +199,17 @@ pub(crate) struct Screens {
     pub velas: Option<String>,
     /// That screen itself.
     pub velas_output: Option<Output>,
-    /// Every output connected now; `None` when they could not be listed.
+    /// Every output connected now, by every name mpv may give it; `None`
+    /// when that is not known: when the list is not known to be complete in
+    /// the names mpv may use (`screens_from`).
     pub connected: Option<Vec<Output>>,
 }
 
 impl Screens {
-    /// Whether an output of this name is connected now. When the outputs
-    /// could not be listed, or the list names none of them, nothing can be
-    /// told, and the name is taken as it is, as before this check existed.
+    /// Whether an output of this name is connected now. When that is not
+    /// known (`connected` is `None`), or the list names none of them, nothing
+    /// can be told, and the name is taken as it is, as before this check
+    /// existed.
     pub(crate) fn is_connected(&self, name: &str) -> bool {
         match &self.connected {
             Some(outputs) if outputs.iter().any(|output| !output.names.is_empty()) => {
@@ -360,9 +363,33 @@ pub(crate) async fn look_at_screens(app: &tauri::AppHandle) -> Screens {
 /// A monitor Tauri gives, with the name mpv takes for it
 /// (`platform_screen_name`; the two differ on macOS).
 #[derive(Debug, Clone)]
-struct NamedMonitor {
+pub(crate) struct NamedMonitor {
     monitor: MonitorDescriptor,
     mpv_name: Option<String>,
+}
+
+#[cfg(test)]
+impl NamedMonitor {
+    /// A monitor as Tauri gives it, at `x` on the desktop, and the name mpv
+    /// takes for it (`None`: none could be found).
+    pub(crate) fn for_test(
+        name: &str,
+        mpv_name: Option<&str>,
+        width_px: u32,
+        height_px: u32,
+        x: i32,
+    ) -> Self {
+        Self {
+            monitor: MonitorDescriptor {
+                name: Some(name.to_string()),
+                width_px,
+                height_px,
+                position_x: x,
+                position_y: 0,
+            },
+            mpv_name: mpv_name.map(str::to_string),
+        }
+    }
 }
 
 async fn named_monitor(app: &tauri::AppHandle, monitor: MonitorDescriptor) -> NamedMonitor {
@@ -370,29 +397,73 @@ async fn named_monitor(app: &tauri::AppHandle, monitor: MonitorDescriptor) -> Na
     NamedMonitor { monitor, mpv_name }
 }
 
+/// What the system lists of its outputs besides Tauri's monitors
+/// (`platform_outputs`), and whether that list is complete.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum PlatformOutputs {
+    /// Not a Wayland session: the system names no output otherwise than
+    /// Tauri does, and there is nothing to add.
+    NoneToAdd,
+    /// A Wayland session whose compositor listed every one of its outputs,
+    /// each with its connector name.
+    Complete(Vec<Output>),
+    /// A Wayland session whose compositor's list could not be read (empty),
+    /// or names some output by its model only. What it does list still
+    /// names the screen holding Vela's window (`connector_of`), but it does
+    /// not tell which names are connected.
+    Incomplete(Vec<Output>),
+}
+
+impl PlatformOutputs {
+    fn outputs(&self) -> &[Output] {
+        match self {
+            Self::NoneToAdd => &[],
+            Self::Complete(outputs) | Self::Incomplete(outputs) => outputs,
+        }
+    }
+}
+
 /// What `look_at_screens` saw, put together: the monitor holding Vela's
 /// window, every monitor Tauri lists (`None` when they could not be listed),
 /// and the outputs the system lists by names Tauri does not give
 /// (`platform_outputs`). Kept apart from the asking so that a test can run it.
-fn screens_from(
+///
+/// What is connected is known only when the list is complete in the names
+/// mpv may use (third review of finding pw-1): Tauri's monitors could be
+/// listed, each of them has the name mpv takes for it (on macOS a failed
+/// translation leaves one without), and in a Wayland session the
+/// compositor's own list could be read and names every output by its
+/// connector. Otherwise `connected` is `None`, and every name is taken as it
+/// is, as before the check existed.
+pub(crate) fn screens_from(
     velas: Option<NamedMonitor>,
     monitors: Option<Vec<NamedMonitor>>,
-    platform: Vec<Output>,
+    platform: PlatformOutputs,
 ) -> Screens {
     let velas_output = velas.as_ref().map(output_of);
     let velas_name = velas.and_then(|velas| velas.mpv_name).map(|name| {
         velas_output
             .as_ref()
-            .and_then(|own| connector_of(&name, own, &platform))
+            .and_then(|own| connector_of(&name, own, platform.outputs()))
             .map(str::to_string)
             .unwrap_or(name)
     });
-    let connected = monitors.map(|monitors| {
-        platform
-            .into_iter()
-            .chain(monitors.iter().map(output_of))
-            .collect::<Vec<_>>()
-    });
+    let platform_complete = match &platform {
+        PlatformOutputs::NoneToAdd | PlatformOutputs::Complete(_) => true,
+        PlatformOutputs::Incomplete(_) => false,
+    };
+    let connected = monitors
+        .filter(|monitors| {
+            platform_complete && monitors.iter().all(|monitor| monitor.mpv_name.is_some())
+        })
+        .map(|monitors| {
+            platform
+                .outputs()
+                .iter()
+                .cloned()
+                .chain(monitors.iter().map(output_of))
+                .collect::<Vec<_>>()
+        });
     Screens {
         velas: velas_name,
         velas_output,
@@ -457,22 +528,23 @@ fn output_of(named: &NamedMonitor) -> Output {
 
 /// Outputs the system lists by names Tauri does not give. On Wayland, Tauri
 /// names an output by its model ("XG27UQDMS") and mpv by its connector
-/// ("DP-3"); the compositor gives both.
+/// ("DP-3"); the compositor gives both. A list that could not be read is
+/// incomplete, so nothing is then known to be connected.
 #[cfg(target_os = "linux")]
-async fn platform_outputs() -> Vec<Output> {
+async fn platform_outputs() -> PlatformOutputs {
     tauri::async_runtime::spawn_blocking(|| {
         if !wayland_session() {
-            return Vec::new();
+            return PlatformOutputs::NoneToAdd;
         }
-        wayland_hdr::outputs().unwrap_or_default()
+        wayland_hdr::outputs().unwrap_or(PlatformOutputs::Incomplete(Vec::new()))
     })
     .await
-    .unwrap_or_default()
+    .unwrap_or(PlatformOutputs::Incomplete(Vec::new()))
 }
 
 #[cfg(not(target_os = "linux"))]
-async fn platform_outputs() -> Vec<Output> {
-    Vec::new()
+async fn platform_outputs() -> PlatformOutputs {
+    PlatformOutputs::NoneToAdd
 }
 
 #[cfg(target_os = "linux")]
@@ -955,8 +1027,8 @@ mod wayland_hdr {
     }
 
     /// The compositor's outputs, each by its connector name and its model,
-    /// at its current mode.
-    pub(super) fn outputs() -> Result<Vec<super::Output>, String> {
+    /// at its current mode (`listed`).
+    pub(super) fn outputs() -> Result<super::PlatformOutputs, String> {
         let connection = Connection::connect_to_env().map_err(|error| error.to_string())?;
         let mut queue = connection.new_event_queue();
         let qh = queue.handle();
@@ -968,23 +1040,59 @@ mod wayland_hdr {
         queue
             .roundtrip(&mut state)
             .map_err(|error| error.to_string())?;
-        Ok(state
-            .outputs
-            .iter()
+        Ok(listed(
+            state
+                .outputs
+                .iter()
+                .map(|output| Described {
+                    name: output.name.clone(),
+                    model: output.model.clone(),
+                    width: output.width,
+                    height: output.height,
+                })
+                .collect(),
+        ))
+    }
+
+    /// One output as the compositor described it.
+    #[derive(Debug, Clone, Default)]
+    pub(super) struct Described {
+        /// The connector name (`wl_output` version 4 and later).
+        pub name: Option<String>,
+        pub model: Option<String>,
+        /// The current mode.
+        pub width: u32,
+        pub height: u32,
+    }
+
+    /// The compositor's outputs as Vela lists them: each by its connector
+    /// name first and its model, and the list complete only when every
+    /// output has a connector name, the name mpv takes (third review of
+    /// finding pw-1). A compositor that gives models only, or one output
+    /// without its connector, leaves the list incomplete.
+    pub(super) fn listed(described: Vec<Described>) -> super::PlatformOutputs {
+        let named = |name: &Option<String>| name.as_deref().is_some_and(|name| !name.trim().is_empty());
+        let complete = described.iter().all(|output| named(&output.name));
+        let outputs = described
+            .into_iter()
             .map(|output| super::Output {
                 names: output
                     .name
-                    .iter()
-                    .chain(output.model.iter())
+                    .into_iter()
+                    .chain(output.model)
                     .filter(|name| !name.trim().is_empty())
-                    .cloned()
                     .collect(),
                 width_px: output.width,
                 height_px: output.height,
                 position: None,
             })
             .filter(|output| !output.names.is_empty())
-            .collect())
+            .collect();
+        if complete {
+            super::PlatformOutputs::Complete(outputs)
+        } else {
+            super::PlatformOutputs::Incomplete(outputs)
+        }
     }
 
     pub(super) fn query(
@@ -1207,17 +1315,10 @@ mod tests {
     }
 
     fn monitor(name: &str, mpv_name: &str, width_px: u32, height_px: u32, x: i32) -> NamedMonitor {
-        NamedMonitor {
-            monitor: MonitorDescriptor {
-                name: Some(name.to_string()),
-                width_px,
-                height_px,
-                position_x: x,
-                position_y: 0,
-            },
-            mpv_name: Some(mpv_name.to_string()),
-        }
+        NamedMonitor::for_test(name, Some(mpv_name), width_px, height_px, x)
     }
+
+    use PlatformOutputs::{Complete, Incomplete, NoneToAdd};
 
     fn listed(names: &[&str], width_px: u32, height_px: u32, position: Option<(i32, i32)>) -> Output {
         Output {
@@ -1240,7 +1341,7 @@ mod tests {
         let screens = screens_from(
             Some(hdmi.clone()),
             Some(vec![studio.clone(), hdmi.clone()]),
-            vec![compositor.clone()],
+            Complete(vec![compositor.clone()]),
         );
         assert_eq!(screens.velas.as_deref(), Some("HDMI-1"));
         assert_eq!(
@@ -1260,15 +1361,119 @@ mod tests {
         }
         assert!(!screens.is_connected("DP-1"));
         // Vela's screen is named as mpv takes it, not as Tauri gives it.
-        let on_studio = screens_from(Some(studio), Some(vec![hdmi.clone()]), Vec::new());
+        let on_studio = screens_from(Some(studio), Some(vec![hdmi.clone()]), NoneToAdd);
         assert_eq!(on_studio.velas.as_deref(), Some("Studio Display (7)"));
         assert_eq!(on_studio.velas_output.map(|output| output.width_px), Some(5120));
         // The monitors could not be listed: nothing is known to be connected,
         // and Vela's screen is still named.
-        let unlisted = screens_from(Some(hdmi), None, vec![compositor]);
+        let unlisted = screens_from(Some(hdmi), None, Complete(vec![compositor]));
         assert_eq!(unlisted.connected, None);
         assert_eq!(unlisted.velas.as_deref(), Some("HDMI-1"));
-        assert_eq!(screens_from(None, None, Vec::new()), Screens::default());
+        assert_eq!(screens_from(None, None, NoneToAdd), Screens::default());
+    }
+
+    // Third review of finding pw-1, comments 1 and 2: what is connected is
+    // known only from a list complete in the names mpv may use. In each way
+    // of being incomplete nothing is known, and every name is taken; a
+    // complete list still rejects a name it does not have.
+    #[test]
+    fn connected_is_known_only_from_a_complete_list() {
+        let model = monitor("XG27UQDMS", "XG27UQDMS", 3840, 2160, 0);
+        let hdmi = monitor("HDMI-1", "HDMI-1", 1920, 1080, 3840);
+        let compositor = listed(&["DP-3", "XG27UQDMS"], 3840, 2160, None);
+        let complete = screens_from(
+            Some(model.clone()),
+            Some(vec![model.clone(), hdmi.clone()]),
+            Complete(vec![compositor.clone()]),
+        );
+        assert!(complete.connected.is_some(), "a complete list is known");
+        assert!(complete.is_connected("DP-3") && complete.is_connected("HDMI-1"));
+        assert!(!complete.is_connected("DP-1"), "a complete list rejects a name it lacks");
+        assert!(!complete.is_connected("no-such-screen"));
+        // Not a Wayland session: Tauri's names are mpv's, and complete.
+        let x11 = screens_from(Some(hdmi.clone()), Some(vec![hdmi.clone()]), NoneToAdd);
+        assert!(x11.connected.is_some());
+        assert!(!x11.is_connected("DP-1"));
+
+        let without_mpv_name = NamedMonitor::for_test("Studio Display", None, 5120, 2880, -5120);
+        for (why, screens) in [
+            (
+                "the compositor's list could not be read",
+                screens_from(
+                    Some(model.clone()),
+                    Some(vec![model.clone(), hdmi.clone()]),
+                    Incomplete(Vec::new()),
+                ),
+            ),
+            (
+                "an output the compositor lists by its model only",
+                screens_from(
+                    Some(model.clone()),
+                    Some(vec![model.clone(), hdmi.clone()]),
+                    Incomplete(vec![compositor.clone(), listed(&["U2720Q"], 3840, 2160, None)]),
+                ),
+            ),
+            (
+                "a monitor without the name mpv takes for it",
+                screens_from(
+                    Some(hdmi.clone()),
+                    Some(vec![hdmi.clone(), without_mpv_name.clone()]),
+                    NoneToAdd,
+                ),
+            ),
+            (
+                "Tauri's monitors could not be listed",
+                screens_from(Some(hdmi.clone()), None, NoneToAdd),
+            ),
+        ] {
+            assert_eq!(screens.connected, None, "{why}");
+            for name in ["DP-1", "HDMI-1", "no-such-screen"] {
+                assert!(screens.is_connected(name), "{why}: {name} is taken");
+            }
+        }
+    }
+
+    // The compositor's list is complete only when every output has its
+    // connector name.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn a_compositor_list_is_complete_only_when_every_output_has_its_connector() {
+        use wayland_hdr::{listed as from_compositor, Described};
+        let described = |name: Option<&str>, model: &str| Described {
+            name: name.map(str::to_string),
+            model: Some(model.to_string()),
+            width: 3840,
+            height: 2160,
+        };
+        let both = vec![described(Some("DP-1"), "XG27UQDMS"), described(Some("DP-2"), "U2720Q")];
+        assert_eq!(
+            from_compositor(both),
+            Complete(vec![
+                listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
+                listed(&["DP-2", "U2720Q"], 3840, 2160, None),
+            ])
+        );
+        assert_eq!(
+            from_compositor(vec![described(Some("DP-1"), "XG27UQDMS"), described(None, "U2720Q")]),
+            Incomplete(vec![
+                listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
+                listed(&["U2720Q"], 3840, 2160, None),
+            ]),
+            "one output without its connector"
+        );
+        assert_eq!(
+            from_compositor(vec![described(Some("  "), "XG27UQDMS")]),
+            Incomplete(vec![listed(&["XG27UQDMS"], 3840, 2160, None)]),
+            "a blank connector is none"
+        );
+        assert_eq!(
+            from_compositor(vec![described(None, "XG27UQDMS"), described(None, "U2720Q")]),
+            Incomplete(vec![
+                listed(&["XG27UQDMS"], 3840, 2160, None),
+                listed(&["U2720Q"], 3840, 2160, None),
+            ]),
+            "a compositor that gives models only"
+        );
     }
 
     // Second review of finding pw-1: on Wayland Tauri names a screen by its
@@ -1283,7 +1488,7 @@ mod tests {
             listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
             listed(&["DP-2", "XG27UQDMS"], 2560, 1440, None),
         ];
-        let on_right = screens_from(Some(right.clone()), Some(both.clone()), compositor.clone());
+        let on_right = screens_from(Some(right.clone()), Some(both.clone()), Complete(compositor.clone()));
         assert_eq!(on_right.velas.as_deref(), Some("DP-2"), "the connector of Vela's own screen");
         let basis = profile_basis(on_right.velas.as_deref(), None, &on_right);
         assert_eq!(size(&basis), (Some("DP-2"), 2560, 1440));
@@ -1294,7 +1499,7 @@ mod tests {
             "the other screen, by its connector, is its own"
         );
         assert!(on_right.is_connected("DP-1") && on_right.is_connected("DP-2"));
-        let on_left = screens_from(Some(left), Some(both.clone()), compositor);
+        let on_left = screens_from(Some(left), Some(both.clone()), Complete(compositor));
         assert_eq!(on_left.velas.as_deref(), Some("DP-1"));
         assert_eq!(size(&profile_basis(Some("DP-1"), None, &on_left)), (Some("DP-1"), 3840, 2160));
 
@@ -1306,7 +1511,7 @@ mod tests {
             listed(&["DP-1", "XG27UQDMS"], 3840, 2160, None),
             listed(&["DP-2", "XG27UQDMS"], 3840, 2160, None),
         ];
-        let untold = screens_from(Some(right.clone()), Some(both.clone()), alike);
+        let untold = screens_from(Some(right.clone()), Some(both.clone()), Complete(alike));
         assert_eq!(untold.velas.as_deref(), Some("XG27UQDMS"));
         let basis = profile_basis(untold.velas.as_deref(), None, &untold);
         assert_eq!(size(&basis), (Some("XG27UQDMS"), 2560, 1440));
@@ -1316,14 +1521,14 @@ mod tests {
         let one = screens_from(
             Some(right.clone()),
             Some(vec![right.clone()]),
-            vec![listed(&["DP-3", "XG27UQDMS"], 5120, 2880, None)],
+            Complete(vec![listed(&["DP-3", "XG27UQDMS"], 5120, 2880, None)]),
         );
         assert_eq!(one.velas.as_deref(), Some("DP-3"));
         // A compositor that gives no connector names: the model stays.
         let nameless = screens_from(
             Some(right.clone()),
             Some(vec![right]),
-            vec![listed(&["XG27UQDMS"], 2560, 1440, None)],
+            Incomplete(vec![listed(&["XG27UQDMS"], 2560, 1440, None)]),
         );
         assert_eq!(nameless.velas.as_deref(), Some("XG27UQDMS"));
     }

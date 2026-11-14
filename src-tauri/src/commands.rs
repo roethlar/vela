@@ -9297,6 +9297,38 @@ mod tests {
     }
 
     #[test]
+    fn a_remembered_screen_stays_when_what_is_connected_is_not_known() {
+        // Third review of finding pw-1, comment 1, the reviewer's probe: on
+        // Wayland the compositor's list could not be read, while Tauri still
+        // lists its monitors by model. The remembered DP-1 is connected, and
+        // must stay the destination; it is not passed over for Vela's screen.
+        use crate::player::PlayerKind::External;
+        use display::{NamedMonitor, PlatformOutputs};
+        let on_dp1 = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let model = NamedMonitor::for_test("XG27UQDMS", Some("XG27UQDMS"), 3840, 2160, 0);
+        let seen = |platform| display::screens_from(Some(model.clone()), Some(vec![model.clone()]), platform);
+        let unread = seen(PlatformOutputs::Incomplete(Vec::new()));
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &unread).name.as_deref(),
+            Some("DP-1"),
+            "nothing is known to be connected: the remembered screen stands"
+        );
+        // An output listed by its model only: the same.
+        let models_only = seen(PlatformOutputs::Incomplete(vec![output(&["XG27UQDMS"], 3840, 2160)]));
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &models_only).name.as_deref(),
+            Some("DP-1")
+        );
+        // The same list read in full, naming DP-3 only: DP-1 is gone, and
+        // the play goes to Vela's screen, by its connector.
+        let complete = seen(PlatformOutputs::Complete(vec![output(&["DP-3", "XG27UQDMS"], 3840, 2160)]));
+        assert_eq!(
+            screen_for_play(&on_dp1, None, External, None, &complete).name.as_deref(),
+            Some("DP-3")
+        );
+    }
+
+    #[test]
     fn an_observation_across_several_screens_is_shown_on_its_first() {
         // Review finding pw-1, comment 3: a window across several screens
         // reports them all; the screen decided, ranked for and opened on is
