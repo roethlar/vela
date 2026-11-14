@@ -5,7 +5,7 @@
 // scenario is seen to act on the verdict, not only the verdict to be right.
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { skipJumpVerdict } from './e2e/judge.mjs';
+import { plexStopProblems, skipJumpVerdict } from './e2e/judge.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
 
 // markers.mjs's rule: the play resumed from 1 s ahead of a range at 2-12 s,
@@ -145,4 +145,118 @@ test('pa-1: the markers scenario passes one jump across the range, and logs it',
   await proveSkippedPast(mpv, 'auto-skip: the intro range', 2, 12);
   assert.equal(logged.length, 1, `one line is logged: ${JSON.stringify(logged)}`);
   assert.match(logged[0], /^auto-skip: the intro range: from 1\.00 s, last sample before the jump 1\.\d\d s, first after 12\.50 s, \d+ ms after the play resumed$/);
+});
+
+// multiplex.mjs's rule for Plex A's timeline reports of one stopped play: the
+// item is ratingKey 1, key /library/metadata/1, 10000 ms long; the play was
+// sent to 6000 ms before the stop.
+const ITEM = { durationMs: 10000, ratingKey: '1', key: '/library/metadata/1', seekMs: 6000 };
+const report = (state, time, extra = {}) => ({
+  state,
+  time: String(time),
+  duration: '10000',
+  ratingKey: '1',
+  key: '/library/metadata/1',
+  ...extra,
+});
+// As seen in passing runs: one "playing" report while the play runs, then
+// the stopped one where mpv was just before the stop.
+const GOOD = [report('playing', 4916), report('stopped', 7458)];
+const judgeStop = (reports, lastSeenMs = 7458) => plexStopProblems(reports, { ...ITEM, lastSeenMs });
+// (lastSeenMs is 7458 unless given, undefined included.)
+const WHERE = (time, ...seen) =>
+  `the stopped report's position (${time} ms) is where the play stopped: mpv was at ${seen.length > 0 ? seen[0] : 7458} ms ` +
+  'just before the stop, and the item ends at 10000 ms';
+
+test('pa-7: the reports of a play stopped where it was seen pass', () => {
+  assert.deepEqual(judgeStop(GOOD), []);
+  // Several "playing" reports, and a stop a moment after mpv was read.
+  assert.deepEqual(judgeStop([report('playing', 1000), report('playing', 4916), report('stopped', 9000)], 7458), []);
+});
+
+test("pa-7: the stopped report's time and duration swapped fails", () => {
+  // The swap the first fix let through: the stop reported at the item's full
+  // duration (10000), with the position as its duration.
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 10000, { duration: '7458' })]), [
+    WHERE(10000),
+    "the stopped report carries the item's duration (10000 ms), not 7458",
+  ]);
+});
+
+test('pa-7: a stopped report away from where the play stopped fails', () => {
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6458)]), [WHERE(6458)], 'one second early');
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6957)]), [WHERE(6957)], 'just over 500 ms early');
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6958)]), [], '500 ms early is allowed');
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 9459)]), [WHERE(9459)], 'more than 2 s late');
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 9458)]), [], '2 s late is allowed');
+  // At the item's end, though within 2 s of where mpv was.
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 10000)], 8500), [WHERE(10000, 8500)], "at the item's end");
+});
+
+test('pa-7: no stopped report, two, or one that is not last fails', () => {
+  assert.deepEqual(judgeStop([report('playing', 4916), report('playing', 7458)]), [
+    'the play sends exactly one stopped timeline report, not 0',
+  ]);
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458), report('stopped', 7458)]), [
+    'the play sends exactly one stopped timeline report, not 2',
+    'the stopped report comes last',
+    '"playing" reports, and only those, come before it',
+  ]);
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458), report('playing', 7000)]), [
+    'the stopped report comes last',
+    '"playing" reports, and only those, come before it',
+  ]);
+});
+
+test('pa-7: anything but "playing" reports before the stopped one, or none, fails', () => {
+  assert.deepEqual(judgeStop([report('paused', 4916), report('stopped', 7458)]), [
+    '"playing" reports, and only those, come before it',
+  ]);
+  assert.deepEqual(judgeStop([report('stopped', 7458)]), ['"playing" reports, and only those, come before it']);
+});
+
+test('pa-7: a stopped report for another item fails, by its ratingKey and by its key', () => {
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458, { ratingKey: '2' })]), [
+    'the stopped report names the item played by its ratingKey 1, not 2',
+  ]);
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458, { key: '/library/metadata/2' })]), [
+    'the stopped report names the item played by its key /library/metadata/1, not /library/metadata/2',
+  ]);
+});
+
+test('pa-7: a stopped report short of the seek, or past the item, fails', () => {
+  // Short of the seek, though where mpv was said to be.
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 5900)], 5900), [
+    'the stopped report carries the final position, past the 6000 ms seek and inside the 10000 ms item, not 5900',
+  ]);
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 10001)], 9500), [
+    'the stopped report carries the final position, past the 6000 ms seek and inside the 10000 ms item, not 10001',
+    WHERE(10001, 9500),
+  ]);
+});
+
+test('pa-7: a "playing" report further on than the stop fails', () => {
+  assert.deepEqual(judgeStop([report('playing', 8000), report('stopped', 7458)]), [
+    'no report says the play got further than its final position',
+  ]);
+});
+
+test("pa-7: a position of mpv's that was not read, or a time that is no number, fails", () => {
+  for (const lastSeenMs of [null, undefined, NaN]) {
+    assert.deepEqual(plexStopProblems(GOOD, { ...ITEM, lastSeenMs }), [
+      `the play's position just before the stop was read from mpv, not ${lastSeenMs}`,
+      WHERE(7458, lastSeenMs),
+    ]);
+  }
+  const { time: _gone, ...noTime } = report('stopped', 7458);
+  assert.deepEqual(judgeStop([report('playing', 4916), noTime]), [
+    'the stopped report carries the final position, past the 6000 ms seek and inside the 10000 ms item, not undefined',
+    WHERE(undefined),
+    'no report says the play got further than its final position',
+  ]);
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 'soon')]), [
+    'the stopped report carries the final position, past the 6000 ms seek and inside the 10000 ms item, not soon',
+    WHERE('soon'),
+    'no report says the play got further than its final position',
+  ]);
 });

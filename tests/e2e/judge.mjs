@@ -50,3 +50,60 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
   }
   return null;
 }
+
+// What is wrong with the timeline reports Plex received for one play that was
+// stopped (review finding pa-7; multiplex.mjs): `reports` are the query
+// objects of the play's /:/timeline requests, in the order they came;
+// `lastSeenMs` is the play's position read from mpv just before the stop;
+// `seekMs` the position the play was sent to before it; `durationMs`,
+// `ratingKey` and `key` the item's. One sentence per broken rule, none when
+// all is well:
+// - exactly one report says state=stopped, and it is the last;
+// - before the last there is at least one report, and all say "playing";
+// - the stopped report names the item (its ratingKey, and its key);
+// - its time is past the seek and inside the item;
+// - its time is where the play stopped: no earlier than lastSeenMs - 500, no
+//   later than lastSeenMs + 2000 (the stop takes a moment, never seconds),
+//   and before the item's end (a report at the full duration tells Plex it
+//   was watched to the end); lastSeenMs must have been read;
+// - it carries the item's duration;
+// - no report says the play got further than the stopped report's time.
+export function plexStopProblems(reports, { lastSeenMs, durationMs, ratingKey, key, seekMs }) {
+  const stopped = reports.filter((q) => q.state === 'stopped');
+  const one = `the play sends exactly one stopped timeline report, not ${stopped.length}`;
+  // With none there is nothing more to judge; with more, the first is judged.
+  if (stopped.length === 0) return [one];
+  const problems = stopped.length === 1 ? [] : [one];
+  const report = stopped[0];
+  if (reports.at(-1) !== report) problems.push('the stopped report comes last');
+  const earlier = reports.slice(0, -1);
+  if (!(earlier.length > 0 && earlier.every((q) => q.state === 'playing'))) {
+    problems.push('"playing" reports, and only those, come before it');
+  }
+  if (report.ratingKey !== ratingKey) {
+    problems.push(`the stopped report names the item played by its ratingKey ${ratingKey}, not ${report.ratingKey}`);
+  }
+  if (report.key !== key) problems.push(`the stopped report names the item played by its key ${key}, not ${report.key}`);
+  const finalMs = Number(report.time);
+  if (!(finalMs >= seekMs && finalMs <= durationMs)) {
+    problems.push(
+      `the stopped report carries the final position, past the ${seekMs} ms seek and inside the ${durationMs} ms item, not ${report.time}`,
+    );
+  }
+  if (!Number.isFinite(lastSeenMs)) {
+    problems.push(`the play's position just before the stop was read from mpv, not ${lastSeenMs}`);
+  }
+  if (!(finalMs >= lastSeenMs - 500 && finalMs <= lastSeenMs + 2000 && finalMs < durationMs)) {
+    problems.push(
+      `the stopped report's position (${report.time} ms) is where the play stopped: mpv was at ${lastSeenMs} ms ` +
+        `just before the stop, and the item ends at ${durationMs} ms`,
+    );
+  }
+  if (report.duration !== String(durationMs)) {
+    problems.push(`the stopped report carries the item's duration (${durationMs} ms), not ${report.duration}`);
+  }
+  if (!reports.every((q) => Number(q.time) <= finalMs)) {
+    problems.push('no report says the play got further than its final position');
+  }
+  return problems;
+}
