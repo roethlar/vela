@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — `markers`, the only scenario that stands for automatic skipping (row 8a) in either player, waits up to 14 and 16 seconds for a running play to be past second 12. Ordinary playback gets there in that time, so the row is counted as shown, and the parity verdict passes, with automatic skipping broken.
 **Status**: In progress
 **Branch**: —
-**Commit**: `25287b6`, `17d415f`, `343707b`, `da7ef27`
+**Commit**: `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6` (repair)
 
 ## Evidence
 
@@ -146,3 +146,56 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "Ordinary playback satisfies the autoskip proof". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 12:24 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9f8-3b8c-7112-8395-08712227b34a`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 12:11 UTC, finished 12:21 UTC.
+- Reviewed head `2a42345091b17ed54fb89ab281882e7e85f7f505`, base
+  `f00cdc472623d796e115b474461e81249f738922` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/judge.mjs:30 — Success bypasses the deadline check. With unchanged proveSkippedPast, ordinary playback and one 9400 ms delayed observation (below IPC's 10000 ms timeout), my stand-in passed at 11256 ms and position 12.26 s. Its only seek was the setup seek to 1 s; no automatic skip occurred. Enforce the deadline before accepting a crossing and add a delayed-observation regression test. The existing tests pass after restoration but permit this false certification.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right.
+The judgement took a position past the range's end as the skip whenever it
+was seen, also after the window; one slow read was enough to certify a play
+in which nothing was skipped.
+
+### Repair (round 2), `716abc6`
+
+In `skipJumpVerdict` (`tests/e2e/judge.mjs`) a position at or past the
+range's end now counts only if it is seen inside the window (5000 ms from
+the resume). Seen later, the leg fails: "the position was first seen past
+the range's end (12 s) N ms after playing on from 1.00 s, after the 5000 ms
+in which only a skip can get it there; it is T (the sample before was B
+s)". At exactly the window's end it still counts. Nothing else in the
+judgement or in the scenario changes; in real runs the jump is seen about
+one second after the resume.
+
+One assertion of the follow-up changed, and it is this finding's own: the
+unit test "the end is judged before the window" required a crossing first
+seen at 5050 ms to pass. That was the rule the reviewer showed to be wrong;
+the test, now "a crossing counts only inside the window, and the first
+sample may be the jump", requires it to fail.
+
+Files: `tests/e2e/judge.mjs`, `tests/e2e-judge.test.mjs`.
+
+Guard, in `tests/e2e-judge.test.mjs`: that unit test, with a crossing at
+5050 ms (fails, with the whole sentence), at exactly 5000 ms (passes), and
+the reviewer's trace (ordinary playback, then a sample past the end at
+11256 ms); and a new test of the scenario's own loop, "the markers scenario
+fails a play first seen past the range after the window, through one slow
+read", against a stand-in for mpv whose one read of the position takes
+4.9 s. Red-proofs by the coordinating agent, the file put back and checked
+byte for byte after each: the late-crossing rule taken out (both tests
+failed); the window's own end made too late (the unit test failed). `npm
+run check` was green before the commit (480 tests), and the test file
+passes inside `codex sandbox` in workspace-write mode.
+
+Not covered: as listed above.

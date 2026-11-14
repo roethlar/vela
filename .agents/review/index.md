@@ -24,7 +24,7 @@ admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| pa-1 | MEDIUM   | The automatic-skip test passes by ordinary playback, without a skip    | `[~]`  | `25287b6`, `17d415f`, `343707b`, `da7ef27` | codex/default/standard |
+| pa-1 | MEDIUM   | The automatic-skip test passes by ordinary playback, without a skip    | `[~]`  | `25287b6`, `17d415f`, `343707b`, `da7ef27`, `716abc6` | codex/default/standard |
 | pa-2 | MEDIUM   | The external player's cropping is tested in automatic mode only; the row says off, manual, auto | `[~]`  | `9bcdfbc`, `a9ed237`, `2a42345` | codex/default/standard |
 | pa-3 | MEDIUM   | Half of a split row can be deleted and the guard still says the plan's list is all there | `[x]`  | `ddbb743` | codex/default/standard |
 | pa-4 | MEDIUM   | A timer started through Node's timer modules is not seen by the import watch | `[~]`  | `c294a09`, `be3f1f4`, `cc85c2d` | codex/default/standard esc:T5(ceiling) |
