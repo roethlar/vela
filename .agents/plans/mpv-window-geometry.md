@@ -517,3 +517,19 @@ On the Windows install the request came from: steps 1 to 3.
 
 **Review:** three `codereview codex` hunts over `9815e10`, one per slice;
 see `.agents/review/index.md`.
+
+### 2026-11-14: both end-to-end suites at the landed commit
+
+Run in a clean worktree checked out at `9815e10`, each suite building the
+app it ran:
+
+- External player: 46 of 48 passed, 6 skipped (the embedded-only
+  scenarios). Failed: `embeddedownconfig` and `pagefail`, the two recorded
+  known failures (`tests/e2e/parity.mjs`).
+- Embedded player: 49 of 50 passed, 4 skipped. Failed: `pagefail`.
+- `npm run e2e:verdict` at that checkout: PASS.
+
+The same as the run at the branch head. `playlistplay` and `windowsetting`,
+the two scenarios that hold this work, passed in the external player;
+`windowsetting` does not run in the embedded one, and `playlistplay` makes
+its window checks in the external player only.
