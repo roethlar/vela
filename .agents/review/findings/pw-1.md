@@ -162,3 +162,22 @@ generation pass over `f1e0c9c..9815e10` with Slice 1 of the plan as its
 mandate, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`). Reviewer's
 title: "Revalidate the compatibility display after stream resolution". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 11:18 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9be-4cb1-7c20-a866-0def9af47313`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 11:08 UTC, finished 11:17 UTC.
+- Reviewed head `0e5ea592532c476cafe6a1142dc6de68d2f57ef1`, base
+  `530e9a544cf0b7f2f3f4837aec093b1d5b3f0492` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/commands.rs:4938 — VelasScreen does not capture a screen identity. With an empty observation, detect_profile ranks for Vela's monitor before resolution, but launch queries current_screen_name again at line 5648. Moving Vela between differently capable monitors still produces the recorded mismatch. Carry the concrete detected output and test this transition.
+  - src-tauri/src/commands.rs:4937 — Named unconditionally overrides the later observation, even if that output disappears during resolution. Unplugging ranked DP-1 while the previous player moves to HDMI-1 leaves launch requesting nonexistent DP-1; mpv falls back without reranking. Placement is also only a request on Wayland. Validate the effective output and reconcile selection when placement cannot honor the ranked target.
+  - tests/player-window-ui.test.mjs:176 — The detect_profile guard misses the same multi-screen regression expressed differently: I reversed observed.names inside detect_profile before screen_name() was called. Ranking then names HDMI-1 while RankedScreen carries DP-1, yet both prescribed suites passed. Exercise the profile-selection behavior with multiple screens rather than checking only selected source expressions.
+  - src-tauri/src/commands.rs:5076 — The documented first-play gap remains a real compatibility defect: an empty record ranks for Vela's display, carries no ranked screen, and opens on the saved screen. This predates these commits, but leaving it for owner preference does not resolve the incorrect resolution/HDR selection.
+  - src-tauri/src/commands.rs:8811 — Guard proof confirmed: restoring inherited-screen precedence failed the Rust guard with HDMI-1 versus DP-1; dropping the carried screen failed the Node guard. After restoration, all 76 Rust and 13 Node tests passed. Tracked files are restored. Embedded playback and E2E were inspected, not run.
