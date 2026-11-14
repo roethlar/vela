@@ -180,6 +180,9 @@ trap 'exit 129' HUP
 trap 'exit 130' INT
 trap 'exit 143' TERM
 tmp="$(mktemp -d)"
+# A TMPDIR that is not absolute gives a name that is not either, and one that
+# begins with "-" would be taken for an option by the programs it is given to.
+case "$tmp" in /*) ;; *) tmp="$PWD/$tmp" ;; esac
 # The load is seen to come from the unpacked set in /proc/self/maps, which
 # writes a line break in a file's name as the four characters "\012". Such a
 # name cannot be told from one that has those four characters, so a set below

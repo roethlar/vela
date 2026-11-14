@@ -1966,6 +1966,28 @@ done
     // What the check found out about the package stands.
     assert.equal(run.status, 0, run.stdout);
   });
+
+  await t.test('a TMPDIR named relative to where the check runs, beginning with "-"', (t) => {
+    // The name of the directory it makes there would begin with "-" as well,
+    // and sed, find and rm would take it for an option.
+    const scratch = emptyDirectory(t);
+    fs.mkdirSync(path.join(scratch, '-dash'));
+    const standIn = checkBesideStandIn(t, { lines: ['RESULT PASS'] });
+    for (const [script, args] of [
+      [checkPackagePath, ['--without-libmpv', pacmanPackage(t, {}).file]],
+      [standIn.script, [...builtSet(t), packageWith(t, right).file]],
+    ]) {
+      const run = spawnSync('/bin/bash', [script, ...args], {
+        cwd: scratch,
+        encoding: 'utf8',
+        env: { ...process.env, TMPDIR: '-dash' },
+      });
+      assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+      assert.equal(run.stderr, '');
+      assert.match(run.stdout, /^RESULT PASS /m);
+      assert.deepEqual(fs.readdirSync(path.join(scratch, '-dash')), [], 'the check left its directory behind');
+    }
+  });
 });
 
 // check-libmpv.py itself, with a stand-in for the library: what it prints and,
