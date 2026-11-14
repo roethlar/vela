@@ -1922,3 +1922,45 @@ leaves row 13b red in the external player.
 
 **Review:** `codereview codex` over the landed commit; see
 `.agents/review/index.md`.
+
+### 2026-11-14 — the reviews of Slices 5 and 6 are closed; the parity verdict passes
+
+**Slice 5.** `pc-2` is closed with a fourth repair (`c681cd4`, written by
+codex, reviewed by the agent): a source choice's end reports the end of
+the run only when the run was waiting for that choice, so cancelling a
+choice opened by hand, in the moment after a clean end, no longer takes
+the window out of fullscreen before the next play.
+
+**Slice 6, the test side.** All eight findings of its review are closed
+(`.agents/review/index.md`). Codex accepted `pa-8`, `pa-3`, `pa-2` and,
+after four rounds, `pa-1`; `pa-6` closed on the agent's review of a
+repair codex wrote; and the owner closed `pa-4`, `pa-5` and `pa-7` as
+they stand on 2026-11-14, when setting work on tests aside until the app
+is done and a release is in view (`.agents/decisions.md`, that date).
+Their last comments from codex are known limits in their records.
+
+**The row that was red is green.** The external player no longer idles at
+the end of a file under the user's own mpv configuration (`67536da`), so
+`embeddedownconfig` passes in both players and rows 13b and 14 have no
+known failure left. The one known failure the verdict still allows is
+`pagefail`, in both players (the race recorded in `.agents/state.md`).
+
+**Verdict.** Run in a clean worktree at `22b64f6`, each suite building
+its app: external 47 of 48, embedded 49 of 50, the one failure in each
+`pagefail`; `npm run e2e:verdict`: PASS. The results and logs are kept
+outside the repository on `continuum`
+(`~/dev/vela-agent-keep/full-22b64f6-e2e/`). It is the second passing
+verdict of the day (the first at `77d4dc3`) after none had passed since
+the review fixes began to land.
+
+**Also landed that day, outside this plan's slices but touching the
+embedded player:** every play is told to check the media server's
+certificate, with a setting to turn that off
+(`.agents/plans/tls-verify.md`); a play whose player has already gone is
+over at once (`c861796`).
+
+**What is still the owner's.** Everything under "Owner checks
+outstanding" and "For the owner" in this log, unchanged: the by-eye
+checks, and the switch-on (Settings control, release notes, version). The
+embedded player is still chosen only by `"player": "embedded"` in the
+configuration file.

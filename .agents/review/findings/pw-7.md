@@ -417,3 +417,12 @@ Not checked: the control mounted in the real window with replies held
 back; the tests run the component's code, not the window. `windowsetting`,
 which saves the choice once through the real window, runs in the
 end-to-end suite.
+
+**Afterwards (2026-11-14).** "The other values Settings loads in the same
+go ... can be overwritten by a slow load in the same way, and their
+controls still keep a refused choice", listed above as not covered, is
+fixed at `729070d`: every control of the page that loads and saves a value
+now follows this control's rules, through one shared mechanism. Written
+by codex, checked by the coordinating agent in the real window (each
+control set, saved, read back from `config.json` and shown again after
+reopening, in both players).

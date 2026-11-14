@@ -112,7 +112,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     user's own mpv configuration (FIXED, see the commit "a video ends
     when its file ends in the external player"); the order of events left
     open in `pc-2` (FIXED, and `pc-2` closed);
-    the Arch package not installing `vela-markers.lua` (FIXED); the lockfile-only
+    the Arch package not installing `vela-markers.lua` (FIXED); the same faults as `pw-7`'s in the
+    other Settings controls (FIXED); the lockfile-only
     `npm audit fix` (FIXED; GitHub CI's Frontend job should pass again from
     that commit on: look before relying on it). Their entries under Blockers still say "needs a go":
     read them with this point until each is fixed and its entry removed.
@@ -194,10 +195,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   record, "Not taken"): a play cancelled by a newer play can hand on a
   window one change out of date.
   The parity verdict has not passed on `main` since the fixes began to
-  land; the runs made along the way are in the records. A full run of
-  each suite, each building its app, and the verdict are being made at
-  `77d4dc3` and are owed again once the fixes still in flight have
-  landed. `embeddedownconfig` is no longer a known failure in the
+  land; the runs made along the way are in the records. The verdict
+  PASSED at `77d4dc3` and again at `22b64f6`, with every product fix of
+  2026-11-14 but the Settings controls' in place (external 47 of 48,
+  embedded 49 of 50, the one failure in each `pagefail`; the
+  embedded-player plan's log has it). `embeddedownconfig` is no longer a known failure in the
   external player (`67536da`); `pagefail` still is, in both.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
