@@ -9,12 +9,31 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
-- IN FLIGHT since 2026-11-12: the embedded player plan
-  `.agents/plans/embedded-player.md`, APPROVED that day, running
-  unattended (the owner is away). Where it stands is in that file's
-  "Implementation log"; read it before doing anything, and its "Owner
-  checks outstanding" and "For the owner" lists before telling the owner
-  anything. As of 2026-11-13:
+- WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
+  agent's part of both approved plans is done and every codex review of
+  it is closed (`.agents/review/index.md` has no open finding). `main` at
+  `7b17f63` passes the full check (694 Rust tests, 562 Node tests, both
+  clippy runs, the build, `npm audit`; `cargo audit` is not installed on
+  `continuum` and was not run) and the parity verdict (each suite run in
+  full and building its app: external 47 of 48, embedded 49 of 50, the
+  one failure in each the recorded `pagefail`). GitHub CI is green again.
+  Nothing is released or tagged: 1.0.64 waits for the owner. What is
+  left is the owner's: the by-eye checks and the switch-on of the
+  embedded player (its plan's "Owner checks outstanding" and "For the
+  owner"), the acceptance steps of the player-window plan on real
+  desktops, the release note and documentation for the certificate
+  setting at the next release (`.agents/plans/tls-verify.md`), and one
+  step in `ci.yml` (Blockers). Three owner decisions of 2026-11-14 change
+  how to work here; read them in `.agents/decisions.md` before doing
+  anything: tests are not a priority until a release is in view; what is
+  obviously broken is fixed without asking; a repair codex wrote is
+  closed by the agent's review. The account below was written while the
+  run went on and is kept for its detail.
+- The embedded player plan `.agents/plans/embedded-player.md`, APPROVED
+  2026-11-12. Where it stands is in that file's "Implementation log";
+  read it before doing anything, and its "Owner checks outstanding" and
+  "For the owner" lists before telling the owner anything. As of
+  2026-11-13:
   - Slice 0 (probes), 0b (the library build), 1 (the launch seam) and 2
     (selection and fallback) have landed and been reviewed by codex.
   - Slice 3's core landed at `0a63799`: a play can run inside Vela's
@@ -196,10 +215,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   window one change out of date.
   The parity verdict has not passed on `main` since the fixes began to
   land; the runs made along the way are in the records. The verdict
-  PASSED at `77d4dc3` and again at `22b64f6`, with every product fix of
-  2026-11-14 but the Settings controls' in place (external 47 of 48,
-  embedded 49 of 50, the one failure in each `pagefail`; the
-  embedded-player plan's log has it). `embeddedownconfig` is no longer a known failure in the
+  PASSED at `77d4dc3`, at `22b64f6` and at the run's last commit,
+  `7b17f63` (external 47 of 48, embedded 49 of 50, the one failure in
+  each `pagefail`; the embedded-player plan's log has the second). `embeddedownconfig` is no longer a known failure in the
   external player (`67536da`); `pagefail` still is, in both.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
