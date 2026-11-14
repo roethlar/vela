@@ -136,3 +136,22 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "The build flag does not establish that the executed binary was built". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 10:29 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d992-1da2-7e31-83de-90f4c776ea0c`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 10:19 UTC, finished 10:28 UTC.
+- Reviewed head `f00cdc472623d796e115b474461e81249f738922`, base
+  `c294a09eaf95e068d863971074d9c8147984e529` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/app-binary.mjs:44 — Cargo configuration's build.target still reproduces pa-6. A real build wrote target/<triple>/debug/madeup while this helper selected target/debug/madeup; executing them printed NEW and OLD respectively. The runner would still record built: true. Documenting this limitation does not close the finding.
+  - tests/e2e/app-binary.mjs:55 — path.join changes filesystem semantics by collapsing '..' across symlinks. With CARGO_TARGET_DIR=/tmp/probe/link/../target and link pointing to physical/nested, Cargo built physical/target/debug/madeup, but the helper selected /tmp/probe/target/debug/madeup. I reproduced execution of an OLD binary while the actual artifact printed NEW. Preserve Cargo's path semantics or consume the actual executable artifact.
+  - tests/e2e/app-binary.mjs:49 — Metadata includes every workspace member, so counting all binary targets rejects unrelated helper executables. A two-package workspace successfully built the selected app from src-tauri, but this helper threw 'names 2 binary targets'. The new preflight therefore aborts valid workspace setups; restrict selection to the app package.
+  - tests/e2e-harness.test.mjs:117 — The launch regex silently ignores nested calls. Replacing the first launch with newSession(path.resolve(path.join('/tmp', 'old-vela'))) left all five tests passing because the restart remained matched. Removing target-directory variables from the metadata environment also escaped the guards. The original fixed-path injections did fail, and restoration passed, but the wiring guarantee remains incomplete.
+  - tests/e2e/README.md:18 — The stated default-path exceptions omit CARGO_BUILD_TARGET_DIR. Both relative and absolute values moved Cargo's output and the helper's selection in real probes without CARGO_TARGET_DIR or target-dir configuration. docs/development.md repeats this omission.
