@@ -5922,10 +5922,17 @@ async fn play_by_key_locked(
                 let finishing_session = session_id.clone();
                 // How the play left its window, kept for the next run of Vela
                 // in the same write as the recents stamp: at the end of a play
-                // and never on a timer. The IPC connection has closed by now,
-                // so this is the final state. The start gate above has opened,
-                // so a play that started has been published. Whether it is
-                // still the last external play is decided inside the write.
+                // and never on a timer. The window-state reader has stopped by
+                // now. When it read mpv's connection to its end, this is all
+                // the play reported. When mpv ended before the reader had
+                // connected, the play reported nothing: only the size it
+                // opened at is handed on, and the settings keep what they had
+                // for the rest (review finding pw-8). When the play was
+                // stopped, by a newer play or by Vela quitting, the reader may
+                // have stopped with lines still unread. The start gate above
+                // has opened, so a play that started has been published.
+                // Whether it is still the last external play is decided
+                // inside the write.
                 let _ = write_play_end(
                     |change| config::update(change),
                     &latest_window,

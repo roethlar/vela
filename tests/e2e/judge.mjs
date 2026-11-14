@@ -107,3 +107,17 @@ export function plexStopProblems(reports, { lastSeenMs, durationMs, ratingKey, k
   }
   return problems;
 }
+
+// How many connections a listening Unix socket has accepted, counted in the
+// text of /proc/net/unix (review finding pw-8; windowsetting.mjs, which waits
+// for Vela's own connections to an mpv before it changes or ends the play).
+// Each line there is one socket: `Num RefCount Protocol Flags Type St Inode
+// Path`. The accepted end of a connection carries the listening socket's
+// path and is in state 03 (connected); the listening socket itself is in
+// state 01; the connecting ends carry no path.
+export function acceptedConnections(procNetUnix, socketPath) {
+  return procNetUnix
+    .split('\n')
+    .map((line) => line.trim().split(/\s+/))
+    .filter((fields) => fields[7] === socketPath && fields[5] === '03').length;
+}

@@ -4,8 +4,9 @@
 // judgement, a test drives that code with a stand-in for mpv, so that the
 // scenario is seen to act on the verdict, not only the verdict to be right.
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
 import test from 'node:test';
-import { plexStopProblems, skipJumpVerdict } from './e2e/judge.mjs';
+import { acceptedConnections, plexStopProblems, skipJumpVerdict } from './e2e/judge.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
 import { assertPlexStopped } from './e2e/scenarios/multiplex.mjs';
 
@@ -402,4 +403,55 @@ test("pa-7: a position of mpv's that was not read, or a time that is no number, 
     WHERE('soon'),
     'no report says the play got further than its final position',
   ]);
+});
+
+// windowsetting.mjs waits until Vela itself is connected to a play's mpv
+// before it changes or ends the play (review finding pw-8: it used to reach
+// mpv, change its window and quit it within milliseconds of the socket
+// appearing, now and then before Vela had connected, and mpv then ended
+// without telling Vela anything). The count it waits on, from the text of
+// /proc/net/unix:
+test('pw-8: the connections a socket has accepted are counted from /proc/net/unix', () => {
+  const one = '/run/user/1000/vela/mpv-1.sock';
+  const text = [
+    'Num       RefCount Protocol Flags    Type St Inode Path',
+    `0000000000000000: 00000002 00000000 00010000 0001 01 101 ${one}`, // listening
+    `0000000000000000: 00000003 00000000 00000000 0001 03 102 ${one}`, // accepted
+    '0000000000000000: 00000003 00000000 00000000 0001 03 103', // a connecting end
+    `0000000000000000: 00000003 00000000 00000000 0001 03 104 ${one}`,
+    '0000000000000000: 00000003 00000000 00000000 0001 03 105 /run/user/1000/vela/mpv-2.sock',
+    `0000000000000000: 00000003 00000000 00000000 0001 03 106 ${one}`,
+    `0000000000000000: 00000003 00000000 00000000 0001 02 107 ${one}`, // connecting, not yet connected
+    '0000000000000000: 00000002 00000000 00000000 0002 01 108 /run/systemd/notify',
+    '',
+  ].join('\n');
+  assert.equal(acceptedConnections(text, one), 3, 'the three accepted ends, not the listening socket or one still connecting');
+  assert.equal(acceptedConnections(text, '/run/user/1000/vela/mpv-2.sock'), 1);
+  assert.equal(acceptedConnections(text, '/run/user/1000/vela/mpv-3.sock'), 0);
+  assert.equal(acceptedConnections(text, '/run/user/1000/vela/mpv-1.soc'), 0, 'a path that only begins the same is another socket');
+  assert.equal(acceptedConnections('', one), 0);
+});
+
+// And the scenario's use of it: a play is handed back, to be changed or
+// ended, only after mpv has accepted three connections: the scenario's own
+// and Vela's two.
+test('pw-8: windowsetting hands a play back only once Vela is connected to its mpv', () => {
+  const source = fs.readFileSync(new URL('./e2e/scenarios/windowsetting.mjs', import.meta.url), 'utf8');
+  const start = source.indexOf('    async function play() {');
+  const end = source.indexOf('    async function setFullscreen(');
+  assert.ok(start > 0 && end > start, 'the scenario has its play() and what follows it');
+  const play = source.slice(start, end);
+  // The whole statement, as the step straight before the play is handed
+  // back: a wait that is there but skipped, or that asks for fewer, is not
+  // this text.
+  const lastStep =
+    '\n      await pollUntil(\n' +
+    "        () => acceptedConnections(fs.readFileSync('/proc/net/unix', 'utf8'), socket) >= 3,\n" +
+    '        "Vela\'s own connections to this mpv",\n' +
+    '        { intervalMs: 20 },\n' +
+    '      );\n' +
+    '      return { mpv, session: recent.session_id };\n';
+  assert.equal(play.split(lastStep).length, 2, "play() waits for mpv's three accepted connections as its last step before it hands the play back");
+  assert.equal(play.split('return ').filter((part) => part.startsWith('{ mpv')).length, 1, 'by its one way out');
+  assert.equal(source.split('acceptedConnections(').length, 2, 'the count is asked there and nowhere else');
 });

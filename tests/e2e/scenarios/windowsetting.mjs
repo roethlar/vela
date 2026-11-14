@@ -17,6 +17,7 @@ import {
   seedConfig,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { acceptedConnections } from '../judge.mjs';
 
 let mock;
 
@@ -104,6 +105,23 @@ export default {
         const head = readConfigSafely()?.recents?.[0];
         return head && head.session_id !== previous && head.ended_at_ms === 0 ? head : null;
       }, 'the recorded start of this play');
+      // Wait until Vela is watching this mpv before the play is changed or
+      // ended (review finding pw-8). Vela learns how the window is left only
+      // over its own connections to mpv's socket, and it opens them by
+      // trying every 100 ms; this scenario can reach mpv, change its window
+      // and quit it within a few milliseconds of the socket appearing, so
+      // now and then Vela was not yet connected and mpv ended without ever
+      // telling it anything. A person cannot be that quick: mpv's window is
+      // not even there yet. Nothing a user sees says Vela is connected, so
+      // this waits on the sockets themselves: mpv has accepted this
+      // scenario's connection and Vela's two (the end-of-file watcher and
+      // the reader of the window state, the only ones Vela opens for a play
+      // like this one, with no notice to show and no Automatic quality).
+      await pollUntil(
+        () => acceptedConnections(fs.readFileSync('/proc/net/unix', 'utf8'), socket) >= 3,
+        "Vela's own connections to this mpv",
+        { intervalMs: 20 },
+      );
       return { mpv, session: recent.session_id };
     }
 
