@@ -2332,6 +2332,25 @@ echo app > squashfs-root/usr/bin/vela
     }
   });
 
+  await t.test('one named through a symbolic link: read as the file the link leads to', () => {
+    // A link's own size is the length of the name it holds, not the size of
+    // the image. Measured that way, the place where the program ends lies
+    // past the end of the file, and a good package was refused.
+    const file = image('Vela_1.0.5_amd64.AppImage');
+    const link = path.join(scratch, 'latest.AppImage');
+    fs.symlinkSync(path.basename(file), link);
+    assert.ok(fs.lstatSync(link).size < 128, 'the link itself has to be shorter than the program, or this test shows nothing');
+    const run = checkPackageRun(['--without-libmpv', link], checkPackagePath, { PATH: unsquashfsStandIn(t, { calls }) });
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+    assert.match(run.stdout, /^ok   absent: nothing named like the set /m);
+    const [call, ...more] = recordedCalls(calls);
+    assert.deepEqual(more, []);
+    assert.deepEqual(call.slice(2, 4), ['-o', '128']);
+    assert.equal(call.at(-1), link);
+    assert.equal(fs.lstatSync(link).isSymbolicLink(), true, 'the link is left as it was');
+    fs.rmSync(calls);
+  });
+
   await t.test('one with a library of the set is found out', () => {
     const PATH = unsquashfsStandIn(t, {
       calls,

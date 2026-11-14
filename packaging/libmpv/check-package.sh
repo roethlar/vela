@@ -222,7 +222,9 @@ squashfs_offset() {
     *) return 1 ;;
   esac
   shoff="${shoff//[[:space:]]/}" entsize="${entsize//[[:space:]]/}" count="${count//[[:space:]]/}"
-  size="$(stat -c %s -- "$file")" || return 1
+  # The size of the file that od reads: through a link, as od goes, and not
+  # the link's own (which is the length of the name it holds).
+  size="$(stat -L -c %s -- "$file")" || return 1
   # Numbers that do not fit what a file of this size can hold are not taken
   # into the shell's arithmetic, where they would wrap around.
   [[ "$shoff" =~ ^[0-9]{1,15}$ && "$entsize" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || return 1
