@@ -324,6 +324,25 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   installed there. Slice 5 of the embedded-player plan adds a line for its
   own new script and deliberately leaves this one alone until the owner
   answers.
+- GitHub CI on `main` is RED since 2026-11-13 about 19:10 local, and not
+  because of a commit: its `Frontend` job fails at `npm audit
+  --audit-level=moderate`. Two moderate advisories against SvelteKit were
+  published that day (`@sveltejs/kit` GHSA-pfhg-q3qv-9q6r, GHSA-27mw-82g8-phjj
+  and GHSA-mw6w-2fmv-pvw3; `@sveltejs/adapter-static` GHSA-jf9x-2fg2-hx4w),
+  and the gate fails closed on them by the 2026-11-02 decision. Because
+  that step comes first, the job does not reach `npm run check` or the
+  build; the Rust, libmpv and cargo-audit jobs pass. Every commit since
+  was checked locally (`npm run check`, the build, the Rust set). The fix
+  is prepared and NOT landed, because it changes the dependencies Vela is
+  built with and nobody has said go: a plain `npm audit fix` (no
+  `--force`), lockfile only, on the local branch `npm-audit-fix`: kit
+  2.70.3 to 2.70.4, adapter-static 3.0.10 to 3.0.11 (both published
+  2026-11-05), vite-plugin-svelte 7.2.0 to 7.3.1, and two small transitive
+  packages. With it `npm audit --audit-level=moderate` passes (the four
+  known low deepmerge findings remain), and `npm run check` and the build
+  pass. Vela is not exposed meanwhile: the advisories concern the Node and
+  Vercel adapters and server-side form handling, and Vela ships a static
+  page.
 - CI does not exercise the package check (2026-11-14, the owner has not
   been asked yet). `tests/libmpv-packaging.test.mjs` needs `bsdtar` to
   build and unpack its stand-in packages; GitHub's runner image does not
