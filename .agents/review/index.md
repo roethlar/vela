@@ -1,5 +1,21 @@
 # Review status
 
+**Player window review (mpv window state, size, the setting), 2026-11-14 (open):** three codereview codex
+hunts, one per slice (called plainly; the host's codex config resolves to
+gpt-6-astra @ max; standard), over `f1e0c9c..9815e10`: `findings` in each.
+Seven candidates, seven admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-player-window.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pw-1 | MEDIUM   | The copy is chosen for one screen and the window can open on another   | `[ ]`  | — | codex/default/standard |
+| pw-2 | MEDIUM   | A play in the embedded player is ranked for the previous mpv window's screen | `[ ]`  | — | codex/default/standard |
+| pw-3 | MEDIUM   | A width and a height never reported together can be carried as the window's size | `[ ]`  | — | codex/default/standard |
+| pw-4 | MEDIUM   | Quitting Vela waits, without limit, for the settings file to be written | `[ ]`  | — | codex/default/standard |
+| pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[ ]`  | — | codex/default/standard |
+| pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[ ]`  | — | codex/default/standard |
+| pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[ ]`  | — | codex/default/standard |
+
 **Embedded player Slice 6 review (the parity tests), 2026-11-14 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `ab95c49..ac3e563`: `findings`. Eight candidates, eight
