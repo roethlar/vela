@@ -3774,10 +3774,12 @@ pub(crate) struct PlaybackWindowSession {
 /// written only when a play starts (`publish_started_play`), so they outlive
 /// the play's mpv and any failed launch after it.
 ///
-/// They are two because they answer two questions (review finding pw-6):
-/// how the next mpv window opens is the last EXTERNAL play's business, and
-/// an embedded play in between must not erase it; what a play's end or Vela's
-/// exit may save is the business of the latest play, of either player.
+/// They are two because they answer different questions (review finding
+/// pw-6). How the next mpv window opens, in this run and in the next one
+/// (what a play's end or Vela's exit saves), is the last EXTERNAL play's
+/// business, and an embedded play in between must not erase it. What the
+/// latest play of either player observed is what the display shown in the
+/// settings, and an embedded play's exact successor, go by.
 #[derive(Default)]
 pub(crate) struct PlaybackWindowRecord {
     /// The latest play that started, in either player.
@@ -4298,11 +4300,14 @@ fn inherited_screen_name(record: &PlaybackWindowRecord) -> Option<String> {
 
 /// What a play that has ended hands to the settings to remember: the player
 /// that ran it, how it left its window, and the screen. Only while it is
-/// still the latest play that started, of either player: an end callback can
-/// run late (after a slow final check-in with the server), and by then a
-/// newer play's window is the one to remember, at that play's own end; and a
-/// newer embedded play has no window to remember, so nothing is saved (the
-/// settings refuse an embedded play's window, `config::remember_mpv_window`).
+/// still the last play that started in mpv's own window, the one the next
+/// mpv window of this run opens from (`opening_window`), so that the next run
+/// opens as this one would have gone on. An end callback can run late (after
+/// a slow final check-in with the server): when a newer external play has
+/// started by then, its window is the one to remember, at its own end, and
+/// nothing is saved; when only embedded plays have started since, this is
+/// still the window to remember, and it is saved (review finding pw-6). An
+/// embedded play has no window of its own, so its end saves nothing.
 fn window_to_remember(
     record: &PlaybackWindowRecord,
     session_id: &str,
@@ -4312,13 +4317,13 @@ fn window_to_remember(
     Option<String>,
 )> {
     record
-        .latest()
-        .filter(|latest| latest.session_id == session_id)
-        .map(|latest| {
+        .last_external()
+        .filter(|last| last.session_id == session_id)
+        .map(|last| {
             (
-                latest.player,
-                latest.observation.snapshot(),
-                latest.observation.display_snapshot().screen_name().cloned(),
+                last.player,
+                last.observation.snapshot(),
+                last.observation.display_snapshot().screen_name().cloned(),
             )
         })
 }
@@ -4329,11 +4334,11 @@ fn window_to_remember(
 type SettingsChange<'a> = Box<dyn FnOnce(&mut config::AppConfig) -> Result<(), String> + 'a>;
 
 /// Run INSIDE a settings change: hand to the settings the window of the play
-/// `session_id`, or of the latest play when `None`, while that play is still
-/// the latest (`window_to_remember`). Returns whether the stored window
-/// changed.
+/// `session_id`, or of the last external play when `None`, while that play is
+/// still the last external one (`window_to_remember`). Returns whether the
+/// stored window changed.
 ///
-/// Both questions, whether the play is still the latest and how its window
+/// Both questions, whether the play is still the last external one and how its window
 /// was left, are answered here, under the settings lock, and not before it
 /// was waited for (review finding pw-5): a write that waited for the lock
 /// writes what is true when it runs, so a play's end and Vela's exit, in
@@ -4353,8 +4358,8 @@ fn remember_window_in(
         match session_id {
             Some(session_id) => window_to_remember(&record, session_id),
             None => record
-                .latest()
-                .and_then(|latest| window_to_remember(&record, &latest.session_id)),
+                .last_external()
+                .and_then(|last| window_to_remember(&record, &last.session_id)),
         }
     };
     ended.is_some_and(|(player, window, screen)| {
@@ -4363,7 +4368,7 @@ fn remember_window_in(
 }
 
 /// What a play's end writes, in ONE settings change: `finish` (its recents
-/// stamp) and, while it is still the latest play, its window
+/// stamp) and, while it is still the last external play, its window
 /// (`remember_window_in`, which decides that inside the change).
 fn write_play_end<'a>(
     update: impl FnOnce(SettingsChange<'a>) -> Result<(), String>,
@@ -4378,8 +4383,8 @@ fn write_play_end<'a>(
     }))
 }
 
-/// When Vela quits, the latest play's window is kept for the next run, under
-/// the same rules as at the end of a play. A play still showing when Vela
+/// When Vela quits, the last external play's window is kept for the next run,
+/// under the same rules as at the end of a play. A play still showing when Vela
 /// quits, or one whose end still waits on its final check-in with the server,
 /// would otherwise never hand it over: the process ends before that play's
 /// end callback runs. The settings are written only when the stored window
@@ -4396,7 +4401,7 @@ pub(crate) fn remember_window_on_exit(latest: &std::sync::Arc<std::sync::Mutex<P
     });
 }
 
-/// How long quitting waits for the latest play's window to reach the
+/// How long quitting waits for the last external play's window to reach the
 /// settings: short, like the wait for embedded plays beside it in the exit
 /// handler. The write waits for the settings lock, which another Vela can
 /// hold, and for the disk.
@@ -5920,7 +5925,7 @@ async fn play_by_key_locked(
                 // and never on a timer. The IPC connection has closed by now,
                 // so this is the final state. The start gate above has opened,
                 // so a play that started has been published. Whether it is
-                // still the latest play is decided inside the write.
+                // still the last external play is decided inside the write.
                 let _ = write_play_end(
                     |change| config::update(change),
                     &latest_window,
@@ -8334,10 +8339,56 @@ mod tests {
             ),
             "an embedded play in between must not erase the last external window"
         );
-        // The latest play is still the embedded one, for what an end or an
-        // exit may save.
+        // The latest play is the embedded one; the window the external play
+        // left is still the one an end or an exit saves for the next run
+        // (this assertion said None before; the attack on pw-6 showed that
+        // this run and the next then disagree).
         assert_eq!(record.latest().unwrap().session_id, "embedded");
-        assert_eq!(window_to_remember(&record, "external"), None);
+        assert_eq!(
+            window_to_remember(&record, "external").map(|(_, window, screen)| (window, screen)),
+            Some(opening_window(&record, Default::default()))
+        );
+        assert_eq!(window_to_remember(&record, "embedded"), None);
+    }
+
+    #[test]
+    fn an_external_plays_late_end_after_an_embedded_play_saves_its_window() {
+        // Review finding pw-6, the attack's sequence: an external play is
+        // left windowed on HDMI-1; an embedded play starts before the
+        // external play's end has run. The next mpv window of this run opens
+        // as the external play left it, and so must the next run's first.
+        let settings = HeldSettings::default();
+        let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+        publish_started_play(Ok(()), &slot, windowed_session("external"), || {}).unwrap();
+        let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
+        publish_started_play(Ok(()), &slot, embedded, || {}).unwrap();
+        let in_this_run = opening_window(&slot.lock().unwrap(), Default::default());
+        assert_eq!(in_this_run.1.as_deref(), Some("HDMI-1"));
+
+        // The embedded play's end saves nothing.
+        write_play_end(|change| settings.update(change), &slot, "embedded", |_| {}).unwrap();
+        assert_eq!(settings.window(), None);
+        // The external play's late end saves its window.
+        write_play_end(|change| settings.update(change), &slot, "external", |_| {}).unwrap();
+        let saved = Some(config::MpvWindow {
+            fullscreen: Some(false),
+            maximized: Some(false),
+            screen: Some("HDMI-1".to_string()),
+            ..Default::default()
+        });
+        assert_eq!(settings.window(), saved, "the next run opens as this run would");
+
+        // Quitting before that end has run saves the same window.
+        let settings = HeldSettings::default();
+        remember_window_on_exit_with(&slot, || settings.read(), |change| settings.update(change));
+        assert_eq!(settings.window(), saved, "quitting saves it too");
+
+        // A newer external play takes over: the older one's end saves nothing.
+        let settings = HeldSettings::default();
+        let newer = observed_window_session("newer", crate::player::PlayerKind::External);
+        publish_started_play(Ok(()), &slot, newer, || {}).unwrap();
+        write_play_end(|change| settings.update(change), &slot, "external", |_| {}).unwrap();
+        assert_eq!(settings.window(), None);
     }
 
     #[test]
@@ -8465,13 +8516,12 @@ mod tests {
         // A play whose end arrives after a newer play started.
         assert_eq!(window_to_remember(&published([latest]), "older"), None);
         assert_eq!(window_to_remember(&PlaybackWindowRecord::default(), "latest"), None);
-        // The player is handed over too, for the settings to refuse an
-        // embedded play's window.
+        // An embedded play has no window of its own to hand over. (This
+        // assertion handed over its player for the settings to refuse; the
+        // record now hands over only the last external play's window, review
+        // finding pw-6, and the settings still refuse any other player.)
         let embedded = observed_window_session("embedded", crate::player::PlayerKind::Embedded);
-        assert_eq!(
-            window_to_remember(&published([embedded]), "embedded").map(|(player, _, _)| player),
-            Some(crate::player::PlayerKind::Embedded)
-        );
+        assert_eq!(window_to_remember(&published([embedded]), "embedded"), None);
     }
 
     #[test]

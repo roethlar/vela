@@ -107,7 +107,7 @@ test('the play path opens its window from the run or the setting, and hands it o
     /if !recents_ready\.wait_succeeded\(\) \{[\s\S]{0,1800}let _ = write_play_end\(\s*\|change\| config::update\(change\),\s*&latest_window,\s*&session_id,\s*move \|cfg\| \{\s*crate::recents::finish_session\(cfg, &key, &finishing_session, position_ms, now_ms\);\s*\},\s*\);/,
     'the end of a play must hand its final window to the settings',
   );
-  // Quitting Vela hands the latest play's window over too: a play still
+  // Quitting Vela hands the last external play's window over too: a play still
   // showing then never reaches its own end.
   assert.match(
     lib,

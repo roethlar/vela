@@ -131,7 +131,7 @@ pub struct AppState {
     /// (`commands::PlaybackWindowRecord`). Every later play in this run opens
     /// its window from the second, manual or automatic. Shared with each
     /// play's end callback, which remembers its window for the next run only
-    /// while it is still the latest play.
+    /// while it is still the last play in mpv's own window.
     pub(crate) playback_window_session: Arc<Mutex<commands::PlaybackWindowRecord>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
@@ -511,8 +511,9 @@ pub fn run() {
                 // moment here, bounded, before the process goes.
                 #[cfg(target_os = "linux")]
                 player::embedded::wait_for_unfinished_plays(std::time::Duration::from_secs(2));
-                // How the latest play left its window, for the next run: a
-                // play still showing now never reaches its own end callback.
+                // How the last play in mpv's own window left it, for the
+                // next run: a play still showing now never reaches its own
+                // end callback.
                 // Waited for briefly, on a thread of its own: a settings
                 // write that cannot finish in time is let go of.
                 commands::remember_window_on_exit(&state.playback_window_session);
