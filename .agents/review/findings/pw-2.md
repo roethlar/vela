@@ -1,7 +1,7 @@
 # pw-2: a play in the embedded player is ranked for the previous mpv window's screen
 
 **Severity**: MEDIUM — the screen for Prefer Compatible is taken from the last external play's record whatever player the coming play will use. A play that will run in the embedded player is drawn in Vela's window, on Vela's screen, and gets a copy chosen for the screen mpv's window was on. Before this work such a play was ranked for Vela's screen. The embedded player is hidden, so only someone who has switched it on by hand can meet this.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `6bb2db6`, `577fe5b`
 
@@ -293,3 +293,22 @@ Two more tests hold the rest of that step:
 `the_winner_is_selected_by_its_source_and_its_version` and
 `a_selection_is_resolved_with_the_plays_duration_markers_and_quality`.
 How it was made and checked is in `pw-1`'s record.
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-14 19:11 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1db71-fd5f-7bc0-816c-14df3d3c410e`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 19:04 UTC, finished 19:09 UTC.
+- Reviewed head `79384d9a6d7a5567aacc59b9f0281d098272d9e3`, base
+  `719db900d361bf7fea36e0e60e8d393f47c78727` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
