@@ -9414,6 +9414,12 @@ mod tests {
         let choice = crate::player::choose(Embedded, &Ok(()));
         assert_eq!(choice.kind, Embedded);
         let screen = screen_for_play(&record, None, choice.kind, None, &screens);
+        let target = target_for(&screen, &screens, display::HdrState::Disabled);
+        assert_eq!(
+            (target.width, target.height),
+            (1920, 1080),
+            "ranked for HDMI-1's size, not for the 4K DP-1 the last mpv window was on"
+        );
         let (copy, destination) = compatible_choice(&screen, &screens, display::HdrState::Disabled);
         assert_eq!(copy, "1080p-sdr", "ranked for HDMI-1");
         // The launch hands the play its carried screen (`selection.screen`).
