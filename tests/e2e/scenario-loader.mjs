@@ -175,23 +175,32 @@ export function verdictProblems(
       continue;
     }
     if (run.player !== player) problems.push(`the ${player} results are of a ${run.player} run`);
-    if (!run.full) problems.push(`the ${player} results are of a run of named scenarios, not the full suite`);
+    // Each of these is judged by what the runner writes and by nothing that
+    // merely reads as it: `full: true`, `built: true`, `dirty: false`. A file
+    // that does not say so does not get the benefit of the doubt.
+    if (run.full !== true) problems.push(`the ${player} results are of a run of named scenarios, not the full suite`);
     // A run that built nothing ran whatever binary was there: its head says
     // which scenarios ran, not which product code (review finding conf2-1).
     if (run.built !== true) {
       problems.push(`the ${player} run did not build the app it ran (--skip-build), so nothing ties its binary to commit ${run.head}`);
     }
-    if (run.dirty) problems.push(`the ${player} run was of a worktree with uncommitted changes, or one that changed during the run`);
+    if (run.dirty !== false) problems.push(`the ${player} run was of a worktree with uncommitted changes, or one that changed during the run`);
     if (checkout?.head && run.head !== checkout.head) {
       problems.push(`the ${player} run is of commit ${run.head}, not of the checked-out ${checkout.head}`);
     }
     heads.add(run.head);
-    const ran = run.scenarios ?? {};
+    // The runner writes its results by scenario name, in an object. A name
+    // is looked up among the object's own only: every object also answers
+    // to names it inherits (review finding pa-5, the repair).
+    const byName = run.scenarios !== null && typeof run.scenarios === 'object' && !Array.isArray(run.scenarios);
+    if (!byName) problems.push(`the ${player} results hold no scenarios by name`);
+    const ran = byName ? run.scenarios : {};
+    const resultOf = (name) => (Object.hasOwn(ran, name) ? ran[name] : undefined);
     for (const name of Object.keys(ran)) {
       if (!scenarios.some((s) => s.name === name)) problems.push(`the ${player} results name "${name}", which is no scenario now`);
     }
     for (const scenario of scenarios.filter((s) => runsIn(s, player))) {
-      const result = ran[scenario.name];
+      const result = resultOf(scenario.name);
       const known = knownFailures.find((k) => k.scenario === scenario.name && k.player === player);
       // Only 'pass' and 'fail' are results of a scenario that ran. Anything
       // else (a skip, no status, a status nobody writes) is a problem in its
@@ -210,7 +219,14 @@ export function verdictProblems(
           if (!known.intermittent) {
             problems.push(`${scenario.name} passed in the ${player} player: its known failure is gone; take it out of KNOWN_FAILURES`);
           }
-        } else if (!String(result.error ?? '').includes(known.failsWith)) {
+        } else if (typeof result.error !== 'string') {
+          // The runner writes a failure's error as text. Anything else that
+          // only turns into text holding the recorded words (a list with the
+          // text in it) is not the known failure seen.
+          problems.push(
+            `${scenario.name} failed in the ${player} player, but its error is not text (${JSON.stringify(result.error)}): the runner writes text, so this is not its known failure seen`,
+          );
+        } else if (!result.error.includes(known.failsWith)) {
           problems.push(`${scenario.name} failed in the ${player} player, but not with its known failure: ${result.error}`);
         }
       } else if (result.status === 'fail') {
@@ -220,9 +236,12 @@ export function verdictProblems(
     for (const { id } of inventory) {
       if (exemptions.some((e) => e.row === id && e.player === player)) continue;
       if (redCoverage(scenarios, id, player, knownFailures).length > 0 && coverage(scenarios, id, player, knownFailures).length === 0) continue;
-      const showing = coverage(scenarios, id, player, knownFailures).filter(
-        (name) => ran[name]?.status === 'pass' && (ran[name].shown ?? []).includes(id),
-      );
+      // `shown` is the list the runner writes. Text in its place would match
+      // one row's id inside another's ("12" holds "1" and "2").
+      const showing = coverage(scenarios, id, player, knownFailures).filter((name) => {
+        const result = resultOf(name);
+        return result?.status === 'pass' && Array.isArray(result.shown) && result.shown.includes(id);
+      });
       if (showing.length === 0) problems.push(`row ${id} is shown by no scenario that passed in the ${player} run`);
     }
   }

@@ -549,6 +549,44 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   assert.match(otherAs('passed'), /^a has no result in the embedded run: its status is "passed", neither pass nor fail$/m);
   assert.match(otherAs('fail'), /^a failed in the embedded player: null$/m);
   assert.equal(otherAs('pass'), '');
+  // And a known failure counts only as the runner could have written it:
+  // its error is text. A list holding the text, the text inside an object,
+  // or no error at all is not the known failure seen (review finding pa-5,
+  // from its first verification).
+  const knownErr = (error) =>
+    verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error, shown: [] } }) });
+  for (const error of [['AssertionError: the known text'], [['the known text']], { message: 'the known text' }, null, undefined, 7]) {
+    assert.match(
+      knownErr(error),
+      /^b failed in the external player, but its error is not text \(.*\): the runner writes text, so this is not its known failure seen$/m,
+      JSON.stringify(error),
+    );
+  }
+  assert.equal(knownErr('the known text'), '');
+  // A row counts as shown only from the list the runner writes: text in its
+  // place would match one row's id inside another's.
+  const textShown = { status: 'pass', error: null, shown: '12', routes: [] };
+  assert.equal(
+    verdict({ ...good, embedded: run('embedded', { a: textShown, b: textShown }) }),
+    'row 1 is shown by no scenario that passed in the embedded run\nrow 2 is shown by no scenario that passed in the embedded run',
+  );
+  // Results that are not by scenario name hold none.
+  assert.match(verdict({ ...good, embedded: run('embedded', [{ status: 'pass' }]) }), /^the embedded results hold no scenarios by name$/m);
+  assert.match(verdict({ ...good, embedded: run('embedded', null) }), /^the embedded results hold no scenarios by name$/m);
+  // A scenario whose name every object answers to has no result unless
+  // the file holds one of its own.
+  const inherited = { name: 'constructor', rows: ['1'] };
+  assert.match(
+    verdictProblems([inherited, b], good, { inventory, exemptions: [], knownFailures: [known], checkout }).join('\n'),
+    /^constructor did not run in the external run$/m,
+  );
+  // A file that does not say the run was full, or clean, is not taken
+  // as either.
+  const embeddedWith = (extra) => verdict({ ...good, embedded: run('embedded', good.embedded.scenarios, extra) });
+  assert.equal(embeddedWith({}), '');
+  assert.match(embeddedWith({ dirty: undefined }), /^the embedded run was of a worktree with uncommitted changes/m);
+  assert.match(embeddedWith({ dirty: 0 }), /^the embedded run was of a worktree with uncommitted changes/m);
+  assert.match(embeddedWith({ full: 'yes' }), /^the embedded results are of a run of named scenarios, not the full suite$/m);
   // Row 2 in the external player is RED (only b claims it, a known failure);
   // without the record it is a failure like any other.
   assert.match(verdict(good, []), /b failed in the external player/);
