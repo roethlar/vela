@@ -198,7 +198,7 @@ test('a play is shown on the one screen decided before its copy is chosen', () =
   // and that target. Nothing else in the choice of copy ranks.
   assert.match(
     select,
-    /let target = match state\.app_handle\.get\(\) \{\s+Some\(app\) if policy == crate::selection::PlaybackSourcePolicy::Compatible => \{\s+Some\(compatibility_target\(app, &screen, &screens, &cfg\)\.await\?\)\s+\}\s+_ => None,\s+\};\s+let \(winner, destination\) = rank_and_place\(&mut candidates, policy, &screen, target\)\s+\.ok_or_else/,
+    /let target = match state\.app_handle\.get\(\) \{\s+Some\(app\) if policy == crate::selection::PlaybackSourcePolicy::Compatible => \{\s+let overrides = playback_display_overrides\(&cfg\)\.map_err\(PlayFailure::fatal\)\?;\s+Some\(compatibility_target\(app, &screen, &screens, overrides\)\.await\)\s+\}\s+_ => None,\s+\};\s+let \(winner, destination\) = rank_and_place\(&mut candidates, policy, &screen, target\)\s+\.ok_or_else/,
     'the copy is ranked by the policy, for the decided screen',
   );
   assert.equal(count(select, 'rank_and_place('), 1);
@@ -211,12 +211,18 @@ test('a play is shown on the one screen decided before its copy is chosen', () =
     production,
     /crate::selection::rank_candidates\(\s+&mut source_candidates,\s+crate::selection::PlaybackSourcePolicy::Best,\s+None,\s+\);/,
   );
+  // The target's construction is compatibility_target_from, which the Rust
+  // tests run with made-up screens and HDR answers
+  // (a_compatible_target_is_made_for_the_decided_screen); the production
+  // wrapper is that one call with the system's HDR answer, and nothing else.
   const target = bodyOf(commands, 'async fn compatibility_target(');
   assert.match(
     target,
-    /let basis = display::profile_basis\(screen\.name\.as_deref\(\), screen\.observed\.as_ref\(\), screens\);\s+let detected = display::profile_of\(app, basis\)\.await;/,
-    'the profile is the decided screen\'s',
+    /\) -> crate::selection::CompatibilityTarget \{\s+compatibility_target_from\(screen, screens, overrides, async \|basis\| display::hdr_of\(app, basis\)\.await\)\.await$/,
+    'the wrapper only hands the construction the system',
   );
+  assert.equal(count(production, 'compatibility_target_from('), 2, 'defined, and called by the wrapper only');
+  assert.equal(count(production, 'compatibility_target('), 2, 'defined, and called by the choice of copy only');
 
   // Both ready selections carry the decided screen: the ranked one as
   // rank_and_place places it, the one with nothing to rank as decided.
@@ -251,8 +257,8 @@ test('a play is shown on the one screen decided before its copy is chosen', () =
   assert.equal(count(display.slice(0, display.indexOf('\n#[cfg(test)]\nmod tests {')), 'screens_from('), 2);
   // The HDR state is asked for the decided output, by its name, size and place.
   assert.match(
-    bodyOf(display, 'pub(crate) async fn profile_of('),
-    /let hdr = native_hdr_state\(\s+app,\s+basis\.name\.clone\(\),\s+basis\.width_px,\s+basis\.height_px,\s+basis\.position,\s+\)\s+\.await;/,
+    bodyOf(display, 'pub(crate) async fn hdr_of('),
+    /\) -> HdrState \{\s+native_hdr_state\(\s+app,\s+basis\.name\.clone\(\),\s+basis\.width_px,\s+basis\.height_px,\s+basis\.position,\s+\)\s+\.await$/,
     'the HDR state is the decided output\'s',
   );
 

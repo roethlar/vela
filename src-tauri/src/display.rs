@@ -295,17 +295,21 @@ pub(crate) fn profile_basis(
     }
 }
 
-/// The profile of a decided output: its basis, and its HDR state asked of
-/// the system for that output, by the same rules as `detect_profile`.
-pub(crate) async fn profile_of(app: &tauri::AppHandle, basis: ProfileBasis) -> DisplayProfile {
-    let hdr = native_hdr_state(
+/// The HDR state of a decided output, asked of the system for that output
+/// (its name, size and place), by the same rules as `detect_profile`.
+pub(crate) async fn hdr_of(app: &tauri::AppHandle, basis: &ProfileBasis) -> HdrState {
+    native_hdr_state(
         app,
         basis.name.clone(),
         basis.width_px,
         basis.height_px,
         basis.position,
     )
-    .await;
+    .await
+}
+
+/// The profile of a decided output: its basis, with its HDR state.
+pub(crate) fn profile_with(basis: ProfileBasis, hdr: HdrState) -> DisplayProfile {
     DisplayProfile {
         name: basis.name,
         width_px: basis.width_px,

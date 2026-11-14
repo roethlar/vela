@@ -5107,22 +5107,34 @@ async fn decide_play_screen(
 
 /// What a Compatible choice ranks for: the profile of the output the play
 /// was decided to be shown on (`screen_for_play`), with the user's display
-/// overrides on top.
+/// overrides on top. `hdr_of` answers the HDR state of the output whose
+/// basis it is given. The whole construction is here, so that a test runs
+/// it with made-up screens and HDR answers (third review of finding pw-1,
+/// comment 6); `compatibility_target` only hands it the system.
+async fn compatibility_target_from(
+    screen: &PlayScreen,
+    screens: &display::Screens,
+    overrides: display::DisplayOverrides,
+    hdr_of: impl AsyncFnOnce(&display::ProfileBasis) -> display::HdrState,
+) -> crate::selection::CompatibilityTarget {
+    let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), screens);
+    let hdr = hdr_of(&basis).await;
+    let effective = display::apply_overrides(&display::profile_with(basis, hdr), overrides);
+    crate::selection::CompatibilityTarget {
+        width: effective.width_px,
+        height: effective.height_px,
+        hdr: effective.hdr,
+    }
+}
+
+/// `compatibility_target_from`, with the HDR state asked of the system.
 async fn compatibility_target(
     app: &tauri::AppHandle,
     screen: &PlayScreen,
     screens: &display::Screens,
-    cfg: &config::AppConfig,
-) -> Result<crate::selection::CompatibilityTarget, PlayFailure> {
-    let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), screens);
-    let detected = display::profile_of(app, basis).await;
-    let overrides = playback_display_overrides(cfg).map_err(PlayFailure::fatal)?;
-    let effective = display::apply_overrides(&detected, overrides);
-    Ok(crate::selection::CompatibilityTarget {
-        width: effective.width_px,
-        height: effective.height_px,
-        hdr: effective.hdr,
-    })
+    overrides: display::DisplayOverrides,
+) -> crate::selection::CompatibilityTarget {
+    compatibility_target_from(screen, screens, overrides, async |basis| display::hdr_of(app, basis).await).await
 }
 
 fn playback_source_choices(
@@ -5425,7 +5437,8 @@ async fn select_playback_version(
     }
     let target = match state.app_handle.get() {
         Some(app) if policy == crate::selection::PlaybackSourcePolicy::Compatible => {
-            Some(compatibility_target(app, &screen, &screens, &cfg).await?)
+            let overrides = playback_display_overrides(&cfg).map_err(PlayFailure::fatal)?;
+            Some(compatibility_target(app, &screen, &screens, overrides).await)
         }
         _ => None,
     };
@@ -9042,19 +9055,68 @@ mod tests {
         vec![copy("4k-hdr", 3840, 2160, true), copy("1080p-sdr", 1920, 1080, false)]
     }
 
-    /// The Compatible target for the decided screen, as `compatibility_target`
-    /// makes it, with its HDR state given (the system is not asked here).
+    /// The Compatible target for the decided screen, made by the real
+    /// `compatibility_target_from`, no overrides, with its HDR state given
+    /// (the system is not asked here).
     fn target_for(
         screen: &PlayScreen,
         screens: &display::Screens,
         hdr: display::HdrState,
     ) -> crate::selection::CompatibilityTarget {
-        let basis = display::profile_basis(screen.name.as_deref(), screen.observed.as_ref(), screens);
-        crate::selection::CompatibilityTarget {
-            width: basis.width_px,
-            height: basis.height_px,
-            hdr,
-        }
+        tauri::async_runtime::block_on(compatibility_target_from(
+            screen,
+            screens,
+            display::DisplayOverrides::default(),
+            async |_: &display::ProfileBasis| hdr,
+        ))
+    }
+
+    #[test]
+    fn a_compatible_target_is_made_for_the_decided_screen() {
+        // Third review of finding pw-1, comment 6: the target's construction
+        // itself, with made-up screens. DP-1 (4K) is decided; Vela's window
+        // is on HDMI-1 (1080p). The target is DP-1's, the HDR state is asked
+        // for DP-1 and the answer counts, and the overrides go on top.
+        use crate::player::PlayerKind::External;
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(&PlaybackWindowRecord::default(), None, External, Some("DP-1"), &screens);
+        assert_eq!(screen.name.as_deref(), Some("DP-1"));
+        let make = |overrides, answer: display::HdrState| {
+            let asked = std::cell::RefCell::new(Vec::new());
+            let target = tauri::async_runtime::block_on(compatibility_target_from(
+                &screen,
+                &screens,
+                overrides,
+                async |basis: &display::ProfileBasis| {
+                    asked.borrow_mut().push((basis.name.clone(), basis.width_px, basis.height_px));
+                    answer
+                },
+            ));
+            (
+                (target.width, target.height, target.hdr),
+                asked.into_inner(),
+            )
+        };
+        let dp1 = vec![(Some("DP-1".to_string()), 3840, 2160)];
+        assert_eq!(
+            make(display::DisplayOverrides::default(), display::HdrState::Enabled),
+            ((3840, 2160, display::HdrState::Enabled), dp1.clone()),
+            "the decided output's size, and its HDR state asked for it"
+        );
+        assert_eq!(
+            make(display::DisplayOverrides::default(), display::HdrState::Disabled),
+            ((3840, 2160, display::HdrState::Disabled), dp1.clone()),
+            "the HDR answer counts"
+        );
+        let overrides = display::DisplayOverrides {
+            resolution: Some(display::ResolutionOverride::P1080),
+            hdr: Some(display::HdrOverride::Disabled),
+        };
+        assert_eq!(
+            make(overrides, display::HdrState::Enabled),
+            ((1920, 1080, display::HdrState::Disabled), dp1),
+            "the overrides go on top"
+        );
     }
 
     /// The copy a Compatible choice gives and where the play is shown.
