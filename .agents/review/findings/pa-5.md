@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — for a scenario recorded as a known failure, the verdict compares the error text of any result that is not a pass. A result marked skipped that carries the recorded text is accepted, so the verdict can pass on a run in which the scenario never ran.
 **Status**: In progress
 **Branch**: —
-**Commit**: `115cbaa`, `dbb91b4` (repair)
+**Commit**: `115cbaa`, `dbb91b4` (repair), `0d8ccbd` (second repair)
 
 ## Evidence
 
@@ -140,3 +140,82 @@ check` was green before the commit (422 tests).
 Not covered: `routes` in a result is not read by the verdict, so its shape
 is not checked. An ordinary scenario's failure is a problem whatever its
 error is, so that branch asks nothing of the error.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 10:42 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d999-f83a-7190-a22a-4064dd0fa2e6`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 10:28 UTC, finished 10:36 UTC.
+- Reviewed head `dbb91b41bcae7ad042f86cada77a936f54dd0d70`, base
+  `397850ad80512e18c1189d9354247001594e587a` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenario-loader.mjs:222 — Passing results bypass error validation. With otherwise valid full-run JSON fixtures, external markers with status 'pass' and error ['scenario failed'] returns no problems. run.mjs:411 always writes error: null for passes. Require that invariant and add a regression assertion.
+  - tests/e2e/scenario-loader.mjs:243 — The array check only filters coverage; it does not reject malformed shown values. Setting external playback.shown to '13', 7, or {} in otherwise valid full-run fixtures still returns no problems because other scenarios cover rows 1 and 3. The runner always writes an array. Validate shown for each applicable result before aggregating coverage, and add a regression with overlapping row coverage.
+
+Orchestrator: a valid verdict, reopened on two comments, and both are
+right. The first repair checked a result's shape only where the verdict
+happened to read it. It is the second reopen of this finding; a third goes
+to the owner, as `pc-2` did.
+
+### Repair (round 3), `0d8ccbd`
+
+The first repair asked of a result only what the verdict was about to use.
+This one judges every result whole, as the runner writes it
+(`tests/e2e/run.mjs`), before it counts for anything:
+
+- A scenario that does not run in a player must be in that player's
+  results as `{ status: 'skip' }` and nothing else. A full run names every
+  scenario, the skipped ones too, so one that is missing is reported.
+- A scenario that runs must have status `pass` or `fail` (a skip or any
+  other status is reported as before), and then exactly `status`, `error`,
+  `shown` and `routes`. `shown` and `routes` are lists of text. A
+  failure's error is text. A pass has no error.
+- A pass must also carry a proof the runner itself would have passed: the
+  runner's own rule (`proofProblems`) is applied to it, so a pass that does
+  not show a row it declares, shows one it does not, or took a test-only
+  route it does not declare is no result of a run.
+- A result that fails any of this is reported as "<name> has a result in
+  the <player> run that the runner does not write: <why>", and counts for
+  nothing: not as a pass, not as a known failure, not as showing a row.
+- The results must name a commit.
+
+The first repair's rules stay (a result looked up among the file's own
+names; results by scenario name; `dirty: false` and `full: true` said, not
+assumed). Its sentence for a failure whose error is not text is replaced
+by the general one above.
+
+Two older assertions changed with it, both from this finding's first fix.
+A made-up failure with no error (`error: null`) was expected to read "a
+failed in the embedded player: null"; the runner never writes that, so the
+case now gives the failure an error text, and a failure with none is
+expected to be refused. The made-up failures in the test gained `routes:
+[]`, as the runner writes them.
+
+Files: `tests/e2e/scenario-loader.mjs`, `tests/e2e-parity.test.mjs`.
+
+Guard: the verdict test gained the reviewer's two cases (a pass with an
+error; a `shown` given as "13", 7, an object, null, a list of numbers or a
+mixed list, while another scenario shows the same row) and a case for each
+other rule: `routes` as text, a part missing, a part too many, a pass that
+shows none of its rows, one that shows a row it does not declare, one that
+took an undeclared route, a scenario of the other player given as a pass,
+as a skip with more in it, as text, and left out, and results with no
+commit. Red-proofs by the coordinating agent: fourteen rules, the first
+repair's among them, were each taken out in turn, the file put back and
+checked byte for byte after each. Every one made the verdict test fail,
+and it passed once restored. `npm run check` was green before the commit.
+
+The verdict on real results is unchanged: over the two results files of
+the full runs made at `9bcdfbc` earlier the same day, the new rules report
+one problem, the scenario that really failed there (`windowsetting`).
+
+Not covered: the top of a results file is read for `player`, `full`,
+`built`, `head`, `dirty` and `scenarios` only; what else the runner writes
+there (`appBinary`, `finishedAt`, `changedDuringRun`) is not read by the
+verdict and not checked.

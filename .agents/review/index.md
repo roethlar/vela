@@ -28,7 +28,7 @@ admitted, none declined. Record:
 | pa-2 | MEDIUM   | The external player's cropping is tested in automatic mode only; the row says off, manual, auto | `[~]`  | `9bcdfbc` | codex/default/standard |
 | pa-3 | MEDIUM   | Half of a split row can be deleted and the guard still says the plan's list is all there | `[x]`  | `ddbb743` | codex/default/standard |
 | pa-4 | MEDIUM   | A timer started through Node's timer modules is not seen by the import watch | `[~]`  | `c294a09` | codex/default/standard |
-| pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[~]`  | `115cbaa`, `dbb91b4` | codex/default/standard |
+| pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[~]`  | `115cbaa`, `dbb91b4`, `0d8ccbd` | codex/default/standard esc:T5(ceiling) |
 | pa-6 | MEDIUM   | A run can say it built the app it ran when it built elsewhere and ran an older binary | `[~]`  | `f00cdc4` | codex/default/standard |
 | pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[~]`  | `17d9a81` | codex/default/standard |
 | pa-8 | LOW      | A name every object has, such as toString, is accepted as a test-only route | `[x]`  | `ade0278` | codex/default/standard |
