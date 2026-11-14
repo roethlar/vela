@@ -183,6 +183,7 @@ export default {
     // mpv shows, read from mpv itself. The stream's own request is checked on
     // the wire by the mock (contractViolations, below).
     let playedPath = null;
+    let lastSeenMs = null;
     await playAndQuit(driver, () => chooseBacking(driver, 'Mock Plex A'), {
       during: async (mpv) => {
         playedPath = await mpv.getProp('path');
@@ -192,6 +193,15 @@ export default {
           assert.ok(!value.includes('plex-token-'), `mpv's ${what} must carry no token: ${value}`);
         }
         assert.equal(title, TITLE, 'mpv shows the title, nothing more');
+        // Row 2's running half: Plex hears the play is playing (a timeline
+        // report every five seconds or so) while it runs, before any stop.
+        await pollUntil(
+          () => mockA.state.requests.some(
+            (request) => request.path === '/:/timeline' && request.query.state === 'playing',
+          ),
+          'a "playing" timeline report to reach Plex A while the play runs',
+          { timeoutMs: 10000 },
+        );
         // Nor the process the player runs in: mpv's own in the external
         // player, Vela's in the embedded one. Its command line and its
         // environment are readable by any process of the user. This check
@@ -205,6 +215,11 @@ export default {
           assert.ok(!text.includes('plex-token-'), `the player's ${what} must carry no token`);
           assert.ok(!/x-plex-token/i.test(text), `the player's ${what} must carry no token header`);
         }
+      },
+      // Where the play is just before it is stopped: the stopped report's
+      // position is checked against it below.
+      beforeStop: async (mpv) => {
+        lastSeenMs = Math.round((await mpv.getProp('time-pos')) * 1000);
       },
     });
     // On the wire: the player fetched the stream itself (GET; Vela's own
@@ -252,6 +267,59 @@ export default {
         .filter((request) => request.path === '/:/timeline' || request.path === '/:/progress')
         .every((request) => request.tokenPresent && request.tokenMatches),
       'Plex playback reporting must use the source token header',
+    );
+    // Row 2's final half (review finding pa-7): the stop itself reaches Plex,
+    // as a timeline report with state=stopped for this item, the last of the
+    // play's timeline reports, at the play's final position. playAndQuit
+    // seeks to 6 s and stops a moment later, inside the 10 s clip, so that
+    // position is between 6 and 10 s, and no "playing" report may come later
+    // or say more.
+    const stoppedReport = await pollUntil(
+      () => mockA.state.requests.find(
+        (request) => request.path === '/:/timeline' && request.query.state === 'stopped',
+      ),
+      'the final "stopped" timeline report to reach Plex A',
+    );
+    const timelines = mockA.state.requests.filter((request) => request.path === '/:/timeline');
+    const detail = JSON.stringify(timelines.map((request) => request.query));
+    console.log(`Plex A timeline reports: ${detail}`);
+    assert.equal(
+      timelines.filter((request) => request.query.state === 'stopped').length,
+      1,
+      `the play sends exactly one stopped timeline report: ${detail}`,
+    );
+    assert.equal(timelines.at(-1), stoppedReport, `the stopped report comes last: ${detail}`);
+    assert.ok(
+      timelines.slice(0, -1).length > 0 &&
+        timelines.slice(0, -1).every((request) => request.query.state === 'playing'),
+      `"playing" reports, and only those, come before it: ${detail}`,
+    );
+    assert.equal(stoppedReport.query.ratingKey, '1', `the stopped report names the item played: ${detail}`);
+    assert.equal(stoppedReport.query.key, '/library/metadata/1', `the stopped report names the item played: ${detail}`);
+    const finalMs = Number(stoppedReport.query.time);
+    assert.ok(
+      finalMs >= 6000 && finalMs <= 10000,
+      `the stopped report carries the final position, past the 6 s seek and inside the clip: ${detail}`,
+    );
+    // And it is where the play stopped, not the item's end (review finding
+    // pa-7): it is no earlier than mpv's position read just before the stop
+    // (lastSeenMs, less a little for timing) and at most 2 s later, since the
+    // stop takes a moment, never seconds; and the play is stopped well
+    // before the 10 s clip ends, so a report at the item's full duration
+    // (which tells Plex it was watched to the end) fails here.
+    assert.ok(
+      Number.isFinite(lastSeenMs) && finalMs >= lastSeenMs - 500 && finalMs <= lastSeenMs + 2000 && finalMs < 10000,
+      `the stopped report's position (${finalMs} ms) is where the play stopped: mpv was at ${lastSeenMs} ms ` +
+        `just before the stop, and the clip ends at 10000 ms: ${detail}`,
+    );
+    assert.equal(
+      stoppedReport.query.duration,
+      '10000',
+      `the stopped report carries the item's duration (10000 ms in the mock): ${detail}`,
+    );
+    assert.ok(
+      timelines.every((request) => Number(request.query.time) <= finalMs),
+      `no report says the play got further than its final position: ${detail}`,
     );
 
     // Plex B has no media behind its part: Vela's check of the stream before

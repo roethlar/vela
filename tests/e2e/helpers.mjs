@@ -410,7 +410,9 @@ export async function openDetailAndPlay(driver, cardSelector) {
 // control), and prove the stop acted. Returns the first time-pos sample
 // observed after load (the resume-position evidence).
 // `during(mpv)`, if given, runs once the play has progressed, before the seek.
-export async function playAndQuit(driver, start, { key = null, during = null } = {}) {
+// `beforeStop(mpv)`, if given, runs after the seek has been observed, just
+// before the stop: the last moment the play's position can be read.
+export async function playAndQuit(driver, start, { key = null, during = null, beforeStop = null } = {}) {
   const before = mpvSocketSnapshot();
   await start();
   const socketPath = await waitForNewMpvSocket(before).catch(async (err) => {
@@ -434,6 +436,7 @@ export async function playAndQuit(driver, start, { key = null, during = null } =
     if (during) await during(mpv);
     await mpv.setProp('time-pos', 6);
     await new Promise((r) => setTimeout(r, 1500)); // let Vela observe ≥6s
+    if (beforeStop) await beforeStop(mpv);
     await stopPlayAsUser(driver, mpv, socketPath, 'the play', { key });
   } finally {
     mpv.close();
