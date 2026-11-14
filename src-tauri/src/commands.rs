@@ -9895,8 +9895,12 @@ mod tests {
     /// asked for, and the quality.
     #[derive(Default)]
     struct VersionedSource {
-        asked: std::sync::Mutex<Vec<(String, Option<u64>, Option<String>, bool, String)>>,
+        asked: std::sync::Mutex<Vec<AskedResolution>>,
     }
+
+    /// One resolution asked of `VersionedSource`: key, duration, version,
+    /// markers, quality.
+    type AskedResolution = (String, Option<u64>, Option<String>, bool, String);
 
     #[async_trait::async_trait]
     impl crate::source::MediaSource for VersionedSource {
