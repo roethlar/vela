@@ -1496,3 +1496,118 @@ Slice 4 cover it).
 - One thing for the owner's Slice 4 list, added below it: with "use my own
   mpv configuration" on, a profile that keeps changing mpv's HDR target
   makes the embedded player drop to standard range for that play.
+
+### 2026-11-13 — Slice 5 (controls and cropping): landed at `3d2fef6`, hidden like the rest
+
+Built to `.agents/plans/embedded-player.slice5-design.md`. One commit.
+
+What an embedded play has now, all of it only in the player nobody is
+offered yet:
+
+- A control bar over the picture: play and pause, time, a seek bar, mute
+  and volume, audio and subtitle lists, a crop control when a crop script
+  is loaded, fullscreen, close. It hides after three seconds of quiet
+  while playing.
+- Keys, mapped by the page because mpv gets no key in this player: Space
+  (pause, or skip while a marker's button shows), the arrows (5 and 60
+  seconds), `m`, `f`, `q`, Escape (leave fullscreen, else close), and `C`
+  for cropping.
+- A "Skip Intro / Credits / Commercials" button drawn by the page. The
+  marker script runs with its own drawing off (`vela-markers-draw=no`) and
+  is told to skip by name, never by a seek.
+- Fullscreen of Vela's own window, held across the plays of a run and left
+  when the run ends or the user stops.
+- Cropping by a new script written by Vela, `vela-crop.lua` (MIT), which
+  the embedded launch loads in place of the bundled `autocrop.lua`: off,
+  manual and automatic, with FFmpeg's `bbox` filter. It refuses HDR video.
+
+How the page reaches the player: one command, `player_command`, with ten
+names and nothing else; each maps to one fixed mpv command built in Rust.
+Whose play it is, is decided under the player-slot lock in the same hold
+that stops it or copies its socket's path (the `ec-5` rule); `player_close`
+is gone and `stop` takes its place. One command at a time per play; a
+player that does not answer costs one waiting thread per five seconds. The
+state the bar shows comes from a per-play thread as `player-state`, at
+most four times a second, built field by field: a track's title and
+language (cut to 200 characters, and no title at all for a track from a
+file of its own, since mpv names those after their URL) are the only text
+from mpv that reaches the page.
+
+How it was made: a read-only map of the code, a draft design, a design
+check (two helpers measuring in the app and against the library, three
+attacking the draft), then four helpers building it on branches (scripts
+and launch; backend; page; integration and end-to-end scenarios), three
+attacking the result (23 findings, among them a track title that carried
+a URL's query to the page, and several guards that could not fail), two
+rounds of repair, and the coordinating agent's own reading, checks and
+regression injections. The review of record is codex's, below.
+
+What the coordinating agent ran at the landed content:
+
+- The full check: JS (165 Node tests, svelte-check clean), the build, Rust
+  1.89, stable and 1.100 clippy, 567 Rust tests, the ten tests against the
+  shipped library. `cargo audit` is not installed on this machine; GitHub
+  CI runs it.
+- The whole suite in the external player: 41 of 42. The one failure is
+  `pagefail`, the recorded product race.
+- The whole suite in the embedded player: 37 of 46, with `autocrop` now
+  skipped there (its embedded counterpart is `embeddedcrop`). The new
+  scenarios `embeddedcontrols`, `embeddedskip` and `embeddedcrop` pass,
+  and so do `cropscript` and the new legs of `markerpayload` with the
+  system's mpv. The nine failures are not this slice's: eight are the
+  scenarios already diagnosed for Slice 6
+  (`.agents/plans/embedded-player.slice6-notes.md`: `continuetv`,
+  `multiplex`, `playlistplay`, `serverplaylists`, `sourcepolicy`,
+  `surfaces`, `uifoundation`, and `pagefail`), and `mergedview` failed
+  once with "element click intercepted", a click made while the player
+  view was still leaving, which is the same race as `sourcepolicy`'s.
+  A first run had nine more failures, all "screenshot: no response": the
+  test compositor going idle after five minutes, fixed in the harness
+  (`a0b9c06`) before this run.
+- Seven regressions injected by the coordinating agent, each caught: a
+  view of another session reaching the play (Rust and Node); an absolute
+  seek of any size taken; the title mpv gives a track from a file of its
+  own reaching the page; an embedded launch naming the stock crop scripts;
+  the command run on an async worker instead of the blocking pool (Node
+  pin); the view calling the backend past the list of names (four Node
+  tests); a held key repeating every action (two Node tests).
+- Read by the coordinating agent: the command parser, its transport and
+  gate, the state payload, the Tauri commands and the wiring into
+  `playback::play`, the key map. Not read line by line: the page's markup
+  and styles, the crop script, the scenarios.
+
+Departures from the design, all the builders' and all kept:
+
+- `stop` answers success, as `player_close` did, when the view's play is no
+  longer the running one (the design would have said "not running").
+- Before the first state arrives the page gets no all-empty state; it
+  simply has none yet.
+- The volume slider sends once, on release, like the seek bar, so that a
+  drag does not run into the one-command-at-a-time rule.
+- Escape leaves a fullscreen the user made themselves too (it follows the
+  window's real state, as mpv's own Escape does); only the automatic
+  leaving spares it.
+- The crop script refuses silently, without the toast, when there are no
+  video parameters yet; the toast is for video that is definitely HDR.
+- Relative seeks are mpv's default (to a keyframe), as in mpv's own
+  window; on a file with few keyframes an arrow can jump further than five
+  seconds.
+
+Known gaps, none worked around:
+
+- Builds for Windows and macOS were not compiled (no target installed
+  here; GitHub CI builds them). The new command and its helpers compile to
+  "the player is not running" there, by reading.
+- The audio and subtitle lists, the notice line and the busy and
+  no-answer refusals are held by unit tests only: the test clips have one
+  audio track and no subtitles.
+- The seek bar and the volume slider are driven in the end-to-end
+  scenario by setting their value and sending the events a drag sends,
+  not by a pointer drag.
+- Hardware-decoded video goes through the crop script's "switch hardware
+  decoding off, measure, switch it back" path only in the embedded
+  scenario; nothing else can reach it.
+- Whether the scripts, the controls and the picture look right is for
+  the owner's eye (the list above, "From Slice 5").
+- The Arch package gets an install line for `vela-crop.lua`; the missing
+  one for `vela-markers.lua` is still the recorded blocker.

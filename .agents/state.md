@@ -45,13 +45,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     - Packaging the mpv library into the Linux packages, opt-in (branch
       `embedded-packaging`): `scripts/build.sh --with-libmpv`. Its repair
       pass was cut off by a usage limit on 2026-11-13 and is being redone.
-    - Slice 5, controls and cropping (branch `slice5`, head `e057ae4`;
-      design `.agents/plans/embedded-player.slice5-design.md`). Its helpers
-      report the full check and its new embedded scenarios passing. Its
-      cropping script is built under an assumption the owner has not ruled
-      on (the plan's "For the owner", item 3); it stays hidden with the
-      rest. It was branched before the `hd-3` fix and has to be merged
-      with it.
+    - (Slice 5, controls and cropping, LANDED at `3d2fef6` and is with codex
+      for its review; see the plan's log. Its cropping script is built
+      under an assumption the owner has not ruled on: the plan's "For the
+      owner", item 3.)
     - Then Slice 6 (parity). What was found out for it is
       `.agents/plans/embedded-player.slice6-notes.md`: why each scenario
       that fails in the embedded venue fails (none is a defect of the
