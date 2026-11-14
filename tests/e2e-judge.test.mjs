@@ -886,9 +886,12 @@ test('pw-8: MpvIpc keeps the last value mpv reported for an observed property', 
   assert.equal(mpv.reported('fullscreen'), undefined, 'nothing reported yet');
   sock.emit('data', '{"event":"property-change","id":1,"name":"fullscreen","data":false}\n{"event":"property-');
   assert.equal(mpv.reported('fullscreen'), false);
-  // A line split across two reads, then a reply that is not an event.
-  sock.emit('data', 'change","id":1,"name":"fullscreen","data":true}\n{"request_id":99,"error":"success","data":false}\n');
-  assert.equal(mpv.reported('fullscreen'), true, 'the last report counts, a reply does not');
+  // A line split across two reads.
+  sock.emit('data', 'change","id":1,"name":"fullscreen","data":true}\n');
+  assert.equal(mpv.reported('fullscreen'), true, 'the last report counts');
+  // An event that is not a property's change says nothing of its value.
+  sock.emit('data', '{"event":"end-file","name":"fullscreen","data":false}\n');
+  assert.equal(mpv.reported('fullscreen'), true, 'only a property-change is a report');
   sock.emit('data', '{"event":"property-change","id":2,"name":"pause","data":false}\n');
   assert.equal(mpv.reported('fullscreen'), true, 'another property is kept apart');
   assert.equal(mpv.reported('pause'), false);
