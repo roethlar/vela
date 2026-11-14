@@ -325,12 +325,13 @@ In either mode a file fails if it cannot be unpacked, or if what comes out of
 it is not Vela (it has no `usr/bin/vela`). An empty file, for one, unpacks
 without complaint and certainly holds no part of the set.
 
-On an Arch host `packaging/arch/` keeps the packages of earlier builds, and a
-default build copies every one of them to `dist/`, as it always has. A
-`--with-libmpv` build does not: it asks makepkg which package this build made
-(`makepkg --packagelist`), checks that one and copies that one alone, from
-wherever makepkg was told to put it (`PKGDEST`). An older package that
-carries the set can therefore not pass in place of the new one. If makepkg
+On an Arch host `packaging/arch/` keeps the packages of earlier builds. A
+build, with or without `--with-libmpv`, asks makepkg which package this build
+made (`makepkg --packagelist`) and copies that one alone to `dist/`, from
+wherever makepkg was told to put it (`PKGDEST`); a `--with-libmpv` build
+checks it first. An older package that carries the set can therefore not
+pass in place of the new one, nor be handed out by a build that was not
+asked for the set. If makepkg
 writes its packages under an ending the check does not know (it knows
 `.pkg.tar.zst` and `.pkg.tar.xz`), the check fails the package and says so.
 

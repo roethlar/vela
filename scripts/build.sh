@@ -341,17 +341,18 @@ dist="dist"
 rm -rf "$dist"
 mkdir -p "$dist"
 artifacts=()
-if [ "$mode" = arch ] && [ "$with_libmpv" -eq 1 ]; then
+if [ "$mode" = arch ]; then
   # packaging/arch is never cleared, so the packages of earlier builds lie
   # there, and makepkg may have been told to put this build's package
   # somewhere else altogether (PKGDEST in makepkg.conf). Collected as below,
-  # an older package that carries the set would be checked, pass, and be
-  # handed out as this build's, while the package this build made went
-  # unchecked. So makepkg is asked which package this build made, and that
-  # one is checked and copied: it has to be there.
+  # an older package would be handed out as this build's: one that carries
+  # the set from a build that was not asked for it, or one that would be
+  # checked and pass while the package this build made went unchecked. So
+  # makepkg is asked which package this build made, and that one is checked
+  # and copied: it has to be there.
   while IFS= read -r f; do
     [ -f "$f" ] || {
-      echo "==> --with-libmpv: makepkg names $f as the package of this build, and it is not there; see the build's output above" >&2
+      echo "==> makepkg names $f as the package of this build, and it is not there; see the build's output above" >&2
       exit 1
     }
     artifacts+=("$f")

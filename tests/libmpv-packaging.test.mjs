@@ -457,14 +457,59 @@ test('a build without --with-libmpv passes no overlay and checks no package', { 
 test('a default Arch build clears the variable that would package the set', { skip: posixBashUnavailable }, (t) => {
   const fixture = buildFixture(t, { host: 'arch' });
   fixture.addSet(fixture.defaultSet);
-  // packaging/arch keeps the packages of earlier builds. A default build has
-  // always copied every one of them to dist/, and still does.
-  fs.writeFileSync(path.join(fixture.root, 'packaging', 'arch', 'vela-0.9.0-1-x86_64.pkg.tar.zst'), 'an earlier build\n');
   const built = fixture.run([], { env: { VELA_PACKAGE_LIBMPV: fixture.defaultSet } });
   assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
-  // Nothing but the build: no question to the check, none to makepkg.
-  assert.deepEqual(fixture.log(), ['npm run build:arch', 'VELA_PACKAGE_LIBMPV=<unset>']);
-  assert.deepEqual(fixture.dist(), ['vela-0.9.0-1-x86_64.pkg.tar.zst', 'vela-1.0.0-1-x86_64.pkg.tar.zst']);
+  // The build, and makepkg asked which package it made: no question to the check.
+  assert.deepEqual(fixture.log(), ['npm run build:arch', 'VELA_PACKAGE_LIBMPV=<unset>', 'makepkg --packagelist (in packaging/arch)']);
+  assert.deepEqual(fixture.dist(), ['vela-1.0.0-1-x86_64.pkg.tar.zst']);
+});
+
+test('a default Arch build hands out the package it made, and not an earlier one with the set', { skip: posixBashUnavailable }, async (t) => {
+  // packaging/arch keeps the packages of earlier builds, an opt-in one among
+  // them. A build that was not asked for the set must not hand that one out.
+  const older = 'vela-0.9.0-1-x86_64.pkg.tar.zst';
+  const withOlder = (options) => {
+    const fixture = buildFixture(t, { host: 'arch', ...options });
+    fs.writeFileSync(path.join(fixture.root, 'packaging', 'arch', older), 'an earlier build, with the set\n');
+    return fixture;
+  };
+
+  await t.test('beside this build\'s package', () => {
+    const fixture = withOlder();
+    const built = fixture.run([]);
+    assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
+    assert.deepEqual(fixture.dist(), ['vela-1.0.0-1-x86_64.pkg.tar.zst']);
+  });
+
+  await t.test('makepkg was told to put its package elsewhere (PKGDEST): it is found there', () => {
+    const fixture = withOlder({ archPackage: 'built packages/vela-1.0.0-1-x86_64.pkg.tar.zst' });
+    const built = fixture.run([]);
+    assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
+    assert.deepEqual(fixture.dist(), ['vela-1.0.0-1-x86_64.pkg.tar.zst']);
+    assert.ok(built.stdout.includes(`==> Artifacts (also in ${fixture.root}/built packages):`), built.stdout);
+  });
+
+  await t.test('the package makepkg names is not there: the older one does not stand in for it', () => {
+    const fixture = withOlder({ produce: false });
+    fixture.leaveEarlierBuild();
+    const built = fixture.run([]);
+    assert.equal(built.status, 1, `${built.stdout}\n${built.stderr}`);
+    assert.ok(
+      built.stderr.includes(
+        `==> makepkg names ${fixture.root}/packaging/arch/vela-1.0.0-1-x86_64.pkg.tar.zst as the package of this build, and it is not there`,
+      ),
+      built.stderr,
+    );
+    assert.deepEqual(fixture.dist(), []);
+  });
+
+  await t.test('makepkg cannot say which package it made: nothing is handed out', () => {
+    const fixture = withOlder({ makepkgNames: null });
+    const built = fixture.run([]);
+    assert.equal(built.status, 0, `${built.stdout}\n${built.stderr}`);
+    assert.match(built.stdout, /nothing matched/);
+    assert.deepEqual(fixture.dist(), []);
+  });
 });
 
 test('--with-libmpv passes the overlay and checks every package before any reaches dist/', { skip: posixBashUnavailable }, (t) => {
@@ -696,7 +741,7 @@ test('--with-libmpv on Arch checks and hands out the package this build made, an
     assert.equal(built.status, 1, `${built.stdout}\n${built.stderr}`);
     assert.ok(
       built.stderr.includes(
-        `--with-libmpv: makepkg names ${fixture.root}/packaging/arch/vela-1.0.0-1-x86_64.pkg.tar.zst as the package of this build, and it is not there`,
+        `==> makepkg names ${fixture.root}/packaging/arch/vela-1.0.0-1-x86_64.pkg.tar.zst as the package of this build, and it is not there`,
       ),
       built.stderr,
     );
