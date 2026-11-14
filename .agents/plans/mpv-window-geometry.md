@@ -518,6 +518,27 @@ On the Windows install the request came from: steps 1 to 3.
 **Review:** three `codereview codex` hunts over `9815e10`, one per slice;
 see `.agents/review/index.md`.
 
+### 2026-11-14: the repair of `pw-1` and `pw-2` changes two of the things left as they are
+
+The codex review reopened `pw-1` and `pw-2` on which screen a Prefer
+Compatible copy is ranked for and which screen the window opens on. Their
+joint repair (`52138d0` to `eb2f1c2`; the rule and what it changes for a
+user are in `.agents/review/findings/pw-1.md`, "Repair (round 2)") decides
+the screen once, by name, before the copy is chosen. Two entries of "Left
+as they are" in the entry of the landing no longer hold:
+
+- The first video of a run, under Prefer Compatible, is now ranked for the
+  saved screen it opens on.
+- A saved screen that is no longer connected now sends the first video to
+  the screen holding Vela's window, not to mpv's default screen. The same
+  holds for a screen a play was last seen on.
+
+The owner's acceptance step 4 reads accordingly: after unplugging the
+screen the mpv window was on, the next video opens on the screen Vela's
+window is on, and plays.
+
+The two entries about `--geometry` and the carried size stand.
+
 ### 2026-11-14: both end-to-end suites at the landed commit
 
 Run in a clean worktree checked out at `9815e10`, each suite building the

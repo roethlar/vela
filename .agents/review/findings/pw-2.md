@@ -199,3 +199,61 @@ title: "Choose the compatibility display using the upcoming player". Reviewer's 
 - Verdict: **reopened**. Comments, verbatim:
   - src-tauri/src/commands.rs:5380 — Late StartFailed fallback leaves pw-2 incomplete. With the previous external window on DP-1 and Vela on HDMI-1, an available embedded choice ranks for HDMI-1. If preparation/start subsequently fails, including because an unfinished embedded play appears, playback::play launches the same resolved stream externally on DP-1. Carrying PlayerChoice does not prevent this later player change. Reconcile the selected version and destination when fallback occurs; documenting this as a known gap does not close the defect.
   - tests/player-selection.test.mjs:31 — Guard proof confirmed: restoring the original display mistake failed all three named Rust guards; passing wanted_player to ranking failed the Node guard. After restoration, 76 Rust and 13 Node tests passed. Coverage remains incomplete: forcing the actual rank_candidates call to Best also passed both suites. The Rust guards test helpers, and the text pins do not establish the selected version or its correctness after StartFailed. Add a behavioral selection-to-fallback guard. All mutations were restored; embedded/display and E2E behavior was inspected, not executed.
+
+Orchestrator: a valid verdict, reopened on two comments, and both are
+right. It is the first reopen of this finding. `pw-1` was reopened on the
+same subject; one repair answers both, and its rule, how it was made and
+checked, what changes for a user and what is not built are in `pw-1`'s
+record, "Repair (round 2)".
+
+### Repair (round 2): `2eb5626`, `fec6128`, `f9acc1f` (with `pw-1`'s `52138d0`, `8526d28`, `eb2f1c2`)
+
+By the reviewer's comment:
+
+1. *A play the embedded player could run and then cannot start opens
+   mpv's own window on the last external window's screen, with a copy
+   ranked for Vela's.* Closed by the rule itself (`52138d0`): an embedded
+   play is decided for the screen holding Vela's window; the launch's
+   description of the play carries that screen; and `playback::play`
+   describes the play again for mpv's own window from the same
+   description, so the window asks for the screen the copy was ranked for.
+   The choice of copy is not made again, and it need not be: the copy and
+   the screen now agree. Guard:
+   `commands::tests::a_play_the_embedded_player_cannot_start_opens_where_its_copy_was_ranked`:
+   the last external window on DP-1 (4K), Vela on HDMI-1, the embedded
+   player able to run; it chooses the player, decides the screen, requires
+   the ranking's target to be HDMI-1's 1920x1080 and the copy to be the
+   1080p SDR one, then runs the real `playback::play` with an embedded
+   launcher that fails and a stand-in for mpv, and requires mpv to be
+   started with `--screen-name=HDMI-1`. Red-proofs: the embedded play
+   decided for the last external window's screen (the original defect):
+   fails on the size ranked for; the screen left out of the fallback's
+   launch: fails on the argument. `fec6128` is the size check, added
+   because the author's own red-proof showed the first form of the test
+   failing on the window's screen and not on the ranking.
+   `f9acc1f` guards the case the attacker found unguarded: a play that
+   fell back at its start is published as an external play, and the next
+   item of a playlist, an embedded play replacing it, must be decided for
+   Vela's screen (`a_compatible_choice_follows_the_screen_the_play_opens_on`;
+   with the condition removed, 650 tests had stayed green).
+2. *Forcing the real ranking to Best passed every test.* The ranking in
+   the choice of copy is now one function, `rank_and_place`, the only
+   ranking call in `select_playback_version`, and it is tested on what it
+   does: `the_ranking_ranks_by_its_policy_and_places_on_the_decided_screen`
+   (a 4K HDR copy and a 1080p SDR copy on a 1080p SDR screen: Compatible
+   gives the second, Best and Fastest the first, Compatible without a
+   target the first; the screen returned is the one decided). Its call is
+   held by source text in `tests/player-window-ui.test.mjs`: the policy,
+   the decided screen and the target made only for Compatible; and nothing
+   else in production ranks but the Ask prompt. Red-proofs: Best forced
+   inside `rank_and_place` (five Rust tests fail); Best, or no target, at
+   the call (the Node test fails); no screen returned; either ready
+   selection carrying no screen.
+
+Files: as in `pw-1`'s record.
+
+Known gaps: the fallback's test builds the choice of copy by hand (the
+target from `profile_basis`, the screen put into the play's description),
+because `select_playback_version` needs a running app; the link from the
+choice of copy to the launch is held by source text. The disagreement on
+ranking or resolving again is `pw-1`'s (its record, "Not built").

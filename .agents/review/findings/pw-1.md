@@ -181,3 +181,186 @@ title: "Revalidate the compatibility display after stream resolution". Reviewer'
   - tests/player-window-ui.test.mjs:176 — The detect_profile guard misses the same multi-screen regression expressed differently: I reversed observed.names inside detect_profile before screen_name() was called. Ranking then names HDMI-1 while RankedScreen carries DP-1, yet both prescribed suites passed. Exercise the profile-selection behavior with multiple screens rather than checking only selected source expressions.
   - src-tauri/src/commands.rs:5076 — The documented first-play gap remains a real compatibility defect: an empty record ranks for Vela's display, carries no ranked screen, and opens on the saved screen. This predates these commits, but leaving it for owner preference does not resolve the incorrect resolution/HDR selection.
   - src-tauri/src/commands.rs:8811 — Guard proof confirmed: restoring inherited-screen precedence failed the Rust guard with HDMI-1 versus DP-1; dropping the carried screen failed the Node guard. After restoration, all 76 Rust and 13 Node tests passed. Tracked files are restored. Embedded playback and E2E were inspected, not run.
+
+Orchestrator: a valid verdict, reopened on four comments (the fifth
+confirms the guard proof). All four are right. Comments 1, 3 and 4 are
+repaired in full. Comment 2 is repaired where that does not restart a
+video, and its other half is disputed below. It is the first reopen of
+this finding. `pw-2` was reopened on the same subject, and one repair
+answers both.
+
+### Repair (round 2): `52138d0`, `8526d28`, `eb2f1c2` (with `pw-2`'s `2eb5626`, `fec6128`, `f9acc1f`)
+
+One rule for `pw-1` and `pw-2` together, built as one piece of work and
+landed as six commits, each for one of the two findings.
+
+- **The screen is decided once, by name, before the copy is chosen**, for
+  every source policy: `select_playback_version` calls `decide_play_screen`
+  once, after the player is chosen and the probes have answered, and that
+  calls `screen_for_play` (`src-tauri/src/commands.rs`), the one place the
+  screen is decided. For a play in mpv's own window: the screen the last
+  external play's window was observed on; while the run has had none, the
+  screen the player window setting saved for the first window. For a play
+  in the embedded player: the screen holding Vela's window (the exact
+  successor of an embedded play keeps that play's observed screen).
+- **A screen that is not connected is passed over**, ending at the screen
+  holding Vela's window, by name. What is connected is looked at once per
+  play (`display::look_at_screens`, on a blocking thread): the monitors
+  Tauri lists, each under Tauri's name and mpv's, and on Wayland the
+  compositor's own outputs by connector and model. When the outputs cannot
+  be listed, or the list names none, a name is taken unchecked, as before
+  the check existed.
+- **A Compatible copy is ranked for that output's profile**:
+  `display::profile_basis` (pure: it is told the output and never picks
+  one) and `profile_of` (the HDR state, asked for that output). The
+  observation's size counts when the name came from that observation;
+  otherwise the output's own.
+- **The launch asks for that screen and looks at no screen again**:
+  `PlaybackSelection.screen` carries the name, and `play_by_key_locked`
+  does `let screen_name = selection.screen.clone();`. A play the embedded
+  player cannot start after all is described again for mpv's own window
+  from the same play, so its window asks for the same screen.
+- **On Wayland the screen holding Vela's window is named by its
+  connector** ("DP-3"), not its model, when the compositor's list tells
+  which output it is (`display::connector_of`): two screens of one model
+  share the model's name.
+
+`RankedScreen`, `screen_to_open_on`, `compatibility_display`,
+`playback_compatibility_target`, `inherited_screen_name` and
+`display::current_screen_name` are gone; `opening_window` gives the window
+state only.
+
+By the reviewer's comment:
+
+1. *Vela's screen has no identity; moving Vela between the ranking and the
+   launch.* Closed: the screen holding Vela's window is a name decided
+   once, and the launch does not look again. Guard:
+   `commands::tests::the_screen_holding_velas_window_is_carried_by_name`
+   (ranked 1080p SDR for HDMI-1, Vela's window then moves to DP-1, the
+   destination stays HDMI-1), and in `tests/player-window-ui.test.mjs`
+   "a play is shown on the one screen decided before its copy is chosen".
+   Red-proofs: the name dropped; a second look put into the launch in
+   three forms.
+2. *A ranked output that disappears; placement is only a request.* The
+   output is checked as connected when it is decided:
+   `a_screen_that_is_not_connected_is_passed_over`,
+   `display::tests::a_name_is_connected_when_an_output_has_it`,
+   `what_was_seen_of_the_screens_is_put_together`, and end to end
+   `windowsetting`, which now requires that the stored `no-such-screen` is
+   NOT asked for and that a screen is asked for by name. Red-proofs: the
+   connected check made always true; every name accepted; an unreadable
+   list rejecting every name; the compositor's list dropped; Vela's screen
+   given no name, end to end on a fresh build. The rest is the
+   disagreement below.
+3. *The guard missed the reversed names.* The profile is now chosen by a
+   pure function that can be run:
+   `display::tests::the_profile_is_the_named_outputs_among_several` (two
+   and three outputs, either order, an observation naming the output
+   second), `an_output_the_list_lacks_gets_the_values_of_velas_screen`,
+   `commands::tests::an_observation_across_several_screens_is_shown_on_its_first`,
+   `display::tests::two_screens_of_one_model_are_told_apart`. The
+   reviewer's own mutation (the names reversed) now fails, where the name
+   is taken and inside `profile_basis`.
+4. *The first play of a run.* Closed:
+   `the_first_play_of_a_run_is_ranked_for_the_saved_screen_it_opens_on`
+   (saved DP-1 connected: 4K HDR on DP-1; unplugged: 1080p SDR on HDMI-1;
+   in full screen mode the saved screen is not used).
+
+Files: `src-tauri/src/commands.rs`, `src-tauri/src/display.rs`,
+`src-tauri/src/playback.rs` (a doc comment, and the test stand-ins handed
+to the command layer's tests), `tests/player-window-ui.test.mjs`,
+`tests/player-selection.test.mjs`,
+`tests/e2e/scenarios/windowsetting.mjs`.
+
+**How it was made and checked.** Three helper agents on Opus 5.5 in turn:
+an author; a second that attacked the result (thirteen mutations of the
+deciding code, one of which survived, and four more findings); a third
+that fixed those, each with a guard and a red-proof. Their red-proofs are
+per comment below. The coordinating agent then replayed the six commits
+onto a `main` that had moved on (two conflicts with the first half of
+`pw-9` and one in the Node pins, and that half's test adapted to the new
+rule), read the product diff, and on the merged content ran:
+
+- the full check: green (661 Rust tests, 493 Node tests; the two audit
+  commands exit as recorded);
+- end to end, external player: `mergedview`, `mpvargs`, `multiplex`,
+  `exitplay`, `playback`, `playerfallback`, `playlistplay`, `replaceplay`,
+  `sourcepolicy`, `windowsetting`, 10 of 10; embedded player:
+  `embeddedplay`, `playlistplay`, `embeddedfullscreenend`,
+  `embeddedcontrols`, 4 of 4;
+- eight red-proofs of its own on the merged content, each restored from
+  the committed state and each failing the test named: a name that is not
+  connected taken anyway; the saved first screen not used; any replaced
+  play lending an embedded play its screen; Vela's screen looked up by
+  name among the outputs; the connector never taken; the real ranking
+  ranking Best whatever the policy; a play of this run handing on nothing
+  (the adapted `pw-9` test); an observation that names another screen
+  lending its size;
+- the compositor's list on a real desktop (the development machine, one
+  screen): one output, connector `DP-3`, model `XG27UQDMS`, 3840x2160, and
+  the model's name is turned into `DP-3`.
+
+The venue has one screen. A second screen, an unplugged one and two of
+one model rest on unit tests.
+
+**What changes for a user**, also one who changed no setting:
+
+- A saved or observed screen that is no longer connected is not asked for
+  any more; the video goes to the screen holding Vela's window. Before,
+  mpv was asked for the gone screen and chose one itself. The plan's log
+  had this under "Left as they are", and its entry of 2026-11-14 now says
+  so.
+- The first video of a run, under Prefer Compatible, is ranked for the
+  saved screen it opens on. Also "Left as they are" before.
+- The screen is fixed before the stream is resolved, for every policy. A
+  report of another screen that arrives from the play before while the
+  stream is being resolved no longer moves the next window. How the window
+  opens (full screen, maximized, size) is still read after resolution.
+- An observation that names no screen no longer lends its size to the
+  ranking; the size of the screen holding Vela's window is used.
+- On Wayland a video sent to the screen holding Vela's window asks mpv for
+  the connector's name where it asked for the model's name. With one
+  screen it opens on that screen either way.
+- A player window setting that cannot be read fails the choice of copy
+  (and the title menu's "which version would play") where it failed the
+  launch before. The play does not start either way.
+- Each play, and each "which version would play" query, now looks at the
+  screens once: one question to Vela's window on a blocking thread, and on
+  Wayland one round trip to the compositor, with no limit of its own, as
+  the HDR query that was already made there for a Compatible choice.
+
+**Not built, and put to the reviewer as a disagreement** (comment 2's
+second half): nothing ranks or resolves again once resolution has started,
+and nothing checks after the window has opened that the compositor put it
+where it was asked to, to relaunch if not. An output unplugged in the
+second or so that resolution takes is still asked for, and mpv places the
+window where it can; on Wayland the screen is a request. Either would end
+a transcode the server has just started and restart a video the user has
+just started, on evidence (a report from mpv about its window) that
+arrives after the video is already showing. The cheap half is done: the
+output is checked as connected when it is decided. If the reviewer holds
+that the rest must be built, it is the owner's to decide, because it
+changes what a user sees.
+
+Known gaps, besides the disagreement:
+
+- macOS and Windows were not compiled. The new code there is Tauri's own
+  calls and pure functions. Assumption, not checked: on Windows the names
+  mpv reports for a screen are Tauri's names for it; if they differ, an
+  observed screen counts as not connected and the video goes to the screen
+  holding Vela's window (the same screen when there is one).
+- On X11 the connected check relies on GDK naming a monitor as mpv does
+  (the RandR name). The venue (Xvfb) showed the check working.
+- A Wayland compositor that does not name its outputs (before `wl_output`
+  version 4) lists models only. Assumption from mpv's source as the
+  coordinating agent remembers it, not checked here: mpv then reports the
+  model too, so what was saved or observed is still in the list.
+- Two screens of one model AND one size cannot be told apart: the name
+  stays the model's; the size ranked for is still that of Vela's own
+  monitor.
+- The Settings display (`detect_profile`) still asks for Vela's monitor on
+  an async worker, as before this work. It is not a play.
+- The link from the choice of copy to the launch is held by source text
+  (`select_playback_version` needs a running app); the late fallback's
+  test builds the choice of copy by hand and runs the real
+  `playback::play`.
