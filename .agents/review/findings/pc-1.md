@@ -1,7 +1,7 @@
 # pc-1: a line that arrives in pieces is read past the limit of whoever is waiting for it
 
 **Severity**: MEDIUM — a command to the embedded player can wait longer than its two seconds, holding the play's one-command gate, and a stopped play's state thread can stay alive, for as long as mpv's socket keeps sending pieces of a line or lines too long to keep. mpv does not ordinarily do either.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `a909c20`
 
@@ -65,3 +65,22 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `0aeeff0..3d2fef6`, 2026-11-14 00:45 UTC
 (`.agents/review/codereview-2026-11-14-embedded-controls.md`). Reviewer's
 title: "Partial or oversized IPC lines bypass the read deadline". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 02:14 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d7ca-845e-7a10-8b23-5affd8c52c57`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 02:02 UTC, finished 02:07 UTC.
+- Reviewed head `a909c206eb53e21d5e8d6f1181fd0df69960b6be`, base
+  `cd3ea59a1305dd4e4043bd995efd3ac90af74566` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  - src-tauri/src/player/report.rs:348 — Restoring the original reader failed all four new socket guards despite their timing margins. Removing cancellation separately failed both reporter guards. Restored head passed: 207 tests, 10 ignored.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
