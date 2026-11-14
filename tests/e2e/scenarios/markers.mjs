@@ -19,6 +19,7 @@ import { pollUntil, openLibraryGrid, mockSource, seedConfig } from '../helpers.m
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
+import { skipJumpVerdict } from '../judge.mjs';
 
 const TICKS_PER_MS = 10_000;
 let mock;
@@ -88,9 +89,11 @@ async function launch(driver) {
 // of the end and lets playback cover the rest does not pass. The margin
 // allows for the sample that sees the play just past the start, before the
 // script's seek lands. The samples either side of the jump are logged.
+// Exported for tests/e2e-judge.test.mjs, which drives it with a stand-in for
+// mpv to see that its verdict is the one it acts on.
 const JUMP_WINDOW_MS = 5000;
 const IN_RANGE_MARGIN_S = 1;
-async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
+export async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
   await pollUntil(
     () => mpv.getProp('time-pos').catch(() => null).then((t) => t != null),
     `${what}: the play to have a position`,
@@ -113,33 +116,28 @@ async function proveSkippedPast(mpv, what, rangeStart, rangeEnd) {
   );
   await mpv.setProp('pause', false);
   const unpausedAt = Date.now();
-  let before = start.t;
-  let last = null;
+  // The judgement is skipJumpVerdict's (judge.mjs), held by unit tests; this
+  // loop only samples, and asks it after each sample.
+  const samples = [];
+  const rule = {
+    startS: start.t,
+    rangeStart,
+    rangeEnd,
+    windowMs: JUMP_WINDOW_MS,
+    marginS: IN_RANGE_MARGIN_S,
+  };
   for (;;) {
     const t = await mpv.getProp('time-pos').catch(() => null);
-    const elapsed = Date.now() - unpausedAt;
-    if (t != null && t >= rangeEnd) {
+    samples.push({ t, ms: Date.now() - unpausedAt });
+    const verdict = skipJumpVerdict(samples, rule);
+    if (verdict?.ok === true) {
       console.log(
-        `${what}: from ${start.t.toFixed(2)} s, last sample before the jump ${before.toFixed(2)} s, ` +
-          `first after ${t.toFixed(2)} s, ${elapsed} ms after the play resumed`,
+        `${what}: from ${start.t.toFixed(2)} s, last sample before the jump ${verdict.before.toFixed(2)} s, ` +
+          `first after ${verdict.after.toFixed(2)} s, ${verdict.ms} ms after the play resumed`,
       );
       return;
     }
-    if (t != null && t >= rangeStart + IN_RANGE_MARGIN_S) {
-      throw new Error(
-        `${what}: the play must jump from the range's start (${rangeStart} s) past its end ` +
-          `(${rangeEnd} s) in one step; it was seen inside the range at ${t} s ` +
-          `(the sample before was ${before} s), ${elapsed} ms after resuming from ${start.t.toFixed(2)} s`,
-      );
-    }
-    if (t != null) before = t;
-    last = t;
-    if (elapsed > JUMP_WINDOW_MS) {
-      throw new Error(
-        `${what}: the position must be past the range's end (${rangeEnd} s) within ${JUMP_WINDOW_MS} ms ` +
-          `of playing on from ${start.t.toFixed(2)} s, which only a skip can do; it is ${last}`,
-      );
-    }
+    if (verdict) throw new Error(`${what}: ${verdict.why}`);
     await new Promise((r) => setTimeout(r, 100));
   }
 }
