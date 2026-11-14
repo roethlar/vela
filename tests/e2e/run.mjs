@@ -265,7 +265,11 @@ if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
   }
   const weston = spawn(
     'weston',
-    ['--backend=headless', '--renderer=gl', `--socket=${socket}`, '--width=1280', '--height=800'],
+    // weston goes idle after 300 seconds without input, and input sent
+    // through WebDriver does not count. Once idle it never draws a window
+    // that opens afterwards, so every later scenario of a long run hung at
+    // its first screenshot. Hence no idle time at all.
+    ['--backend=headless', '--renderer=gl', `--socket=${socket}`, '--width=1280', '--height=800', '--idle-time=0'],
     { stdio: 'ignore' },
   );
   weston.on('error', () => {
