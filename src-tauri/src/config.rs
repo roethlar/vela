@@ -320,10 +320,10 @@ impl MpvWindow {
         )
     }
 
-    /// This record updated with what a play that ended observed. A part the
-    /// play did not observe keeps its stored value, so a play that reported
-    /// nothing (one that failed at once, say) does not erase the record. An
-    /// unusable screen name is not taken.
+    /// This record updated with how a play left its window, or how Vela
+    /// opened it when mpv never reported otherwise. An unknown part keeps its
+    /// stored value; a play that reported nothing can still hand on its
+    /// opening flags and size. An unusable screen name is not taken.
     pub(crate) fn updated_with(
         &self,
         ended: crate::playback::PlaybackWindowState,

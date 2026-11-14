@@ -5649,10 +5649,11 @@ async fn play_by_key_locked(
             None => None,
         },
     };
-    // The size this window opens at stands until the play shows a windowed
-    // size of its own, so a play that stays fullscreen hands it on.
+    // How Vela opens this window stands until mpv reports otherwise, even
+    // when the reader never connects (pw-9). The requested screen is not a
+    // measurement of where the compositor actually placed the window.
     let window_observation =
-        playback::WindowStateObservation::opened_at(inherited_window_state.windowed_size);
+        playback::WindowStateObservation::opened_at(inherited_window_state);
 
     // Grab the teardown handle before `resolved` is consumed below. Whatever
     // started a transcode is obliged to stop it: neither server has a
@@ -5925,9 +5926,9 @@ async fn play_by_key_locked(
                 // and never on a timer. The window-state reader has stopped by
                 // now. When it read mpv's connection to its end, this is all
                 // the play reported. When mpv ended before the reader had
-                // connected, the play reported nothing: only the size it
-                // opened at is handed on, and the settings keep what they had
-                // for the rest (review finding pw-8). When the play was
+                // connected, the opening flags and size are handed on; the
+                // settings keep what they had for unknown fields, including
+                // the unobserved screen (pw-9). When the play was
                 // stopped, by a newer play or by Vela quitting, the reader may
                 // have stopped with lines still unread. The start gate above
                 // has opened, so a play that started has been published.
@@ -8424,8 +8425,8 @@ mod tests {
             playback::PlaybackWindowState::default()
         );
         assert_eq!(inherited_screen_name(&PlaybackWindowRecord::default()), None);
-        // A play that started but has reported nothing leaves both unknown,
-        // so the configured options still decide.
+        // A play opened without known state that has reported nothing leaves
+        // both unknown, so the configured options still decide.
         let silent = PlaybackWindowSession {
             session_id: "silent".to_string(),
             player: crate::player::PlayerKind::External,
@@ -8436,6 +8437,128 @@ mod tests {
             playback::PlaybackWindowState::default()
         );
         assert_eq!(inherited_screen_name(&published([silent])), None);
+    }
+
+    #[test]
+    fn the_next_play_stays_fullscreen_when_the_previous_reader_never_connected() {
+        let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+        let cfg = config::AppConfig {
+            mpv_window_mode: Some("fullscreen".to_string()),
+            ..Default::default()
+        };
+        let (opened, _) = opening_window(
+            &slot.lock().unwrap(),
+            config::first_window_of_run(&cfg).unwrap(),
+        );
+        assert_eq!(opened.fullscreen, Some(true));
+        publish_started_play(
+            Ok(()),
+            &slot,
+            PlaybackWindowSession {
+                session_id: "never-connected".to_string(),
+                player: crate::player::PlayerKind::External,
+                observation: playback::WindowStateObservation::opened_at(opened),
+            },
+            || {},
+        ).unwrap();
+
+        // No IPC events at all. A contrary first-window setting must not
+        // disguise whether this run actually handed the fullscreen on.
+        let next = opening_window(&slot.lock().unwrap(), stored_first_window());
+        assert_eq!(
+            next, (opened, None),
+            "the next play must inherit fullscreen even when the prior reader never connected"
+        );
+    }
+
+    // A never-connected play can set either flag, both, or neither. Older
+    // settings are deliberately contrary; unobserved fields must survive.
+    fn never_connected_window_cases() -> [(playback::PlaybackWindowState, config::MpvWindow); 4] {
+        [
+            (Some(true), Some(false), Some(true), Some(false)),
+            (Some(true), None, Some(true), Some(true)),
+            (None, Some(false), Some(false), Some(false)),
+            (None, None, Some(false), Some(true)),
+        ].map(|(fullscreen, maximized, saved_fullscreen, saved_maximized)| (
+            playback::PlaybackWindowState {
+                fullscreen,
+                maximized,
+                windowed_size: None,
+            },
+            config::MpvWindow {
+                fullscreen: saved_fullscreen,
+                maximized: saved_maximized,
+                screen: Some("previous-screen".to_string()),
+                width: Some(1024),
+                height: Some(576),
+            },
+        ))
+    }
+
+    fn settings_before_never_connected_play() -> HeldSettings {
+        HeldSettings(std::sync::Mutex::new(config::AppConfig {
+            mpv_window: Some(config::MpvWindow {
+                fullscreen: Some(false),
+                maximized: Some(true),
+                screen: Some("previous-screen".to_string()),
+                width: Some(1024),
+                height: Some(576),
+            }),
+            ..Default::default()
+        }))
+    }
+
+    #[test]
+    fn a_never_connected_plays_end_saves_its_opening_flags() {
+        for (opened, expected) in never_connected_window_cases() {
+            let settings = settings_before_never_connected_play();
+            let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+            publish_started_play(
+                Ok(()),
+                &slot,
+                PlaybackWindowSession {
+                    session_id: "never-connected".to_string(),
+                    player: crate::player::PlayerKind::External,
+                    observation: playback::WindowStateObservation::opened_at(opened),
+                },
+                || {},
+            ).unwrap();
+            write_play_end(
+                |change| settings.update(change), &slot, "never-connected", |_| {},
+            ).unwrap();
+            assert_eq!(
+                settings.window(), Some(expected),
+                "the play's end must save opening flags and keep fields it never knew: {opened:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn quitting_saves_a_never_connected_plays_opening_flags() {
+        for (opened, expected) in never_connected_window_cases() {
+            let settings = settings_before_never_connected_play();
+            let slot = std::sync::Mutex::new(PlaybackWindowRecord::default());
+            publish_started_play(
+                Ok(()),
+                &slot,
+                PlaybackWindowSession {
+                    session_id: "never-connected".to_string(),
+                    player: crate::player::PlayerKind::External,
+                    observation: playback::WindowStateObservation::opened_at(opened),
+                },
+                || {},
+            ).unwrap();
+            // Its end has not run. Use the real exit rule with in-memory
+            // settings, as the existing exit tests do.
+            remember_window_on_exit_with(&slot, || settings.read(), |change| settings.update(change));
+            assert_eq!(
+                settings.window(), Some(expected),
+                "Vela's exit must save opening flags and keep fields it never knew: {opened:?}"
+            );
+            remember_window_on_exit_with(&slot, || settings.read(), |_| {
+                panic!("quitting again must not rewrite the same opening state")
+            });
+        }
     }
 
     #[test]

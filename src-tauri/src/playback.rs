@@ -70,9 +70,9 @@ pub enum ProgressTarget {
 
 /// Runtime mpv window state that is carried to the next play in this run of
 /// Vela, and, when the player window setting remembers it, to the first play
-/// of the next run (`config::MpvWindow`). `None` means mpv has not reported the property, which is distinct
-/// from an explicit `false` and therefore leaves configured launch options
-/// authoritative.
+/// of the next run (`config::MpvWindow`). `None` means Vela did not set the
+/// property at opening and mpv has not reported it, which is distinct from
+/// an explicit `false` and leaves configured launch options authoritative.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct PlaybackWindowState {
     pub fullscreen: Option<bool>,
@@ -208,14 +208,18 @@ pub struct WindowStateObservation {
 }
 
 impl WindowStateObservation {
-    /// A fresh handle for a play whose window opens at `windowed_size`. That
-    /// size counts as confirmed until the play reports a windowed size of its
-    /// own, so a play that stays fullscreen or maximized, or never shows a
-    /// window, hands the same size on instead of none.
-    pub fn opened_at(windowed_size: Option<(u32, u32)>) -> Self {
+    /// A fresh handle carrying how Vela opened the window until mpv reports
+    /// otherwise. Each reported flag replaces its seed immediately; the size
+    /// counts as confirmed until mpv reports a windowed size of its own.
+    /// Unknown opening flags stay unknown. The requested screen is not an
+    /// observation: the compositor can place the window elsewhere, and
+    /// Prefer Compatible trusts the observed display's identity and size.
+    pub fn opened_at(window: PlaybackWindowState) -> Self {
         Self {
             state: Arc::new(Mutex::new(WindowTracker {
-                confirmed: windowed_size,
+                fullscreen: window.fullscreen,
+                maximized: window.maximized,
+                confirmed: window.windowed_size,
                 ..WindowTracker::default()
             })),
             display: Arc::default(),
@@ -2869,6 +2873,109 @@ mod tests {
         );
     }
 
+    #[test]
+    fn a_play_that_reports_nothing_hands_on_its_opening_flags() {
+        for fullscreen in [false, true] {
+            for maximized in [false, true] {
+                let opened = PlaybackWindowState {
+                    fullscreen: Some(fullscreen),
+                    maximized: Some(maximized),
+                    windowed_size: None,
+                };
+                let observation = WindowStateObservation::opened_at(opened);
+                assert_eq!(
+                    observation.snapshot(),
+                    opened,
+                    "a play with no IPC reports must hand on both opening flags"
+                );
+            }
+        }
+    }
+
+    fn assert_report_replaces_only_its_seed(property: WindowProperty) {
+        for seed in [false, true] {
+            let opened = PlaybackWindowState {
+                fullscreen: Some(seed),
+                maximized: Some(seed),
+                windowed_size: None,
+            };
+            let observation = WindowStateObservation::opened_at(opened);
+            let mut expected = opened;
+            let name = match property {
+                WindowProperty::Fullscreen => {
+                    expected.fullscreen = Some(!seed);
+                    "fullscreen"
+                }
+                WindowProperty::Maximized => {
+                    expected.maximized = Some(!seed);
+                    "window-maximized"
+                }
+            };
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": name, "data": !seed
+            }));
+            assert_eq!(
+                observation.snapshot(), expected,
+                "{name} must replace its seed immediately without changing the other flag"
+            );
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": "time-pos", "data": 12.5
+            }));
+            assert_eq!(
+                observation.snapshot(), expected,
+                "later events and snapshots must not restore the {name} seed"
+            );
+            // The first report does not freeze the property either.
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": name, "data": seed
+            }));
+            assert_eq!(observation.snapshot(), opened, "later {name} reports still win");
+        }
+    }
+
+    #[test]
+    fn an_mpv_fullscreen_report_replaces_only_its_seed() {
+        assert_report_replaces_only_its_seed(WindowProperty::Fullscreen);
+    }
+
+    #[test]
+    fn an_mpv_maximized_report_replaces_only_its_seed() {
+        assert_report_replaces_only_its_seed(WindowProperty::Maximized);
+    }
+
+    #[test]
+    fn flags_neither_set_at_opening_nor_reported_stay_unknown() {
+        for (fullscreen, maximized) in [(None, None), (Some(true), None), (None, Some(false))] {
+            let opened = PlaybackWindowState {
+                fullscreen,
+                maximized,
+                windowed_size: None,
+            };
+            let observation = WindowStateObservation::opened_at(opened);
+            observation.apply_ipc_event(&serde_json::json!({
+                "event": "property-change", "name": "time-pos", "data": 12.5
+            }));
+            assert_eq!(
+                observation.snapshot(), opened,
+                "an unrelated report must not invent an unknown opening flag"
+            );
+        }
+    }
+
+    #[test]
+    fn opening_window_state_is_not_a_display_measurement() {
+        let observation = WindowStateObservation::opened_at(PlaybackWindowState {
+            fullscreen: Some(true),
+            maximized: Some(false),
+            windowed_size: Some((800, 450)),
+        });
+        assert_eq!(
+            observation.display_snapshot(),
+            crate::display::ObservedDisplay::default(),
+            "opening a window measures neither its screen nor that screen's dimensions"
+        );
+    }
+
     // The windowed-size rule, driven with explicit times. `t(ms)` is a fixed
     // origin plus `ms`, so nothing here waits or reads a clock.
     mod windowed_size {
@@ -3080,7 +3187,11 @@ mod tests {
         // itself replaces it.
         #[test]
         fn a_play_hands_on_the_size_it_was_opened_at_until_it_reports_its_own() {
-            let observation = WindowStateObservation::opened_at(Some((800, 450)));
+            let opened = PlaybackWindowState {
+                windowed_size: Some((800, 450)),
+                ..Default::default()
+            };
+            let observation = WindowStateObservation::opened_at(opened);
             let event = |name: &str, data: serde_json::Value| {
                 serde_json::json!({ "event": "property-change", "name": name, "data": data })
             };
@@ -3099,7 +3210,7 @@ mod tests {
                 }
             );
             // A play with no window (it reports 0x0) hands it on too.
-            let observation = WindowStateObservation::opened_at(Some((800, 450)));
+            let observation = WindowStateObservation::opened_at(opened);
             observation.apply_ipc_event_at(&dimensions(0, 0), t(0));
             assert_eq!(observation.snapshot().windowed_size, Some((800, 450)));
             // Its own windowed size wins.
@@ -3110,9 +3221,49 @@ mod tests {
             assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
             // Opened with no size, nothing is invented.
             assert_eq!(
-                WindowStateObservation::opened_at(None).snapshot(),
+                WindowStateObservation::opened_at(PlaybackWindowState::default()).snapshot(),
                 PlaybackWindowState::default()
             );
+        }
+
+        #[test]
+        fn opening_flags_keep_screen_sizes_out_of_the_windowed_size() {
+            for property in [WindowProperty::Fullscreen, WindowProperty::Maximized] {
+                let mut opened = PlaybackWindowState {
+                    windowed_size: Some((800, 450)),
+                    ..Default::default()
+                };
+                let name = match property {
+                    WindowProperty::Fullscreen => {
+                        opened.fullscreen = Some(true);
+                        "fullscreen"
+                    }
+                    WindowProperty::Maximized => {
+                        opened.maximized = Some(true);
+                        "window-maximized"
+                    }
+                };
+                let observation = WindowStateObservation::opened_at(opened);
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": "osd-dimensions",
+                    "data": { "w": 1920, "h": 1080 }
+                }), t(0));
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": "time-pos", "data": 12.5
+                }), t(2000));
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": name, "data": false
+                }), t(2100));
+                assert_eq!(
+                    observation.snapshot().windowed_size, Some((800, 450)),
+                    "a size reported before {name} leaves its opening state is not windowed"
+                );
+                observation.apply_ipc_event_at(&serde_json::json!({
+                    "event": "property-change", "name": "osd-dimensions",
+                    "data": { "w": 1024, "h": 576 }
+                }), t(2200));
+                assert_eq!(observation.snapshot().windowed_size, Some((1024, 576)));
+            }
         }
 
         // Through the IPC event path the reader uses: the observation feeds

@@ -85,12 +85,6 @@ test('the play path opens its window from the run or the setting, and hands it o
     'the setting must be saved through apply_mpv_window_mode',
   );
   assert.doesNotMatch(setMode, /cfg\.mpv_window/, 'and set nothing itself');
-  // The play hands on the size it opened at until it shows one of its own.
-  assert.match(
-    commands,
-    /let window_observation =\s+playback::WindowStateObservation::opened_at\(inherited_window_state\.windowed_size\);/,
-    'the launch must start its window observation from the size it opens at',
-  );
   assert.match(
     commands,
     /if record\.last_external\(\)\.is_some\(\) \{[\s\S]{0,200}inherited_window_state\(record\)[\s\S]{0,200}\} else \{\s*first_of_run\s*\}/,
@@ -141,6 +135,32 @@ test('the play path opens its window from the run or the setting, and hands it o
     commands,
     /let launched_window_session = PlaybackWindowSession \{[\s\S]{0,120}player: started_player,/,
     'the record the end callback reads must name the player that started',
+  );
+});
+
+test('the real launch seeds and shares the complete opening window state', () => {
+  const start = commands.indexOf('\nasync fn play_by_key_locked(');
+  assert.notEqual(start, -1, 'the launch path exists');
+  // Ignore comments so a disconnected copy of the old wiring cannot pass.
+  const play = commands.slice(start, commands.indexOf('\n}\n', start)).replace(/\/\/[^\n]*/g, '');
+  assert.match(
+    play,
+    /let window_observation =\s+playback::WindowStateObservation::opened_at\(inherited_window_state\);/,
+    'the launch must seed both flags and size from the complete opening state',
+  );
+  assert.equal(
+    [...play.matchAll(/let\s+(?:mut\s+)?window_observation\b/g)].length, 1,
+    'the seeded observation must not be replaced before launch or publication',
+  );
+  assert.match(
+    play,
+    /let spec = playback::PlaySpec \{[^}]*\binherited_window_state,\s+screen_name,\s+window_observation: window_observation\.clone\(\),/,
+    'the IPC reader must receive the observation seeded from the actual launch state',
+  );
+  assert.match(
+    play,
+    /let launched_window_session = PlaybackWindowSession \{\s+session_id: session_id\.to_string\(\),\s+player: started_player,\s+observation: window_observation,\s+\};\s+let window_slot = &state\.playback_window_session;\s+let played = publish_started_play\(played, window_slot, launched_window_session,/,
+    'the published play must share that seeded observation with its IPC reader',
   );
 });
 
