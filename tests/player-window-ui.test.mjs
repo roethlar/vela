@@ -101,9 +101,13 @@ test('the play path opens its window from the run or the setting, and hands it o
     /let latest_window = state\.playback_window_session\.clone\(\);/,
     'the end callback must see the record the launch path publishes',
   );
+  // Read without whole-line comments, so the comment above the write can say
+  // what it must (review finding pw-8) without widening the code allowed
+  // between the gate and the write (370 characters of code; the bound was
+  // 1800 with about 1170 characters of comment in it).
   assert.match(
-    commands,
-    /if !recents_ready\.wait_succeeded\(\) \{[\s\S]{0,1800}let _ = write_play_end\(\s*\|change\| config::update\(change\),\s*&latest_window,\s*&session_id,\s*move \|cfg\| \{\s*crate::recents::finish_session\(cfg, &key, &finishing_session, position_ms, now_ms\);\s*\},\s*\);/,
+    commands.replace(/^[ \t]*\/\/[^\n]*\n/gm, ''),
+    /if !recents_ready\.wait_succeeded\(\) \{[\s\S]{0,600}let _ = write_play_end\(\s*\|change\| config::update\(change\),\s*&latest_window,\s*&session_id,\s*move \|cfg\| \{\s*crate::recents::finish_session\(cfg, &key, &finishing_session, position_ms, now_ms\);\s*\},\s*\);/,
     'the end of a play must hand its final window to the settings',
   );
   // Quitting Vela hands the last external play's window over too: a play still

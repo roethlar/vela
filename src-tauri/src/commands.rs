@@ -6148,17 +6148,36 @@ async fn play_by_key_locked(
                 let finishing_session = session_id.clone();
                 // How the play left its window, kept for the next run of Vela
                 // in the same write as the recents stamp: at the end of a play
-                // and never on a timer. The window-state reader has stopped by
-                // now. When it read mpv's connection to its end, this is all
-                // the play reported. When mpv ended before the reader had
-                // connected, the opening flags and size are handed on; the
-                // settings keep what they had for unknown fields, including
-                // the unobserved screen (pw-9). When the play was
-                // stopped, by a newer play or by Vela quitting, the reader may
-                // have stopped with lines still unread. The start gate above
-                // has opened, so a play that started has been published.
-                // Whether it is still the last external play is decided
-                // inside the write.
+                // and never on a timer. What the window-state reader has
+                // applied by now depends on how the play ended:
+                // - The play ended by itself (mpv quit or reached its end):
+                //   the tracker's tail or the end watcher got here on the
+                //   reader's `done`, which the reader sets only after it read
+                //   mpv's connection to its end. This is all the play reported.
+                // - mpv ended before the reader had connected: the reader gave
+                //   up and set `done`; the opening flags and size are handed
+                //   on, and the settings keep what they had for unknown
+                //   fields, including the unobserved screen (pw-9).
+                // - The play was cancelled by a newer play: the tail and the
+                //   end watcher got here on the stop flag, which does not wait
+                //   for the reader. The reader may still be running, with
+                //   lines unread; it applies at most the line it is reading
+                //   and stops at the next. A change it applies after this
+                //   write is saved only by a later write: Vela's exit (which
+                //   waits for this reader while this is still the last
+                //   external play, review finding pw-8), or, when the newer
+                //   play runs in mpv's own window, that play's end or Vela's
+                //   exit, which save the newer play's window instead. A change
+                //   it never reads is lost, and when no play in mpv's own
+                //   window follows (the newer one is embedded, or fails to
+                //   start) the window saved here stays saved after Vela exits.
+                // - Vela is quitting: the exit kills mpv, hands the window
+                //   over (waiting for this reader) and only then sets the stop
+                //   flag, so a connected reader reaches the end of the killed
+                //   mpv's connection first, as in the first case.
+                // The start gate above has opened, so a play that started has
+                // been published. Whether it is still the last external play
+                // is decided inside the write.
                 let _ = write_play_end(
                     |change| config::update(change),
                     &latest_window,
