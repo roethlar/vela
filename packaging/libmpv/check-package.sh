@@ -9,7 +9,7 @@
 # embedded. This script is where such a package is stopped: at build time.
 #
 # usage: check-package.sh [--without-libmpv] [--set DIR] PACKAGE...
-#        check-package.sh --preflight [--without-libmpv] [--set DIR]
+#        check-package.sh --preflight [--without-libmpv] [--set DIR] [--appimage]
 #
 #   PACKAGE  a .deb, .rpm, .AppImage or pacman package (.pkg.tar.zst, .xz)
 #   --set DIR  the set the package was built from, or was built without
@@ -17,8 +17,13 @@
 #              check could be made here. scripts/build.sh asks before it
 #              builds, so that a missing tool stops a --with-libmpv build
 #              at its start and not after the whole of it.
+#   --appimage  (with --preflight) an AppImage is among the packages to be
+#              checked, which needs unsquashfs as well
 #
-# Each package is unpacked into a temporary directory; nothing is installed.
+# Each package is unpacked into a temporary directory; nothing is installed,
+# and nothing that comes out of a package, or the package itself, is run.
+# (With the set, its libmpv.so.2 is loaded, which runs the library's own
+# start-up code; that is the one exception.)
 # A file that cannot be unpacked, or that unpacks to something other than
 # Vela (no usr/bin/vela), fails whichever of the two questions is asked.
 #
@@ -45,7 +50,9 @@
 #
 # Exit status: 0 if every package passed, 1 if one did not, 2 if the check
 # could not be made (no package was judged then, and the reason is on standard
-# error). Needs bsdtar (libarchive) to unpack and, to load the library,
+# error) or an AppImage could not be read for want of unsquashfs (that package
+# has a FAIL line that says so). Needs bsdtar (libarchive) to unpack,
+# unsquashfs (squashfs-tools, 4.4 or later) for an AppImage and, to load the library,
 # Python 3 and the system libraries the set's MANIFEST lists. The temporary
 # directory (TMPDIR) must be one a library can be loaded from. What is
 # unpacked there is removed when the check ends, also when it is cancelled (it
@@ -86,12 +93,14 @@ die() { printf 'check-package: %s\n' "$*" >&2; exit 2; }
 
 without=0
 preflight=0
+appimage=0
 reference=""
 packages=()
 while [ $# -gt 0 ]; do
   case "$1" in
     --without-libmpv) without=1 ;;
     --preflight) preflight=1 ;;
+    --appimage) appimage=1 ;;
     # A --set that names nothing is a mistake, not "no set": it is what
     # --set="$DIR" turns into when DIR is empty, and taking it for "no set"
     # would drop the comparison with the built set without a word.
@@ -112,10 +121,15 @@ if [ "$preflight" -eq 1 ]; then
   [ "${#packages[@]}" -eq 0 ] || die "--preflight checks no package; name none"
 else
   [ "${#packages[@]}" -gt 0 ] || die "no package named (try --help)"
+  # Named packages say for themselves whether one is an AppImage.
+  [ "$appimage" -eq 0 ] || die "--appimage goes with --preflight; name the packages instead"
 fi
 
 # What the check cannot be made without. --preflight stops after these.
 command -v bsdtar >/dev/null 2>&1 || die "bsdtar is not installed (libarchive; on Debian and Ubuntu: libarchive-tools)"
+if [ "$appimage" -eq 1 ]; then
+  command -v unsquashfs >/dev/null 2>&1 || die "unsquashfs is not installed (squashfs-tools); an AppImage is read with nothing else"
+fi
 if [ -n "$reference" ]; then
   [ -f "$reference/MANIFEST" ] || die "no libmpv set in $reference (it has no MANIFEST)"
   reference="$(cd "$reference" && pwd -P)"
@@ -158,12 +172,49 @@ pass() { printf 'ok   %s\n' "$*"; }
 fail() { printf 'FAIL %s\n' "$*"; failed=1; }
 skipped() { printf 'skip %s\n' "$*"; }   # a comparison that was not made
 
+# squashfs_offset FILE: where the squashfs of an AppImage begins, printed, or
+# status 1 when FILE is not an ELF program followed by a squashfs. The AppImage
+# runtime finds its image the same way: right after the ELF section header
+# table, which is the last part of the program. Nothing of FILE is run; od
+# reads its bytes.
+squashfs_offset() {
+  local file="$1" ident endian shoff entsize count offset size
+  ident="$(od -An -v -tx1 -N6 -- "$file" | tr -d ' \n')" || return 1
+  case "${ident:10:2}" in
+    01) endian=little ;;
+    02) endian=big ;;
+    *) return 1 ;;
+  esac
+  case "${ident:0:10}" in
+    7f454c4602) # 64-bit
+      shoff="$(od -An -tu8 -j40 -N8 --endian="$endian" -- "$file")" || return 1
+      entsize="$(od -An -tu2 -j58 -N2 --endian="$endian" -- "$file")" || return 1
+      count="$(od -An -tu2 -j60 -N2 --endian="$endian" -- "$file")" || return 1 ;;
+    7f454c4601) # 32-bit
+      shoff="$(od -An -tu4 -j32 -N4 --endian="$endian" -- "$file")" || return 1
+      entsize="$(od -An -tu2 -j46 -N2 --endian="$endian" -- "$file")" || return 1
+      count="$(od -An -tu2 -j48 -N2 --endian="$endian" -- "$file")" || return 1 ;;
+    *) return 1 ;;
+  esac
+  shoff="${shoff//[[:space:]]/}" entsize="${entsize//[[:space:]]/}" count="${count//[[:space:]]/}"
+  size="$(stat -c %s -- "$file")" || return 1
+  # Numbers that do not fit what a file of this size can hold are not taken
+  # into the shell's arithmetic, where they would wrap around.
+  [[ "$shoff" =~ ^[0-9]{1,15}$ && "$entsize" =~ ^[0-9]+$ && "$count" =~ ^[0-9]+$ ]] || return 1
+  [ "$count" -gt 0 ] || return 1
+  offset=$((shoff + entsize * count))
+  [ "$offset" -lt "$size" ] || return 1
+  [ "$(od -An -v -tx1 -j"$offset" -N4 -- "$file" | tr -d ' \n')" = 68737173 ] || return 1   # "hsqs"
+  printf '%s\n' "$offset"
+}
+
 # unpack PACKAGE INTO: the file tree the package installs, in INTO/root.
-# Returns 3 for a file that is none of the four kinds, 1 when unpacking failed.
+# Returns 3 for a file that is none of the four kinds, 4 for an AppImage when
+# there is no unsquashfs to read it with, 1 when unpacking failed.
 # Every step says so itself: the caller tests this function's result, and bash
 # does not stop at a failed command inside a function called that way.
 unpack() {
-  local package="$1" into="$2" data
+  local package="$1" into="$2" data offset
   mkdir -p "$into/root" || return 1
   case "$package" in
     *.deb)
@@ -178,15 +229,19 @@ unpack() {
       bsdtar -xf "$package" -C "$into/root" || return 1
       ;;
     *.AppImage)
-      # An AppImage unpacks itself, and has to be executable to do it: a copy
-      # is made executable, not the builder's file. APPIMAGE_EXTRACT_AND_RUN
-      # (scripts/build.sh sets it for the bundler's own tools) is taken away
-      # so that nothing can turn "unpack" into "unpack and start Vela".
-      cp "$package" "$into/package.AppImage" || return 1
-      chmod +x "$into/package.AppImage" || return 1
-      ( cd "$into" && env -u APPIMAGE_EXTRACT_AND_RUN ./package.AppImage --appimage-extract >/dev/null ) || return 1
+      # An AppImage is a program with a squashfs file system appended to it.
+      # It could unpack itself, but that would run it, and what runs is
+      # whatever the file holds, with the rights of whoever checks it. So it
+      # is never run: the squashfs is read by unsquashfs, where the ELF
+      # header says the program ends. A file that is not such an AppImage is
+      # refused before anything else is done with it.
+      offset="$(squashfs_offset "$package")" || {
+        echo "this is not an AppImage this check can read: no squashfs follows an ELF program in it"
+        return 1
+      }
+      command -v unsquashfs >/dev/null 2>&1 || return 4
       rmdir "$into/root" || return 1
-      mv "$into/squashfs-root" "$into/root" || return 1
+      unsquashfs -no-progress -no-xattrs -o "$offset" -d "$into/root" "$package" >/dev/null || return 1
       ;;
     *) return 3 ;;
   esac
@@ -346,6 +401,7 @@ check_without() {
 }
 
 any_failed=0
+unchecked=0
 n=0
 for package in "${packages[@]}"; do
   n=$((n + 1))
@@ -358,6 +414,9 @@ for package in "${packages[@]}"; do
     unpack "$package" "$tmp/$n" >"$tmp/$n.log" 2>&1 || status=$?
     if [ "$status" -eq 3 ]; then
       fail "unpack: not a .deb, .rpm, .AppImage or pacman package"
+    elif [ "$status" -eq 4 ]; then
+      fail "unpack: unsquashfs is not installed (squashfs-tools), and an AppImage is read with nothing else, so this package could not be checked"
+      unchecked=1
     elif [ "$status" -ne 0 ]; then
       sed 's/^/     /' "$tmp/$n.log"
       fail "unpack: the package could not be unpacked"
@@ -379,4 +438,7 @@ for package in "${packages[@]}"; do
   chmod -R u+rwX "$tmp/$n" 2>/dev/null || true
   rm -rf "$tmp/$n" "$tmp/$n.log"
 done
+# A package that could not be read for want of a tool was not judged, and the
+# run says so by its status, whatever became of the others.
+[ "$unchecked" -eq 0 ] || exit 2
 exit "$any_failed"

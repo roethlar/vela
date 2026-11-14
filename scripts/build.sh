@@ -40,7 +40,8 @@
 # packaging/libmpv/check-package.sh: the whole set must be where Vela will
 # look for it, unchanged, and must load from there. A package that fails stops
 # the build, and nothing is copied to dist/. What the check itself needs
-# (bsdtar, Python 3) is asked for before anything is built. See
+# (bsdtar, Python 3, and unsquashfs for an AppImage) is asked for before
+# anything is built. See
 # docs/development.md, "Packaging the set".
 #
 # Usage:
@@ -169,8 +170,13 @@ if [ "$with_libmpv" -eq 1 ]; then
   libmpv_set="$(cd "$libmpv_set" && pwd -P)"
   # The packages are checked when they have been built, and that check has
   # needs of its own: bsdtar, Python 3, a client API number that belongs to
-  # the pinned mpv. Whether they are met is known now.
-  "$libmpv_check" --preflight --set "$libmpv_set" || {
+  # the pinned mpv, and unsquashfs when an AppImage is built. Whether they are
+  # met is known now.
+  libmpv_preflight=(--preflight --set "$libmpv_set")
+  for d in "${subdirs[@]}"; do
+    [ "$d" != appimage ] || libmpv_preflight+=(--appimage)
+  done
+  "$libmpv_check" "${libmpv_preflight[@]}" || {
     echo "--with-libmpv: the packages could not be checked once built (see above), so nothing is built" >&2
     exit 1
   }

@@ -484,6 +484,22 @@ test('--with-libmpv passes the overlay and checks every package before any reach
   assert.deepEqual(fixture.dist(), ['Vela-1.0.0-1.x86_64.rpm', 'Vela_1.0.0_amd64.deb']);
 });
 
+test('--with-libmpv asks beforehand whether an AppImage can be checked only when one is to be built', { skip: posixBashUnavailable }, (t) => {
+  for (const [bundles, asked] of [['appimage', ' --appimage'], ['deb,appimage', ' --appimage'], ['deb', '']]) {
+    const fixture = buildFixture(t);
+    const set = fixture.addSet(fixture.defaultSet);
+    // (The stand-in build makes no AppImage, so how each build ends is not
+    // the question here.)
+    fixture.run(['--bundles', bundles, '--with-libmpv']);
+    assert.equal(fixture.log()[0], `preflight --set ${set}${asked}`, bundles);
+  }
+  // The default bundle of a Debian-family host is an AppImage.
+  const fixture = buildFixture(t);
+  const set = fixture.addSet(fixture.defaultSet);
+  fixture.run(['--with-libmpv']);
+  assert.equal(fixture.log()[0], `preflight --set ${set} --appimage`);
+});
+
 test('a package that fails the check fails the build and leaves dist/ empty', { skip: posixBashUnavailable }, (t) => {
   const fixture = buildFixture(t, { checkStatus: 1 });
   fixture.addSet(fixture.defaultSet);
@@ -904,6 +920,54 @@ const referenceWith = (t, manifest) => {
   return directory;
 };
 
+// An AppImage is an ELF program with a squashfs appended to it. The check
+// finds the squashfs where the ELF section header table ends; this is the
+// smallest ELF header that says where that is: at byte 128, behind a table of
+// one 64-byte entry at byte 64. `image` follows it.
+const appImageOf = (image) => {
+  const head = Buffer.alloc(128);
+  head.set([0x7f, 0x45, 0x4c, 0x46, 2, 1, 1]); // ELF, 64-bit, little-endian, version 1
+  head.writeUInt16LE(2, 16); // an executable
+  head.writeUInt16LE(62, 18); // for x86-64
+  head.writeBigUInt64LE(64n, 40); // the section header table starts at byte 64,
+  head.writeUInt16LE(64, 52); // after a header of 64 bytes,
+  head.writeUInt16LE(64, 58); // and has entries of 64 bytes,
+  head.writeUInt16LE(1, 60); // one of them
+  return Buffer.concat([head, image]);
+};
+// A squashfs, as far as its first four bytes go.
+const squashfsLike = Buffer.from('hsqs and nothing a real squashfs has\n');
+
+// A stand-in for unsquashfs, in front of PATH: it records its arguments in
+// `calls` (one call to a line, as JSON), checks that the image it was told to
+// read begins where it was told it does, and writes `usr/bin/vela` and the
+// shell lines `extra` into the directory it was given (in $dest). Returns the
+// PATH to use.
+function unsquashfsStandIn(t, { calls, extra = '' }) {
+  const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-unsquashfs-')));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  executable(
+    path.join(directory, 'unsquashfs'),
+    `#!/bin/bash
+set -eu
+"${process.execPath}" -e 'console.log(JSON.stringify(process.argv.slice(1)))' -- "$@" >> "${calls}"
+dest='' offset=''
+while [ $# -gt 1 ]; do
+  case "$1" in -d) dest="$2"; shift ;; -o) offset="$2"; shift ;; esac
+  shift
+done
+[ "$(tail -c +$((offset + 1)) "$1" | head -c 4)" = hsqs ] || exit 1
+mkdir -p "$dest/usr/bin" "$dest/usr/lib/Vela/mpv-scripts"
+echo app > "$dest/usr/bin/vela"
+echo script > "$dest/usr/lib/Vela/mpv-scripts/autocrop.lua"
+${extra}
+`,
+  );
+  return `${directory}:${process.env.PATH}`;
+}
+const recordedCalls = (calls) =>
+  fs.existsSync(calls) ? fs.readFileSync(calls, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
+
 test('the package check, asked for a package without the set, finds any part of one', { skip: checkUnavailable }, async (t) => {
   // The set a default build was built without: one library, known by its
   // checksum, as a MANIFEST lists it.
@@ -1046,7 +1110,7 @@ test('the package check refuses a set that is not in the package where the loade
 
 test('the package check unpacks each kind of package, and fails one it cannot unpack', { skip: checkUnavailable }, async (t) => {
   // A deb and an rpm are what the documented --with-libmpv build produces.
-  // An AppImage unpacks itself and has a test of its own below.
+  // An AppImage is read by unsquashfs and has tests of its own below.
   const script = { 'usr/lib/Vela/mpv-scripts/autocrop.lua': 'script\n' };
   for (const kind of Object.keys(packageKinds)) {
     await t.test(`a ${kind} without the set: its files are looked at, all of them`, (t) => {
@@ -1486,11 +1550,11 @@ test('the package check removes what it unpacked, also when it is cancelled', { 
   // Start the check in a process group of its own and wait until what it
   // started says it is running (it creates `marker`). `ended` resolves when
   // the check has ended, with how it ended.
-  const started = async ({ script = checkPackagePath, args, tmp, marker }) => {
+  const started = async ({ script = checkPackagePath, args, tmp, marker, env = {} }) => {
     const child = spawn('/bin/bash', [script, ...args], {
       detached: true,
       stdio: 'ignore',
-      env: { ...process.env, TMPDIR: tmp },
+      env: { ...process.env, ...env, TMPDIR: tmp },
     });
     const ended = new Promise((resolve) => child.once('exit', (code, killedBy) => resolve({ code, killedBy })));
     const giveUp = Date.now() + 20_000;
@@ -1594,31 +1658,27 @@ test('the package check removes what it unpacked, also when it is cancelled', { 
 
   for (const signal of ['SIGTERM', 'SIGHUP', 'SIGINT']) {
     await t.test(`${signal} to the check alone while a package is still unpacking: it is let finish first`, async (t) => {
-      // An AppImage stand-in that goes on writing for a while after it has
+      // An unsquashfs stand-in that goes on writing for a while after it has
       // said it is running. Removing the directory under it would leave
       // behind whatever it wrote next.
       const scratch = emptyDirectory(t);
       const marker = path.join(scratch, 'unpacking');
       const finished = path.join(scratch, 'finished');
       const image = path.join(scratch, 'Vela_1.0.0_amd64.AppImage');
-      fs.writeFileSync(
-        image,
-        `#!/bin/sh
-[ "$*" = --appimage-extract ] || exit 1
-mkdir -p squashfs-root/usr/bin
-echo app > squashfs-root/usr/bin/vela
-: > "${marker}"
+      fs.writeFileSync(image, appImageOf(squashfsLike));
+      const PATH = unsquashfsStandIn(t, {
+        calls: path.join(scratch, 'calls'),
+        extra: `: > "${marker}"
 i=0
 while [ "$i" -lt 10 ]; do
-  echo more > "squashfs-root/usr/file$i"
+  echo more > "$dest/usr/file$i"
   i=$((i + 1))
   sleep 0.02
 done
-: > "${finished}"
-`,
-      );
+: > "${finished}"`,
+      });
       const tmp = emptyDirectory(t);
-      const end = await interrupted({ args: ['--without-libmpv', image], tmp, marker, signal, wholeGroup: false });
+      const end = await interrupted({ args: ['--without-libmpv', image], tmp, marker, signal, wholeGroup: false, env: { PATH } });
       assert.equal(fs.existsSync(finished), true, 'the check ended while the package was still being unpacked');
       assert.deepEqual(end, { code: statusOf[signal], killedBy: null });
       assert.deepEqual(fs.readdirSync(tmp), []);
@@ -1827,51 +1887,84 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
   });
 });
 
-test('the package check has an AppImage unpack itself and never starts it', { skip: checkUnavailable }, async (t) => {
-  // No AppImage can be built in this suite, so this is a stand-in that
-  // behaves as one does: asked `--appimage-extract` it writes its file tree
-  // to ./squashfs-root; asked anything else, or with APPIMAGE_EXTRACT_AND_RUN
-  // set (scripts/build.sh exports it for the bundler's own tools), it starts
-  // the app. What a real AppImage does with the set's libraries is not proved
-  // by this.
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-appimage-')));
-  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
-  const started = path.join(root, 'started');
-  const standIn = (name, extra) => {
-    const file = path.join(root, name);
-    fs.writeFileSync(
-      file,
-      `#!/bin/sh
-if [ -n "\${APPIMAGE_EXTRACT_AND_RUN:-}" ] || [ "$*" != --appimage-extract ]; then
-  echo started >> "${started}"
-  exit 0
-fi
-mkdir -p squashfs-root/usr/bin squashfs-root/usr/lib/Vela/mpv-scripts
-echo app > squashfs-root/usr/bin/vela
-echo script > squashfs-root/usr/lib/Vela/mpv-scripts/autocrop.lua
-${extra}
-`,
-    );
-    // As a download leaves it: not executable. The check must cope without
-    // changing the builder's file.
+test('the package check reads an AppImage with unsquashfs and never runs it', { skip: checkUnavailable }, async (t) => {
+  // An AppImage could unpack itself, but whatever it is would then run, with
+  // the rights of whoever checks it. These AppImages are stand-ins, and so is
+  // unsquashfs (see unsquashfsStandIn); a real squashfs is read in the test
+  // after this one, where squashfs-tools is installed.
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-appimage-')));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const calls = path.join(scratch, 'unsquashfs-calls');
+  const ran = path.join(scratch, 'ran');
+  const image = (name, bytes = appImageOf(squashfsLike)) => {
+    const file = path.join(scratch, name);
+    fs.writeFileSync(file, bytes);
+    // As a download leaves it: not executable. The check must not change it.
     fs.chmodSync(file, 0o644);
     return file;
   };
+  const both = [['--without-libmpv'], []];
 
-  await t.test('one without the set passes', () => {
-    const image = standIn('Vela_1.0.0_amd64.AppImage', '');
-    const run = checkPackageRun(['--without-libmpv', image], checkPackagePath, { APPIMAGE_EXTRACT_AND_RUN: '1' });
+  await t.test('a file named like an AppImage that is a script: never run, refused before anything else', () => {
+    // It does what an AppImage asked to unpack itself would do, and leaves a
+    // mark that it ran. Executable or not, it must not run.
+    const script = `#!/bin/sh
+echo ran >> "${ran}"
+mkdir -p squashfs-root/usr/bin
+echo app > squashfs-root/usr/bin/vela
+`;
+    for (const mode of [0o644, 0o755]) {
+      const file = image(`Vela_1.0.${mode}_amd64.AppImage`, script);
+      fs.chmodSync(file, mode);
+      for (const args of both) {
+        const run = checkPackageRun([...args, file], checkPackagePath, {
+          PATH: unsquashfsStandIn(t, { calls }),
+          APPIMAGE_EXTRACT_AND_RUN: '1',
+        });
+        assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+        assert.match(run.stdout, /^ {5}this is not an AppImage this check can read: no squashfs follows an ELF program in it$/m);
+        assert.match(run.stdout, /^FAIL unpack: the package could not be unpacked$/m);
+        assert.doesNotMatch(run.stdout, /^ok /m);
+        assert.match(run.stdout, /^RESULT FAIL /m);
+      }
+    }
+    assert.equal(fs.existsSync(ran), false, 'the file named like an AppImage was run');
+    assert.deepEqual(recordedCalls(calls), [], 'unsquashfs was given a file that is no AppImage');
+  });
+
+  await t.test('an ELF program with no squashfs after it is refused, and so is a cut-off header', () => {
+    const noImage = image('Vela_1.0.3_amd64.AppImage', appImageOf(Buffer.from('not a squashfs\n')));
+    const cutOff = image('Vela_1.0.4_amd64.AppImage', appImageOf(squashfsLike).subarray(0, 40));
+    for (const file of [noImage, cutOff]) {
+      const run = checkPackageRun(['--without-libmpv', file], checkPackagePath, { PATH: unsquashfsStandIn(t, { calls }) });
+      assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+      assert.match(run.stdout, /^ {5}this is not an AppImage this check can read: /m);
+    }
+    assert.deepEqual(recordedCalls(calls), []);
+  });
+
+  await t.test('one without the set passes; unsquashfs reads it from where its program ends', () => {
+    const file = image('Vela_1.0.0_amd64.AppImage');
+    const run = checkPackageRun(['--without-libmpv', file], checkPackagePath, { PATH: unsquashfsStandIn(t, { calls }) });
     assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^ok   absent: nothing named like the set /m);
-    assert.equal(fs.statSync(image).mode & 0o777, 0o644);
+    const [call, ...more] = recordedCalls(calls);
+    assert.deepEqual(more, []);
+    assert.deepEqual(call.slice(0, 4), ['-no-progress', '-no-xattrs', '-o', '128']);
+    assert.equal(call[4], '-d');
+    assert.match(call[5], /\/1\/root$/);
+    assert.equal(call[6], file, 'the builder\'s file is read where it lies; no copy is made to run');
+    assert.equal(call.length, 7);
+    assert.equal(fs.statSync(file).mode & 0o777, 0o644);
+    fs.rmSync(calls);
   });
 
   await t.test('one with a library of the set is found out', () => {
-    const image = standIn(
-      'Vela_1.0.1_amd64.AppImage',
-      'mkdir -p squashfs-root/usr/lib/Vela/libmpv\necho x > squashfs-root/usr/lib/Vela/libmpv/libvela-ass.so.9',
-    );
-    const run = checkPackageRun(['--without-libmpv', image], checkPackagePath, { APPIMAGE_EXTRACT_AND_RUN: '1' });
+    const PATH = unsquashfsStandIn(t, {
+      calls,
+      extra: 'mkdir -p "$dest/usr/lib/Vela/libmpv"\necho x > "$dest/usr/lib/Vela/libmpv/libvela-ass.so.9"',
+    });
+    const run = checkPackageRun(['--without-libmpv', image('Vela_1.0.1_amd64.AppImage')], checkPackagePath, { PATH });
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL absent: the package has usr\/lib\/Vela\/libmpv$/m);
     assert.match(run.stdout, /^FAIL absent: the package has usr\/lib\/Vela\/libmpv\/libvela-ass\.so\.9$/m);
@@ -1881,20 +1974,130 @@ ${extra}
     // A package can carry a directory without any permission bit. Unpacked by
     // an ordinary account it cannot be listed, and a check that only looked
     // where it was allowed to would pass this package.
-    const image = standIn(
-      'Vela_1.0.2_amd64.AppImage',
-      [
-        'mkdir -p squashfs-root/usr/share/closed',
-        'echo x > squashfs-root/usr/share/closed/libvela-ass.so.9',
-        'chmod 000 squashfs-root/usr/share/closed/libvela-ass.so.9 squashfs-root/usr/share/closed',
+    const PATH = unsquashfsStandIn(t, {
+      calls,
+      extra: [
+        'mkdir -p "$dest/usr/share/closed"',
+        'echo x > "$dest/usr/share/closed/libvela-ass.so.9"',
+        'chmod 000 "$dest/usr/share/closed/libvela-ass.so.9" "$dest/usr/share/closed"',
       ].join('\n'),
-    );
-    const run = checkPackageRun(['--without-libmpv', image]);
+    });
+    const run = checkPackageRun(['--without-libmpv', image('Vela_1.0.2_amd64.AppImage')], checkPackagePath, { PATH });
     assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
     assert.match(run.stdout, /^FAIL absent: the package has usr\/share\/closed\/libvela-ass\.so\.9$/m);
   });
 
-  assert.equal(fs.existsSync(started), false, 'the AppImage was started');
+  await t.test('without unsquashfs an AppImage is not judged, and the run says it could not check', (t) => {
+    const PATH = pathWithout(t, 'unsquashfs');
+    const good = pacmanPackage(t, {}).file;
+    for (const args of both) {
+      const run = checkPackageRun([...args, image('Vela_1.0.0_amd64.AppImage'), good], checkPackagePath, { PATH });
+      assert.equal(run.status, 2, `${run.stdout}\n${run.stderr}`);
+      assert.match(
+        run.stdout,
+        /^FAIL unpack: unsquashfs is not installed \(squashfs-tools\), and an AppImage is read with nothing else, so this package could not be checked$/m,
+      );
+      // The other package is judged all the same.
+      assert.deepEqual(run.stdout.match(/^RESULT \w+/gm), ['RESULT FAIL', args.length ? 'RESULT PASS' : 'RESULT FAIL']);
+    }
+  });
+});
+
+// A real squashfs behind an ELF header: needs mksquashfs to make one and
+// unsquashfs to read it (squashfs-tools).
+const squashfsToolsMissing = ['mksquashfs', 'unsquashfs'].find(
+  (tool) => spawnSync('/bin/sh', ['-c', `command -v ${tool}`]).status !== 0,
+);
+test('the package check reads a real squashfs behind an ELF program', {
+  skip: checkUnavailable || (squashfsToolsMissing && `needs squashfs-tools (${squashfsToolsMissing} is not installed)`),
+}, async (t) => {
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-squashfs-')));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const appImage = (name, files, modes = {}) => {
+    const tree = path.join(scratch, `${name}.tree`);
+    for (const [file, contents] of Object.entries({ 'usr/bin/vela': 'the app\n', ...files })) {
+      fs.mkdirSync(path.dirname(path.join(tree, file)), { recursive: true });
+      fs.writeFileSync(path.join(tree, file), contents);
+    }
+    for (const entry of fs.readdirSync(tree, { recursive: true, withFileTypes: true })) {
+      fs.chmodSync(path.join(entry.parentPath, entry.name), entry.isDirectory() ? 0o755 : 0o644);
+    }
+    for (const [file, mode] of Object.entries(modes)) fs.chmodSync(path.join(tree, file), mode);
+    const squashfs = path.join(scratch, `${name}.squashfs`);
+    const made = spawnSync('mksquashfs', [tree, squashfs, '-noappend', '-quiet', '-all-root'], { encoding: 'utf8' });
+    assert.equal(made.status, 0, made.stderr);
+    const file = path.join(scratch, name);
+    fs.writeFileSync(file, appImageOf(fs.readFileSync(squashfs)));
+    return file;
+  };
+  const clean = checkPackageRun(['--without-libmpv', appImage('Vela_1.0.0_amd64.AppImage', {})]);
+  assert.equal(clean.status, 0, `${clean.stdout}\n${clean.stderr}`);
+  const dirty = checkPackageRun([
+    '--without-libmpv',
+    appImage('Vela_1.0.1_amd64.AppImage', { 'usr/lib/Vela/libmpv/libvela-ass.so.9': 'x\n' }),
+  ]);
+  assert.equal(dirty.status, 1, `${dirty.stdout}\n${dirty.stderr}`);
+  assert.match(dirty.stdout, /^FAIL absent: the package has usr\/lib\/Vela\/libmpv\/libvela-ass\.so\.9$/m);
+  // The modes in the image are the package's, and unsquashfs keeps them.
+  const right = manifestOf(pinned);
+  const inSet = Object.fromEntries(Object.entries(setFilesOf(right)).map(([name, contents]) => [`usr/lib/Vela/libmpv/${name}`, contents]));
+  const closed = checkPackageRun([appImage('Vela_1.0.2_amd64.AppImage', inSet, { 'usr/lib/Vela/libmpv/libmpv.so.2': 0o600 })]);
+  assert.equal(closed.status, 1, `${closed.stdout}\n${closed.stderr}`);
+  assert.match(closed.stdout, /^ok   place: the set is at usr\/lib\/Vela\/libmpv$/m);
+  assert.match(closed.stdout, /^FAIL access: usr\/lib\/Vela\/libmpv\/libmpv\.so\.2 cannot be read by every user/m);
+});
+
+test('the package check never lets an unpacked package write outside its temporary directory', { skip: checkUnavailable }, async (t) => {
+  // What bsdtar does by default, and what the check relies on: it refuses a
+  // name with "..", takes the leading "/" off an absolute name (which then
+  // lands inside the package's tree), and refuses to write through a
+  // symbolic link or to make a hard link to a file outside. Each refusal
+  // fails the package, in either mode.
+  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-escape-')));
+  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+  const outside = path.join(scratch, 'outside');
+  fs.mkdirSync(outside);
+  fs.writeFileSync(path.join(outside, 'victim'), 'as it was\n');
+  const make = [
+    'import io, sys, tarfile',
+    'out, outside, which = sys.argv[1], sys.argv[2], sys.argv[3]',
+    'def add(t, name, data=b"escaped\\n", **fields):',
+    '    entry = tarfile.TarInfo(name)',
+    '    for key, value in fields.items(): setattr(entry, key, value)',
+    '    entry.size = len(data) if entry.type == tarfile.REGTYPE else 0',
+    '    t.addfile(entry, io.BytesIO(data) if entry.type == tarfile.REGTYPE else None)',
+    'with tarfile.open(out, "w", format=tarfile.GNU_FORMAT) as t:',
+    '    add(t, "usr/bin/vela", b"the app\\n")',
+    '    if which == "dotdot": add(t, "../" * 30 + outside.lstrip("/") + "/dotdot")',
+    '    if which == "absolute": add(t, outside + "/absolute")',
+    '    if which == "through a link":',
+    '        add(t, "usr/out", type=tarfile.SYMTYPE, linkname=outside)',
+    '        add(t, "usr/out/through")',
+    '    if which == "a hard link out":',
+    '        add(t, "usr/hard", type=tarfile.LNKTYPE, linkname=outside + "/victim")',
+    '        add(t, "usr/hard", b"overwritten\\n")',
+    '    if which == "a hard link through a link":',
+    '        add(t, "usr/out", type=tarfile.SYMTYPE, linkname=outside)',
+    '        add(t, "usr/hard", type=tarfile.LNKTYPE, linkname="usr/out/victim")',
+    '        add(t, "usr/hard", b"overwritten\\n")',
+  ].join('\n');
+  for (const which of ['dotdot', 'absolute', 'through a link', 'a hard link out', 'a hard link through a link']) {
+    await t.test(which, () => {
+      // An uncompressed tar under a pacman package's name: bsdtar reads either.
+      const file = path.join(scratch, `vela-1.0.0-1-x86_64.pkg.tar.zst`);
+      const made = spawnSync('python3', ['-I', '-c', make, file, outside, which], { encoding: 'utf8' });
+      assert.equal(made.status, 0, made.stderr);
+      for (const mode of [['--without-libmpv'], []]) {
+        const run = checkPackageRun([...mode, file]);
+        if (which !== 'absolute') {
+          assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+          assert.match(run.stdout, /^FAIL unpack: the package could not be unpacked$/m);
+        }
+        assert.deepEqual(fs.readdirSync(outside), ['victim'], `${which}: the package wrote outside`);
+        assert.equal(fs.readFileSync(path.join(outside, 'victim'), 'utf8'), 'as it was\n');
+      }
+    });
+  }
 });
 
 test('the package check stops when mpv was bumped and its client API version was not looked up again', { skip: checkUnavailable }, (t) => {
@@ -2086,6 +2289,28 @@ test('the package check, asked beforehand, says whether it can run and judges no
       assert.deepEqual([run.status, run.stdout], [2, '']);
       assert.match(run.stderr, /^check-package: bsdtar is not installed \(libarchive; on Debian and Ubuntu: libarchive-tools\)\n$/);
     }
+  });
+
+  await t.test('no unsquashfs on this machine: it matters only when an AppImage is to be checked', (t) => {
+    const PATH = pathWithout(t, 'unsquashfs');
+    for (const mode of [[], ['--without-libmpv']]) {
+      const run = checkPackageRun(['--preflight', ...mode, '--set', set, '--appimage'], checkPackagePath, { PATH });
+      assert.deepEqual([run.status, run.stdout], [2, '']);
+      assert.equal(run.stderr, 'check-package: unsquashfs is not installed (squashfs-tools); an AppImage is read with nothing else\n');
+      const withoutAppImage = checkPackageRun(['--preflight', ...mode, '--set', set], checkPackagePath, { PATH });
+      assert.deepEqual([withoutAppImage.status, withoutAppImage.stderr], [0, '']);
+    }
+    // With it, an AppImage can be checked.
+    const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-calls-')));
+    t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+    const found = checkPackageRun(['--preflight', '--set', set, '--appimage'], checkPackagePath, {
+      PATH: unsquashfsStandIn(t, { calls: path.join(scratch, 'calls') }),
+    });
+    assert.deepEqual([found.status, found.stderr], [0, '']);
+    // Named packages say for themselves whether one is an AppImage.
+    const named = checkPackageRun(['--appimage', pacmanPackage(t, {}).file]);
+    assert.deepEqual([named.status, named.stdout], [2, '']);
+    assert.equal(named.stderr, 'check-package: --appimage goes with --preflight; name the packages instead\n');
   });
 
   await t.test('no Python on this machine', (t) => {

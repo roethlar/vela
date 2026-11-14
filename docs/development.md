@@ -297,9 +297,15 @@ directory (nothing is installed) and requires that:
   `usr/share/licenses/vela/libmpv`.
 
 It needs `bsdtar` and Python 3, and, because it really loads the library, the
-system libraries the set leans on (the `system` lines of the `MANIFEST`). The
-build script asks it before building anything (`check-package.sh
---preflight`) whether it can run here: the first two, and its own record of
+system libraries the set leans on (the `system` lines of the `MANIFEST`). An
+AppImage needs `unsquashfs` too (squashfs-tools, 4.4 or later): the check
+never runs the AppImage, not even to unpack itself, but reads the squashfs
+that follows its ELF program; a file named `.AppImage` that is not such a
+program is refused before anything else is done with it. Without `unsquashfs` an AppImage is not judged:
+it fails, and the check ends with status 2, as for a check that could not be
+made. The build script asks it before building anything (`check-package.sh
+--preflight`, with `--appimage` when an AppImage is to be built) whether it
+can run here: those tools, and its own record of
 the pinned mpv's client API version. A machine that cannot check then stops
 at once and not after the release build. If the check cannot judge the
 packages for another reason, the build fails too and says that the packages
@@ -354,7 +360,9 @@ Not done yet:
 - **CI does not run the tests of the check.** Most of
   `tests/libmpv-packaging.test.mjs` runs `check-package.sh` on packages it
   makes itself, and for that it needs `bsdtar`, as the check does. Where
-  `bsdtar` is missing those tests are skipped and the output says so. `npm
+  `bsdtar` is missing those tests are skipped and the output says so; the one
+  that reads a real squashfs behind an ELF program also needs squashfs-tools
+  (`mksquashfs` and `unsquashfs`) and is skipped without it. `npm
   run check` runs in the `frontend` job of `ci.yml`, which installs nothing,
   and the software list of GitHub's `ubuntu-latest` image does not name
   `bsdtar`. So on CI they are most likely skipped, and a green run there
