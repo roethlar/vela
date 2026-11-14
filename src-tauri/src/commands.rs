@@ -4444,8 +4444,9 @@ fn remember_window_on_exit_with<'a>(
 /// left it, or, when there has been none, as `first_of_run` says. What this
 /// run observed always wins over the setting, and embedded plays in between
 /// do not make the setting apply again (review finding pw-6). The screen it
-/// opens on is not decided here but with the play's copy, by the same rule
-/// (`screen_for_play`).
+/// opens on is not decided here but by the same rule (`screen_for_play`):
+/// for a Compatible choice with the play's copy, for any other at the
+/// launch, after the stream is resolved (`screen_at_launch`).
 fn opening_window(
     record: &PlaybackWindowRecord,
     first_of_run: playback::PlaybackWindowState,
