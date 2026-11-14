@@ -535,3 +535,80 @@ Not covered, and why:
   reading.
 - **The error line of a play the user started** can still be cleared by
   the refresh the report triggers, as in round 2.
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-14 06:54 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d8ca-b82f-7512-8f2e-14e546d69e2e`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 06:42 UTC, finished 06:52 UTC.
+- Reviewed head `060a5fd9e5477c5d9e80bd6e50a0efbde6bca9db`, base
+  `5dc176164f1d872752e9d3023fd293037cace818` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/commands.rs:4385 — Cancelling a manual source choice after A ends cleanly but before its completion is dispatched emits runOver=true, although A remains authorized for continuation. I reproduced cancel_choice → tracker report → advance_playlist returning ContinuePlaying → B starting; replaying the actual page functions confirmed fullscreen is lost before B starts. This acknowledged gap is an introduced regression: no running player or pending choice does not prove no successor is coming. Coordinate this report with outstanding completion/continuation work without changing cancellation semantics. The enumeration misses this order: its choice chains require DispatchA before ChoiceEnds, and its model marks continuation as coming only after dispatch.
+
+### Halted for the owner (2026-11-14)
+
+The reviewer has reopened this finding three times. Before the third
+verdict the agent doing this work had written down, and told the owner,
+that a third reopen would stop the work and go to the owner. It has
+stopped. Nothing described below as "would close it" has been built.
+
+Where it stands:
+
+- Three repairs are on `main`: `4118fea`, `c872dad`, `060a5fd`.
+- The third closed all four orders of events the reviewer named in round
+  2. The reviewer raised none of them again and confirmed the guard.
+- Its one comment is about something the third repair ADDED, which this
+  record listed under "Not covered": the report a source choice makes when
+  it ends without a play. That report is decided from "nothing is playing,
+  no choice is waiting, the page holds the player's fullscreen". The
+  reviewer's point, which is right: that does not prove nothing is coming.
+  A play that has just ended cleanly still has its completion waiting to
+  be dispatched, and the dispatch may start the next play.
+- What a user could meet: a source-choice dialog the user opened by hand
+  is still up while a play runs fullscreen in Vela's window; the play ends
+  cleanly; the user cancels the dialog in the moment (about a second at
+  most) before Vela has dealt with that end. Vela's window then leaves
+  fullscreen, and the next play of the run starts windowed. Nothing is
+  left fullscreen with nothing playing; that failure, the one this finding
+  is about, is closed in every order the reviewer and the helpers found.
+- Reaching it by hand is unlikely: the player view covers the page while a
+  play runs, so the dialog has to have been opened between two plays of a
+  run and left open.
+
+What would close it (the agent's design, not built, not reviewed):
+
+- A choice's end should report the end of the run only when the run's end
+  hangs on that choice. That is so for a choice made for a play that
+  follows another (`replace_session` is set: the dispatcher's successor,
+  or Continue Playing's), and for a choice the user opened by hand ONLY
+  once the dispatcher has met it at a clean end and answered "a successor
+  is being chosen" on its account (`has_manual_pending` in
+  `advance_playlist`); the dispatcher would mark the choice then.
+- A hand-opened choice the dispatcher has not met reports nothing when it
+  ends, as before the third repair. The dispatch that is still to come
+  finds no choice waiting and decides as it always did.
+- A choice that is no longer held (it expired after 120 seconds) reports
+  nothing: by then the page's own 50-second backstop has left fullscreen.
+- The enumerating test gains the reviewer's order (a choice ending before
+  the old play's tracker reports and before its dispatch) for a
+  hand-opened choice. The change takes reports away; it adds no new state
+  beyond one mark on a waiting choice.
+
+The question for the owner: may the agent make that fourth, small repair
+and send it to the reviewer again?
+
+- **Yes** (the agent's recommendation): one more commit to `main` for
+  this finding and one more review round. The embedded player stays hidden
+  either way.
+- **No, leave it**: `pc-2` stays open with the race above on record. The
+  window can lose fullscreen once, in the case described.
+- **No, take the source-choice report out again**: the race goes, and what
+  it fixed comes back: cancelling the source choice of a playlist's next
+  entry leaves the library fullscreen until the 50-second backstop.
