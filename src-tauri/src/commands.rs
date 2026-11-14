@@ -9154,6 +9154,26 @@ mod tests {
     }
 
     #[test]
+    fn quitting_leaves_the_record_free_while_it_waits_for_the_reader() {
+        // The record's lock is taken only to find the play: an end callback
+        // writing during the exit's wait is not held up by it.
+        let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
+        let reading = observation.reader_started();
+        let waiting = {
+            let record = record.clone();
+            std::thread::spawn(move || wait_for_last_external_reader(&record, Duration::from_secs(3)))
+        };
+        std::thread::sleep(Duration::from_millis(300));
+        assert!(!waiting.is_finished(), "the wait is still going on");
+        assert!(
+            record.try_lock().is_ok(),
+            "the record must be free while quitting waits for the reader"
+        );
+        drop(reading);
+        assert_eq!(waiting.join().unwrap(), playback::ReaderWait::FinishedWithin);
+    }
+
+    #[test]
     fn quitting_does_not_wait_for_a_reader_that_has_finished() {
         let (observation, record) = windowed_play_in_record("play", crate::player::PlayerKind::External);
         drop(observation.reader_started());
