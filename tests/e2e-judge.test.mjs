@@ -873,6 +873,93 @@ test('pw-8: windowsetting goes on after a fullscreen change only once mpv has re
   await changing;
 });
 
+// The two tests above run the scenario's exported play() and setFullscreen().
+// They prove the scenario waits only if its run() really calls those two: a
+// copy of either inside run(), without the waits, would leave them green. So
+// the scenario's source is held to this: each name is bound once, by its
+// exported module-level function, and used nowhere but as a call; every call
+// is an awaited, unconditional statement directly in run()'s body, play()
+// with the scenario's own world and the real app and mpv (no second
+// argument); and fullscreen is changed nowhere but in setFullscreen().
+test('pw-8: windowsetting run() plays and changes fullscreen only through the guarded play() and setFullscreen()', () => {
+  const file = 'scenarios/windowsetting.mjs';
+  const source = fs.readFileSync(new URL(`./e2e/${file}`, import.meta.url), 'utf8');
+  const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  const declared = {};
+  for (const name of ['play', 'setFullscreen']) {
+    const found = tree.statements.filter((node) => ts.isFunctionDeclaration(node) && node.name?.text === name);
+    assert.equal(found.length, 1, `${name} is declared once at module level`);
+    assert.ok(
+      found[0].modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword)
+        && found[0].modifiers?.some((modifier) => modifier.kind === ts.SyntaxKind.AsyncKeyword),
+      `${name} is the exported async function the tests above run`,
+    );
+    declared[name] = found[0];
+  }
+  const runs = [];
+  const calls = { play: [], setFullscreen: [] };
+  const fullscreenChanges = [];
+  const visit = (node) => {
+    if (ts.isMethodDeclaration(node) && node.name.getText(tree) === 'run') runs.push(node);
+    if (ts.isIdentifier(node) && node.text in calls) {
+      if (node === declared[node.text].name) {
+        // The declaration itself.
+      } else {
+        assert.ok(
+          ts.isCallExpression(node.parent) && node.parent.expression === node,
+          `${node.text} is used only as a call of the module-level function, not as "${node.parent.getText(tree)}"`,
+        );
+        calls[node.text].push(node.parent);
+      }
+    }
+    if (ts.isCallExpression(node)
+      && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.name.text === 'setProp'
+      && node.arguments[0]?.getText(tree) === "'fullscreen'") {
+      fullscreenChanges.push(node);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  assert.equal(runs.length, 1, 'one run()');
+  const body = runs[0].body;
+  const statementIn = (call) => {
+    assert.ok(ts.isAwaitExpression(call.parent), `"${call.getText(tree)}" is awaited`);
+    let node = call.parent.parent;
+    if (ts.isVariableDeclaration(node)) node = node.parent?.parent;
+    assert.ok(
+      (ts.isExpressionStatement(node) || ts.isVariableStatement(node)) && node.parent === body,
+      `"${call.getText(tree)}" is an unconditional statement directly in run()'s body`,
+    );
+    const preceding = body.statements.slice(0, body.statements.indexOf(node));
+    assert.ok(!preceding.some((s) => ts.isReturnStatement(s) || ts.isThrowStatement(s)), `"${call.getText(tree)}" is reachable`);
+  };
+  assert.equal(calls.play.length, 6, 'run() starts its six plays through play()');
+  for (const call of calls.play) {
+    statementIn(call);
+    assert.deepEqual(call.arguments.map((arg) => arg.getText(tree)), ['world'], 'play() with the scenario world and the real app and mpv');
+  }
+  const world = body.statements.filter((s) => ts.isVariableStatement(s)
+    && s.declarationList.declarations.some((d) => d.name.getText(tree) === 'world'));
+  assert.equal(world.length, 1, 'world is declared once, in run()');
+  assert.equal(
+    world[0].declarationList.declarations[0].initializer?.getText(tree),
+    '{ driver, readConfigSafely }',
+    "the world is run()'s own driver and config reader",
+  );
+  assert.equal(calls.setFullscreen.length, 3, "run() changes fullscreen three times through setFullscreen()");
+  for (const call of calls.setFullscreen) {
+    statementIn(call);
+    assert.equal(call.arguments.length, 2);
+  }
+  assert.ok(fullscreenChanges.length > 0, 'the change is found');
+  for (const change of fullscreenChanges) {
+    let node = change;
+    while (node && node !== declared.setFullscreen) node = node.parent;
+    assert.equal(node, declared.setFullscreen, `fullscreen is changed only in setFullscreen(), not by "${change.getText(tree)}"`);
+  }
+});
+
 // MpvIpc keeps what mpv reports of the properties a connection observes.
 test('pw-8: MpvIpc keeps the last value mpv reported for an observed property', async () => {
   const written = [];
