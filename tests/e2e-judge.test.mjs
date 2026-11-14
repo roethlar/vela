@@ -102,8 +102,13 @@ function standInMpv(positionAt) {
   let paused = false;
   let pos = 0.5;
   let resumedAt = null;
+  const made = Date.now();
   return {
     async getProp(name) {
+      // Past any time the scenario can take, it answers no more, so that a
+      // scenario sampling for good stops there and the test's timeout fails
+      // it (a timer left running would keep the test process alive).
+      if (Date.now() - made > 10000) return new Promise(() => {});
       if (name === 'pause') return paused;
       if (name === 'time-pos') return paused || resumedAt == null ? pos : positionAt(Date.now() - resumedAt);
       throw new Error(`the stand-in has no property ${name}`);
@@ -118,7 +123,11 @@ function standInMpv(positionAt) {
   };
 }
 
-test('pa-1: the markers scenario fails a skip that lands inside the range', async () => {
+// A scenario that ignored a failing verdict would sample for good: the
+// timeout makes that a failure, not a hang.
+const STAND_IN = { timeout: 15000 };
+
+test('pa-1: the markers scenario fails a skip that lands inside the range', STAND_IN, async () => {
   // The skip lands at 9 s after 0.9 s of playing, and playback would be past
   // the end 3 s later.
   const mpv = standInMpv((ms) => (ms < 900 ? 1 + ms / 1000 : 9 + (ms - 900) / 1000));
@@ -129,7 +138,7 @@ test('pa-1: the markers scenario fails a skip that lands inside the range', asyn
   );
 });
 
-test('pa-1: the markers scenario passes one jump across the range, and logs it', async (t) => {
+test('pa-1: the markers scenario passes one jump across the range, and logs it', STAND_IN, async (t) => {
   const mpv = standInMpv((ms) => (ms < 900 ? 1 + ms / 1000 : 12.5));
   const logged = [];
   t.mock.method(console, 'log', (line) => logged.push(line));
