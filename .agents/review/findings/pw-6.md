@@ -1,7 +1,7 @@
 # pw-6: after a play in the embedded player, the next mpv window is treated as the first of the run again
 
 **Severity**: MEDIUM — there is one record of the last play, and a play in the embedded player replaces it with one that carries no window. A play in mpv's window that follows it finds no window to inherit and gets what the setting says for the FIRST window of a run: with "Full screen" chosen, a window the user had left windowed earlier in the same run opens fullscreen again. The embedded player is hidden, so this needs it switched on by hand.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `55be8fc`, `0e5ea59`
 
@@ -190,3 +190,33 @@ generation pass over `f1e0c9c..9815e10` with Slice 3 of the plan as its
 mandate, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`). Reviewer's
 title: "An embedded play makes the first-window setting apply again". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 11:00 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9ad-f7a1-7763-ad98-1b9d2f5a543e`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 10:50 UTC, finished 11:00 UTC.
+- Reviewed head `0e5ea592532c476cafe6a1142dc6de68d2f57ef1`, base
+  `530e9a544cf0b7f2f3f4837aec093b1d5b3f0492` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  - src-tauri/src/commands.rs:3796 — publish is the only writer after default initialization: last_external at 3798 follows successful external plays; latest at 3800 follows every successful play. Accessors at 3804/3808 only read. External-only runs keep identical sessions and shared live observations in both slots, so these two commits preserve their opening, saving and quitting behavior.
+  - src-tauri/src/commands.rs:1221 — get_playback_preferences correctly uses latest: Settings reports the most recent play's observed display, including embedded playback.
+  - src-tauri/src/commands.rs:4289 — inherited_window_state correctly uses last_external; embedded observations must not replace an external window's state.
+  - src-tauri/src/commands.rs:4296 — inherited_screen_name correctly uses last_external for the next external window's screen.
+  - src-tauri/src/commands.rs:4320 — window_to_remember correctly uses last_external with an exact session filter. Embedded ends save nothing; an external A's end after embedded B and external C cannot save a window.
+  - src-tauri/src/commands.rs:4361 — Exit correctly selects last_external, including while embedded playback remains active. Variables named latest in the exit helpers refer to the whole record. Persistence still respects Remember mode and never saves embedded window observations.
+  - src-tauri/src/commands.rs:4458 — opening_window correctly checks last_external before applying first_of_run; intervening embedded plays cannot restart the first-window rule.
+  - src-tauri/src/commands.rs:5044 — compatibility_display correctly uses last_external for upcoming external playback; its embedded exact-successor arm at 5045 correctly uses latest, filtered by player and session.
+  - src-tauri/src/commands.rs:8346 — The remaining latest reads, here and at 8938/8954, correctly test latest-play publication and failed-launch preservation. The rewritten assertions are meaningful: reverting window_to_remember to latest failed both rewritten tests and the late-end persistence test.
+  - src-tauri/src/commands.rs:8330 — Clearing last_external on embedded publish reproduced the predicted fullscreen reset and failed the named guard. Separate mutations proved end persistence, exit persistence, and the previously unproved older-external-end assertion at 8391. After restoring the pinned source, all 76 commands::tests passed.
+  - tests/player-selection.test.mjs:423 — Bypassing publish failed the writer guard; bypassing opening_window failed the launch wiring guards. Restored verification passed all 13 Node tests. Both prescribed commands ran; neither had a socket-related failure. Tracked files were restored unchanged.
+  - tests/e2e/scenarios/windowsetting.mjs:152 — The recorded intermittent failures still warrant separate investigation; their cause is not established here. They predate this fix, and external-only record behavior remains equivalent. Relevant E2E and embedded paths were read, but neither runtime was executed.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
