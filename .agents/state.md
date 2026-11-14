@@ -89,8 +89,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       stands (2026-11-14, afternoon): `pa-8`, `pa-3` and `pa-2` accepted
       and closed. The other five were reopened and repaired, each record
       says on what: `pa-1` once (repair `716abc6` with codex), `pa-7` once
-      (repair `d504a1e` with codex), `pa-4` twice (second repair `cc85c2d`
-      with codex), `pa-5` three times (third repair `bf86854` with codex;
+      (repair `d504a1e` with codex), `pa-4` three times, and HALTED FOR THE OWNER at
+      the third (its record, "Halted for the owner": the rounds are not
+      getting narrower; three ways on, the agent recommends taking it as it
+      is), `pa-5` three times (third repair `bf86854` with codex;
       its record says why it did not go to the owner at the third reopen
       and when it will), `pa-6` twice (its third repair is being written
       by codex, see below). The three that changed scenarios (`pa-1`,
@@ -100,10 +102,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       from the work: `.agents/plans/embedded-player.slice6-notes.md`.
     The owner's by-eye checks and the switch-on (Settings control, release
     notes, version bump) are NOT the agent's to do.
-  - Active review loop: see `.agents/review/index.md`. Two findings are
+  - Active review loop: see `.agents/review/index.md`. Three findings are
     with the owner: `ps-2`, contested after four reopens
-    (`.agents/review/ps-2.contested.md`), and `pc-2`, halted after three
-    (its record, "Halted for the owner").
+    (`.agents/review/ps-2.contested.md`), `pc-2`, halted after three
+    (its record, "Halted for the owner"), and `pa-4`, halted after three
+    (the same heading in its record).
   - On 2026-11-13 the owner switched on multi-agent workflows for the
     session that is doing this work. The agent reads that as the approval
     the 2026-08-20 constraint below asks for before more than one Claude

@@ -378,3 +378,85 @@ added is reported, what it then does is not seen. A process the import
 starts in a group of its own cannot be ended by the check; if it holds the
 check's pipes that is reported (round 2), and if it does not, the spawn
 itself is (the permission net).
+
+### Verification round 3 (repair-delta redispatch), recorded 2026-11-14 13:17 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da25-ad7e-7163-8269-b3614e75c117`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:01 UTC, finished 13:16 UTC.
+- Reviewed head `cc85c2d97358a3fd010c79a8b1d3bd816771c2e3`, base
+  `d7a9bd8049fc4a17e2025615dfd53f542fb05b67` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/import-watch.mjs:171 — The report still precedes asynchronous work from a prepended exit listener. process.prependOnceListener('exit', async () => { await Promise.resolve(); fs.appendFileSync(marker, 'x'); }) received a completely clean report, then wrote the file. Injected into smoke.mjs, it passed all 35 tests and wrote from both processes. The once listener disappears before comparison, and its continuation runs after serialization. No watch listeners or channels were modified.
+  - tests/e2e/import-watch.mjs:177 — Having previously observed an idle loop does not establish natural termination. process.once('beforeExit', () => process.exit(0)) received a completely clean report: idle is already true and the once listener has removed itself. An awaited promise followed by process.exit(0) in a prepended once beforeExit listener also passed. Explicit termination needs detection beyond the idle flag.
+  - tests/e2e/README.md:125 — Freezing node:path does not necessarily make the import fail. A scenario containing try { path.resolve = path.resolve; setTimeout(() => fs.writeFileSync(marker, 'x'), 1); } catch {} received a clean report, while its ordinary import scheduled the timer and wrote the file. The caught assignment failure silently suppresses the operation being checked, reproducing the original timer false clearance.
+  - tests/e2e/import-check.mjs:50 — Cleanup signals a numeric process-group ID after Node has reaped its leader. Once the original group disappears, that ID can be reused before close or the delayed cleanup, allowing SIGKILL to target an unrelated group. A controlled simulation of identifier reuse confirmed that finish kills the replacement group. Preserve ownership of the group until cleanup; the stale numeric ID alone is insufficient.
+  - tests/e2e/README.md:118 — The three-exception list remains incomplete. On Node 26.13.1, process.report.writeReport(path) also refuses the write under audit mode although it succeeds normally. Its permission check is recorded, so this example is rejected, but the claimed behavior equivalence is inaccurate.
+  - tests/e2e-parity.test.mjs:355 — Guard proof confirmed: reverting report timing, removing binding recording, disabling group termination, and replacing SIGKILL with SIGTERM triggered the corresponding guards. The ended and group-emptiness assertions also failed independently when termination was ineffective. All source mutations were restored; all 35 tests passed afterward in the sandbox. Embedded playback and the E2E suite were not run.
+
+Orchestrator: a valid verdict, reopened on five comments. Each is true as
+far as it goes. It is the third reopen, and the coordinating agent stops
+here and puts the finding to the owner.
+
+### Halted for the owner (2026-11-14)
+
+**Where it stands.** The watch is on `main` as of `cc85c2d`. The finding
+as raised (a timer started through Node's timer modules went unseen) is
+closed and held by tests, and so is everything the reviewer demonstrated
+in rounds 1 and 2: a timer by any route, an act put off past the import, a
+replaced function that changed what an import does, a forged or missing
+report, a bad end, a deadline that a process could ignore, the test file
+importing a scenario the watch had not cleared, work left for
+`beforeExit`, a refused `process.binding`, a process left running in the
+watch's group, a kill that was not checked.
+
+**Why it stops.** The rounds are not getting narrower. Round 1 had five
+comments, round 2 four, round 3 five, and each round's are new ways into
+the same three places:
+
+- What a module does at the very end of the process. Round 3: an `exit`
+  listener put in front, whose work is put off once more and runs after
+  the report; a `beforeExit` listener that calls `process.exit(0)` once the
+  loop has been idle.
+- What Node's audit mode changes. The watch runs under it so that Node
+  itself reports writes, processes and the network. But audit mode is not
+  the same as no audit: `node:path` is frozen, `process.binding`, five
+  descriptor calls and `process.report.writeReport` are refused. A module
+  that tries one of those inside a try/catch and acts only if it works
+  does its act in the runner and not under the watch. Each one found can
+  be recorded; the reviewer keeps finding another.
+- Ending what the import started. Round 3: the group is signalled by its
+  number after its first process has been reaped, and a number can in
+  principle be given to another group in between. (In practice the system
+  would have to start about four million processes in that instant.)
+
+Every one of these needs code written to be odd: no scenario in the suite
+does anything of the kind, and a scenario's `run()` can do all of it with
+nothing watching. The watch exists to catch a mistake at import.
+
+**What the coordinating agent thinks, and the choice.**
+
+1. Take it as it is (recommended). The five comments of round 3 go into
+   the record and the README as known limits, and the owner closes the
+   finding. Nothing a user of Vela sees depends on it.
+2. One more round, written by codex as a coding task, since the remaining
+   rules are the reviewer's own: record every listener added to the
+   process (Node announces each one, by any route), record `process.exit`,
+   put a small supervising process in charge of the group so that it is
+   signalled only while its owner lives, and say in the README that audit
+   mode is not equivalent and what is known to differ. This closes round
+   3's comments 1, 2 and 4; comments 3 and 5 can only be stated. The
+   coordinating agent reviews it. It may be reopened again.
+3. Replace the watch by a rule on the text: the loader refuses a scenario
+   file whose top level holds anything but imports, declarations and its
+   default export. That is complete by construction for the file itself,
+   and a different, smaller thing than "importing does nothing". A new
+   piece of work.
+
+Until the owner says, nothing more is done on this finding.
