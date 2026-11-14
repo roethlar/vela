@@ -889,6 +889,34 @@ From Slice 5 (controls and cropping; listed when the slice was designed,
   Vela to freeze: on mpv's own window this once left a process that could
   not be killed.
 
+From Slice 6 (parity): what no test here can show, and so is yours before
+the embedded player is offered.
+
+- **The automatic quality step-down, in each player** (rows 10 and 11 of
+  the inventory). Play a Plex film at quality Automatic over a link slow
+  enough to starve it, or throttled. The play should be started again at a
+  lower quality at about the same position, with a short notice on screen
+  for about two seconds, once. With the embedded player selected the
+  relaunch must stay in Vela's window and the player view must stay up
+  across it. Nothing in the test venue can degrade a play, and Vela has no
+  switch that forces a step-down; unit tests hold the decision and the
+  notice's rules, and nothing has shown the two together in a running app.
+- **Three behaviours the tests reach only by a route no user takes.** Each
+  shows what Vela does once the step is taken, not that your own gesture
+  takes it:
+  - the skip button of the external player, pressed through mpv's own
+    input commands, not a click in mpv's window (row 8b);
+  - a new play stopping a running one in the embedded player, where the
+    second Play is pressed underneath the player view, which no user can
+    reach (row 12a);
+  - Vela's exit stopping playback, started in both players by the page's
+    "Exit Vela" command, not by closing the window (row 12b).
+  Close the window during a play in each player and see that the sound
+  stops and no mpv is left; click the skip button in mpv's window once.
+- **The library shown fullscreen between two episodes** (For the owner,
+  item 10) is now also what the test `continuetv` passes through in the
+  embedded player; how it looks is still for your eye.
+
 ### 2026-11-12 — approval recorded
 
 The owner's go and the three unattended-run rules are in Status. The owner
@@ -1284,6 +1312,17 @@ Each can be overturned; none has shipped to users.
 10. **In fullscreen, the library shows for a moment between two episodes.**
     (Slice 5 design.) Vela's window stays fullscreen from one play to the
     next, and the page behind the player is the library.
+11. **A play that replaces another in the embedded player is not something
+    its user can start.** (Slice 6.) While a play runs, the player view
+    covers the page, so the embedded player's user closes the play and
+    starts the next one. The external player's user can press Play beside
+    mpv's window. The parity tests treat the two as the same behaviour
+    reached by each user's own route.
+12. **A malformed line in the Advanced mpv options is handled differently
+    by the two players.** (Slice 6.) A line holding a NUL character makes
+    the external player fail to start ("Couldn't play"; seen in a test);
+    the embedded player drops the line and plays (by reading). Left as it
+    is; say if the two should agree.
 
 ### 2026-11-13 — Slice 3 review: nine findings, all admitted
 
@@ -1753,3 +1792,133 @@ made: the whole packaging test file against a real `unsquashfs`
 (squashfs-tools 4.7.4, in a container), 188 of 188 with none skipped, and
 the real-squashfs test fails when the image is read from the wrong place.
 CI still runs none of these tests (`.agents/state.md`, Blockers).
+
+### 2026-11-14 — Slice 6 (parity), the test side: landed at `ac3e563`; the switch-on is not the agent's
+
+**What this is.** The plan's parity list ("Behaviour inventory") says each
+of fourteen playback behaviours must pass in both players before the
+embedded one is offered. This commit makes the end-to-end suite show that,
+row by row and player by player, and adds the guard that keeps it shown.
+No product code changed (`src/` and `src-tauri/` are untouched). The
+embedded player is still hidden: no Settings control, no release note, no
+version bump, no change to `README.md` or `docs/usage.md`. Those four
+lines of Slice 6 are the owner's.
+
+**What it shows.** From two full runs of one commit, one in each player,
+judged by `npm run e2e:verdict`:
+
+| Row | Behaviour | External player | Embedded player |
+| --- | --- | --- | --- |
+| 1 | Play starts; resume at start_seconds | playback, playverbs, resume, search | embeddedplay, playback, playverbs, resume, search |
+| 2 | Plex timeline and Jellyfin/Emby check-ins, final stop | multiplex, watchstate | multiplex, watchstate |
+| 3 | Final position on quit; recents stamp; playback-ended | curation, playback, playverbs, watchstate | curation, playback, playverbs, watchstate |
+| 4 | Clean end to watched, Continue Playing modes | completionhub, continueoff, continueon, continuetv, mergedview | completionhub, continueoff, continueon, continuetv, mergedview |
+| 5 | Playlist and server-playlist advance | continueon, playlistplay, serverplaylists | continueon, playlistplay, serverplaylists |
+| 6 | Source choice / policy | mergedview, multiplex, sourcepolicy | mergedview, multiplex, sourcepolicy |
+| 7 | Stream auth header never in argv/URL/title | multiplex | multiplex |
+| 8a | Skip markers: automatic skip | markers | markers |
+| 8b | Skip markers: the skip button | markerbutton (test-only route) | embeddedskip |
+| 9 | Autocrop off / manual / auto | autocrop | embeddedcrop |
+| 10 | Automatic quality step-down relaunch | exempted | exempted |
+| 11 | Unrequested-play notice | exempted | exempted |
+| 12a | A new play stops the previous one | replaceplay | replaceplay (test-only route) |
+| 12b | App exit stops playback | exitplay (test-only route) | exitplay (test-only route) |
+| 13a | User mpv arguments (Advanced) | mpvargs | embeddedplay, mpvargs |
+| 13b | Own-config mode | **not shown** (`embeddedownconfig` fails there) | embeddedownconfig |
+| 14 | Ends at end of file rather than idling | completionhub, continueoff, continueon, continuetv | completionhub, continueoff, continueon, continuetv, embeddedownconfig, embeddedplay |
+
+Three of the plan's rows are split where their halves are proven
+differently (8, 12, 13). "Exempted" and "test-only route" are explained in
+"Owner checks outstanding", above. Row 13b is not shown in the external
+player because of a defect in the external player that these tests found
+(below).
+
+**The guard, in three layers.**
+
+- *What a scenario says.* Every scenario declares, on its default export,
+  the rows it stands for (or why it stands for none), why it runs in one
+  player only, and any test-only route it takes. One loader
+  (`tests/e2e/scenario-loader.mjs`) serves the runner and the tests and
+  refuses a scenario it does not understand. `tests/e2e-parity.test.mjs`,
+  part of `npm run check`, fails when a row is shown in one player and
+  neither shown nor exempted in the other, when an exemption is stale or
+  names a test that does not exist, and when the list
+  (`tests/e2e/parity.mjs`) does not match the table in this file. It
+  imports every scenario with process, socket, file and timer calls
+  watched, so that reading a scenario does nothing.
+- *What a scenario did.* A scenario calls `shown(rows)` at the end of its
+  proof; the runner fails one whose reported rows, or test-only routes
+  taken, differ from what it declares, and writes what happened to
+  `tests/e2e/results/<player>.json`.
+- *What two runs showed.* `npm run e2e:verdict` passes only when both runs
+  are full, of the commit that is checked out, clean, each having built
+  the app it ran; every scenario passed, or failed exactly as its recorded
+  known failure; and every row was reached in each player by a scenario
+  that passed there.
+
+What no layer sees: an assertion weakened or deleted before `shown()`.
+That stays review's.
+
+**The harness.** The test compositor (weston) now has a seat, so the page
+has focus as on a desktop. A play is stopped the way its user stops it
+(`stopPlayAsUser`: mpv's quit in the external player; the view's Close,
+`q` or Escape in the embedded one). An mpv socket is taken for the play's
+only if it belongs to the scenario's own Vela; before, a socket of any
+Vela of the same user could be taken, which had produced timeouts. New
+scenarios: `replaceplay`, `exitplay`, `markerbutton` (external only),
+`mpvargs`. Changed so that they run in both players: `multiplex`,
+`sourcepolicy`, `playlistplay`, `serverplaylists`, `surfaces`,
+`mergedview`, `continuetv`, `playback`, `playverbs`, `curation`,
+`watchstate`, `embeddedownconfig`.
+
+**Runs.** The full check and both full suites were run in a clean
+worktree at `360bb97`, whose tree is identical to the landed commit's
+(`git diff` between the two is empty); each suite built the app.
+
+- Full check: passes (405 Node tests, 602 Rust tests; `npm audit` fails on
+  `main` for a reason of its own, `.agents/state.md`, Blockers).
+- External player: 45 of 47 passed, 6 skipped (the embedded-only
+  scenarios). Failed: `embeddedownconfig`, `pagefail`.
+- Embedded player: 49 of 50 passed, 3 skipped. Failed:
+  `pagefail`.
+- Verdict: PASS. `embeddedownconfig` in the external player and `pagefail`
+  are recorded known failures; the verdict demands exactly their recorded
+  failure text (and accepts a pass of `pagefail`, which is a race).
+
+**Found in the product by these tests; nothing was changed for them.**
+
+- *The external player can idle at the end of a file in "use my own mpv
+  configuration" mode.* A user's `mpv.conf` that makes the `gpu-hq`
+  profile include a file saying `idle=yes` wins over Vela's `--idle=no`,
+  because Vela's command line ends with the stream-header `--include`
+  after it. The play then never finishes: no Continue Playing, no final
+  watched state. This is the 1.0.62 fix (`bf1b1c3`) not reaching one
+  corner; the same corner was closed for the embedded player in review
+  finding `ec-4`. Reproduced with mpv 0.41 alone. It needs that particular
+  `mpv.conf`, and it is why `embeddedownconfig` fails in the external
+  player. Recorded in `.agents/state.md`, Blockers, with the proposed fix;
+  it changes the external player, so it waits for a go.
+- *Vela's exit tells the server nothing about a play that is running.* No
+  final check-in is sent when Vela exits during a play, in either player;
+  the code says the exit does not wait for the tracker, so this looks
+  deliberate. Not changed.
+- *A play replaced by a play of another film keeps its place among the
+  recents* (its position is stamped; it is not moved to the front). The
+  code says so on purpose (`recents::finish_session`). Not changed.
+
+**How it was written.** By two helper agents (the scenarios and harness;
+the guard), attacked by two others (nineteen findings), repaired, checked
+by a further one, which found one more (the verdict accepted runs of
+another commit), repaired again and checked again. The coordinating agent
+closed the last item that check left (a run made with `--skip-build` must
+not count), merged `main`, gave the scenario `main` had gained
+(`embeddedfullscreenend`) its declaration, and made the runs above.
+
+**Not done, and not the agent's:** the Settings control, the default, the
+release notes, `docs/usage.md`, the licence paragraph and the version
+bump. Before those: the owner's by-eye checks (above), the steps for rows
+10 and 11, and the external player's own-configuration defect, which
+leaves row 13b red in the external player.
+
+**Review:** `codereview codex` over the landed commit; see
+`.agents/review/index.md`.

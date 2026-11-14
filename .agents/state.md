@@ -71,13 +71,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       is built under
       an assumption the owner has not ruled on: the plan's "For the
       owner", item 3.
-    - Slice 6 (parity) is next, being written since the evening of
-      2026-11-13 on the local branch `slice6` (tests and harness only; no
-      product code). What was found out for it is
-      `.agents/plans/embedded-player.slice6-notes.md`: why each scenario
-      that fails in the embedded venue fails (none is a defect of the
-      embedded player; two are the test compositor), what proves each
-      inventory row in each player, and a design for the parity guard.
+    - Slice 6 (parity), the TEST SIDE, LANDED at `ac3e563`: every row of
+      the plan's parity list is shown in both players by the end-to-end
+      suite, or recorded as exempted, with a guard in `npm run check` and
+      a verdict over two full runs (`npm run e2e:verdict`; the plan's log
+      has the table). No product code changed. Two rows have no
+      end-to-end proof in either player (the quality step-down and its
+      notice) and one is red in the EXTERNAL player because of a defect
+      these tests found there (Blockers, "own mpv configuration"). The
+      rest of Slice 6 is the switch-on, which is the owner's. Its codex
+      review: `.agents/review/index.md`. Notes kept from the work:
+      `.agents/plans/embedded-player.slice6-notes.md`.
     The owner's by-eye checks and the switch-on (Settings control, release
     notes, version bump) are NOT the agent's to do.
   - Active review loop: see `.agents/review/index.md`. Two findings are
@@ -386,6 +390,23 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   server certificate mpv's library does not accept): assert
   `--tls-verify=yes` in the external launch after the user's options, and
   decide what the embedded player should trust.
+- The external player can idle at the end of a file in "use my own mpv
+  configuration" mode (found 2026-11-14 by the parity tests, unfixed, the
+  owner has not been asked yet). With that setting on, a user `mpv.conf`
+  that makes the `gpu-hq` profile include a file saying `idle=yes` wins
+  over Vela's `--idle=no`. Vela's command line ends with the stream-header
+  `--include` after `--idle=no` (`src-tauri/src/player/external.rs`);
+  with that trailing `--include` mpv ends up idling, without it mpv exits
+  at the end (seen with mpv 0.41 alone; why mpv orders the two so was not
+  established). mpv then stays open at the end of the file and the play
+  never finishes: no Continue Playing, no final watched state, as on
+  Windows before 1.0.62 (`bf1b1c3`). The embedded player had the same
+  corner closed in review finding `ec-4`. It makes the E2E scenario
+  `embeddedownconfig` fail in the external player, which is recorded as a
+  known failure in `tests/e2e/parity.mjs`; take that entry out when this
+  is fixed. Proposed fix (needs a go: it changes the external player's
+  command line): put Vela's lifecycle options after the stream-header
+  include as well, with a test that drives a real mpv.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). One cause of the continuation flakes
   is gone since 2026-11-13: scenarios sought in a file the moment mpv named
