@@ -138,3 +138,22 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `ab95c49..ac3e563`, 2026-11-14 07:27 UTC
 (`.agents/review/codereview-2026-11-14-embedded-parity.md`). Reviewer's
 title: "The import watch misses timers from Node's timer modules". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 10:21 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d988-cd2a-7972-9a62-de08aa31933b`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 10:09 UTC, finished 10:19 UTC.
+- Reviewed head `c294a09eaf95e068d863971074d9c8147984e529`, base
+  `ddbb7433d915b3ad2299103911a7992e32738528` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/import-watch.mjs:143 — Only the scheduler instance is patched. A temporary scenario calling Object.getPrototypeOf(scheduler).wait.call(scheduler, 500, { ref: false }).then(writeFile) returned a completely clean report. The same injection passed all 19 parity tests; importing it in a process kept alive demonstrated the deferred file write. The predicted timer failure remains, contradicting README lines 72–84.
+  - tests/e2e/import-watch.mjs:42 — Wrappers discard function properties and change import behavior. A temporary scenario using setTimeout[promisify.custom]?.(300, undefined, { ref: false }).then(writeFile) reported no effects because wrapping erased promisify.custom. The normal import scheduled the timer and wrote the file. Preserve and instrument these callable properties instead of silently disabling the operation being checked.
+  - tests/e2e-parity.test.mjs:49 — Scenario stdout is trusted as the report, and nonzero exit status is ignored. I injected a scenario that wrote a file, printed a fabricated clean report with the expected names, and called process.exit(7): all 19 tests passed. Removing the beforeExit listener and printing that report also bypassed the helper. Require a trustworthy completion protocol and successful child termination.
+  - tests/e2e-parity.test.mjs:44 — spawnSync's default SIGTERM does not enforce a deadline when the child ignores SIGTERM or stops itself with SIGSTOP. Both probes remained blocked beyond a 200 ms timeout and required an external SIGKILL after 1.8 seconds. The advertised bounded failure can hang indefinitely.
+  - tests/e2e-parity.test.mjs:58 — Scenarios are imported again in the test process even when the watched import times out. Injecting a referenced setInterval into smoke.mjs, with the child deadline shortened to 200 ms, failed the import assertion but kept the suite running until externally killed after eight seconds. Avoid importing a rejected scenario into the parent. Guard mutations separately failed for missing timer, promise-timer, and deferred-write recording; after restoration, all 19 tests passed.
