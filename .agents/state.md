@@ -109,7 +109,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     brought to the owner). Under it these are being fixed, each of which
     this file or a record had as waiting for a go: the second half of
     `pw-9`; the external player idling at the end of a file under the
-    user's own mpv configuration; the order of events left open in `pc-2`;
+    user's own mpv configuration (FIXED, see the commit "a video ends
+    when its file ends in the external player"); the order of events left
+    open in `pc-2`;
     the Arch package not installing `vela-markers.lua`; the lockfile-only
     `npm audit fix`. Their entries under Blockers still say "needs a go":
     read them with this point until each is fixed and its entry removed.
@@ -504,23 +506,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   server certificate mpv's library does not accept): assert
   `--tls-verify=yes` in the external launch after the user's options, and
   decide what the embedded player should trust.
-- The external player can idle at the end of a file in "use my own mpv
-  configuration" mode (found 2026-11-14 by the parity tests, unfixed, the
-  owner has not been asked yet). With that setting on, a user `mpv.conf`
-  that makes the `gpu-hq` profile include a file saying `idle=yes` wins
-  over Vela's `--idle=no`. Vela's command line ends with the stream-header
-  `--include` after `--idle=no` (`src-tauri/src/player/external.rs`);
-  with that trailing `--include` mpv ends up idling, without it mpv exits
-  at the end (seen with mpv 0.41 alone; why mpv orders the two so was not
-  established). mpv then stays open at the end of the file and the play
-  never finishes: no Continue Playing, no final watched state, as on
-  Windows before 1.0.62 (`bf1b1c3`). The embedded player had the same
-  corner closed in review finding `ec-4`. It makes the E2E scenario
-  `embeddedownconfig` fail in the external player, which is recorded as a
-  known failure in `tests/e2e/parity.mjs`; take that entry out when this
-  is fixed. Proposed fix (needs a go: it changes the external player's
-  command line): put Vela's lifecycle options after the stream-header
-  include as well, with a test that drives a real mpv.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). One cause of the continuation flakes
   is gone since 2026-11-13: scenarios sought in a file the moment mpv named

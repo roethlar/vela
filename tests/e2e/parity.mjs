@@ -63,13 +63,6 @@ export const SPLITS = {
 // scenario passes.
 export const KNOWN_FAILURES = [
   {
-    scenario: 'embeddedownconfig',
-    player: 'external',
-    failsWith: "Vela's own idle setting stands, whatever the profile Vela selects has been made to include",
-    defect:
-      "In the external player's own-configuration mode, a user's mpv.conf that redefines the gpu-hq profile to include a file saying idle=yes wins over Vela's --idle=no, so the player idles at the end of the file and the play is never finished. Vela's external command line ends with --include=<stream-header file> after --idle=no (src-tauri/src/player/external.rs, by reading), and mpv applies the profile's include after it. Reproduced with mpv 0.41 alone: MPV_HOME=<that mpv.conf> mpv --no-ytdl --vo=null --profile=gpu-hq --idle=no --include=<any file> <clip> idles; without the trailing --include it exits at the end. The same hazard was fixed for the embedded player only (review finding ec-4). Failed every external run of Slice 6 (7 of 7 and more).",
-  },
-  {
     scenario: 'pagefail',
     player: 'external',
     intermittent: true,

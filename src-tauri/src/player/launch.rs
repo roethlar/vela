@@ -949,6 +949,12 @@ pub(crate) fn build_launch_for(
     } else {
         let include = write_header_include(&spec.http_headers)?;
         args.push(LaunchArg::set("include", include.path.to_string_lossy()));
+        if !embedded {
+            // A CLI include can reapply an include from the user's gpu-hq
+            // profile, even after the earlier lifecycle options. Reassert
+            // the whole lifecycle group once that include has been consumed.
+            args.extend(lifecycle_args(player));
+        }
         Some(include)
     };
     if spec.start_seconds > 0.0 {

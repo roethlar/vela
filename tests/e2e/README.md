@@ -275,9 +275,7 @@ A scenario that runs in both players shows its rows in both, except where
 carries, and the defect with its evidence; `intermittent` for a race that
 does not fail every run, such as `pagefail`'s). Such a scenario shows nothing in
 that player; a row only it claims there is printed as NOT SHOWN, RED, and
-not counted. Today: `embeddedownconfig` in the external player (rows 13b
-and 14; 14 is shown there by other scenarios, 13b by none) and `pagefail`
-in both (it claims no row).
+not counted. Today: `pagefail` in both players (it claims no row).
 
 The parity test reads declarations only: it cannot see that a scenario
 fails in one player, or claims a row it never reaches. That is the parity
@@ -377,8 +375,8 @@ instead.
 `embeddedplay` is the scenario that proves a play really is embedded;
 `playerfallback` is about what happens where it cannot be;
 `embeddedownconfig` (both players, despite its name) plays with a user's
-mpv.conf that tries to override Vela's own options (it fails in the
-external player on a recorded product defect; see Parity);
+mpv.conf that tries to override Vela's own options, and requires Vela's
+lifecycle setting to stand in both players;
 `mpvargs` plays with Advanced arguments and own configuration off;
 `embeddedlatestart` stages an embedded play that does not start in time
 and checks that the same play carries on in the external player while the

@@ -542,6 +542,7 @@ mod tests {
                 "--force-media-title=Recorded: Title".to_string(),
                 "--title=Recorded: Title".to_string(),
                 "--include=<AUTH INCLUDE>".to_string(),
+                "--idle=no".to_string(),
                 "--start=123.5".to_string(),
                 "--".to_string(),
                 "https://media.invalid/video/stream.mkv?x=1".to_string(),
@@ -684,6 +685,77 @@ mod tests {
         assert!(!command_args(&command("mpv", &bare_plan))
             .iter()
             .any(|arg| arg.starts_with("--include")));
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    #[ignore = "needs mpv and ffmpeg; runs headless with null video/audio"]
+    fn own_config_profile_include_cannot_keep_external_mpv_idle_at_eof() {
+        use std::process::Stdio;
+        use std::time::{Duration, Instant};
+
+        let dir = tmp("own-config-eof");
+        std::fs::create_dir_all(&dir).unwrap();
+        let clip = dir.join("clip.mkv");
+        let generated = Command::new("ffmpeg")
+            .args([
+                "-nostdin", "-hide_banner", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                "color=size=16x16:rate=10", "-t", "0.5", "-c:v", "ffv1",
+            ])
+            .arg(&clip)
+            .output()
+            .expect("ffmpeg is installed");
+        assert!(
+            generated.status.success(),
+            "ffmpeg: {}",
+            String::from_utf8_lossy(&generated.stderr)
+        );
+        let override_path = dir.join("idle-yes.conf");
+        std::fs::write(&override_path, "idle=yes\n").unwrap();
+        std::fs::write(
+            dir.join("mpv.conf"),
+            format!("[gpu-hq]\ninclude={}\n", override_path.display()),
+        )
+        .unwrap();
+
+        let cfg = crate::config::AppConfig {
+            mpv_use_own_config: Some(true),
+            mpv_extra_args: Some("--vo=null\n--ao=null".into()),
+            ..Default::default()
+        };
+        let spec = PlaySpec {
+            http_headers: vec![("X-Plex-Token".into(), "synthetic".into())],
+            ..recorded_spec(&clip.to_string_lossy())
+        };
+        let ipc = dir.join("mpv.sock");
+        let plan = build_launch(&spec, &cfg, &ipc.to_string_lossy()).unwrap();
+        let mut cmd = command("mpv", &plan);
+        cmd.env("MPV_HOME", &dir)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        let mut child = cmd.spawn().expect("mpv is installed");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let exited = loop {
+            if child.try_wait().unwrap().is_some() {
+                break true;
+            }
+            if Instant::now() >= deadline {
+                child.kill().unwrap();
+                break false;
+            }
+            std::thread::sleep(Duration::from_millis(25));
+        };
+        let output = child.wait_with_output().unwrap();
+        drop(plan);
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(exited, "mpv stayed open after the half-second file ended");
+        assert!(
+            output.status.success(),
+            "mpv: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        assert!(String::from_utf8_lossy(&output.stdout).contains("Exiting... (End of file)"));
     }
 
     #[test]

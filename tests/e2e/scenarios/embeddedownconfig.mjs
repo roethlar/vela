@@ -4,12 +4,9 @@
 // the Advanced arguments, is `mpvargs`). The name is from when this ran only
 // in the embedded player (review finding ec-4); it now runs in both.
 //
-// KNOWN TO FAIL IN THE EXTERNAL PLAYER, on a product defect: there the
-// profile's `idle=yes` wins over Vela's `--idle=no`, because Vela's command
-// line ends with an `--include` (the stream-header file) after it. It is
-// recorded in tests/e2e/parity.mjs (KNOWN_FAILURES), with its evidence, and
-// rows 13b and 14 are NOT counted as shown in that player by this scenario.
-// The assertion stays as it is: it is the product that has to change.
+// The external player reasserts its lifecycle options after the stream-header
+// include: otherwise that include lets the profile's `idle=yes` win over
+// Vela's earlier `--idle=no`. This scenario must pass in both players.
 //
 // Nothing in the Advanced options, "use my own mpv configuration" on, and a
 // user's mpv.conf (found through MPV_HOME, where mpv looks for it) that sets

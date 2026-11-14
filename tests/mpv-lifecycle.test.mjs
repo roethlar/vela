@@ -85,13 +85,14 @@ test('the launch asserts the lifecycle options after every user-controlled optio
   // ...by the one function that describes a launch for either.
   const body = functionBody(launch, 'pub(crate) fn build_launch_for(', 'launch::build_launch_for');
   assert.doesNotMatch(body, /spec\.player/, 'the player is the one named, nothing else decides');
-  // One call serves both players: the external one gets `idle=no`, the
-  // embedded one `idle=once` (the Rust unit tests hold the two values).
+  // The first call serves both players: the external one gets `idle=no`, the
+  // embedded one `idle=once` (the Rust unit tests hold the two values). The
+  // external launch repeats its lifecycle group after a stream-header include.
   const loop = 'args.extend(lifecycle_args(player))';
   const at = body.indexOf(loop);
   assert.notEqual(at, -1, 'the launch must apply lifecycle_args()');
-  assert.equal(body.indexOf(loop, at + 1), -1, 'lifecycle_args() is applied exactly once');
-  assert.equal(body.split('lifecycle_args(').length - 1, 1, 'and in no other form');
+  assert.equal(body.split(loop).length - 1, 2, 'the initial group and the external reassertion');
+  assert.equal(body.split('lifecycle_args(').length - 1, 2, 'and in no other form');
 
   // Advanced arguments and own-config handling live in base_args; the
   // inherited window state and screen placement are the last option groups
@@ -136,7 +137,10 @@ test("the embedded player's required options follow everything the user controls
   assert.notEqual(at, -1, 'the launch must apply embedded_required_args()');
   assert.equal(body.indexOf(required, at + 1), -1, 'exactly once');
   for (const earlier of ['base_args(', 'markers_args(', 'args.extend(lifecycle_args(player))']) {
-    const last = body.lastIndexOf(earlier);
+    // The later lifecycle call belongs only to the external header include.
+    const last = earlier === 'args.extend(lifecycle_args(player))'
+      ? body.indexOf(earlier)
+      : body.lastIndexOf(earlier);
     assert.notEqual(last, -1, `the launch must still call ${earlier}`);
     assert.ok(last < at, `embedded_required_args() must follow ${earlier}`);
   }
