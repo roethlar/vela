@@ -7,6 +7,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { APP_BINARY_FROM } from './app-binary.mjs';
 import { EXEMPTIONS, INVENTORY, KNOWN_FAILURES, PLAYERS, ROW_IDS, SPLITS } from './parity.mjs';
 import { TEST_ONLY_ROUTES } from './proof.mjs';
 
@@ -146,26 +147,96 @@ const said = (value) => {
   return text.length > 200 ? `${text.slice(0, 200)}…` : text;
 };
 
-// Why `result`, with status 'pass' or 'fail', is not what the runner writes
-// for `scenario` in a run of `player` (run.mjs: status, error, and the
-// proof's shown and routes), as the end of a sentence; null when it is. A
-// pass is also held to the runner's own rule for one: a scenario whose proof
-// has a problem (proofProblems) is failed by the runner, so a pass with such
-// a proof is no result of a run.
-function resultShapeProblem(scenario, player, result) {
+// One description of the results file the runner writes (run.mjs), in three
+// parts, each of which says what is wrong as sentences or the end of one. The
+// verdict applies them to the files it is given, and the runner applies them
+// to the file it has just written (resultsFileProblems), so that what is
+// written and what is read cannot drift apart unseen. A file is taken only as
+// the runner could have written it; nothing in it gets the benefit of the
+// doubt (review finding pa-5). What no rule here can tell is a file made by
+// hand that is exactly like one of the runner's.
+
+// The top of the file: exactly these names, each of its kind.
+const RESULTS_FILE_KEYS = ['appBinary', 'appBinaryFrom', 'built', 'changedDuringRun', 'dirty', 'finishedAt', 'full', 'head', 'player', 'scenarios'];
+export function resultsTopProblems(run, player) {
+  const about = `the ${player} results`;
+  if (run === null || typeof run !== 'object' || Array.isArray(run)) return [`${about} are not a results file: ${said(run)}`];
+  const problems = [];
+  const keys = Object.keys(run).sort().join(', ');
+  if (keys !== RESULTS_FILE_KEYS.join(', ')) problems.push(`${about} hold ${keys || 'nothing'}, not ${RESULTS_FILE_KEYS.join(', ')}`);
+  if (run.player !== player) problems.push(`${about} are of a ${run.player} run`);
+  for (const flag of ['full', 'built', 'dirty', 'changedDuringRun']) {
+    if (typeof run[flag] !== 'boolean') problems.push(`${about} give "${flag}" as ${said(run[flag])}, not true or false`);
+  }
+  // recordedTree: a tree that changed during the run is a dirty run.
+  if (run.changedDuringRun === true && run.dirty !== true) {
+    problems.push(`${about} say the tree changed during the run and that the run was clean`);
+  }
+  if (typeof run.head !== 'string' || run.head === '') problems.push(`${about} name no commit`);
+  if (typeof run.appBinary !== 'string' || !path.isAbsolute(run.appBinary)) {
+    problems.push(`${about} name no app binary by its full path (${said(run.appBinary)})`);
+  }
+  // locateAppBinary: a run that built took the binary from Cargo's report of
+  // the build, and one that did not, from the prediction.
+  if (typeof run.built === 'boolean' && run.appBinaryFrom !== (run.built ? APP_BINARY_FROM.build : APP_BINARY_FROM.prediction)) {
+    problems.push(`${about} say the app binary came from ${said(run.appBinaryFrom)}, which a run with "built" ${run.built} does not write`);
+  }
+  if (typeof run.finishedAt !== 'string' || Number.isNaN(Date.parse(run.finishedAt)) || new Date(run.finishedAt).toISOString() !== run.finishedAt) {
+    problems.push(`${about} give no time of finishing as the runner writes it (${said(run.finishedAt)})`);
+  }
+  if (run.scenarios === null || typeof run.scenarios !== 'object' || Array.isArray(run.scenarios)) {
+    problems.push(`${about} hold no scenarios by name`);
+  }
+  return problems;
+}
+
+// One scenario's result, whatever the scenario: `{ status: 'skip' }` and
+// nothing else, or status 'pass' or 'fail' with exactly `error`, `shown` and
+// `routes`. The two lists are what proof.mjs kept in sets: text, each entry
+// once, and a route only if it is a registered one. A failure's error is
+// text; a pass has none. Returns why the result is not one the runner
+// writes, as the end of a sentence; null when it is.
+export function outcomeShapeProblem(result) {
+  if (result === null || typeof result !== 'object' || Array.isArray(result)) return `it is ${said(result)}, not a result`;
   const keys = Object.keys(result).sort().join(', ');
+  if (result.status === 'skip') return keys === 'status' ? null : `it is a skip that holds ${keys}, not status alone`;
+  if (result.status !== 'pass' && result.status !== 'fail') return `its status is ${said(result.status)}, not pass, fail or skip`;
   if (keys !== 'error, routes, shown, status') return `it holds ${keys || 'nothing'}, not status, error, shown and routes`;
   for (const list of ['shown', 'routes']) {
     if (!Array.isArray(result[list]) || result[list].some((entry) => typeof entry !== 'string')) {
       return `its "${list}" is ${said(result[list])}, not a list of text`;
     }
+    const twice = result[list].find((entry, i) => result[list].indexOf(entry) !== i);
+    if (twice !== undefined) return `its "${list}" names ${said(twice)} twice, and the runner writes each once`;
   }
+  const unregistered = result.routes.find((route) => !Object.hasOwn(TEST_ONLY_ROUTES, route));
+  if (unregistered !== undefined) return `its "routes" names ${said(unregistered)}, which is no test-only route`;
   if (result.status === 'fail') {
     return typeof result.error === 'string' ? null : `it failed with an error that is not text (${said(result.error)})`;
   }
-  if (result.error !== null) return `it passed with an error (${said(result.error)}), and a pass has none`;
+  return result.error === null ? null : `it passed with an error (${said(result.error)}), and a pass has none`;
+}
+
+// A pass is also held to the runner's own rule for one: a scenario whose
+// proof has a problem (proofProblems) is failed by the runner, so a pass with
+// such a proof is no result of a run. For a result outcomeShapeProblem has
+// cleared.
+function passProofProblem(scenario, player, result) {
   const unproven = proofProblems(scenario, player, result);
   return unproven.length > 0 ? `it passed, but it ${unproven.join('; and it ')}: the runner fails such a scenario` : null;
+}
+
+// The whole file, as the runner checks the one it has just written: its top,
+// and every result in it by itself. (What a result means for its scenario,
+// in its player, is the verdict's to judge: verdictProblems.)
+export function resultsFileProblems(run, player) {
+  const problems = resultsTopProblems(run, player);
+  const outcomes = run !== null && typeof run === 'object' && run.scenarios !== null && typeof run.scenarios === 'object' && !Array.isArray(run.scenarios) ? run.scenarios : {};
+  for (const [name, result] of Object.entries(outcomes)) {
+    const why = outcomeShapeProblem(result);
+    if (why) problems.push(`${name} has a result in the ${player} run that the runner does not write: ${why}`);
+  }
+  return problems;
 }
 
 // Everything wrong with the parity as two full runs showed it, one of each
@@ -202,7 +273,9 @@ export function verdictProblems(
       problems.push(`no results of the ${player} run`);
       continue;
     }
-    if (run.player !== player) problems.push(`the ${player} results are of a ${run.player} run`);
+    // The top of the file, as the runner writes it: its names, their kinds,
+    // and what the runner cannot write together.
+    problems.push(...resultsTopProblems(run, player));
     // Each of these is judged by what the runner writes and by nothing that
     // merely reads as it: `full: true`, `built: true`, `dirty: false`. A file
     // that does not say so does not get the benefit of the doubt.
@@ -216,13 +289,11 @@ export function verdictProblems(
     if (checkout?.head && run.head !== checkout.head) {
       problems.push(`the ${player} run is of commit ${run.head}, not of the checked-out ${checkout.head}`);
     }
-    if (typeof run.head !== 'string' || run.head === '') problems.push(`the ${player} results name no commit`);
     heads.add(run.head);
     // The runner writes its results by scenario name, in an object. A name
     // is looked up among the object's own only: every object also answers
     // to names it inherits (review finding pa-5, the repair).
     const byName = run.scenarios !== null && typeof run.scenarios === 'object' && !Array.isArray(run.scenarios);
-    if (!byName) problems.push(`the ${player} results hold no scenarios by name`);
     const ran = byName ? run.scenarios : {};
     const resultOf = (name) => (Object.hasOwn(ran, name) ? ran[name] : undefined);
     for (const name of Object.keys(ran)) {
@@ -261,10 +332,9 @@ export function verdictProblems(
             ? `${scenario.name} was skipped in the ${player} run, so it has no result there`
             : `${scenario.name} has no result in the ${player} run: its status is ${JSON.stringify(record ? result.status : undefined)}, neither pass nor fail`,
         );
-      } else if (resultShapeProblem(scenario, player, result)) {
-        problems.push(
-          `${scenario.name} has a result in the ${player} run that the runner does not write: ${resultShapeProblem(scenario, player, result)}`,
-        );
+      } else if (outcomeShapeProblem(result) ?? (result.status === 'pass' ? passProofProblem(scenario, player, result) : null)) {
+        const why = outcomeShapeProblem(result) ?? passProofProblem(scenario, player, result);
+        problems.push(`${scenario.name} has a result in the ${player} run that the runner does not write: ${why}`);
       } else if (result.status === 'pass') {
         passed.set(scenario.name, result);
         if (known && !known.intermittent) {

@@ -25,6 +25,7 @@ import {
   redCoverage,
   scenarioProblems,
   testOnlyCoverage,
+  resultsFileProblems,
   verdictProblems,
 } from './e2e/scenario-loader.mjs';
 
@@ -854,7 +855,20 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   const b = { name: 'b', rows: ['2'] };
   const known = { scenario: 'b', player: 'external', failsWith: 'the known text', defect: 'd' };
   const passing = (name, shown) => ({ [name]: { status: 'pass', error: null, shown, routes: [] } });
-  const run = (player, scenarios, extra = {}) => ({ player, full: true, built: true, head: 'h', dirty: false, scenarios, ...extra });
+  // A results file as the runner writes one (run.mjs).
+  const run = (player, scenarios, extra = {}) => ({
+    player,
+    full: true,
+    built: true,
+    appBinary: '/t/debug/vela',
+    appBinaryFrom: "cargo's report of this run's build",
+    head: 'h',
+    dirty: false,
+    changedDuringRun: false,
+    finishedAt: '2026-11-14T00:00:00.000Z',
+    scenarios,
+    ...extra,
+  });
   const good = {
     external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'AssertionError: the known text', shown: [], routes: [] } }),
     embedded: run('embedded', { ...passing('a', ['1']), ...passing('b', ['2']) }),
@@ -999,6 +1013,67 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   assert.match(withC('skip'), /^c does not run in the external player, and its result there is not the skip the runner writes: "skip"$/);
   // Results that name no commit.
   assert.match(verdict({ ...good, embedded: run('embedded', good.embedded.scenarios, { head: undefined }) }), /^the embedded results name no commit$/m);
+  // From the third verification: the two lists are what the runner kept in
+  // sets, so an entry twice, or a route nobody registered, is no result of a
+  // run: not for a pass, and not for a known failure that keeps its text.
+  assert.match(
+    embeddedA({ ...pass, shown: ['1', '1'] }),
+    /^a has a result in the embedded run that the runner does not write: its "shown" names "1" twice, and the runner writes each once$/m,
+  );
+  assert.match(embeddedA({ ...pass, routes: ['mpvInput', 'mpvInput'] }), /its "routes" names "mpvInput" twice, and the runner writes each once/);
+  const knownWith = (extra) =>
+    verdict({
+      ...good,
+      external: run('external', {
+        ...passing('a', ['1']),
+        b: { status: 'fail', error: 'AssertionError: the known text', shown: [], routes: [], ...extra },
+      }),
+    });
+  assert.equal(knownWith({}), '');
+  assert.match(
+    knownWith({ routes: ['not-a-route'] }),
+    /^b has a result in the external run that the runner does not write: its "routes" names "not-a-route", which is no test-only route$/m,
+  );
+  assert.match(knownWith({ routes: ['toString'] }), /its "routes" names "toString", which is no test-only route/);
+  assert.match(knownWith({ shown: ['2', '2'] }), /its "shown" names "2" twice/);
+  // The top of the file is the runner's too: its names, their kinds, and
+  // what the runner cannot write together.
+  const top = (extra) => verdict({ ...good, embedded: run('embedded', good.embedded.scenarios, extra) });
+  assert.equal(top({}), '');
+  assert.match(
+    top({ extra: 1 }),
+    /^the embedded results hold appBinary, appBinaryFrom, built, changedDuringRun, dirty, extra, finishedAt, full, head, player, scenarios, not appBinary, /m,
+  );
+  const { finishedAt: _noTime, ...untimed } = good.embedded;
+  assert.match(
+    verdict({ ...good, embedded: untimed }),
+    /^the embedded results hold appBinary, appBinaryFrom, built, changedDuringRun, dirty, full, head, player, scenarios, not /m,
+  );
+  assert.match(top({ full: 'true' }), /^the embedded results give "full" as "true", not true or false$/m);
+  assert.match(top({ changedDuringRun: true }), /^the embedded results say the tree changed during the run and that the run was clean$/m);
+  assert.match(top({ appBinary: 'target/debug/vela' }), /^the embedded results name no app binary by its full path \("target\/debug\/vela"\)$/m);
+  assert.match(
+    top({ appBinaryFrom: 'cargo metadata (nothing was built)' }),
+    /^the embedded results say the app binary came from "cargo metadata \(nothing was built\)", which a run with "built" true does not write$/m,
+  );
+  assert.match(top({ finishedAt: 'yesterday' }), /^the embedded results give no time of finishing as the runner writes it \("yesterday"\)$/m);
+  assert.match(verdict({ ...good, embedded: 'pass' }), /^the embedded results are not a results file: "pass"$/m);
+  // The runner applies the same rules to the file it has just written: the
+  // top, and every result in it by itself.
+  assert.deepEqual(resultsFileProblems(good.embedded, 'embedded'), []);
+  assert.deepEqual(resultsFileProblems(good.external, 'external'), []);
+  assert.deepEqual(resultsFileProblems(run('embedded', { a: { status: 'skip' }, b: { ...pass, shown: ['2', '2'] } }), 'embedded'), [
+    'b has a result in the embedded run that the runner does not write: its "shown" names "2" twice, and the runner writes each once',
+  ]);
+  assert.match(
+    resultsFileProblems(run('embedded', { a: { status: 'skipped' } }), 'embedded').join('\n'),
+    /^a has a result in the embedded run that the runner does not write: its status is "skipped", not pass, fail or skip$/,
+  );
+  assert.match(
+    resultsFileProblems(run('embedded', { a: { status: 'skip', error: null } }), 'embedded').join('\n'),
+    /it is a skip that holds error, status, not status alone/,
+  );
+  assert.match(resultsFileProblems(run('external', {}), 'embedded').join('\n'), /^the embedded results are of a external run$/);
   // Results that are not by scenario name hold none.
   assert.match(verdict({ ...good, embedded: run('embedded', [{ status: 'pass' }]) }), /^the embedded results hold no scenarios by name$/m);
   assert.match(verdict({ ...good, embedded: run('embedded', null) }), /^the embedded results hold no scenarios by name$/m);
@@ -1049,6 +1124,40 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
     verdict({ ...good, embedded: run('embedded', { ...passing('a', []), ...passing('b', ['2']) }) }),
     /row 1 is shown by no scenario that passed in the embedded run/,
   );
+});
+
+// The runner reads back the file it wrote and applies the verdict's rules to
+// it, so that what it writes and what the verdict takes cannot drift apart
+// unseen; a file that fails them fails the run. The words the two sides
+// share for where the binary came from are one pair of constants.
+test('the runner checks the results file it wrote by the rules the verdict reads it with', async () => {
+  const runner = fs.readFileSync(path.join(repoRoot, 'tests/e2e/run.mjs'), 'utf8');
+  assert.match(runner, /const unreadable = resultsFileProblems\(JSON\.parse\(fs\.readFileSync\(resultsFile, 'utf8'\)\), runPlayer\);/);
+  assert.match(runner, /if \(unreadable\.length > 0\) \{\s+unreadableResults = true;/);
+  assert.match(runner, /\nprocess\.exit\(failures === 0 && !unreadableResults \? 0 : 1\);\n/);
+  assert.equal(runner.split('process.exit(failures').length, 2, 'the run ends in one place');
+  const { APP_BINARY_FROM } = await import('./e2e/app-binary.mjs');
+  // What the runner records for where the binary came from is one of the two
+  // sentences the rules read back, and nothing else. (A real run would also
+  // fail its own check of the file on a third.)
+  const appBinaryText = fs.readFileSync(path.join(repoRoot, 'tests/e2e/app-binary.mjs'), 'utf8');
+  assert.equal(appBinaryText.split('appBinaryFrom: APP_BINARY_FROM.build,').length, 2, 'a run that builds records the build sentence');
+  assert.equal(appBinaryText.split('appBinaryFrom: APP_BINARY_FROM.prediction,').length, 2, 'a run that does not records the other');
+  assert.equal(appBinaryText.split('appBinaryFrom:').length, 3, 'and no third');
+  const written = (built) => ({
+    player: 'external',
+    full: true,
+    built,
+    appBinary: '/t/debug/vela',
+    appBinaryFrom: built ? APP_BINARY_FROM.build : APP_BINARY_FROM.prediction,
+    head: 'h',
+    dirty: false,
+    changedDuringRun: false,
+    finishedAt: new Date().toISOString(),
+    scenarios: { a: { status: 'skip' }, b: { status: 'pass', error: null, shown: ['1'], routes: [] }, c: { status: 'fail', error: '', shown: [], routes: ['mpvInput'] } },
+  });
+  assert.deepEqual(resultsFileProblems(written(true), 'external'), []);
+  assert.deepEqual(resultsFileProblems(written(false), 'external'), []);
 });
 
 test('a run records the commit it started at, and is dirty when its tree changed during the run (conf-1)', () => {

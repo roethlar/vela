@@ -14,7 +14,7 @@ import { appCommands, locateAppBinary } from './app-binary.mjs';
 import { Driver } from './driver.mjs';
 import { setScenarioConfigRoot } from './mpv.mjs';
 import { beginProof, endProof } from './proof.mjs';
-import { loadScenarios, proofProblems, recordedTree, runsIn } from './scenario-loader.mjs';
+import { loadScenarios, proofProblems, recordedTree, resultsFileProblems, runsIn } from './scenario-loader.mjs';
 
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(e2eDir, '../..');
@@ -433,8 +433,22 @@ if (!live) {
   );
 }
 
+// The file just written must be one the verdict will read: the verdict's own
+// rules for a results file are applied to it here, so that what this runner
+// writes and what the verdict takes cannot drift apart unseen (review
+// finding pa-5). A run whose file fails them fails.
+let unreadableResults = false;
+if (!live) {
+  const resultsFile = path.join(resultsDir, `${runPlayer}.json`);
+  const unreadable = resultsFileProblems(JSON.parse(fs.readFileSync(resultsFile, 'utf8')), runPlayer);
+  if (unreadable.length > 0) {
+    unreadableResults = true;
+    console.error(`e2e: ${resultsFile} is not a results file the verdict will read: ${unreadable.join('; ')}`);
+  }
+}
+
 const ran = scenarios.length - skipped;
 console.log(
   `e2e: ${ran - failures}/${ran} passed${skipped ? `, ${skipped} skipped` : ''}; artifacts in ${path.relative(repoRoot, artifactsDir)}/`,
 );
-process.exit(failures === 0 ? 0 : 1);
+process.exit(failures === 0 && !unreadableResults ? 0 : 1);

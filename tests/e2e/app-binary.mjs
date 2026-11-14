@@ -55,13 +55,21 @@ export function appCommands(repoRoot) {
 // Returns { appBinary, built, appBinaryFrom, identity }: `identity` is
 // appIdentity(appBinary) taken as soon as the build has ended (or the
 // prediction is made), which the driver checks before it starts each session.
+// Where a run's app binary came from, as the results file records it
+// (`appBinaryFrom`): the two sentences the runner writes, which the verdict
+// reads back (scenario-loader.mjs, resultsTopProblems).
+export const APP_BINARY_FROM = {
+  build: "cargo's report of this run's build",
+  prediction: 'cargo metadata (nothing was built)',
+};
+
 export async function locateAppBinary({ skipBuild, env, commands, echo = (line) => process.stdout.write(`${line}\n`) }) {
   if (skipBuild) {
     const appBinary = predictAppBinary(commands, env);
-    return { appBinary, built: false, appBinaryFrom: 'cargo metadata (nothing was built)', identity: appIdentity(appBinary) };
+    return { appBinary, built: false, appBinaryFrom: APP_BINARY_FROM.prediction, identity: appIdentity(appBinary) };
   }
   const appBinary = await buildAppBinary(commands, env, echo);
-  return { appBinary, built: true, appBinaryFrom: "cargo's report of this run's build", identity: appIdentity(appBinary) };
+  return { appBinary, built: true, appBinaryFrom: APP_BINARY_FROM.build, identity: appIdentity(appBinary) };
 }
 
 // Which file a path names, and its state: device, inode, size and

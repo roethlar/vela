@@ -246,7 +246,17 @@ has ended and checked before every session starts. It does not prove that
 nothing replaced the file in the moment between Cargo writing it and that
 note, or between a check and the app's start, nor that a change which kept
 all four (the same size and modification time, written in place) did not
-happen. It reads the two and fails when a scenario failed other than as its
+happen. A results file is read only as the runner writes one: exactly its
+names at the top, each of its kind (and no two that the runner cannot write
+together), and every scenario's result whole: a skip and nothing else for a
+scenario that does not run in that player, otherwise a pass or a failure
+with its error (none for a pass, text for a failure) and its two lists,
+each entry once, a route only if it is a registered one, and for a pass a
+proof the runner itself would have passed. Anything else is reported in its
+own words and counts for nothing. The runner applies the same rules to the
+file it has just written and fails the run if it breaks one, so the two
+cannot drift apart unseen. What the rules cannot tell is a file made by hand
+that is exactly like one of the runner's. It reads the two and fails when a scenario failed other than as its
 recorded known failure, when a known failure passed (take it out) or failed
 with other text, when a scenario did not run, when the runs are of
 different or uncommitted states or not full, and when a row is shown in a
