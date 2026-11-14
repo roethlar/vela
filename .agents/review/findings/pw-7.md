@@ -138,3 +138,19 @@ generation pass over `f1e0c9c..9815e10` with Slice 3 of the plan as its
 mandate, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`). Reviewer's
 title: "A failed setting save leaves the unsaved mode selected". Reviewer's severity: LOW.
+
+### Verification round 1, recorded 2026-11-14 11:56 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9dc-b7e7-73f3-a0dc-29731c6e3940`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 11:41 UTC, finished 11:55 UTC.
+- Reviewed head `ac2524072c877789edf96dbdedf8dbeb2affcc27`, base
+  `2dd9eb70661d0771fa2439b3ec5b68e1bc898bf8` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src/lib/Settings.svelte:282 — A pending load can overwrite a newer successful save: load reads remember, waits for playback preferences, fullscreen saves successfully, then load restores remember into both variables. A refused retry of fullscreen now restores remember although the backend holds fullscreen. Reproduced against both pins: base displays fullscreen after that retry; head displays remember. Prevent stale loads from overwriting newer confirmed saves and guard this interleaving.
+  - tests/player-window-ui.test.mjs:203 — The guard bites at this head, but demonstrated two false passes with rollback removed: single-quoting the select ID triggers the early return; retaining the previous saver in a comment before its broken replacement makes functionSource execute the commented copy. Both variants compile and retain the real control. Parse the actual element and function declarations. The pinned source was restored, and all five tests passed.
