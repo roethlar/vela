@@ -1,7 +1,7 @@
 # hd-3: the drawing thread waits for mpv each time it sets the HDR target
 
 **Severity**: MEDIUM — the picture freezes for a quarter to half a second, and frames are dropped, each time the display changes during a play. (First recorded as "about a second"; measured since: 200 to 243 ms with the shipped library, about 399 ms in the reviewer's rig.)
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `0e7adca`
 
@@ -79,3 +79,24 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `74f44b6..e8db400`, 2026-11-13 08:38 UTC
 (`.agents/review/codereview-2026-11-13-embedded-hdr.md`). Reviewer's
 title: "Avoid synchronous property writes on the render thread". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 00:06 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d758-167a-7331-9a7d-0304001387ef`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 23:57 UTC, finished 00:03 UTC.
+- Reviewed head `0e7adca54df16297a4de6953930b8d43ace197cd`, base
+  `dc864f34e5b91163cb77ce60208af2d95589c00b` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  - src-tauri/src/player/embedded/hdr.rs:1653 — Independently confirmed guard failures for synchronous calls, premature presentation, omitted frame reports and omitted force-window protection; all passed after restoration.
+  - src-tauri/src/player/embedded/session.rs:544 — Accept the documented synchronous loadfile gap for hd-3: conditional profiles or IPC can still cause a startup stall, but recurring HDR updates no longer wait for mpv.
+  - tests/e2e/run.mjs:250 — Verification passed: 103 embedded, 35 launch, 20 Node and all five tests against the supplied shipped library. Embedded runtime and E2E were inspected but not run because no display, compositor or GPU is available.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

@@ -30,11 +30,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `embedded-packaging` (a worktree beside the clone); nothing of it is on
     `main` yet, and the release workflow is not touched.
   - Slice 4 (HDR) landed at `e8db400`. Its codex review returned THREE
-    findings (`hd-1` to `hd-3`): `hd-1` is fixed and verified; `hd-3` is
-    fixed at `0e7adca` and with codex; `hd-2` is written on the local
-    branch `hd-2` (a worktree beside the clone, on top of the `hd-3` fix)
-    and is not on `main` yet: the agent still has to verify it. Their
-    design, with what was measured against the shipped library, is
+    findings (`hd-1` to `hd-3`): `hd-1` and `hd-3` are fixed and verified
+    by codex; `hd-2` is fixed and with codex (`.agents/review/index.md`).
+    Their design, with what was measured against the shipped library and
+    what the fixes changed about it, is
     `.agents/review/hd-3-hd-2.design.md`. The slice's acceptance is a
     by-eye comparison only the owner can make.
   - WHERE THE UNLANDED WORK IS (2026-11-13, evening). Several pieces are
@@ -43,10 +42,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     written by helper agents from a recorded design, attacked by other
     helpers and repaired; none has yet been verified by the agent that
     coordinates, reviewed by codex, or landed. Land them in this order:
-    - `hd-2` (branch `hd-2`, head `353b871`, on top of the `hd-3` fix):
-      mpv's three HDR targets are observed and put back when something
-      else changes them. Its helpers left one low finding open, about how
-      far a source-text test reaches.
     - Packaging the mpv library into the Linux packages, opt-in (branch
       `embedded-packaging`): `scripts/build.sh --with-libmpv`. Its repair
       pass was cut off by a usage limit on 2026-11-13 and is being redone.

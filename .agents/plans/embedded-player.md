@@ -864,6 +864,12 @@ From Slice 4 (HDR):
 - Not checked for lack of hardware: a display without HDR (expected:
   standard range, exactly as before this slice), an HDR display on a
   compositor other than KWin.
+- With "use my own mpv configuration" on and a profile in your mpv.conf
+  that sets `target-trc`, `target-prim` or `target-peak`: on an HDR
+  display the embedded player puts its own values back (the picture is
+  held for a frame or two each time), and if something keeps changing
+  them it drops to standard range for that play. Say if you would rather
+  your own values won.
 
 From Slice 5 (controls and cropping; listed when the slice was designed,
 2026-11-13, so that they are not lost; they apply once it has landed):
@@ -1472,3 +1478,21 @@ agent at the fix's content before it was committed:
 Not run, and why: a change of the display in the middle of a play on a
 real HDR desktop (it needs the display to change; the owner's checks for
 Slice 4 cover it).
+
+### 2026-11-13 — `hd-3` verified; `hd-2` fixed; the Slice 4 review is answered
+
+- codex accepted the `hd-3` fix (`0e7adca`) with its guard confirmed, and
+  accepted the recorded gap about the hand-over of the file.
+- `hd-2` is fixed (see `.agents/review/findings/hd-2.md` for the commit and
+  the guard proof) and with codex. What was run at the fix's content: the
+  full check (521 Rust tests), the ten tests against the shipped library,
+  six scenarios in the embedded venue (6 of 6), and a scripted play on
+  `continuum`'s HDR desktop in which a second IPC client changed each of
+  mpv's targets: each was back at Vela's value within 46 to 82 ms with no
+  dropped frame, and nine changes in quick succession made Vela give up to
+  standard range as designed while the play carried on.
+- The design both fixes started from was wrong in three places, found by
+  attacking the fixes before they landed; its last section says which.
+- One thing for the owner's Slice 4 list, added below it: with "use my own
+  mpv configuration" on, a profile that keeps changing mpv's HDR target
+  makes the embedded player drop to standard range for that play.

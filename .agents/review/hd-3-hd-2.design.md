@@ -220,3 +220,34 @@ All decisions live here, against the two traits, so that they are tested without
 4. Headless weston has no colour management, so no end-to-end scenario reaches a
    transition. The embedded scenarios show that the rewritten loop still plays; a scripted
    run on a real HDR desktop shows the transitions themselves.
+
+## Corrections made while the fixes were written
+
+The fixes were attacked before they landed, and three things above did not
+survive. The code and the findings' records are right; this section says
+where the text above is now wrong.
+
+- **hd-3, an ask that cannot be sent.** Above: such a change finishes on
+  the spot. An attack showed that a way back to standard range finished
+  like that can leave mpv drawing for HDR under an untagged surface, because
+  asks made before mpv's queue filled still land. As built: an HDR change
+  with an unsent ask counts as refused at once; a way to standard range with
+  an unsent ask waits, held, and is asked again once the queue has been
+  read empty (`hdr::drained`).
+- **hd-3, the hand-over of the file.** Above: `loadfile` cannot stall
+  because no video output exists before the first file. That holds only
+  while `force-window` is off, and a user's option could turn it on. As
+  built: the embedded launch turns it off after the user's options; a
+  conditional profile or an IPC command can still turn it on, which is a
+  recorded gap of `hd-3`.
+- **hd-2, which reports count as someone else's.** Above: a report counts
+  once mpv has answered Vela's ask for that option, on the strength of the
+  order of mpv's events. An attack showed, against the shipped library,
+  that mpv reports an observed option only when it differs from what it
+  read at the end of its previous pass: a value set back, in the same pass
+  as Vela's ask, to what Vela was last told is never reported (300 of 300
+  tries). As built: each answer makes mpv observe that option anew under
+  the ask's own number, mpv then reports it once more as it reads it after
+  the answer, and a change finishes only when all three options have been
+  answered and reported afresh. Nothing depends on the order of events.
+
