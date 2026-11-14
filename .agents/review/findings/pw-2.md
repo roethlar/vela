@@ -183,3 +183,19 @@ generation pass over `f1e0c9c..9815e10` with Slice 1 of the plan as its
 mandate, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`). Reviewer's
 title: "Choose the compatibility display using the upcoming player". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 11:08 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9b7-5fe3-72f2-8593-8a176768d068`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 11:00 UTC, finished 11:08 UTC.
+- Reviewed head `0e5ea592532c476cafe6a1142dc6de68d2f57ef1`, base
+  `530e9a544cf0b7f2f3f4837aec093b1d5b3f0492` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/commands.rs:5380 — Late StartFailed fallback leaves pw-2 incomplete. With the previous external window on DP-1 and Vela on HDMI-1, an available embedded choice ranks for HDMI-1. If preparation/start subsequently fails, including because an unfinished embedded play appears, playback::play launches the same resolved stream externally on DP-1. Carrying PlayerChoice does not prevent this later player change. Reconcile the selected version and destination when fallback occurs; documenting this as a known gap does not close the defect.
+  - tests/player-selection.test.mjs:31 — Guard proof confirmed: restoring the original display mistake failed all three named Rust guards; passing wanted_player to ranking failed the Node guard. After restoration, 76 Rust and 13 Node tests passed. Coverage remains incomplete: forcing the actual rank_candidates call to Best also passed both suites. The Rust guards test helpers, and the text pins do not establish the selected version or its correctness after StartFailed. Add a behavioral selection-to-fallback guard. All mutations were restored; embedded/display and E2E behavior was inspected, not executed.
