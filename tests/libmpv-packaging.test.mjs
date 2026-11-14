@@ -176,8 +176,8 @@ test('the package check looks where the loader looks, for the library the loader
   );
   has(
     checkPackage,
-    '\n  out="$(env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 -I -B "$here/check-libmpv.py" "$set" \\\n' +
-      '           --expect-mpv "$mpv_pin" --expect-client-api "$CLIENT_API" 2>&1)" || status=$?\n',
+    '\n    out="$(env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 -I -B "$here/check-libmpv.py" "$set" \\\n' +
+      '             --expect-mpv "$mpv_pin" --expect-client-api "$CLIENT_API" 2>&1)" || status=$?\n',
     'the load, from the unpacked package and with nothing of the builder\'s shell in the way',
   );
   // What that call really hands over, and what the check makes of the
@@ -1286,8 +1286,34 @@ test('the package check compares the set in the package with the pins, the set i
       assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
       assert.deepEqual(run.stdout.match(/^FAIL manifest: .*$/gm), [`FAIL manifest: ${problem}`], run.stdout);
       assert.doesNotMatch(run.stdout, /^ok   manifest:/m);
+      // And its library was not loaded: there is no line about a load but this.
+      assert.deepEqual(run.stdout.match(/^\S+ +load: .*$/gm), [
+        'skip load: libmpv.so.2 was not loaded, because the set failed the check above; nothing of a set that failed is run',
+      ]);
     });
   }
+
+  await t.test('libmpv.so.2 a link to a library outside the package: not loaded', (t) => {
+    // The same bytes, elsewhere: what the package installs is a link that
+    // leads out of it.
+    const elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-elsewhere-')));
+    t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(elsewhere, 'libmpv.so.2'), library);
+    const linked = packageOf(
+      t,
+      'pkg.tar.zst',
+      Object.fromEntries(
+        Object.entries(setFilesOf(right, { 'libmpv.so.2': null })).map(([name, contents]) => [`usr/lib/Vela/libmpv/${name}`, contents]),
+      ),
+      { 'usr/lib/Vela/libmpv/libmpv.so.2': path.join(elsewhere, 'libmpv.so.2') },
+    );
+    const run = checkPackageRun([linked.file]);
+    assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+    assert.match(run.stdout, /^FAIL manifest: reached through a symbolic link: libmpv\.so\.2$/m);
+    assert.deepEqual(run.stdout.match(/^\S+ +load: .*$/gm), [
+      'skip load: libmpv.so.2 was not loaded, because the set failed the check above; nothing of a set that failed is run',
+    ]);
+  });
 
   await t.test('a component at another version', (t) => {
     const stale = manifestOf(pinned.map(([name, version]) => [name, name === 'ffmpeg' ? '1.0.0' : version]));
@@ -1448,7 +1474,11 @@ function checkBesideStandIn(t, { lines = [], status = 0, first = [] }) {
       '',
     ].join('\n'),
   );
-  return { script: path.join(directory, 'check-package.sh'), called: () => JSON.parse(fs.readFileSync(record, 'utf8')) };
+  return {
+    script: path.join(directory, 'check-package.sh'),
+    called: () => JSON.parse(fs.readFileSync(record, 'utf8')),
+    wasCalled: () => fs.existsSync(record),
+  };
 }
 
 test('the package check calls check-libmpv.py on the unpacked set, and passes a package only when it finds nothing wrong', { skip: checkUnavailable }, async (t) => {
@@ -1524,6 +1554,42 @@ test('the package check calls check-libmpv.py on the unpacked set, and passes a 
       'FAIL load: check-libmpv.py ended without saying that the set passed',
     ],
   };
+  // Loading the library runs its start-up code. A package that has failed a
+  // check before the load is not known to hold the set's code, so
+  // check-libmpv.py is not even started for it.
+  const failedBefore = {
+    'its set is not the one the build was given': (t) => ({
+      args: ['--set', referenceWith(t, `${right}glibc 2.35\n`)],
+      file: packageWith(t, right).file,
+      line: /^FAIL source: /m,
+    }),
+    'a component is not the pinned version': (t) => ({
+      args: [],
+      file: packageWith(t, manifestOf(pinned.map(([name, version]) => [name, name === 'ffmpeg' ? '1.0.0' : version]))).file,
+      line: /^FAIL pins: /m,
+    }),
+    'a library of the set is closed to other users': (t) => ({
+      args: [],
+      file: packageWith(t, right, { modes: { 'usr/lib/Vela/libmpv/libmpv.so.2': 0o600 } }).file,
+      line: /^FAIL access: /m,
+    }),
+  };
+  for (const [what, make] of Object.entries(failedBefore)) {
+    await t.test(`${what}: nothing of it is loaded`, (t) => {
+      const standIn = checkBesideStandIn(t, { lines: [...itsOk, 'RESULT PASS'], status: 0 });
+      const { args, file, line } = make(t);
+      const run = checkPackageRun([...args, file], standIn.script);
+      assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+      assert.match(run.stdout, line);
+      assert.equal(standIn.wasCalled(), false, 'check-libmpv.py was started on a package that had failed');
+      assert.match(
+        run.stdout,
+        /^skip load: libmpv\.so\.2 was not loaded, because the package failed a check above; nothing of a set that failed is run$/m,
+      );
+      assert.match(run.stdout, /^RESULT FAIL /m);
+    });
+  }
+
   for (const [what, [answer, line]] of Object.entries(refused)) {
     await t.test(what, (t) => {
       const standIn = checkBesideStandIn(t, answer);
@@ -1783,9 +1849,10 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
   const clientApi = shellValue(checkPackage, 'CLIENT_API');
   const privateName = 'libvela-avcodec.so.63';
   const right = manifestOf(pinned, { libraries: [privateName] });
-  // A set on disk, as `right` describes it but for `differing`, and what the
-  // check makes of it when the library answers `say`.
-  const verdict = (t, differing = {}, say = {}) => {
+  // A set on disk, as `right` describes it but for `differing` (and whatever
+  // `prepare` does to it), and what the check makes of it when the library
+  // answers `say`.
+  const verdict = (t, differing = {}, say = {}, prepare = () => {}) => {
     const set = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-set-')));
     t.after(() => fs.rmSync(set, { recursive: true, force: true }));
     for (const [name, contents] of Object.entries(setFilesOf(right, differing))) {
@@ -1793,6 +1860,7 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
       fs.mkdirSync(path.dirname(path.join(set, name)), { recursive: true });
       fs.writeFileSync(path.join(set, name), contents);
     }
+    prepare(set);
     const scenario = {
       api: clientApi.split('.').map(Number),
       'mpv-version': `mpv v${mpvPin}`,
@@ -1841,11 +1909,33 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
     'a licence text left out': [{ [licencePath('dav1d')]: null }, `missing: ${licencePath('dav1d')}`],
     'a file the MANIFEST does not list': [{ 'notes.txt': 'x\n' }, 'not in MANIFEST: notes.txt'],
   };
+  // A set that fails its manifest check is not loaded: loading a library runs
+  // its start-up code, and that code is not known to be the set's.
+  const notLoaded = 'skip load: libmpv.so.2 was not loaded, because the set failed the check above; nothing of a set that failed is run';
+  const failsUnloaded = (result, problems) => {
+    assert.deepEqual(result.lines, [...problems.map((p) => `FAIL manifest: ${p}`), notLoaded, 'RESULT FAIL'], result.stderr);
+    assert.equal(result.status, 1);
+    assert.deepEqual(result.loads, [], 'a library was loaded');
+  };
   for (const [what, [differing, problem]] of Object.entries(damaged)) {
-    await t.test(`${what}, and nothing else wrong`, (t) => {
-      failsBy(verdict(t, differing), 0, `FAIL manifest: ${problem}`);
+    await t.test(`${what}, and nothing else wrong: not loaded`, (t) => {
+      failsUnloaded(verdict(t, differing), [problem]);
     });
   }
+
+  await t.test('libmpv.so.2 is a link to a library outside the set: not loaded', (t) => {
+    // The same bytes, so only where they are is wrong.
+    const elsewhere = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-elsewhere-')));
+    t.after(() => fs.rmSync(elsewhere, { recursive: true, force: true }));
+    fs.writeFileSync(path.join(elsewhere, 'libmpv.so.2'), library);
+    const outside = path.join(elsewhere, 'libmpv.so.2');
+    for (const relative of [false, true]) {
+      const linked = verdict(t, { 'libmpv.so.2': null }, {}, (set) =>
+        fs.symlinkSync(relative ? path.relative(set, outside) : outside, path.join(set, 'libmpv.so.2')),
+      );
+      failsUnloaded(linked, ['reached through a symbolic link: libmpv.so.2', 'symbolic link in the set: libmpv.so.2']);
+    }
+  });
 
   await t.test('the library is of another client API version', (t) => {
     const result = verdict(t, {}, { api: [2, 5] });
@@ -1877,13 +1967,7 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
   });
 
   await t.test('there is no library to load', (t) => {
-    const result = verdict(t, { 'libmpv.so.2': null });
-    assert.deepEqual(result.lines, [
-      'FAIL manifest: missing: libmpv.so.2',
-      `FAIL load: ${result.set}/libmpv.so.2: cannot open shared object file: No such file or directory`,
-      'RESULT FAIL',
-    ]);
-    assert.equal(result.status, 1);
+    failsUnloaded(verdict(t, { 'libmpv.so.2': null }), ['missing: libmpv.so.2']);
   });
 });
 

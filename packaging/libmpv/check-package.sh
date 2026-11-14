@@ -23,7 +23,8 @@
 # Each package is unpacked into a temporary directory; nothing is installed,
 # and nothing that comes out of a package, or the package itself, is run.
 # (With the set, its libmpv.so.2 is loaded, which runs the library's own
-# start-up code; that is the one exception.)
+# start-up code; that is the one exception, and it is made only for a set
+# that has passed every check before the load.)
 # A file that cannot be unpacked, or that unpacks to something other than
 # Vela (no usr/bin/vela), fails whichever of the two questions is asked.
 #
@@ -38,7 +39,9 @@
 #   * its components are the versions pinned in versions.txt;
 #   * every file the MANIFEST lists is there and unmodified, and nothing else
 #     is (check-libmpv.py);
-#   * libmpv.so.2 LOADS from the unpacked package, by absolute path, says it is
+#   * (only when everything above has passed; otherwise nothing is loaded and
+#     a "skip" line says so)
+#     libmpv.so.2 LOADS from the unpacked package, by absolute path, says it is
 #     the pinned mpv release with that release's client API version, and every
 #     library of the set in the process came from the unpacked package
 #     (check-libmpv.py);
@@ -321,21 +324,28 @@ check_with() {
   # machine's own libraries. A library path or a preload in the builder's
   # shell is neither. -I keeps Python from importing anything that is not its
   # own, whatever the package or the environment holds.
-  status=0
-  out="$(env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 -I -B "$here/check-libmpv.py" "$set" \
-           --expect-mpv "$mpv_pin" --expect-client-api "$CLIENT_API" 2>&1)" || status=$?
-  # Its own closing line would read as this script's; this script prints one.
-  printf '%s\n' "$out" | sed '/^RESULT /d'
-  # Three things have to agree before the set is taken to have passed: no
-  # line of it says FAIL, its exit status is 0, and its closing line says
-  # PASS. Each alone fails the package. Its status is not trusted to have
-  # counted every FAIL line it printed, and silence is not taken for a pass.
-  if grep -q '^FAIL ' <<< "$out"; then
-    failed=1
-  elif [ "$status" -ne 0 ]; then
-    fail "load: check-libmpv.py stopped with status $status"
-  elif ! grep -qx 'RESULT PASS' <<< "$out"; then
-    fail "load: check-libmpv.py ended without saying that the set passed"
+  # Loading the library runs its start-up code. A package that has failed a
+  # check above is not known to hold the set's code, so nothing of it is
+  # loaded: check-libmpv.py is not started at all.
+  if [ "$failed" -eq 1 ]; then
+    skipped "load: libmpv.so.2 was not loaded, because the package failed a check above; nothing of a set that failed is run"
+  else
+    status=0
+    out="$(env -u LD_LIBRARY_PATH -u LD_PRELOAD python3 -I -B "$here/check-libmpv.py" "$set" \
+             --expect-mpv "$mpv_pin" --expect-client-api "$CLIENT_API" 2>&1)" || status=$?
+    # Its own closing line would read as this script's; this script prints one.
+    printf '%s\n' "$out" | sed '/^RESULT /d'
+    # Three things have to agree before the set is taken to have passed: no
+    # line of it says FAIL, its exit status is 0, and its closing line says
+    # PASS. Each alone fails the package. Its status is not trusted to have
+    # counted every FAIL line it printed, and silence is not taken for a pass.
+    if grep -q '^FAIL ' <<< "$out"; then
+      failed=1
+    elif [ "$status" -ne 0 ]; then
+      fail "load: check-libmpv.py stopped with status $status"
+    elif ! grep -qx 'RESULT PASS' <<< "$out"; then
+      fail "load: check-libmpv.py ended without saying that the set passed"
+    fi
   fi
 
   case "$package" in

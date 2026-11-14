@@ -8,7 +8,8 @@ without a GPU:
     (libraries, licence texts, the build patch) present and unmodified,
     nothing unlisted, no symbolic link, and a file named as its licence
     text for every shipped component;
-  * the library loads and reports the pinned mpv version (and, with
+  * (only when the above holds; a set that fails it is not loaded at all)
+    the library loads and reports the pinned mpv version (and, with
     --expect-client-api, the client API version that release has);
   * every loaded library of the set really comes from the set's directory;
   * each given clip DECODES to what was recorded for it: the same number of
@@ -207,10 +208,15 @@ def main():
     for p in problems:
         print(f"FAIL manifest: {p}")
     if problems:
-        ok = False
-    else:
-        print("ok   manifest: every listed file present and unmodified, nothing unlisted, "
-              "a licence text for every component")
+        # Loading a library runs its start-up code, and the libraries of this
+        # set are not known to be the ones it lists: one may be another
+        # library, or a link to one outside the set. None of it is loaded.
+        print("skip load: libmpv.so.2 was not loaded, because the set failed the check above; "
+              "nothing of a set that failed is run")
+        print("RESULT FAIL")
+        return 1
+    print("ok   manifest: every listed file present and unmodified, nothing unlisted, "
+          "a licence text for every component")
 
     path = os.path.join(libdir, "libmpv.so.2")
     try:

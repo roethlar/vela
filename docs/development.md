@@ -292,7 +292,9 @@ directory (nothing is installed) and requires that:
   else is there;
 - `libmpv.so.2` loads from the unpacked package, says it is the pinned mpv
   release with that release's client API version, and every library of the
-  set in the process came from the unpacked package;
+  set in the process came from the unpacked package. Loading a library runs
+  its start-up code, so a package that has failed any of the checks above is
+  not loaded at all; a line that begins `skip load` says so;
 - an Arch package also has every licence text under
   `usr/share/licenses/vela/libmpv`.
 
