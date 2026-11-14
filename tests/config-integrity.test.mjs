@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import test from "node:test";
+import { parse } from "svelte/compiler";
+import ts from "typescript";
 
 const config = fs.readFileSync("src-tauri/src/config.rs", "utf8");
 const connections = fs.readFileSync("src-tauri/src/connections.rs", "utf8");
@@ -25,6 +27,308 @@ const tauriConfig = fs.readFileSync("src-tauri/tauri.conf.json", "utf8");
 const backend = `${commands}\n${playback}`;
 const page = fs.readFileSync("src/routes/+page.svelte", "utf8");
 const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
+
+// Settings persistence: one regression test per value control. Like the
+// Player window tests, run the component's own scripts and parsed bindings
+// against a backend whose write application and reply delivery are separate.
+// These are not mounted-webview tests.
+const settingsControls = [
+  { label: "Continue Playing", id: "continue-playing", group: "continuation", key: "mode", initial: "on", choice: "off", newer: "only-tv", save: "saveContinuePlaying" },
+  { label: "mpv path (Save, Browse and Clear)", id: "mpv-path", group: "path", initial: "/stored/mpv", choice: "/chosen/mpv", newer: "/newer/mpv", save: "saveMpvPath" },
+  { label: "Advanced mpv options", id: "mpv-extra", group: "advanced", key: "extraArgs", initial: "--profile=fast", choice: "--osd-level=3", newer: "--video-sync=display-resample", save: "saveMpvAdvanced" },
+  { label: "Use my own mpv config", group: "advanced", key: "useOwnConfig", initial: true, choice: false, newer: true, save: "saveMpvAdvanced" },
+  { label: "Black-bar cropping", id: "mpv-autocrop", group: "advanced", key: "autocrop", initial: "auto", choice: "off", newer: "manual", save: "saveMpvAdvanced" },
+  { label: "Playback quality", id: "playback-quality", group: "advanced", key: "playbackQuality", initial: "automatic", choice: "original", newer: "test-tier", save: "saveMpvAdvanced" },
+  { label: "Skip intros", id: "skip-intros", group: "advanced", key: "skipIntros", initial: "autoskip", choice: "button", newer: "off", save: "saveMpvAdvanced" },
+  { label: "Skip credits", id: "skip-credits", group: "advanced", key: "skipCredits", initial: "autoskip", choice: "button", newer: "off", save: "saveMpvAdvanced" },
+  { label: "Skip commercials", id: "skip-commercials", group: "advanced", key: "skipCommercials", initial: "autoskip", choice: "button", newer: "off", save: "saveMpvAdvanced" },
+  { label: "Duplicate playback source", name: "playback-source-policy", group: "preferences", key: "policy", initial: "fastest", choice: "best", newer: "compatible", save: "savePlaybackPreferences" },
+  { label: "Resolution override", id: "playback-resolution-override", group: "preferences", key: "resolutionOverride", initial: "2160p", choice: "", newer: "1080p", save: "savePlaybackPreferences" },
+  { label: "HDR override", id: "playback-hdr-override", group: "preferences", key: "hdrOverride", initial: "enabled", choice: "", newer: "disabled", save: "savePlaybackPreferences" },
+];
+
+function settingsApp() {
+  const source = fs.readFileSync("src/lib/Settings.svelte", "utf8");
+  const ast = parse(source, { modern: true });
+  const elements = [];
+  function walk(node, label) {
+    if (!node || typeof node !== "object") return;
+    if (node.type === "RegularElement") {
+      if (node.name === "label") label = node;
+      elements.push({ node, label });
+    }
+    for (const [key, value] of Object.entries(node)) if (key !== "parent") walk(value, label);
+  }
+  walk(ast.fragment);
+  const attribute = (node, name) => node.attributes.find((a) => a.type === "Attribute" && a.name === name);
+  const text = (a) => Array.isArray(a?.value) ? a.value.map((v) => v.data ?? "").join("") : "";
+  const expression = (a) => {
+    const tag = Array.isArray(a?.value) ? a.value[0] : a?.value;
+    return tag?.expression ? source.slice(tag.expression.start, tag.expression.end) : undefined;
+  };
+  const button = (name) => {
+    const found = elements.filter(({ node }) => node.name === "button" && expression(attribute(node, "onclick")) === name);
+    assert.equal(found.length, 1, `one button calls ${name}`);
+    return found[0].node;
+  };
+  const controls = settingsControls.map((spec) => {
+    const found = elements.filter(({ node, label }) => {
+      if (spec.id) return text(attribute(node, "id")) === spec.id;
+      if (spec.name) return text(attribute(node, "name")) === spec.name;
+      return node.name === "input" && label && source.slice(label.start, label.end).includes("Use my own mpv config");
+    });
+    assert.equal(found.length, 1, `one ${spec.label} control`);
+    const node = found[0].node;
+    const binding = node.attributes.find((a) => a.type === "BindDirective");
+    assert.ok(binding, `${spec.label} is bound`);
+    const bound = source.slice(binding.expression.start, binding.expression.end);
+    const edit = expression(attribute(node, "oninput")) ?? expression(attribute(node, "onchange")) ?? "() => {}";
+    const saveButton = button(spec.save);
+    return `${JSON.stringify(spec.label)}: {
+      get value() { return ${bound}; },
+      edit(value) { (${edit})(); ${bound} = value; },
+      save() { return (${expression(attribute(saveButton, "onclick"))})(); },
+      get busy() { return ${expression(attribute(saveButton, "disabled"))}; }
+    }`;
+  });
+  const program = ast.instance.content;
+  const instance = ts.createSourceFile("Settings.ts", source.slice(program.start, program.end), ts.ScriptTarget.ES2022, true);
+  const statements = instance.statements.filter((statement) => {
+    if (ts.isImportDeclaration(statement)) return false;
+    // Tests control when the opening's real load runs.
+    return !(ts.isExpressionStatement(statement) && statement.expression.getText(instance) === "load()");
+  });
+  const actions = ["browseMpv", "clearMpvPath", "installMpv"].map((name) => `${name}: ${expression(attribute(button(name), "onclick"))}`);
+  const code = ts.transpileModule([
+    source.slice(ast.module.content.start, ast.module.content.end),
+    "return () => {",
+    "const destroyed = []; const onDestroy = (fn) => destroyed.push(fn);",
+    ...statements.map((statement) => statement.getText(instance)),
+    `return { load, ${actions.join(",")}, insertPreset, controls: { ${controls.join(",")} },`,
+    "get err() { return err; }, get qualityTiers() { return qualityTiers; }, close() { destroyed.splice(0).forEach((fn) => fn()); } }; };",
+  ].join("\n"), { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText;
+  return (backend) => ({
+    open: new Function("invoke", "openDialog", "$state", "$derived", "$props", "onMount", "localStorage", code)(
+      backend.invoke, async () => "/browsed/mpv", (value) => value, (value) => value,
+      () => ({ onClose() {}, onChanged() {}, onLinkPlex() {} }), () => {}, { getItem() { return null; } },
+    ),
+  });
+}
+
+function settingsBackend(spec) {
+  const state = {
+    path: "/stored/mpv", continuation: { mode: "only-tv" },
+    advanced: {
+      extraArgs: "", useOwnConfig: false, autocrop: "off", playbackQuality: "original",
+      skipIntros: "button", skipCredits: "button", skipCommercials: "button",
+      qualityTiers: [{ id: "test-tier", label: "Test tier", bitrateKbps: 1000, width: 1280, height: 720 }],
+    },
+    preferences: { policy: "best", resolutionOverride: null, hdrOverride: null },
+  };
+  if (spec.group === "path") state.path = spec.initial;
+  else state[spec.group][spec.key] = spec.initial;
+  const backend = { holdLoads: false, holdWrites: false, refuse: false, failDisplay: false, loads: [], writes: [] };
+  const mpv = () => ({
+    available: true, path: state.path ?? "/automatic/mpv", configuredPath: state.path,
+    canAutoInstall: true, installCommand: null, installDescription: "test installer", installUrl: "",
+  });
+  const profile = { widthPx: 1920, heightPx: 1080, hdr: "disabled", evidence: "native" };
+  backend.value = () => (spec.group === "path" ? state.path : state[spec.group][spec.key]) ?? "";
+  backend.invoke = (command, args) => {
+    if (command === "get_sources") return backend.holdLoads ? new Promise((resolve) => backend.loads.push(() => resolve([]))) : Promise.resolve([]);
+    if (command === "check_mpv") return Promise.resolve(mpv());
+    if (command === "get_mpv_advanced") return Promise.resolve(structuredClone(state.advanced));
+    if (command === "get_continue_playing") return Promise.resolve(state.continuation.mode);
+    if (command === "get_mpv_window_mode") return Promise.resolve("remember");
+    if (command === "get_playback_preferences") {
+      if (backend.failDisplay) return Promise.reject(new Error("display refresh failed"));
+      return Promise.resolve({ ...state.preferences, detectedDisplay: profile, effectiveDisplay: profile });
+    }
+    return new Promise((resolve, reject) => {
+      const write = {
+        args, reply: undefined,
+        apply() {
+          if (command === "set_continue_playing") write.reply = state.continuation.mode = args.mode;
+          else if (command === "set_mpv_advanced") Object.assign(state.advanced, args, { extraArgs: args.extraArgs.trim() });
+          else if (command === "set_playback_preferences") Object.assign(state.preferences, args);
+          else if (command === "set_mpv_path" || command === "install_mpv") {
+            state.path = command === "install_mpv" ? "/installed/mpv" : args.path;
+            write.reply = mpv();
+          } else throw new Error(`unexpected command: ${command}`);
+        },
+        deliver(refused = false) {
+          if (refused) reject(new Error("settings save refused"));
+          else resolve(write.reply);
+        },
+      };
+      backend.writes.push(write);
+      if (!backend.holdWrites) {
+        if (!backend.refuse) write.apply();
+        write.deliver(backend.refuse);
+      }
+    });
+  };
+  return backend;
+}
+
+const settingsTurn = () => new Promise((resolve) => setImmediate(resolve));
+
+for (const spec of settingsControls) {
+  test(`Settings ${spec.label}: drafts, refused saves and ordered replies`, async () => {
+    const backend = settingsBackend(spec);
+    const app = settingsApp()(backend);
+    const a = app.open();
+    const control = a.controls[spec.label];
+
+    // A choice made before the first answer survives even when it equals
+    // the displayed default and the stored value is something else.
+    backend.holdLoads = true;
+    const opening = a.load();
+    control.edit(spec.choice);
+    backend.loads.shift()();
+    await opening;
+    assert.equal(control.value, spec.choice, "a slow initial load must keep the user's draft");
+    backend.holdLoads = false;
+    await control.save();
+    assert.equal(backend.value(), spec.choice);
+
+    // The same load cannot overwrite a choice saved while it was waiting.
+    backend.holdLoads = true;
+    const reload = a.load();
+    control.edit(spec.newer);
+    await control.save();
+    backend.loads.shift()();
+    await reload;
+    backend.holdLoads = false;
+    assert.equal(control.value, backend.value(), "a slow load must not undo a confirmed save");
+    backend.refuse = true;
+    control.edit(spec.choice);
+    await control.save();
+    assert.equal(control.value, backend.value(), "a refused choice must revert to the confirmed value");
+    assert.match(a.err, /save refused/);
+    assert.equal(control.busy, false);
+    backend.refuse = false;
+
+    // Editing again while a save is out makes a new draft, not a value its
+    // old successful (or refused) reply is allowed to replace.
+    backend.holdWrites = true;
+    control.edit(spec.choice);
+    const index = backend.writes.length;
+    const saving = control.save();
+    control.edit(spec.newer);
+    backend.writes[index].apply();
+    backend.writes[index].deliver();
+    await saving;
+    assert.equal(control.value, spec.newer, "the old reply must keep an edit made after Save");
+    assert.equal(backend.value(), spec.choice);
+
+    // A applies, closes without its reply, and B reads that applied value.
+    // B's next write must wait for A's reply, retaining B's clicked choice.
+    const first = backend.writes.length;
+    const savingA = control.save();
+    await settingsTurn();
+    backend.writes[first].apply();
+    a.close();
+    const b = app.open();
+    if (spec.key === "playbackQuality") {
+      assert.deepEqual(b.qualityTiers, a.qualityTiers, "a reopened quality select retains the catalog for its confirmed tier");
+    }
+    await b.load();
+    const reopened = b.controls[spec.label];
+    assert.equal(reopened.value, backend.value());
+    reopened.edit(spec.choice);
+    const savingB = reopened.save();
+    await settingsTurn();
+    assert.equal(backend.writes.length, first + 1, "reopened B must wait for A's reply before writing");
+    backend.writes[first].deliver();
+    await savingA;
+    await settingsTurn();
+    assert.equal(backend.writes.length, first + 2);
+    backend.writes[first + 1].apply();
+    backend.writes[first + 1].deliver();
+    await savingB;
+    assert.equal(backend.value(), spec.choice, "the queued write keeps the click's value");
+    assert.equal(reopened.value, backend.value());
+    backend.holdWrites = false;
+    backend.refuse = true;
+    reopened.edit(spec.newer);
+    await reopened.save();
+    assert.equal(reopened.value, backend.value(), "a refusal after reopening restores the latest confirmation");
+    backend.refuse = false;
+
+    if (spec.group === "preferences") {
+      backend.failDisplay = true;
+      reopened.edit(spec.newer);
+      await reopened.save();
+      assert.match(b.err, /display refresh failed/);
+      assert.equal(backend.value(), spec.newer);
+      assert.equal(reopened.value, backend.value(), "a failed display refresh does not undo a successful write");
+    }
+    if (spec.group === "path") {
+      backend.refuse = true;
+      await b.clearMpvPath();
+      assert.equal(reopened.value, backend.value(), "refused Clear restores the path");
+      await b.browseMpv();
+      assert.equal(reopened.value, backend.value(), "refused Browse restores the path");
+      backend.refuse = false;
+      await b.browseMpv();
+      assert.equal(reopened.value, "/browsed/mpv");
+      await b.clearMpvPath();
+      assert.equal(reopened.value, "");
+    }
+    if (spec.key === "extraArgs") {
+      backend.holdLoads = true;
+      const loading = b.load();
+      b.insertPreset("--keep-open=no");
+      const draft = reopened.value;
+      backend.loads.shift()();
+      await loading;
+      assert.equal(reopened.value, draft, "Insert makes a draft too");
+      await reopened.save();
+      assert.equal(backend.value(), draft.trim());
+      assert.equal(reopened.value, draft, "successful Save keeps the author's argument formatting");
+    }
+    b.close();
+  });
+}
+
+test("Settings Install mpv: installation and path saves share their confirmation order", async () => {
+  const spec = settingsControls.find((control) => control.group === "path");
+  const backend = settingsBackend(spec);
+  const app = settingsApp()(backend);
+  const a = app.open();
+  await a.load();
+  backend.holdWrites = true;
+  const installing = a.installMpv();
+  backend.writes[0].apply();
+  a.close();
+  const b = app.open();
+  await b.load();
+  const path = b.controls[spec.label];
+  path.edit("/after-install/mpv");
+  const saving = path.save();
+  await settingsTurn();
+  assert.equal(backend.writes.length, 1, "a path save must wait for the installer reply");
+  backend.writes[0].deliver();
+  await installing;
+  await settingsTurn();
+  backend.writes[1].apply();
+  backend.writes[1].deliver();
+  await saving;
+  assert.equal(path.value, "/after-install/mpv");
+  assert.equal(path.value, backend.value());
+
+  // On Windows installation (and set_mpv_path on every platform) can store
+  // a path before check_mpv fails. The error must not roll it back in the UI.
+  const retry = b.installMpv();
+  await settingsTurn();
+  backend.writes[2].apply();
+  backend.writes[2].deliver(true);
+  await retry;
+  assert.match(b.err, /save refused/);
+  assert.equal(path.value, backend.value(), "re-read a path that may have been stored before an error");
+  b.close();
+});
 
 // The index of the brace that closes the one at `open`. Reads Rust well enough
 // to ignore the braces that are not code: those in comments, in string
