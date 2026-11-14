@@ -197,6 +197,22 @@ test('a Compatible play is shown on the screen its copy was ranked for, any othe
   );
   assert.ok(ranking > 0, 'only a Compatible choice decides the screen, and ranks for it');
   assert.equal(count(select, 'decide_play_screen('), 1, 'once, in that arm');
+  // The names that arm and the launch hand decide_play_screen are the
+  // play's own: nothing in either function binds them again (the attack on
+  // the fourth repair, finding 5: a `let replace_session = None;` before the
+  // arm passed every pin). In the choice of copy the play's session is the
+  // parameter, read only by that arm; in the launch it is taken from the
+  // request once, and the saved first screen read from the setting once.
+  const code = (body) => body.replace(/\/\/[^\n]*/g, '');
+  const bindings = (body, name) =>
+    (code(body).match(new RegExp(`\\blet\\s[^=;]*\\b${name}\\b[^=;]*=`, 'g')) ?? []).length;
+  assert.equal(count(code(select), 'replace_session'), 2, "the choice of copy's session is its parameter, read by that arm only");
+  assert.equal(bindings(select, 'replace_session'), 0, 'never bound again in the choice of copy');
+  assert.equal(bindings(select, 'saved_first_screen'), 1, 'the saved first screen is read once, in that arm');
+  const launch = bodyOf(commands, 'async fn play_by_key_locked(');
+  assert.match(launch, /let PlayLaunchRequest \{[^}]*\breplace_session,[^}]*\} = request;/, "the launch's session is the request's");
+  assert.equal(bindings(launch, 'replace_session'), 1, 'and never bound again in the launch');
+  assert.equal(bindings(launch, 'saved_first_screen'), 1, 'the saved first screen is read once in the launch');
   assert.ok(select.indexOf('let upcoming_player = crate::player::choose(') < ranking, 'after the player is chosen');
   assert.doesNotMatch(
     select,
