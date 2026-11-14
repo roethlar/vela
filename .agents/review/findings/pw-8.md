@@ -1,7 +1,7 @@
 # pw-8: the end-to-end scenario for the player window fails about one external run in four, and with it the parity verdict
 
 **Severity**: MEDIUM — `windowsetting`, the scenario that holds the player-window work end to end, failed about one external run in four at its fullscreen checks, and four of the last five full runs. It is not a recorded known failure, so every such run failed the parity verdict. The cause turned out to be in the scenario, not in Vela.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `26660a9`
 
@@ -256,3 +256,22 @@ Known gaps:
   Vela's lies mpv's own delivery; nothing measures it.
 - The wrapper case and the real exit handler running twice were not run;
   they rest on Tauri's documentation and the code.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 19:15 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1db77-30b0-74c0-913b-0e38f5030bf1`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 19:09 UTC, finished 19:15 UTC.
+- Reviewed head `bb3b84e2d7569d030d024ccf95fb3709cb3e88bb`, base
+  `81598d3998d43c5f293bbb16320575f58561a6e9` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
