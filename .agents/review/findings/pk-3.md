@@ -1,7 +1,7 @@
 # pk-3: a plain Arch build can put an older package, with the set in it, into dist/
 
 **Severity**: MEDIUM — after an opt-in build and a version change, `scripts/build.sh` without the flag copies every package it finds in `packaging/arch/` to `dist/`, the older one with the whole set included. A build that was not asked for the set then hands one out.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `26910e5`, `07ebee4`
 
@@ -60,3 +60,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `2f0d191..4b8293e`, 2026-11-14 01:05 UTC
 (`.agents/review/codereview-2026-11-14-libmpv-packaging.md`). Reviewer's
 title: "Keep earlier opt-in Arch packages out of default-build output". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 03:07 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d7f1-5275-7f42-bdaa-3e556aafe3ec`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 02:44 UTC, finished 02:51 UTC.
+- Reviewed head `13487828af78d0e8a5a4c1ae181efe8dc3981da7`, base
+  `8e6299e6403d7467705206c691ab7e50099dbf9c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

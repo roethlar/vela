@@ -1,7 +1,7 @@
 # pk-4: a package whose directories above the set cannot be entered still passes
 
 **Severity**: MEDIUM — the check looks at the permissions of `usr/lib/Vela` and below, not at `usr` and `usr/lib`. A package that installs `usr/lib` with mode 0700 passes with 'every user may read every file of the set', and on the machine it is installed on nobody but root can load the library.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `2faadcf`
 
@@ -58,3 +58,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `2f0d191..4b8293e`, 2026-11-14 01:05 UTC
 (`.agents/review/codereview-2026-11-14-libmpv-packaging.md`). Reviewer's
 title: "Check permissions on every ancestor of the packaged set". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 03:07 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d7f7-a2fd-7512-a506-3d2f848ae0fd`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 02:51 UTC, finished 02:59 UTC.
+- Reviewed head `13487828af78d0e8a5a4c1ae181efe8dc3981da7`, base
+  `8e6299e6403d7467705206c691ab7e50099dbf9c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

@@ -1,7 +1,7 @@
 # pk-2: the libraries of a set that has failed its checks are loaded anyway
 
 **Severity**: HIGH — `check-libmpv.py` goes on to load `libmpv.so.2` after the set has failed its manifest check, so a package whose library is a link to somewhere else, or has been altered, gets its code run (a library's start-up code runs on load) before the check says FAIL.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `12fa2fa`, `9b12157` (and `1348782`)
 
@@ -66,3 +66,21 @@ Raised by: codex / host default / host default / standard, codereview
 generation pass over `2f0d191..4b8293e`, 2026-11-14 01:05 UTC
 (`.agents/review/codereview-2026-11-14-libmpv-packaging.md`). Reviewer's
 title: "Reject invalid sets before loading their libraries". Reviewer's severity: HIGH.
+
+### Verification round 1, recorded 2026-11-14 03:07 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d7e8-3fe8-70c2-9181-5e52301562f7`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 02:34 UTC, finished 02:44 UTC.
+- Reviewed head `13487828af78d0e8a5a4c1ae181efe8dc3981da7`, base
+  `8e6299e6403d7467705206c691ab7e50099dbf9c` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
