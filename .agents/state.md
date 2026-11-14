@@ -428,19 +428,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   skipped there. One step would fix it (`sudo apt-get install -y
   libarchive-tools` before `npm run check`); it is a change to `ci.yml`,
   which the agent does not make.
-- The external player does not check the media server's TLS certificate
-  (found 2026-11-13 by a run, unfixed, the owner has not been asked yet).
-  The system's mpv up to 0.41 defaults to `tls-verify=no` and Vela does
-  not set it, so mpv fetches the stream, and sends the stream's token,
-  without verifying whom it is talking to; Vela's own client does verify.
-  The mpv shipped for the embedded player (0.42) verifies by default, but
-  against its own TLS library's trust store, which is not always the one
-  Vela's client uses (`SSL_CERT_FILE` is honoured by one and not the
-  other): a server on a private CA then browses and will not play, with no
-  message. Details: `.agents/plans/embedded-player.slice6-notes.md`.
-  DECIDED by the owner on 2026-11-14: the player checks, and a setting
-  turns the check off. Plan `.agents/plans/tls-verify.md`, being built;
-  this entry goes when it has landed.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
   with `continueon` and `playverbs`). One cause of the continuation flakes
   is gone since 2026-11-13: scenarios sought in a file the moment mpv named

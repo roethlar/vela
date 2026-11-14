@@ -4,9 +4,8 @@
 
 APPROVED by the owner on 2026-11-14 (decision `.agents/decisions.md`, that
 date: "The player checks the server's certificate, with a setting to turn
-it off"). Being built as one slice, by codex as a coding task, reviewed
-and landed by the working agent. This section and the log at the end say
-how far it has landed.
+it off"). LANDED 2026-11-14 at `bc51d01`, its one slice whole. Not released;
+the release note and the version are still to be written (below).
 
 ## The fault
 
@@ -61,4 +60,39 @@ one for the setting's round trip through the configuration. A real
 
 ## Implementation log
 
-(nothing landed yet)
+### 2026-11-14: landed at `bc51d01`
+
+Written by codex as a coding task; read, amended, merged and checked by
+the working agent.
+
+- The setting is `mpv_tls_verify` in `config.json`: absent or null means
+  check, only `false` turns checking off, any other value makes the file
+  invalid like any bad settings file.
+- The control is in Settings under "mpv player": a checkbox "Skip server
+  certificate checks", off by default, its own "Save certificate setting"
+  button, and a line saying what skipping costs and that a private
+  authority can be named to mpv with `tls-ca-file` instead.
+- `--tls-verify=yes` or `=no` is the last option on the external command
+  line (after the stream-header include) and the last of the embedded
+  player's options.
+- A refused certificate cannot be told apart reliably from mpv's other
+  early failures, and mpv can fail before Vela is connected to it. So the
+  second way of the plan was taken: a play of an `https` stream, with
+  checking on, that ends without having been seen to start (no file
+  loaded, no position, no ordinary end reported) is reported where Vela
+  reports a play that did not start, with words that name the certificate
+  and the setting. The working agent narrowed this from codex's version,
+  which showed it for every early end; other early ends are reported as
+  before.
+- Checks: the full check green (693 Rust tests, 549 Node tests). End to
+  end, external: `playback`, `mpvargs`, `multiplex`, `surfaces`,
+  `embeddedownconfig`, `windowsetting`, `smoke`, `sourcedeadend`, 8 of 8;
+  embedded: `embeddedplay`, `mpvargs`, `embeddedownconfig`,
+  `embeddedlatestart`, `playback`, 5 of 5.
+- Not checked: a real `https` server whose certificate mpv refuses (none
+  in the venue); the notice in a real window; Windows and macOS (not
+  compiled here).
+
+Still to do, at the next release: the release note (it changes what
+happens for a server whose certificate mpv does not accept) and the
+user-facing documentation of the setting.
