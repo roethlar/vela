@@ -876,8 +876,12 @@ mod wayland_hdr {
         proxy: wl_output::WlOutput,
         name: Option<String>,
         model: Option<String>,
+        /// The current mode, as the output's hardware takes it (before its
+        /// transform). `query` matches by this, as it always has.
         width: u32,
         height: u32,
+        /// How the output is turned on the desktop (the geometry event).
+        transform: Option<WEnum<wl_output::Transform>>,
     }
 
     #[derive(Default)]
@@ -915,6 +919,7 @@ mod wayland_hdr {
                         model: None,
                         width: 0,
                         height: 0,
+                        transform: None,
                     }),
                     "wp_color_manager_v1" => {
                         state.manager = Some(registry.bind(name, version.min(3), qh, ()))
@@ -943,7 +948,12 @@ mod wayland_hdr {
             };
             match event {
                 wl_output::Event::Name { name } => output.name = Some(name),
-                wl_output::Event::Geometry { model, .. } => output.model = Some(model),
+                wl_output::Event::Geometry {
+                    model, transform, ..
+                } => {
+                    output.model = Some(model);
+                    output.transform = Some(transform);
+                }
                 wl_output::Event::Mode {
                     flags: WEnum::Value(value),
                     width,
@@ -1038,6 +1048,7 @@ mod wayland_hdr {
                     model: output.model.clone(),
                     width: output.width,
                     height: output.height,
+                    transform: output.transform,
                 })
                 .collect(),
         ))
@@ -1049,31 +1060,53 @@ mod wayland_hdr {
         /// The connector name (`wl_output` version 4 and later).
         pub name: Option<String>,
         pub model: Option<String>,
-        /// The current mode.
+        /// The current mode, before the output's transform.
         pub width: u32,
         pub height: u32,
+        pub transform: Option<WEnum<wl_output::Transform>>,
+    }
+
+    /// Whether a transform turns the output a quarter turn, so that it is
+    /// shown with its mode's width and height swapped (third review of
+    /// finding pw-1, comment 4: a portrait output).
+    pub(super) fn quarter_turned(transform: Option<WEnum<wl_output::Transform>>) -> bool {
+        use wl_output::Transform;
+        matches!(
+            transform,
+            Some(WEnum::Value(
+                Transform::_90 | Transform::_270 | Transform::Flipped90 | Transform::Flipped270
+            ))
+        )
     }
 
     /// The compositor's outputs as Vela lists them: each by its connector
-    /// name first and its model, and the list complete only when every
-    /// output has a connector name, the name mpv takes (third review of
-    /// finding pw-1). A compositor that gives models only, or one output
-    /// without its connector, leaves the list incomplete.
+    /// name first and its model, at its size as it is shown (its mode, turned
+    /// by its transform), and the list complete only when every output has
+    /// a connector name, the name mpv takes (third review of finding pw-1).
+    /// A compositor that gives models only, or one output without its
+    /// connector, leaves the list incomplete.
     pub(super) fn listed(described: Vec<Described>) -> super::PlatformOutputs {
         let named = |name: &Option<String>| name.as_deref().is_some_and(|name| !name.trim().is_empty());
         let complete = described.iter().all(|output| named(&output.name));
         let outputs = described
             .into_iter()
-            .map(|output| super::Output {
-                names: output
-                    .name
-                    .into_iter()
-                    .chain(output.model)
-                    .filter(|name| !name.trim().is_empty())
-                    .collect(),
-                width_px: output.width,
-                height_px: output.height,
-                position: None,
+            .map(|output| {
+                let (width_px, height_px) = if quarter_turned(output.transform) {
+                    (output.height, output.width)
+                } else {
+                    (output.width, output.height)
+                };
+                super::Output {
+                    names: output
+                        .name
+                        .into_iter()
+                        .chain(output.model)
+                        .filter(|name| !name.trim().is_empty())
+                        .collect(),
+                    width_px,
+                    height_px,
+                    position: None,
+                }
             })
             .filter(|output| !output.names.is_empty())
             .collect();
@@ -1433,6 +1466,7 @@ mod tests {
             model: Some(model.to_string()),
             width: 3840,
             height: 2160,
+            ..Default::default()
         };
         let both = vec![described(Some("DP-1"), "XG27UQDMS"), described(Some("DP-2"), "U2720Q")];
         assert_eq!(
@@ -1463,6 +1497,68 @@ mod tests {
             ]),
             "a compositor that gives models only"
         );
+    }
+
+    // Third review of finding pw-1, comment 4: the compositor's outputs are
+    // given as they are shown. Each of the eight transforms, and the
+    // reviewer's probe: a saved portrait output other than Vela's monitor is
+    // ranked for 1080x1920, not for its unturned mode.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn the_compositors_outputs_are_given_as_they_are_shown() {
+        use wayland_client::{protocol::wl_output::Transform, WEnum};
+        use wayland_hdr::{listed as from_compositor, Described};
+        let shown = |transform: Option<WEnum<Transform>>| {
+            let outputs = from_compositor(vec![Described {
+                name: Some("DP-2".to_string()),
+                model: Some("U2720Q".to_string()),
+                width: 1920,
+                height: 1080,
+                transform,
+            }]);
+            let output = &outputs.outputs()[0];
+            (output.width_px, output.height_px)
+        };
+        for (transform, expected) in [
+            (Transform::Normal, (1920, 1080)),
+            (Transform::_90, (1080, 1920)),
+            (Transform::_180, (1920, 1080)),
+            (Transform::_270, (1080, 1920)),
+            (Transform::Flipped, (1920, 1080)),
+            (Transform::Flipped90, (1080, 1920)),
+            (Transform::Flipped180, (1920, 1080)),
+            (Transform::Flipped270, (1080, 1920)),
+        ] {
+            assert_eq!(shown(Some(WEnum::Value(transform))), expected, "{transform:?}");
+        }
+        assert_eq!(shown(None), (1920, 1080), "no transform told: as the mode");
+        assert_eq!(shown(Some(WEnum::Unknown(99))), (1920, 1080), "a transform not known: as the mode");
+
+        // The reviewer's probe: Vela on HDMI-1, the saved DP-2 turned to
+        // portrait.
+        let hdmi = monitor("HDMI-1", "HDMI-1", 1920, 1080, 0);
+        let portrait = monitor("U2720Q", "U2720Q", 1080, 1920, 1920);
+        let screens = screens_from(
+            Some(hdmi.clone()),
+            Some(vec![hdmi, portrait]),
+            from_compositor(vec![
+                Described {
+                    name: Some("HDMI-1".to_string()),
+                    model: Some("HDMI-1".to_string()),
+                    width: 1920,
+                    height: 1080,
+                    transform: Some(WEnum::Value(Transform::Normal)),
+                },
+                Described {
+                    name: Some("DP-2".to_string()),
+                    model: Some("U2720Q".to_string()),
+                    width: 1920,
+                    height: 1080,
+                    transform: Some(WEnum::Value(Transform::_270)),
+                },
+            ]),
+        );
+        assert_eq!(size(&profile_basis(Some("DP-2"), None, &screens)), (Some("DP-2"), 1080, 1920));
     }
 
     // On Wayland Tauri names a screen by its model, so two screens of one
