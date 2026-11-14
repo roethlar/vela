@@ -45,10 +45,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     - Packaging the mpv library into the Linux packages, opt-in (branch
       `embedded-packaging`): `scripts/build.sh --with-libmpv`. Its repair
       pass was cut off by a usage limit on 2026-11-13 and is being redone.
-    - (Slice 5, controls and cropping, LANDED at `3d2fef6` and is with codex
-      for its review; see the plan's log. Its cropping script is built
-      under an assumption the owner has not ruled on: the plan's "For the
-      owner", item 3.)
+    - (Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
+      log. Its codex review returned TWO findings, `pc-1` and `pc-2`, both
+      admitted and being fixed: `.agents/review/index.md`. Its cropping
+      script is built under an assumption the owner has not ruled on: the
+      plan's "For the owner", item 3.)
     - Then Slice 6 (parity), being written since the evening of
       2026-11-13 on the local branch `slice6` (tests and harness only; no
       product code). What was found out for it is

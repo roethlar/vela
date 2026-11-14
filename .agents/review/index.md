@@ -1,6 +1,17 @@
 # Review status
 
-**Embedded player Slice 4 review, 2026-11-13 (open):** codereview codex
+**Embedded player Slice 5 review, 2026-11-14 (open):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `0aeeff0..3d2fef6`: `findings`. Two candidates, two
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-embedded-controls.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pc-1 | MEDIUM   | A line that arrives in pieces is read past the limit of whoever waits for it | `[ ]`  | — | codex/default/standard |
+| pc-2 | MEDIUM   | A play that ends in an error leaves Vela's window in fullscreen for 50 seconds | `[ ]`  | — | codex/default/standard |
+
+**Embedded player Slice 4 review, 2026-11-13 (closed 2026-11-14, all three verified):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `74f44b6..e8db400`: `findings`. Three candidates, three
 admitted, none declined. Record:
