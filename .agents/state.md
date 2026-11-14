@@ -88,7 +88,8 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       verification one by one (`.agents/review/index.md`). Where each
       stands (2026-11-14, afternoon): `pa-8`, `pa-3` and `pa-2` accepted
       and closed. The other five were reopened and repaired, each record
-      says on what: `pa-1` twice (second repair `9dfad5e` with codex),
+      says on what: `pa-1` three times (third repair `8ed9acb` with codex;
+      its record says that a fourth reopen goes to the owner),
       `pa-7` twice (its third repair is being built by helper agents on
       the local branch `pa7-r3`: the play is paused and moved before it is
       stopped, so that where it stopped does not depend on when anything
@@ -97,8 +98,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       owner": the rounds are not getting narrower; three ways on, the agent
       recommends taking it as it is), `pa-5` four times (its record says
       why it did not go to the owner and when it will; its fourth repair is
-      being written by codex, see below), `pa-6` twice (its third repair is
-      being written by codex, see below). The three that changed scenarios (`pa-1`,
+      being written by codex, see below), `pa-6` twice (its second repair,
+      `3d2ecca`, was written by codex and reviewed by the agent, and is
+      not sent to codex; see below). The three that changed scenarios (`pa-1`,
       `pa-7`, `pa-2`) each got follow-up commits so that plain
       `node --test` holds the fix (`17d415f` to `2a42345`): codex's sandbox
       cannot run the end-to-end suite. Notes kept
@@ -125,9 +127,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     `cx-pa5r5`, `cx-pw7r4`), uncommitted there until the agent lands them:
     the first half of `pw-9` (LANDED at `0b313a2`); the other end-to-end
     scenarios checked for the race `pw-8` had, with the wait in one helper
-    (written; sixteen scenarios changed; it passes its unit tests on
-    current `main` and is in full end-to-end runs before it lands);
-    `pa-6`'s third repair; `pa-5`'s fourth; and `pw-7`'s fourth. Codex cannot be the
+    (LANDED at `71395c3`: sixteen scenario files changed; the survey and
+    the agent's review are `.agents/review/pw-8.other-scenarios.md`);
+    `pa-6`'s second repair (LANDED at `3d2ecca`); `pa-5`'s fourth (being
+    written); and `pw-7`'s fourth (waiting its turn). Codex cannot be the
     reviewer of code it wrote, so for these the agent reviews (reads the
     diff, runs the checks and the end-to-end runs codex's sandbox cannot,
     red-proves the tests) and lands them; their records say so. Whether
@@ -158,16 +161,26 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   coding task (its record says why it did not go to the owner at the
   third reopen and when it will). `pw-1` and `pw-2` reopened, both on
   which screen a Compatible copy is ranked for and opened on; one repair
-  for both LANDED at `52138d0` to `eb2f1c2` (six commits) and is with
-  codex: the screen is decided once, by name, before the copy is chosen.
+  for both LANDED at `52138d0` to `eb2f1c2` (six commits): the screen is
+  decided once, by name, before the copy is chosen. Codex REOPENED both
+  again. `pw-1`, on six points: a screen that is connected can be judged
+  not connected when the list of names is incomplete (Wayland when the
+  compositor's list cannot be read; macOS on HiDPI screens), and the
+  remembered screen is then lost; two screens of one model can be told
+  apart wrongly under fractional scaling; a rotated screen is ranked for
+  its unrotated size; for policies other than Prefer Compatible the
+  screen must again be decided after the stream is resolved, as the
+  plan's Slice 1 says; and one guard. `pw-2`, on one guard. Those faults
+  are on `main`. The next repair is being built by helper agents on the
+  local branch `pw1-r3`.
   It changes what a user sees in several small ways, listed in `pw-1`'s
   record ("What changes for a user"); two of them the plan's log had under
   "Left as they are" (its entry of 2026-11-14 on this repair): the first
   play of a run is ranked for the saved screen it opens on, and a screen
   that is not connected sends the window to Vela's screen. It does NOT
   re-resolve or relaunch a play when the screen changes during resolution
-  or the compositor places the window elsewhere; that is put to codex as a
-  recorded disagreement, and goes to the owner if codex insists. One fix departs on
+  or the compositor places the window elsewhere; codex ACCEPTED that limit
+  in its second verdict on `pw-1`. One fix departs on
   purpose from what was first decided: what a play's end and Vela's exit
   save is the last window of mpv's own, not the latest play's (`pw-6`'s
   record says why). Do not release 1.0.64 before codex has accepted them.
@@ -194,7 +207,15 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   ("timed out waiting for local suppression with the server transition
   still pending"), which had passed in every other embedded full run that
   day. That failure has not been looked into; it was on a loaded machine.
-  A full run and verdict is owed once the open repairs have landed.
+  (The survey for `pw-8`'s race fits it: the scenario let the play run to
+  its end without knowing that Vela's watcher for the end of the file was
+  connected. An inference; the scenario now waits.) At `33ea46a` plus the
+  `cx-race` change, one full run of each suite: external clean but for
+  the recorded own-config failure; embedded clean but for `pagefail` and
+  `mergedview` once, a fault of that scenario's own, fixed at `ad3b82d`.
+  That pair was no verdict: the embedded run did not build its app, and
+  the verdict takes only runs that did. A full run of each suite, each
+  building, and the verdict are owed once the open repairs have landed.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
