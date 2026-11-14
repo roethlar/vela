@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { appBinaryFromMetadata, cargoMetadataCwd, METADATA_ARGS } from './app-binary.mjs';
+import { appCommands, locateAppBinary } from './app-binary.mjs';
 import { Driver } from './driver.mjs';
 import { setScenarioConfigRoot } from './mpv.mjs';
 import { beginProof, endProof } from './proof.mjs';
@@ -145,10 +145,10 @@ async function runScenario(scenario, tauriDriverBin) {
   process.on('exit', killTree);
   activeKills.add(killTree);
 
-  const driver = new Driver(driverUrl);
+  const driver = new Driver(driverUrl, located);
   try {
     await waitUntil(driverListening, `tauri-driver on :${driverPort}`);
-    await driver.newSession(appBinary);
+    await driver.newSession();
     beginProof();
     await scenario.run({
       driver,
@@ -165,7 +165,7 @@ async function runScenario(scenario, tauriDriverBin) {
         // webview, so the old WebDriver session may already be gone.
         await driver.deleteSession().catch(() => {});
         if (between) await between();
-        await driver.newSession(appBinary);
+        await driver.newSession();
       },
     });
     // What it reached must be what it declares (proof.mjs).
@@ -242,47 +242,31 @@ if (await driverListening()) {
   process.exit(1);
 }
 
-// The app binary is where Cargo builds, asked of Cargo itself with the
-// environment the build gets: CARGO_TARGET_DIR or a Cargo configuration may
-// move it from src-tauri/target, and a fixed path would then start an older
-// binary than the one just built (review finding pa-6). The same for a run
-// with --skip-build, which starts what is there. The build's environment is
-// runStep's with nothing added: this process's own. Cargo is asked from
-// src-tauri/, where tauri build runs it, so that a src-tauri/.cargo/config.toml
-// and a relative CARGO_TARGET_DIR are read as the build reads them.
-let appBinary;
-{
-  const buildEnv = { ...process.env };
-  const res = spawnSync('cargo', METADATA_ARGS, {
-    cwd: cargoMetadataCwd(repoRoot),
-    env: buildEnv,
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-  });
-  try {
-    if (res.error || res.status !== 0) {
-      throw new Error(`\`cargo ${METADATA_ARGS.join(' ')}\` failed: ${res.error?.message || res.stderr?.trim() || `exit ${res.status}`}`);
-    }
-    appBinary = appBinaryFromMetadata(res.stdout, buildEnv);
-  } catch (err) {
-    console.error(`e2e: cannot tell where Cargo builds the app, so which binary to run: ${err.message}`);
-    process.exit(1);
-  }
-}
-
 runStep(path.join(e2eDir, 'fetch-driver.sh'), []);
-if (!skipBuild) {
-  // --debug keeps compile times sane; tauri build (unlike plain cargo build)
-  // embeds the built frontend, so no dev server is involved.
-  runStep('npm', ['run', 'tauri', '--', 'build', '--debug', '--no-bundle']);
+
+// The app binary (review finding pa-6; see the app-binary module). A run that builds
+// makes the debug build (`tauri build --debug --no-bundle`, which embeds the
+// built front end, so no dev server is involved) and starts the executable
+// Cargo reported for that build. A run with --skip-build builds nothing and
+// starts where `cargo metadata` says the debug binary is, a prediction; it is
+// recorded as not built. Every session below starts this one path: the
+// driver is made with it and starts nothing else, and refuses to start it
+// once the file is no longer the one found here (see the driver module).
+let located;
+try {
+  located = Object.freeze(await locateAppBinary({ skipBuild, env: process.env, commands: appCommands(repoRoot) }));
+} catch (err) {
+  console.error(`e2e: cannot tell which app binary to run: ${err.message}`);
+  process.exit(1);
 }
+const { appBinary, built, appBinaryFrom } = located;
 if (!fs.existsSync(appBinary)) {
   console.error(
-    `e2e: app binary missing: ${appBinary}, where Cargo builds it (${skipBuild ? 'run without --skip-build' : 'the build did not leave it there'})`,
+    `e2e: app binary missing: ${appBinary}, from ${appBinaryFrom} (${skipBuild ? 'run without --skip-build' : 'the build did not leave it there'})`,
   );
   process.exit(1);
 }
-console.log(`e2e: running ${appBinary}`);
+console.log(`e2e: running ${appBinary} (from ${appBinaryFrom})`);
 
 fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
@@ -431,13 +415,14 @@ if (!live) {
       {
         player: runPlayer,
         full: nameFilter.length === 0,
-        // Whether this run built the app it ran: it ran the build, then the
-        // binary at the path Cargo gave for that same environment (above).
+        // Whether this run built the app it ran: it ran the build, and
+        // started the executable Cargo reported for that build (above).
         // With --skip-build the binary is whatever was built last, of any
         // code; the verdict refuses it. What `built` does not prove: see
         // README.md, "Parity".
-        built: !skipBuild,
+        built,
         appBinary,
+        appBinaryFrom,
         ...tree,
         finishedAt: new Date().toISOString(),
         scenarios: outcomes,

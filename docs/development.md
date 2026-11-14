@@ -101,12 +101,13 @@ npm run e2e -- playback        # run one scenario by name
 The E2E venue needs `tauri-driver`, Xvfb, ffmpeg, mpv, bsdtar, and curl. The
 first run downloads the pinned WebKitWebDriver described in
 [tests/e2e/README.md](../tests/e2e/README.md); artifacts land under
-`tests/e2e/artifacts/`. The app it runs is the debug binary in Cargo's
-target directory, as Cargo reports it when asked from `src-tauri/`, where
-`tauri build` runs Cargo (`src-tauri/target/debug/vela` unless
-`CARGO_TARGET_DIR`, a relative one taken from `src-tauri/`, or a Cargo
-configuration's `target-dir`, read from `src-tauri/` upwards, moves it), with
-or without `--skip-build`.
+`tests/e2e/artifacts/`. A run that builds starts the executable that
+Cargo's own report of that build names for the app. With `--skip-build` it
+builds nothing and starts where `cargo metadata` predicts the debug binary
+is, which does not follow a Cargo configuration file's `build.target`; such a
+run is recorded as not built (see tests/e2e/README.md). Every session starts
+that one path, and is refused if the file was written over or put in its
+place after it was found.
 
 ## The shipped libmpv set
 

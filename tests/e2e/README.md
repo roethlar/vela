@@ -12,16 +12,28 @@ npm run e2e -- smoke           # run one scenario by name
 npm run e2e -- --embedded      # the same suite, played in the embedded player
 ```
 
-- The app binary is the one Cargo builds: the runner asks Cargo where
-  (`cargo metadata`, with the environment the build gets, run in
-  `src-tauri/` where `tauri build` runs Cargo) and starts
-  `<target directory>/debug/vela`, which is `src-tauri/target/debug/vela`
-  unless `CARGO_TARGET_DIR` (a relative one is taken from `src-tauri/`, as
-  the build takes it) or a Cargo configuration's `target-dir` (read from
-  `src-tauri/` upwards, `src-tauri/.cargo/config.toml` included) moves it; with
-  `--skip-build` too. It prints the path it runs, stops when Cargo cannot
-  say, and stops when `CARGO_BUILD_TARGET` is set (the binary would then be
-  under `<target directory>/<target>/debug/`).
+- A run that builds starts the executable Cargo's own report of that build
+  names for the app (the build passes `--message-format=json-render-diagnostics`
+  through `tauri build` to Cargo, and the runner takes the compiler-artifact
+  message of the `src-tauri/Cargo.toml` package's binary, path as printed),
+  wherever the environment or a Cargo configuration sent it. It stops when no
+  such message arrives or more than one executable claims to be the app.
+- A run with `--skip-build` builds nothing, so nothing reports an artifact. It
+  starts a prediction: `<target_directory>/debug/<the app package's binary>`,
+  with `target_directory` from `cargo metadata` asked in `src-tauri/` with the
+  runner's environment (so `CARGO_TARGET_DIR`, `CARGO_BUILD_TARGET_DIR` and a
+  configuration's `target-dir` are followed, and the path is not normalized).
+  It does not follow a Cargo configuration file's `build.target`: in that
+  setup it may start an older binary at `<target directory>/debug/`, or stop
+  with "app binary missing" when there is none. `CARGO_BUILD_TARGET` in the
+  environment is refused. Such a run is recorded as not built.
+- The runner prints the path it runs and where the path came from, and
+  records both in the results file (`appBinary`, `appBinaryFrom`).
+- Every session starts that one path: the WebDriver client (`driver.mjs`) is
+  made with it and starts nothing else. When the path was found, its device,
+  inode, size and modification time were noted; before each session starts
+  (a restart included), the client checks them again and refuses to start a
+  file that was written over or put in its place since.
 - Requires Linux, `tauri-driver` (`cargo install tauri-driver`), `Xvfb`
   (`xorg-server-xvfb`), `bsdtar`, `curl`, `openssl`, and — for the playback-driving
   scenarios — `ffmpeg` and `mpv`. Server flows run against in-process mock
@@ -227,14 +239,14 @@ the checkout, so it refuses runs of any other commit, and a dirty checkout.
 It also refuses a run made with `--skip-build`: such a run ran whatever
 binary was built last, of any code, so its commit says nothing about the
 app. `built: true` in a results file means that the run ran the build and
-then started the binary at the path Cargo gave for the build's own
-environment, asked from `src-tauri/` where the build runs Cargo (recorded as
-`appBinary`). It does not prove that the build
-wrote that file: a Cargo configuration file's `build.target` (the
-environment's `CARGO_BUILD_TARGET` is refused) would send the build to
-`<target directory>/<target>/debug/` and leave an older binary at the path
-run; nor that nothing replaced the binary between the build and the
-scenarios. It reads the two and fails when a scenario failed other than as its
+started, for every scenario, the executable Cargo's report of that build
+named for the app (recorded as `appBinary`), the same file each time: its
+device, inode, size and modification time are noted as soon as the build
+has ended and checked before every session starts. It does not prove that
+nothing replaced the file in the moment between Cargo writing it and that
+note, or between a check and the app's start, nor that a change which kept
+all four (the same size and modification time, written in place) did not
+happen. It reads the two and fails when a scenario failed other than as its
 recorded known failure, when a known failure passed (take it out) or failed
 with other text, when a scenario did not run, when the runs are of
 different or uncommitted states or not full, and when a row is shown in a
