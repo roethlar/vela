@@ -13,6 +13,8 @@ import {
   pollUntil,
   seedConfig,
   waitForPageUncovered,
+  velaConnected,
+  runPlayer,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
@@ -193,6 +195,10 @@ export default {
         loaded.startsWith(`http://127.0.0.1:${healthy.port}/Videos/${expectedId}/stream`),
         `expected ${expectedId}, got ${loaded}`,
       );
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socket, runPlayer === 'embedded' ? 4 : 3);
       return mpv;
     }
 

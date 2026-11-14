@@ -18,7 +18,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createConnection } from 'node:net';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { PLAYER_VIEW_UP, holdsFor, mockSource, openLibraryGrid, pollUntil, seedConfig, showPlayerBar } from '../helpers.mjs';
+import { PLAYER_VIEW_UP, holdsFor, mockSource, openLibraryGrid, pollUntil, seedConfig, showPlayerBar, velaConnected } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
 
@@ -87,6 +87,10 @@ async function play(driver, verb) {
     () => mpv.getProp('time-pos').catch(() => null),
     `${verb}: the first position`,
   );
+  // playback::play: this client + position/window reader + EOF watcher;
+  // Original quality, no notice or health sampler.
+  // Embedded also has player::report::spawn_reporter for the view's state.
+  await velaConnected(socketPath, 4);
   return { mpv, socketPath, first };
 }
 

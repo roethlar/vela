@@ -20,7 +20,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import fs from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { holdsFor, mockSource, mpvInput, openLibraryGrid, pollUntil, seedConfig } from '../helpers.mjs';
+import { holdsFor, mockSource, mpvInput, openLibraryGrid, pollUntil, seedConfig, velaConnected } from '../helpers.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
@@ -101,6 +101,9 @@ async function playAndAssertCrop(driver, label, { minStart, maxStart, park }) {
       Number(m[2]) < 180,
       `${label}: detected crop must remove the letterbox bars (h=${m[2]})`,
     );
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    await velaConnected(socketPath, 3);
     if (park !== undefined) {
       await mpv.setProp('time-pos', park);
       await new Promise((r) => setTimeout(r, 1500)); // let Vela observe the position

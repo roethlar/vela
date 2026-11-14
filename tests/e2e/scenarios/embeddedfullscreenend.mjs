@@ -33,6 +33,7 @@ import {
   seedConfig,
   seedPlaylists,
   showPlayerBar,
+  velaConnected,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 
@@ -279,7 +280,12 @@ export default {
     await driver.click(play);
     const first = await nextOpened(driver, from, 'the first play of the playlist to open its view');
     sessions.set(first, 'one');
-    let mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
+    let socketPath = await waitForNewMpvSocket(before);
+    let mpv = await MpvIpc.connect(socketPath);
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    // Embedded also has player::report::spawn_reporter for the view's state.
+    await velaConnected(socketPath, 4);
     await viewReady(driver);
     let windowed = await fullscreenOn(driver);
     await screenshot('01-playlist-fullscreen');
@@ -312,7 +318,12 @@ export default {
     await openDetailAndPlay(driver, 'button.poster[aria-label^="Mock Movie Three"]');
     const third = await nextOpened(driver, from, 'the third play to open its view');
     sessions.set(third, 'three');
-    mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
+    socketPath = await waitForNewMpvSocket(before);
+    mpv = await MpvIpc.connect(socketPath);
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    // Embedded also has player::report::spawn_reporter for the view's state.
+    await velaConnected(socketPath, 4);
     await viewReady(driver);
     windowed = await fullscreenOn(driver);
     mpv.quit();
@@ -331,7 +342,12 @@ export default {
     await openDetailAndPlay(driver, 'button.poster[aria-label^="Mock Movie Three"]');
     const fourth = await nextOpened(driver, from, 'the fourth play to open its view');
     sessions.set(fourth, 'three again');
-    mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
+    socketPath = await waitForNewMpvSocket(before);
+    mpv = await MpvIpc.connect(socketPath);
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    // Embedded also has player::report::spawn_reporter for the view's state.
+    await velaConnected(socketPath, 4);
     await viewReady(driver);
     windowed = await fullscreenOn(driver);
     try {
@@ -389,7 +405,12 @@ export default {
     );
     const sixth = await nextOpened(driver, from, 'the playlist\'s first play to open its view again');
     sessions.set(sixth, 'one, playlist again');
-    mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
+    socketPath = await waitForNewMpvSocket(before);
+    mpv = await MpvIpc.connect(socketPath);
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    // Embedded also has player::report::spawn_reporter for the view's state.
+    await velaConnected(socketPath, 4);
     await viewReady(driver);
     windowed = await fullscreenOn(driver);
     mock.state.failPlaybackInfo = true;

@@ -6,7 +6,9 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import test from 'node:test';
+import ts from 'typescript';
 import { acceptedConnections, plexStopProblems, skipJumpVerdict } from './e2e/judge.mjs';
+import { velaConnected } from './e2e/helpers.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
 import { assertPlexStopped } from './e2e/scenarios/multiplex.mjs';
 import { positionsWhile } from './e2e/helpers.mjs';
@@ -748,13 +750,139 @@ test('pw-8: windowsetting hands a play back only once Vela is connected to its m
   // back: a wait that is there but skipped, or that asks for fewer, is not
   // this text.
   const lastStep =
-    '\n      await pollUntil(\n' +
-    "        () => acceptedConnections(fs.readFileSync('/proc/net/unix', 'utf8'), socket) >= 3,\n" +
-    '        "Vela\'s own connections to this mpv",\n' +
-    '        { intervalMs: 20 },\n' +
-    '      );\n' +
+    '\n      await velaConnected(socket, 3);\n' +
     '      return { mpv, session: recent.session_id };\n';
   assert.equal(play.split(lastStep).length, 2, "play() waits for mpv's three accepted connections as its last step before it hands the play back");
+  const tree = ts.createSourceFile('play.mjs', play, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+  assert.deepEqual(tree.statements[0].body.statements.slice(-2).map((node) => node.getText(tree)), [
+    'await velaConnected(socket, 3);',
+    'return { mpv, session: recent.session_id };',
+  ], 'the last two executable statements are the unconditional wait and handoff');
   assert.equal(play.split('return ').filter((part) => part.startsWith('{ mpv')).length, 1, 'by its one way out');
-  assert.equal(source.split('acceptedConnections(').length, 2, 'the count is asked there and nowhere else');
+  assert.equal(source.split('velaConnected(').length, 2, 'the wait is asked there and nowhere else');
 });
+
+const SOCKET = '/tmp/vela-test/mpv-1.sock';
+const procRow = (state, socket = SOCKET) => `0000000000000000: 00000003 00000000 00000000 0001 ${state} 123 ${socket}`;
+const procWithClients = (count) => [
+  'Num RefCount Protocol Flags Type St Inode Path',
+  procRow('01'), // listener
+  procRow('02'), // connecting
+  procRow('03', ''), // unnamed peer
+  procRow('03', `${SOCKET}.other`), // another play
+  ...Array.from({ length: count }, () => procRow('03')),
+].join('\n');
+
+for (const connections of [3, 4, 5]) {
+  test(`pw-8: velaConnected waits for all ${connections} clients on this socket`, async () => {
+    let reads = 0;
+    await velaConnected(SOCKET, connections, {
+      readProcNetUnix: () => {
+        reads++;
+        assert.ok(reads <= connections, 'the exact requested count must release the wait');
+        return procWithClients(reads);
+      },
+      intervalMs: 0,
+    });
+    assert.equal(reads, connections, 'every missing client must keep the wait pending');
+  });
+}
+
+test('pw-8: velaConnected accepts extra clients and reads /proc/net/unix by default', async (t) => {
+  const reads = [];
+  t.mock.method(fs, 'readFileSync', (...args) => {
+    reads.push(args);
+    return procWithClients(4);
+  });
+  await velaConnected(SOCKET, 3, { timeoutMs: 0, intervalMs: 0 });
+  assert.deepEqual(reads, [['/proc/net/unix', 'utf8']], 'the live wait reads the kernel socket table');
+});
+
+test('pw-8: velaConnected times out naming the socket and required count', async () => {
+  await assert.rejects(
+    velaConnected(SOCKET, 4, { readProcNetUnix: () => procWithClients(3), timeoutMs: 0, intervalMs: 1 }),
+    { message: `timed out waiting for mpv at ${SOCKET} to accept 4 connections (Vela and the scenario)` },
+  );
+});
+
+test('pw-8: velaConnected rejects invalid counts before reading the kernel table', async () => {
+  for (const count of [0, -1, 2.5, NaN, undefined]) {
+    await assert.rejects(
+      velaConnected(SOCKET, count, { readProcNetUnix: () => { throw new Error('must not read'); } }),
+      { message: 'connections must be a positive integer' },
+    );
+  }
+});
+
+// Hold the wiring as executable statements, not a comment or a call hidden
+// in an unused function/branch. Each await must be directly in its existing
+// function's block (or try / the mergedview finish arm), immediately before
+// the named step. The pairs below are the survey's observation boundaries.
+// Using the parser also rejects `if (false) await ...`, a detached promise,
+// and an early return that leaves the text of the call present but dead.
+const BOTH = "runPlayer === 'embedded' ? 4 : 3";
+const CONNECTION_SITES = [
+  ['helpers.mjs', 'playAndQuit', 'socketPath', BOTH, 'if (during) await during(mpv);'],
+  ['scenarios/windowsetting.mjs', 'play', 'socket', '3', 'return { mpv, session: recent.session_id };'],
+  ['scenarios/continueoff.mjs', 'run', 'socket', BOTH, "await mpv.setProp('pause', true);"],
+  ['scenarios/continueon.mjs', 'nextMpv', 'socket', BOTH, "await mpv.setProp('pause', true);"],
+  ['scenarios/continuetv.mjs', 'nextMpv', 'socket', BOTH, "await mpv.setProp('pause', true);"],
+  ['scenarios/completionhub.mjs', 'startCompletedEpisode', 'socket', BOTH, "await mpv.setProp('pause', true);"],
+  ['scenarios/playlistplay.mjs', 'nextMpv', 'socket', BOTH, 'return { mpv, socket };'],
+  ['scenarios/serverplaylists.mjs', 'nextPlayer', 'socket', BOTH, 'return mpv;'],
+  ['scenarios/replaceplay.mjs', 'playing', 'socketPath', BOTH, 'return mpv;'],
+  ['scenarios/playback.mjs', 'run', 'socketPath', BOTH, "await mpv.setProp('time-pos', 6);"],
+  ['scenarios/watchstate.mjs', 'run', 'socketPath', BOTH, "await mpv.setProp('time-pos', 6);"],
+  ['scenarios/mergedview.mjs', 'playFromMenu', 'socketPath', BOTH, "await mpv.setProp('pause', true);", 'finish'],
+  ['scenarios/autocrop.mjs', 'playAndAssertCrop', 'socketPath', '3', 'if (park !== undefined)'],
+  ['scenarios/embeddedcrop.mjs', 'play', 'socketPath', '4', 'return { mpv, socketPath, first };'],
+  ['scenarios/embeddedfullscreenend.mjs', 'run', 'socketPath', '4', 'await viewReady(driver);', null, 4],
+  ['live/plex.mjs', 'completeEpisodeAndContinue', 'firstSocket', BOTH, 'await first.setProp("time-pos", Math.max(0, duration - 0.8));'],
+];
+
+for (const [file, owner, socket, count, next, branch = null, occurrences = 1] of CONNECTION_SITES) {
+  test(`pw-8: ${file} ${owner} awaits Vela before ${next}`, () => {
+    const source = fs.readFileSync(new URL(`./e2e/${file}`, import.meta.url), 'utf8');
+    const tree = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
+    const calls = [];
+    const visit = (node) => {
+      if (ts.isCallExpression(node) && node.expression.getText(tree) === 'velaConnected') calls.push(node);
+      ts.forEachChild(node, visit);
+    };
+    visit(tree);
+    assert.equal(calls.length, occurrences, `${file}: every surveyed play must call velaConnected`);
+    if (file !== 'helpers.mjs') {
+      assert.ok(tree.statements.some((node) => ts.isImportDeclaration(node)
+        && node.moduleSpecifier.text === '../helpers.mjs'
+        && node.importClause?.namedBindings?.elements?.some((entry) => entry.name.text === 'velaConnected' && !entry.propertyName)),
+      `${file}: the wait comes from the shared helper`);
+    }
+    for (const call of calls) {
+      assert.deepEqual(call.arguments.map((arg) => arg.getText(tree)), [socket, count], `${file}: the derived connection count and this play's socket`);
+      assert.ok(ts.isAwaitExpression(call.parent) && ts.isExpressionStatement(call.parent.parent), `${file}: the connection wait is awaited`);
+      const statement = call.parent.parent;
+      assert.ok(ts.isBlock(statement.parent), `${file}: the wait is an unconditional statement in its block`);
+      const statements = statement.parent.statements;
+      const index = statements.indexOf(statement);
+      assert.ok(statements[index + 1]?.getText(tree).startsWith(next), `${file}: the connection wait must immediately precede ${next}`);
+      let conditional = null;
+      let node = statement;
+      while (node && !ts.isFunctionDeclaration(node) && !ts.isMethodDeclaration(node)) {
+        const parent = node.parent;
+        if (ts.isBlock(parent)) {
+          const preceding = parent.statements.slice(0, parent.statements.indexOf(node));
+          assert.ok(!preceding.some((s) => ts.isReturnStatement(s) || ts.isThrowStatement(s)), `${file}: the wait is reachable`);
+        } else if (ts.isIfStatement(parent)) {
+          assert.equal(conditional, null, `${file}: no extra branch may skip the wait`);
+          assert.equal(node, parent.thenStatement, `${file}: the wait is in the expected arm`);
+          conditional = parent.expression.getText(tree);
+        } else {
+          assert.ok(ts.isTryStatement(parent) || ts.isFunctionDeclaration(parent) || ts.isMethodDeclaration(parent), `${file}: no wrapper may defer or skip the wait`);
+        }
+        node = parent;
+      }
+      assert.equal(node?.name?.getText(tree), owner, `${file}: the wait is in the play-driving function`);
+      assert.equal(conditional, branch, `${file}: only the surveyed branch encloses the wait`);
+    }
+  });
+}

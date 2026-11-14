@@ -15,9 +15,9 @@ import {
   openLibraryGrid,
   pollUntil,
   seedConfig,
+  velaConnected,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
-import { acceptedConnections } from '../judge.mjs';
 
 let mock;
 
@@ -116,12 +116,9 @@ export default {
       // this waits on the sockets themselves: mpv has accepted this
       // scenario's connection and Vela's two (the end-of-file watcher and
       // the reader of the window state, the only ones Vela opens for a play
-      // like this one, with no notice to show and no Automatic quality).
-      await pollUntil(
-        () => acceptedConnections(fs.readFileSync('/proc/net/unix', 'utf8'), socket) >= 3,
-        "Vela's own connections to this mpv",
-        { intervalMs: 20 },
-      );
+      // like this one, with no notice to show and no Automatic quality;
+      // playback::play, spawn_position_reader and spawn_eof_watcher).
+      await velaConnected(socket, 3);
       return { mpv, session: recent.session_id };
     }
 

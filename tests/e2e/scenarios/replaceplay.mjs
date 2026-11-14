@@ -39,6 +39,7 @@ import {
   seedConfig,
   socketAccepting,
   stopPlayAsUser,
+  velaConnected,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
@@ -64,6 +65,10 @@ async function playing(socketPath, id, port) {
   const loaded = await pollUntil(() => mpv.getProp('path').catch(() => null), `${id} to load`);
   assert.ok(loaded.startsWith(`http://127.0.0.1:${port}/Videos/${id}/stream`), `expected ${id}'s stream, got ${loaded}`);
   await pollUntil(() => mpv.getProp('time-pos').then((t) => t > 0.5).catch(() => false), `${id} to progress`);
+  // playback::play: this client + position/window reader + EOF watcher;
+  // Original quality, no notice or health sampler.
+  // Embedded adds player::report::spawn_reporter for the view's state.
+  await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
   return mpv;
 }
 

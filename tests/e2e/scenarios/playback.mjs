@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { makeClips, mockSource, seedConfig, pollUntil, stopPlayAsUser } from '../helpers.mjs';
+import { makeClips, mockSource, seedConfig, pollUntil, stopPlayAsUser, velaConnected, runPlayer } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
 
@@ -121,6 +121,10 @@ export default {
         () => mpv.getProp('time-pos').then((t) => t > 0.5).catch(() => false),
         'playback to progress past 0.5s',
       );
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
       await mpv.setProp('time-pos', 6);
       // Vela polls the same socket for progress; give it a beat to observe ≥6s.
       await new Promise((r) => setTimeout(r, 1500));

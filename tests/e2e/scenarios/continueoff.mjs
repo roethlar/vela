@@ -12,6 +12,8 @@ import {
   mockSource,
   pollUntil,
   seedConfig,
+  velaConnected,
+  runPlayer,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
@@ -128,6 +130,10 @@ export default {
     );
     const socket = await waitForNewMpvSocket(before);
     const mpv = await MpvIpc.connect(socket);
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    // Embedded adds player::report::spawn_reporter for the view's state.
+    await velaConnected(socket, runPlayer === 'embedded' ? 4 : 3);
     await mpv.setProp('pause', true);
     assert.ok(
       String(await mpv.getProp('path')).includes('/Videos/off-a/stream'),

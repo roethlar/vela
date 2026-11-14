@@ -21,7 +21,7 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import { createConnection } from "node:net";
-import { pollUntil, seedConfig } from "../helpers.mjs";
+import { pollUntil, seedConfig, velaConnected, runPlayer } from "../helpers.mjs";
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from "../mpv.mjs";
 import { shown } from '../proof.mjs';
 
@@ -400,6 +400,10 @@ async function completeEpisodeAndContinue(driver, fixtures) {
       "the real Plex episode duration",
       { timeoutMs: 40000 },
     );
+    // playback::play: this client + position/window reader + EOF watcher;
+    // Original quality, no notice or health sampler.
+    // Embedded adds player::report::spawn_reporter for the view's state.
+    await velaConnected(firstSocket, runPlayer === 'embedded' ? 4 : 3);
     await first.setProp("time-pos", Math.max(0, duration - 0.8));
     await first.setProp("pause", false);
     releasedToEof = true;

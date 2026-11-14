@@ -9,6 +9,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from './mpv.mjs';
 import { testOnlyRoute } from './proof.mjs';
+import { acceptedConnections } from './judge.mjs';
 
 // Generate 10s test clips into <configRoot>/media; returns the dir. The
 // clips back the mock servers' Range-capable /Videos/{id}/stream routes.
@@ -91,6 +92,30 @@ export async function pollUntil(fn, what, { timeoutMs = 15000, intervalMs = 250 
     if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
     await new Promise((r) => setTimeout(r, intervalMs));
   }
+}
+
+// Wait for the TOTAL live accepted clients, including the scenario's own.
+// Finding the socket, reading mpv, or seeing a recorded Start does not prove
+// Vela's readers connected: playback.rs retries their connects every 100 ms.
+// Callers derive the count from playback::play for their particular launch.
+// Do not include a short-lived notice/control/probe connection in a persistent
+// count: it can disappear, or stand in for a reader that has not arrived yet.
+// Both players expose this socket: build_launch_for sets input-ipc-server,
+// and embedded::session checks that libmpv took it. There is no embedded
+// bypass; its extra player::report::spawn_reporter must be counted at the call.
+// This proves connection, not that an event has already been consumed.
+// Inject the /proc reader and polling limits for socket-free unit tests.
+export async function velaConnected(socketPath, connections, {
+  readProcNetUnix = () => fs.readFileSync('/proc/net/unix', 'utf8'),
+  timeoutMs = 15000,
+  intervalMs = 20,
+} = {}) {
+  assert.ok(Number.isInteger(connections) && connections > 0, 'connections must be a positive integer');
+  await pollUntil(
+    () => acceptedConnections(readProcNetUnix(), socketPath) >= connections,
+    `mpv at ${socketPath} to accept ${connections} connections (Vela and the scenario)`,
+    { timeoutMs, intervalMs },
+  );
 }
 
 // Sidebar → the mock library's grid.
@@ -469,6 +494,10 @@ export async function playAndQuit(driver, start, { key = null, during = null, po
       () => mpv.getProp('time-pos').then((t) => t > 0.5).catch(() => false),
       'playback to progress',
     );
+    // playback::play: this client + position/window reader + EOF watcher;
+    // these Original plays have no notice or health sampler. An embedded
+    // play also has player::report::spawn_reporter for its view's state.
+    await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
     if (during) await during(mpv);
     await mpv.setProp('time-pos', 6);
     await new Promise((r) => setTimeout(r, 1500)); // let Vela observe ≥6s

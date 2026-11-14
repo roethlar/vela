@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { holdsFor, pollUntil, makeClips, mockSource, seedConfig, stopPlayAsUser } from '../helpers.mjs';
+import { holdsFor, pollUntil, makeClips, mockSource, seedConfig, stopPlayAsUser, velaConnected, runPlayer } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { shown } from '../proof.mjs';
 
@@ -44,6 +44,10 @@ async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
   try {
     loaded = await pollUntil(() => mpv.getProp('path').catch(() => null), `mpv to load via "${menuLabel}"`);
     if (finish) {
+      // playback::play: this client + position/window reader + EOF watcher;
+      // Original quality, no notice or health sampler.
+      // Embedded adds player::report::spawn_reporter for the view's state.
+      await velaConnected(socketPath, runPlayer === 'embedded' ? 4 : 3);
       await mpv.setProp('pause', true);
       await mpv.setProp('time-pos', 9.2);
       await mpv.setProp('pause', false);
