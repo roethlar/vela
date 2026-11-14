@@ -325,7 +325,8 @@ packaging/libmpv/check-package.sh --without-libmpv --set .libmpv/out/libmpv dist
 ```
 
 In either mode a file fails if it cannot be unpacked, or if what comes out of
-it is not Vela (it has no `usr/bin/vela`). An empty file, for one, unpacks
+it is not Vela (it has no `usr/bin/vela` of its own, not one reached through
+a symbolic link). An empty file, for one, unpacks
 without complaint and certainly holds no part of the set.
 
 On an Arch host `packaging/arch/` keeps the packages of earlier builds. A

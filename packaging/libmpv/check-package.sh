@@ -28,7 +28,8 @@
 # start-up code; that is the one exception, and it is made only for a set
 # that has passed every check before the load.)
 # A file that cannot be unpacked, or that unpacks to something other than
-# Vela (no usr/bin/vela), fails whichever of the two questions is asked.
+# Vela (no usr/bin/vela of its own), fails whichever of the two questions is
+# asked.
 #
 # Without --without-libmpv the package must CONTAIN the set (it was built by
 # scripts/build.sh --with-libmpv):
@@ -278,6 +279,15 @@ unpack() {
   chmod -R u+rwX "$into/root" || return 1
 }
 
+# of_vela ROOT: whether the package unpacked in ROOT has the program, as a file
+# of its own: not a link, nor reached through one. A link above it that leads
+# out of the package would find the builder's own program.
+of_vela() {
+  local root="$1"
+  [ -f "$root/$APP_PATH" ] && [ ! -L "$root/$APP_PATH" ] &&
+    [ "$(realpath -m -- "$root/$APP_PATH")" = "$(cd "$root" && pwd -P)/$APP_PATH" ]
+}
+
 # not_enterable ROOT DIR: of the directories from the top of DIR (a path
 # relative to ROOT) down to DIR itself, the first that not every user may
 # enter, printed; nothing when every user may enter them all. The walk ends
@@ -492,7 +502,7 @@ for package in "${packages[@]}"; do
     elif [ "$status" -ne 0 ]; then
       sed 's/^/     /' "$tmp/$n.log"
       fail "unpack: the package could not be unpacked"
-    elif [ ! -f "$tmp/$n/root/$APP_PATH" ] || [ -L "$tmp/$n/root/$APP_PATH" ]; then
+    elif ! of_vela "$tmp/$n/root"; then
       fail "unpack: this is not a package of Vela: it has no $APP_PATH"
     elif [ "$without" -eq 1 ]; then
       check_without "$package" "$tmp/$n/root"

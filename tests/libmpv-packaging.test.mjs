@@ -1299,6 +1299,18 @@ test('the package check judges nothing that is not a package of Vela', { skip: c
     failsBothWays(t, linked.file, notVela);
   });
 
+  await t.test('a package in which a directory above the program is a link to somewhere else', (t) => {
+    // The program is found, but through the link: it is the builder's own
+    // (here one made for the test), not a file of the package.
+    const elsewhere = scratch(t);
+    fs.mkdirSync(path.join(elsewhere, 'bin'));
+    fs.writeFileSync(path.join(elsewhere, 'bin', 'vela'), 'a program outside the package\n');
+    for (const kind of ['pkg.tar.zst', 'rpm']) {
+      const linked = packageOf(t, kind, { 'usr/bin/vela': null }, { 'usr/bin': path.join(elsewhere, 'bin') });
+      failsBothWays(t, linked.file, notVela);
+    }
+  });
+
   await t.test('a file that is no package, and a file that is not there, asked for no set', (t) => {
     const other = pacmanPackage(t, {});
     const renamed = path.join(other.root, 'vela.zip');
