@@ -280,6 +280,11 @@ const LINE_CAP: usize = 1 << 20;
 pub(crate) enum Read1 {
     /// A whole line, without its newline.
     Line(Vec<u8>),
+    /// A piece of a line arrived, or of one past the cap that is being
+    /// dropped, and the line is not whole yet. The piece is kept (or
+    /// dropped) as with any other; the caller can look at its own limits
+    /// before it reads on.
+    Piece,
     /// The read limit passed. Whatever part of a line had arrived is kept.
     Waited,
     /// The connection ended or failed.
@@ -290,7 +295,10 @@ pub(crate) enum Read1 {
 /// in pieces across a timeout is kept until it is whole: the buffer is
 /// emptied only after a complete line has been taken out of it. A line
 /// longer than [`LINE_CAP`] is dropped as it arrives, so it never takes more
-/// memory than that, and the next line is read as usual.
+/// memory than that, and the next line is read as usual. Each call reads at
+/// most once from the connection and then returns, whole line or not, so a
+/// line that keeps coming in pieces never keeps the caller from its own
+/// deadline or stop flag.
 #[cfg(target_os = "linux")]
 pub(crate) struct Lines<R> {
     reader: std::io::BufReader<R>,
@@ -337,12 +345,10 @@ impl<R: Read> Lines<R> {
             }
             let used = piece.len() + usize::from(newline);
             self.reader.consume(used);
-            if newline {
-                if std::mem::replace(&mut self.dropping, false) {
-                    continue;
-                }
-                return Read1::Line(std::mem::take(&mut self.partial));
+            if !newline || std::mem::replace(&mut self.dropping, false) {
+                return Read1::Piece;
             }
+            return Read1::Line(std::mem::take(&mut self.partial));
         }
     }
 }
@@ -490,7 +496,9 @@ pub(crate) fn spawn_reporter(
                             }
                         }
                     }
-                    Read1::Waited => {}
+                    // Nothing whole yet: the state still goes when it is due,
+                    // and the stop flag is looked at before the next read.
+                    Read1::Piece | Read1::Waited => {}
                     Read1::End => return,
                 }
                 let now = Instant::now();
@@ -501,6 +509,36 @@ pub(crate) fn spawn_reporter(
             }
         })?;
     Ok(())
+}
+
+/// For tests: a player that sends `stream` a line that never ends, a few
+/// bytes `every` so often, after (when `too_long`) more than [`LINE_CAP`] of
+/// it at once. It stops when `done` is set, when the connection goes, or
+/// after four seconds.
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) fn send_a_line_without_end(
+    stream: &std::os::unix::net::UnixStream,
+    too_long: bool,
+    every: Duration,
+    done: &std::sync::atomic::AtomicBool,
+) {
+    use std::io::Write;
+    let mut writer = stream;
+    let mut head = br#"{"event":"client-message","args":["x",""#.to_vec();
+    if too_long {
+        head.extend(std::iter::repeat_n(b'a', LINE_CAP + 64 * 1024));
+    }
+    if writer.write_all(&head).is_err() {
+        return;
+    }
+    let began = Instant::now();
+    while !done.load(std::sync::atomic::Ordering::SeqCst) && began.elapsed() < Duration::from_secs(4)
+    {
+        if writer.write_all(b"aaaa").is_err() {
+            return;
+        }
+        std::thread::sleep(every);
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
@@ -831,6 +869,16 @@ mod tests {
         Lines::new(Scripted(pieces.into()))
     }
 
+    /// The next read that is not a piece of a line.
+    fn past_pieces(lines: &mut Lines<Scripted>) -> Read1 {
+        loop {
+            match lines.next() {
+                Read1::Piece => {}
+                other => return other,
+            }
+        }
+    }
+
     #[test]
     fn lines_are_whole_across_waits_and_end_with_the_connection() {
         let mut lines = scripted(vec![
@@ -838,9 +886,11 @@ mod tests {
             None,
             Some(b"1}\n{\"b\":2}\n{\"c\"".to_vec()),
         ]);
+        assert_eq!(lines.next(), Read1::Piece, "a piece is handed back at once");
         assert_eq!(lines.next(), Read1::Waited);
         assert_eq!(lines.next(), Read1::Line(b"{\"a\":1}".to_vec()));
         assert_eq!(lines.next(), Read1::Line(b"{\"b\":2}".to_vec()));
+        assert_eq!(lines.next(), Read1::Piece);
         assert_eq!(lines.next(), Read1::End, "the connection ended inside a line");
     }
 
@@ -852,7 +902,7 @@ mod tests {
         pieces.push(None);
         pieces.push(Some(b"tail\n{\"after\":true}\n".to_vec()));
         let mut lines = scripted(pieces);
-        assert_eq!(lines.next(), Read1::Waited);
+        assert_eq!(past_pieces(&mut lines), Read1::Waited);
         // A mebibyte, written out: the bound must not move with the constant.
         assert!(
             lines.partial.capacity() <= 1 << 20,
@@ -860,16 +910,16 @@ mod tests {
             lines.partial.capacity()
         );
         assert_eq!(
-            lines.next(),
+            past_pieces(&mut lines),
             Read1::Line(b"{\"after\":true}".to_vec()),
             "the long line is passed over and the next is read"
         );
-        assert_eq!(lines.next(), Read1::End);
+        assert_eq!(past_pieces(&mut lines), Read1::End);
         // A line of exactly the cap is still a line.
         let mut whole = vec![b'y'; LINE_CAP];
         whole.push(b'\n');
         let mut lines = scripted(vec![Some(whole)]);
-        assert!(matches!(lines.next(), Read1::Line(line) if line.len() == LINE_CAP));
+        assert!(matches!(past_pieces(&mut lines), Read1::Line(line) if line.len() == LINE_CAP));
     }
 
     mod with_a_player {
@@ -1063,6 +1113,79 @@ mod tests {
             );
             stop.store(true, Ordering::SeqCst);
             let _ = std::fs::remove_file(&path);
+        }
+
+        /// A reporter whose player, after its first state, sends a line that
+        /// never ends: the reporter goes on sending its state at least once
+        /// a second (and at most four a second) while the pieces come, and
+        /// ends promptly once the play's stop flag is set.
+        fn a_line_without_end_holds_up_neither_state_nor_stop(name: &str, too_long: bool) {
+            let (listener, path) = listen(name);
+            let times = Arc::new(Mutex::new(Vec::<Instant>::new()));
+            let notify: StateNotify = {
+                let times = times.clone();
+                Arc::new(move |_: &PlayerState| times.lock().unwrap().push(Instant::now()))
+            };
+            let kept = notify.clone();
+            let stop = Arc::new(AtomicBool::new(false));
+            spawn_reporter(path.clone(), stop.clone(), "play".into(), None, notify).unwrap();
+            let (mut stream, _) = accept(&listener);
+            stream
+                .write_all(
+                    b"{\"event\":\"property-change\",\"id\":3,\"name\":\"pause\",\"data\":true}\n",
+                )
+                .unwrap();
+            assert!(wait_for(|| !times.lock().unwrap().is_empty()));
+            let done = Arc::new(AtomicBool::new(false));
+            // A piece every 5 ms: sooner than the reporter's shortest read
+            // wait (10 ms), so no read ever runs out and the state goes only
+            // because the reporter looks at its clock after each piece.
+            let player = std::thread::spawn({
+                let done = done.clone();
+                move || {
+                    send_a_line_without_end(&stream, too_long, Duration::from_millis(5), &done)
+                }
+            });
+            std::thread::sleep(Duration::from_millis(2500));
+            let until = Instant::now();
+            let mut sent = times.lock().unwrap().clone();
+            sent.push(until);
+            let gaps: Vec<Duration> = sent.windows(2).map(|pair| pair[1] - pair[0]).collect();
+            // 200 ms of margin over the one-second rule, for a busy machine.
+            assert!(
+                gaps.iter().all(|gap| *gap <= MAX_GAP + Duration::from_millis(200)),
+                "a state at least once a second while the pieces come: {gaps:?}"
+            );
+            assert!(
+                gaps[..gaps.len() - 1]
+                    .iter()
+                    .all(|gap| *gap >= MIN_GAP - Duration::from_millis(10)),
+                "and at most four a second: {gaps:?}"
+            );
+            stop.store(true, Ordering::SeqCst);
+            let stopped = Instant::now();
+            while Arc::strong_count(&kept) > 1 && stopped.elapsed() < Duration::from_secs(5) {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            // 500 ms of margin: a read waits at most a quarter second.
+            assert!(
+                stopped.elapsed() < Duration::from_millis(500),
+                "a stopped play's reporter ends promptly: {:?}",
+                stopped.elapsed()
+            );
+            done.store(true, Ordering::SeqCst);
+            player.join().unwrap();
+            let _ = std::fs::remove_file(&path);
+        }
+
+        #[test]
+        fn a_line_that_comes_in_pieces_without_end_holds_up_neither_state_nor_stop() {
+            a_line_without_end_holds_up_neither_state_nor_stop("dribble", false);
+        }
+
+        #[test]
+        fn a_line_past_the_cap_without_end_holds_up_neither_state_nor_stop() {
+            a_line_without_end_holds_up_neither_state_nor_stop("dribble-long", true);
         }
 
         #[test]

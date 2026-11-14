@@ -429,6 +429,9 @@ mod channel {
                 .map_err(|_| NOT_RUNNING)?;
             let answer = match lines.next() {
                 Read1::Line(line) => line,
+                // Nothing whole yet: the limit is looked at again before the
+                // next read.
+                Read1::Piece => continue,
                 Read1::Waited => return Err(NO_ANSWER),
                 Read1::End => return Err(NOT_RUNNING),
             };
@@ -930,6 +933,106 @@ mod tests {
             );
             server.join().unwrap();
             let _ = std::fs::remove_file(&path);
+        }
+
+        /// A player that answers every command with a line that never ends
+        /// (`report::send_a_line_without_end`): the command gives up
+        /// within its limit, lets go of the gate, and the quiet spell
+        /// follows.
+        fn a_line_without_end_does_not_stretch_the_limit(name: &str, too_long: bool) {
+            use std::sync::atomic::AtomicBool;
+            let (listener, path) = listen(name);
+            listener.set_nonblocking(true).unwrap();
+            let done = Arc::new(AtomicBool::new(false));
+            let server = std::thread::spawn({
+                let done = done.clone();
+                move || {
+                    let mut talks = Vec::new();
+                    while !done.load(Ordering::SeqCst) {
+                        let Ok((stream, _)) = listener.accept() else {
+                            std::thread::sleep(Duration::from_millis(5));
+                            continue;
+                        };
+                        stream.set_nonblocking(false).unwrap();
+                        let done = done.clone();
+                        talks.push(std::thread::spawn(move || {
+                            let mut line = String::new();
+                            if BufReader::new(&stream).read_line(&mut line).unwrap_or(0) > 0 {
+                                crate::player::report::send_a_line_without_end(
+                                    &stream,
+                                    too_long,
+                                    Duration::from_millis(20),
+                                    &done,
+                                );
+                            }
+                        }));
+                    }
+                    for talk in talks {
+                        talk.join().unwrap();
+                    }
+                }
+            });
+            let limit = Duration::from_millis(300);
+            // 300 ms of margin over the limit, for a busy machine: a read
+            // waits at most until the limit, and a piece comes every 20 ms.
+            let margin = Duration::from_millis(300);
+            let slot = Arc::new(Mutex::new(Some(PlayerHandle::Embedded(
+                Session::for_test_with_channel(
+                    "play",
+                    crate::player::control::Channel::with_limits(
+                        path.clone(),
+                        limit,
+                        Duration::from_millis(600),
+                    ),
+                ),
+            ))));
+            let (finished, answer) = std::sync::mpsc::channel();
+            std::thread::spawn({
+                let slot = slot.clone();
+                move || {
+                    let began = Instant::now();
+                    let answer = send(&slot, "play", "toggle-pause", json!([]));
+                    let _ = finished.send((answer, began.elapsed()));
+                }
+            });
+            let first = answer.recv_timeout(limit + margin);
+            assert!(
+                matches!(&first, Ok((Err(text), _)) if text == NO_ANSWER),
+                "no answer within the limit: {first:?}"
+            );
+            // The command let go of its turn; the quiet spell follows.
+            let began = Instant::now();
+            assert_eq!(
+                send(&slot, "play", "toggle-pause", json!([])),
+                Err(NO_ANSWER.to_string())
+            );
+            assert!(began.elapsed() < Duration::from_millis(100), "refused at once");
+            // After the spell the gate lets the next command through, and it
+            // too gives up within its limit.
+            std::thread::sleep(Duration::from_millis(700));
+            let began = Instant::now();
+            assert_eq!(
+                send(&slot, "play", "toggle-pause", json!([])),
+                Err(NO_ANSWER.to_string())
+            );
+            assert!(
+                began.elapsed() >= limit && began.elapsed() < limit + margin,
+                "it went to the player and gave up at the limit: {:?}",
+                began.elapsed()
+            );
+            done.store(true, Ordering::SeqCst);
+            server.join().unwrap();
+            let _ = std::fs::remove_file(&path);
+        }
+
+        #[test]
+        fn a_line_that_comes_in_pieces_without_end_does_not_stretch_the_limit() {
+            a_line_without_end_does_not_stretch_the_limit("dribble", false);
+        }
+
+        #[test]
+        fn a_line_past_the_cap_without_end_does_not_stretch_the_limit() {
+            a_line_without_end_does_not_stretch_the_limit("dribble-long", true);
         }
 
         #[test]
