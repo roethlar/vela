@@ -43,11 +43,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       do not contain it; the release workflow is untouched. Its codex
       review returned SIX findings, `pk-1` to `pk-6`, all admitted and
       fixed on `main` (`53f2ecd` to `1348782`: thirteen commits, three of
-      them for defects found while the fixes were attacked), and with
-      codex for verification: `.agents/review/index.md`. Since those
-      commits the check never runs an AppImage, and it loads a package's
-      library only when the package holds, byte for byte, the set named
-      with `--set`.
+      them for defects found while the fixes were attacked). codex has
+      verified `pk-2` to `pk-5`; it reopened `pk-1` and `pk-6`, each for a
+      case with a symbolic link, and both are repaired (`e3ac36e`,
+      `b26f6b6`) and back with codex: `.agents/review/index.md`. Since
+      those commits the check never runs an AppImage, and it loads a
+      package's library only when the package holds, byte for byte, the
+      set named with `--set`. The AppImage reading has been run once
+      against a real `unsquashfs` (in a container; `pk-1`'s record).
     - Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
       log. Its codex review returned TWO findings, both admitted and fixed
       (`a909c20`, `4118fea`). codex verified `pc-1` and REOPENED `pc-2`: a
