@@ -5508,6 +5508,33 @@ async fn select_playback_version(
     };
     let (winner, destination) = rank_and_place(&mut candidates, ranking)
         .ok_or_else(|| PlayFailure::unavailable("no playable copy was found".to_string()))?;
+    let selection = selection_for_winner(
+        versions,
+        &mut probed_sources,
+        &winner,
+        item,
+        upcoming_player,
+        destination,
+    )?;
+    Ok(PlaybackSelectionOutcome::Ready {
+        selection: Box::new(selection),
+        ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
+    })
+}
+
+/// The selection a ranking's winner makes: the very version that won, by its
+/// source AND its version id (a source may offer several copies of one
+/// title), routed by the key its source was probed with. Kept apart so that
+/// a test runs it from the ranking to the stream the play is resolved to
+/// (`resolve_selected`; second review of finding pw-2).
+fn selection_for_winner(
+    versions: Vec<PlaybackVersion>,
+    probed_sources: &mut HashMap<String, String>,
+    winner: &crate::selection::PlaybackCandidate,
+    item: &ItemDto,
+    player: crate::player::PlayerChoice,
+    screen: PlayDestination,
+) -> Result<PlaybackSelection, PlayFailure> {
     let version = versions
         .into_iter()
         .find(|version| {
@@ -5520,17 +5547,45 @@ async fn select_playback_version(
     let mut selected_item = item.clone();
     selected_item.rating_key = version.item_key;
     selected_item.source_id = version.source_id.clone();
-    Ok(PlaybackSelectionOutcome::Ready {
-        selection: Box::new(PlaybackSelection {
-            source_id: version.source_id,
-            raw_item_key,
-            version_id: Some(version.version_id),
-            item: selected_item,
-            player: upcoming_player,
-            screen: destination,
-        }),
-        ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
+    Ok(PlaybackSelection {
+        source_id: version.source_id,
+        raw_item_key,
+        version_id: Some(version.version_id),
+        item: selected_item,
+        player,
+        screen,
     })
+}
+
+/// The stream a selection plays: its version when it has one, otherwise the
+/// source's own default copy.
+async fn resolve_selected(
+    src: &dyn crate::source::MediaSource,
+    selection: &PlaybackSelection,
+    include_markers: bool,
+    quality: &str,
+) -> Result<crate::source::StreamResolution, String> {
+    match selection.version_id.as_deref() {
+        Some(version_id) => {
+            src.resolve_stream_version(
+                &selection.raw_item_key,
+                selection.item.duration_ms,
+                version_id,
+                include_markers,
+                quality,
+            )
+            .await
+        }
+        None => {
+            src.resolve_stream(
+                &selection.raw_item_key,
+                selection.item.duration_ms,
+                include_markers,
+                quality,
+            )
+            .await
+        }
+    }
 }
 
 struct PlayLaunchRequest<'a> {
@@ -5729,27 +5784,9 @@ async fn play_by_key_locked(
             .map(|cfg| config::playback_quality(cfg.playback_quality.as_deref()))
             .unwrap_or_else(|_| config::PLAYBACK_QUALITY_ORIGINAL.to_string()),
     };
-    let resolved = match selection.version_id.as_deref() {
-        Some(version_id) => {
-            src.resolve_stream_version(
-                &selection.raw_item_key,
-                item.duration_ms,
-                version_id,
-                include_markers,
-                &quality,
-            )
-            .await
-        }
-        None => src
-            .resolve_stream(
-                &selection.raw_item_key,
-                item.duration_ms,
-                include_markers,
-                &quality,
-            )
-            .await,
-    }
-    .map_err(PlayFailure::unavailable)?;
+    let resolved = resolve_selected(src.as_ref(), &selection, include_markers, &quality)
+        .await
+        .map_err(PlayFailure::unavailable)?;
 
     // Resolve first so a just-ended process can deliver its final IPC events
     // while a slow server prepares this play. Every play, manual or automatic,
@@ -9676,10 +9713,44 @@ mod tests {
             (1920, 1080),
             "ranked for HDMI-1's size, not for the 4K DP-1 the last mpv window was on"
         );
-        let (copy, destination) = compatible_choice(&screen, &screens, display::HdrState::Disabled);
-        assert_eq!(copy, "1080p-sdr", "ranked for HDMI-1");
-        // The launch hands the play its carried screen (`selection.screen`).
+        // The real ranking, the real selection of its winner, and the real
+        // resolution of that selection (second review of finding pw-2): the
+        // version that won is the one resolved, out of two copies on one
+        // source, the 4K HDR one listed first.
+        let (winner, destination) = rank_and_place(
+            &mut two_copies(),
+            Ranking::ForScreen {
+                screen: screen.clone(),
+                target,
+            },
+        )
+        .unwrap();
+        assert_eq!(winner.version_id, "1080p-sdr", "ranked for HDMI-1");
+        let mut probed = HashMap::from([("server".to_string(), "title".to_string())]);
+        let selection = selection_for_winner(
+            versions_of(&two_copies()),
+            &mut probed,
+            &winner,
+            &catalog_item("server:title", "movie", 1, false),
+            choice,
+            destination,
+        )
+        .unwrap_or_else(|_| panic!("the winner is selected"));
+        assert_eq!(selection.version_id.as_deref(), Some("1080p-sdr"));
+        let resolved = tauri::async_runtime::block_on(resolve_selected(
+            &VersionedSource,
+            &selection,
+            false,
+            config::PLAYBACK_QUALITY_ORIGINAL,
+        ))
+        .unwrap();
+        // The launch hands the play the resolved stream and its carried
+        // screen (`screen_at_launch`, which looks at nothing for it).
+        let PlayDestination::RankedFor(destination) = selection.screen else {
+            panic!("a Compatible choice carries its screen");
+        };
         let mut spec = embedded_spec();
+        spec.url = resolved.url;
         spec.screen_name = destination;
         spec.inherited_window_state = opening_window(&record, Default::default());
         let launcher = FailingLauncher {
@@ -9724,6 +9795,130 @@ mod tests {
             Some("--screen-name=HDMI-1"),
             "the mpv window opens on the screen the copy was ranked for: {started_with}"
         );
+        assert_eq!(
+            started_with.lines().last(),
+            Some("https://media.invalid/server/1080p-sdr"),
+            "the mpv window plays the version the copy was ranked for: {started_with}"
+        );
+    }
+
+    /// The versions a source offers for these candidates, in their order.
+    fn versions_of(candidates: &[crate::selection::PlaybackCandidate]) -> Vec<PlaybackVersion> {
+        candidates
+            .iter()
+            .map(|candidate| PlaybackVersion {
+                source_id: candidate.source_id.clone(),
+                source_name: "Server".to_string(),
+                item_key: format!("{}:title", candidate.source_id),
+                version_id: candidate.version_id.clone(),
+                width: candidate.width,
+                height: candidate.height,
+                hdr: candidate.hdr,
+                bitrate: candidate.bitrate,
+                direct_play_rank: candidate.direct_play_rank,
+                endpoint: url::Url::parse("https://media.invalid/").unwrap(),
+                provider_verified_local: false,
+            })
+            .collect()
+    }
+
+    /// A source whose stream for a version names that version.
+    struct VersionedSource;
+
+    #[async_trait::async_trait]
+    impl crate::source::MediaSource for VersionedSource {
+        fn id(&self) -> String {
+            "server".to_string()
+        }
+        fn name(&self) -> String {
+            "Server".to_string()
+        }
+        fn kind(&self) -> &'static str {
+            "plex"
+        }
+        async fn sections(&self) -> Result<Vec<SectionDto>, String> {
+            Ok(vec![])
+        }
+        async fn hubs(&self) -> Result<Vec<HubDto>, String> {
+            Ok(vec![])
+        }
+        async fn items(
+            &self,
+            _key: &str,
+            _ty: &str,
+            _sort: Option<&str>,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn search(&self, _query: &str) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn children(
+            &self,
+            _key: &str,
+            _start: usize,
+            _size: usize,
+        ) -> Result<Vec<ItemDto>, String> {
+            Ok(vec![])
+        }
+        async fn resolve_stream(
+            &self,
+            key: &str,
+            _duration_ms: Option<u64>,
+            _include_markers: bool,
+            _quality: &str,
+        ) -> Result<crate::source::StreamResolution, String> {
+            Ok(Self::stream(format!("https://media.invalid/{key}/default")))
+        }
+        async fn resolve_stream_version(
+            &self,
+            key: &str,
+            _duration_ms: Option<u64>,
+            version_id: &str,
+            _include_markers: bool,
+            _quality: &str,
+        ) -> Result<crate::source::StreamResolution, String> {
+            assert_eq!(key, "title", "resolved by the key its source was probed with");
+            Ok(Self::stream(format!("https://media.invalid/server/{version_id}")))
+        }
+    }
+
+    impl VersionedSource {
+        fn stream(url: String) -> crate::source::StreamResolution {
+            crate::source::StreamResolution {
+                url,
+                resume_ms: 0,
+                progress: playback::ProgressTarget::None,
+                http_headers: Vec::new(),
+                delivery: crate::source::Delivery::Original,
+                transcode_session: None,
+                markers: Vec::new(),
+            }
+        }
+    }
+
+    #[test]
+    fn a_selection_without_a_version_plays_the_sources_own_copy() {
+        // The other arm of resolve_selected: nothing ranked, the source's
+        // default copy.
+        let selection = PlaybackSelection {
+            source_id: "server".to_string(),
+            raw_item_key: "title".to_string(),
+            version_id: None,
+            item: catalog_item("server:title", "movie", 1, false),
+            player: crate::player::choose(crate::player::PlayerKind::External, &Ok(())),
+            screen: PlayDestination::DecidedAtLaunch,
+        };
+        let resolved = tauri::async_runtime::block_on(resolve_selected(
+            &VersionedSource,
+            &selection,
+            false,
+            config::PLAYBACK_QUALITY_ORIGINAL,
+        ))
+        .unwrap();
+        assert_eq!(resolved.url, "https://media.invalid/title/default");
     }
 
     #[test]

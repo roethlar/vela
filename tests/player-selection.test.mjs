@@ -58,7 +58,15 @@ test('every play chooses its player from the setting and what can run', () => {
   const ranks = select.search(/decide_play_screen\(\s+state,\s+replace_session,\s+upcoming_player\.kind,/);
   assert.notEqual(ranks, -1, 'the copy is ranked for the player that will run the play');
   assert.ok(at < ranks, 'chosen before the copy is ranked');
-  assert.equal(select.split('player: upcoming_player,').length - 1, 2, 'both ready selections carry it');
+  // Both ready selections carry it: the one with nothing to rank directly,
+  // the ranked one through selection_for_winner.
+  assert.equal(select.split('player: upcoming_player,').length - 1, 1, 'the one with nothing to rank carries it');
+  assert.match(select, /selection_for_winner\(\s+versions,\s+&mut probed_sources,\s+&winner,\s+item,\s+upcoming_player,/);
+  assert.match(
+    functionBody(commands, 'fn selection_for_winner(', 'selection_for_winner'),
+    /Ok\(PlaybackSelection \{[^}]*\bplayer,\s+screen,\s+\}\)$/,
+    'and the ranked one carries what it is given',
+  );
   assert.match(
     body,
     /let selection = select_playback_version\(\s+state,\s+item,\s+replace_session,\s+explicit_source_id,\s+prior_affinity\.as_deref\(\),\s+server_owned,\s+player,\s+\)\s+\.await\?;/,
@@ -206,7 +214,7 @@ test('once a play has installed its session, only the launch-failure path ends i
   // The player setting is read before anything is resolved or installed: by
   // the choice of copy (review finding pw-2), whose answer carries it.
   const read = body.indexOf('let selection = select_playback_version(');
-  const resolved = body.indexOf('let resolved = match selection.version_id.as_deref() {');
+  const resolved = body.indexOf('let resolved = resolve_selected(src.as_ref(), &selection, include_markers, &quality)');
   assert.notEqual(read, -1, 'the play must read which player is wanted');
   assert.notEqual(resolved, -1, 'the play must still resolve its stream');
   assert.ok(read < resolved, 'the player setting is read before the stream is resolved');

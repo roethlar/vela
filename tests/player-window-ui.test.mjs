@@ -37,7 +37,7 @@ test('the play path opens its window from the run or the setting, and hands it o
   // The play path reads the setting, before stream resolution...
   assert.match(
     commands,
-    /let \(first_of_run, saved_first_screen\) = config::load_config\(\)[\s\S]{0,200}config::first_window_of_run\(&cfg\)[\s\S]{0,4000}let resolved = match selection\.version_id/,
+    /let \(first_of_run, saved_first_screen\) = config::load_config\(\)[\s\S]{0,200}config::first_window_of_run\(&cfg\)[\s\S]{0,4000}let resolved = resolve_selected\(/,
     'the play path must read the player window setting before resolving the stream',
   );
   // ...and the launch is given what it says when the run has no window yet.
@@ -50,7 +50,7 @@ test('the play path opens its window from the run or the setting, and hands it o
   // has just ended has had that long to report how it left its window.
   const playPath = commands.slice(commands.indexOf('\nasync fn play_by_key_locked('));
   const resolvedAt = playPath.search(
-    /let resolved = match selection\.version_id[\s\S]*?\.map_err\(PlayFailure::unavailable\)\?;/,
+    /let resolved = resolve_selected\(src\.as_ref\(\), &selection, include_markers, &quality\)\s+\.await\s+\.map_err\(PlayFailure::unavailable\)\?;/,
   );
   const resolveEnd = playPath.indexOf('.map_err(PlayFailure::unavailable)?;', resolvedAt);
   const sampledAt = playPath.indexOf('opening_window(&current, first_of_run)');
@@ -233,15 +233,22 @@ test('a Compatible play is shown on the screen its copy was ranked for, any othe
   assert.equal(count(production, 'compatibility_target_from('), 2, 'defined, and called by the wrapper only');
   assert.equal(count(production, 'compatibility_target('), 2, 'defined, and called by the choice of copy only');
 
-  // The ranked selection carries what rank_and_place gives; the one with
-  // nothing to rank leaves the screen to the launch.
-  assert.match(select, /player: upcoming_player,\s+screen: destination,\s+\}\),/, 'the ranked selection carries it');
+  // The ranked selection is the winner's (selection_for_winner, run by the
+  // Rust tests from the ranking to the stream resolved) and carries what
+  // rank_and_place gives; the one with nothing to rank leaves the screen to
+  // the launch.
+  assert.match(
+    select,
+    /\.ok_or_else\(\|\| PlayFailure::unavailable\("no playable copy was found"\.to_string\(\)\)\)\?;\s+let selection = selection_for_winner\(\s+versions,\s+&mut probed_sources,\s+&winner,\s+item,\s+upcoming_player,\s+destination,\s+\)\?;\s+Ok\(PlaybackSelectionOutcome::Ready \{\s+selection: Box::new\(selection\),/,
+    'the ranked selection is the winner\'s, and carries it',
+  );
+  assert.equal(count(production, 'selection_for_winner('), 2, 'defined, and called by the choice of copy only');
   assert.match(
     select,
     /player: upcoming_player,\s+screen: PlayDestination::DecidedAtLaunch,\s+\}\),/,
     'one with nothing to rank is decided at the launch',
   );
-  assert.equal(count(select.replace(/\/\/[^\n]*/g, ''), 'screen: '), 2);
+  assert.equal(count(select.replace(/\/\/[^\n]*/g, ''), 'screen: '), 1);
 
   // How it is decided, by either: the screens are looked at before the
   // record is locked, and the record is held only to decide.
@@ -310,6 +317,11 @@ test('a Compatible play is shown on the screen its copy was ranked for, any othe
     playBody.search(/let resolved = /),
   );
   assert.ok(resolvedEnd > 0 && resolvedEnd < decidedAt, 'after the stream is resolved');
+  // The stream resolved is the selection's (resolve_selected, run by the
+  // Rust tests), and it is what the launch plays (second review of pw-2).
+  assert.match(playBody, /let resolved = resolve_selected\(src\.as_ref\(\), &selection, include_markers, &quality\)/);
+  assert.equal(count(production, 'resolve_selected('), 2, 'defined, and called by the launch only');
+  assert.match(playBody, /let spec = playback::PlaySpec \{[^}]*\burl: resolved\.url,/, 'the launch plays it');
   assert.match(
     playBody,
     /let \(first_of_run, saved_first_screen\) = config::load_config\(\)[\s\S]{0,200}config::first_window_of_run\(&cfg\)/,
