@@ -1,6 +1,6 @@
 # Review status
 
-**Player window review (mpv window state, size, the setting), 2026-11-14 (open):** three codereview codex
+**Player window review (mpv window state, size, the setting), 2026-11-14 (closed 2026-11-14):** three codereview codex
 hunts, one per slice (called plainly; the host's codex config resolves to
 gpt-6-astra @ max; standard), over `f1e0c9c..9815e10`: `findings` in each.
 Seven candidates, seven admitted, none declined. Record:
@@ -16,7 +16,7 @@ Seven candidates, seven admitted, none declined. Record:
 | pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[x]`  | `55be8fc`, `0e5ea59` | codex/default/standard |
 | pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[x]`  | `ac25240`, `0ee2e0d`, `1430f2e`, `0cc2e03` | codex/default/standard esc:T5(ceiling); the last repair: codex wrote it; reviewed by the agent |
 | pw-8 | MEDIUM   | The end-to-end scenario for the player window fails about one external run in four, and the parity verdict with it (the scenario's fault) | `[x]`  | `26660a9`, `71395c3` (the other scenarios), `0ae5b64`..`bb3b84e` | codex/default/standard esc:T5(ceiling) |
-| pw-9 | MEDIUM   | When mpv ends before Vela has connected to it, the play's end is held back five seconds, and the next play of a full-screen run opens windowed | `[~]`  | `0b313a2` (first half) | codex wrote it; reviewed by the agent |
+| pw-9 | MEDIUM   | When mpv ends before Vela has connected to it, the play's end is held back five seconds, and the next play of a full-screen run opens windowed | `[x]`  | `0b313a2`, `c861796` | codex wrote it; reviewed by the agent |
 
 **Embedded player Slice 6 review (the parity tests), 2026-11-14 (closed 2026-11-14):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

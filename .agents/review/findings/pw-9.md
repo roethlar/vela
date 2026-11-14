@@ -137,3 +137,48 @@ the two places in the code. Not a codex finding.
 First half: written by codex, reviewed and landed by the coordinating
 agent, 2026-11-14 (`0b313a2`); not sent to codex for verification, since
 codex wrote it.
+
+### The second half, `c861796`: written by codex, reviewed by the coordinating agent. CLOSED.
+
+The owner said on 2026-11-14 that what is obviously broken is fixed
+without asking (`.agents/decisions.md`, that date), so the second half no
+longer waits.
+
+The reader now knows which player it follows (`PlayerExit` in
+`src-tauri/src/playback.rs`: the slot and the serial of this launch's
+handle) and, after a connection that fails, asks whether that player has
+exited: the child process for mpv's own window, the session's thread for
+the embedded player. If so, the tries stop and the play's end is dealt
+with at once, where it took about five seconds. A refused connection
+alone means nothing, nor does a busy slot, another player in the slot or
+an error from the question; how long the reader waits for an mpv that is
+still starting is unchanged. The reader's `done` is now set by a guard on
+every way out of its thread, a panic included.
+
+Guard: `a_play_ending_before_its_socket_exists_finishes_without_the_connect_timeout`
+runs `play()` with a real process and a real embedded session thread and
+no socket. Codex saw it fail with the one line taken out (the end timed
+out) and pass with it.
+
+**Not taken.** Codex had also built a cure for a neighbouring fault (the
+known gap of `pw-8`: a play cancelled by a newer play stops its reader
+with lines it had received unread, so the window it hands on can be one
+change out of date). The cure replaced the read loop of every play on
+every platform, with a polling read on Windows and non-blocking reads on
+Unix, and nothing here can compile or run the Windows or macOS side. The
+fault shows only when a play in mpv's own window is replaced by one that
+is not in mpv's own window, which today means the hidden embedded player.
+The coordinating agent judged the risk to progress tracking on the
+shipped platforms greater than the gain and had codex take it out again.
+It stays a known gap; codex's version is kept outside the repository, in
+the session's scratch files, and may not be there later.
+
+The coordinating agent read both versions, merged the kept half with the
+certificate change (`bc51d01`), which touches the same function, and ran
+the full check on the result (green: 694 Rust tests, 549 Node tests).
+End to end on that content: \playback\, \eplaceplay\, \playlistplay\, \sourcedeadend\, \surfaces\, \xitplay\, \continueon\ and \multiplex\ in the external player (8 of 8), and \mbeddedplay\, \mbeddedlatestart\, \playlistplay\, \eplaceplay\ and \xitplay\ in the embedded one (5 of 5). It made no red-proofs of its own: the owner set work on tests
+aside that day. Under the owner's decision of 2026-11-14 ("Coding tasks
+may go to codex") this review closes the finding.
+
+Not checked: Windows and macOS (not compiled here); a real server that
+refuses a stream.

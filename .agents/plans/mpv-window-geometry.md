@@ -554,3 +554,39 @@ The same as the run at the branch head. `playlistplay` and `windowsetting`,
 the two scenarios that hold this work, passed in the external player;
 `windowsetting` does not run in the embedded one, and `playlistplay` makes
 its window checks in the external player only.
+
+### 2026-11-14: the codex review of the three slices is closed
+
+Seven findings from the review (`pw-1` to `pw-7`) and two raised after it
+(`pw-8`, `pw-9`), all fixed on `main` and all closed
+(`.agents/review/index.md`; each record says what was wrong, what was
+done and what is not covered). What the fixes changed about the slices
+as landed:
+
+- **Which screen.** A Prefer Compatible copy is ranked for the screen its
+  window is asked to open on, decided once before the ranking; every
+  other policy decides the screen after the stream is resolved, as Slice
+  1 says. A remembered screen that is known to be gone is passed over for
+  the screen Vela's window is on (`pw-1`, `pw-2`; the entry above this
+  one on the two things no longer "left as they are").
+- **What is remembered.** What a play's end and Vela's exit save is the
+  last window of mpv's own, also after plays in the embedded player
+  (`pw-6`); an older play cannot save over a newer one (`pw-5`); a width
+  and a height never reported together are not carried as a size
+  (`pw-3`); a play hands on how its window was opened until mpv reports
+  otherwise (`pw-9`).
+- **Quitting.** Vela's exit waits at most two seconds for the settings
+  file (`pw-4`), and inside that at most half a second for its reader to
+  take in what mpv had sent (`pw-8`).
+- **The setting's control** shows what the backend holds, also after a
+  save that failed or was answered late (`pw-7`).
+- **Besides.** A play whose player has already gone is over at once, not
+  five seconds later (`pw-9`, `c861796`).
+
+Known gaps that remain, from the records: no macOS or Windows build and
+no real second screen were at hand for any of this; a play cancelled by
+a newer play can hand on a window one change out of date (`pw-9`'s
+record, "Not taken"); two screens of one model cannot be told apart.
+
+The owner's acceptance steps in the entry of the landing stand, with step
+4 as amended above. 1.0.64 is still not released and not tagged.

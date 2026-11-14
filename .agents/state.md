@@ -108,7 +108,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     (`.agents/decisions.md`, that date, which also says what is still
     brought to the owner). Under it these are being fixed, each of which
     this file or a record had as waiting for a go: the second half of
-    `pw-9`; the external player idling at the end of a file under the
+    `pw-9` (FIXED); the external player idling at the end of a file under the
     user's own mpv configuration (FIXED, see the commit "a video ends
     when its file ends in the external player"); the order of events left
     open in `pc-2` (FIXED, and `pc-2` closed);
@@ -176,8 +176,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Player window choice go one at a time). One fix departs on purpose
   from what was first decided: what a play's end and Vela's exit save is
   the last window of mpv's own, not the latest play's (`pw-6`'s record
-  says why). Do not release 1.0.64 before the two findings below are
-  closed.
+  says why).
   Two findings were added after the review (its document, "Raised after
   the intake"). `pw-8`: the scenario `windowsetting` used to fail one
   external run in four; the scenario was fixed (`26660a9`), every other
@@ -186,12 +185,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   on a fault in the product: Vela, quitting, saved the window before its
   reader had read all that mpv sent. Repaired at `0ae5b64` to `bb3b84e`
   (quitting waits at most half a second, inside the two seconds it
-  already allowed, until the reader has finished) and WITH CODEX. `pw-9`:
-  its first half is fixed (`0b313a2`); its second half (a play whose mpv
-  has already gone is treated as running for five seconds) and the reader
-  dropping lines it had received when a play is cancelled are being
-  fixed by codex as a coding task (worktree `cx-pw9b`), under the owner's
-  word that what is obviously broken is fixed.
+  already allowed, until the reader has finished); codex ACCEPTED it. `pw-9`:
+  both halves are fixed and it is CLOSED: a play hands on how its window
+  was opened (`0b313a2`), and a play whose player has already gone is
+  over at once, not five seconds later (written by codex, reviewed by the
+  agent). With it the whole player-window review is CLOSED; the plan's
+  log has the summary. One known gap is left on purpose (`pw-9`'s
+  record, "Not taken"): a play cancelled by a newer play can hand on a
+  window one change out of date.
   The parity verdict has not passed on `main` since the fixes began to
   land; the runs made along the way are in the records. A full run of
   each suite, each building its app, and the verdict are being made at
