@@ -341,7 +341,12 @@ def main():
     mapped = set()
     with open("/proc/self/maps") as f:
         for line in f:
-            p = line.split()[-1]
+            # Five fields (address, permissions, offset, device, inode), then
+            # the path as it is, spaces and all; a mapping of no file has none.
+            fields = line.rstrip("\n").split(None, 5)
+            if len(fields) < 6:
+                continue
+            p = fields[5]
             base = os.path.basename(p)
             if base.startswith("libvela-") or base == "libmpv.so.2":
                 mapped.add(os.path.realpath(p))

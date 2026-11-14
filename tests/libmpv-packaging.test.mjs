@@ -1682,6 +1682,16 @@ test('the package check calls check-libmpv.py on the unpacked set, and passes a 
       'FAIL load: check-libmpv.py ended without saying that the set passed',
     ],
   };
+  await t.test('a temporary directory whose name has spaces: a good package passes', (t) => {
+    const standIn = checkBesideStandIn(t, { lines: [...itsOk, 'RESULT PASS'], status: 0 });
+    const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela libmpv  tmp with spaces ')));
+    t.after(() => fs.rmSync(tmp, { recursive: true, force: true }));
+    const run = checkPackageRun(['--set', referenceWith(t, right), packageWith(t, right).file], standIn.script, { TMPDIR: tmp });
+    assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+    assert.ok(standIn.called().arguments[0].startsWith(`${tmp}/`), standIn.called().arguments[0]);
+    assert.equal(standIn.called().library, library);
+  });
+
   // Loading the library runs its start-up code. A package that has failed a
   // check before the load is not known to hold the set's code, so
   // check-libmpv.py is not even started for it.
@@ -1980,8 +1990,8 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
   // A set on disk, as `right` describes it but for `differing` (and whatever
   // `prepare` does to it), and what the check makes of it when the library
   // answers `say`.
-  const verdict = (t, differing = {}, say = {}, prepare = () => {}) => {
-    const set = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-set-')));
+  const verdict = (t, differing = {}, say = {}, prepare = () => {}, prefix = 'vela-libmpv-set-') => {
+    const set = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
     t.after(() => fs.rmSync(set, { recursive: true, force: true }));
     for (const [name, contents] of Object.entries(setFilesOf(right, differing))) {
       if (contents === null) continue;
@@ -2037,6 +2047,15 @@ test('check-libmpv.py fails its run for each thing it finds wrong with a set', {
     'a licence text left out': [{ [licencePath('dav1d')]: null }, `missing: ${licencePath('dav1d')}`],
     'a file the MANIFEST does not list': [{ 'notes.txt': 'x\n' }, 'not in MANIFEST: notes.txt'],
   };
+  await t.test('a set in a directory whose name has spaces passes', (t) => {
+    // /proc/self/maps ends each line with the file's path as it is, spaces
+    // and all. (A temporary directory with spaces in its name puts them there.)
+    const result = verdict(t, {}, {}, undefined, 'vela libmpv  set with spaces ');
+    assert.match(result.set, / {2}set with spaces /);
+    assert.deepEqual(result.lines, [...okLines(result.set), 'RESULT PASS'], result.stderr);
+    assert.equal(result.status, 0);
+  });
+
   // A set that fails its manifest check is not loaded: loading a library runs
   // its start-up code, and that code is not known to be the set's.
   const notLoaded = 'skip load: libmpv.so.2 was not loaded, because the set failed the check above; nothing of a set that failed is run';
