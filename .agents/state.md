@@ -112,7 +112,7 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     user's own mpv configuration (FIXED, see the commit "a video ends
     when its file ends in the external player"); the order of events left
     open in `pc-2`;
-    the Arch package not installing `vela-markers.lua`; the lockfile-only
+    the Arch package not installing `vela-markers.lua` (FIXED); the lockfile-only
     `npm audit fix`. Their entries under Blockers still say "needs a go":
     read them with this point until each is fixed and its entry removed.
   - Active review loop: see `.agents/review/index.md`. Nothing is waiting
@@ -447,25 +447,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
     precondition (120 cards instead of 60). None of those commits touches
     the page; this is the race above, not a regression.
-- The Arch package has no marker skipping (found 2026-11-13, unfixed, the
-  owner has not been asked yet). `packaging/arch/PKGBUILD` installs the
-  mpv scripts one by one (`autocrop.lua`, `vela-autocrop.lua`) and was not
-  given a line for `vela-markers.lua` when that script was added on
-  2026-07-25; `build:arch` runs `tauri build --no-bundle`, so nothing else
-  stages it. Seen on `continuum`: the installed 1.0.63 package has no
-  `/usr/lib/Vela/mpv-scripts/vela-markers.lua`. The launcher checks that
-  the script exists and otherwise plays without it
-  (`src-tauri/src/player/launch.rs`, "did not resolve; playing without
-  skip controls"), so on an Arch install the skip button and auto-skip
-  never appear, with one line on stderr and nothing in the window. The
-  Tauri bundles (deb, rpm, AppImage) take the whole scripts directory
-  (`src-tauri/tauri.conf.json`, `resources`) and should not be affected;
-  that is by reading, no built bundle was opened. Proposed fix (needs a go:
-  it changes what the Arch package does): one `install` line in the
-  PKGBUILD and a test that every script the launcher resolves by name is
-  installed there. Slice 5 of the embedded-player plan adds a line for its
-  own new script and deliberately leaves this one alone until the owner
-  answers.
 - GitHub CI on `main` is RED since 2026-11-13 about 19:10 local, and not
   because of a commit: its `Frontend` job fails at `npm audit
   --audit-level=moderate`. Two moderate advisories against SvelteKit were
