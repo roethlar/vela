@@ -10,7 +10,8 @@
 
 export const PLAYERS = ['external', 'embedded'];
 
-// A row is split where its halves are proven differently in the two players.
+// A row is split where its halves are proven differently in the two players,
+// or, like row 9, by mode, so that each mode must be shown on its own (SPLITS).
 export const INVENTORY = [
   { id: '1', behaviour: 'Play starts; resume at start_seconds' },
   { id: '2', behaviour: 'Plex timeline and Jellyfin/Emby check-ins, final stop' },

@@ -593,6 +593,62 @@ test('a mode of row 9 dropped from the inventory, or row 9 made whole again, is 
   ]);
 });
 
+// Before row 9 was split, its test-only marking could fall on no other row.
+// Now it is a choice: autocrop takes the mpvInput route in its Manual leg in
+// the external player, so the marking is on 9b there and on no other mode or
+// player. Pinned, so that moving it to another mode, which nothing at run
+// time would see (proofProblems ties a route to a player, not to a row), takes
+// a change to this literal (review finding pa-2).
+test("row 9's test-only marking is on Manual (9b) in the external player only", () => {
+  const marked = Object.fromEntries(
+    SPLITS[9].flatMap((row) => PLAYERS.map((player) => [`${row} ${player}`, testOnlyCoverage(scenarios, row, player)])),
+  );
+  assert.deepEqual(marked, {
+    '9a external': [],
+    '9a embedded': [],
+    '9b external': ['autocrop'],
+    '9b embedded': [],
+    '9c external': [],
+    '9c embedded': [],
+  });
+});
+
+// Every row a scenario declares is reported by a shown() call in its source,
+// once, and no other row is (review finding pa-2): a call dropped or doubled
+// is seen here, before any run. The runner's proofProblems sees a row that
+// is declared and never reached in a real run; where in its leg the call
+// stands is seen by neither.
+function shownLiterals(file) {
+  const source = fs.readFileSync(file, 'utf8');
+  return [...source.matchAll(/\bshown\(([^)]*)\)/g)].flatMap((call) =>
+    [...call[1].matchAll(/'([^']*)'|"([^"]*)"/g)].map((lit) => lit[1] ?? lit[2]),
+  );
+}
+
+test('every declared row has one shown() call in its scenario, and no other row has one', () => {
+  const files = [
+    ...scenarios.map((s) => [s, path.join(scenarioDir, `${s.name}.mjs`)]),
+    ...live.map((s) => [s, path.join(liveDir, `${s.name.replace(/^live-/, '')}.mjs`)]),
+  ];
+  const problems = [];
+  for (const [scenario, file] of files) {
+    const reported = shownLiterals(file);
+    for (const row of scenario.rows) {
+      const count = reported.filter((r) => r === row).length;
+      if (count !== 1) problems.push(`${scenario.name} declares row ${row} and calls shown('${row}') ${count} times`);
+    }
+    for (const row of new Set(reported)) {
+      if (!scenario.rows.includes(row)) problems.push(`${scenario.name} calls shown('${row}') and does not declare it`);
+    }
+  }
+  assert.deepEqual(problems, []);
+  assert.deepEqual(
+    ['autocrop', 'embeddedcrop'].map((name) => shownLiterals(path.join(scenarioDir, `${name}.mjs`)).sort()),
+    [['9a', '9b', '9c'], ['9a', '9b', '9c']],
+    'the cropping scenarios report each mode once',
+  );
+});
+
 // The reviewer's injection: row 8b (the skip button) deleted from the
 // inventory together with the scenarios that claim it. Every other check
 // still passes on that; the inventory check must not (review finding pa-3).
