@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — for a scenario recorded as a known failure, the verdict compares the error text of any result that is not a pass. A result marked skipped that carries the recorded text is accepted, so the verdict can pass on a run in which the scenario never ran.
 **Status**: In progress
 **Branch**: —
-**Commit**: `115cbaa`, `dbb91b4` (repair), `0d8ccbd` (second repair)
+**Commit**: `115cbaa`, `dbb91b4` (repair), `0d8ccbd` (second repair), `bf86854` (third repair)
 
 ## Evidence
 
@@ -269,3 +269,67 @@ anything other than a mistake in it (that is, by asking the verdict to
 tell a hand-made file that is exactly like the runner's from a real one,
 which no check of the file can do), the finding goes to the owner as
 contested.
+
+### Repair (round 4), `bf86854`
+
+The repair this record announced after the third reopen, made once the
+repair of `pa-6` (`8cf3a05`) had settled what the runner writes at the top
+of the file. It is one description of the whole results file, in
+`tests/e2e/scenario-loader.mjs`, in three parts:
+
+- `resultsTopProblems`: the top of the file. Exactly its ten names
+  (`player`, `full`, `built`, `appBinary`, `appBinaryFrom`, `head`,
+  `dirty`, `changedDuringRun`, `finishedAt`, `scenarios`); the four flags
+  true or false and nothing that reads like it; a commit; the app binary
+  by its full path; where it came from, which must be the sentence a run
+  with that `built` writes; the time of finishing as the runner writes it;
+  no "changed during the run" on a run that says it was clean; the results
+  by scenario name.
+- `outcomeShapeProblem`: one result by itself. A skip and nothing else, or
+  a pass or a failure with exactly `error`, `shown` and `routes`; the two
+  lists are text, each entry once (the reviewer's first two cases), and a
+  route only if it is a registered one (the third); a failure's error is
+  text and a pass has none.
+- In `verdictProblems`, as before: what a result means for its scenario in
+  its player (a skip only where the scenario does not run; a pass only with
+  a proof the runner would have passed; a known failure only as a failure
+  with its text; a row shown only by a result that stood).
+
+The verdict applies the first two to the files it is given. The runner
+(`tests/e2e/run.mjs`) reads back the file it has just written, applies
+them to it (`resultsFileProblems`), and fails the run if it breaks one. So
+a rule the runner's own file does not meet fails every real run, and what
+is written and what is read cannot drift apart unseen. The two sentences
+for where the binary came from are one pair of constants in
+`tests/e2e/app-binary.mjs`, written by the runner and read by the rules.
+
+Files: `tests/e2e/scenario-loader.mjs`, `tests/e2e/run.mjs`,
+`tests/e2e/app-binary.mjs`, `tests/e2e-parity.test.mjs`,
+`tests/e2e/README.md`.
+
+Guard: the verdict test gained the reviewer's three cases (`shown` with an
+entry twice; `routes` with an entry twice; a known failure that keeps its
+text and names a route nobody registered, and one named `toString`) and a
+case for each rule of the top of the file; a new test, "the runner checks
+the results file it wrote by the rules the verdict reads it with", holds
+the runner's reading back of its file, its exit, and the shared sentences,
+and runs the rules on a file as the runner writes one, built and not built.
+Red-proofs by the coordinating agent, the file put back and checked byte
+for byte after each: fourteen rules and wirings were each taken out in
+turn (each list rule; each rule of the top; the top rules' call from the
+verdict; the per-result part of the runner's check; the runner's failing of
+the run; the skip's shape; a third sentence for where the binary came
+from). The last one at first passed every test: nothing held the sentence
+a `--skip-build` run records. A check of it was added, and it then failed.
+`npm run check` was green before the commit (473 tests), and the parity
+test passes inside `codex sandbox` in workspace-write mode.
+
+Against real files: the results of the two full runs made at `8cf3a05`
+are checked with these rules when those runs end; the plan's log has the
+result. An older results file (from before `appBinaryFrom`, and from
+before row 9 was split) is refused, as it should be: it is not a file this
+runner writes.
+
+Not covered, by nature: a file made by hand that is exactly like one of
+the runner's. The commit named at the top is compared with the checkout by
+the verdict, not checked for its form.
