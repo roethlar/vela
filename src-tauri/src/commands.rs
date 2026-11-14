@@ -4897,16 +4897,33 @@ struct PlaybackSelection {
     /// it falls back (`select_playback_version`): decided with the settings
     /// the copy was chosen with, before the copy was ranked for its screen.
     player: crate::player::PlayerChoice,
-    /// The output the play is shown on, by name, decided once before the
-    /// copy was chosen (`screen_for_play`); a Compatible copy was ranked for
-    /// it. The launch asks for this output and no other, whichever player
-    /// ends up running the play (review findings pw-1 and pw-2). `None` only
-    /// when not even the screen holding Vela's window has a name.
-    screen: Option<String>,
+    /// Where the play is shown: the output a Compatible copy was ranked for,
+    /// or, for any other choice, to be decided at the launch
+    /// (`PlayDestination`).
+    screen: PlayDestination,
 }
 
-/// The screen a play is to be shown on, decided once, before its copy is
-/// chosen (`screen_for_play`).
+/// Where a play is shown, as its choice of copy hands it to the launch
+/// (review findings pw-1 and pw-2; third review of pw-1, comment 5). Only a
+/// Compatible choice ranks for a screen, so only it fixes the screen before
+/// the stream is resolved; every other play's screen is decided after
+/// resolution, as the plan's Slice 1 promises, so that a report from the
+/// player before arriving meanwhile still counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PlayDestination {
+    /// A Compatible copy was ranked for this output, by name, decided once
+    /// before the copy was chosen (`screen_for_play`). The launch asks for
+    /// it and looks at no screen again, whichever player ends up running the
+    /// play. `None` only when not even the screen holding Vela's window has
+    /// a name.
+    RankedFor(Option<String>),
+    /// No copy was ranked for a screen (Best, Fastest, Ask, or nothing to
+    /// rank): the launch decides the screen once the stream is resolved
+    /// (`screen_at_launch`).
+    DecidedAtLaunch,
+}
+
+/// The screen a play is to be shown on, decided once (`screen_for_play`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 struct PlayScreen {
     /// The output, by name.
@@ -4970,21 +4987,55 @@ fn screen_for_play(
         })
 }
 
-/// The copy a play gets, and the output it is shown on: the candidates
-/// ranked by the policy (a Compatible ranking for `target`, the profile of
-/// the decided output), and that output. What `select_playback_version`
-/// ranks with, kept apart so that a test can run it (review finding pw-2).
+/// How a choice of copy ranks: for a decided screen, or by a policy that
+/// looks at no screen.
+enum Ranking {
+    /// A Compatible ranking for `target`, the profile of the decided
+    /// `screen`.
+    ForScreen {
+        screen: PlayScreen,
+        target: crate::selection::CompatibilityTarget,
+    },
+    /// Any other ranking (Best, Fastest, or Compatible with no screen to
+    /// rank for, which ranks as Best).
+    ByPolicy(crate::selection::PlaybackSourcePolicy),
+}
+
+/// The copy a play gets, and where it is shown: the candidates ranked, and,
+/// for a ranking for a screen, that screen; otherwise the screen is left to
+/// the launch. What `select_playback_version` ranks with, kept apart so that
+/// a test can run it (review finding pw-2).
 fn rank_and_place(
     candidates: &mut [crate::selection::PlaybackCandidate],
-    policy: crate::selection::PlaybackSourcePolicy,
-    screen: &PlayScreen,
-    target: Option<crate::selection::CompatibilityTarget>,
-) -> Option<(crate::selection::PlaybackCandidate, Option<String>)> {
+    ranking: Ranking,
+) -> Option<(crate::selection::PlaybackCandidate, PlayDestination)> {
+    let (policy, target, destination) = match ranking {
+        Ranking::ForScreen { screen, target } => (
+            crate::selection::PlaybackSourcePolicy::Compatible,
+            Some(target),
+            PlayDestination::RankedFor(screen.name),
+        ),
+        Ranking::ByPolicy(policy) => (policy, None, PlayDestination::DecidedAtLaunch),
+    };
     crate::selection::rank_candidates(candidates, policy, target);
     candidates
         .first()
         .cloned()
-        .map(|winner| (winner, screen.name.clone()))
+        .map(|winner| (winner, destination))
+}
+
+/// The screen the launch asks for (third review of finding pw-1, comment
+/// 5). A Compatible copy's screen was decided with it, before the stream was
+/// resolved, and nothing is looked at again; any other play's screen is
+/// decided now, after resolution, by `decide`, once.
+async fn screen_at_launch(
+    destination: PlayDestination,
+    decide: impl AsyncFnOnce() -> PlayScreen,
+) -> Option<String> {
+    match destination {
+        PlayDestination::RankedFor(name) => name,
+        PlayDestination::DecidedAtLaunch => decide().await.name,
+    }
 }
 
 enum PlaybackSelectionOutcome {
@@ -5074,17 +5125,21 @@ fn completion_watch_backings(completion: &PlaybackCompletion) -> Vec<BackingRef>
 
 /// Decide the screen a play is shown on (`screen_for_play`), from what is
 /// connected now and the record of the plays before it. `upcoming` is the
-/// player that will run the play: the one asked for, or mpv's own window
-/// when the embedded player cannot run (review finding pw-2). Also returns
+/// player whose screen it is: for a Compatible choice the player that will
+/// run the play (the one asked for, or mpv's own window when the embedded
+/// player cannot run, review finding pw-2); at the launch, mpv's own window,
+/// the only player that uses it. `saved_first_screen` is the screen the
+/// player window setting saved for the first window of a run. Also returns
 /// what was seen of the screens, for the ranking. The screens are looked at
-/// before the record is locked, and the record's lock is held only to decide.
+/// before the record is locked, and the record's lock is held only to
+/// decide. Called once per play: by a Compatible choice of copy, or else by
+/// the launch (`screen_at_launch`).
 async fn decide_play_screen(
     state: &AppState,
     replace_session: Option<&str>,
     upcoming: crate::player::PlayerKind,
-    cfg: &config::AppConfig,
-) -> Result<(PlayScreen, display::Screens), PlayFailure> {
-    let (_, saved_first_screen) = config::first_window_of_run(cfg).map_err(PlayFailure::fatal)?;
+    saved_first_screen: Option<&str>,
+) -> (PlayScreen, display::Screens) {
     let screens = match state.app_handle.get() {
         Some(app) => display::look_at_screens(app).await,
         None => display::Screens::default(),
@@ -5098,11 +5153,11 @@ async fn decide_play_screen(
             &current,
             replace_session,
             upcoming,
-            saved_first_screen.as_deref(),
+            saved_first_screen,
             &screens,
         )
     };
-    Ok((screen, screens))
+    (screen, screens)
 }
 
 /// What a Compatible choice ranks for: the profile of the output the play
@@ -5262,8 +5317,8 @@ async fn select_playback_version(
     // run is asked only for a play that wants it (the answer comes from the
     // window). A play that can run embedded now and then cannot start there
     // after all still falls back at the start (`EmbeddedFallback`), and its
-    // mpv window then opens on the screen decided below, which its copy was
-    // ranked for (review finding pw-2).
+    // mpv window then opens on the play's screen: for a Compatible choice the
+    // one decided below, which its copy was ranked for (review finding pw-2).
     let embedded_available = match wanted_player {
         crate::player::PlayerKind::External => Ok(()),
         crate::player::PlayerKind::Embedded => {
@@ -5351,14 +5406,6 @@ async fn select_playback_version(
         }
     }
 
-    // The screen this play is shown on, decided once, here, before the copy
-    // is chosen, for every source policy: a Compatible copy is ranked for it,
-    // and the launch asks for it and for no other (review findings pw-1 and
-    // pw-2). Decided after the probes, so that a player that has just ended
-    // has had that long to report where its window was.
-    let (screen, screens) =
-        decide_play_screen(state, replace_session, upcoming_player.kind, &cfg).await?;
-
     if versions.is_empty() {
         legacy.sort_by(|left, right| left.0.source_id.cmp(&right.0.source_id));
         let Some((backing, _source, raw)) = legacy.into_iter().next() else {
@@ -5387,7 +5434,7 @@ async fn select_playback_version(
             version_id: None,
             item: selected_item,
             player: upcoming_player,
-            screen: screen.name,
+            screen: PlayDestination::DecidedAtLaunch,
             }),
             ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
         });
@@ -5435,14 +5482,31 @@ async fn select_playback_version(
             AskSourceDecision::NoCandidate => {}
         }
     }
-    let target = match state.app_handle.get() {
+    // Only a Compatible choice ranks for the screen the play is shown on, so
+    // only it decides that screen here, once, before the copy is chosen; the
+    // launch asks for it and for no other (review findings pw-1 and pw-2).
+    // Decided after the probes, so that a player that has just ended has had
+    // that long to report where its window was. Every other policy looks at
+    // no screen here: its play's screen is decided at the launch, after the
+    // stream is resolved (third review of pw-1, comment 5).
+    let ranking = match state.app_handle.get() {
         Some(app) if policy == crate::selection::PlaybackSourcePolicy::Compatible => {
             let overrides = playback_display_overrides(&cfg).map_err(PlayFailure::fatal)?;
-            Some(compatibility_target(app, &screen, &screens, overrides).await)
+            let (_, saved_first_screen) =
+                config::first_window_of_run(&cfg).map_err(PlayFailure::fatal)?;
+            let (screen, screens) = decide_play_screen(
+                state,
+                replace_session,
+                upcoming_player.kind,
+                saved_first_screen.as_deref(),
+            )
+            .await;
+            let target = compatibility_target(app, &screen, &screens, overrides).await;
+            Ranking::ForScreen { screen, target }
         }
-        _ => None,
+        _ => Ranking::ByPolicy(policy),
     };
-    let (winner, destination) = rank_and_place(&mut candidates, policy, &screen, target)
+    let (winner, destination) = rank_and_place(&mut candidates, ranking)
         .ok_or_else(|| PlayFailure::unavailable("no playable copy was found".to_string()))?;
     let version = versions
         .into_iter()
@@ -5647,10 +5711,11 @@ async fn play_by_key_locked(
     // for the screen this player shows the play on (review finding pw-2).
     let player_choice = selection.player.clone();
     // How this play's window opens if it is the first external play of this
-    // run: the player window setting. Read here for the same reason as the
-    // player above; used only when this run has no window of its own yet.
-    // Its screen is the one decided with the copy (`selection.screen`).
-    let (first_of_run, _) = config::load_config()
+    // run, and on which screen: the player window setting. Read here for the
+    // same reason as the player above; used only when this run has no window
+    // of its own yet. The screen is used only when the launch decides it
+    // (`screen_at_launch`); a Compatible copy's was decided with the copy.
+    let (first_of_run, saved_first_screen) = config::load_config()
         .map_err(|_| "could not read Vela settings".to_string())
         .and_then(|cfg| config::first_window_of_run(&cfg))
         .map_err(PlayFailure::fatal)?;
@@ -5697,12 +5762,27 @@ async fn play_by_key_locked(
             .unwrap_or_else(|e| e.into_inner());
         opening_window(&current, first_of_run)
     };
-    // The screen, though, was decided with the copy, before the stream was
-    // resolved, and is not looked at again: neither where Vela's window is
-    // now nor what the record says now (review finding pw-1). Whichever
-    // player runs the play is asked for it, also mpv's own window when the
-    // embedded player cannot start the play after all (review finding pw-2).
-    let screen_name = selection.screen.clone();
+    // The screen: a Compatible copy's was decided with the copy, before the
+    // stream was resolved, and is not looked at again, neither where Vela's
+    // window is now nor what the record says now (review finding pw-1);
+    // whichever player runs the play is asked for it, also mpv's own window
+    // when the embedded player cannot start the play after all (review
+    // finding pw-2). Any other play's screen is decided now, once the stream
+    // is resolved, like the window state above (the plan's Slice 1; third
+    // review of pw-1, comment 5), as for a play in mpv's own window: the
+    // only player that uses it, also for a play the embedded player cannot
+    // start.
+    let screen_name = screen_at_launch(selection.screen, async || {
+        decide_play_screen(
+            state,
+            replace_session,
+            crate::player::PlayerKind::External,
+            saved_first_screen.as_deref(),
+        )
+        .await
+        .0
+    })
+    .await;
     // How Vela opens this window stands until mpv reports otherwise, even
     // when the reader never connects (pw-9). The requested screen is not a
     // measurement of where the compositor actually placed the window.
@@ -9128,12 +9208,16 @@ mod tests {
         let target = target_for(screen, screens, hdr);
         let (winner, destination) = rank_and_place(
             &mut two_copies(),
-            crate::selection::PlaybackSourcePolicy::Compatible,
-            screen,
-            Some(target),
+            Ranking::ForScreen {
+                screen: screen.clone(),
+                target,
+            },
         )
         .unwrap();
-        (winner.version_id, destination)
+        let PlayDestination::RankedFor(name) = destination else {
+            panic!("a Compatible choice carries the screen it was ranked for: {destination:?}");
+        };
+        (winner.version_id, name)
     }
 
     #[test]
@@ -9426,6 +9510,10 @@ mod tests {
     fn the_ranking_ranks_by_its_policy_and_places_on_the_decided_screen() {
         // Review finding pw-2, comment 6: the ranking step of
         // `select_playback_version`, on behaviour. A 1080p SDR screen.
+        // Third review of pw-1, comment 5: only a ranking for a screen
+        // carries that screen; any other leaves it to the launch (where this
+        // test held the decided screen for Best, Fastest and a Compatible
+        // ranking without its target, it now holds DecidedAtLaunch).
         use crate::selection::PlaybackSourcePolicy::{Best, Compatible, Fastest};
         let screens = screens_with("HDMI-1", &two_screens());
         let screen = screen_for_play(
@@ -9435,24 +9523,87 @@ mod tests {
             None,
             &screens,
         );
-        let target = Some(target_for(&screen, &screens, display::HdrState::Disabled));
-        let rank = |policy, target| {
-            let (winner, destination) = rank_and_place(&mut two_copies(), policy, &screen, target).unwrap();
+        let target = target_for(&screen, &screens, display::HdrState::Disabled);
+        let rank = |ranking| {
+            let (winner, destination) = rank_and_place(&mut two_copies(), ranking).unwrap();
             (winner.version_id, destination)
         };
-        let hdmi = Some("HDMI-1".to_string());
-        assert_eq!(rank(Compatible, target), ("1080p-sdr".to_string(), hdmi.clone()));
-        assert_eq!(rank(Best, target), ("4k-hdr".to_string(), hdmi.clone()));
-        assert_eq!(rank(Fastest, target), ("4k-hdr".to_string(), hdmi.clone()));
+        let for_screen = || Ranking::ForScreen {
+            screen: screen.clone(),
+            target,
+        };
         assert_eq!(
-            rank(Compatible, None),
-            ("4k-hdr".to_string(), hdmi),
+            rank(for_screen()),
+            ("1080p-sdr".to_string(), PlayDestination::RankedFor(Some("HDMI-1".to_string())))
+        );
+        let at_launch = PlayDestination::DecidedAtLaunch;
+        assert_eq!(rank(Ranking::ByPolicy(Best)), ("4k-hdr".to_string(), at_launch.clone()));
+        assert_eq!(rank(Ranking::ByPolicy(Fastest)), ("4k-hdr".to_string(), at_launch.clone()));
+        assert_eq!(
+            rank(Ranking::ByPolicy(Compatible)),
+            ("4k-hdr".to_string(), at_launch),
             "without its target a Compatible ranking is a Best one"
         );
+        assert_eq!(rank_and_place(&mut [], for_screen()), None, "no copy, no choice");
+    }
+
+    #[test]
+    fn only_a_compatible_choice_fixes_the_screen_before_resolution() {
+        // Third review of finding pw-1, comment 5, and the plan's Slice 1:
+        // a play whose copy was not ranked for a screen (Best here) decides
+        // its screen at the launch, after the stream is resolved, so a
+        // report from the play before that arrives meanwhile counts. The
+        // steps are the play path's, in its order.
+        use crate::player::PlayerKind::{Embedded, External};
+        let last = session_observed_on("last", External, &["DP-1"], Some((3840, 2160)));
+        let slot = std::sync::Mutex::new(published([last.clone()]));
+        let screens = screens_with("HDMI-1", &two_screens());
+        // The choice of copy, by Best: no screen.
+        let (_, destination) = rank_and_place(
+            &mut two_copies(),
+            Ranking::ByPolicy(crate::selection::PlaybackSourcePolicy::Best),
+        )
+        .unwrap();
+        assert_eq!(destination, PlayDestination::DecidedAtLaunch);
+        // A late report while the stream is resolved: the window moved.
+        last.observation.apply_ipc_event(&serde_json::json!({
+            "event": "property-change", "name": "display-names", "data": ["HDMI-1"]
+        }));
+        // The launch decides, once, as for mpv's own window.
+        let decided = std::cell::Cell::new(0);
+        let launch = |destination| {
+            tauri::async_runtime::block_on(screen_at_launch(destination, async || {
+                decided.set(decided.get() + 1);
+                screen_for_play(&slot.lock().unwrap(), None, External, None, &screens)
+            }))
+        };
+        assert_eq!(launch(destination), Some("HDMI-1".to_string()), "the late report counts");
+        assert_eq!(decided.get(), 1, "decided once, at the launch");
+        // A Compatible copy ranked for DP-1 is shown on DP-1, and the launch
+        // looks at nothing.
         assert_eq!(
-            rank_and_place(&mut [], Compatible, &screen, target),
-            None,
-            "no copy, no choice"
+            launch(PlayDestination::RankedFor(Some("DP-1".to_string()))),
+            Some("DP-1".to_string())
+        );
+        assert_eq!(decided.get(), 1, "a Compatible copy's screen is not decided again");
+        assert_eq!(launch(PlayDestination::RankedFor(None)), None);
+        assert_eq!(decided.get(), 1);
+        // A play that wants the embedded player is decided at the launch as
+        // for mpv's own window, where it opens if the embedded player cannot
+        // start it: where the last mpv window is, as before this work. The
+        // embedded rule would have given Vela's screen.
+        assert_eq!(
+            screen_for_play(&slot.lock().unwrap(), None, External, None, &screens).name,
+            Some("HDMI-1".to_string())
+        );
+        let gone = published([session_observed_on("gone", External, &["DP-1"], None)]);
+        assert_eq!(
+            screen_for_play(&gone, None, External, None, &screens).name,
+            Some("DP-1".to_string())
+        );
+        assert_eq!(
+            screen_for_play(&gone, None, Embedded, None, &screens).name,
+            Some("HDMI-1".to_string())
         );
     }
 
