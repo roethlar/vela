@@ -9117,6 +9117,17 @@ mod tests {
         assert_eq!(decide(&both, Some("embedded"), External), named("HDMI-1"));
         assert_eq!(decide(&both, Some("embedded"), Embedded), named("DP-1"));
         assert_eq!(decide(&both, None, Embedded), named(VELAS));
+        // A play that wanted the embedded player and fell back to mpv's own
+        // window at start is published as an external play. The next embedded
+        // play that replaces it (the next item of a playlist) is not the
+        // successor of an embedded play: it is shown in Vela's window, so it
+        // is decided for Vela's screen, not for the mpv window's.
+        let fell_back = published([observed_window_session("last", External)]);
+        assert_eq!(
+            decide(&fell_back, Some("last"), Embedded),
+            named(VELAS),
+            "only an embedded play's successor keeps its observed screen"
+        );
     }
 
     #[test]
