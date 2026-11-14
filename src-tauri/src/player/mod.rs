@@ -29,6 +29,60 @@ pub(crate) enum PlayerHandle {
     Embedded(embedded::Session),
 }
 
+/// A number for a new player, never handed out before in this run of Vela
+/// (`PlayerHandle::serial`).
+pub(crate) fn new_serial() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+}
+
+/// The player view the page has been told is open, kept with the telling
+/// (review finding pc-2). `player-opened` and `player-closed` are sent only
+/// through [`ViewRecord::announce`], which changes the record and sends the
+/// event in one step under the record's lock, by the rule the page applies
+/// to those events (`nextPlayerSession` in `src/lib/playerView.ts`): an
+/// opening shows its session; a closing hides its session only if that is
+/// the one showing. A report that has to name the view the page is showing
+/// is sent through [`ViewRecord::report`], under the same lock, so no opening
+/// or closing can come between what it reads and what it sends.
+#[derive(Default)]
+pub(crate) struct ViewRecord {
+    showing: std::sync::Mutex<Option<String>>,
+}
+
+impl ViewRecord {
+    /// Record that the view of `session_id` opened (`opened`) or closed, and
+    /// send the event with `emit`, as one step. `emit` must only send. Only
+    /// the embedded player has a view, and it runs only on Linux.
+    #[cfg(target_os = "linux")]
+    pub(crate) fn announce(&self, session_id: &str, opened: bool, emit: impl FnOnce()) {
+        let mut showing = self.showing.lock().unwrap_or_else(|e| e.into_inner());
+        if opened {
+            *showing = Some(session_id.to_string());
+        } else if showing.as_deref() == Some(session_id) {
+            *showing = None;
+        }
+        emit();
+    }
+
+    /// Send, with `emit`, a report naming the session whose view the page is
+    /// showing, or `own` when no view is showing. `emit` must only send.
+    pub(crate) fn report(&self, own: &str, emit: impl FnOnce(&str)) {
+        let showing = self.showing.lock().unwrap_or_else(|e| e.into_inner());
+        emit(showing.as_deref().unwrap_or(own));
+    }
+
+    /// Whether the record's lock is held right now, by any thread (this one
+    /// included). For tests that check a send happens under it.
+    #[cfg(all(test, target_os = "linux"))]
+    pub(crate) fn is_locked(&self) -> bool {
+        matches!(
+            self.showing.try_lock(),
+            Err(std::sync::TryLockError::WouldBlock)
+        )
+    }
+}
+
 /// The embedded player's side of the app, for the life of the process.
 #[cfg(target_os = "linux")]
 pub(crate) use embedded::Host as EmbeddedHost;
@@ -161,17 +215,32 @@ impl PlayerHandle {
         }
     }
 
-    /// Whether this is the EMBEDDED play of `session_id`. An embedded play
-    /// is put in the slot only once it has started, and so once the page has
-    /// been told its view opened. Asked under the slot's lock.
-    pub(crate) fn is_embedded_play(&self, session_id: &str) -> bool {
+    /// Whether this is the EMBEDDED play of `session_id`, still running: not
+    /// told to stop, and not ended. Asked under the slot's lock, for the
+    /// player view's fullscreen: a play that has been stopped (replaced, or
+    /// stopped by a launch that then failed) may not put the window in
+    /// fullscreen any more (review finding pc-2).
+    pub(crate) fn is_running_embedded_play(&mut self, session_id: &str) -> bool {
         match self {
             PlayerHandle::External(_) => {
                 let _ = session_id;
                 false
             }
             #[cfg(target_os = "linux")]
-            PlayerHandle::Embedded(session) => session.is_play(session_id),
+            PlayerHandle::Embedded(session) => {
+                session.is_play(session_id) && !session.stop_requested() && !session.has_ended()
+            }
+        }
+    }
+
+    /// Which player this is: a number no other player started in this run
+    /// of Vela has. Tells the player a launch found in the slot from any
+    /// player put there later.
+    pub(crate) fn serial(&self) -> u64 {
+        match self {
+            PlayerHandle::External(child) => child.serial(),
+            #[cfg(target_os = "linux")]
+            PlayerHandle::Embedded(session) => session.serial(),
         }
     }
 

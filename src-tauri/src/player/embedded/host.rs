@@ -204,6 +204,14 @@ pub(crate) fn follow_fullscreen(app: &tauri::AppHandle) {
         let fullscreen = gtk::gdk::WindowState::FULLSCREEN;
         if event.changed_mask().contains(fullscreen) {
             let on = event.new_window_state().contains(fullscreen);
+            // The page gives up its claim on fullscreen when it hears the
+            // window has left it; so does the backend's copy of that claim
+            // (review finding pc-2).
+            if !on {
+                app.state::<crate::AppState>()
+                    .player_fullscreen_held
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
             let _ = app.emit("window-fullscreen", serde_json::json!({ "on": on }));
         }
         gtk::glib::Propagation::Proceed
@@ -431,8 +439,17 @@ impl Prepared {
                     Lifecycle::Opened => "player-opened",
                     Lifecycle::Closed => "player-closed",
                 };
-                // An id and nothing else: never a URL, a title or a path.
-                let _ = app.emit(name, serde_json::json!({ "sessionId": session_id }));
+                // Recorded and sent in one step, so that the record of the
+                // view the page shows is never behind or ahead of what the
+                // page has been sent (review finding pc-2). An id and nothing
+                // else: never a URL, a title or a path.
+                app.state::<crate::AppState>().player_view.announce(
+                    &session_id,
+                    event == Lifecycle::Opened,
+                    || {
+                        let _ = app.emit(name, serde_json::json!({ "sessionId": session_id }));
+                    },
+                );
                 // Appearing and disappearing both take effect with the
                 // window's next draw, and a play that has just appeared is
                 // put where the page last said.

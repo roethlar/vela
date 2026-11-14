@@ -235,19 +235,17 @@ pub(crate) fn command(
     channel.send(command).map_err(str::to_string)
 }
 
-/// Whether `session_id` is the running embedded play, asked under the slot's
-/// lock. For the player view's fullscreen: only that play's view may put the
-/// window in fullscreen.
-pub(crate) fn is_running_embedded_play(
-    slot: &Mutex<Option<PlayerHandle>>,
-    session_id: &Value,
-) -> bool {
+/// Whether `session_id` is the running embedded play: the player in the
+/// slot, whose content the caller passes with the slot's lock held. For the
+/// player view's fullscreen: only that play's view may put the window in
+/// fullscreen, and only while the play has been neither told to stop nor
+/// ended (review finding pc-2).
+pub(crate) fn is_running_embedded_play(slot: &mut Option<PlayerHandle>, session_id: &Value) -> bool {
     let Some(session_id) = session_id.as_str() else {
         return false;
     };
-    let slot = slot.lock().unwrap_or_else(|e| e.into_inner());
-    slot.as_ref()
-        .is_some_and(|player| player.command_channel(session_id).is_some())
+    slot.as_mut()
+        .is_some_and(|player| player.is_running_embedded_play(session_id))
 }
 
 #[cfg(target_os = "linux")]
@@ -1146,7 +1144,7 @@ mod tests {
                 Err(NOT_RUNNING.to_string())
             );
             assert_eq!(send(&slot, "any", "stop", json!([])), Ok(()));
-            assert!(!is_running_embedded_play(&slot, &json!("any")));
+            assert!(!is_running_embedded_play(&mut slot.lock().unwrap(), &json!("any")));
             std::thread::sleep(Duration::from_millis(50));
             let mut player = slot.lock().unwrap().take().unwrap();
             assert!(
@@ -1158,14 +1156,24 @@ mod tests {
 
         #[test]
         fn only_the_running_embedded_play_counts_as_running() {
-            let slot = slot_with("play-b", "");
-            assert!(is_running_embedded_play(&slot, &json!("play-b")));
-            assert!(!is_running_embedded_play(&slot, &json!("play-a")));
-            assert!(!is_running_embedded_play(&slot, &json!(null)));
-            assert!(!is_running_embedded_play(
-                &Mutex::new(None),
-                &json!("play-b")
+            let mut slot = Some(PlayerHandle::Embedded(
+                crate::player::embedded::Session::for_test_live("play-b"),
             ));
+            assert!(is_running_embedded_play(&mut slot, &json!("play-b")));
+            assert!(!is_running_embedded_play(&mut slot, &json!("play-a")));
+            assert!(!is_running_embedded_play(&mut slot, &json!(null)));
+            assert!(!is_running_embedded_play(&mut None, &json!("play-b")));
+            // Told to stop (replaced, or stopped by a launch that then
+            // failed), it no longer counts, though it has not ended yet.
+            if let Some(player) = slot.as_mut() {
+                let _ = player.kill();
+            }
+            assert!(!is_running_embedded_play(&mut slot, &json!("play-b")));
+            // Nor does one that has ended.
+            let mut ended = Some(PlayerHandle::Embedded(
+                crate::player::embedded::Session::for_test("play-b"),
+            ));
+            assert!(!is_running_embedded_play(&mut ended, &json!("play-b")));
         }
 
         #[test]

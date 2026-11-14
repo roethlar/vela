@@ -3712,6 +3712,12 @@ impl PlaybackChoiceRequests {
         });
     }
 
+    /// Whether any choice is still waiting for the user.
+    fn has_pending(&mut self, now: Instant) -> bool {
+        self.prune_at(now);
+        !self.entries.is_empty()
+    }
+
     fn has_manual_pending(&mut self, now: Instant) -> bool {
         self.prune_at(now);
         self.entries
@@ -4044,6 +4050,10 @@ struct PlaylistLocation {
 struct PlayFailure {
     message: String,
     kind: PlayFailureKind,
+    /// The play's session had been installed and its launch failed:
+    /// `install_and_launch` has then already decided whether the run is over
+    /// and told the page (review finding pc-2), so nobody else does.
+    launched: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -4058,6 +4068,7 @@ impl PlayFailure {
         Self {
             message,
             kind: PlayFailureKind::Unavailable,
+            launched: false,
         }
     }
 
@@ -4065,6 +4076,7 @@ impl PlayFailure {
         Self {
             message: "playback request was superseded".to_string(),
             kind: PlayFailureKind::Superseded,
+            launched: false,
         }
     }
 
@@ -4072,6 +4084,16 @@ impl PlayFailure {
         Self {
             message,
             kind: PlayFailureKind::Fatal,
+            launched: false,
+        }
+    }
+
+    /// A launch that failed after its session was installed
+    /// (`install_and_launch`).
+    fn launch_failed(message: String) -> Self {
+        Self {
+            launched: true,
+            ..Self::fatal(message)
         }
     }
 }
@@ -4161,32 +4183,19 @@ impl PlaybackAdvance {
 /// is decided by the completion dispatcher, not here. A play that is no
 /// longer the active one has been replaced: its successor is installed
 /// before it is stopped (a step-down, a play the backend or the user
-/// started). Should that successor then fail to start, after this end was
-/// reported so, and the replaced play ran in the embedded player, the launch
-/// reports the run over itself (`install_and_launch`); a replaced external
-/// play gets no such report, as before. Any other end (an error, a quit that
-/// was not the page's, mpv dying) ends the run.
+/// started). Should that successor then fail to start, the launch tells the
+/// page itself when the run is over (`install_and_launch`). Any other end (an
+/// error, a quit that was not the page's, mpv dying) ends the run.
 fn end_is_run_over(clean_eof: bool, active_session: Option<&str>, ended_session: &str) -> bool {
     !clean_eof && active_session.is_none_or(|active| active == ended_session)
 }
 
-/// A tracker's verdict on its play's end (`end_is_run_over`), read under the
-/// lock of the active session. When another play is the active one, it
-/// replaced this play, and this end is reported as "the run goes on": that is
-/// noted in `ends_told_run_goes_on`, under the same lock, so the replacing
-/// launch, should it fail, knows the page was told so and owes it the report
-/// that the run is over (review finding pc-2). Taken on the tracker's own
-/// thread, a plain thread outside any runtime, so the lock is waited for with
-/// `blocking_lock`; the second lock is held for one push, inside the first.
+/// A tracker's verdict on its play's end (`end_is_run_over`), on what the
+/// active session is when it reports. Taken on the tracker's own thread, a
+/// plain thread outside any runtime, so the lock is waited for with
+/// `blocking_lock`, and held only to read it.
 fn tracker_end_is_run_over(state: &AppState, clean_eof: bool, ended_session: &str) -> bool {
     let active = state.active_playback_session.blocking_lock();
-    if active.as_deref().is_some_and(|active| active != ended_session) {
-        state
-            .ends_told_run_goes_on
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push(ended_session.to_string());
-    }
     end_is_run_over(clean_eof, active.as_deref(), ended_session)
 }
 
@@ -4242,74 +4251,39 @@ async fn install_playback_session(
     });
 }
 
-/// The play a new launch replaces, when that play ran in the embedded player:
-/// the active session, when it is not the new one and its recorded player is
-/// the embedded one. Read by `install_and_launch` before the new session is
-/// installed, under the play lock. The active session is not cleared when a
-/// play ends, so this play may be running or may have ended long ago; only
-/// its tracker's report says which (`tracker_end_is_run_over`), and the launch
-/// reports about it only after that report said its run goes on (review
-/// finding pc-2).
-async fn replaced_embedded_session(state: &AppState, new_session: &str) -> Option<String> {
-    let active = state.active_playback_session.lock().await.clone()?;
-    let player = state.active_playback_player.lock().await;
-    replaced_view_session(&active, player.as_ref(), new_session)
+/// Whether a launch that failed, once undone, owes the page the report that
+/// the run is over (review finding pc-2): nothing is playing, no play is
+/// active, and the page holds the player's fullscreen. Decided from the state
+/// of the app alone, never from which plays have reported their ends.
+fn failed_launch_ends_run(nothing_playing: bool, play_active: bool, fullscreen_held: bool) -> bool {
+    nothing_playing && !play_active && fullscreen_held
 }
 
-fn replaced_view_session(
-    active: &str,
-    player: Option<&(String, crate::player::PlayerKind)>,
-    new_session: &str,
-) -> Option<String> {
-    let embedded = player.is_some_and(|(session, kind)| {
-        session == active && *kind == crate::player::PlayerKind::Embedded
-    });
-    (embedded && active != new_session).then(|| active.to_string())
-}
-
-/// What the page is told when a launch failed after its session was
-/// installed, and nothing is playing now: the run is over, for each play
-/// whose view the page may still take for this run's.
-/// - `replaced_told_goes_on`: the embedded play this launch replaced, when
-///   its own end was reported while this launch was installed, as "the run
-///   goes on". That end can only have come from this launch stopping it, or
-///   from it ending by itself at the same moment; either way it is over now.
-/// - `own_view`: this launch's own play, when it started in the embedded
-///   player (and so had its view announced) before the launch failed. It has
-///   no tracker, so nothing else will ever report its end.
-///
-/// Nothing, when another play is the active one by now. Ids and a flag only.
-fn failed_launch_ends(
-    replaced_told_goes_on: Option<&str>,
-    own_view: Option<&str>,
-    active: Option<&str>,
-) -> Vec<serde_json::Value> {
-    if active.is_some() {
-        return Vec::new();
+/// Whether nothing is playing after a launch failed. `before` is the player
+/// that was in the slot before the launch was installed. Only that player,
+/// still in the slot and not ended, is still playing: the launch failed
+/// before stopping it. Anything else means nothing plays: the slot empty
+/// (the launch took the old player out and stopped it, or the reaper emptied
+/// it), the old player ended, or a player the launch started and stopped
+/// again when it could not start its tracking (`playback::play` leaves that
+/// one in the slot, told to stop). Asked with the slot's lock held.
+fn nothing_playing(slot: &mut Option<crate::player::PlayerHandle>, before: Option<u64>) -> bool {
+    match slot.as_mut() {
+        None => true,
+        Some(player) => {
+            Some(player.serial()) != before || matches!(player.has_ended(), Ok(true))
+        }
     }
-    replaced_told_goes_on
-        .into_iter()
-        .chain(own_view)
-        .map(|session| {
-            serde_json::json!({
-                "sessionId": session,
-                "runOver": true,
-            })
-        })
-        .collect()
 }
 
-/// Undo a launch that failed after its session was installed, and say what
-/// to report (`failed_launch_ends`). Runs on the async command task. Each
-/// lock is taken alone and held for its statement only: the slot's and the
-/// noted ends' (plain locks) never across an await.
+/// Undo a launch that failed after its session was installed. Runs on the
+/// async command task; each lock is taken alone.
 async fn undo_failed_launch(
     state: &AppState,
     session_id: &str,
     transcode_session: Option<&str>,
     previous_cursor: Option<PlaylistCursor>,
-    replaced: Option<&str>,
-) -> Vec<serde_json::Value> {
+) {
     // mpv never started, so no tracker tail will ever run: this is the
     // only chance to stop what the resolve already committed us to.
     if let Some(session) = transcode_session {
@@ -4321,41 +4295,202 @@ async fn undo_failed_launch(
     // bookkeeping for the established failure contract, but never
     // re-authorize its dead session for delayed continuation work.
     clear_playback_session_if(state, session_id).await;
-    {
-        let mut cursor = state.playlist_cursor.lock().await;
-        if cursor
-            .as_ref()
-            .is_none_or(|current| current.session_id == session_id)
-        {
-            *cursor = previous_cursor;
-        }
-    }
-    // A tracker notes its end under the active session's lock, which the
-    // clearing above has taken since: every end reported as "the run goes on"
-    // while this launch was installed has been noted by now, and every later
-    // one finds no play active and says the run is over itself.
-    let replaced_told_goes_on = replaced.filter(|replaced| {
-        state
-            .ends_told_run_goes_on
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .iter()
-            .any(|ended| ended == replaced)
-    });
-    // An embedded play that started is put in the slot, and stays there,
-    // stopped, when the launch fails after it.
-    let own_view_shown = state
-        .current_child
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
+    let mut cursor = state.playlist_cursor.lock().await;
+    if cursor
         .as_ref()
-        .is_some_and(|player| player.is_embedded_play(session_id));
-    let active = state.active_playback_session.lock().await;
-    failed_launch_ends(
-        replaced_told_goes_on,
-        own_view_shown.then_some(session_id),
-        active.as_deref(),
-    )
+        .is_none_or(|current| current.session_id == session_id)
+    {
+        *cursor = previous_cursor;
+    }
+}
+
+/// After a launch failed and was undone: when the run is over by then
+/// (`failed_launch_ends_run`), give `report_end` the one report that says so,
+/// naming the session whose view the page is showing, or this launch's own
+/// when no view is showing. The page leaves its fullscreen on it. Whether
+/// anything plays and whether the page holds fullscreen are read under the
+/// slot's lock, which `player_fullscreen` also holds when it sets that claim.
+/// With the real launch that togetherness carries no weight: once nothing
+/// plays, nothing in the slot is a running embedded play, so no claim can be
+/// set between the two reads, and a claim given up between them only sends a
+/// report the page then ignores. The report is given with the view record's
+/// lock held (`ViewRecord::report`), the lock the view's own events are sent
+/// under, so no opening or closing comes between the name it reads and the
+/// report. No lock is held across an await. Ids and a flag only.
+async fn report_failed_launch_end(
+    state: &AppState,
+    session_id: &str,
+    before: Option<u64>,
+    report_end: &mut impl FnMut(serde_json::Value),
+) {
+    let (nothing_playing, fullscreen_held) = {
+        let mut slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            nothing_playing(&mut slot, before),
+            state.player_fullscreen_held.load(Ordering::SeqCst),
+        )
+    };
+    let play_active = state.active_playback_session.lock().await.is_some();
+    if failed_launch_ends_run(nothing_playing, play_active, fullscreen_held) {
+        state.player_view.report(session_id, |session| {
+            report_end(serde_json::json!({
+                "sessionId": session,
+                "runOver": true,
+            }))
+        });
+    }
+}
+
+/// Whether a source choice the user was asked to make, once it has been dealt
+/// with without starting a play (cancelled, expired, or chosen and then
+/// refused or failed before its play was installed), leaves the run over
+/// (review finding pc-2): nothing is playing, no choice is still waiting, and
+/// the page holds the player's fullscreen. While a choice waits, the page
+/// keeps fullscreen (the dispatcher said a successor is coming), so its end
+/// is a moment the run can end. Decided from the state of the app alone.
+fn choice_end_ends_run(nothing_playing: bool, choice_pending: bool, fullscreen_held: bool) -> bool {
+    nothing_playing && !choice_pending && fullscreen_held
+}
+
+/// Whether nothing is playing now: the slot is empty, or its player has
+/// ended. Asked with the slot's lock held and under the play lock, so no
+/// launch is under way. A player that has been told to stop and has not yet
+/// ended counts as playing (only a launch that failed leaves one, and that
+/// launch has made its own report).
+fn nothing_plays_now(slot: &mut Option<crate::player::PlayerHandle>) -> bool {
+    slot.as_mut()
+        .is_none_or(|player| matches!(player.has_ended(), Ok(true)))
+}
+
+/// After a source choice was dealt with without starting a play: when the
+/// run is over by then (`choice_end_ends_run`), give `report_end` the one
+/// report that says so, naming the session whose view the page is showing,
+/// or `own` when no view is showing (the page then leaves whatever the name).
+/// Runs on the async command task under the play lock: the slot's lock is
+/// taken alone and let go of before the choices' lock is awaited, and the
+/// report is given under the view record's lock, as a failed launch's is.
+/// Ids and a flag only.
+async fn report_choice_end(
+    state: &AppState,
+    own: &str,
+    report_end: &mut impl FnMut(serde_json::Value),
+) {
+    let (nothing_playing, fullscreen_held) = {
+        let mut slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+        (
+            nothing_plays_now(&mut slot),
+            state.player_fullscreen_held.load(Ordering::SeqCst),
+        )
+    };
+    let choice_pending = state.playback_choices.lock().await.has_pending(Instant::now());
+    if choice_end_ends_run(nothing_playing, choice_pending, fullscreen_held) {
+        state.player_view.report(own, |session| {
+            report_end(serde_json::json!({
+                "sessionId": session,
+                "runOver": true,
+            }))
+        });
+    }
+}
+
+/// The session a choice's end names when no view shows: the play the choice
+/// was to follow, or the choice's own play.
+fn choice_own_session(pending: &PendingPlaybackChoice) -> String {
+    pending
+        .replace_session
+        .clone()
+        .unwrap_or_else(|| pending.session_id.clone())
+}
+
+/// Cancel a source choice, under the play lock, and then report the end of
+/// the run if that leaves it over (`report_choice_end`). A choice no longer
+/// held (it expired, or was cleared) is reported on all the same: the user
+/// has given up on it either way, and only the state decides. Answers
+/// whether the choice was still held.
+async fn cancel_choice(
+    state: &AppState,
+    request_id: &str,
+    mut report_end: impl FnMut(serde_json::Value),
+) -> bool {
+    let _play = state.play_lock.lock().await;
+    let taken = state
+        .playback_choices
+        .lock()
+        .await
+        .take_at(request_id, Instant::now());
+    let own = match taken.as_ref() {
+        Some(pending) => {
+            if let Some(expected) = pending.replace_session.as_deref() {
+                clear_playlist_cursor_if(state, expected).await;
+                let mut run = state.playback_run.lock().await;
+                if run.as_ref().is_some_and(|run| run.session_id == expected) {
+                    *run = None;
+                }
+            }
+            choice_own_session(pending)
+        }
+        // No play is known; the request's id stands in for a name, which the
+        // page needs only when no view shows, and then leaves whatever it is.
+        None => request_id.to_string(),
+    };
+    report_choice_end(state, &own, &mut report_end).await;
+    taken.is_some()
+}
+
+/// Resolve a source choice with `source_id`, under the play lock: `play`
+/// starts the chosen play (the real command passes `play_by_key_locked`).
+/// Whenever that does not start a play (the choice expired, the source was
+/// not offered, the play was refused or failed before its session was
+/// installed), the end of the run is reported if that leaves it over
+/// (`report_choice_end`). A launch that failed after its session was
+/// installed has already made that report itself (`PlayFailure::launched`).
+async fn resolve_choice<P, F>(
+    state: &AppState,
+    request_id: &str,
+    source_id: &str,
+    play: P,
+    mut report_end: impl FnMut(serde_json::Value),
+) -> Result<PlayCommandResult, String>
+where
+    P: FnOnce(PendingPlaybackChoice, String) -> F,
+    F: std::future::Future<Output = Result<PlayCommandResult, PlayFailure>>,
+{
+    let _play = state.play_lock.lock().await;
+    let taken = state
+        .playback_choices
+        .lock()
+        .await
+        .take_at(request_id, Instant::now());
+    let Some(pending) = taken else {
+        report_choice_end(state, request_id, &mut report_end).await;
+        return Err("this source choice expired or was superseded".to_string());
+    };
+    let own = choice_own_session(&pending);
+    if !pending
+        .request
+        .choices
+        .iter()
+        .any(|choice| choice.source_id == source_id)
+    {
+        report_choice_end(state, &own, &mut report_end).await;
+        return Err("that source was not offered for this playback request".to_string());
+    }
+    let result = play(pending, source_id.to_string()).await;
+    let started_or_reported = match &result {
+        Ok(PlayCommandResult::Started { .. }) => true,
+        Err(failure) => failure.launched,
+        Ok(_) => false,
+    };
+    if !started_or_reported {
+        report_choice_end(state, &own, &mut report_end).await;
+    }
+    match result {
+        Ok(result) => Ok(result),
+        Err(failure) if failure.kind == PlayFailureKind::Superseded => {
+            Ok(PlayCommandResult::Superseded)
+        }
+        Err(failure) => Err(failure.message),
+    }
 }
 
 /// What a play installs in the app's state while it starts.
@@ -4368,18 +4503,14 @@ struct PlayInstall<'a> {
     transcode_session: Option<&'a str>,
 }
 
-/// Install a play and start it, all under the play lock: note the play it
-/// replaces, move the playlist position, install the session, then run
+/// Install a play and start it, all under the play lock: note which player
+/// is in the slot, move the playlist position, install the session, then run
 /// `launch` (which stops the previous player and starts this one). When the
 /// launch fails, everything installed is undone here, the one place that does
-/// it (review finding sel-1), and, when nothing is playing now, `report_end`
-/// is given the report that the run is over for each play whose view the page
-/// may still hold: the embedded play this one replaced, once its own end was
-/// reported as "the run goes on", and this play, when it started in the
-/// embedded player before the launch failed (review finding pc-2). Nothing is
-/// reported on any other path: a play that started is followed by its own
-/// reports, and a launch that failed before it stopped anything leaves the
-/// play it would have replaced running and its tracker unended.
+/// it (review finding sel-1), and then, when nothing is playing, no play is
+/// active and the page holds the player's fullscreen, `report_end` is given
+/// the report that the run is over (review finding pc-2). A play that
+/// started is followed by its own reports.
 async fn install_and_launch<L>(
     state: &AppState,
     install: PlayInstall<'_>,
@@ -4389,18 +4520,14 @@ async fn install_and_launch<L>(
 where
     L: std::future::Future<Output = Result<std::sync::Arc<std::sync::atomic::AtomicBool>, String>>,
 {
-    // Read before anything of this play is installed: until then the active
-    // play is the one `launch` will stop, if it is still running. Its tracker
-    // may report its end while this play is installed, and so say its run
-    // goes on; such ends are noted afresh for each launch (under the play
-    // lock, no other launch runs), so one noted for an earlier launch is
-    // never taken for this one's.
-    let replaced = replaced_embedded_session(state, install.session_id).await;
-    state
-        .ends_told_run_goes_on
+    // The player `launch` will stop, read before anything of this play is
+    // installed (under the play lock, no other launch runs).
+    let before = state
+        .current_child
         .lock()
         .unwrap_or_else(|e| e.into_inner())
-        .clear();
+        .as_ref()
+        .map(crate::player::PlayerHandle::serial);
     let previous_cursor = {
         let mut cursor = state.playlist_cursor.lock().await;
         std::mem::replace(&mut *cursor, install.cursor)
@@ -4416,25 +4543,26 @@ where
     match launch.await {
         Ok(stop) => Ok(stop),
         Err(message) => {
-            let ends = undo_failed_launch(
+            undo_failed_launch(
                 state,
                 install.session_id,
                 install.transcode_session,
                 previous_cursor,
-                replaced.as_deref(),
             )
             .await;
-            for end in ends {
-                report_end(end);
-            }
+            report_failed_launch_end(state, install.session_id, before, &mut report_end).await;
             Err(message)
         }
     }
 }
 
-/// Send the page a `playback-ended` the launch itself owes it
-/// (`install_and_launch`). Runs on the async command's task and holds no lock.
-/// The payload is ids and a flag only.
+/// Send the page a `playback-ended` the backend owes it from the state of the
+/// app: a launch that failed (`install_and_launch`), or a source choice that
+/// ended without a play (`report_choice_end`). Runs on the async command's
+/// task, inside
+/// `ViewRecord::report` and so with the view record's lock held (a plain
+/// lock, never across an await): it must only send. The payload is ids and a
+/// flag only.
 fn report_playback_ended(state: &AppState, end: serde_json::Value) {
     if let Some(app) = state.app_handle.get() {
         use tauri::Emitter;
@@ -5464,7 +5592,7 @@ async fn play_by_key_locked(
                     use tauri::Manager;
                     // A plain thread outside any runtime: the active
                     // session's lock is waited for here, and held only to
-                    // read it and note an end told "the run goes on".
+                    // read it.
                     let run_over = tracker_end_is_run_over(
                         &app.state::<AppState>(),
                         advance.saw_eof(&session_id),
@@ -5604,7 +5732,7 @@ async fn play_by_key_locked(
         |end| report_playback_ended(state, end),
     )
     .await
-    .map_err(PlayFailure::fatal)?;
+    .map_err(PlayFailure::launch_failed)?;
     *state
         .tracking_stop
         .lock()
@@ -5687,29 +5815,76 @@ pub async fn player_command(
 /// The player view's fullscreen: on only for the running embedded play, off
 /// always. What the window really did arrives as `window-fullscreen`
 /// (`player::embedded::follow_fullscreen`); Tauri's own answer is only the
-/// last request. Whose play it is, is asked under the slot's lock; the window
-/// is asked after that lock is let go of, from the blocking pool.
+/// last request. Whose play it is, is asked under the slot's lock, and the
+/// page's claim on fullscreen is recorded under that same lock
+/// (`AppState::player_fullscreen_held`, read by a launch that failed, review
+/// finding pc-2); the window is asked after that lock is let go of, from the
+/// blocking pool.
+///
+/// Answers whether the page holds the player's fullscreen once the request is
+/// dealt with: a refused "on" leaves the claim as it was. The page takes its
+/// own claim from this answer, so that its claim and this copy agree, and
+/// sends its requests one at a time (`fullscreenRequests` in
+/// `src/lib/playerControls.ts`), each after the last one's answer, so the
+/// window is asked in the order the page asked (review finding pc-2).
 #[tauri::command]
 pub async fn player_fullscreen(
     session_id: serde_json::Value,
     on: serde_json::Value,
     app: tauri::AppHandle,
-) {
-    let _ = tauri::async_runtime::spawn_blocking(move || {
+) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
         use tauri::Manager;
         let on = on.as_bool() == Some(true);
-        if on {
-            let state = app.state::<AppState>();
-            let slot = &state.current_child;
-            if !crate::player::control::is_running_embedded_play(slot, &session_id) {
-                return;
+        let state = app.state::<AppState>();
+        let claim = claim_player_fullscreen(&state, &session_id, on);
+        if claim.ask_window {
+            if let Some(window) = app.webview_windows().into_values().next() {
+                let _ = window.set_fullscreen(on);
             }
         }
-        if let Some(window) = app.webview_windows().into_values().next() {
-            let _ = window.set_fullscreen(on);
-        }
+        claim.held
     })
-    .await;
+    .await
+    .unwrap_or(false)
+}
+
+/// What `player_fullscreen` does with one request.
+#[derive(Debug, PartialEq, Eq)]
+struct FullscreenClaim {
+    /// Whether the window is to be asked.
+    ask_window: bool,
+    /// Whether the page holds the player's fullscreen after the request.
+    held: bool,
+}
+
+/// The page's claim on the player's fullscreen, as `player_fullscreen` keeps
+/// it: on only for the running embedded play of `session_id`, recorded with
+/// the slot's lock held; off always. A refused "on" changes nothing.
+fn claim_player_fullscreen(
+    state: &AppState,
+    session_id: &serde_json::Value,
+    on: bool,
+) -> FullscreenClaim {
+    if !on {
+        state.player_fullscreen_held.store(false, Ordering::SeqCst);
+        return FullscreenClaim {
+            ask_window: true,
+            held: false,
+        };
+    }
+    let mut slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+    if !crate::player::control::is_running_embedded_play(&mut slot, session_id) {
+        return FullscreenClaim {
+            ask_window: false,
+            held: state.player_fullscreen_held.load(Ordering::SeqCst),
+        };
+    }
+    state.player_fullscreen_held.store(true, Ordering::SeqCst);
+    FullscreenClaim {
+        ask_window: true,
+        held: true,
+    }
 }
 
 /// Play one item, either resuming its resolved position or explicitly starting
@@ -5777,48 +5952,36 @@ pub async fn resolve_playback_source_choice(
     source_id: String,
     state: State<'_, AppState>,
 ) -> Result<PlayCommandResult, String> {
-    let _play = state.play_lock.lock().await;
-    let pending = state
-        .playback_choices
-        .lock()
-        .await
-        .take_at(&request_id, Instant::now())
-        .ok_or_else(|| "this source choice expired or was superseded".to_string())?;
-    if !pending
-        .request
-        .choices
-        .iter()
-        .any(|choice| choice.source_id == source_id)
-    {
-        return Err("that source was not offered for this playback request".to_string());
-    }
-    match play_by_key_locked(
-        &state,
-        PlayLaunchRequest {
-            item: &pending.item,
-            start_from_beginning: pending.start_from_beginning,
-            session_id: &pending.session_id,
-            playlist: pending.playlist,
-            replace_session: pending.replace_session.as_deref(),
-            run_kind: pending.run_kind,
-            explicit_source_id: Some(&source_id),
-            persist_explicit_choice: false,
-            quality_override: None,
-            resume_override_ms: None,
-            osd_notice: None,
-            steps_taken: 0,
-            continues_automatic: false,
-            player: None,
+    let state: &AppState = &state;
+    resolve_choice(
+        state,
+        &request_id,
+        &source_id,
+        |pending, source_id| async move {
+            play_by_key_locked(
+                state,
+                PlayLaunchRequest {
+                    item: &pending.item,
+                    start_from_beginning: pending.start_from_beginning,
+                    session_id: &pending.session_id,
+                    playlist: pending.playlist,
+                    replace_session: pending.replace_session.as_deref(),
+                    run_kind: pending.run_kind,
+                    explicit_source_id: Some(&source_id),
+                    persist_explicit_choice: false,
+                    quality_override: None,
+                    resume_override_ms: None,
+                    osd_notice: None,
+                    steps_taken: 0,
+                    continues_automatic: false,
+                    player: None,
+                },
+            )
+            .await
         },
+        |end| report_playback_ended(state, end),
     )
     .await
-    {
-        Ok(result) => Ok(result),
-        Err(failure) if failure.kind == PlayFailureKind::Superseded => {
-            Ok(PlayCommandResult::Superseded)
-        }
-        Err(failure) => Err(failure.message),
-    }
 }
 
 #[tauri::command]
@@ -5826,23 +5989,8 @@ pub async fn cancel_playback_source_choice(
     request_id: String,
     state: State<'_, AppState>,
 ) -> Result<bool, String> {
-    let _play = state.play_lock.lock().await;
-    let Some(pending) = state
-        .playback_choices
-        .lock()
-        .await
-        .take_at(&request_id, Instant::now())
-    else {
-        return Ok(false);
-    };
-    if let Some(expected) = pending.replace_session.as_deref() {
-        clear_playlist_cursor_if(&state, expected).await;
-        let mut run = state.playback_run.lock().await;
-        if run.as_ref().is_some_and(|run| run.session_id == expected) {
-            *run = None;
-        }
-    }
-    Ok(true)
+    let state: &AppState = &state;
+    Ok(cancel_choice(state, &request_id, |end| report_playback_ended(state, end)).await)
 }
 
 #[tauri::command]
@@ -6582,9 +6730,36 @@ pub(crate) enum AfterCleanEnd {
     /// A successor was started or is being chosen, or another play replaced
     /// this one.
     Successor,
-    /// The backend could not start the run's successor, and nothing replaced
-    /// the play: the run is over.
+    /// Nothing follows and Continue Playing does not apply: the backend could
+    /// not start the run's successor, or no play is active at all (a launch
+    /// that replaced the ended play failed and was undone). The run is over.
     RunOver,
+}
+
+/// The completion dispatcher's `playback-ended` for a clean end, once
+/// [`advance_playlist`] has answered `after`: its ids, whether the run is over
+/// (`RunOver`), and whether a successor is coming (`Successor`: another play
+/// is active, or one is being chosen). The page leaves the player's
+/// fullscreen on the first and keeps it on the second, also while that play
+/// has no view yet or plays in mpv's own window (review finding pc-2); a
+/// choice that then ends without a play reports the end of the run itself
+/// (`report_choice_end`). `successor` is always sent, true or false, and only
+/// in this report: it is how the page tells the dispatcher's report from a
+/// play's own (`endLeavesPlayerFullscreen`). Ids and flags only: never a URL,
+/// a title or a path.
+pub(crate) fn clean_end_report(completion: &PlaybackCompletion, after: AfterCleanEnd) -> serde_json::Value {
+    let source_id = completion
+        .item_key
+        .split_once(':')
+        .map(|(source, _)| source)
+        .unwrap_or_default();
+    serde_json::json!({
+        "sourceId": source_id,
+        "itemKey": completion.item_key.clone(),
+        "sessionId": completion.session_id.clone(),
+        "runOver": after == AfterCleanEnd::RunOver,
+        "successor": after == AfterCleanEnd::Successor,
+    })
 }
 
 /// The run's successor could not be started: the run is over unless another
@@ -6599,19 +6774,48 @@ async fn successor_failed(state: &AppState, ended_session: &str) -> AfterCleanEn
     }
 }
 
+/// The ended play is not the active one: another play is, and it is the
+/// successor; or no play is active at all, and nothing is coming. A successor
+/// the page would start names the ended play as the one it replaces and would
+/// be refused, so Continue Playing does not apply either (review finding
+/// pc-2).
+async fn replaced_or_over(state: &AppState) -> AfterCleanEnd {
+    if state.active_playback_session.lock().await.is_some() {
+        AfterCleanEnd::Successor
+    } else {
+        AfterCleanEnd::RunOver
+    }
+}
+
 async fn finish_or_replaced(state: &AppState, ended_session: &str) -> AfterCleanEnd {
     if finish_sequence_if_current(state, ended_session).await {
         AfterCleanEnd::ContinuePlaying
     } else {
-        AfterCleanEnd::Successor
+        replaced_or_over(state).await
+    }
+}
+
+/// A successor the dispatcher asked for has been started, or is being
+/// chosen; or it was refused because the ended play is no longer the active
+/// one (`replaced_or_over`). A choice keeps the run going while the user
+/// makes it; if it ends without a play, `cancel_choice` or `resolve_choice`
+/// reports the end of the run (review finding pc-2).
+async fn after_successor(state: &AppState, result: PlayCommandResult) -> AfterCleanEnd {
+    match result {
+        PlayCommandResult::Started { .. } => AfterCleanEnd::Successor,
+        PlayCommandResult::Superseded => replaced_or_over(state).await,
+        PlayCommandResult::SourceChoiceRequired { request } => {
+            emit_source_choice_required(state, &request.request_id);
+            AfterCleanEnd::Successor
+        }
     }
 }
 
 /// Handle one fully-finished clean EOF. Says `ContinuePlaying` only when the
 /// exact active single item or playlist genuinely ended, authorizing the
 /// frontend to apply Continue Playing, and `RunOver` when a playlist's
-/// successor could not be started. The UUID prevents queued older work from
-/// replacing a newer manual play.
+/// successor could not be started or no play is active any more. The UUID
+/// prevents queued older work from replacing a newer manual play.
 pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> AfterCleanEnd {
     if state
         .playback_choices
@@ -6626,7 +6830,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> A
         return finish_or_replaced(state, ended_session).await;
     };
     if cursor.session_id != ended_session {
-        return AfterCleanEnd::Successor;
+        return replaced_or_over(state).await;
     };
     if cursor.owner == PlaylistOwner::Server {
         let items = match fetch_server_playlist_items(state, &cursor.playlist_id).await {
@@ -6637,7 +6841,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> A
         if next_index >= items.len() {
             return finish_or_replaced(state, ended_session).await;
         }
-        let result = match play_server_playlist_entries(
+        return match play_server_playlist_entries(
             state,
             cursor.playlist_id,
             items,
@@ -6647,19 +6851,12 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> A
         )
         .await
         {
-            Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => {
-                AfterCleanEnd::Successor
-            }
-            Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
-                emit_source_choice_required(state, &request.request_id);
-                AfterCleanEnd::Successor
-            }
+            Ok(result) => after_successor(state, result).await,
             Err(error) => {
                 eprintln!("vela: server playlist auto-advance stopped: {error}");
                 successor_failed(state, ended_session).await
             }
         };
-        return result;
     }
     let lookup = cursor.playlist_id.clone();
     let playlist = match playlist_store(move || crate::playlists::get(&lookup)).await {
@@ -6687,13 +6884,7 @@ pub(crate) async fn advance_playlist(state: &AppState, ended_session: &str) -> A
     )
     .await
     {
-        Ok(PlayCommandResult::Started { .. } | PlayCommandResult::Superseded) => {
-            AfterCleanEnd::Successor
-        }
-        Ok(PlayCommandResult::SourceChoiceRequired { request }) => {
-            emit_source_choice_required(state, &request.request_id);
-            AfterCleanEnd::Successor
-        }
+        Ok(result) => after_successor(state, result).await,
         Err(error) => {
             eprintln!("vela: playlist auto-advance stopped: {error}");
             successor_failed(state, ended_session).await
@@ -6883,6 +7074,10 @@ fn attr(xml: &str, name: &str) -> Option<String> {
         buf.clear();
     }
 }
+
+#[cfg(all(test, target_os = "linux"))]
+#[path = "run_over_tests.rs"]
+mod run_over_tests;
 
 #[cfg(test)]
 mod tests {
@@ -7840,394 +8035,6 @@ mod tests {
         // No play is active (a replacement that failed to start has been
         // taken back): nothing follows.
         assert!(end_is_run_over(false, None, "a"));
-    }
-
-    fn test_app_state() -> AppState {
-        AppState::for_tests()
-    }
-
-    /// How the launch handed to `install_and_launch` ends.
-    #[derive(Clone, Copy, PartialEq)]
-    enum LaunchEnd {
-        /// The new play starts.
-        Starts,
-        /// The new play fails to start.
-        Fails,
-        /// The new play fails to start, and by then another play ("c") has
-        /// been installed.
-        FailsAfterAnotherPlay,
-        /// The launch fails before it stops the old player: the old play
-        /// still runs, and its tracker reports nothing.
-        FailsBeforeStopping,
-        /// The new play started in the embedded player, so its view was
-        /// announced, and the launch failed after that (its tracker could
-        /// not be started); the player stays in the slot, stopped.
-        #[cfg(target_os = "linux")]
-        FailsAfterItsViewOpened,
-    }
-
-    /// What happened around one run of the real `install_and_launch`.
-    struct LaunchSeen {
-        /// The old play's own verdict on its end, taken by the tracker's own
-        /// function on a plain thread, from inside the launch (after the old
-        /// player was stopped).
-        old_verdict_during_launch: Option<bool>,
-        /// What the launch was given to report, in order.
-        reports: Vec<serde_json::Value>,
-        /// Whether the launch was reported as failed.
-        failed: bool,
-    }
-
-    /// A tracker's report of the end of `session`, as the tracker takes it:
-    /// on a plain thread outside any runtime.
-    fn tracker_reports_end(state: &AppState, session: &str) -> bool {
-        std::thread::scope(|scope| {
-            scope
-                .spawn(|| tracker_end_is_run_over(state, false, session))
-                .join()
-                .expect("the tracker's thread")
-        })
-    }
-
-    /// Run the real `install_and_launch` for a new play "new", with the play
-    /// "old" active beforehand (when `old_player` is not `None`, in that
-    /// player; with `old_installed` false, nothing is active). With
-    /// `old_ended_before`, the old play ended by itself before the launch,
-    /// and its tracker reported then. The launch, as the real one does,
-    /// records the new play's player and stops the old player, whose tracker
-    /// then reports while the new play is installed.
-    async fn launch_replacing(
-        state: &AppState,
-        old_installed: bool,
-        old_player: Option<crate::player::PlayerKind>,
-        old_ended_before: bool,
-        how: LaunchEnd,
-    ) -> LaunchSeen {
-        let item = catalog_item("test:k", "movie", 1, false);
-        if old_installed {
-            install_playback_session(state, "old", &item, None, None).await;
-            *state.active_playback_player.lock().await =
-                old_player.map(|kind| ("old".to_string(), kind));
-            if old_ended_before {
-                assert!(
-                    tracker_reports_end(state, "old"),
-                    "a play that ends by itself, still the active one, ends its run"
-                );
-            } else {
-                // A running embedded play is the player in the slot.
-                #[cfg(target_os = "linux")]
-                if old_player == Some(crate::player::PlayerKind::Embedded) {
-                    *state.current_child.lock().unwrap_or_else(|e| e.into_inner()) = Some(
-                        crate::player::PlayerHandle::Embedded(
-                            crate::player::embedded::Session::for_test("old"),
-                        ),
-                    );
-                }
-            }
-        }
-        let mut old_verdict_during_launch = None;
-        let launch = async {
-            *state.active_playback_player.lock().await =
-                Some(("new".to_string(), crate::player::PlayerKind::Embedded));
-            if how == LaunchEnd::FailsBeforeStopping {
-                return Err("the launch failed early".to_string());
-            }
-            // The old player is stopped and taken out of the slot.
-            let _stopped = state
-                .current_child
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .take();
-            if old_installed && !old_ended_before {
-                old_verdict_during_launch = Some(tracker_reports_end(state, "old"));
-            }
-            match how {
-                LaunchEnd::Starts => Ok(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false))),
-                LaunchEnd::Fails | LaunchEnd::FailsBeforeStopping => {
-                    Err("the player did not start".to_string())
-                }
-                LaunchEnd::FailsAfterAnotherPlay => {
-                    install_playback_session(state, "c", &item, None, None).await;
-                    Err("the player did not start".to_string())
-                }
-                #[cfg(target_os = "linux")]
-                LaunchEnd::FailsAfterItsViewOpened => {
-                    *state.current_child.lock().unwrap_or_else(|e| e.into_inner()) = Some(
-                        crate::player::PlayerHandle::Embedded(
-                            crate::player::embedded::Session::for_test("new"),
-                        ),
-                    );
-                    Err("couldn't start playback tracking".to_string())
-                }
-            }
-        };
-        let mut reports = Vec::new();
-        let result = install_and_launch(
-            state,
-            PlayInstall {
-                session_id: "new",
-                item: &item,
-                run_kind: None,
-                affinity_source_id: None,
-                cursor: None,
-                transcode_session: None,
-            },
-            launch,
-            |end| reports.push(end),
-        )
-        .await;
-        LaunchSeen {
-            old_verdict_during_launch,
-            reports,
-            failed: result.is_err(),
-        }
-    }
-
-    // pc-2: a step-down, or any play that replaces an embedded one, that then
-    // fails to start. The old play's tracker, reporting while the replacement
-    // is installed, says its run goes on; the failed launch says it is over,
-    // naming the old play, whose view is the one the page had. This runs the
-    // real install-and-launch sequence and the tracker's own verdict, so the
-    // replaced play being read before the new one is installed, the
-    // tracker's note of its end, and the report are all held here.
-    #[tokio::test]
-    async fn a_replacement_that_fails_to_start_reports_the_replaced_run_over() {
-        let state = test_app_state();
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::Embedded),
-            false,
-            LaunchEnd::Fails,
-        )
-        .await;
-        assert!(seen.failed);
-        assert_eq!(
-            seen.old_verdict_during_launch,
-            Some(false),
-            "the old play's own report, during the launch, says the run goes on"
-        );
-        assert_eq!(
-            seen.reports,
-            vec![serde_json::json!({ "sessionId": "old", "runOver": true })],
-            "the failed launch must report the replaced play's run over, once"
-        );
-        assert_eq!(*state.active_playback_session.lock().await, None);
-        // Now the old play's end, if it comes after the failure, says so too.
-        assert!(tracker_reports_end(&state, "old"));
-    }
-
-    // pc-2: a replacement that STARTS is followed by its own play; nothing
-    // may say the run is over, before the launch or after it.
-    #[tokio::test]
-    async fn a_replacement_that_starts_reports_nothing() {
-        let state = test_app_state();
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::Embedded),
-            false,
-            LaunchEnd::Starts,
-        )
-        .await;
-        assert!(!seen.failed);
-        assert_eq!(seen.reports, Vec::<serde_json::Value>::new());
-        assert_eq!(state.active_playback_session.lock().await.as_deref(), Some("new"));
-    }
-
-    // pc-2: when another play is the active one by the time the failure is
-    // undone, something IS playing; the run is not over.
-    #[tokio::test]
-    async fn a_failed_replacement_reports_nothing_while_another_play_is_active() {
-        let state = test_app_state();
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::Embedded),
-            false,
-            LaunchEnd::FailsAfterAnotherPlay,
-        )
-        .await;
-        assert!(seen.failed);
-        assert_eq!(seen.reports, Vec::<serde_json::Value>::new());
-        assert_eq!(state.active_playback_session.lock().await.as_deref(), Some("c"));
-    }
-
-    // pc-2: an external play has no view and the page holds no fullscreen
-    // for it; how its replacement's failure is reported does not change.
-    #[tokio::test]
-    async fn a_failed_replacement_of_an_external_play_reports_nothing_more() {
-        let state = test_app_state();
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::External),
-            false,
-            LaunchEnd::Fails,
-        )
-        .await;
-        assert!(seen.failed);
-        assert_eq!(seen.reports, Vec::<serde_json::Value>::new());
-        let state = test_app_state();
-        let seen = launch_replacing(&state, true, None, false, LaunchEnd::Fails).await;
-        assert_eq!(
-            seen.reports,
-            Vec::<serde_json::Value>::new(),
-            "a play whose player is not known is not taken for embedded"
-        );
-    }
-
-    // pc-2: a play that replaced nothing, failing, has nothing to report.
-    #[tokio::test]
-    async fn a_failed_first_play_reports_nothing() {
-        let state = test_app_state();
-        let seen = launch_replacing(&state, false, None, false, LaunchEnd::Fails).await;
-        assert!(seen.failed);
-        assert_eq!(seen.reports, Vec::<serde_json::Value>::new());
-        assert_eq!(*state.active_playback_session.lock().await, None);
-    }
-
-    // pc-2: the active session is not cleared when a play ends. A play that
-    // ended by itself (its tracker, finding it still the active one, said its
-    // run is over) is still the active session, recorded as embedded, when a
-    // later play is started; that play failing has stopped nothing and owes
-    // the page no report, which would only cost it a refresh that can wipe
-    // the play's "Couldn't play" line.
-    #[tokio::test]
-    async fn a_failed_play_after_an_ended_embedded_play_reports_nothing() {
-        let state = test_app_state();
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::Embedded),
-            true,
-            LaunchEnd::Fails,
-        )
-        .await;
-        assert!(seen.failed);
-        assert_eq!(seen.old_verdict_during_launch, None);
-        assert_eq!(seen.reports, Vec::<serde_json::Value>::new());
-    }
-
-    // pc-2: a launch that fails before it stops the old player leaves that
-    // play running, its view showing; saying its run is over would take the
-    // page out of fullscreen with the picture still playing. However the
-    // launch's steps are ordered, only an end the old play's tracker
-    // reported can bring that report.
-    #[tokio::test]
-    async fn a_launch_that_fails_before_stopping_the_old_play_reports_nothing() {
-        let state = test_app_state();
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::Embedded),
-            false,
-            LaunchEnd::FailsBeforeStopping,
-        )
-        .await;
-        assert!(seen.failed);
-        assert_eq!(seen.old_verdict_during_launch, None);
-        assert_eq!(seen.reports, Vec::<serde_json::Value>::new());
-    }
-
-    // pc-2: an end noted for an earlier launch (a replaced play whose
-    // tracker reported while that launch was installed) is not taken for a
-    // later launch's, even when the later one fails.
-    #[tokio::test]
-    async fn an_end_noted_for_an_earlier_launch_is_not_this_ones() {
-        let state = test_app_state();
-        state
-            .ends_told_run_goes_on
-            .lock()
-            .unwrap_or_else(|e| e.into_inner())
-            .push("old".to_string());
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::Embedded),
-            false,
-            LaunchEnd::FailsBeforeStopping,
-        )
-        .await;
-        assert_eq!(seen.reports, Vec::<serde_json::Value>::new());
-    }
-
-    // pc-2: the new play started in the embedded player, so the page was
-    // told its view opened, and the launch then failed. The page holds that
-    // play's view, not the old one's, so its report is the one that lets the
-    // page leave; nothing else will ever report it, as it has no tracker.
-    #[cfg(target_os = "linux")]
-    #[tokio::test]
-    async fn a_failed_launch_whose_view_opened_reports_its_own_run_over() {
-        let state = test_app_state();
-        let seen = launch_replacing(
-            &state,
-            true,
-            Some(crate::player::PlayerKind::Embedded),
-            false,
-            LaunchEnd::FailsAfterItsViewOpened,
-        )
-        .await;
-        assert!(seen.failed);
-        assert_eq!(
-            seen.reports,
-            vec![
-                serde_json::json!({ "sessionId": "old", "runOver": true }),
-                serde_json::json!({ "sessionId": "new", "runOver": true }),
-            ]
-        );
-        // A first play, too: it replaced nothing, and its view opened.
-        let state = test_app_state();
-        let seen =
-            launch_replacing(&state, false, None, false, LaunchEnd::FailsAfterItsViewOpened).await;
-        assert_eq!(
-            seen.reports,
-            vec![serde_json::json!({ "sessionId": "new", "runOver": true })]
-        );
-    }
-
-    #[test]
-    fn a_tracker_notes_only_an_end_reported_while_another_play_is_active() {
-        let state = test_app_state();
-        let noted = |state: &AppState| {
-            state
-                .ends_told_run_goes_on
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .clone()
-        };
-        // No play active, or this one: its run is over, and nothing is noted.
-        assert!(tracker_end_is_run_over(&state, false, "a"));
-        *state.active_playback_session.blocking_lock() = Some("a".to_string());
-        assert!(tracker_end_is_run_over(&state, false, "a"));
-        assert!(!tracker_end_is_run_over(&state, true, "a"));
-        assert_eq!(noted(&state), Vec::<String>::new());
-        // Another play is active: the run goes on, and that is noted.
-        *state.active_playback_session.blocking_lock() = Some("b".to_string());
-        assert!(!tracker_end_is_run_over(&state, false, "a"));
-        assert_eq!(noted(&state), vec!["a".to_string()]);
-    }
-
-    #[test]
-    fn the_replaced_view_is_the_active_embedded_play_and_never_the_new_one() {
-        use crate::player::PlayerKind::{Embedded, External};
-        let embedded = ("a".to_string(), Embedded);
-        assert_eq!(replaced_view_session("a", Some(&embedded), "b"), Some("a".to_string()));
-        assert_eq!(replaced_view_session("a", Some(&embedded), "a"), None);
-        assert_eq!(replaced_view_session("a", Some(&("a".to_string(), External)), "b"), None);
-        // The player recorded for another session says nothing of this one.
-        assert_eq!(replaced_view_session("a", Some(&("c".to_string(), Embedded)), "b"), None);
-        assert_eq!(replaced_view_session("a", None, "b"), None);
-    }
-
-    #[test]
-    fn a_failed_launch_ends_the_run_only_when_no_play_is_active() {
-        let over = |session: &str| serde_json::json!({ "sessionId": session, "runOver": true });
-        assert_eq!(failed_launch_ends(Some("a"), None, None), vec![over("a")]);
-        assert_eq!(failed_launch_ends(None, Some("n"), None), vec![over("n")]);
-        assert_eq!(failed_launch_ends(Some("a"), Some("n"), None), vec![over("a"), over("n")]);
-        assert_eq!(failed_launch_ends(Some("a"), Some("n"), Some("c")), Vec::<serde_json::Value>::new());
-        assert_eq!(failed_launch_ends(None, None, None), Vec::<serde_json::Value>::new());
     }
 
     #[test]

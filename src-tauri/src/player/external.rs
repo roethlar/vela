@@ -16,6 +16,8 @@ use super::PlayerHandle;
 pub(crate) struct ManagedChild {
     child: std::process::Child,
     _header_include: Option<HeaderInclude>,
+    /// Which player this is (`super::PlayerHandle::serial`).
+    serial: u64,
 }
 
 impl ManagedChild {
@@ -29,7 +31,12 @@ impl ManagedChild {
         Self {
             child,
             _header_include: header_include,
+            serial: super::new_serial(),
         }
+    }
+
+    pub(crate) fn serial(&self) -> u64 {
+        self.serial
     }
 
     pub(crate) fn kill(&mut self) -> std::io::Result<()> {

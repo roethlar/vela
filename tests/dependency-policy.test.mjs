@@ -122,7 +122,14 @@ test("Ask source choices stay one-shot, session-safe, and credential-free", asyn
     /pub async fn resolve_playback_source_choice\((?<body>[\s\S]*?)\n\}\n\n#\[tauri::command\]\npub async fn cancel_playback_source_choice/,
   )?.groups?.body;
   assert.ok(resolve, "the source-choice resolver must remain registered");
-  assert.match(resolve, /\.take_at\(&request_id, Instant::now\(\)\)/);
+  // The command hands its request id to `resolve_choice`, which takes the
+  // held choice by that id (review finding pc-2 moved it there).
+  assert.match(resolve, /resolve_choice\(\s*state,\s*&request_id,/);
+  const resolveChoice = commands.match(
+    /async fn resolve_choice<P, F>\((?<body>[\s\S]*?)\n\}\n/,
+  )?.groups?.body;
+  assert.ok(resolveChoice, "the source-choice resolver's body must remain explicit");
+  assert.match(resolveChoice, /\.take_at\(request_id, Instant::now\(\)\)/);
   assert.match(resolve, /persist_explicit_choice: false/);
 
   const emittedChoice = commands.match(

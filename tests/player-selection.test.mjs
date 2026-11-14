@@ -99,7 +99,7 @@ test('once a play has installed its session, only the launch-failure path ends i
     '|end| report_playback_ended(state, end),',
     ')',
     '.await',
-    '.map_err(PlayFailure::fatal)?;',
+    '.map_err(PlayFailure::launch_failed)?;',
   ]);
   for (const installs of ['install_playback_session', 'playlist_cursor', 'undo_failed_launch', 'launch.await']) {
     assert.equal(body.indexOf(installs), -1, `the play path itself has no ${installs}`);
@@ -117,22 +117,22 @@ test('once a play has installed its session, only the launch-failure path ends i
     'and named only where it is written and handed over',
   );
 
-  // The installation, the launch and the arm, whole: note the play being
-  // replaced, install, run the launch, and on failure undo it and tell the
-  // page about the replaced play when there is something to tell (review
-  // finding pc-2), then report the failure.
+  // The installation, the launch and the arm, whole: note which player is in
+  // the slot, install, run the launch, and on failure undo it and then give
+  // the page the report the run is over when the state of the app says so
+  // (review finding pc-2), then report the failure.
   const installAndLaunch = functionBody(commands, 'async fn install_and_launch<', 'install_and_launch');
   const opens = installAndLaunch.indexOf('\n{\n');
   assert.notEqual(opens, -1, 'install_and_launch opens its body on a line of its own');
   const sequence = installAndLaunch.slice(opens);
   assert.deepEqual(statements(sequence), [
     '{',
-    'let replaced = replaced_embedded_session(state, install.session_id).await;',
-    'state',
-    '.ends_told_run_goes_on',
+    'let before = state',
+    '.current_child',
     '.lock()',
     '.unwrap_or_else(|e| e.into_inner())',
-    '.clear();',
+    '.as_ref()',
+    '.map(crate::player::PlayerHandle::serial);',
     'let previous_cursor = {',
     'let mut cursor = state.playlist_cursor.lock().await;',
     'std::mem::replace(&mut *cursor, install.cursor)',
@@ -148,34 +148,30 @@ test('once a play has installed its session, only the launch-failure path ends i
     'match launch.await {',
     'Ok(stop) => Ok(stop),',
     'Err(message) => {',
-    'let ends = undo_failed_launch(',
+    'undo_failed_launch(',
     'state,',
     'install.session_id,',
     'install.transcode_session,',
     'previous_cursor,',
-    'replaced.as_deref(),',
     ')',
     '.await;',
-    'for end in ends {',
-    'report_end(end);',
-    '}',
+    'report_failed_launch_end(state, install.session_id, before, &mut report_end).await;',
     'Err(message)',
     '}',
     '}',
   ]);
   // The undo, whole: stop the transcode, clear the session, put the playlist
-  // position back, and say what to report.
+  // position back.
   const undo = functionBody(commands, 'async fn undo_failed_launch(', 'undo_failed_launch');
-  const undoBody = undo.slice(undo.indexOf(') -> Vec<serde_json::Value> {\n'));
+  const undoBody = undo.slice(undo.indexOf(') {\n'));
   assert.deepEqual(statements(undoBody), [
-    ') -> Vec<serde_json::Value> {',
+    ') {',
     'if let Some(session) = transcode_session {',
     'if let Some(record) = take_active_transcode(&state.active_transcode, session) {',
     'stop_transcode_record(record).await;',
     '}',
     '}',
     'clear_playback_session_if(state, session_id).await;',
-    '{',
     'let mut cursor = state.playlist_cursor.lock().await;',
     'if cursor',
     '.as_ref()',
@@ -183,27 +179,6 @@ test('once a play has installed its session, only the launch-failure path ends i
     '{',
     '*cursor = previous_cursor;',
     '}',
-    '}',
-    'let replaced_told_goes_on = replaced.filter(|replaced| {',
-    'state',
-    '.ends_told_run_goes_on',
-    '.lock()',
-    '.unwrap_or_else(|e| e.into_inner())',
-    '.iter()',
-    '.any(|ended| ended == replaced)',
-    '});',
-    'let own_view_shown = state',
-    '.current_child',
-    '.lock()',
-    '.unwrap_or_else(|e| e.into_inner())',
-    '.as_ref()',
-    '.is_some_and(|player| player.is_embedded_play(session_id));',
-    'let active = state.active_playback_session.lock().await;',
-    'failed_launch_ends(',
-    'replaced_told_goes_on,',
-    'own_view_shown.then_some(session_id),',
-    'active.as_deref(),',
-    ')',
   ]);
 
   // The player setting is read before anything is resolved or installed.
@@ -299,7 +274,7 @@ test('a relaunch stays in the player it replaces', () => {
   const launches = others.split('continues_automatic: false,').length - 1;
   assert.ok(launches >= 4, 'the user-started launches must still be found');
   assert.equal(
-    others.split('continues_automatic: false,\n            player: None,').length - 1,
+    [...others.matchAll(/continues_automatic: false,\n\s+player: None,/g)].length,
     launches,
     'a launch the user starts never names a player',
   );

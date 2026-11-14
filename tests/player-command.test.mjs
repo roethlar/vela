@@ -173,37 +173,64 @@ test('fullscreen is asked of the window only for the running embedded play, afte
     session_id: serde_json::Value,
     on: serde_json::Value,
     app: tauri::AppHandle,
-) {
-    let _ = tauri::async_runtime::spawn_blocking(move || {
+) -> bool {
+    tauri::async_runtime::spawn_blocking(move || {
         use tauri::Manager;
         let on = on.as_bool() == Some(true);
-        if on {
-            let state = app.state::<AppState>();
-            let slot = &state.current_child;
-            if !crate::player::control::is_running_embedded_play(slot, &session_id) {
-                return;
+        let state = app.state::<AppState>();
+        let claim = claim_player_fullscreen(&state, &session_id, on);
+        if claim.ask_window {
+            if let Some(window) = app.webview_windows().into_values().next() {
+                let _ = window.set_fullscreen(on);
             }
         }
-        if let Some(window) = app.webview_windows().into_values().next() {
-            let _ = window.set_fullscreen(on);
-        }
+        claim.held
     })
-    .await;
+    .await
+    .unwrap_or(false)
 }
 `,
   );
   assert.equal(
     item(control, 'pub(crate) fn is_running_embedded_play(', 'is_running_embedded_play'),
-    `pub(crate) fn is_running_embedded_play(
-    slot: &Mutex<Option<PlayerHandle>>,
-    session_id: &Value,
-) -> bool {
+    `pub(crate) fn is_running_embedded_play(slot: &mut Option<PlayerHandle>, session_id: &Value) -> bool {
     let Some(session_id) = session_id.as_str() else {
         return false;
     };
-    let slot = slot.lock().unwrap_or_else(|e| e.into_inner());
-    slot.as_ref()
-        .is_some_and(|player| player.command_channel(session_id).is_some())
+    slot.as_mut()
+        .is_some_and(|player| player.is_running_embedded_play(session_id))
+}
+`,
+  );
+  // Asked, and the page's claim on fullscreen recorded, under the slot's
+  // lock; off always goes through; a refused "on" leaves the claim as it
+  // was and answers what is held (review finding pc-2).
+  assert.equal(
+    item(commands, 'fn claim_player_fullscreen(', 'claim_player_fullscreen'),
+    `fn claim_player_fullscreen(
+    state: &AppState,
+    session_id: &serde_json::Value,
+    on: bool,
+) -> FullscreenClaim {
+    if !on {
+        state.player_fullscreen_held.store(false, Ordering::SeqCst);
+        return FullscreenClaim {
+            ask_window: true,
+            held: false,
+        };
+    }
+    let mut slot = state.current_child.lock().unwrap_or_else(|e| e.into_inner());
+    if !crate::player::control::is_running_embedded_play(&mut slot, session_id) {
+        return FullscreenClaim {
+            ask_window: false,
+            held: state.player_fullscreen_held.load(Ordering::SeqCst),
+        };
+    }
+    state.player_fullscreen_held.store(true, Ordering::SeqCst);
+    FullscreenClaim {
+        ask_window: true,
+        held: true,
+    }
 }
 `,
   );
@@ -224,6 +251,14 @@ test("the window's real fullscreen reaches the page from GDK, followed once from
         let fullscreen = gtk::gdk::WindowState::FULLSCREEN;
         if event.changed_mask().contains(fullscreen) {
             let on = event.new_window_state().contains(fullscreen);
+            // The page gives up its claim on fullscreen when it hears the
+            // window has left it; so does the backend's copy of that claim
+            // (review finding pc-2).
+            if !on {
+                app.state::<crate::AppState>()
+                    .player_fullscreen_held
+                    .store(false, std::sync::atomic::Ordering::SeqCst);
+            }
             let _ = app.emit("window-fullscreen", serde_json::json!({ "on": on }));
         }
         gtk::glib::Propagation::Proceed

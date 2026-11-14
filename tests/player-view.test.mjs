@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { endLeavesPlayerFullscreen, nextPlayerSession } from '../src/lib/playerView.ts';
+import { endLeavesPlayerFullscreen, nextPlayerSession, showingPlayEnded } from '../src/lib/playerView.ts';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const read = (file) => fs.readFileSync(path.join(repoRoot, file), 'utf8').replace(/\r\n/g, '\n');
@@ -73,11 +73,11 @@ test('the page shows the player view for exactly the session the events name', (
   // session's view is showing.
   assert.match(
     page,
-    /listen<\{ sessionId: string \}>\("player-opened", \(\{ payload \}\) => \{\s+playerSession = nextPlayerSession\(playerSession, \{\s+kind: "opened",\s+sessionId: payload\.sessionId,\s+\}\);/,
+    /listen<\{ sessionId: string \}>\("player-opened", \(\{ payload \}\) => \{\s+const previous = playerSession;\s+playerSession = nextPlayerSession\(playerSession, \{\s+kind: "opened",\s+sessionId: payload\.sessionId,\s+\}\);/,
   );
   assert.match(
     page,
-    /listen<\{ sessionId: string \}>\("player-closed", \(\{ payload \}\) => \{\s+playerSession = nextPlayerSession\(playerSession, \{\s+kind: "closed",\s+sessionId: payload\.sessionId,\s+\}\);/,
+    /listen<\{ sessionId: string \}>\("player-closed", \(\{ payload \}\) => \{\s+const previous = playerSession;\s+playerSession = nextPlayerSession\(playerSession, \{\s+kind: "closed",\s+sessionId: payload\.sessionId,\s+\}\);/,
   );
   assert.match(page, /let playerSession = \$state<string \| null>\(null\);/);
   assert.equal(
@@ -325,19 +325,26 @@ test('fullscreen for the player is held by the page and left on events', () => {
     /function finishPlaybackRun\(sessionId: string\) \{\s+if \(playerSession === null \|\| playerSession === sessionId\) leavePlayerFullscreen\(\);/,
   );
   // Every report of an end goes through the rule in $lib/playerView (tested
-  // case by case below), with what the page knows now.
+  // case by case below), with what the page knows now: first whether it
+  // names the view that shows, then whether it leaves.
   assert.match(
     page,
-    shape(`endsSinceViewClosed++;
+    shape(`const end = event.payload ?? {};
+      playerSessionEnded = showingPlayEnded(playerSession, playerSessionEnded, playerSession, end);
       if (
-        endLeavesPlayerFullscreen(event.payload ?? {}, {
+        endLeavesPlayerFullscreen(end, {
           showing: playerSession,
-          endsSinceViewChanged: endsSinceViewClosed,
+          showingEnded: playerSessionEnded,
           continuationPending: continuationPending(),
         })
       ) {
         leavePlayerFullscreen();
       }`),
+  );
+  assert.equal(
+    [...page.matchAll(/(?<!let )playerSessionEnded = /g)].length,
+    2,
+    'after its declaration, set only on a report and on a view change',
   );
   assert.match(
     page,
@@ -347,11 +354,16 @@ test('fullscreen for the player is held by the page and left on events', () => {
     page,
     /async function handlePlaybackContinuation\(event: \{ payload: PlaybackContinuation \}\) \{\s+continuationsRunning\+\+;\s+try \{\s+await continueAfterPlayback\(event\.payload\);\s+\} finally \{\s+continuationsRunning--;\s+\}\s+\}/,
   );
-  // Both lifecycle events keep the count and the backstop.
-  assert.equal([...page.matchAll(/\}\);\s+playerViewChanged\(\);\s+\}\)\.then/g)].length, 2);
+  // Both lifecycle events keep the view's state and the backstop, from the
+  // view that showed before them.
+  assert.equal(
+    [...page.matchAll(/const previous = playerSession;\s+playerSession = nextPlayerSession\(playerSession, \{[^}]*\}\);\s+playerViewChanged\(previous\);\s+\}\)\.then/g)].length,
+    2,
+  );
   assert.match(page, /const PLAYER_FULLSCREEN_BACKSTOP_MS = 20_000 \+ 30_000;/);
-  // The bookkeeping itself, whole: a request for fullscreen that was refused
-  // drops the claim; leaving clears the backstop.
+  // The bookkeeping itself, whole: requests go one at a time, in order, and
+  // the claim becomes what the backend answers it holds (a refused request
+  // drops it); leaving clears the backstop.
   assert.match(
     page,
     shape(`function askPlayerFullscreen(on: boolean) {
@@ -359,18 +371,24 @@ test('fullscreen for the player is held by the page and left on events', () => {
       if (on && sessionId === null) return;
       playerAskedFullscreen = on;
       if (!on) clearPlayerFullscreenBackstop();
-      setPlayerFullscreen(sessionId ?? "", on).catch(() => {
-        if (on) playerAskedFullscreen = false;
+      // One request at a time, in order; the claim then becomes what the
+      // backend holds (a refused request gives it up).
+      requestPlayerFullscreen(sessionId ?? "", on, (held) => {
+        playerAskedFullscreen = held;
       });
     }`),
   );
-  // A view change starts the count of ends again; with a view, no backstop;
-  // with none and Vela's claim held, one backstop, which leaves only if
-  // still no view shows when it runs out.
+  assert.match(page, shape(`const requestPlayerFullscreen = fullscreenRequests(setPlayerFullscreen);`));
+  assert.equal(page.split('setPlayerFullscreen(').length - 1, 0, 'the request is sent only through the queue');
+  assert.equal(page.split('requestPlayerFullscreen(').length - 1, 1, 'and only from askPlayerFullscreen');
+  // A view change keeps whether the view showing is of a play that ended
+  // (only while that view still shows); with a view, no backstop; with none
+  // and Vela's claim held, one backstop, which leaves only if still no view
+  // shows when it runs out.
   assert.match(
     page,
-    shape(`function playerViewChanged() {
-      endsSinceViewClosed = 0;
+    shape(`function playerViewChanged(previous: string | null) {
+      playerSessionEnded = showingPlayEnded(previous, playerSessionEnded, playerSession);
       if (playerSession !== null) {
         clearPlayerFullscreenBackstop();
       } else if (playerAskedFullscreen && !playerFullscreenBackstop) {
@@ -412,29 +430,37 @@ test('fullscreen for the player is held by the page and left on events', () => {
 });
 
 // pc-2. The page's events for a run, replayed as the page takes them: a
-// view opening or closing goes through `nextPlayerSession` and starts the
-// count of ends again; each end goes through `endLeavesPlayerFullscreen`.
+// view opening or closing goes through `nextPlayerSession`, and whether the
+// play of the view showing has ended through `showingPlayEnded`; each end
+// goes through `showingPlayEnded` and then `endLeavesPlayerFullscreen`.
 // Returns the index of every event at which fullscreen is left.
 function fullscreenLeftAt(events) {
   let showing = null;
-  let ends = 0;
+  let showingEnded = false;
   const left = [];
   events.forEach((event, index) => {
     if (event.kind === 'opened' || event.kind === 'closed') {
+      const previous = showing;
       showing = nextPlayerSession(showing, event);
-      ends = 0;
+      showingEnded = showingPlayEnded(previous, showingEnded, showing);
       return;
     }
-    ends++;
-    const ctx = { showing, endsSinceViewChanged: ends, continuationPending: event.pending ?? false };
+    showingEnded = showingPlayEnded(showing, showingEnded, showing, event.payload);
+    const ctx = { showing, showingEnded, continuationPending: event.pending ?? false };
     if (endLeavesPlayerFullscreen(event.payload, ctx)) left.push(index);
   });
   return left;
 }
-// The tracker's report of an end: its session and whether the run is over.
+// A play's own report of its end: its session and whether the run is over.
 const ended = (sessionId, runOver) => ({ kind: 'ended', payload: { sessionId, runOver, sourceId: 's', itemKey: 's:k' } });
-// The completion dispatcher's second report of a clean end.
-const endedAgain = (pending = false) => ({ kind: 'ended', payload: { sourceId: 's', itemKey: 's:k' }, pending });
+// The completion dispatcher's second report of a clean end, saying neither
+// that the run is over nor that a successor is coming (Continue Playing
+// decides).
+const endedAgain = (pending = false, sessionId = 'a') => ({
+  kind: 'ended',
+  payload: { sessionId, runOver: false, successor: false, sourceId: 's', itemKey: 's:k' },
+  pending,
+});
 
 test('a clean end whose successor the backend starts keeps fullscreen across the gap (case 1)', () => {
   // As the embeddedfullscreenend scenario saw it: the old view closes only
@@ -450,11 +476,11 @@ test("a playlist whose next play cannot be started ends the run at the dispatche
   const over = (sessionId) => ({ kind: 'ended', payload: { sessionId, runOver: true, sourceId: 's', itemKey: 's:k' } });
   assert.deepEqual(fullscreenLeftAt([opened('a'), ended('a', false), over('a'), closed('a')]), [2]);
   assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), over('a')]), [3]);
-  // A second report that names its session but does not say the run is
-  // over keeps the old rule.
+  // A report without `successor` is a play's own, not the dispatcher's: it
+  // leaves only when it says the run is over, however many come.
   const notOver = { kind: 'ended', payload: { sessionId: 'a', runOver: false, sourceId: 's', itemKey: 's:k' } };
   assert.deepEqual(fullscreenLeftAt([opened('a'), ended('a', false), notOver, opened('b'), closed('a')]), []);
-  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), notOver]), [3]);
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), notOver]), []);
 });
 
 test("the dispatcher's report of a clean end names its session and says whether the run is over", () => {
@@ -464,16 +490,42 @@ test("the dispatcher's report of a clean end names its session and says whether 
     shape(`let after = commands::advance_playlist(&state, &completion.session_id).await;
       if after == commands::AfterCleanEnd::ContinuePlaying {`),
   );
+  // The payload is `clean_end_report`'s (tested in Rust, and the one the
+  // Rust enumeration of orders sends to its page): ids, whether the run is
+  // over, and whether a successor is coming.
   assert.match(
     lib,
-    shape(`"playback-ended",
-      serde_json::json!({
-          "sourceId": source_id,
-          "itemKey": completion.item_key.clone(),
-          "sessionId": completion.session_id.clone(),
-          "runOver": after == commands::AfterCleanEnd::RunOver,
-      }),`),
+    shape(`let _ = app_handle.emit(
+          "playback-ended",
+          commands::clean_end_report(&completion, after),
+      );`),
   );
+  assert.equal(lib.split('"playback-ended"').length - 1, 1, 'the dispatcher sends it once, there');
+  assert.match(
+    commands,
+    shape(`"runOver": after == AfterCleanEnd::RunOver,
+      "successor": after == AfterCleanEnd::Successor,
+    })`),
+  );
+});
+
+test('a report that says a successor is coming keeps fullscreen, whatever else the page sees', () => {
+  const coming = (sessionId) => ({ kind: 'ended', payload: { sessionId, runOver: false, successor: true, sourceId: 's', itemKey: 's:k' } });
+  // The successor's view opens only after the report (still starting, or
+  // announced after its launch returned).
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), coming('a'), opened('b')]), []);
+  // The successor plays in mpv's own window: no view ever opens.
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), coming('a')]), []);
+  // Saying no successor is coming, with nothing pending here, that same
+  // report leaves.
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), endedAgain()]), [3]);
+  // Only true says a successor is coming, and only false that none is: any
+  // other value is no dispatcher's report, and leaves nothing.
+  const maybe = { kind: 'ended', payload: { sessionId: 'a', runOver: false, successor: 'yes' } };
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), maybe]), []);
+  // A report that says the run is over still leaves, whatever else it says.
+  const both = { kind: 'ended', payload: { sessionId: 'a', runOver: true, successor: true } };
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), both]), [2]);
 });
 
 test("a clean end whose successor the page decides keeps fullscreen while it decides (case 2)", () => {
@@ -497,9 +549,12 @@ test("a clean end whose successor the page decides keeps fullscreen while it dec
 
 test('a clean end with no successor leaves fullscreen at its second report (case 3)', () => {
   assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), endedAgain(false)]), [3]);
-  // While the view still shows, the rule waits: there the page's own end of
-  // the run (`finishPlaybackRun`, after `continue-playing`) leaves it.
-  assert.deepEqual(fullscreenLeftAt([opened('a'), ended('a', false), endedAgain(false), closed('a')]), []);
+  // The view that still shows is the ended play's own: it is only waiting
+  // to close, and the report leaves all the same.
+  assert.deepEqual(fullscreenLeftAt([opened('a'), ended('a', false), endedAgain(false), closed('a')]), [2]);
+  // While another play's view shows, nothing leaves: the page's own end of
+  // the run (`finishPlaybackRun`, after `continue-playing`) decides.
+  assert.deepEqual(fullscreenLeftAt([opened('b'), endedAgain(false, 'a')]), []);
 });
 
 test("the user's stop leaves fullscreen from the view, and its end then changes nothing (case 4)", () => {
@@ -535,99 +590,116 @@ test('a play the backend replaces keeps fullscreen (case 8)', () => {
   assert.deepEqual(fullscreenLeftAt([opened('a'), opened('b'), closed('a'), ended('a', false)]), []);
 });
 
-// pc-2, reopened: a play that replaced the one showing (a step-down, a play
-// the user or the page starts, a playlist's next play) fails to start. The
-// old play's own report says "not over" when it comes while the replacement
-// is still installed, and "over" when it comes after the failure was undone;
-// the failed launch reports the old play's run over. The page leaves at the
-// first report that says so, in every order of the three events.
-const failedReplacement = (sessionId) => ({ kind: 'ended', payload: { sessionId, runOver: true } });
+// pc-2. Every distinct sequence of events the page receives in the
+// orders the Rust test `in_every_order_the_page_leaves_fullscreen_exactly_when_the_run_is_over`
+// (src-tauri/src/run_over_tests.rs) runs through the real backend functions:
+// launches that fail before or after stopping the play they replace, with or
+// without a view of their own, one after another; the old play's own report,
+// clean or not; the dispatcher's report; the old view closing; the reaper; a
+// play that fell back to mpv's own window. Each event says whether anything
+// was playing or coming when it was sent. Replayed as `+page.svelte` takes
+// them, through the real helpers: the page leaves the player's fullscreen at
+// a report once nothing plays or is coming, and never while something does.
+// What plays or is coming at each event is the Rust test's model (its
+// `World`), carried in the fixture: this replay checks the page's real
+// helpers against that model, not the model itself. The page's backstop is
+// not replayed (no time passes here).
+const orders = JSON.parse(read('tests/fixtures/run-over-orders.json'));
 
-test('a play that replaced the one showing and fails to start leaves fullscreen at once, in every order, whoever started it', () => {
-  const orders = [
-    // The old play's report while the replacement is installed.
-    [[opened('a'), ended('a', false), failedReplacement('a'), closed('a')], 2],
-    [[opened('a'), ended('a', false), closed('a'), failedReplacement('a')], 3],
-    [[opened('a'), closed('a'), ended('a', false), failedReplacement('a')], 3],
-    // Its report after the failure was undone.
-    [[opened('a'), failedReplacement('a'), ended('a', true), closed('a')], 1],
-    [[opened('a'), failedReplacement('a'), closed('a'), ended('a', true)], 1],
-    [[opened('a'), closed('a'), failedReplacement('a'), ended('a', true)], 2],
-    // Its report read the state before the failure, and arrives after.
-    [[opened('a'), failedReplacement('a'), ended('a', false), closed('a')], 1],
-    [[opened('a'), closed('a'), failedReplacement('a'), ended('a', false)], 2],
-  ];
-  for (const [events, at] of orders) {
-    const left = fullscreenLeftAt(events);
-    assert.equal(left[0], at, JSON.stringify(events));
+// An end's code: `1`/`0` a play's own report (over or not), `R`/`s`/`n` the
+// dispatcher's (over, a successor coming, neither).
+function parseToken(token) {
+  if (token[0] === 'e') {
+    const code = token[2];
+    assert.ok('10Rsn'.includes(code), token);
+    const payload = { sessionId: token[1], runOver: code === '1' || code === 'R', sourceId: 's', itemKey: 's:k' };
+    if ('Rsn'.includes(code)) payload.successor = code === 's';
+    return { kind: 'ended', payload, busy: token[3] === '+', pending: token[4] === 'p' };
   }
-});
+  return { kind: token[0] === 'o' ? 'opened' : 'closed', sessionId: token[1], busy: token[2] === '+', pending: token[3] === 'p' };
+}
 
-test("a failed replacement's report leaves nothing while another play's view shows, and miscounts nothing after", () => {
-  assert.deepEqual(fullscreenLeftAt([opened('a'), opened('c'), failedReplacement('a'), closed('a')]), []);
-  // A later play's first report of a clean end is still only its first.
-  assert.deepEqual(
-    fullscreenLeftAt([
-      opened('a'),
-      ended('a', false),
-      failedReplacement('a'),
-      closed('a'),
-      opened('b'),
-      ended('b', false),
-      closed('b'),
-      ended('b', false),
-    ]),
-    [2],
-  );
-});
+// The page's handlers for these events (pinned above): `player-opened` and
+// `player-closed` go through `nextPlayerSession` and `showingPlayEnded`;
+// `playback-ended` goes through `showingPlayEnded`, asks
+// `endLeavesPlayerFullscreen`, and leaves only fullscreen it asked for. The
+// page has asked for it when the run's first view showed.
+function replayPage(events) {
+  let showing = null;
+  let showingEnded = false;
+  let asked = true;
+  let leftAt = null;
+  events.forEach((event, index) => {
+    if (event.kind !== 'ended') {
+      const previous = showing;
+      showing = nextPlayerSession(showing, { kind: event.kind, sessionId: event.sessionId });
+      showingEnded = showingPlayEnded(previous, showingEnded, showing);
+      return;
+    }
+    showingEnded = showingPlayEnded(showing, showingEnded, showing, event.payload);
+    const leaves = endLeavesPlayerFullscreen(event.payload, {
+      showing,
+      showingEnded,
+      continuationPending: event.pending,
+    });
+    if (leaves && asked) {
+      asked = false;
+      leftAt = index;
+    }
+  });
+  return leftAt;
+}
 
-// pc-2: a launch whose play started in the embedded player (its view was
-// announced) and then failed reports that play run over too, right after the
-// replaced play's report. With the new play's view showing, the replaced
-// play's report leaves nothing; the new play's own leaves, in every order.
-test("a failed launch whose own view opened leaves fullscreen at once, in every order", () => {
-  const orders = [
-    [[opened('a'), opened('n'), closed('a'), ended('a', false), failedReplacement('a'), failedReplacement('n'), closed('n')], 5],
-    [[opened('a'), opened('n'), ended('a', false), failedReplacement('a'), closed('n'), failedReplacement('n'), closed('a')], 5],
-    [[opened('a'), opened('n'), closed('n'), closed('a'), ended('a', false), failedReplacement('a'), failedReplacement('n')], 5],
-    [[opened('a'), ended('a', false), opened('n'), failedReplacement('a'), failedReplacement('n'), closed('a'), closed('n')], 4],
-    [[opened('a'), opened('n'), failedReplacement('a'), failedReplacement('n'), ended('a', true), closed('a'), closed('n')], 3],
-    // A first play: nothing replaced, only its own report.
-    [[opened('n'), failedReplacement('n'), closed('n')], 1],
-    [[opened('n'), closed('n'), failedReplacement('n')], 2],
-  ];
-  for (const [events, at] of orders) {
-    assert.equal(fullscreenLeftAt(events)[0], at, JSON.stringify(events));
+test('in every order the backend produces, the page leaves fullscreen at a report exactly when the run is over', () => {
+  assert.ok(orders.length > 700, `${orders.length} sequences`);
+  // Among them, a source choice for the next play that ends without a play
+  // (the dispatcher says a successor is coming, then the choice's end says
+  // the run is over), and a successor in mpv's own window followed by
+  // another, or replaced by a step-down.
+  assert.ok(orders.some((line) => /eAs\+\. .*eA1-/.test(line)));
+  assert.ok(orders.some((line) => /eBs\+/.test(line)));
+  assert.ok(orders.some((line) => /eB0\+.*eD/.test(line)));
+  // Among them, a successor coming with no view of its own showing yet.
+  assert.ok(orders.some((line) => / cA[+-]. .*eAs\+/.test(line) && !/oB/.test(line.split('eAs')[0])));
+  let left = 0;
+  let kept = 0;
+  for (const line of orders) {
+    const [body, end] = line.split(' |');
+    const events = body.split(' ').map(parseToken);
+    const busyAtEnd = end === '+';
+    const leftAt = replayPage(events);
+    if (busyAtEnd) {
+      assert.equal(leftAt, null, `left while something still plays: ${line}`);
+      kept++;
+    } else {
+      assert.notEqual(leftAt, null, `nothing plays or is coming, and nothing told the page: ${line}`);
+      assert.equal(events[leftAt].busy, false, `left at ${leftAt} while something played or was coming: ${line}`);
+      left++;
+    }
   }
+  assert.ok(left > 0 && kept > 0, `${left} left, ${kept} kept`);
 });
 
-test('a launch that fails after replacing a play reports that play run over, and no other path does', () => {
-  // The sequence itself (the replaced play read before anything is
-  // installed, the report given only when the launch fails and nothing is
-  // playing) is run by the Rust tests of `install_and_launch`. What is held
-  // here is the wiring around it: the play path starts every play through
-  // it, hands it the function that really sends the report, and sends no
-  // such report of its own anywhere else.
-  const testsAt = commands.indexOf('\n#[cfg(test)]\nmod tests {');
-  assert.notEqual(testsAt, -1, 'the command layer has its test module');
+test("a launch that fails reports the run over only from the state of the app, and nothing else sends that report", () => {
+  // The sequence itself (the player in the slot read before anything is
+  // installed, the report given only when nothing plays, no play is active
+  // and the page holds the player's fullscreen) is run by the Rust tests.
+  // What is held here is the wiring around it that a unit test cannot reach.
+  const testsAt = commands.indexOf('\n#[cfg(all(test, target_os = "linux"))]');
+  assert.notEqual(testsAt, -1, 'the command layer has its tests after the shipped code');
   const shipped = commands.slice(0, testsAt);
   const playPath = shipped.slice(shipped.indexOf('\nasync fn play_by_key_locked('));
   const playBody = playPath.slice(0, playPath.indexOf('\n}\n'));
-  assert.match(
-    playBody,
-    shape(`let stop = install_and_launch(
-        state,
-        PlayInstall {`),
-  );
+  // The play path starts every play through `install_and_launch` and hands it
+  // the function that really sends the report.
   assert.match(
     playBody,
     shape(`launch,
         |end| report_playback_ended(state, end),
     )
     .await
-    .map_err(PlayFailure::fatal)?;`),
+    .map_err(PlayFailure::launch_failed)?;`),
   );
-  // What sends it: `playback-ended`, with the value it is given.
   assert.match(
     shipped,
     shape(`fn report_playback_ended(state: &AppState, end: serde_json::Value) {
@@ -637,36 +709,96 @@ test('a launch that fails after replacing a play reports that play run over, and
         }
     }`),
   );
-  // Nothing else in the command layer sends it or reads the play to report:
-  // the play path's only `playback-ended` is its tracker's own report, and a
-  // play that fails at its resolve, or starts, sends nothing more.
-  assert.equal(shipped.split('report_playback_ended(').length - 1, 2, 'defined once and passed once');
-  assert.equal(shipped.split('replaced_embedded_session(').length - 1, 2, 'defined once and read once');
+  assert.equal(
+    shipped.split('report_playback_ended(').length - 1,
+    4,
+    'defined once, passed to the launch, and to the two ends of a source choice',
+  );
+  assert.equal(shipped.split('"playback-ended"').length - 1, 2, "the tracker's report, and the one the backend owes from the state of the app");
+  // What it sends: a session and the flag, nothing else, under the view
+  // record's lock.
   assert.match(
     shipped,
-    shape(`let replaced = replaced_embedded_session(state, install.session_id).await;`),
-  );
-  assert.equal(shipped.split('"playback-ended"').length - 1, 2, "the tracker's report and the failed launch's");
-  assert.equal(playBody.split('"playback-ended"').length - 1, 1, "the play path's own is the tracker's report");
-  assert.match(playBody, /let run_over = tracker_end_is_run_over\([\s\S]{0,400}"playback-ended",\s+serde_json::json!\(\{/);
-  // The tracker's verdict is the function the Rust tests run, which notes an
-  // end told "the run goes on" for the launch to find: the tracker calls it,
-  // and nothing else does.
-  assert.equal(shipped.split('tracker_end_is_run_over(').length - 1, 2, 'defined once and called once, by the tracker');
-  // What it reports: a session and the flag, nothing else.
-  assert.match(
-    commands,
-    shape(`.map(|session| {
-        serde_json::json!({
-            "sessionId": session,
-            "runOver": true,
-        })
-    })`),
+    shape(`if failed_launch_ends_run(nothing_playing, play_active, fullscreen_held) {
+        state.player_view.report(session_id, |session| {
+            report_end(serde_json::json!({
+                "sessionId": session,
+                "runOver": true,
+            }))
+        });
+    }`),
   );
 });
 
+test("the page's claim on fullscreen is kept where it is asked for and where the window leaves it", () => {
+  // `player_fullscreen` records the claim through `claim_player_fullscreen`
+  // (unit-tested in Rust) and asks the window only when that says so.
+  assert.match(
+    commands,
+    shape(`let state = app.state::<AppState>();
+        let claim = claim_player_fullscreen(&state, &session_id, on);
+        if claim.ask_window {
+            if let Some(window) = app.webview_windows().into_values().next() {
+                let _ = window.set_fullscreen(on);
+            }
+        }
+        claim.held`),
+  );
+  // The window leaving fullscreen, however that was asked for, gives the
+  // claim up before the page hears of it.
+  assert.match(
+    host,
+    shape(`let on = event.new_window_state().contains(fullscreen);
+        // The page gives up its claim on fullscreen when it hears the
+        // window has left it; so does the backend's copy of that claim
+        // (review finding pc-2).
+        if !on {
+            app.state::<crate::AppState>()
+                .player_fullscreen_held
+                .store(false, std::sync::atomic::Ordering::SeqCst);
+        }
+        let _ = app.emit("window-fullscreen", serde_json::json!({ "on": on }));`),
+  );
+  assert.equal(host.split('player_fullscreen_held').length - 1, 1, 'and only there');
+});
+
+test('the view record and the view events are one step', () => {
+  // The embedded play's lifecycle sends `player-opened` and `player-closed`
+  // only through the record (`ViewRecord::announce`), with the send inside.
+  assert.match(
+    host,
+    shape(`app.state::<crate::AppState>().player_view.announce(
+        &session_id,
+        event == Lifecycle::Opened,
+        || {
+            let _ = app.emit(name, serde_json::json!({ "sessionId": session_id }));
+        },
+    );`),
+  );
+  assert.equal(host.split('app.emit(name').length - 1, 1, 'the view events are sent nowhere else');
+  for (const source of [commands, lib, playerMod, session]) {
+    assert.equal(source.indexOf('"player-opened"'), -1);
+    assert.equal(source.indexOf('"player-closed"'), -1);
+  }
+});
+
+test("the dispatcher's every answer that a successor is coming checks that a play is active", () => {
+  const advance = commands.slice(commands.indexOf('\npub(crate) async fn advance_playlist('));
+  const body = advance.slice(0, advance.indexOf('\n}\n'));
+  assert.equal(body.split('AfterCleanEnd::Successor').length - 1, 1, 'only for a choice the user is making');
+  assert.match(body, shape(`if cursor.session_id != ended_session {
+      return replaced_or_over(state).await;
+  };`));
+  assert.equal(body.split('Ok(result) => after_successor(state, result).await,').length - 1, 2, 'both playlists');
+  assert.match(commands, shape(`PlayCommandResult::Superseded => replaced_or_over(state).await,`));
+  assert.match(commands, shape(`} else {
+        replaced_or_over(state).await
+    }`));
+});
+
 test('a report that does not say the run is over never leaves on its own', () => {
-  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), endedAgain()]), []);
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false)]), []);
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), ended('b', false), ended('c', false)]), []);
   assert.deepEqual(
     fullscreenLeftAt([opened('a'), closed('a'), { kind: 'ended', payload: { runOver: true } }]),
     [],
@@ -719,4 +851,100 @@ test('the page gets out of the way of the picture only while the view is mounted
   );
   assert.equal(css.split('player-open').length - 1, 3, 'and that is all the class does');
   assert.match(view, /\.player \{[^}]*background: transparent;/);
+});
+
+// pc-2. The dispatcher asks the user to choose the source of the
+// run's next play; the page keeps fullscreen while the dialog is up. The
+// user cancels it (or it expired, or the play chosen fails before it is
+// installed): the backend then says the run is over (Rust:
+// `a_successor_being_chosen_keeps_fullscreen_and_a_choice_ended_without_a_play_ends_the_run`).
+test('a successor being chosen keeps fullscreen, and a choice that ends without a play leaves it', () => {
+  const coming = { kind: 'ended', payload: { sessionId: 'a', runOver: false, successor: true, sourceId: 's', itemKey: 's:k' } };
+  // The dialog is not up yet when the dispatcher's report comes, and is
+  // when the choice ends.
+  assert.deepEqual(fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), coming]), []);
+  assert.deepEqual(
+    fullscreenLeftAt([opened('a'), closed('a'), ended('a', false), coming, { ...ended('a', true), pending: true }]),
+    [4],
+  );
+  // The view closes only after the choice has ended.
+  assert.deepEqual(fullscreenLeftAt([opened('a'), ended('a', false), coming, ended('a', true), closed('a')]), [3]);
+});
+
+test("a source choice's end is reported from the state of the app, through the real commands", () => {
+  const testsAt = commands.indexOf('\n#[cfg(all(test, target_os = "linux"))]');
+  const shipped = commands.slice(0, testsAt);
+  // Both commands go through the functions the Rust tests run, with the
+  // real play and the function that really sends.
+  assert.match(
+    shipped,
+    shape(`Ok(cancel_choice(state, &request_id, |end| report_playback_ended(state, end)).await)`),
+  );
+  const resolve = shipped.slice(shipped.indexOf('\npub async fn resolve_playback_source_choice('));
+  const resolveBody = resolve.slice(0, resolve.indexOf('\n}\n'));
+  assert.match(resolveBody, shape(`resolve_choice(
+      state,
+      &request_id,
+      &source_id,
+      |pending, source_id| async move {
+          play_by_key_locked(`));
+  assert.match(resolveBody, shape(`|end| report_playback_ended(state, end),
+    )
+    .await`));
+  // What it sends: a session and the flag, under the view record's lock.
+  assert.match(
+    shipped,
+    shape(`if choice_end_ends_run(nothing_playing, choice_pending, fullscreen_held) {
+        state.player_view.report(own, |session| {
+            report_end(serde_json::json!({
+                "sessionId": session,
+                "runOver": true,
+            }))
+        });
+    }`),
+  );
+  // Every way a choice ends without a play reaches it: no longer held, a
+  // source not offered, and a play that neither started nor was launched.
+  const choose = shipped.slice(shipped.indexOf('\nasync fn resolve_choice<'));
+  const chooseBody = choose.slice(0, choose.indexOf('\n}\n'));
+  assert.equal(chooseBody.split('report_choice_end(').length - 1, 3);
+  assert.match(chooseBody, shape(`Ok(PlayCommandResult::Started { .. }) => true,
+      Err(failure) => failure.launched,
+      Ok(_) => false,`));
+  const cancel = shipped.slice(shipped.indexOf('\nasync fn cancel_choice('));
+  const cancelBody = cancel.slice(0, cancel.indexOf('\n}\n'));
+  assert.equal(cancelBody.split('report_choice_end(').length - 1, 1);
+});
+
+// pc-2. A successor the dispatcher starts in mpv's own window has
+// no view. Its own reports do not end the run unless they say so: it ends
+// cleanly and its dispatcher starts the next play, or a step-down replaces
+// it (Rust: `a_successor_in_mpv_own_window_keeps_fullscreen_until_the_run_is_over`).
+test('a successor in mpv own window keeps fullscreen until a report says the run is over', () => {
+  const coming = (sessionId) => ({ kind: 'ended', payload: { sessionId, runOver: false, successor: true } });
+  const over = (sessionId) => ({ kind: 'ended', payload: { sessionId, runOver: true, successor: false } });
+  const start = [opened('a'), closed('a'), ended('a', false), coming('a')];
+  // B ends cleanly; its dispatcher starts C.
+  assert.deepEqual(fullscreenLeftAt([...start, ended('b', false), coming('b')]), []);
+  // ... or cannot.
+  assert.deepEqual(fullscreenLeftAt([...start, ended('b', false), over('b')]), [5]);
+  // B is stepped down to D; D plays on.
+  assert.deepEqual(fullscreenLeftAt([...start, ended('b', false)]), []);
+  // A's view, its play long ended, closes only after all of that.
+  assert.deepEqual(
+    fullscreenLeftAt([opened('a'), ended('a', false), coming('a'), ended('b', false), over('b'), closed('a')]),
+    [4],
+  );
+  // While a play that still plays has its view showing, nothing leaves.
+  assert.deepEqual(fullscreenLeftAt([opened('c'), over('b')]), []);
+});
+
+test("whether the view showing is of a play that ended follows the reports and the view's changes", () => {
+  assert.equal(showingPlayEnded(null, false, null, { sessionId: 'a' }), false, 'no view shows');
+  assert.equal(showingPlayEnded('a', false, 'a', { sessionId: 'a' }), true, 'a report names it');
+  assert.equal(showingPlayEnded('a', false, 'a', { sessionId: 'b' }), false, 'a report names another');
+  assert.equal(showingPlayEnded('a', true, 'a', { sessionId: 'b' }), true, 'it stays ended');
+  assert.equal(showingPlayEnded('a', true, 'a'), true, "another play's view closed");
+  assert.equal(showingPlayEnded('a', true, 'b'), false, 'another view opened');
+  assert.equal(showingPlayEnded('a', true, null), false, 'the view closed');
 });

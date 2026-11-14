@@ -99,14 +99,22 @@ pub struct AppState {
     /// (an Automatic step-down) stays in the same player even if the setting
     /// changed in between.
     pub(crate) active_playback_player: AsyncMutex<Option<(String, player::PlayerKind)>>,
-    /// Plays whose tracker reported their end while another play was the
-    /// active one, so told the page their run goes on. Added to by the
-    /// tracker's own thread (a plain thread) while it holds
-    /// `active_playback_session`; read and emptied by a launch on the async
-    /// command task, never across an await. A launch that fails after it
-    /// stopped one of these plays owes the page the report that the run is
-    /// over (review finding pc-2).
-    pub(crate) ends_told_run_goes_on: Mutex<Vec<String>>,
+    /// The player view the page has been told is open (review finding
+    /// pc-2). Changed only together with the `player-opened` and
+    /// `player-closed` events, on the embedded play's own thread, and read by
+    /// a launch that failed, on the async command task, to name the view the
+    /// page is showing in the report it sends with the record's lock held.
+    pub(crate) player_view: player::ViewRecord,
+    /// Whether the page holds the player's fullscreen: set when
+    /// `player_fullscreen` turns fullscreen on for the running embedded play
+    /// (under the player slot's lock), cleared when it turns it off and when
+    /// the window is seen to leave fullscreen however that was asked for
+    /// (`player::embedded::follow_fullscreen`). It outlasts the play that
+    /// asked, as the page's own claim does, also across a play that fell back
+    /// to mpv's own window; nothing sets it for somebody who only ever uses
+    /// mpv's own window. A launch that failed reads it to know whether it owes
+    /// the page the report that the run is over (review finding pc-2).
+    pub(crate) player_fullscreen_held: AtomicBool,
     /// Which embedded-player fallback the user has already been told about.
     pub(crate) embedded_fallback_notices: Arc<Mutex<player::FallbackNotices>>,
     /// The embedded player's side of the app: whether it can run here, and
@@ -156,7 +164,8 @@ impl AppState {
             active_playback_session: AsyncMutex::new(None),
             active_playback_item: AsyncMutex::new(None),
             active_playback_player: AsyncMutex::new(None),
-            ends_told_run_goes_on: Mutex::new(Vec::new()),
+            player_view: player::ViewRecord::default(),
+            player_fullscreen_held: AtomicBool::new(false),
             embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
             embedded: Arc::new(player::EmbeddedHost::new()),
             playback_run: AsyncMutex::new(None),
@@ -212,7 +221,8 @@ pub fn run() {
         active_playback_session: AsyncMutex::new(None),
         active_playback_item: AsyncMutex::new(None),
         active_playback_player: AsyncMutex::new(None),
-        ends_told_run_goes_on: Mutex::new(Vec::new()),
+        player_view: player::ViewRecord::default(),
+        player_fullscreen_held: AtomicBool::new(false),
         embedded_fallback_notices: Arc::new(Mutex::new(player::FallbackNotices::default())),
         embedded: Arc::new(player::EmbeddedHost::new()),
         playback_run: AsyncMutex::new(None),
@@ -369,21 +379,15 @@ pub fn run() {
                     // This remains unconditional on server success: local
                     // curation and any backend-owned successor are already final.
                     // It names its session and says whether the run is over (a
-                    // playlist whose successor could not be started): the page
-                    // leaves the run's fullscreen on it. Ids and a flag only.
-                    let source_id = completion
-                        .item_key
-                        .split_once(':')
-                        .map(|(source, _)| source)
-                        .unwrap_or_default();
+                    // playlist whose successor could not be started, or no play
+                    // active at all): the page leaves the run's fullscreen on it;
+                    // and whether a successor is coming (another play is active,
+                    // or one is being chosen): the page keeps it then, even
+                    // before that play's view has opened or when it plays in
+                    // mpv's own window (review finding pc-2). Ids and flags only.
                     let _ = app_handle.emit(
                         "playback-ended",
-                        serde_json::json!({
-                            "sourceId": source_id,
-                            "itemKey": completion.item_key.clone(),
-                            "sessionId": completion.session_id.clone(),
-                            "runOver": after == commands::AfterCleanEnd::RunOver,
-                        }),
+                        commands::clean_end_report(&completion, after),
                     );
                 }
             });

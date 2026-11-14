@@ -197,7 +197,7 @@ test('a running embedded play is asked to stop, and waited for, before its windo
     /impl Drop for Session \{\s+fn drop\(&mut self\) \{[\s\S]{0,400}if self\.thread\.is_some\(\) && !self\.stop_and_wait\(self\.patience\) \{/,
   );
   assert.match(session, /^const STOP_PATIENCE: Duration = Duration::from_secs\(5\);$/m);
-  assert.match(session, /thread: Some\(thread\),\s+header_include,\s+patience: STOP_PATIENCE,\s+leftovers: &LEFTOVERS,\s+\};/);
+  assert.match(session, /thread: Some\(thread\),\s+header_include,\s+patience: STOP_PATIENCE,\s+leftovers: &LEFTOVERS,\s+serial: crate::player::new_serial\(\),\s+\};/);
   // Teardown order is field order: what draws goes before what it draws
   // with, and the surface last.
   assert.match(

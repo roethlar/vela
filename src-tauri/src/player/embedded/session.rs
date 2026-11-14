@@ -690,6 +690,8 @@ pub(crate) struct Session {
     /// thread goes if it has not ended by then.
     patience: Duration,
     leftovers: &'static Leftovers,
+    /// Which player this is (`crate::player::PlayerHandle::serial`).
+    serial: u64,
 }
 
 impl Session {
@@ -758,6 +760,7 @@ impl Session {
             header_include,
             patience: STOP_PATIENCE,
             leftovers: &LEFTOVERS,
+            serial: crate::player::new_serial(),
         };
         // On every failure below the session is dropped, which stops the
         // play, waits for it, and keeps it if it will not end (`Drop`).
@@ -801,7 +804,35 @@ impl Session {
             header_include,
             patience: STOP_PATIENCE,
             leftovers: &LEFTOVERS,
+            serial: crate::player::new_serial(),
         }
+    }
+
+    /// A play that runs, as far as anything holding it can tell, until it is
+    /// told to stop, for tests of what holds one.
+    #[cfg(test)]
+    pub(crate) fn for_test_live(session_id: &str) -> Self {
+        let mut play = Self::for_test_running(STOP_PATIENCE, &LEFTOVERS, |stopped| {
+            while !stopped() {
+                std::thread::sleep(Duration::from_micros(50));
+            }
+        });
+        play.session_id = session_id.to_string();
+        play
+    }
+
+    /// The same, that takes a moment to end once told to stop, as a real
+    /// play does.
+    #[cfg(test)]
+    pub(crate) fn for_test_slow_to_stop(session_id: &str) -> Self {
+        let mut play = Self::for_test_running(STOP_PATIENCE, &LEFTOVERS, |stopped| {
+            while !stopped() {
+                std::thread::sleep(Duration::from_micros(50));
+            }
+            std::thread::sleep(Duration::from_millis(200));
+        });
+        play.session_id = session_id.to_string();
+        play
     }
 
     /// A play whose thread runs `body`, for tests of what happens to a
@@ -826,6 +857,7 @@ impl Session {
             header_include: None,
             patience,
             leftovers,
+            serial: crate::player::new_serial(),
         }
     }
 
@@ -845,9 +877,13 @@ impl Session {
         self.shared.wake();
     }
 
-    #[cfg(test)]
+    /// Whether the play has been told to stop.
     pub(crate) fn stop_requested(&self) -> bool {
         self.shared.stop.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn serial(&self) -> u64 {
+        self.serial
     }
 
     /// Whether the play has ended and released everything it held: whether

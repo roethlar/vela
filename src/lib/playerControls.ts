@@ -58,11 +58,47 @@ export function sendPlayerCommand<N extends PlayerCommandName>(
 
 /**
  * Ask for Vela's window to be fullscreen (only for the running play) or not
- * (always). The answer says nothing about what the window did: the
+ * (always). The answer is whether the page holds the player's fullscreen
+ * after the request, as the backend keeps that claim (a refused "on" leaves
+ * it as it was). It says nothing about what the window did: the
  * `window-fullscreen` event does.
  */
-export function setPlayerFullscreen(sessionId: string, on: boolean): Promise<void> {
-  return invoke("player_fullscreen", { sessionId, on });
+export function setPlayerFullscreen(sessionId: string, on: boolean): Promise<boolean> {
+  return invoke<boolean>("player_fullscreen", { sessionId, on });
+}
+
+/** Sends one request for the player's fullscreen; see `fullscreenRequests`. */
+export type FullscreenRequest = (sessionId: string, on: boolean, held: (held: boolean) => void) => void;
+
+/**
+ * The page's requests for the player's fullscreen, through `send`. Each is
+ * sent only once the one before it has been answered, so the backend records
+ * the claim and asks the window in the order the page asked: an "on" still
+ * on its way can never land after the "off" that followed it and leave the
+ * window fullscreen with nobody holding it. The answer of the LAST request
+ * sent is handed to `held`, so the page's claim is the backend's (a refused
+ * "on" drops it); an answer overtaken by a later request is dropped. A
+ * request that fails outright is taken as holding nothing. (Review finding
+ * pc-2.)
+ */
+export function fullscreenRequests(
+  send: (sessionId: string, on: boolean) => Promise<boolean>,
+): FullscreenRequest {
+  let last: Promise<unknown> = Promise.resolve();
+  let latest = 0;
+  return (sessionId, on, held) => {
+    const mine = ++latest;
+    const answer = last.then(() => send(sessionId, on));
+    last = answer.catch(() => undefined);
+    answer.then(
+      (holds) => {
+        if (mine === latest) held(holds === true);
+      },
+      () => {
+        if (mine === latest) held(false);
+      },
+    );
+  };
 }
 
 // ---------------------------------------------------------------------------

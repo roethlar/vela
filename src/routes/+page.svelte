@@ -7,8 +7,13 @@
   import Icon from "$lib/Icon.svelte";
   import ItemDetail from "$lib/ItemDetail.svelte";
   import PlayerView from "$lib/PlayerView.svelte";
-  import { endLeavesPlayerFullscreen, nextPlayerSession, type PlaybackEnd } from "$lib/playerView";
-  import { setPlayerFullscreen } from "$lib/playerControls";
+  import {
+    endLeavesPlayerFullscreen,
+    nextPlayerSession,
+    showingPlayEnded,
+    type PlaybackEnd,
+  } from "$lib/playerView";
+  import { fullscreenRequests, setPlayerFullscreen } from "$lib/playerControls";
   import PlaylistsView from "$lib/PlaylistsView.svelte";
   import ServerPlaylistView from "$lib/ServerPlaylistView.svelte";
   import ServerLogo from "$lib/ServerLogo.svelte";
@@ -44,6 +49,9 @@
   // The playback session whose picture is showing inside this window, when a
   // play runs in the window instead of in a player window of its own.
   let playerSession = $state<string | null>(null);
+  // Whether a report of an end has named that session: its play has ended,
+  // and its view is only waiting to close (`showingPlayEnded`).
+  let playerSessionEnded = false;
   let unlistenWindowFullscreen: (() => void) | undefined;
 
   // Fullscreen for the player. `windowFullscreen` is what the window really
@@ -54,23 +62,22 @@
   // window the user made fullscreen themselves is left alone.
   let windowFullscreen = $state(false);
   let playerAskedFullscreen = false;
-  // The ends reported since the last view closed: a clean end reports two,
-  // the second after the run's successor (if any) has been decided; any
-  // other end reports one, which says whether the run is over.
-  let endsSinceViewClosed = 0;
   let playerFullscreenBackstop: ReturnType<typeof setTimeout> | undefined;
   // How long a play may take to start (the backend's `START_LIMIT` for the
   // in-window player), plus a margin: the backstop against a lost
   // event, never the way fullscreen is normally left.
   const PLAYER_FULLSCREEN_BACKSTOP_MS = 20_000 + 30_000;
+  const requestPlayerFullscreen = fullscreenRequests(setPlayerFullscreen);
 
   function askPlayerFullscreen(on: boolean) {
     const sessionId = playerSession;
     if (on && sessionId === null) return;
     playerAskedFullscreen = on;
     if (!on) clearPlayerFullscreenBackstop();
-    setPlayerFullscreen(sessionId ?? "", on).catch(() => {
-      if (on) playerAskedFullscreen = false;
+    // One request at a time, in order; the claim then becomes what the
+    // backend holds (a refused request gives it up).
+    requestPlayerFullscreen(sessionId ?? "", on, (held) => {
+      playerAskedFullscreen = held;
     });
   }
 
@@ -85,10 +92,11 @@
     playerFullscreenBackstop = undefined;
   }
 
-  // After `player-opened` or `player-closed`: with no view left, the run may
-  // still go on; the backstop leaves fullscreen if nothing ever says so.
-  function playerViewChanged() {
-    endsSinceViewClosed = 0;
+  // After `player-opened` or `player-closed` (`previous` is the view that
+  // showed before): with no view left, the run may still go on; the backstop
+  // leaves fullscreen if nothing ever says so.
+  function playerViewChanged(previous: string | null) {
+    playerSessionEnded = showingPlayEnded(previous, playerSessionEnded, playerSession);
     if (playerSession !== null) {
       clearPlayerFullscreenBackstop();
     } else if (playerAskedFullscreen && !playerFullscreenBackstop) {
@@ -104,17 +112,17 @@
     return continuationsRunning > 0 || continuationSession !== null || sourceChoiceRequest !== null;
   }
 
-  // A play ended. An end that is not clean says so in its one report; the
-  // first report of a clean end comes before the backend has decided on a
-  // successor, so only a later one means the run is over: one that says so
-  // (the successor could not be started), or one with no view showing and
-  // nothing pending here (the rule is in $lib/playerView).
+  // A play ended. A report that says the run is over leaves, unless another
+  // play's view shows; the dispatcher's report of a clean end says whether a
+  // successor is coming, and with none and nothing pending here the run is
+  // over (the rule is in $lib/playerView).
   function playbackEnded(event: { payload: PlaybackEnd }): Promise<unknown> {
-    endsSinceViewClosed++;
+    const end = event.payload ?? {};
+    playerSessionEnded = showingPlayEnded(playerSession, playerSessionEnded, playerSession, end);
     if (
-      endLeavesPlayerFullscreen(event.payload ?? {}, {
+      endLeavesPlayerFullscreen(end, {
         showing: playerSession,
-        endsSinceViewChanged: endsSinceViewClosed,
+        showingEnded: playerSessionEnded,
         continuationPending: continuationPending(),
       })
     ) {
@@ -540,18 +548,20 @@
     // (the rule for them is in $lib/playerView). `playback-ended` is not used
     // for this; it is about the play, not its view, and can fire twice.
     listen<{ sessionId: string }>("player-opened", ({ payload }) => {
+      const previous = playerSession;
       playerSession = nextPlayerSession(playerSession, {
         kind: "opened",
         sessionId: payload.sessionId,
       });
-      playerViewChanged();
+      playerViewChanged(previous);
     }).then((un) => (unlistenPlayerOpened = un));
     listen<{ sessionId: string }>("player-closed", ({ payload }) => {
+      const previous = playerSession;
       playerSession = nextPlayerSession(playerSession, {
         kind: "closed",
         sessionId: payload.sessionId,
       });
-      playerViewChanged();
+      playerViewChanged(previous);
     }).then((un) => (unlistenPlayerClosed = un));
     // What the window really is; the user may leave fullscreen with the
     // compositor's own shortcut, and then Vela no longer holds it.

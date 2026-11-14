@@ -16,6 +16,7 @@ import {
   commandNotice,
   focusKindOf,
   formatTime,
+  fullscreenRequests,
   keyAction,
   nextPlayerState,
   nextSeekBar,
@@ -422,4 +423,81 @@ test('the notice line shows the fixed sentences and nothing that came otherwise'
   ]) {
     assert.equal(commandNotice(odd), 'The player could not do that.', String(odd));
   }
+});
+
+// Review finding pc-2: the page's requests for the player's fullscreen. A
+// fake backend whose answers the test releases by hand, in any order.
+function fakeBackend() {
+  const sent = [];
+  const send = (sessionId, on) =>
+    new Promise((resolve, reject) => {
+      sent.push({ sessionId, on, resolve, reject });
+    });
+  return { sent, send };
+}
+const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+test('fullscreen requests reach the backend one at a time, in the order asked', async () => {
+  const backend = fakeBackend();
+  const request = fullscreenRequests(backend.send);
+  const claims = [];
+  request('a', true, (held) => claims.push(held));
+  request('a', false, (held) => claims.push(held));
+  await settle();
+  // The "off" is not sent while the "on" is unanswered: it cannot overtake
+  // it and land first, leaving the window fullscreen with nobody holding it.
+  assert.deepEqual(backend.sent.map((r) => r.on), [true]);
+  backend.sent[0].resolve(true);
+  await settle();
+  assert.deepEqual(backend.sent.map((r) => r.on), [true, false]);
+  backend.sent[1].resolve(false);
+  await settle();
+  // Only the last request's answer becomes the claim.
+  assert.deepEqual(claims, [false]);
+});
+
+test("the page's claim becomes what the backend answers it holds", async () => {
+  // A refused "on" gives the claim up.
+  let backend = fakeBackend();
+  let request = fullscreenRequests(backend.send);
+  let claims = [];
+  request('a', true, (held) => claims.push(held));
+  await settle();
+  backend.sent[0].resolve(false);
+  await settle();
+  assert.deepEqual(claims, [false]);
+  // A refused "on" while an earlier one is held keeps it (the backend says so).
+  backend = fakeBackend();
+  request = fullscreenRequests(backend.send);
+  claims = [];
+  request('a', true, (held) => claims.push(held));
+  await settle();
+  backend.sent[0].resolve(true);
+  await settle();
+  request('b', true, (held) => claims.push(held));
+  await settle();
+  backend.sent[1].resolve(true);
+  await settle();
+  assert.deepEqual(claims, [true, true]);
+  // A request that fails outright holds nothing, and the next is still sent.
+  backend = fakeBackend();
+  request = fullscreenRequests(backend.send);
+  claims = [];
+  request('a', true, (held) => claims.push(held));
+  await settle();
+  backend.sent[0].reject(new Error('gone'));
+  await settle();
+  assert.deepEqual(claims, [false]);
+  request('a', false, (held) => claims.push(held));
+  await settle();
+  assert.equal(backend.sent.length, 2);
+  // Only `true` holds.
+  backend = fakeBackend();
+  request = fullscreenRequests(backend.send);
+  claims = [];
+  request('a', true, (held) => claims.push(held));
+  await settle();
+  backend.sent[0].resolve('yes');
+  await settle();
+  assert.deepEqual(claims, [false]);
 });
