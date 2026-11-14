@@ -1,5 +1,22 @@
 # Review status
 
+**Embedded player Slice 6 review (the parity tests), 2026-11-14 (open):** codereview codex
+(called plainly; the host's codex config resolves to gpt-6-astra @ max;
+standard) over `ab95c49..ac3e563`: `findings`. Eight candidates, eight
+admitted, none declined. Record:
+`.agents/review/codereview-2026-11-14-embedded-parity.md`.
+
+| ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
+|------|----------|------------------------------------------------------------------------|--------|--------|----------|
+| pa-1 | MEDIUM   | The automatic-skip test passes by ordinary playback, without a skip    | `[ ]`  | — | codex/default/standard |
+| pa-2 | MEDIUM   | The external player's cropping is tested in automatic mode only; the row says off, manual, auto | `[ ]`  | — | codex/default/standard |
+| pa-3 | MEDIUM   | Half of a split row can be deleted and the guard still says the plan's list is all there | `[ ]`  | — | codex/default/standard |
+| pa-4 | MEDIUM   | A timer started through Node's timer modules is not seen by the import watch | `[ ]`  | — | codex/default/standard |
+| pa-5 | MEDIUM   | The verdict takes a known failure that was skipped for one that failed | `[ ]`  | — | codex/default/standard |
+| pa-6 | MEDIUM   | A run can say it built the app it ran when it built elsewhere and ran an older binary | `[ ]`  | — | codex/default/standard |
+| pa-7 | MEDIUM   | Nothing checks that Plex is told the play has stopped                  | `[ ]`  | — | codex/default/standard |
+| pa-8 | LOW      | A name every object has, such as toString, is accepted as a test-only route | `[ ]`  | — | codex/default/standard |
+
 **Embedded player, packaging review, 2026-11-14 (closed 2026-11-14, all six verified):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
 standard) over `2f0d191..4b8293e`: `findings`. Six candidates, six
