@@ -274,3 +274,22 @@ ranking or resolving again is `pw-1`'s (its record, "Not built").
 - Verdict: **reopened**. Comments, verbatim:
   - src-tauri/src/commands.rs:9416 — The carried-screen fallback repair works within the documented placement limits, but round-1's selection-to-fallback guard remains incomplete. This test checks the helper's winner, then launches embedded_spec() with a fixed URL, copying only the destination. Removing `&& version.version_id == winner.version_id` at line 5437 makes production select the first version on the winning source—potentially 4K HDR instead of the ranked 1080p SDR—yet all 661 Rust tests and 20 prescribed Node tests passed. Exercise the production winner-to-selection/resolution handoff and assert that fallback receives the selected version's stream.
   - src-tauri/src/commands.rs:9332 — Guard failures confirmed for forcing Best, dropping the fallback screen, restoring the original embedded-screen mistake, and removing the embedded-successor condition. After restoring all mutations, 661 Rust tests passed (10 ignored) and all 20 prescribed Node tests passed; tracked files are unchanged. Embedded/display and E2E behavior was inspected, not executed.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right.
+The comment is about a guard: the reviewer found the behaviour itself to
+work "within the documented placement limits". It is the second reopen.
+The repair was built with `pw-1`'s (its record, "Repair (round 3)").
+
+### Repair (round 3): `1fa21c6`, `2b8c690`, `ec250c7` (with `pw-1`'s, `c9e7245` to `79384d9`)
+
+*Removing the match on the version's id made production take the first
+version of the winning source, and every test passed.* The step from the
+winner of the ranking to what is played is now two functions,
+`selection_for_winner` and `resolve_selected`, and the fallback's test
+runs both for real: with a 4K HDR version listed first and the 1080p SDR
+one the winner, mpv must be started with the 1080p SDR stream
+(`a_play_the_embedded_player_cannot_start_opens_where_its_copy_was_ranked`).
+Two more tests hold the rest of that step:
+`the_winner_is_selected_by_its_source_and_its_version` and
+`a_selection_is_resolved_with_the_plays_duration_markers_and_quality`.
+How it was made and checked is in `pw-1`'s record.

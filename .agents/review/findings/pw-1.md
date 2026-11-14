@@ -387,3 +387,88 @@ Known gaps, besides the disagreement:
   - tests/player-window-ui.test.mjs:218 — The production ranking connection remains insufficiently guarded. I inserted a shadow PlayScreen in compatibility_target using screens.velas while leaving the selected launch destination untouched. This restores ranking-for-Vela/launching-on-another-screen, yet all 67 prescribed Rust tests and 20 Node tests passed. Exercise the actual target-construction path with injectable display data and require this mutation to fail.
   - src-tauri/src/commands.rs:5693 — The carried-name approach repairs the ordinary moving-Vela and saved-screen cases, and reversing observation names now fails the behavioral guard. I do not require post-resolution reranking or automatic post-open relaunch to close pw-1; the documented hot-unplug/compositor limitation is an acceptable boundary. The pre-resolution identity and connectivity defects above still require repair.
   - src-tauri/src/commands.rs:9172 — Guard proof confirmed: dropping Vela's name, disabling connectivity filtering, reversing observation names, ignoring the saved screen, and dropping the launch screen each failed the corresponding guard. After restoration, all 67 Rust and 20 Node tests passed. Tracked files are restored; embedded playback and E2E were inspected, not run.
+
+Orchestrator: a valid verdict, reopened on six comments, and all six are
+right; the seventh ACCEPTS that nothing ranks, resolves or relaunches
+again after resolution has started, so that disagreement is settled. It is
+the second reopen. `pw-2` was reopened on the same code, on one guard, and
+one repair answers both.
+
+### Repair (round 3): `c9e7245` to `79384d9` (fourteen commits, `pw-2`'s among them)
+
+By the reviewer's comment:
+
+1. and 2. *A connected screen judged not connected when the list of names
+   is incomplete (Wayland when the compositor's list cannot be read; macOS
+   when a monitor's mpv name cannot be worked out).* What is connected is
+   now known only from a list that is COMPLETE in the names mpv may use:
+   Tauri's monitors listed, every one with its mpv name, and in a Wayland
+   session the compositor's list read with a connector name for every
+   output. Otherwise nothing is known and every name is taken as it is, as
+   before the check existed (`c9e7245`; `PlatformOutputs`, `screens_from`).
+   The macOS translation itself is not changed: nothing here can run
+   macOS. An incomplete list still gives a decided screen its own size for
+   the ranking (`3d19f97`, found when the repair was attacked).
+3. *Two screens of one model told apart by size, wrongly under fractional
+   scaling.* The connector is taken only when exactly one output carries
+   the model's name; otherwise the name stays the model's, as before round
+   2 (`a1f48ab`).
+4. *A rotated output ranked for its unrotated size.* The compositor's
+   outputs are given as they are shown, turned by their transform
+   (`5708b4d`).
+5. *The screen frozen before resolution for every policy, against the
+   plan's Slice 1.* Only a Prefer Compatible choice fixes the screen
+   before the stream is resolved, because only it ranks for a screen. For
+   every other policy the screen is decided in the launch, after
+   resolution, by the same function, as for a play in mpv's own window; a
+   play the embedded player cannot start then opens where the last mpv
+   window was, as before round 2. The two cases are two values of one
+   type (`PlayDestination`), and the choice of copy looks at no screen
+   unless the policy is Compatible (`6cb2af8`).
+6. *The ranking's link to the decided screen not held by a test.* The
+   target of a Compatible choice is built by one function a test runs with
+   made-up display data (`compatibility_target_from`, `6d95bc0`); the
+   reviewer's mutation fails four tests.
+
+Also `f0aefb7`: an empty `WAYLAND_DISPLAY` is not a Wayland display for
+the list of outputs. The end-to-end venue runs X11 with that variable
+empty and the session type inherited from the desktop, and rule 1 would
+otherwise have made everything unknown there (`windowsetting` failed until
+this commit).
+
+Files: `src-tauri/src/display.rs`, `src-tauri/src/commands.rs`,
+`tests/player-window-ui.test.mjs`, `tests/player-selection.test.mjs`,
+`tests/e2e/scenarios/windowsetting.mjs`.
+
+**How it was made and checked.** Three helper agents on Opus 5.5: an
+author, an attacker (one defect and four mutations that survived), a
+repairer who fixed all five, each with a test it red-proved. On the final
+content the helpers ran the end-to-end sets: external 10 of 10
+(`playback`, `playlistplay`, `sourcepolicy`, `mergedview`, `multiplex`,
+`windowsetting`, `playerfallback`, `replaceplay`, `exitplay`, `mpvargs`),
+embedded 3 of 3 (`embeddedplay`, `playlistplay`, `embeddedfullscreenend`).
+The coordinating agent read the reports, ran the full check on the
+content that landed (green: 674 Rust tests, 533 Node tests; the two audit
+commands exit as recorded) and landed the commits. It made no red-proofs
+of its own this time: the owner set work on tests aside that day
+(`.agents/decisions.md`, 2026-11-14).
+
+**What changes for a user, against `main` before this repair:**
+
+- Under Best, Fastest and Ask the screen is again read after the stream is
+  resolved, so a late report of where the last mpv window was moves the
+  next window, as the plan says. The title menu's "which version would
+  play" looks at no screen under those policies.
+- A remembered screen is no longer dropped when Vela cannot tell what is
+  connected; it is asked for, and mpv decides, as before round 2.
+- With two screens of one model, Vela's screen is asked for by its model
+  again, so the window may open on the other one, as before round 2.
+- A rotated screen is ranked as it is shown.
+
+Known gaps: macOS and Windows were not compiled or run; no real desktop
+with two screens, a rotated screen or fractional scaling was at hand; on
+macOS with HiDPI screens the connected check may never apply; the HDR
+query's fallback by size still uses the unrotated mode (it predates this
+work); for a play decided at the launch the window's state and its screen
+are read a moment apart; each launch on Wayland makes one round trip to
+the compositor with no limit of its own.

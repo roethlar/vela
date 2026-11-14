@@ -8,8 +8,8 @@ Seven candidates, seven admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| pw-1 | MEDIUM   | The copy is chosen for one screen and the window can open on another   | `[~]`  | `68d6211`, `7b34af2`, `52138d0`, `8526d28`, `eb2f1c2` | codex/default/standard esc:T5(ceiling) |
-| pw-2 | MEDIUM   | A play in the embedded player is ranked for the previous mpv window's screen | `[~]`  | `6bb2db6`, `577fe5b`, `2eb5626`, `fec6128`, `f9acc1f` | codex/default/standard esc:T5(ceiling) |
+| pw-1 | MEDIUM   | The copy is chosen for one screen and the window can open on another   | `[~]`  | `68d6211`, `7b34af2`, `52138d0`, `8526d28`, `eb2f1c2`, `c9e7245`..`79384d9` | codex/default/standard esc:T5(ceiling) |
+| pw-2 | MEDIUM   | A play in the embedded player is ranked for the previous mpv window's screen | `[~]`  | `6bb2db6`, `577fe5b`, `2eb5626`, `fec6128`, `f9acc1f`, `1fa21c6`, `2b8c690`, `ec250c7` | codex/default/standard esc:T5(ceiling) |
 | pw-3 | MEDIUM   | A width and a height never reported together can be carried as the window's size | `[x]`  | `2dd9eb7` | codex/default/standard |
 | pw-4 | MEDIUM   | Quitting Vela waits, without limit, for the settings file to be written | `[x]`  | `5de1305` | codex/default/standard |
 | pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[x]`  | `cbd93ae` | codex/default/standard |
