@@ -499,7 +499,7 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   const passing = (name, shown) => ({ [name]: { status: 'pass', error: null, shown, routes: [] } });
   const run = (player, scenarios, extra = {}) => ({ player, full: true, built: true, head: 'h', dirty: false, scenarios, ...extra });
   const good = {
-    external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'AssertionError: the known text', shown: [] } }),
+    external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'AssertionError: the known text', shown: [], routes: [] } }),
     embedded: run('embedded', { ...passing('a', ['1']), ...passing('b', ['2']) }),
   };
   const checkout = { head: 'h', dirty: false };
@@ -508,12 +508,12 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   assert.equal(verdict(good), '');
   // A failure that is not the known one.
   assert.match(
-    verdict({ ...good, embedded: run('embedded', { ...passing('a', ['1']), b: { status: 'fail', error: 'boom', shown: [] } }) }),
+    verdict({ ...good, embedded: run('embedded', { ...passing('a', ['1']), b: { status: 'fail', error: 'boom', shown: [], routes: [] } }) }),
     /b failed in the embedded player: boom/,
   );
   // The known failure failing differently, or not at all.
   assert.match(
-    verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'other', shown: [] } }) }),
+    verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'other', shown: [], routes: [] } }) }),
     /not with its known failure/,
   );
   assert.match(
@@ -525,7 +525,7 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   assert.equal(verdict({ ...good, external: run('external', { ...passing('a', ['1']), ...passing('b', ['2']) }) }, [race]), '');
   assert.equal(verdict(good, [race]), '');
   assert.match(
-    verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'other', shown: [] } }) }, [race]),
+    verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error: 'other', shown: [], routes: [] } }) }, [race]),
     /not with its known failure/,
   );
   // A known failure counts only when it failed: skipped, or with no status or
@@ -534,7 +534,7 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   const knownAs = (status) =>
     verdict({
       ...good,
-      external: run('external', { ...passing('a', ['1']), b: { status, error: 'AssertionError: the known text', shown: [] } }),
+      external: run('external', { ...passing('a', ['1']), b: { status, error: 'AssertionError: the known text', shown: [], routes: [] } }),
     });
   assert.match(knownAs('skip'), /^b was skipped in the external run, so it has no result there$/m);
   assert.match(knownAs(undefined), /^b has no result in the external run: its status is undefined, neither pass nor fail$/m);
@@ -542,23 +542,28 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   assert.match(knownAs('failed'), /its status is "failed", neither pass nor fail/);
   assert.equal(knownAs('fail'), '');
   // The same for a scenario that is no known failure: only 'pass' passes.
-  const otherAs = (status) =>
-    verdict({ ...good, embedded: run('embedded', { ...passing('b', ['2']), a: { status, error: null, shown: ['1'] } }) });
+  const otherAs = (status, error = null) =>
+    verdict({ ...good, embedded: run('embedded', { ...passing('b', ['2']), a: { status, error, shown: ['1'], routes: [] } }) });
   assert.match(otherAs('skip'), /^a was skipped in the embedded run, so it has no result there$/m);
   assert.match(otherAs(undefined), /^a has no result in the embedded run: its status is undefined, neither pass nor fail$/m);
   assert.match(otherAs('passed'), /^a has no result in the embedded run: its status is "passed", neither pass nor fail$/m);
-  assert.match(otherAs('fail'), /^a failed in the embedded player: null$/m);
+  assert.match(otherAs('fail', 'boom'), /^a failed in the embedded player: boom$/m);
+  // A failure with no error text is not one the runner wrote.
+  assert.match(
+    otherAs('fail'),
+    /^a has a result in the embedded run that the runner does not write: it failed with an error that is not text \(null\)$/m,
+  );
   assert.equal(otherAs('pass'), '');
   // And a known failure counts only as the runner could have written it:
   // its error is text. A list holding the text, the text inside an object,
   // or no error at all is not the known failure seen (review finding pa-5,
   // from its first verification).
   const knownErr = (error) =>
-    verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error, shown: [] } }) });
+    verdict({ ...good, external: run('external', { ...passing('a', ['1']), b: { status: 'fail', error, shown: [], routes: [] } }) });
   for (const error of [['AssertionError: the known text'], [['the known text']], { message: 'the known text' }, null, undefined, 7]) {
     assert.match(
       knownErr(error),
-      /^b failed in the external player, but its error is not text \(.*\): the runner writes text, so this is not its known failure seen$/m,
+      /^b has a result in the external run that the runner does not write: it failed with an error that is not text \(.*\)$/m,
       JSON.stringify(error),
     );
   }
@@ -568,8 +573,75 @@ test('the verdict of two full runs fails on a failure, a missing run, and a row 
   const textShown = { status: 'pass', error: null, shown: '12', routes: [] };
   assert.equal(
     verdict({ ...good, embedded: run('embedded', { a: textShown, b: textShown }) }),
-    'row 1 is shown by no scenario that passed in the embedded run\nrow 2 is shown by no scenario that passed in the embedded run',
+    [
+      'a has a result in the embedded run that the runner does not write: its "shown" is "12", not a list of text',
+      'b has a result in the embedded run that the runner does not write: its "shown" is "12", not a list of text',
+      'row 1 is shown by no scenario that passed in the embedded run',
+      'row 2 is shown by no scenario that passed in the embedded run',
+    ].join('\n'),
   );
+  // From the second verification: a result is judged whole, as the runner
+  // writes it, before it counts for anything. A pass carries no error.
+  const embeddedA = (result) => verdict({ ...good, embedded: run('embedded', { ...passing('b', ['2']), a: result }) });
+  const pass = { status: 'pass', error: null, shown: ['1'], routes: [] };
+  assert.equal(embeddedA(pass), '');
+  assert.match(
+    embeddedA({ ...pass, error: ['scenario failed'] }),
+    /^a has a result in the embedded run that the runner does not write: it passed with an error \(\["scenario failed"\]\), and a pass has none$/m,
+  );
+  assert.match(embeddedA({ ...pass, error: '' }), /it passed with an error \(""\), and a pass has none/);
+  // A `shown` that is no list of text is refused where it stands, also when
+  // another scenario shows the same row: a2 covers row 1 as well as a.
+  const a2 = { name: 'a2', rows: ['1'] };
+  const overlapping = (shown) =>
+    verdictProblems(
+      [a, a2, b],
+      {
+        external: run('external', { ...good.external.scenarios, ...passing('a2', ['1']) }),
+        embedded: run('embedded', { a: { ...pass, shown }, ...passing('a2', ['1']), ...passing('b', ['2']) }),
+      },
+      { inventory, exemptions: [], knownFailures: [known], checkout },
+    ).join('\n');
+  assert.equal(overlapping(['1']), '');
+  for (const shown of ['13', 7, {}, null, [1], ['1', 7]]) {
+    assert.match(
+      overlapping(shown),
+      /^a has a result in the embedded run that the runner does not write: its "shown" is .*, not a list of text$/,
+      JSON.stringify(shown),
+    );
+  }
+  // The same for `routes`, for a result with a part missing or one too many,
+  // and for a pass the runner would have failed: one that does not show a
+  // row it declares, or shows one it does not.
+  assert.match(embeddedA({ ...pass, routes: 'mpvInput' }), /its "routes" is "mpvInput", not a list of text/);
+  const { routes: _noRoutes, ...withoutRoutes } = pass;
+  assert.match(embeddedA(withoutRoutes), /it holds error, shown, status, not status, error, shown and routes/);
+  assert.match(embeddedA({ ...pass, extra: 1 }), /it holds error, extra, routes, shown, status, not status, error, shown and routes/);
+  assert.match(
+    overlapping([]),
+    /^a has a result in the embedded run that the runner does not write: it passed, but it declares row 1 but did not reach the end of its proof in the embedded player \(no shown\('1'\)\): the runner fails such a scenario$/,
+  );
+  assert.match(embeddedA({ ...pass, shown: ['1', '2'] }), /it passed, but it reported row 2 as shown, which it does not declare: the runner fails such a scenario/);
+  assert.match(embeddedA({ ...pass, routes: ['mpvInput'] }), /it passed, but it took the test-only route mpvInput in the embedded player without declaring it/);
+  // A scenario that does not run in a player is named there as skipped, and
+  // as nothing else.
+  const onlyEmbedded = { name: 'c', rows: ['2'], onlyPlayer: 'embedded' };
+  const withC = (external) =>
+    verdictProblems(
+      [a, b, onlyEmbedded],
+      {
+        external: run('external', { ...good.external.scenarios, ...(external === undefined ? {} : { c: external }) }),
+        embedded: run('embedded', { ...good.embedded.scenarios, ...passing('c', ['2']) }),
+      },
+      { inventory, exemptions: [], knownFailures: [known], checkout },
+    ).join('\n');
+  assert.equal(withC({ status: 'skip' }), '');
+  assert.equal(withC(undefined), 'c is not in the external results, which name every scenario, a skipped one too');
+  assert.match(withC({ ...pass, shown: ['2'] }), /^c does not run in the external player, and its result there is not the skip the runner writes: \{"status":"pass"/);
+  assert.match(withC({ status: 'skip', error: 'x' }), /^c does not run in the external player, and its result there is not the skip the runner writes/);
+  assert.match(withC('skip'), /^c does not run in the external player, and its result there is not the skip the runner writes: "skip"$/);
+  // Results that name no commit.
+  assert.match(verdict({ ...good, embedded: run('embedded', good.embedded.scenarios, { head: undefined }) }), /^the embedded results name no commit$/m);
   // Results that are not by scenario name hold none.
   assert.match(verdict({ ...good, embedded: run('embedded', [{ status: 'pass' }]) }), /^the embedded results hold no scenarios by name$/m);
   assert.match(verdict({ ...good, embedded: run('embedded', null) }), /^the embedded results hold no scenarios by name$/m);

@@ -140,6 +140,34 @@ export function recordedTree(start, samples) {
   return { head: start.head, dirty: start.status !== '' || changedDuringRun, changedDuringRun };
 }
 
+// A value from a results file, for a sentence about it: short enough to read.
+const said = (value) => {
+  const text = JSON.stringify(value) ?? String(value);
+  return text.length > 200 ? `${text.slice(0, 200)}…` : text;
+};
+
+// Why `result`, with status 'pass' or 'fail', is not what the runner writes
+// for `scenario` in a run of `player` (run.mjs: status, error, and the
+// proof's shown and routes), as the end of a sentence; null when it is. A
+// pass is also held to the runner's own rule for one: a scenario whose proof
+// has a problem (proofProblems) is failed by the runner, so a pass with such
+// a proof is no result of a run.
+function resultShapeProblem(scenario, player, result) {
+  const keys = Object.keys(result).sort().join(', ');
+  if (keys !== 'error, routes, shown, status') return `it holds ${keys || 'nothing'}, not status, error, shown and routes`;
+  for (const list of ['shown', 'routes']) {
+    if (!Array.isArray(result[list]) || result[list].some((entry) => typeof entry !== 'string')) {
+      return `its "${list}" is ${said(result[list])}, not a list of text`;
+    }
+  }
+  if (result.status === 'fail') {
+    return typeof result.error === 'string' ? null : `it failed with an error that is not text (${said(result.error)})`;
+  }
+  if (result.error !== null) return `it passed with an error (${said(result.error)}), and a pass has none`;
+  const unproven = proofProblems(scenario, player, result);
+  return unproven.length > 0 ? `it passed, but it ${unproven.join('; and it ')}: the runner fails such a scenario` : null;
+}
+
 // Everything wrong with the parity as two full runs showed it, one of each
 // player (`results`: { external, embedded }, each the results file run.mjs
 // writes: { player, full, built, head, dirty, scenarios: { <name>: { status,
@@ -188,6 +216,7 @@ export function verdictProblems(
     if (checkout?.head && run.head !== checkout.head) {
       problems.push(`the ${player} run is of commit ${run.head}, not of the checked-out ${checkout.head}`);
     }
+    if (typeof run.head !== 'string' || run.head === '') problems.push(`the ${player} results name no commit`);
     heads.add(run.head);
     // The runner writes its results by scenario name, in an object. A name
     // is looked up among the object's own only: every object also answers
@@ -199,49 +228,59 @@ export function verdictProblems(
     for (const name of Object.keys(ran)) {
       if (!scenarios.some((s) => s.name === name)) problems.push(`the ${player} results name "${name}", which is no scenario now`);
     }
-    for (const scenario of scenarios.filter((s) => runsIn(s, player))) {
+    // Every scenario's result is judged only as the runner writes it
+    // (run.mjs), whole, before it counts for anything: `{ status: 'skip' }`
+    // for a scenario that does not run in this player; otherwise status
+    // 'pass' or 'fail' with `error` (null for a pass, text for a failure) and
+    // the proof's `shown` and `routes`, both lists of text, and for a pass a
+    // proof the runner itself would have passed. Anything else is a problem
+    // in its own words and counts for nothing: not as a pass, not as a known
+    // failure, not as showing a row (review finding pa-5).
+    const passed = new Map();
+    for (const scenario of scenarios) {
       const result = resultOf(scenario.name);
       const known = knownFailures.find((k) => k.scenario === scenario.name && k.player === player);
-      // Only 'pass' and 'fail' are results of a scenario that ran. Anything
-      // else (a skip, no status, a status nobody writes) is a problem in its
-      // own words, whatever error text it carries: a skipped known failure
-      // that kept its text is not a failure seen (review finding pa-5).
-      if (!result) {
-        problems.push(`${scenario.name} did not run in the ${player} run`);
-      } else if (result.status !== 'pass' && result.status !== 'fail') {
-        problems.push(
-          result.status === 'skip'
-            ? `${scenario.name} was skipped in the ${player} run, so it has no result there`
-            : `${scenario.name} has no result in the ${player} run: its status is ${JSON.stringify(result.status)}, neither pass nor fail`,
-        );
-      } else if (known) {
-        if (result.status === 'pass') {
-          if (!known.intermittent) {
-            problems.push(`${scenario.name} passed in the ${player} player: its known failure is gone; take it out of KNOWN_FAILURES`);
-          }
-        } else if (typeof result.error !== 'string') {
-          // The runner writes a failure's error as text. Anything else that
-          // only turns into text holding the recorded words (a list with the
-          // text in it) is not the known failure seen.
+      const record = result !== null && typeof result === 'object' && !Array.isArray(result);
+      if (!runsIn(scenario, player)) {
+        // A full run names every scenario, the ones it skips too.
+        if (result === undefined) {
+          problems.push(`${scenario.name} is not in the ${player} results, which name every scenario, a skipped one too`);
+        } else if (!record || result.status !== 'skip' || Object.keys(result).length !== 1) {
           problems.push(
-            `${scenario.name} failed in the ${player} player, but its error is not text (${JSON.stringify(result.error)}): the runner writes text, so this is not its known failure seen`,
+            `${scenario.name} does not run in the ${player} player, and its result there is not the skip the runner writes: ${said(result)}`,
           );
-        } else if (!result.error.includes(known.failsWith)) {
-          problems.push(`${scenario.name} failed in the ${player} player, but not with its known failure: ${result.error}`);
         }
-      } else if (result.status === 'fail') {
+      } else if (result === undefined) {
+        problems.push(`${scenario.name} did not run in the ${player} run`);
+      } else if (!record || (result.status !== 'pass' && result.status !== 'fail')) {
+        // Only 'pass' and 'fail' are results of a scenario that ran. A skip,
+        // no status, or a status nobody writes is not a failure seen,
+        // whatever error text it carries.
+        problems.push(
+          record && result.status === 'skip'
+            ? `${scenario.name} was skipped in the ${player} run, so it has no result there`
+            : `${scenario.name} has no result in the ${player} run: its status is ${JSON.stringify(record ? result.status : undefined)}, neither pass nor fail`,
+        );
+      } else if (resultShapeProblem(scenario, player, result)) {
+        problems.push(
+          `${scenario.name} has a result in the ${player} run that the runner does not write: ${resultShapeProblem(scenario, player, result)}`,
+        );
+      } else if (result.status === 'pass') {
+        passed.set(scenario.name, result);
+        if (known && !known.intermittent) {
+          problems.push(`${scenario.name} passed in the ${player} player: its known failure is gone; take it out of KNOWN_FAILURES`);
+        }
+      } else if (!known) {
         problems.push(`${scenario.name} failed in the ${player} player: ${result.error}`);
+      } else if (!result.error.includes(known.failsWith)) {
+        problems.push(`${scenario.name} failed in the ${player} player, but not with its known failure: ${result.error}`);
       }
     }
     for (const { id } of inventory) {
       if (exemptions.some((e) => e.row === id && e.player === player)) continue;
       if (redCoverage(scenarios, id, player, knownFailures).length > 0 && coverage(scenarios, id, player, knownFailures).length === 0) continue;
-      // `shown` is the list the runner writes. Text in its place would match
-      // one row's id inside another's ("12" holds "1" and "2").
-      const showing = coverage(scenarios, id, player, knownFailures).filter((name) => {
-        const result = resultOf(name);
-        return result?.status === 'pass' && Array.isArray(result.shown) && result.shown.includes(id);
-      });
+      // Only a result that stood as a pass above shows a row.
+      const showing = coverage(scenarios, id, player, knownFailures).filter((name) => passed.get(name)?.shown.includes(id));
       if (showing.length === 0) problems.push(`row ${id} is shown by no scenario that passed in the ${player} run`);
     }
   }
