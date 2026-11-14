@@ -230,3 +230,20 @@ green before the commit (483 tests).
 Not covered: as listed above, with half a second in place of two. That
 `run()` passes `positionAtStop`, and the waits for the two reports, are
 still held by end-to-end runs and by the text test only.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 13:43 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da43-1dfa-7e53-ac7b-41a852e5528b`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:33 UTC, finished 13:43 UTC.
+- Reviewed head `d504a1ed8f0a83d6a183ea5bdf8866a253286923`, base
+  `54409079deac906fd16d3eef739d096c1e79c440` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/helpers.mjs:476 — The last reading still need not represent the stop. stopPlayAsUser closes this connection immediately after requesting quit/click/key, then allows 4000 ms for termination; subsequent sampling cannot observe playback during that interval. Neither player guarantees termination within 500 ms. A simulated 900 ms delay using the actual stop helper and MpvIpc produced last/final positions of 7459/8360 ms externally and 7610/8560 ms embedded: correct reports failed, while stale reports passed. start_tracking_plex obtains its final position from an independent observer that can continue receiving updates after this connection closes. Keep observation alive through termination or stabilize playback before sampling, and guard delayed stop handling explicitly.
+  - tests/e2e-judge.test.mjs:495 — The no-late-reading assertion snapshots the count after positionsWhile returns, but that helper awaits its watcher before returning. Removing the watcher’s running check left all 32 tests passing while a probe delivered a reading at 150 ms after the action ended at 120 ms. Assert against action completion inside the callback, including an outstanding read. The allowance, initial-reading, ongoing-reading and wiring mutations did fail their guards; after restoring the pinned code, all 32 tests passed.
