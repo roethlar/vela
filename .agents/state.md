@@ -162,69 +162,42 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   without limit for the settings file; an older window can be saved over a
   newer one; and three smaller ones. All seven are FIXED on `main`
   (`55be8fc` to `ac25240`, ten commits, 2026-11-14; no version change, no
-  release note). Where each stands with codex (2026-11-14, afternoon):
-  `pw-6`, `pw-5`, `pw-4` and `pw-3` accepted and closed. `pw-7` reopened
-  three times: its second repair (`1430f2e`) let a late reply to a save
-  made by a Settings page that has since been closed overwrite a newer
-  choice. That fault is on `main`. Its fourth repair is with codex as a
-  coding task (its record says why it did not go to the owner at the
-  third reopen and when it will). `pw-1` and `pw-2` reopened, both on
-  which screen a Compatible copy is ranked for and opened on; one repair
-  for both LANDED at `52138d0` to `eb2f1c2` (six commits): the screen is
-  decided once, by name, before the copy is chosen. Codex REOPENED both
-  again. `pw-1`, on six points: a screen that is connected can be judged
-  not connected when the list of names is incomplete (Wayland when the
-  compositor's list cannot be read; macOS on HiDPI screens), and the
-  remembered screen is then lost; two screens of one model can be told
-  apart wrongly under fractional scaling; a rotated screen is ranked for
-  its unrotated size; for policies other than Prefer Compatible the
-  screen must again be decided after the stream is resolved, as the
-  plan's Slice 1 says; and one guard. `pw-2`, on one guard. Those faults
-  are on `main`. The next repair is being built by helper agents on the
-  local branch `pw1-r3`.
-  It changes what a user sees in several small ways, listed in `pw-1`'s
-  record ("What changes for a user"); two of them the plan's log had under
-  "Left as they are" (its entry of 2026-11-14 on this repair): the first
-  play of a run is ranked for the saved screen it opens on, and a screen
-  that is not connected sends the window to Vela's screen. It does NOT
-  re-resolve or relaunch a play when the screen changes during resolution
-  or the compositor places the window elsewhere; codex ACCEPTED that limit
-  in its second verdict on `pw-1`. One fix departs on
-  purpose from what was first decided: what a play's end and Vela's exit
-  save is the last window of mpv's own, not the latest play's (`pw-6`'s
-  record says why). Do not release 1.0.64 before codex has accepted them.
+  release note). Where each stands (2026-11-14, evening): `pw-1` to
+  `pw-7` are CLOSED. Codex accepted `pw-3` to `pw-6` at once, and `pw-1`
+  and `pw-2` in their third round, after two joint repairs (`52138d0` to
+  `eb2f1c2`, then `c9e7245` to `79384d9`): a Prefer Compatible copy is
+  ranked for the screen its window is asked to open on, decided once
+  before the ranking; every other policy decides the screen after the
+  stream is resolved, as the plan says; a remembered screen that is
+  known to be gone is passed over for the screen Vela's window is on.
+  What that changes for a user, and its known gaps (no macOS or Windows
+  build, no real second screen), are in `pw-1`'s record. `pw-7` closed on
+  the agent's review of a repair codex wrote (`0cc2e03`: saves of the
+  Player window choice go one at a time). One fix departs on purpose
+  from what was first decided: what a play's end and Vela's exit save is
+  the last window of mpv's own, not the latest play's (`pw-6`'s record
+  says why). Do not release 1.0.64 before the two findings below are
+  closed.
   Two findings were added after the review (its document, "Raised after
-  the intake"). `pw-8`: the scenario `windowsetting` failed about one
-  external run in four, and four of five full runs, and the parity verdict
-  with it. The cause was the scenario, which changed and ended a play
-  before Vela had connected to mpv; fixed at `26660a9`. Codex REOPENED it:
-  the scenario's wait leaves a fault in the product, which is that Vela,
-  when it quits, saves the window before its reader has read all that mpv
-  sent. Its repair is being built by helper agents on the local branch
-  `pw8-r2`: quitting waits, for at most half a second and inside the two
-  seconds it already allows, until the reader has finished. `pw-9`,
-  HALF OPEN: a play whose mpv ends before Vela has connected is not seen
-  to have ended for five seconds, and handed the next play no fullscreen
-  state. Its first half (seeding the opening state, so the next play gets
-  it) is FIXED at `0b313a2`, written by codex and reviewed by the agent;
-  its second half (the reader giving up sooner) changes when tracking
-  gives up for every play and waits for the owner's word.
+  the intake"). `pw-8`: the scenario `windowsetting` used to fail one
+  external run in four; the scenario was fixed (`26660a9`), every other
+  scenario was gone through for the same race (`71395c3`,
+  `.agents/review/pw-8.other-scenarios.md`), and codex then reopened it
+  on a fault in the product: Vela, quitting, saved the window before its
+  reader had read all that mpv sent. Repaired at `0ae5b64` to `bb3b84e`
+  (quitting waits at most half a second, inside the two seconds it
+  already allowed, until the reader has finished) and WITH CODEX. `pw-9`:
+  its first half is fixed (`0b313a2`); its second half (a play whose mpv
+  has already gone is treated as running for five seconds) and the reader
+  dropping lines it had received when a play is cancelled are being
+  fixed by codex as a coding task (worktree `cx-pw9b`), under the owner's
+  word that what is obviously broken is fixed.
   The parity verdict has not passed on `main` since the fixes began to
-  land. Full runs: at `8cf3a05` it failed on `windowsetting` alone; at
-  `26660a9` (with `pw-8` fixed) the external suite was clean but for the
-  two recorded failures, and the embedded one failed `completionhub` once
-  ("timed out waiting for local suppression with the server transition
-  still pending"), which had passed in every other embedded full run that
-  day. That failure has not been looked into; it was on a loaded machine.
-  (The survey for `pw-8`'s race fits it: the scenario let the play run to
-  its end without knowing that Vela's watcher for the end of the file was
-  connected. An inference; the scenario now waits.) At `33ea46a` plus the
-  `cx-race` change, one full run of each suite: external clean but for
-  the recorded own-config failure; embedded clean but for `pagefail` and
-  `mergedview` once, a fault of that scenario's own, fixed at `ad3b82d`.
-  That pair was no verdict: the embedded run did not build its app, and
-  the verdict takes only runs that did. A full run of each suite, each
-  building, and the verdict are owed once the open repairs have landed.
+  land; the runs made along the way are in the records. A full run of
+  each suite, each building its app, and the verdict are being made at
+  `77d4dc3` and are owed again once the fixes still in flight have
+  landed. `embeddedownconfig` is no longer a known failure in the
+  external player (`67536da`); `pagefail` still is, in both.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
