@@ -37,6 +37,29 @@ function readConnections(configRoot) {
   );
 }
 
+// The check of Plex A's timeline reports once the play has stopped (review
+// finding pa-7): of all the requests Plex A received, its /:/timeline ones,
+// printed, must break no rule of plexStopProblems (judge.mjs) for the item
+// played and `lastSeenMs`, mpv's position just before the stop. Exported for
+// tests/e2e-judge.test.mjs, which calls it on recorded requests, so that what
+// the scenario hands the rules is held as well as the rules.
+export function assertPlexStopped(requests, lastSeenMs) {
+  const timelines = requests.filter((request) => request.path === '/:/timeline');
+  const detail = JSON.stringify(timelines.map((request) => request.query));
+  console.log(`Plex A timeline reports: ${detail}`);
+  assert.deepEqual(
+    plexStopProblems(timelines.map((request) => request.query), {
+      lastSeenMs,
+      durationMs: 10000, // the item's duration in the mock
+      ratingKey: '1',
+      key: '/library/metadata/1',
+      seekMs: 6000, // playAndQuit's seek
+    }),
+    [],
+    `Plex A's timeline reports tell it the play was playing, and where it stopped: ${detail}`,
+  );
+}
+
 async function openContextMenu(driver) {
   await driver.exec(
     `const el = document.querySelector('button.poster[aria-label^="${TITLE}"]');
@@ -279,27 +302,15 @@ export default {
     // a little for timing) and at most 2 s later, and before the 10 s clip
     // ends, so a report at the item's full duration (which tells Plex it was
     // watched to the end) fails. The rules are plexStopProblems's (judge.mjs),
-    // held by unit tests; this waits for the report and asks it.
+    // held by unit tests; this waits for the report and asks them through
+    // assertPlexStopped, held by unit tests too.
     await pollUntil(
       () => mockA.state.requests.find(
         (request) => request.path === '/:/timeline' && request.query.state === 'stopped',
       ),
       'the final "stopped" timeline report to reach Plex A',
     );
-    const timelines = mockA.state.requests.filter((request) => request.path === '/:/timeline');
-    const detail = JSON.stringify(timelines.map((request) => request.query));
-    console.log(`Plex A timeline reports: ${detail}`);
-    assert.deepEqual(
-      plexStopProblems(timelines.map((request) => request.query), {
-        lastSeenMs,
-        durationMs: 10000, // the item's duration in the mock
-        ratingKey: '1',
-        key: '/library/metadata/1',
-        seekMs: 6000, // playAndQuit's seek
-      }),
-      [],
-      `Plex A's timeline reports tell it the play was playing, and where it stopped: ${detail}`,
-    );
+    assertPlexStopped(mockA.state.requests, lastSeenMs);
 
     // Plex B has no media behind its part: Vela's check of the stream before
     // it starts a player is answered 404, so this choice persists its

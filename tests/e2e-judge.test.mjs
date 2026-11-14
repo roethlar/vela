@@ -7,6 +7,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { plexStopProblems, skipJumpVerdict } from './e2e/judge.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
+import { assertPlexStopped } from './e2e/scenarios/multiplex.mjs';
 
 // markers.mjs's rule: the play resumed from 1 s ahead of a range at 2-12 s,
 // a 5000 ms window, a 1 s margin past the range's start.
@@ -308,6 +309,69 @@ test('pa-7: a "playing" report further on than the stop fails', () => {
   assert.deepEqual(judgeStop([report('playing', 8000), report('stopped', 7458)]), [
     'no report says the play got further than its final position',
   ]);
+});
+
+test('pa-7: a stop at exactly the seek passes, and a duration only equal as a number fails', () => {
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6000)], 6000), [], 'a stop at exactly the 6000 ms seek');
+  for (const duration of ['10000.0', '1e4']) {
+    assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458, { duration })]), [
+      `the stopped report carries the item's duration (10000 ms), not ${duration}`,
+    ]);
+  }
+});
+
+test('pa-7: any report further on than the stop fails, by a millisecond, or after it', () => {
+  assert.deepEqual(judgeStop([report('playing', 7459), report('stopped', 7458)]), [
+    'no report says the play got further than its final position',
+  ]);
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7458), report('playing', 8000)]), [
+    'the stopped report comes last',
+    '"playing" reports, and only those, come before it',
+    'no report says the play got further than its final position',
+  ]);
+});
+
+// multiplex.mjs's assertPlexStopped, on requests as Plex A's mock records
+// them: the scenario must hand the rules its timeline reports only, the
+// item's facts and the position it read, and fail on any sentence.
+const request = (path, query) => ({ path, query, tokenPresent: true, tokenMatches: true });
+const requestsOf = (playing, stopped, extra = {}) => [
+  request('/library/metadata/1', {}),
+  request('/:/timeline', report('playing', playing)),
+  // The final progress report, which is no timeline report: it says
+  // "stopped" too, further on, and must not be judged with them.
+  request('/:/progress', { state: 'stopped', time: '9999', key: '1' }),
+  request('/:/timeline', report('stopped', stopped, extra)),
+];
+
+test('pa-7: the multiplex scenario passes the reports of a play stopped where it was seen, and prints them', (t) => {
+  const logged = [];
+  t.mock.method(console, 'log', (line) => logged.push(line));
+  assertPlexStopped(requestsOf(4916, 7458), 7458);
+  // The position it is handed is the one judged: a play seen at 9800 ms
+  // and stopped there passes too.
+  assertPlexStopped(requestsOf(4916, 9800), 9800);
+  assert.deepEqual(logged, [
+    `Plex A timeline reports: ${JSON.stringify([report('playing', 4916), report('stopped', 7458)])}`,
+    `Plex A timeline reports: ${JSON.stringify([report('playing', 4916), report('stopped', 9800)])}`,
+  ]);
+});
+
+test('pa-7: the multiplex scenario fails the swap, and a stop away from the position it read', (t) => {
+  t.mock.method(console, 'log', () => {});
+  assert.throws(
+    () => assertPlexStopped(requestsOf(4916, 10000, { duration: '7458' }), 7458),
+    (error) =>
+      error instanceof assert.AssertionError &&
+      error.message.startsWith("Plex A's timeline reports tell it the play was playing, and where it stopped: ") &&
+      JSON.stringify(error.actual) === JSON.stringify([WHERE(10000), "the stopped report carries the item's duration (10000 ms), not 7458"]),
+    'the swap the first fix let through',
+  );
+  assert.throws(
+    () => assertPlexStopped(requestsOf(4916, 7458), 9800),
+    (error) => error instanceof assert.AssertionError && JSON.stringify(error.actual) === JSON.stringify([WHERE(7458, 9800)]),
+    'a stop 2342 ms short of where mpv was read',
+  );
 });
 
 test("pa-7: a position of mpv's that was not read, or a time that is no number, fails", () => {
