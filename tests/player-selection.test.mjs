@@ -31,11 +31,23 @@ function functionBody(source, signature, what) {
 test('every play chooses its player from the setting and what can run', () => {
   const body = functionBody(commands, 'async fn play_by_key_locked(', 'play_by_key_locked');
   // What is wanted: the launch's own player when it replaces a running play,
-  // otherwise the saved setting.
+  // otherwise the saved setting. Read once, from the settings the copy is
+  // chosen with, so that a Compatible choice is made for the screen that
+  // player shows the play on (review finding pw-2), and carried to the
+  // launch.
+  const select = functionBody(commands, 'async fn select_playback_version(', 'select_playback_version');
+  assert.match(
+    select,
+    /let upcoming_player =\s+player\.unwrap_or_else\(\|\| crate::player::PlayerKind::from_setting\(cfg\.player\.as_deref\(\)\)\);/,
+  );
+  assert.equal(select.split('player: upcoming_player,').length - 1, 2, 'both ready selections carry it');
+  assert.match(select, /playback_compatibility_target\(state, replace_session, upcoming_player, &cfg\)/);
   assert.match(
     body,
-    /let wanted_player = match player \{\s+Some\(kind\) => kind,\s+None => crate::player::PlayerKind::from_setting\(\s+config::load_config\(\)[\s\S]{0,160}\.player\s+\.as_deref\(\),\s+\),\s+\};/,
+    /let selection = select_playback_version\(\s+state,\s+item,\s+replace_session,\s+explicit_source_id,\s+prior_affinity\.as_deref\(\),\s+server_owned,\s+player,\s+\)\s+\.await\?;/,
   );
+  assert.match(body, /let wanted_player = selection\.player;/);
+  assert.doesNotMatch(body, /from_setting\(/, 'the play path reads the player setting once, with the copy');
   // Whether the embedded player can run is asked only for a play that wants
   // it (the answer comes from the window), and asked of the real host.
   assert.match(
@@ -184,14 +196,16 @@ test('once a play has installed its session, only the launch-failure path ends i
     '}',
   ]);
 
-  // The player setting is read before anything is resolved or installed.
-  const read = body.indexOf('let wanted_player = match player {');
+  // The player setting is read before anything is resolved or installed: by
+  // the choice of copy (review finding pw-2), whose answer carries it.
+  const read = body.indexOf('let selection = select_playback_version(');
   const resolved = body.indexOf('let resolved = match selection.version_id.as_deref() {');
   assert.notEqual(read, -1, 'the play must read which player is wanted');
   assert.notEqual(resolved, -1, 'the play must still resolve its stream');
   assert.ok(read < resolved, 'the player setting is read before the stream is resolved');
   assert.ok(read < from, 'and before anything is installed');
-  assert.equal(body.indexOf('let wanted_player', read + 1), -1, 'and only once');
+  assert.equal(body.indexOf('let selection = select_playback_version(', read + 1), -1, 'and only once');
+  assert.equal(body.split('let wanted_player').length - 1, 1, 'and bound once');
 });
 
 test('a fallback is explained once, and only by a play that started', () => {
@@ -416,7 +430,7 @@ test('only a play that started writes the window record, in one place', () => {
     // Settings shows the display the latest play observed.
     /let observed = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\)\s+\.latest\(\)\s+\.map\(\|session\| session\.observation\.display_snapshot\(\)\);/g,
     // A Compatible choice is made for that display.
-    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+compatibility_display\(&current, replace_session\)\s+\};/g,
+    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+compatibility_display\(&current, replace_session, upcoming\)\s+\};/g,
     // The launch opens its window from it.
     /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+opening_window\(&current, first_of_run\)\s+\};/g,
     // The end callback hands the play's window to the settings.

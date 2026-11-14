@@ -1000,7 +1000,7 @@ async fn selected_version_for(
     source_id: &str,
     raw_item_key: &str,
 ) -> Option<String> {
-    match select_playback_version(state, item, None, None, None, false).await {
+    match select_playback_version(state, item, None, None, None, false, None).await {
         Ok(PlaybackSelectionOutcome::Ready { selection, .. }) => {
             // Only when the policy picked the very copy being described. For a
             // multi-copy title the menu asks per copy, and the policy's winner
@@ -4821,6 +4821,9 @@ struct PlaybackSelection {
     raw_item_key: String,
     version_id: Option<String>,
     item: ItemDto,
+    /// The player the play asks for (`select_playback_version`), read with
+    /// the settings the copy was chosen with.
+    player: crate::player::PlayerKind,
 }
 
 enum PlaybackSelectionOutcome {
@@ -4908,28 +4911,38 @@ fn completion_watch_backings(completion: &PlaybackCompletion) -> Vec<BackingRef>
     backings
 }
 
-/// The display a Compatible choice is made for, as a play observed it.
-/// A play opens its mpv window on the screen the last external play's window
-/// was on (`inherited_screen_name`), so that play counts for every play.
-/// The latest play, when it was embedded, counts only for its exact automatic
-/// successor. Nothing returned means the display holding Vela's window.
+/// The display a Compatible choice is made for: the screen the coming play
+/// will be shown on, as a play observed it (review finding pw-2). Nothing
+/// returned means the display holding Vela's window.
+///
+/// A play that will run in mpv's own window opens it on the screen the last
+/// external play's window was on (`inherited_screen_name`), so that play
+/// counts. A play that will run in the embedded player is shown in Vela's
+/// window, whatever external window came before; the one exception is the
+/// exact automatic successor of an embedded play, which counts that play's
+/// observation.
 fn compatibility_display(
     record: &PlaybackWindowRecord,
     replace_session: Option<&str>,
+    upcoming: crate::player::PlayerKind,
 ) -> Option<display::ObservedDisplay> {
-    record
-        .latest()
-        .filter(|latest| {
+    match upcoming {
+        crate::player::PlayerKind::External => record.last_external(),
+        crate::player::PlayerKind::Embedded => record.latest().filter(|latest| {
             latest.player == crate::player::PlayerKind::Embedded
                 && replace_session == Some(latest.session_id.as_str())
-        })
-        .or(record.last_external())
-        .map(|session| session.observation.display_snapshot())
+        }),
+    }
+    .map(|session| session.observation.display_snapshot())
 }
 
+/// What a Compatible choice ranks for. `upcoming` is the player the play
+/// asks for; should an embedded play fall back to mpv's own window when it
+/// starts, its copy has been chosen for Vela's screen.
 async fn playback_compatibility_target(
     state: &AppState,
     replace_session: Option<&str>,
+    upcoming: crate::player::PlayerKind,
     cfg: &config::AppConfig,
 ) -> Result<Option<crate::selection::CompatibilityTarget>, PlayFailure> {
     let Some(app) = state.app_handle.get() else {
@@ -4940,7 +4953,7 @@ async fn playback_compatibility_target(
             .playback_window_session
             .lock()
             .unwrap_or_else(|error| error.into_inner());
-        compatibility_display(&current, replace_session)
+        compatibility_display(&current, replace_session, upcoming)
     };
     let detected = display::detect_profile(app, observed).await;
     let overrides = playback_display_overrides(cfg).map_err(PlayFailure::fatal)?;
@@ -5052,12 +5065,22 @@ async fn select_playback_version(
     explicit_source_id: Option<&str>,
     affinity_source_id: Option<&str>,
     server_owned: bool,
+    player: Option<crate::player::PlayerKind>,
 ) -> Result<PlaybackSelectionOutcome, PlayFailure> {
     const PROBE_TIMEOUT: Duration = Duration::from_secs(20);
 
     let cfg = config::load_config().map_err(|_| {
         PlayFailure::fatal("couldn't read the saved playback preferences".to_string())
     })?;
+    // Which player the play asks for: `player` when it is an automatic
+    // relaunch, which stays in the player it replaces, otherwise the user's
+    // setting. Read here, from the settings this choice is made with,
+    // because a Compatible choice is made for the screen that player shows
+    // the play on (review finding pw-2). This is before anything is resolved
+    // or installed, so a settings file that cannot be read fails the play
+    // while there is still nothing to undo (review finding sel-1).
+    let upcoming_player =
+        player.unwrap_or_else(|| crate::player::PlayerKind::from_setting(cfg.player.as_deref()));
     let policy = crate::selection::PlaybackSourcePolicy::from_config(
         cfg.playback_source_policy.as_deref(),
     )
@@ -5165,6 +5188,7 @@ async fn select_playback_version(
             raw_item_key: raw,
             version_id: None,
             item: selected_item,
+            player: upcoming_player,
             }),
             ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
         });
@@ -5213,7 +5237,7 @@ async fn select_playback_version(
         }
     }
     let target = if policy == crate::selection::PlaybackSourcePolicy::Compatible {
-        playback_compatibility_target(state, replace_session, &cfg).await?
+        playback_compatibility_target(state, replace_session, upcoming_player, &cfg).await?
     } else {
         None
     };
@@ -5239,6 +5263,7 @@ async fn select_playback_version(
             raw_item_key,
             version_id: Some(version.version_id),
             item: selected_item,
+            player: upcoming_player,
         }),
         ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
     })
@@ -5350,6 +5375,7 @@ async fn play_by_key_locked(
         explicit_source_id,
         prior_affinity.as_deref(),
         server_owned,
+        player,
     )
     .await?;
     let (selection, ask_mode) = match selection {
@@ -5411,21 +5437,14 @@ async fn play_by_key_locked(
     let skip_policies = SkipPolicies::load()?;
     let include_markers = skip_policies.any_enabled();
     // Which player this play asks for: the one it replaces when it is an
-    // automatic relaunch, otherwise the user's setting. Read HERE, before
-    // anything is resolved or installed: a settings file that cannot be read
-    // then fails the play while there is still nothing to undo. Past the point
-    // where the session is installed, the only way out is the launch-failure
-    // path at the end of this function, which undoes it (review finding
-    // sel-1).
-    let wanted_player = match player {
-        Some(kind) => kind,
-        None => crate::player::PlayerKind::from_setting(
-            config::load_config()
-                .map_err(|_| PlayFailure::fatal("could not read Vela settings".to_string()))?
-                .player
-                .as_deref(),
-        ),
-    };
+    // automatic relaunch, otherwise the user's setting. Read once, by the
+    // choice of copy above, before anything is resolved or installed: a
+    // settings file that cannot be read then fails the play while there is
+    // still nothing to undo. Past the point where the session is installed,
+    // the only way out is the launch-failure path at the end of this
+    // function, which undoes it (review finding sel-1). The copy was chosen
+    // for the screen this player shows the play on (review finding pw-2).
+    let wanted_player = selection.player;
     // How this play's window opens if it is the first external play of this
     // run: the player window setting. Read here for the same reason as the
     // player above; used only when this run has no window of its own yet.
@@ -8383,45 +8402,70 @@ mod tests {
 
     #[test]
     fn a_compatible_choice_follows_the_screen_the_play_opens_on() {
+        use crate::player::PlayerKind::{Embedded, External};
         let names = |observed: Option<display::ObservedDisplay>| observed.map(|value| value.names);
-        let external = published([observed_window_session(
-            "last",
-            crate::player::PlayerKind::External,
-        )]);
+        let external = published([observed_window_session("last", External)]);
         assert_eq!(
-            names(compatibility_display(&external, None)),
+            names(compatibility_display(&external, None, External)),
             Some(vec!["DP-1".to_string()]),
             "a manual play opens on the last window's screen, so it is chosen for that one"
         );
         assert_eq!(
-            names(compatibility_display(&external, Some("other"))),
+            names(compatibility_display(&external, Some("other"), External)),
             Some(vec!["DP-1".to_string()])
         );
-        let embedded = published([observed_window_session(
-            "embedded",
-            crate::player::PlayerKind::Embedded,
-        )]);
+        let embedded = published([observed_window_session("embedded", Embedded)]);
         assert_eq!(
-            names(compatibility_display(&embedded, Some("embedded"))),
+            names(compatibility_display(&embedded, Some("embedded"), Embedded)),
             Some(vec!["DP-1".to_string()]),
             "an embedded play's exact successor keeps its observed display"
         );
-        assert_eq!(compatibility_display(&embedded, None), None);
-        assert_eq!(compatibility_display(&embedded, Some("stale")), None);
-        assert_eq!(compatibility_display(&PlaybackWindowRecord::default(), None), None);
-        // An embedded play after an external one: the next play's window
-        // opens on the external play's screen, so that is the one it counts.
+        assert_eq!(compatibility_display(&embedded, None, Embedded), None);
+        assert_eq!(compatibility_display(&embedded, Some("stale"), Embedded), None);
+        assert_eq!(
+            compatibility_display(&embedded, None, External),
+            None,
+            "no mpv window yet in this run: the next one opens on Vela's screen"
+        );
+        assert_eq!(
+            compatibility_display(&PlaybackWindowRecord::default(), None, External),
+            None
+        );
+        // An embedded play after an external one: the next play in mpv's
+        // window opens on the external play's screen, so that is the one it
+        // counts; the next embedded play is shown in Vela's window.
         let both = published([
             windowed_session("external"),
-            observed_window_session("embedded", crate::player::PlayerKind::Embedded),
+            observed_window_session("embedded", Embedded),
         ]);
         assert_eq!(
-            names(compatibility_display(&both, None)),
+            names(compatibility_display(&both, None, External)),
             Some(vec!["HDMI-1".to_string()])
         );
         assert_eq!(
-            names(compatibility_display(&both, Some("embedded"))),
+            names(compatibility_display(&both, Some("embedded"), External)),
+            Some(vec!["HDMI-1".to_string()])
+        );
+        assert_eq!(
+            names(compatibility_display(&both, Some("embedded"), Embedded)),
             Some(vec!["DP-1".to_string()])
+        );
+        assert_eq!(compatibility_display(&both, None, Embedded), None);
+    }
+
+    #[test]
+    fn an_embedded_play_is_ranked_for_the_screen_holding_velas_window() {
+        // Review finding pw-2, the reviewer's case: the last play ran in
+        // mpv's own window on DP-1, and the user's next play will run in the
+        // embedded player, inside Vela's window. It is ranked for the screen
+        // that holds Vela's window (nothing observed), not for DP-1.
+        let external = published([observed_window_session(
+            "external",
+            crate::player::PlayerKind::External,
+        )]);
+        assert_eq!(
+            compatibility_display(&external, None, crate::player::PlayerKind::Embedded),
+            None
         );
     }
 
