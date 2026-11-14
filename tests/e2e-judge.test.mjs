@@ -9,6 +9,7 @@ import test from 'node:test';
 import { acceptedConnections, plexStopProblems, skipJumpVerdict } from './e2e/judge.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
 import { assertPlexStopped } from './e2e/scenarios/multiplex.mjs';
+import { positionsWhile } from './e2e/helpers.mjs';
 
 // markers.mjs's rule: the play resumed from 1 s ahead of a range at 2-12 s,
 // a 5000 ms window, a 1 s margin past the range's start.
@@ -272,13 +273,13 @@ const GOOD = [report('playing', 4916), report('stopped', 7458)];
 const judgeStop = (reports, lastSeenMs = 7458) => plexStopProblems(reports, { ...ITEM, lastSeenMs });
 // (lastSeenMs is 7458 unless given, undefined included.)
 const WHERE = (time, ...seen) =>
-  `the stopped report's position (${time} ms) is where the play stopped: mpv was at ${seen.length > 0 ? seen[0] : 7458} ms ` +
-  'just before the stop, and the item ends at 10000 ms';
+  `the stopped report's position (${time} ms) is where the play stopped: mpv was last seen at ${seen.length > 0 ? seen[0] : 7458} ms ` +
+  'as it was stopped, and the item ends at 10000 ms';
 
 test('pa-7: the reports of a play stopped where it was seen pass', () => {
   assert.deepEqual(judgeStop(GOOD), []);
   // Several "playing" reports, and a stop a moment after mpv was read.
-  assert.deepEqual(judgeStop([report('playing', 1000), report('playing', 4916), report('stopped', 9000)], 7458), []);
+  assert.deepEqual(judgeStop([report('playing', 1000), report('playing', 4916), report('stopped', 7900)], 7458), []);
 });
 
 test("pa-7: the stopped report's time and duration swapped fails", () => {
@@ -294,10 +295,13 @@ test('pa-7: a stopped report away from where the play stopped fails', () => {
   assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6458)]), [WHERE(6458)], 'one second early');
   assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6957)]), [WHERE(6957)], 'just over 500 ms early');
   assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 6958)]), [], '500 ms early is allowed');
-  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 9459)]), [WHERE(9459)], 'more than 2 s late');
-  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 9458)]), [], '2 s late is allowed');
-  // At the item's end, though within 2 s of where mpv was.
-  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 10000)], 8500), [WHERE(10000, 8500)], "at the item's end");
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7959)]), [WHERE(7959)], 'just over 500 ms late');
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 7958)]), [], '500 ms late is allowed');
+  // The reviewer's case: a stop that acted at once, and a report a second
+  // and a half on, which a two-second allowance let through.
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 8958)]), [WHERE(8958)], '1.5 s late');
+  // At the item's end, though within 500 ms of where mpv was.
+  assert.deepEqual(judgeStop([report('playing', 4916), report('stopped', 10000)], 9700), [WHERE(10000, 9700)], "at the item's end");
 });
 
 test('pa-7: no stopped report, two, or one that is not last fails', () => {
@@ -424,7 +428,7 @@ test('pa-7: the multiplex scenario fails the swap, and a stop away from the posi
 test("pa-7: a position of mpv's that was not read, or a time that is no number, fails", () => {
   for (const lastSeenMs of [null, undefined, NaN]) {
     assert.deepEqual(plexStopProblems(GOOD, { ...ITEM, lastSeenMs }), [
-      `the play's position just before the stop was read from mpv, not ${lastSeenMs}`,
+      `the play's position as it was stopped was read from mpv, not ${lastSeenMs}`,
       WHERE(7458, lastSeenMs),
     ]);
   }
@@ -439,6 +443,104 @@ test("pa-7: a position of mpv's that was not read, or a time that is no number, 
     WHERE('soon'),
     'no report says the play got further than its final position',
   ]);
+});
+
+// The position the stopped report is held to is read all through the stop
+// (helpers.mjs, positionsWhile; review finding pa-7, verification round 1).
+// A stand-in for mpv whose play goes on at one second per second from
+// `fromMs`, and which can stop answering.
+function playingStandIn(fromMs, { goneAfterMs = Infinity } = {}) {
+  const started = Date.now();
+  return {
+    getProp(name) {
+      assert.equal(name, 'time-pos');
+      const elapsed = Date.now() - started;
+      if (elapsed > goneAfterMs) return new Promise(() => {});
+      return Promise.resolve((fromMs + elapsed) / 1000);
+    },
+  };
+}
+const after = (ms, value) => new Promise((resolve) => setTimeout(() => resolve(value), ms));
+
+test('pa-7: the position is read all through a stop that takes long, and the report is held to the last reading', async (t) => {
+  t.mock.method(console, 'log', () => {});
+  // The reviewer's case: the play is at 7458 ms when the stop begins, the
+  // embedded view's controls take 2250 ms to come up, and the play is
+  // stopped, correctly, about 9700 ms in.
+  const readings = [];
+  const result = await positionsWhile(playingStandIn(7458), () => after(2250, 'stopped'), (seconds) => readings.push(Math.round(seconds * 1000)));
+  assert.equal(result, 'stopped', 'what the action returns is returned');
+  const last = readings.at(-1);
+  assert.ok(readings.length >= 20, `it read all through: ${readings.length} readings`);
+  assert.ok(readings[0] < 7600, `from the start of the stop: the first reading is ${readings[0]}`);
+  assert.ok(last >= 9558 && last <= 9758, `to its end: the last reading is ${last}, within 150 ms of where the stop acted`);
+  // A correct report at the stop passes against the last reading, and would
+  // not against a reading taken before the stop began.
+  assertPlexStopped(requestsOf(4916, 9717), last);
+  assert.throws(() => assertPlexStopped(requestsOf(4916, 9717), 7458), assert.AssertionError);
+});
+
+test('pa-7: reading the position ends with the stop, when mpv has gone, and when the stop fails', async () => {
+  // mpv stops answering 300 ms in; the stop takes 800 ms: the readings end
+  // where mpv was last heard, and the wait is the stop's, not a read's.
+  const readings = [];
+  const started = Date.now();
+  await positionsWhile(playingStandIn(7000, { goneAfterMs: 300 }), () => after(800), (seconds) => readings.push(Math.round(seconds * 1000)));
+  const took = Date.now() - started;
+  assert.ok(readings.length >= 3 && readings.at(-1) <= 7300, `the readings end where mpv was last heard: ${readings.at(-1)}`);
+  assert.ok(took < 1500, `the wait is the stop's (800 ms), not a read's: ${took} ms`);
+  // Nothing is handed over once the action has ended.
+  const late = [];
+  await positionsWhile(playingStandIn(7000), () => after(120), (seconds) => late.push(seconds));
+  const count = late.length;
+  await after(200);
+  assert.equal(late.length, count, 'no reading arrives after the action has ended');
+  // A stop that ends the play at once, and the connection with it (the
+  // external player's: mpv's own quit), still has the reading taken before
+  // it began.
+  let gone = false;
+  const startedAt = Date.now();
+  const quits = {
+    getProp: () => (gone ? new Promise(() => {}) : Promise.resolve((7458 + (Date.now() - startedAt)) / 1000)),
+  };
+  const atOnce = [];
+  await positionsWhile(
+    quits,
+    () => {
+      gone = true;
+      return after(100);
+    },
+    (seconds) => atOnce.push(Math.round(seconds * 1000)),
+  );
+  assert.deepEqual(atOnce.length, 1, `one reading, taken before the stop began: ${JSON.stringify(atOnce)}`);
+  assert.ok(atOnce[0] >= 7458 && atOnce[0] < 7558, `where the play was then: ${atOnce[0]}`);
+  // A stop that fails is not swallowed, and the reading stops with it.
+  await assert.rejects(positionsWhile(playingStandIn(7000), () => after(50).then(() => Promise.reject(new Error('the stop failed'))), () => {}), /the stop failed/);
+});
+
+// And the wiring: playAndQuit reads through its stop when asked, and
+// multiplex asks.
+test('pa-7: multiplex has the position read through the stop of its play', () => {
+  const helpers = fs.readFileSync(new URL('./e2e/helpers.mjs', import.meta.url), 'utf8');
+  const quit = helpers.slice(helpers.indexOf('export async function playAndQuit('), helpers.indexOf('\n}\n', helpers.indexOf('export async function playAndQuit(')));
+  assert.equal(
+    quit.split(
+      "    const stop = () => stopPlayAsUser(driver, mpv, socketPath, 'the play', { key });\n" +
+        '    if (positionAtStop) await positionsWhile(mpv, stop, positionAtStop);\n' +
+        '    else await stop();\n',
+    ).length,
+    2,
+    'playAndQuit stops the play once, reading its position through the stop when asked',
+  );
+  assert.equal(quit.split('stopPlayAsUser(').length, 2, 'and stops it nowhere else');
+  const multiplex = fs.readFileSync(new URL('./e2e/scenarios/multiplex.mjs', import.meta.url), 'utf8');
+  assert.equal(
+    multiplex.split('      positionAtStop: (seconds) => {\n        lastSeenMs = Math.round(seconds * 1000);\n      },\n').length,
+    2,
+    'multiplex keeps the last reading',
+  );
+  assert.equal(multiplex.split('lastSeenMs = ').length, 3, 'and sets it nowhere else (its declaration apart)');
+  assert.equal(multiplex.split('assertPlexStopped(mockA.state.requests, lastSeenMs);').length, 2, 'and judges the stopped report against it');
 });
 
 // windowsetting.mjs waits until Vela itself is connected to a play's mpv

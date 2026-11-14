@@ -404,15 +404,51 @@ export async function openDetailAndPlay(driver, cardSelector) {
   await driver.click(play);
 }
 
+// Runs `action()` and, while it runs, reads the play's position every
+// `everyMs` and hands each reading (seconds) to `onPosition`, so that the
+// last one handed over is where the play was when the action ended, however
+// long it took. A read that fails, or does not answer within `readMs` (mpv
+// has gone), hands nothing over; nothing is handed over once the action has
+// ended. Returns what the action returns, and throws what it throws.
+export async function positionsWhile(mpv, action, onPosition, { everyMs = 50, readMs = 300 } = {}) {
+  const read = () =>
+    Promise.race([
+      mpv.getProp('time-pos').catch(() => null),
+      new Promise((resolve) => setTimeout(() => resolve(null), readMs)),
+    ]);
+  // One reading before the action begins: an action that ends the play at
+  // once (the external player's stop is mpv's own quit, and this connection
+  // is closed with it) leaves no time for another.
+  const first = await read();
+  if (typeof first === 'number') onPosition(first);
+  let running = true;
+  const watching = (async () => {
+    while (running) {
+      await new Promise((resolve) => setTimeout(resolve, everyMs));
+      const t = await read();
+      if (running && typeof t === 'number') onPosition(t);
+    }
+  })();
+  try {
+    return await action();
+  } finally {
+    running = false;
+    await watching;
+  }
+}
+
 // Run `start()` (whatever triggers playback), then drive the resulting mpv
 // session: seek to 6s, let Vela observe it, stop it as its user would
 // (stopPlayAsUser; `key` picks the embedded view's key over its Close
 // control), and prove the stop acted. Returns the first time-pos sample
 // observed after load (the resume-position evidence).
 // `during(mpv)`, if given, runs once the play has progressed, before the seek.
-// `beforeStop(mpv)`, if given, runs after the seek has been observed, just
-// before the stop: the last moment the play's position can be read.
-export async function playAndQuit(driver, start, { key = null, during = null, beforeStop = null } = {}) {
+// `positionAtStop(seconds)`, if given, is handed the play's position as it
+// is read all through the stop (positionsWhile), so that the last value it
+// gets is where the play was when the stop acted, however long the stop
+// took: in the embedded player the view's controls can take seconds to come
+// up, and the play goes on meanwhile.
+export async function playAndQuit(driver, start, { key = null, during = null, positionAtStop = null } = {}) {
   const before = mpvSocketSnapshot();
   await start();
   const socketPath = await waitForNewMpvSocket(before).catch(async (err) => {
@@ -436,8 +472,9 @@ export async function playAndQuit(driver, start, { key = null, during = null, be
     if (during) await during(mpv);
     await mpv.setProp('time-pos', 6);
     await new Promise((r) => setTimeout(r, 1500)); // let Vela observe ≥6s
-    if (beforeStop) await beforeStop(mpv);
-    await stopPlayAsUser(driver, mpv, socketPath, 'the play', { key });
+    const stop = () => stopPlayAsUser(driver, mpv, socketPath, 'the play', { key });
+    if (positionAtStop) await positionsWhile(mpv, stop, positionAtStop);
+    else await stop();
   } finally {
     mpv.close();
   }

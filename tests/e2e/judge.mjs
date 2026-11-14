@@ -68,7 +68,8 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
 // What is wrong with the timeline reports Plex received for one play that was
 // stopped (review finding pa-7; multiplex.mjs): `reports` are the query
 // objects of the play's /:/timeline requests, in the order they came;
-// `lastSeenMs` is the play's position read from mpv just before the stop;
+// `lastSeenMs` is the play's position as last read from mpv while it was
+// being stopped (the scenario reads it all through the stop);
 // `seekMs` the position the play was sent to before it; `durationMs`,
 // `ratingKey` and `key` the item's. One sentence per broken rule, none when
 // all is well:
@@ -76,8 +77,10 @@ export function skipJumpVerdict(samples, { startS, rangeStart, rangeEnd, windowM
 // - before the last there is at least one report, and all say "playing";
 // - the stopped report names the item (its ratingKey, and its key);
 // - its time is past the seek and inside the item;
-// - its time is where the play stopped: no earlier than lastSeenMs - 500, no
-//   later than lastSeenMs + 2000 (the stop takes a moment, never seconds),
+// - its time is where the play stopped: within 500 ms of lastSeenMs, either
+//   way (the last reading is at most a moment before the stop acted; an
+//   allowance of seconds once let a stop that took long fail and a report
+//   that was late pass, verification round 1),
 //   and before the item's end (a report at the full duration tells Plex it
 //   was watched to the end); lastSeenMs must have been read;
 // - it carries the item's duration;
@@ -105,12 +108,12 @@ export function plexStopProblems(reports, { lastSeenMs, durationMs, ratingKey, k
     );
   }
   if (!Number.isFinite(lastSeenMs)) {
-    problems.push(`the play's position just before the stop was read from mpv, not ${lastSeenMs}`);
+    problems.push(`the play's position as it was stopped was read from mpv, not ${lastSeenMs}`);
   }
-  if (!(finalMs >= lastSeenMs - 500 && finalMs <= lastSeenMs + 2000 && finalMs < durationMs)) {
+  if (!(finalMs >= lastSeenMs - 500 && finalMs <= lastSeenMs + 500 && finalMs < durationMs)) {
     problems.push(
-      `the stopped report's position (${report.time} ms) is where the play stopped: mpv was at ${lastSeenMs} ms ` +
-        `just before the stop, and the item ends at ${durationMs} ms`,
+      `the stopped report's position (${report.time} ms) is where the play stopped: mpv was last seen at ${lastSeenMs} ms ` +
+        `as it was stopped, and the item ends at ${durationMs} ms`,
     );
   }
   if (report.duration !== String(durationMs)) {

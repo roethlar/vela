@@ -40,7 +40,8 @@ function readConnections(configRoot) {
 // The check of Plex A's timeline reports once the play has stopped (review
 // finding pa-7): of all the requests Plex A received, its /:/timeline ones,
 // printed, must break no rule of plexStopProblems (judge.mjs) for the item
-// played and `lastSeenMs`, mpv's position just before the stop. Exported for
+// played and `lastSeenMs`, mpv's position as last read while the play was
+// being stopped. Exported for
 // tests/e2e-judge.test.mjs, which calls it on recorded requests, so that what
 // the scenario hands the rules is held as well as the rules.
 export function assertPlexStopped(requests, lastSeenMs) {
@@ -240,10 +241,11 @@ export default {
           assert.ok(!/x-plex-token/i.test(text), `the player's ${what} must carry no token header`);
         }
       },
-      // Where the play is just before it is stopped: the stopped report's
-      // position is checked against it below.
-      beforeStop: async (mpv) => {
-        lastSeenMs = Math.round((await mpv.getProp('time-pos')) * 1000);
+      // Where the play is as it is stopped, read all through the stop: the
+      // last reading is the one the stopped report's position is checked
+      // against below.
+      positionAtStop: (seconds) => {
+        lastSeenMs = Math.round(seconds * 1000);
       },
     });
     // On the wire: the player fetched the stream itself (GET; Vela's own
@@ -298,8 +300,8 @@ export default {
     // seeks to 6 s and stops a moment later, inside the 10 s clip, so that
     // position is between 6 and 10 s, and no "playing" report may come later
     // or say more. And it is where the play stopped, not the item's end: no
-    // earlier than mpv's position read just before the stop (lastSeenMs, less
-    // a little for timing) and at most 2 s later, and before the 10 s clip
+    // more than half a second from mpv's position as last read while the play
+    // was being stopped (lastSeenMs), either way, and before the 10 s clip
     // ends, so a report at the item's full duration (which tells Plex it was
     // watched to the end) fails. The rules are plexStopProblems's (judge.mjs),
     // held by unit tests; this waits for the report and asks them through
