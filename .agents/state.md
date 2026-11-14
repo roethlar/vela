@@ -80,8 +80,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       notice) and one is red in the EXTERNAL player because of a defect
       these tests found there (Blockers, "own mpv configuration"). The
       rest of Slice 6 is the switch-on, which is the owner's. Its codex
-      review: `.agents/review/index.md`. Notes kept from the work:
-      `.agents/plans/embedded-player.slice6-notes.md`.
+      review returned EIGHT findings, `pa-1` to `pa-8`, all admitted, all
+      about tests that can pass without what they stand for
+      (`.agents/review/codereview-2026-11-14-embedded-parity.md`); until
+      they are fixed the verdict's word on rows 2, 8a and 9 is weaker than
+      it reads. They are being fixed on two local branches of this clone,
+      `pa-guard` and `pa-scen` (worktrees under
+      `~/dev/vela-agent-keep/wt/`), not on `main`, not pushed. Notes kept
+      from the work: `.agents/plans/embedded-player.slice6-notes.md`.
     The owner's by-eye checks and the switch-on (Settings control, release
     notes, version bump) are NOT the agent's to do.
   - Active review loop: see `.agents/review/index.md`. Two findings are
