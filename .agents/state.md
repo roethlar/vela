@@ -53,11 +53,19 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       against a real `unsquashfs` (in a container; `pk-1`'s record).
     - Slice 5, controls and cropping, LANDED at `3d2fef6`; see the plan's
       log. Its codex review returned TWO findings, both admitted and fixed
-      (`a909c20`, `4118fea`). codex verified `pc-1` and REOPENED `pc-2`: a
-      quality step-down whose replacement fails to start still left the
-      window fullscreen for 50 seconds. Its repair landed at `c872dad` and
-      is with codex (`.agents/review/findings/pc-2.md`, "Repair (round
-      2)"). The slice's cropping script is built under
+      (`a909c20`, `4118fea`). codex verified `pc-1` and has REOPENED
+      `pc-2` TWICE: a play that replaces another and then fails to start
+      can still leave the window fullscreen for 50 seconds. The second
+      repair (`c872dad`, on `main`) closed the order of events the reviewer
+      first named and left four others, which the reviewer then named. A
+      third repair is being written on the local branch `pc-2-r3`, on a
+      different rule: what the page is told after a failed launch is
+      decided from the app's state at that moment (nothing playing, no play
+      active, the page holding the player's fullscreen), not from which
+      reports of a play's end happened to come first. If the reviewer
+      reopens it a third time, stop and bring it to the owner, as `ps-2`
+      was (`.agents/review/findings/pc-2.md`). The slice's cropping script
+      is built under
       an assumption the owner has not ruled on: the plan's "For the
       owner", item 3.
     - Slice 6 (parity) is next, being written since the evening of
