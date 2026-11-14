@@ -1,7 +1,7 @@
 # pk-1: checking an AppImage runs it
 
 **Severity**: HIGH — `check-package.sh` asks an AppImage to unpack itself, which runs the program inside the file. Whoever checks an AppImage they did not build runs whatever it contains, with their own rights, even when only asking whether the set is absent. On the path `scripts/build.sh` takes, the AppImage is the builder's own.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `53f2ecd`, `3d1593e`, `e3ac36e`
 
@@ -130,3 +130,22 @@ nor squashfs-tools.
 
 Still not covered: an `unsquashfs` older than 4.5.1, and any version but
 the one above.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 03:28 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d80e-d267-7ba0-80db-4971e147a1a5`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 03:16 UTC, finished 03:22 UTC.
+- Reviewed head `e3ac36eaef3524f0e4e266f2d99076d9894cc9ad`, base
+  `2f6f84cf0f8cbfbd3c26baa22debc47311da62cd` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

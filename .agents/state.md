@@ -44,9 +44,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       review returned SIX findings, `pk-1` to `pk-6`, all admitted and
       fixed on `main` (`53f2ecd` to `1348782`: thirteen commits, three of
       them for defects found while the fixes were attacked). codex has
-      verified `pk-2` to `pk-5`; it reopened `pk-1` and `pk-6`, each for a
-      case with a symbolic link, and both are repaired (`e3ac36e`,
-      `b26f6b6`) and back with codex: `.agents/review/index.md`. Since
+      verified all six; it had reopened `pk-1` and `pk-6`, each for a case
+      with a symbolic link, and accepted their repairs (`e3ac36e`,
+      `b26f6b6`): `.agents/review/index.md`. That review is closed. Since
       those commits the check never runs an AppImage, and it loads a
       package's library only when the package holds, byte for byte, the
       set named with `--set`. The AppImage reading has been run once

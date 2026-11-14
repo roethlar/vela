@@ -1,7 +1,7 @@
 # pk-6: a temporary directory with a space in its name fails a good package
 
 **Severity**: MEDIUM — with `TMPDIR` set to a path containing a space, the isolation step reads the wrong part of each line of `/proc/self/maps` and reports the set's own libraries as foreign. A correct package fails, and with it an opt-in build.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `25fb666`, `a60f802`, `b26f6b6` (and `3e008bf`)
 
@@ -121,3 +121,22 @@ The full check was run at the repair's content before the second direction
 was added to the test (577 Rust tests; `npm audit` fails on `main` for a
 reason of its own, see `.agents/state.md`, Blockers); after that addition,
 the packaging test file alone.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 03:28 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d814-0ee2-7300-8626-4cfd498ea47e`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 03:22 UTC, finished 03:27 UTC.
+- Reviewed head `b26f6b6c3cfe2f500fdc1c2edabfcce0cf93b1dc`, base
+  `fbe6cab682587f7100dc78d5ddd6ed1c41380335` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. No comments.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.

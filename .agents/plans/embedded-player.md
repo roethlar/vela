@@ -1736,3 +1736,21 @@ replacement fails to start. The old play reports while the replacement is
 installed and says the run goes on; the failure is then only logged, and
 the window stays fullscreen until the 50-second backstop. Its repair is
 being written on the local branch `pc-2-r2`.
+
+### 2026-11-14 — the packaging review is closed: all six verified
+
+codex accepted `pk-2`, `pk-3`, `pk-4` and `pk-5` as they stood, each with
+its guard seen to fail and pass. It reopened two, each for a case with a
+symbolic link that the fix had not thought of:
+
+- `pk-1`: an AppImage named through a link was refused, because the link
+  and not the image was measured. Repaired at `e3ac36e`.
+- `pk-6`: a temporary directory without a line break in its name that is a
+  link to one with a line break passed the refusal. Repaired at `b26f6b6`.
+
+It accepted both repairs. The run this log said was still owed has been
+made: the whole packaging test file against a real `unsquashfs`
+(squashfs-tools 4.7.4, in a container), 188 of 188 with none skipped, and
+the real-squashfs test fails when the image is read from the wrong place.
+CI still runs none of these tests (`.agents/state.md`, Blockers).
+
