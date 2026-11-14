@@ -372,6 +372,16 @@ test('pa-7: the multiplex scenario fails the swap, and a stop away from the posi
     (error) => error instanceof assert.AssertionError && JSON.stringify(error.actual) === JSON.stringify([WHERE(7458, 9800)]),
     'a stop 2342 ms short of where mpv was read',
   );
+  // The seek it hands the rules is playAndQuit's 6000 ms: a stop short of
+  // it fails even where mpv was read.
+  assert.throws(
+    () => assertPlexStopped(requestsOf(4916, 5900), 5900),
+    (error) =>
+      error instanceof assert.AssertionError &&
+      JSON.stringify(error.actual) ===
+        JSON.stringify(['the stopped report carries the final position, past the 6000 ms seek and inside the 10000 ms item, not 5900']),
+    'a stop short of the seek',
+  );
 });
 
 test("pa-7: a position of mpv's that was not read, or a time that is no number, fails", () => {
