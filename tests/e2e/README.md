@@ -18,6 +18,12 @@ npm run e2e -- --embedded      # the same suite, played in the embedded player
   message of the `src-tauri/Cargo.toml` package's binary, path as printed),
   wherever the environment or a Cargo configuration sent it. It stops when no
   such message arrives or more than one executable claims to be the app.
+  Standard output is consumed only when it matches a documented Cargo JSON
+  message: `compiler-artifact`, `compiler-message`, `build-script-executed`,
+  or `build-finished`. The unused compiler and build-script messages are
+  consumed too; `json-render-diagnostics` renders diagnostics on inherited
+  standard error. Every other line is echoed, including JSON with an unknown
+  reason or a malformed Cargo envelope.
 - A run with `--skip-build` builds nothing, so nothing reports an artifact. It
   starts a prediction: `<target_directory>/debug/<the app package's binary>`,
   with `target_directory` from `cargo metadata` asked in `src-tauri/` with the
@@ -29,8 +35,14 @@ npm run e2e -- --embedded      # the same suite, played in the embedded player
   environment is refused. Such a run is recorded as not built.
 - The runner prints the path it runs and where the path came from, and
   records both in the results file (`appBinary`, `appBinaryFrom`).
-- Every session starts that one path: the WebDriver client (`driver.mjs`) is
-  made with it and starts nothing else. When the path was found, its device,
+- Every Driver session starts that one path: the runner sets it once through
+  `driver.mjs`, using the immutable result issued by `locateAppBinary`.
+  A second setting or an object not issued by the locator throws, as does a
+  session before registration. All instances share it, including a second
+  driver imported under another name or made with another path. The slot
+  lives with the locator, so even another URL of the driver module shares
+  it. Subclasses and callers cannot replace an instance's `newSession`.
+  When the path was found, its device,
   inode, size and modification time were noted; before each session starts
   (a restart included), the client checks them again and refuses to start a
   file that was written over or put in its place since.
@@ -264,7 +276,17 @@ has ended and checked before every session starts. It does not prove that
 nothing replaced the file in the moment between Cargo writing it and that
 note, or between a check and the app's start, nor that a change which kept
 all four (the same size and modification time, written in place) did not
-happen. A results file is read only as the runner writes one: exactly its
+happen.
+
+The shared driver selection and file checks hold at run time. Text checks
+still pin the runner's one locator call with its environment and build
+commands, registration before scenarios, and the result fields it records.
+Code that bypasses Driver and sends its own HTTP request can still start another app; the literal `/session` and `tauri:options` text check is only a tripwire.
+The WebDriver server accepts an application in a session request; the client
+module cannot constrain a separate HTTP client, and replacing global `fetch`
+would not cover Node's other HTTP APIs.
+
+A results file is read only as the runner writes one: exactly its
 names at the top, each of its kind (and no two that the runner cannot write
 together), and every scenario's result whole: a skip and nothing else for a
 scenario that does not run in that player, otherwise a pass or a failure

@@ -8,7 +8,6 @@ import test from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { appBinaryFromMetadata, appCommands, appExecutableFromMessages, appIdentity, locateAppBinary, MESSAGE_FORMAT_ARG } from './e2e/app-binary.mjs';
-import { Driver } from './e2e/driver.mjs';
 import { MpvIpc, mpvSocketSnapshot, setScenarioConfigRoot, socketOfScenario } from './e2e/mpv.mjs';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -273,22 +272,45 @@ test("a build that fails, or prints no report from Cargo, gives no app binary (p
 // descriptors 1 and 2, as Cargo does: in a sandbox that refuses sockets,
 // what Node's console and process.stdout wrote to the piped standard output
 // never arrived.
+// The four documented Cargo envelopes, also observed in Cargo 1.99.1's real
+// output (an offline crate with a build script and an unused-variable warning).
+function cargoReport(manifest, executable, status) {
+  const common = {
+    package_id: `path+file://${manifest}#vela@0.0.0`,
+    manifest_path: manifest,
+    target: { kind: ['bin'], crate_types: ['bin'], name: 'vela', src_path: `${manifest}/../src/main.rs`, edition: '2021', doc: true, doctest: false, test: true },
+  };
+  return [
+    { reason: 'compiler-message', ...common, message: { message: 'a warning', code: null, level: 'warning', spans: [], children: [], rendered: 'warning: a warning\n' } },
+    { reason: 'build-script-executed', package_id: common.package_id, linked_libs: [], linked_paths: [], cfgs: [], env: [['PA6_PROBE', '1']], out_dir: '/t/out' },
+    { reason: 'compiler-artifact', ...common, profile: { opt_level: '0', debuginfo: 2, debug_assertions: true, overflow_checks: true, test: false }, features: [], filenames: [executable], executable, fresh: false },
+    { reason: 'build-finished', success: status === '0' },
+  ];
+}
+const otherBuildOutput = [
+  'vite: building for production',
+  '{"vite":"a JSON line without a reason"}',
+  '{"reason":"dependency-warning","message":"a non-Cargo diagnostic"}',
+  // A familiar reason alone is not a Cargo envelope either.
+  ...['compiler-message', 'compiler-artifact', 'build-script-executed', 'build-finished'].map((reason) => JSON.stringify({ reason, message: 'not a Cargo envelope' })),
+];
 const fakeBuild = `
 const { writeSync } = require('node:fs');
 const [manifest, executable, status] = process.argv.slice(1);
 const out = (line) => writeSync(1, line + '\\n');
-out('vite: building for production');
-out('{"vite":"a JSON line without a reason"}');
-out(JSON.stringify({ reason: 'compiler-artifact', manifest_path: manifest, target: { kind: ['bin'], name: 'vela' }, executable }));
-out(JSON.stringify({ reason: 'build-finished', success: status === '0' }));
+const cargoReport = ${cargoReport.toString()};
+const other = ${JSON.stringify(otherBuildOutput)};
+for (const line of other.slice(0, 3)) out(line);
+for (const message of cargoReport(manifest, executable, status)) out(JSON.stringify(message));
+for (const line of other.slice(3)) out(line);
 writeSync(2, 'DIAG: rendered by the build\\n');
 process.exit(Number(status));
 `;
-function fakeBuildCommands(dir, status) {
+function fakeBuildCommands(dir, status, executable = '/t/debug/vela') {
   const appManifest = path.join(dir, 'app/Cargo.toml');
   return {
     appManifest,
-    build: { command: process.execPath, args: ['-e', fakeBuild, appManifest, '/t/debug/vela', String(status)], cwd: dir },
+    build: { command: process.execPath, args: ['-e', fakeBuild, appManifest, executable, String(status)], cwd: dir },
   };
 }
 
@@ -313,7 +335,7 @@ test("a build's other output reaches the terminal: its standard output's other l
     assert.equal(located.appBinary, '/t/debug/vela');
     assert.deepEqual(
       echoed,
-      ['vite: building for production', '{"vite":"a JSON line without a reason"}'],
+      otherBuildOutput,
       "every line of standard output that is not one of Cargo's messages is echoed",
     );
     // Standard error is the terminal's: seen from a child process, whose
@@ -336,6 +358,45 @@ test("a build's other output reaches the terminal: its standard output's other l
   }
 });
 
+test('non-Cargo JSON with a reason, including malformed Cargo envelopes, is echoed (pa-6)', async () => {
+  const { dir } = twoManifests();
+  try {
+    const echoed = [];
+    await locateAppBinary({ skipBuild: false, env: process.env, commands: fakeBuildCommands(dir, 0), echo: (line) => echoed.push(line) });
+    for (const line of otherBuildOutput.slice(2)) {
+      assert.ok(echoed.includes(line), `non-Cargo JSON with a reason disappeared: ${line}`);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+for (const reason of ['compiler-message', 'compiler-artifact', 'build-script-executed', 'build-finished']) {
+  test(`Cargo's ${reason} output is consumed, not echoed (pa-6)`, async () => {
+    const { dir, app } = twoManifests();
+    try {
+      const echoed = [];
+      await locateAppBinary({ skipBuild: false, env: process.env, commands: fakeBuildCommands(dir, 0), echo: (line) => echoed.push(line) });
+      const message = cargoReport(app, '/t/debug/vela', '0').find((m) => m.reason === reason);
+      assert.ok(!echoed.includes(JSON.stringify(message)), `${reason} was echoed as non-Cargo output`);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
+
+test('the app artifact is found among mixed Cargo and non-Cargo output (pa-6)', async () => {
+  const { dir } = twoManifests();
+  try {
+    const located = await locateAppBinary({ skipBuild: false, env: process.env, commands: fakeBuildCommands(dir, 0), echo: () => {} });
+    assert.equal(located.appBinary, '/t/debug/vela', 'mixed output lost the app artifact');
+    assert.equal(located.built, true);
+    assert.equal(located.appBinaryFrom, "cargo's report of this run's build");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // The real project: Cargo asked as a --skip-build run asks it, with
 // CARGO_TARGET_DIR set and without.
 test('a --skip-build run asks Cargo about the real project, and CARGO_TARGET_DIR moves the answer (pa-6)', async (t) => {
@@ -352,28 +413,19 @@ test('a --skip-build run asks Cargo about the real project, and CARGO_TARGET_DIR
   assert.equal(moved.appBinary, '/nowhere/vela-target/debug/vela');
 });
 
-// The runner starts exactly the path locateAppBinary returned. The driver is
-// made with that result and keeps it where nothing else can change it; its
-// newSession takes no path, and refuses to start a file that is no longer the
-// one located (the test after this one). What is left to the runner's text is
-// pinned here, because earlier forms of this test let other paths through: a
-// session started with a path of its own in a nested call, the
-// target-directory variables taken out of Cargo's environment, a parameter of
-// runScenario whose default re-bound the name, a computed method name, a
-// different driver module, a scenario starting a session of its own, and an
-// open-ended accepted form that let any expression follow it. So each
-// accepted form is a whole statement or a closed expression, occurs exactly as
-// many times as it does today, and no other mention of the names it carries
-// is allowed anywhere in the runner; and no harness module other than the
-// driver can make a WebDriver session or a Driver.
-test('the runner starts the one path locateAppBinary returned, and builds nothing itself (pa-6)', () => {
+// Runtime owns session selection, regardless of the caller's names. Text
+// checks retain only the runner's build/environment, registration and results
+// wiring, plus a tripwire for literal WebDriver requests outside the driver.
+// The latter cannot prevent code making its own HTTP request (README, Parity).
+test("the runner registers and records locateAppBinary's result, and builds nothing itself (pa-6)", () => {
   const run = fs.readFileSync(path.join(repoRoot, 'tests/e2e/run.mjs'), 'utf8');
   const count = (text) => run.split(text).length - 1;
   const forms = [
     ["import { appCommands, locateAppBinary } from './app-binary.mjs';", 1],
-    ["import { Driver } from './driver.mjs';", 1],
+    ["import { Driver, setRunApp } from './driver.mjs';", 1],
     ['let located;', 1],
-    ['located = Object.freeze(await locateAppBinary({ skipBuild, env: process.env, commands: appCommands(repoRoot) }));', 1],
+    ['located = await locateAppBinary({ skipBuild, env: process.env, commands: appCommands(repoRoot) });', 1],
+    ['setRunApp(located);', 1],
     ['const { appBinary, built, appBinaryFrom } = located;', 1],
     ['if (!fs.existsSync(appBinary)) {', 1],
     [
@@ -381,8 +433,6 @@ test('the runner starts the one path locateAppBinary returned, and builds nothin
       1,
     ],
     ['console.log(`e2e: running ${appBinary} (from ${appBinaryFrom})`);', 1],
-    ['const driver = new Driver(driverUrl, located);', 1],
-    ['await driver.newSession();', 2],
     ['        built,\n        appBinary,\n        appBinaryFrom,\n        ...tree,\n', 1],
   ];
   let rest = run;
@@ -390,14 +440,15 @@ test('the runner starts the one path locateAppBinary returned, and builds nothin
     assert.equal(count(form), times, `the runner has \`${form}\` exactly ${times} time(s)`);
     rest = rest.split(form).join('');
   }
-  for (const word of ['appBinary', 'located', 'locateAppBinary', 'appCommands', 'newSession', 'Driver', 'driver\\.mjs', 'app-binary\\.mjs']) {
+  for (const word of ['appBinary', 'located', 'locateAppBinary', 'appCommands', 'setRunApp', 'app-binary\\.mjs']) {
     assert.doesNotMatch(rest, new RegExp(`\\b${word}\\b`), `${word.replace(/\\/g, '')} appears in the runner only in the accepted forms`);
   }
   assert.doesNotMatch(rest, /\bbuilt\s*[:=]/, '`built` is recorded only as located says');
   assert.doesNotMatch(run, /['"`]cargo['"`]|['"`]build['"`]/, 'the runner runs no Cargo and no build of its own');
   assert.doesNotMatch(run, /target\/debug|['"`]target['"`]|['"`]debug['"`]/, 'the runner puts no target directory together itself');
-  // Only the driver makes a WebDriver session or a Driver; scenarios may use
-  // Driver.KEY.
+  assert.ok(run.indexOf('setRunApp(located);') < run.indexOf('const { err, proof } = await runScenario(scenario, tauriDriverBin);'), 'the app is registered before scenarios run');
+  // Literal protocol requests outside Driver are suspicious; this is not a
+  // security boundary. New Driver objects and newSession calls are safe now.
   const e2eDir = path.join(repoRoot, 'tests/e2e');
   const modules = fs
     .readdirSync(e2eDir, { recursive: true })
@@ -406,64 +457,203 @@ test('the runner starts the one path locateAppBinary returned, and builds nothin
   for (const file of modules) {
     const text = fs.readFileSync(path.join(e2eDir, file), 'utf8');
     assert.doesNotMatch(text, /\/session\b|tauri:options/, `${file} makes no WebDriver session of its own`);
-    if (file !== 'run.mjs') {
-      assert.doesNotMatch(text, /new\s+Driver\b|\bDriver\s*\.\s*prototype\b|\bnewSession\b/, `${file} makes no driver and starts no session`);
-    }
   }
 });
 
-// What the driver starts: the path it was made with, whatever newSession is
-// given, and only while that path is the file it was when it was located.
-// fetch is replaced here, so no driver or socket is involved.
-test('the driver starts only the app it was made with, and not once the file was replaced (pa-6)', async () => {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'vela-pa6-driver-'));
-  const realFetch = globalThis.fetch;
+// Each case is a fresh process: the run app has no reset API, including for
+// tests. All imports in that process share the real driver module, and fetch
+// is stubbed before any session, so no server, display or socket is involved.
+function driverCase(source) {
+  const { dir } = twoManifests();
   try {
     const app = path.join(dir, 'vela');
-    // Each replacement below changes one part of the file's identity only:
-    // the modification time is put back to this whole second after each
-    // write (a time set to the second is kept exactly, to the nanosecond).
-    const when = new Date(1_700_000_000_000);
-    const write = (file, text) => {
-      fs.writeFileSync(file, text, { mode: 0o755 });
-      fs.utimesSync(file, when, when);
-    };
-    write(app, 'the reported build');
-    const sent = [];
-    globalThis.fetch = async (url, init) => {
-      sent.push(JSON.parse(init.body));
-      return new Response(JSON.stringify({ value: { sessionId: `s${sent.length}` } }), { status: 200 });
-    };
-    const located = { appBinary: app, identity: appIdentity(app) };
-    const driver = new Driver('http://driver.invalid', located);
-    await driver.newSession();
-    assert.deepEqual(
-      sent.map((body) => body.capabilities.alwaysMatch['tauri:options'].application),
-      [app],
-      'the session starts the path the driver was made with',
-    );
-    await assert.rejects(driver.newSession('/tmp/old-vela'), /newSession takes no path/, 'a path handed to newSession is refused');
-    await assert.rejects(new Driver('http://driver.invalid').newSession(), /made without an app to start/);
-    // Written over in place with other contents: the same inode and time, a
-    // new size.
-    write(app, 'an older build, of another size');
-    await assert.rejects(driver.newSession(), /is not the file it was when the run located it/, 'a file written over (a new size) is refused');
-    // Put in its place: the same size and time, a new inode.
-    const again = new Driver('http://driver.invalid', { appBinary: app, identity: appIdentity(app) });
-    write(`${app}.other`, 'an older build, of another size');
-    fs.renameSync(`${app}.other`, app);
-    await assert.rejects(again.newSession(), /is not the file it was when the run located it/, 'a file put in its place (a new inode) is refused');
-    // The same inode and size, touched: a new modification time.
-    const touched = new Driver('http://driver.invalid', { appBinary: app, identity: appIdentity(app) });
-    fs.utimesSync(app, new Date(0), new Date(0));
-    await assert.rejects(touched.newSession(), /is not the file it was when the run located it/, 'a file with a new modification time is refused');
-    fs.rmSync(app);
-    await assert.rejects(touched.newSession(), /now no file/);
-    assert.equal(sent.length, 1, 'nothing refused reached the driver');
+    const old = path.join(dir, 'old-vela');
+    plantOld(old);
+    const driverModule = new URL('./e2e/driver.mjs', import.meta.url).href;
+    const helper = path.join(dir, 'other-client.mjs');
+    fs.writeFileSync(helper, `
+      import { Driver as Client } from ${JSON.stringify(driverModule)};
+      export const otherClient = (url, old) => new Client(url, old);
+      export class Override extends Client {
+        async newSession() { throw new Error('subclass override ran'); }
+      }
+    `);
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      import assert from 'node:assert/strict';
+      import fs from 'node:fs';
+      import { appIdentity, locateAppBinary } from ${JSON.stringify(new URL('./e2e/app-binary.mjs', import.meta.url).href)};
+      import { Driver, setRunApp } from ${JSON.stringify(driverModule)};
+      import { otherClient, Override } from ${JSON.stringify(helper)};
+      const driverModule = ${JSON.stringify(driverModule)};
+      const app = ${JSON.stringify(app)};
+      const old = ${JSON.stringify(old)};
+      const commands = ${JSON.stringify(fakeBuildCommands(dir, 0, app))};
+      const locate = () => locateAppBinary({ skipBuild: false, env: process.env, commands, echo: () => {} });
+      const when = new Date(1_700_000_000_000);
+      const original = 'the reported build';
+      const write = (file, text) => { fs.writeFileSync(file, text); fs.utimesSync(file, when, when); };
+      write(app, original);
+      const url = 'http://driver.invalid';
+      const sent = [];
+      globalThis.fetch = async (url, init) => {
+        sent.push(JSON.parse(init.body));
+        return new Response(JSON.stringify({ value: { sessionId: 's' + sent.length } }), { status: 200 });
+      };
+      const applications = () => sent.map((body) => body.capabilities.alwaysMatch['tauri:options'].application);
+      ${source}
+    `], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    assert.equal(child.status, 0, child.stderr || child.error?.message);
   } finally {
-    globalThis.fetch = realFetch;
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+test('an aliased second driver in another module cannot start another app (pa-6)', () => {
+  driverCase(`
+    const located = await locate();
+    setRunApp(located);
+    const driver = new Driver(url);
+    await driver.newSession();
+    // The reviewer's helper imports Driver as Client, supplies OLD, and
+    // shadows driver in the existing try block, including the restart call.
+    try {
+      const driver = otherClient(url, { appBinary: old, identity: appIdentity(old) });
+      await driver.newSession();
+      await driver.newSession();
+    } finally {}
+    assert.deepEqual(applications(), [app, app, app], 'the aliased second driver started OLD instead of the located app');
+  `);
+});
+
+test("subclasses and callers cannot replace the driver's session start (pa-6)", () => {
+  driverCase(`
+    setRunApp(await locate());
+    const driver = new Override(url, { appBinary: old, identity: appIdentity(old) });
+    await driver.newSession();
+    assert.deepEqual(applications(), [app], 'the subclass did not start the located app');
+    assert.throws(() => { driver.newSession = () => {}; }, TypeError, 'newSession must not be writable');
+    assert.throws(() => Object.defineProperty(driver, 'newSession', { value: () => {} }), TypeError, 'newSession must not be configurable');
+  `);
+});
+
+test("separate driver module URLs share the run's one app selection (pa-6)", () => {
+  driverCase(`
+    setRunApp(await locate());
+    const { Driver: Client, setRunApp: setOtherApp } = await import(driverModule + '?another-import');
+    commands.build.args[3] = old;
+    const another = await locate();
+    assert.throws(() => setOtherApp(another), /already been set/, 'a second driver module URL must not select another app');
+    await new Client(url, another).newSession();
+    assert.deepEqual(applications(), [app], 'a second driver module URL must start the run app');
+  `);
+});
+
+test("the run's app can be set only once (pa-6)", () => {
+  driverCase(`
+    const located = await locate();
+    setRunApp(located);
+    assert.throws(() => setRunApp(located), /already been set/, 'even setting the same app twice must throw');
+    commands.build.args[3] = old;
+    const another = await locate();
+    assert.equal(another.appBinary, old);
+    assert.throws(() => setRunApp(another), /already been set/, 'a second located app must not replace the first');
+    await new Driver(url).newSession();
+    assert.deepEqual(applications(), [app], 'a rejected second setting changed the app');
+  `);
+});
+
+test("only an unchanged locateAppBinary result can set the run's app (pa-6)", () => {
+  driverCase(`
+    const located = await locate();
+    for (const forged of [{ appBinary: old, identity: appIdentity(old) }, { ...located }, Object.create(located), new Proxy(located, {}), undefined, null]) {
+      assert.throws(() => setRunApp(forged), /must be a locateAppBinary result/, 'a forged or copied result must be refused');
+    }
+    for (const [key, value] of Object.entries({ appBinary: old, identity: appIdentity(old), built: false, appBinaryFrom: 'forged' })) {
+      assert.throws(() => { located[key] = value; }, TypeError, 'the located result must be immutable: ' + key);
+    }
+    setRunApp(located);
+    await new Driver(url).newSession();
+    assert.deepEqual(applications(), [app]);
+  `);
+});
+
+test("a session before the run's app is set is refused (pa-6)", () => {
+  driverCase(`
+    const located = await locate();
+    const driver = otherClient(url, located);
+    await assert.rejects(driver.newSession(), /the run app has not been set/, 'a session before registration must be refused');
+    assert.equal(sent.length, 0, 'an unregistered session reached fetch');
+    setRunApp(located);
+    await driver.newSession();
+    assert.deepEqual(applications(), [app], 'a refused early session must not poison later registration');
+  `);
+});
+
+test("a located result without a file cannot set the run's app (pa-6)", () => {
+  driverCase(`
+    fs.rmSync(app);
+    const missing = await locate();
+    assert.throws(() => setRunApp(missing), /the located app has no file to start/, 'a missing file must not be registered');
+    write(app, original);
+    setRunApp(await locate());
+    await new Driver(url).newSession();
+    assert.deepEqual(applications(), [app]);
+  `);
+});
+
+test("a --skip-build locator result selects the run's app without claiming a build (pa-6)", () => {
+  driverCase(`
+    const target = app + '-target';
+    fs.mkdirSync(target + '/debug', { recursive: true });
+    fs.copyFileSync(app, target + '/debug/vela');
+    const metadata = { target_directory: target, packages: [{ manifest_path: commands.appManifest, targets: [{ kind: ['bin'], name: 'vela' }] }] };
+    commands.metadata = { command: process.execPath, args: ['-e', 'require("node:fs").writeSync(1, process.argv[1])', JSON.stringify(metadata)], cwd: commands.build.cwd };
+    const predicted = await locateAppBinary({ skipBuild: true, env: process.env, commands });
+    assert.equal(predicted.built, false, 'a prediction must not claim a build');
+    assert.equal(predicted.appBinaryFrom, 'cargo metadata (nothing was built)');
+    setRunApp(predicted);
+    await new Driver(url).newSession();
+    assert.deepEqual(applications(), [target + '/debug/vela']);
+  `);
+});
+
+test("the driver starts only the run's located app, and not once the file was replaced (pa-6)", () => {
+  driverCase(`
+    const located = await locate();
+    setRunApp(located);
+    const driver = new Driver(url);
+    await driver.newSession();
+    assert.deepEqual(applications(), [app], 'the session starts the located app');
+    await assert.rejects(driver.newSession('/tmp/old-vela'), /newSession takes no path/, 'a path handed to newSession is refused');
+    // A different device cannot be made with a rename on this filesystem;
+    // change only the reported device, retaining the real inode/size/time.
+    const statSync = fs.statSync;
+    fs.statSync = (file, options) => {
+      const stat = statSync(file, options);
+      return file === app ? { ...stat, dev: stat.dev + 1n } : stat;
+    };
+    await assert.rejects(driver.newSession(), /is not the file it was when the run located it/, 'a file on a different device is refused');
+    fs.statSync = statSync;
+    assert.equal(appIdentity(app), located.identity);
+    // Change one part at a time, then put back the original file/state so
+    // an earlier mismatch cannot make a later identity check vacuously pass.
+    write(app, 'an older build, of another size');
+    await assert.rejects(driver.newSession(), /is not the file it was when the run located it/, 'a file written over (a new size) is refused');
+    write(app, original);
+    assert.equal(appIdentity(app), located.identity);
+    fs.renameSync(app, app + '.saved');
+    write(app, original);
+    await assert.rejects(new Driver(url).newSession(), /is not the file it was when the run located it/, 'a file put in its place (a new inode) is refused');
+    fs.renameSync(app + '.saved', app);
+    assert.equal(appIdentity(app), located.identity);
+    fs.utimesSync(app, new Date(0), new Date(0));
+    await assert.rejects(driver.newSession(), /is not the file it was when the run located it/, 'a file with a new modification time is refused');
+    fs.utimesSync(app, when, when);
+    assert.equal(appIdentity(app), located.identity);
+    fs.rmSync(app);
+    await assert.rejects(driver.newSession(), /now no file/);
+    assert.equal(sent.length, 1, 'nothing refused reached the driver');
+  `);
 });
 
 // Another process of this user that makes a socket of a play's name pattern

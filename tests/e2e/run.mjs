@@ -11,7 +11,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appCommands, locateAppBinary } from './app-binary.mjs';
-import { Driver } from './driver.mjs';
+import { Driver, setRunApp } from './driver.mjs';
 import { setScenarioConfigRoot } from './mpv.mjs';
 import { beginProof, endProof } from './proof.mjs';
 import { loadScenarios, proofProblems, recordedTree, resultsFileProblems, runsIn } from './scenario-loader.mjs';
@@ -145,7 +145,7 @@ async function runScenario(scenario, tauriDriverBin) {
   process.on('exit', killTree);
   activeKills.add(killTree);
 
-  const driver = new Driver(driverUrl, located);
+  const driver = new Driver(driverUrl);
   try {
     await waitUntil(driverListening, `tauri-driver on :${driverPort}`);
     await driver.newSession();
@@ -250,11 +250,11 @@ runStep(path.join(e2eDir, 'fetch-driver.sh'), []);
 // Cargo reported for that build. A run with --skip-build builds nothing and
 // starts where `cargo metadata` says the debug binary is, a prediction; it is
 // recorded as not built. Every session below starts this one path: the
-// driver is made with it and starts nothing else, and refuses to start it
+// driver module is set once with it and starts nothing else, and refuses to start it
 // once the file is no longer the one found here (see the driver module).
 let located;
 try {
-  located = Object.freeze(await locateAppBinary({ skipBuild, env: process.env, commands: appCommands(repoRoot) }));
+  located = await locateAppBinary({ skipBuild, env: process.env, commands: appCommands(repoRoot) });
 } catch (err) {
   console.error(`e2e: cannot tell which app binary to run: ${err.message}`);
   process.exit(1);
@@ -266,6 +266,7 @@ if (!fs.existsSync(appBinary)) {
   );
   process.exit(1);
 }
+setRunApp(located);
 console.log(`e2e: running ${appBinary} (from ${appBinaryFrom})`);
 
 fs.rmSync(artifactsDir, { recursive: true, force: true });

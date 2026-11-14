@@ -2,7 +2,10 @@
 // deliberately does not use WebdriverIO — see .agents/plans/e2e-harness.md
 // (deviation 2026-07-05).
 import fs from 'node:fs/promises';
-import { appIdentity } from './app-binary.mjs';
+import { appIdentity, getRunApp } from './app-binary.mjs';
+// Re-export the one setter; even another URL of this module uses the same
+// canonical locator module's selection and cannot set it a second time.
+export { setRunApp } from './app-binary.mjs';
 
 export class WebDriverError extends Error {}
 
@@ -17,17 +20,13 @@ export class Driver {
     ArrowDown: '',
   };
 
-  // The one app this driver starts (review finding pa-6): what
-  // locateAppBinary (app-binary.mjs) returned, kept where nothing outside
-  // this class can change it.
-  #application;
-  #identity;
-
-  constructor(baseUrl, app) {
+  constructor(baseUrl) {
     this.baseUrl = baseUrl;
     this.sessionId = null;
-    this.#application = app?.appBinary;
-    this.#identity = app?.identity;
+    // A constructor argument cannot choose an app. Nor can a subclass or
+    // caller replace the session entry point: this own property is neither
+    // writable nor configurable and closes over the private implementation.
+    Object.defineProperty(this, 'newSession', { value: (...args) => this.#newSession(...args) });
   }
 
   async #cmd(method, path, body, { timeoutMs = 30000 } = {}) {
@@ -58,20 +57,20 @@ export class Driver {
     return json.value;
   }
 
-  // Starts the app the driver was made with, and only while that path is
+  // Starts the run's one app, and only while that path is
   // still the file it was when Cargo reported it (or the prediction was made):
   // a file replaced since then is refused, not started.
-  async newSession(...unexpected) {
+  async #newSession(...unexpected) {
     if (unexpected.length > 0) {
-      throw new WebDriverError('newSession takes no path: the driver starts the app it was made with');
+      throw new WebDriverError('newSession takes no path: every driver starts the run app');
     }
-    if (typeof this.#application !== 'string' || !this.#identity) {
-      throw new WebDriverError('this driver was made without an app to start');
-    }
-    const now = appIdentity(this.#application);
-    if (now !== this.#identity) {
+    const app = getRunApp();
+    if (!app) throw new WebDriverError('the run app has not been set');
+    const { appBinary, identity } = app;
+    const now = appIdentity(appBinary);
+    if (now !== identity) {
       throw new WebDriverError(
-        `the app binary ${this.#application} is not the file it was when the run located it (then ${this.#identity}; now ${now ?? 'no file'})`,
+        `the app binary ${appBinary} is not the file it was when the run located it (then ${identity}; now ${now ?? 'no file'})`,
       );
     }
     const value = await this.#cmd(
@@ -79,7 +78,7 @@ export class Driver {
       '/session',
       {
         capabilities: {
-          alwaysMatch: { 'tauri:options': { application: this.#application } },
+          alwaysMatch: { 'tauri:options': { application: appBinary } },
         },
       },
       { timeoutMs: 60000 }, // covers the app launch

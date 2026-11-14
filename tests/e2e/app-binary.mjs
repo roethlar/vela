@@ -63,13 +63,35 @@ export const APP_BINARY_FROM = {
   prediction: 'cargo metadata (nothing was built)',
 };
 
+// Only this module can issue a located result. Freeze its scalar fields so a
+// caller cannot authenticate one path and then substitute another (pa-6).
+const locatedApps = new WeakSet();
+
+// The driver always imports this canonical module, even when its own URL has
+// a query/fragment and Node instantiates it again. Keeping the selection with
+// its provenance prevents such a second Driver module selecting another app.
+let runApp;
+export const getRunApp = () => runApp;
+export function setRunApp(app) {
+  if (runApp) throw new Error('the run app has already been set');
+  if (!locatedApps.has(app)) throw new Error('the run app must be a locateAppBinary result');
+  if (!app.identity) throw new Error('the located app has no file to start');
+  runApp = app;
+}
+
+function locatedResult(app) {
+  Object.freeze(app);
+  locatedApps.add(app);
+  return app;
+}
+
 export async function locateAppBinary({ skipBuild, env, commands, echo = (line) => process.stdout.write(`${line}\n`) }) {
   if (skipBuild) {
     const appBinary = predictAppBinary(commands, env);
-    return { appBinary, built: false, appBinaryFrom: APP_BINARY_FROM.prediction, identity: appIdentity(appBinary) };
+    return locatedResult({ appBinary, built: false, appBinaryFrom: APP_BINARY_FROM.prediction, identity: appIdentity(appBinary) });
   }
   const appBinary = await buildAppBinary(commands, env, echo);
-  return { appBinary, built: true, appBinaryFrom: APP_BINARY_FROM.build, identity: appIdentity(appBinary) };
+  return locatedResult({ appBinary, built: true, appBinaryFrom: APP_BINARY_FROM.build, identity: appIdentity(appBinary) });
 }
 
 // Which file a path names, and its state: device, inode, size and
@@ -111,12 +133,54 @@ async function buildAppBinary(commands, env, echo) {
   return appExecutableFromMessages(messages, commands.appManifest);
 }
 
-// A line of Cargo's JSON output, or null for any other line.
+// The four message envelopes documented by Cargo 1.99.1's installed
+// reference/external-tools.html#json-messages (linked from `cargo help build`),
+// checked against an offline build with a build script and compiler warning.
+// Additional fields are allowed; an unknown reason or malformed envelope is
+// echoed, never silently treated as Cargo. The two kinds we do not use
+// (compiler-message and build-script-executed) are consumed too; the runner's
+// json-render-diagnostics mode renders compiler diagnostics on inherited stderr.
+const strings = (value) => Array.isArray(value) && value.every((v) => typeof v === 'string');
+const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+function cargoTarget(target) {
+  return object(target) && strings(target.kind) && strings(target.crate_types) &&
+    ['name', 'src_path', 'edition'].every((key) => typeof target[key] === 'string') &&
+    ['doc', 'doctest', 'test'].every((key) => typeof target[key] === 'boolean');
+}
+function cargoEnvelope(message) {
+  if (!object(message)) return false;
+  switch (message.reason) {
+    case 'compiler-artifact': {
+      const p = message.profile;
+      return typeof message.package_id === 'string' && typeof message.manifest_path === 'string' && cargoTarget(message.target) &&
+        object(p) && typeof p.opt_level === 'string' &&
+        (p.debuginfo === null || [0, 1, 2, 'line-directives-only', 'line-tables-only'].includes(p.debuginfo)) &&
+        ['debug_assertions', 'overflow_checks', 'test'].every((key) => typeof p[key] === 'boolean') &&
+        strings(message.features) && strings(message.filenames) &&
+        (message.executable === null || typeof message.executable === 'string') && typeof message.fresh === 'boolean';
+    }
+    case 'compiler-message':
+      return typeof message.package_id === 'string' && typeof message.manifest_path === 'string' && cargoTarget(message.target) &&
+        object(message.message) && typeof message.message.message === 'string' && typeof message.message.level === 'string' &&
+        Array.isArray(message.message.spans) && Array.isArray(message.message.children) &&
+        (message.message.rendered === null || typeof message.message.rendered === 'string');
+    case 'build-script-executed':
+      return typeof message.package_id === 'string' && strings(message.linked_libs) && strings(message.linked_paths) &&
+        strings(message.cfgs) && Array.isArray(message.env) && message.env.every((pair) => strings(pair) && pair.length === 2) &&
+        typeof message.out_dir === 'string';
+    case 'build-finished':
+      return typeof message.success === 'boolean';
+    default:
+      return false;
+  }
+}
+
+// A line matching a documented Cargo message, or null for any other line.
 function cargoMessage(line) {
   if (!line.startsWith('{')) return null;
   try {
     const message = JSON.parse(line);
-    return message && typeof message.reason === 'string' ? message : null;
+    return cargoEnvelope(message) ? message : null;
   } catch {
     return null;
   }
