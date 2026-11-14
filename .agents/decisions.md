@@ -2092,3 +2092,42 @@ Agent's reading (not the owner's words):
 Updates:
 `.agents/repo-guidance.md` (Mission Detail) no longer says embedding is
 unplanned; it points at the approved plan.
+
+## 2026-11-14 - The player window carries over from every play to the next; a setting decides the first window of a run
+
+Status: OWNER RULINGS of 2026-11-12, recorded here as the work landed
+(`9815e10`, Vela 1.0.64). Decisions D1 to D3 of
+`.agents/plans/mpv-window-geometry.md`.
+
+Decision:
+- **D1, which plays inherit.** Asked whether plays the user starts should
+  open like the previous player window or only automatic successors, the
+  owner answered: "all in current session". Every play in a run of Vela
+  now opens mpv's window as the play before it left it: full screen,
+  maximized, screen, and size.
+- **D2, across restarts.** Offered an on/off setting, the owner answered:
+  "full screen is usually the goal for me, so how about options? remember
+  last, full screen, default? if last is full screen, then restore full
+  screen next time." Asked whether the setting governs the first play of
+  a run or every play: "yes, first run only, follow the setting on a new
+  Vela launch session". Asked which choice a fresh install starts with:
+  "remember last". So Settings has a three-way "Player window" choice that
+  decides only how the first player window of a run opens, and an absent
+  setting means "remember".
+- **D3, window position: withdrawn.** Position needs a separate mechanism
+  per platform and is impossible on Wayland. The owner chose embedded
+  playback as the direction instead (2026-11-12, "Embedded playback through
+  libmpv is the direction"). Dropping position from this work is the
+  agent's reading of that ruling, not the owner's words.
+
+Supersedes: the rule of `.agents/plans/playback-window-state-continuity.md`
+(2026-07-18) that "Manual plays retain their configured defaults; window
+size and position remain untouched". D1 reverses its first half; size is
+now carried; position still is not.
+
+Agent's reading (not the owner's words):
+- "Remember last" covers maximized and the screen as well as full screen
+  and size: they are the same kind of state.
+- A custom `--fullscreen`, `--window-maximized` or `--geometry` in the
+  Advanced options or in `mpv.conf` decides only the first play of a run,
+  and only in the "Default" choice once a window has been saved.

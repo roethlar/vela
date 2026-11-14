@@ -2,9 +2,10 @@
 
 ## Status
 
-**APPROVED 2026-11-12 for Slices 1-3. Queued behind the embedded player
-plan; since 2026-11-13 it is being written ahead on the local branch
-`geometry`, and nothing of it is on `main` yet.** The go, verbatim (owner, 2026-11-12, given as
+**APPROVED 2026-11-12 for Slices 1-3. LANDED 2026-11-14 at `9815e10`
+(Vela 1.0.64), all three slices in one commit; see "Implementation log" at
+the end of this file. Not released, not tagged. The acceptance steps on
+real desktops are the owner's and are listed there.** The go, verbatim (owner, 2026-11-12, given as
 the session's goal): "when the sweep finishes, continue with the next
 steps. implement the plan, codereview slices with codex. ask any questions
 upfront. I won't be here after you start." Asked up front which plan that
@@ -358,3 +359,161 @@ Slice 4 additionally needs the Windows build and tests on `netwatch-01`.
 - `.agents/plans/playback-window-state-continuity.md`: a one-line banner
   pointing here for the superseded rule.
 - `.agents/state.md`, and this file's Status and implementation log.
+
+## Implementation log
+
+### 2026-11-14: Slices 1 to 3 landed at `9815e10`, as one commit (Vela 1.0.64)
+
+**What a user gets.** Within one run of Vela every video opens mpv's
+window the way the previous one left it: full screen or not, maximized or
+not, on the same screen, and at the same size. That now includes videos
+the user starts, not only automatic successors. Settings, Player, "Player
+window" chooses how the first video after Vela starts opens: "As you last
+left it" (the default), "Full screen", or "Default". The window's position
+is not carried (D3).
+
+**One commit, not three, and why.** The plan names a commit per slice.
+The slices were written ahead on a branch while the embedded-player plan
+ran, each as its own commits there, and then attacked by helper agents;
+the repairs (two fixes and a dozen guards) came on top of all three, and
+`main` moved under the branch four times. Replaying three separate commits
+onto today's `main` would have meant three hand-merged intermediate states
+that nobody had run. The tree that was run is the one that landed. The
+review is still per slice: three `codereview codex` hunts over this
+commit, each briefed on one slice.
+
+**Slice 1, every play inherits.** As planned: `inherited_window_state` and
+`inherited_screen_name` no longer ask whether the play is the exact
+successor. The record is written by one helper (`publish_started_play`),
+only for a play that started. Beyond the plan:
+
+- The record names the player that ran the play. A play in the embedded
+  player hands on no window state and no screen: its library reports
+  "not fullscreen, not maximized" for a window it does not have, and that
+  would have overridden the user's own options for the next play in mpv's
+  window.
+- The Prefer Compatible source policy picks its copy for the screen the
+  play will open on, which is now the previous player window's screen.
+
+**Slice 2, the size.** As planned: `osd-width` and `osd-height` are
+observed; a size is recorded once it has stood for a second while the
+window is neither full screen nor maximized (a pure state machine,
+`WindowTracker`, tested without mpv); `--geometry=WxH` is passed first.
+Sizes outside 160x90 to 16384 are not recorded. Found by the helpers'
+attack and fixed: a play that opened full screen or maximized and stayed
+so, or never showed a window, handed on no size at all, so the size was
+lost after one such play; a play now starts from the size it was opened
+at, until it reports a windowed size of its own.
+
+**Slice 3, the setting.** As planned: `mpv_window_mode` and `mpv_window`
+in `config.json`, validated like the other settings; written with the
+recents stamp when a play ends, so no extra write and no timer; read for
+the first player window of a run only. Beyond the plan, each with its
+reason:
+
+- No `x` or `y` in the saved window (position is withdrawn), and a saved
+  window with any unknown part invalidates the settings file, like every
+  other setting.
+- A play's end saves its window only while it is still the latest play:
+  an end that runs late, after a slow final server check-in, cannot
+  overwrite a newer play's window.
+- The save is merged part by part: what the ending play did not observe
+  keeps its saved value, and a play that observed nothing saves nothing.
+- Quitting Vela with a video still playing saves that video's window too
+  (found by the helpers' attack: before, it was lost).
+- "The first window of a run" means the first play in mpv's own window:
+  after embedded plays only, the next play in mpv's window still gets what
+  the setting says.
+- A saved screen that is no longer connected: mpv says so in its log and
+  opens on its default screen; the play starts.
+
+**Going back to an older Vela.** Vela 1.0.58 to 1.0.60 refuse a settings
+file with a key they do not know, and so does every build before this one
+(a locally installed 1.0.63 included). In the default choice the window is
+saved after the first video played, even if the setting is never opened.
+Going back after that stops at Settings recovery, which resets every
+setting except the server connections. The release note and
+`docs/usage.md` say so. This is what the plan foresaw ("if strict, say so
+plainly in the release note").
+
+**What tests hold it, and what they cannot.**
+
+- Rust unit tests for every rule of the three slices, each red-proved, and
+  source-text guards for the wiring; a Node test for the Settings control.
+- End to end: `playlistplay` checks that a play the user starts inherits
+  the previous window's state against configured options that say the
+  opposite, and that a 0x0 size report never becomes `--geometry`;
+  `windowsetting` (new, external player only) drives the real app across
+  three runs of it through all three choices, the save at the end of a
+  play, and an unknown screen.
+- NOT testable in this venue: a real size. With no video output mpv
+  reports its window as 0x0, and no windowless output reports anything
+  else, so "the second window opens at the first one's size" rests on unit
+  tests and on the owner's steps below. Whether mpv's reported size and
+  `--geometry` use the same unit on a scaled display is likewise open.
+
+**Runs.** The full check on `main` at the landed content. Both full end-to-end suites, each with a fresh
+build, in a clean worktree at `a423532`, the head of the branch the landed
+commit was made from (the landed tree differs from it by the version
+number, the build date and the release notes only): external player 46 of
+48 passed, 6 skipped, the two failures being the recorded ones
+(`embeddedownconfig`, the external player's own-configuration defect, and
+`pagefail`, the page race); embedded player 49 of 50, 4 skipped, the one
+failure `pagefail`; `npm run e2e:verdict`: PASS. The two suites are run
+once more at the landed commit itself; see the entry that follows this
+one.
+
+**Left as they are; say if any should change.** Four things the helpers'
+attack raised that are what the plan asks for, or a choice the plan left
+open. None was changed:
+
+- A position given in a custom `--geometry` (`+X+Y`, in the Advanced
+  options or `mpv.conf`) applies to the first video of a run only. Later
+  videos get Vela's `--geometry` with the carried size and no position.
+- The size mpv itself picks for the first video (it sizes its window to
+  the video) is carried like a size the user chose: later videos open at
+  that size, not at their own.
+- For the first video of a run, the Prefer Compatible policy still ranks
+  copies for the screen Vela's window is on, while the window may open on
+  the saved screen.
+- A saved screen that is no longer connected sends the first video to
+  mpv's default screen, not to the screen Vela's window is on.
+
+**How it was written.** One helper agent per slice, then two attackers
+(22 findings: 17 fixed; the four above left as they are; one was about
+the machine's disk, not the code), a repair, a check that found two more
+(both about guards), a second repair, and a check that found none; then
+four merges of `main` by the coordinating agent, each followed by the
+full check, with injections of its own.
+
+**Acceptance on real desktops: the owner's, none of it done.**
+
+On `continuum` (KDE Wayland; note the display's scale factor first):
+
+1. Play something, resize the mpv window, close it, start something else
+   by hand. The second window opens at the first one's size. Repeat three
+   times WITHOUT resizing: the size must not drift. If it drifts by the
+   scale factor, mpv's reported size and `--geometry` use different units
+   and the recorded size needs dividing by `display-hidpi-scale`; say so
+   and it will be fixed.
+2. Make a play full screen, quit from full screen, play again: it opens
+   full screen. Leave full screen: the window returns to the earlier size.
+3. With the default choice: make the window full screen, quit mpv, quit
+   Vela, start Vela, play: full screen. The same with a resized window:
+   that size.
+4. With two screens: move the mpv window to the other one, close, play:
+   it opens there (a Wayland compositor may place it elsewhere). Then
+   unplug that screen, start Vela, play: it opens on another screen and
+   plays.
+5. Settings, Player, Player window, "Full screen", Save; restart; the
+   first play opens full screen whatever the last one did. Then "Default",
+   Save, restart: the first play opens as mpv and the Advanced options
+   say.
+6. Read the wording of the control ("Player window"; "After Vela starts,
+   the first video opens"; the three choices; the line under them) and say
+   whether it reads right.
+
+On the Windows install the request came from: steps 1 to 3.
+
+**Review:** three `codereview codex` hunts over `9815e10`, one per slice;
+see `.agents/review/index.md`.

@@ -94,15 +94,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     session is started, for that session only. Reviews of record still go
     to codex, and no agent is cut short. Later the same day the owner
     asked that agents started from then on run on Opus 5.5.
-  Next in the queue after this plan:
-  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved. All
-  three are written on the local branch `geometry` (a worktree beside the
-  clone), attacked and repaired by helpers, and verified there by the
-  coordinating agent (the full check, both E2E venues, injections of its
-  own); not yet reviewed by codex. Nothing of it
-  is on `main`, and it lands only after the embedded plan's slices, as the
-  owner ordered ("Both, embedded first"); the version bump and release
-  notes are made at that landing.
+  After the embedded plan's slices came
+  `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved: LANDED
+  2026-11-14 at `9815e10` as one commit, Vela 1.0.64 (not released, not
+  tagged). Every play in a run now opens mpv's window as the previous one
+  left it, size included, and Settings has a "Player window" choice for
+  the first window after Vela starts. Its log says why it is one commit,
+  what could not be tested here (a real window size), and lists the
+  owner's acceptance steps on real desktops, none of them done. Going back
+  to an older Vela after playing anything in 1.0.64 needs Settings
+  recovery (the release note says so). Its codex review, one hunt per
+  slice: `.agents/review/index.md`.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
@@ -241,14 +243,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (package the usage description, guard the built app metadata, and surface
   actionable transport causes instead of reqwest's shallow request error).
 
-- `.agents/plans/mpv-window-geometry.md` (APPROVED 2026-11-12 for Slices
-  1-3; queued behind the embedded player plan, not started): carry the mpv
-  window's size from one play to the next. Owner ruled D1 "all in current
-  session": manual plays inherit too, reversing the 2026-07-18 rule. A
-  local probe shows `osd-width` / `osd-height` report the window size and
-  `--geometry=WxH` reproduces it exactly. D2 ruled: a three-way setting
-  (remember last / full screen / default), consulted for the first play of
-  a run only, remember-last out of the box. D3 (position) withdrawn.
+- `.agents/plans/mpv-window-geometry.md`: landed 2026-11-14 (`## Now`);
+  what is left is the owner's acceptance on real desktops, listed in that
+  file's log, and its review loop.
 - Owner direction 2026-11-12: embedded playback through libmpv, with
   iOS/iPadOS as a porting goal (`.agents/decisions.md`). The HDR spike ran
   on 2026-11-12 (`.agents/plans/embedded-libmpv-hdr-spike.md`, Log): on
