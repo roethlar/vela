@@ -879,11 +879,13 @@ const pacmanPackage = (t, files, links, modes) => packageOf(t, 'pkg.tar.zst', fi
 
 // One run of the check. Every run in this suite gets a temporary directory of
 // its own (or the one named in `env`) and must leave it empty, however the
-// run ended: an unpacked package with the set is some 60 MB.
-function checkPackageRun(args, script = checkPackagePath, env = {}) {
+// run ended: an unpacked package with the set is some 60 MB. `cwd` is where
+// the check is started, for packages named relative to it.
+function checkPackageRun(args, script = checkPackagePath, env = {}, { cwd } = {}) {
   const tmp = env.TMPDIR ?? fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-check-tmp-')));
   try {
     const run = spawnSync('/bin/bash', [script, ...args], {
+      cwd,
       encoding: 'utf8',
       env: { ...process.env, ...env, TMPDIR: tmp },
     });
@@ -992,8 +994,9 @@ const squashfsLike = Buffer.from('hsqs and nothing a real squashfs has\n');
 // A stand-in for unsquashfs, in front of PATH: it records its arguments in
 // `calls` (one call to a line, as JSON), checks that the image it was told to
 // read begins where it was told it does, and writes `usr/bin/vela` and the
-// shell lines `extra` into the directory it was given (in $dest). Returns the
-// PATH to use.
+// shell lines `extra` into the directory it was given (in $dest). Like the
+// real one, it takes an image name that begins with "-" for an option it does
+// not know, and fails. Returns the PATH to use.
 function unsquashfsStandIn(t, { calls, extra = '' }) {
   const directory = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-unsquashfs-')));
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
@@ -1007,6 +1010,7 @@ while [ $# -gt 1 ]; do
   case "$1" in -d) dest="$2"; shift ;; -o) offset="$2"; shift ;; esac
   shift
 done
+case "$1" in -*) echo "unsquashfs: invalid option $1" >&2; exit 1 ;; esac
 [ "$(tail -c +$((offset + 1)) "$1" | head -c 4)" = hsqs ] || exit 1
 mkdir -p "$dest/usr/bin" "$dest/usr/lib/Vela/mpv-scripts"
 echo app > "$dest/usr/bin/vela"
@@ -2190,6 +2194,21 @@ echo app > squashfs-root/usr/bin/vela
     fs.rmSync(calls);
   });
 
+  await t.test('one named relative to where the check runs, with a name that begins with "-": read all the same', () => {
+    // The image's name is unsquashfs's last argument; given as it is, it
+    // would be read as an option, and a good package would fail.
+    image('-o.AppImage');
+    for (const args of [['--without-libmpv', '--', '-o.AppImage'], ['--without-libmpv', './-o.AppImage']]) {
+      const run = checkPackageRun(args, checkPackagePath, { PATH: unsquashfsStandIn(t, { calls }) }, { cwd: scratch });
+      assert.equal(run.status, 0, `${run.stdout}\n${run.stderr}`);
+      assert.match(run.stdout, /^ok   absent: nothing named like the set /m);
+      const [call, ...more] = recordedCalls(calls);
+      assert.deepEqual(more, []);
+      assert.equal(call.at(-1), './-o.AppImage');
+      fs.rmSync(calls);
+    }
+  });
+
   await t.test('one with a library of the set is found out', () => {
     const PATH = unsquashfsStandIn(t, {
       calls,
@@ -2283,21 +2302,26 @@ test('the package check never lets an unpacked package write outside its tempora
   // name with "..", takes the leading "/" off an absolute name (which then
   // lands inside the package's tree), and refuses to write through a
   // symbolic link or to make a hard link to a file outside. Each refusal
-  // fails the package, in either mode.
-  const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-escape-')));
-  t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
-  const outside = path.join(scratch, 'outside');
-  fs.mkdirSync(outside);
-  fs.writeFileSync(path.join(outside, 'victim'), 'as it was\n');
+  // fails the package, in either mode. A deb is unpacked twice, the ar archive
+  // and then the data.tar in it, and each of the two is held to the same: the
+  // data.tar of a deb carries every case a pacman package does, and the ar
+  // archive around it a member named with ".." or by an absolute path.
   const make = [
     'import io, sys, tarfile',
-    'out, outside, which = sys.argv[1], sys.argv[2], sys.argv[3]',
+    'out, outside, which, kind = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]',
     'def add(t, name, data=b"escaped\\n", **fields):',
     '    entry = tarfile.TarInfo(name)',
     '    for key, value in fields.items(): setattr(entry, key, value)',
     '    entry.size = len(data) if entry.type == tarfile.REGTYPE else 0',
     '    t.addfile(entry, io.BytesIO(data) if entry.type == tarfile.REGTYPE else None)',
-    'with tarfile.open(out, "w", format=tarfile.GNU_FORMAT) as t:',
+    // An ar member, its name written BSD-style after the header, so that a
+    // name of any length and with any "/" in it can be given.
+    'def member(name, data):',
+    '    body = name.encode() + data',
+    '    head = f"{\'#1/\' + str(len(name.encode())):<16}{0:<12}{0:<6}{0:<6}{\'100644\':<8}{len(body):<10}`\\n"',
+    '    return head.encode() + body + (b"\\n" if len(body) % 2 else b"")',
+    'tar = io.BytesIO()',
+    'with tarfile.open(fileobj=tar, mode="w", format=tarfile.GNU_FORMAT) as t:',
     '    add(t, "usr/bin/vela", b"the app\\n")',
     '    if which == "dotdot": add(t, "../" * 30 + outside.lstrip("/") + "/dotdot")',
     '    if which == "absolute": add(t, outside + "/absolute")',
@@ -2311,20 +2335,42 @@ test('the package check never lets an unpacked package write outside its tempora
     '        add(t, "usr/out", type=tarfile.SYMTYPE, linkname=outside)',
     '        add(t, "usr/hard", type=tarfile.LNKTYPE, linkname="usr/out/victim")',
     '        add(t, "usr/hard", b"overwritten\\n")',
+    'with open(out, "wb") as f:',
+    '    if kind == "pacman":',
+    // An uncompressed tar under a pacman package's name: bsdtar reads either.
+    '        f.write(tar.getvalue())',
+    '    else:',
+    '        f.write(b"!<arch>\\n" + member("debian-binary", b"2.0\\n") + member("data.tar", tar.getvalue()))',
+    '        if which == "an ar member with dotdot": f.write(member("../" * 30 + outside.lstrip("/") + "/dotdot", b"escaped\\n"))',
+    '        if which == "an absolute ar member": f.write(member(outside + "/absolute", b"escaped\\n"))',
   ].join('\n');
-  for (const which of ['dotdot', 'absolute', 'through a link', 'a hard link out', 'a hard link through a link']) {
-    await t.test(which, () => {
-      // An uncompressed tar under a pacman package's name: bsdtar reads either.
-      const file = path.join(scratch, `vela-1.0.0-1-x86_64.pkg.tar.zst`);
-      const made = spawnSync('python3', ['-I', '-c', make, file, outside, which], { encoding: 'utf8' });
+  const cases = [
+    ...['dotdot', 'absolute', 'through a link', 'a hard link out', 'a hard link through a link'].flatMap((which) => [
+      [which, 'pacman'],
+      [which, 'deb'],
+    ]),
+    ['an ar member with dotdot', 'deb'],
+    ['an absolute ar member', 'deb'],
+  ];
+  for (const [which, kind] of cases) {
+    await t.test(`${which} (${kind})`, (t) => {
+      // A directory of its own for each case, so that what one case wrote
+      // outside is not laid at the door of the cases after it.
+      const scratch = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'vela-libmpv-escape-')));
+      t.after(() => fs.rmSync(scratch, { recursive: true, force: true }));
+      const outside = path.join(scratch, 'outside');
+      fs.mkdirSync(outside);
+      fs.writeFileSync(path.join(outside, 'victim'), 'as it was\n');
+      const file = path.join(scratch, kind === 'pacman' ? 'vela-1.0.0-1-x86_64.pkg.tar.zst' : 'Vela_1.0.0_amd64.deb');
+      const made = spawnSync('python3', ['-I', '-c', make, file, outside, which, kind], { encoding: 'utf8' });
       assert.equal(made.status, 0, made.stderr);
       for (const mode of [['--without-libmpv'], []]) {
         const run = checkPackageRun([...mode, file]);
-        if (which !== 'absolute') {
+        if (!/absolute/.test(which)) {
           assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
           assert.match(run.stdout, /^FAIL unpack: the package could not be unpacked$/m);
         }
-        assert.deepEqual(fs.readdirSync(outside), ['victim'], `${which}: the package wrote outside`);
+        assert.deepEqual(fs.readdirSync(outside), ['victim'], `${which} (${kind}): the package wrote outside`);
         assert.equal(fs.readFileSync(path.join(outside, 'victim'), 'utf8'), 'as it was\n');
       }
     });

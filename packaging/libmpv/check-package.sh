@@ -245,6 +245,9 @@ unpack() {
       }
       command -v unsquashfs >/dev/null 2>&1 || return 4
       rmdir "$into/root" || return 1
+      # unsquashfs reads a name that begins with "-" as one of its options,
+      # and the image's name comes last; so it never begins with one.
+      case "$package" in -*) package="./$package" ;; esac
       unsquashfs -no-progress -no-xattrs -o "$offset" -d "$into/root" "$package" >/dev/null || return 1
       ;;
     *) return 3 ;;
