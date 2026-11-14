@@ -7,8 +7,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
-import { holdsFor, pollUntil, makeClips, mockSource, seedConfig } from '../helpers.mjs';
+import { holdsFor, pollUntil, makeClips, mockSource, seedConfig, stopPlayAsUser } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mockA;
 let mockB;
@@ -37,7 +38,8 @@ async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
         `normalize-space(.)='${menuLabel}' or normalize-space(.)='Resume on ${menuLabel}')]`,
   );
   await driver.click(item);
-  const mpv = await MpvIpc.connect(await waitForNewMpvSocket(before));
+  const socketPath = await waitForNewMpvSocket(before);
+  const mpv = await MpvIpc.connect(socketPath);
   let loaded;
   try {
     loaded = await pollUntil(() => mpv.getProp('path').catch(() => null), `mpv to load via "${menuLabel}"`);
@@ -46,7 +48,10 @@ async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
       await mpv.setProp('time-pos', 9.2);
       await mpv.setProp('pause', false);
     } else {
-      mpv.quit();
+      // The next step uses the page again, so the play must be over first:
+      // a quit sent and not waited for left the embedded player's view still
+      // covering the page for the next click ("element click intercepted").
+      await stopPlayAsUser(driver, mpv, socketPath, `the play via "${menuLabel}"`);
     }
   } finally {
     mpv.close();
@@ -56,6 +61,7 @@ async function playFromMenu(driver, menuLabel, { finish = false } = {}) {
 
 export default {
   name: 'mergedview',
+  rows: ['4', '6'],
 
   async seed({ configRoot }) {
     // Same title+year on both servers (no provider ids in the mock), so the
@@ -254,5 +260,7 @@ export default {
     );
     assert.equal(mockA.state.userData.m1.played, true);
     assert.equal(mockB.state.userData.m1.played, true);
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '6');
   },
 };

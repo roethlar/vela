@@ -17,6 +17,7 @@ import { spawnSync } from 'node:child_process';
 import { pollUntil, openLibraryGrid, mockSource, seedConfig } from '../helpers.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
@@ -111,6 +112,9 @@ export default {
   // embedded player crops with Vela's own vela-crop.lua instead, and
   // `embeddedcrop` is this scenario's counterpart there.
   onlyPlayer: 'external',
+  onlyPlayerWhy:
+    "the stock autocrop.lua and Vela's shim are loaded only by the external launch; the embedded player crops with vela-crop.lua, which embeddedcrop shows",
+  rows: ['9'],
 
   async seed({ configRoot }) {
     const clip = makePaddedClip(configRoot);
@@ -154,5 +158,7 @@ export default {
     mock.state.checkins.length = 0; // fresh Stopped gate for this leg
     await playAndAssertCrop(driver, 'resume', { minStart: 4 });
     await screenshot('02-resume-cropped');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('9');
   },
 };

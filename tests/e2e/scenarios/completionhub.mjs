@@ -13,6 +13,7 @@ import {
   seedConfig,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 const COMPLETED_ID = 'hub-completed';
 const FOLLOWUP_ID = 'hub-followup';
@@ -157,6 +158,7 @@ function resetForFailure(configRoot) {
 
 export default {
   name: 'completionhub',
+  rows: ['4', '14'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['hub-completed.mp4']);
@@ -341,5 +343,7 @@ export default {
       'failure must stop after the tracker and unconditional post-attempt refreshes',
     );
     await screenshot('02-failure-fallback');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '14');
   },
 };

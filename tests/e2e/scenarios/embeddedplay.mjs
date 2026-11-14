@@ -34,6 +34,7 @@ import { createConnection } from 'node:net';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { makeClips, mockSource, openDetailAndPlay, openLibraryGrid, pollUntil, seedConfig, showPlayerBar } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
@@ -112,6 +113,9 @@ async function settled(stopReportsBefore) {
 export default {
   name: 'embeddedplay',
   onlyPlayer: 'embedded',
+  onlyPlayerWhy:
+    "what only an in-process play has: inside Vela's process, drawn by mpv's library, the page turning into the player view and back",
+  rows: ['1', '13a', '14'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['stream.mp4']);
@@ -259,5 +263,7 @@ export default {
     );
     await settled(stopsBefore);
     assert.equal((await pageState(driver)).app, 'visible');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('1', '13a', '14');
   },
 };

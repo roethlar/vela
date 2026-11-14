@@ -102,6 +102,17 @@ async function waitForHome(driver) {
 export default {
   name: 'playerfallback',
   onlyPlayer: 'external',
+  onlyPlayerWhy:
+    'its premise is a venue where the embedded player cannot run (X11), so the play goes to the external player; in a run of the embedded player there is nothing to fall back from',
+  // Not row 11. Its notice is the D3 fallback notice, for a play the user DID
+  // ask for; row 11's notice is for a play the user did not ask for, a
+  // step-down (playback.rs, osd_notice), which no venue here can force. The
+  // two ride the same delivery (commands.rs, `osd_notice.or(fallback_notice)`),
+  // so this scenario is evidence of that delivery, named in row 11's
+  // exemptions, not a proof of the row (guard finding atk-2).
+  rows: [],
+  noRows:
+    'decision D3, the fallback notice where the embedded player cannot run; it rides the delivery row 11 uses (spawn_osd_notice), but is not the unrequested-play notice of row 11',
 
   async seed({ configRoot }) {
     configRootPath = configRoot;

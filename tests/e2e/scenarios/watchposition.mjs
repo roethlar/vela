@@ -277,6 +277,8 @@ async function waitForPageThree(driver, before) {
 
 export default {
   name: "watchposition",
+  rows: [],
+  noRows: "the scroll position across a watch edit; plays nothing",
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin({

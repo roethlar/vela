@@ -915,7 +915,7 @@ test('the shipped library is tested itself, in every full embedded E2E run', () 
   const runner = read('tests/e2e/run.mjs');
   const embeddedBlock = runner.indexOf("if (runPlayer === 'embedded') {");
   const runsThem = runner.indexOf("runStep('npm', ['run', 'test:libmpv'], { VELA_LIBMPV_DIR: set });");
-  const firstScenario = runner.indexOf('const err = await runScenario(scenario, tauriDriverBin);');
+  const firstScenario = runner.indexOf('const { err, proof } = await runScenario(scenario, tauriDriverBin);');
   assert.ok(embeddedBlock !== -1 && embeddedBlock < runsThem && runsThem < firstScenario);
   // The set is one absolute path, the same for the check, the app and the
   // tests, whatever the variable gave.

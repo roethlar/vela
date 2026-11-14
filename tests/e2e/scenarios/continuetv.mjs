@@ -10,10 +10,17 @@ import {
   makeClips,
   mockSource,
   pollUntil,
+  PLAYER_VIEW_UP,
+  drawnAtPageSize,
+  recordPlayerEvents,
+  runPlayer,
   seedConfig,
   seedPlaylists,
+  stopPlayAsUser,
+  waitForPageUncovered,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
@@ -73,6 +80,7 @@ async function nextMpv(seen, expectedId) {
   const socket = await waitForNewMpvSocket(seen, { timeoutMs: 20_000 });
   seen.add(socket);
   const mpv = await MpvIpc.connect(socket);
+  mpv.socketPath = socket;
   await mpv.setProp('pause', true);
   const loaded = String(await pollUntil(
     () => mpv.getProp('path').catch(() => null),
@@ -134,6 +142,7 @@ function resetMockPlaybackState() {
 
 export default {
   name: 'continuetv',
+  rows: ['4', '14'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, [
@@ -246,8 +255,11 @@ export default {
       (response) =>
         response.method === 'POST' && response.path === '/Sessions/Playing/Stopped',
     ).length;
-    quitEpisode.quit();
-    quitEpisode.close();
+    // The user stops the episode as that player's user does: mpv's quit in
+    // the external player, the view's `q` in the embedded one.
+    await stopPlayAsUser(driver, quitEpisode, quitEpisode.socketPath, 'the user-quit episode', {
+      key: 'q',
+    });
     await pollUntil(
       () =>
         mock.state.served.filter(
@@ -300,17 +312,54 @@ export default {
       'the clean-EOF Continue Watching flow',
     );
 
+    // Fullscreen across the run, branched on the player because what is
+    // fullscreen differs. External: mpv's own window; the scenario makes E1's
+    // window fullscreen and the backend must start the automatic successor
+    // fullscreen (`--fullscreen=yes` from the observed window state). The
+    // embedded player has no window of its own and its launch carries no
+    // window state by design; its counterpart is Vela's own window, which the
+    // user makes fullscreen with the view's `f` and which must STAY fullscreen
+    // from one play of the run to the next (the page holds that state outside
+    // the view) and be left when the run ends. What counts there is the window
+    // the compositor really made (the page's own size, and mpv drawing at it),
+    // as in the `embeddedcontrols` scenario.
+    if (runPlayer === 'embedded') await recordPlayerEvents(driver);
     const seen = mpvSocketSnapshot();
     await driver.click(
       await driver.find('css selector', '[aria-label="Continue watching"] .flowcard.center'),
     );
     const first = await nextMpv(seen, 'e1');
-    await setMpvProperty(
-      first,
-      'fullscreen',
-      true,
-      'the first episode fullscreen readback before clean EOF',
-    );
+    let windowed = null;
+    let fullHeight = null;
+    if (runPlayer === 'embedded') {
+      await driver.waitFor(PLAYER_VIEW_UP, 'the E1 player view');
+      windowed = await drawnAtPageSize(driver, first, 'E1 windowed');
+      await driver.pressKeys('f');
+      await driver.waitFor(`return window.innerHeight > ${windowed}`, 'f to make the window fullscreen', {
+        timeoutMs: 5000,
+      });
+      fullHeight = await drawnAtPageSize(driver, first, 'E1 fullscreen');
+    } else {
+      await setMpvProperty(
+        first,
+        'fullscreen',
+        true,
+        'the first episode fullscreen readback before clean EOF',
+      );
+    }
+    // In the embedded player: the window is fullscreen now, and nothing may
+    // take it out of fullscreen until the run ends.
+    const leftFullscreen = () =>
+      driver.exec(`return window.__playerEvents.fullscreen.some((e) => e.on === false)`);
+    const fullscreenCarriedTo = async (mpv, what) => {
+      await driver.waitFor(PLAYER_VIEW_UP, `the ${what} player view`);
+      assert.equal(await leftFullscreen(), false, `the window must not leave fullscreen before ${what}`);
+      assert.equal(
+        await drawnAtPageSize(driver, mpv, `${what} in the window still fullscreen`),
+        fullHeight,
+        `${what} must open in the window still fullscreen`,
+      );
+    };
     const cleanPlayedArrivals = mock.state.playedArrivals.length;
     const cleanPlayedServed = mock.state.playedServed.length;
     mock.state.playedDelayMs = 8_000;
@@ -324,12 +373,16 @@ export default {
       'the automatic E1 PlayedItems request to arrive',
     );
     const second = await nextMpv(seen, 'e2');
-    await waitForMpvProperty(
-      second,
-      'fullscreen',
-      true,
-      'the frontend-selected next episode to inherit fullscreen state',
-    );
+    if (runPlayer === 'embedded') {
+      await fullscreenCarriedTo(second, 'E2');
+    } else {
+      await waitForMpvProperty(
+        second,
+        'fullscreen',
+        true,
+        'the frontend-selected next episode to inherit fullscreen state',
+      );
+    }
     assert.equal(
       mock.state.playedServed.length,
       cleanPlayedServed,
@@ -362,6 +415,7 @@ export default {
     );
     await finishNaturally(second);
     const third = await nextMpv(seen, 'e3');
+    if (runPlayer === 'embedded') await fullscreenCarriedTo(third, 'E3');
     await finishNaturally(third);
     await pollUntil(
       () =>
@@ -382,6 +436,15 @@ export default {
     assert.deepEqual(playbackInfoIds(), ['e1', 'e2', 'e3']);
     assert.ok(!playbackInfoIds().includes('sp1'), 'regular playback must skip Specials');
     assert.deepEqual(mock.state.contractViolations, []);
+    await waitForPageUncovered(driver, 'at the end of the show');
+    if (runPlayer === 'embedded') {
+      // The run is over (no next episode): the fullscreen made for it is left.
+      await driver.waitFor(
+        `return window.innerHeight === ${windowed}`,
+        'the window to leave fullscreen at the end of the show',
+      );
+      assert.equal(await leftFullscreen(), true, 'the window reported leaving fullscreen');
+    }
     await screenshot('01-season-rollover');
 
     // Fresh run: park the hierarchy lookup after E1 ends, then start a movie
@@ -418,6 +481,9 @@ export default {
         ),
       'the parked next-episode hierarchy request',
     );
+    // The user starts the movie once the page is theirs again: in the embedded
+    // player E1's view leaves a moment after E1 has ended.
+    await waitForPageUncovered(driver, 'after E1 ended');
     await driver.waitFor(
       `return [...document.querySelectorAll('button.sideitem')]
         .some((button) => button.textContent.trim() === 'Playlists')`,
@@ -466,10 +532,11 @@ export default {
       5_000,
       'manual playback must win the delayed continuation race',
     );
-    manual.quit();
-    manual.close();
+    await stopPlayAsUser(driver, manual, manual.socketPath, 'the manual movie');
     assert.deepEqual(playbackInfoIds(), ['e1', 'manual']);
     assert.deepEqual(mock.state.contractViolations, []);
     await screenshot('02-manual-race-won');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '14');
   },
 };

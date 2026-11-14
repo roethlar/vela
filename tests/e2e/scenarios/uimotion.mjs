@@ -446,6 +446,8 @@ async function assertCrumbAndSurfaceMotion(driver, selector, ease, label) {
 
 export default {
   name: 'uimotion',
+  rows: [],
+  noRows: 'motion and empty states; plays nothing',
 
   async seed({ configRoot }) {
     if (expectReducedMotion) {

@@ -14,6 +14,7 @@ import {
   seedConfig,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 let mock;
 
@@ -61,6 +62,7 @@ const playbackInfoIds = () =>
 
 export default {
   name: 'continueoff',
+  rows: ['4', '14'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['off-a.mp4', 'off-b.mp4']);
@@ -159,5 +161,7 @@ export default {
       'Off must survive an app restart',
     );
     await screenshot('02-off-persisted');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('4', '14');
   },
 };

@@ -18,6 +18,7 @@ import { spawnSync } from 'node:child_process';
 import { pollUntil, openLibraryGrid, mockSource, seedConfig } from '../helpers.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 const TICKS_PER_MS = 10_000;
 let mock;
@@ -86,6 +87,7 @@ async function endSession(mpv) {
 
 export default {
   name: 'markers',
+  rows: ['8a'],
 
   async seed({ configRoot }) {
     configRootPath = configRoot;
@@ -192,5 +194,7 @@ export default {
       0,
       'policies off: no MediaSegments request may be made',
     );
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('8a');
   },
 };

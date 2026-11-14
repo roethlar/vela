@@ -20,6 +20,7 @@ import { createConnection } from 'node:net';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
 import { holdsFor, mockSource, openLibraryGrid, pollUntil, seedConfig, showPlayerBar } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 // A 1280x720 frame whose picture is 1280x544, with black bars of 88 rows above
 // and below: the crop the script must find.
@@ -129,6 +130,9 @@ async function stop(driver, mpv, socketPath, what) {
 export default {
   name: 'embeddedcrop',
   onlyPlayer: 'embedded',
+  onlyPlayerWhy:
+    "vela-crop.lua and the view's Crop control are the embedded player's; autocrop shows row 9 in the external player",
+  rows: ['9'],
 
   async seed({ configRoot }) {
     configRootPath = configRoot;
@@ -221,5 +225,7 @@ export default {
       throw err;
     }
     await stop(driver, mpv, socketPath, 'manual');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('9');
   },
 };

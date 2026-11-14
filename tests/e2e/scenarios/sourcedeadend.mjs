@@ -17,6 +17,8 @@ let mockEmpty;
 
 export default {
   name: 'sourcedeadend',
+  rows: [],
+  noRows: 'where a click on a source lands; plays nothing',
 
   async seed({ configRoot }) {
     // A non-empty /Items/Latest makes the first server contribute a

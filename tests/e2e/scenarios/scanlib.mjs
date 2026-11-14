@@ -72,6 +72,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export default {
   name: "scanlib",
+  rows: [],
+  noRows: "the server scan trigger; plays nothing",
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin({

@@ -21,6 +21,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { pollUntil, seedConfig } from "../helpers.mjs";
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from "../mpv.mjs";
+import { shown } from '../proof.mjs';
 
 const CREDS = "/tmp/vela-live-creds.json";
 const SECTION = "Movies";
@@ -218,6 +219,10 @@ const QUALITY_PROJECTION = `(options) => ({
 
 export default {
   name: "live-transcode",
+  onlyPlayer: "external",
+  onlyPlayerWhy:
+    "it reads mpv's argv from /proc/*/cmdline, which only a player that is a program of its own has",
+  rows: ["7"],
 
   async seed({ configRoot }) {
     if (!fs.existsSync(CREDS)) throw new Error(`live: no credentials at ${CREDS}`);
@@ -350,5 +355,7 @@ export default {
         "listed here is an encoder left running on the user's server",
       { timeoutMs: 90000, intervalMs: 1000 },
     );
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('7');
   },
 };

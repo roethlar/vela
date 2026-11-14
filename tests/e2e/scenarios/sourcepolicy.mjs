@@ -5,9 +5,10 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeClips, mockSource, pollUntil, seedConfig } from '../helpers.mjs';
+import { makeClips, mockSource, pollUntil, seedConfig, stopPlayAsUser } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
+import { shown } from '../proof.mjs';
 
 const MOVIE = 'Policy Movie';
 const CANONICAL = 'imdb:tt-policy-movie';
@@ -145,10 +146,13 @@ async function playDetail(driver, { choose = null, inspectChoices = false } = {}
       ),
     );
   }
-  const mpv = await MpvIpc.connect(await waitForNewMpvSocket(before, { timeoutMs: 20_000 }));
+  const socketPath = await waitForNewMpvSocket(before, { timeoutMs: 20_000 });
+  const mpv = await MpvIpc.connect(socketPath);
   try {
     const loaded = await pollUntil(() => mpv.getProp('path').catch(() => null), `${MOVIE} stream`);
-    mpv.quit();
+    // The next step uses the page again, so the play must be over first: in
+    // the embedded player its view covers the page until it has stopped.
+    await stopPlayAsUser(driver, mpv, socketPath, `the ${MOVIE} play`);
     return loaded;
   } finally {
     mpv.close();
@@ -179,10 +183,11 @@ async function playVersion(driver, sourceName) {
       `//*[@role='group' and @aria-label='Play Version']//button[@role='menuitem' and normalize-space(.)='${sourceName}']`,
     ),
   );
-  const mpv = await MpvIpc.connect(await waitForNewMpvSocket(before, { timeoutMs: 20_000 }));
+  const socketPath = await waitForNewMpvSocket(before, { timeoutMs: 20_000 });
+  const mpv = await MpvIpc.connect(socketPath);
   try {
     const loaded = await pollUntil(() => mpv.getProp('path').catch(() => null), `${sourceName} explicit stream`);
-    mpv.quit();
+    await stopPlayAsUser(driver, mpv, socketPath, `the ${sourceName} play`);
     return loaded;
   } finally {
     mpv.close();
@@ -191,6 +196,7 @@ async function playVersion(driver, sourceName) {
 
 export default {
   name: 'sourcepolicy',
+  rows: ['6'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['policy-local.mp4', 'policy-distant.mp4']);
@@ -392,5 +398,7 @@ export default {
     assert.deepEqual(localMock.state.contractViolations, []);
     assert.deepEqual(distantMock.state.contractViolations, []);
     await screenshot('02-merged-hierarchy');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('6');
   },
 };

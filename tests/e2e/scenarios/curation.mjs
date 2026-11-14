@@ -10,6 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pollUntil, openLibraryGrid, goHome, playAndQuit, makeClips, mockSource, seedConfig } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 const HERO_CLIP = `[aria-label="Continue watching"] [aria-label^="Resume Mock Movie"]`;
 const EMPTY_HOME = 'No titles on Home yet';
@@ -17,7 +18,9 @@ const EMPTY_HOME = 'No titles on Home yet';
 let mock;
 
 // Lean play-and-quit via the grid card's context-menu Play: get an
-// unfinished session into recents; mpv is just a means here.
+// unfinished session into recents; mpv is just a means here. The play is
+// stopped as its user stops it (playAndQuit): mpv's quit in the external
+// player, the player view's Close control in the embedded one.
 async function playClipAndQuit(driver) {
   await playAndQuit(driver, async () => {
     await driver.exec(
@@ -34,6 +37,7 @@ async function playClipAndQuit(driver) {
 
 export default {
   name: 'curation',
+  rows: ['3'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['stream.mp4']);
@@ -161,5 +165,7 @@ export default {
     await goHome(driver);
     await driver.waitFor(`return !!document.querySelector('${HERO_CLIP}')`, 'movie back in the hero');
     await screenshot('02-restored');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('3');
   },
 };

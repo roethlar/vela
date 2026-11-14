@@ -208,15 +208,25 @@ session, the NVIDIA proprietary driver (untested, so excluded), a
 compositor without `wl_subcompositor` or `wp_viewporter`, and a
 `WEBKIT_DISABLE_DMABUF_RENDERER` set in your own environment.
 
-What exists so far is the core: the picture, inside the window, in HDR on
-a display and compositor that offer it (KDE's does), with a Close button
-(or Escape). Playback controls and black-bar cropping are later slices of
-the plan. With "use my own mpv configuration"
+What exists so far: the picture, inside the window, in HDR on a display and
+compositor that offer it (KDE's does), a control bar and keys over it
+(pause, seeking, volume, tracks, fullscreen, the skip button, Close or `q`
+or Escape), and black-bar cropping by Vela's own `vela-crop.lua`. With "use
+my own mpv configuration"
 on, the embedded player applies your `mpv.conf` but not your scripts folder,
 per-script option files or key bindings.
 
 `npm run e2e -- --embedded` runs the E2E suite in this player; see
-[tests/e2e/README.md](../tests/e2e/README.md).
+[tests/e2e/README.md](../tests/e2e/README.md). Every playback behaviour the
+plan lists must be shown in both players: each scenario declares which of
+those rows it stands for, and `npm run check` fails when a row is shown in
+one player and neither shown nor exempted in the other (README, "Parity").
+That check reads declarations only. After a full run of each player on the
+same commit, each without `--skip-build`, `npm run e2e:verdict`, run with
+that commit checked out and clean (it refuses runs of any other, and runs
+that did not build the app), checks what the runs did: every scenario
+passed (or failed with its recorded product defect), and every row was
+reached, in each player, by a scenario that passed there.
 
 ### Packaging the set
 

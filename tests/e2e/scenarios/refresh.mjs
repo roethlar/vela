@@ -210,6 +210,8 @@ const listingsFor = (viewId) =>
 
 export default {
   name: "refresh",
+  rows: [],
+  noRows: "refreshing a library view; plays nothing",
 
   async seed({ configRoot }) {
     mockA = await startMockJellyfin({

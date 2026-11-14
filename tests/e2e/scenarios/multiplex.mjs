@@ -5,8 +5,16 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
-import { makeClips, playAndQuit, pollUntil, seedConfig } from '../helpers.mjs';
+import {
+  DISPLAYLESS_MPV_ARGS,
+  makeClips,
+  playAndQuit,
+  pollUntil,
+  seedConfig,
+  waitForPageUncovered,
+} from '../helpers.mjs';
 import { createMockPlexTls, mockPlexSource, startMockPlex } from '../mockplex.mjs';
+import { shown } from '../proof.mjs';
 
 const TITLE = 'Shared Plex Movie';
 const CANONICAL = 'imdb:tt7654321';
@@ -61,6 +69,7 @@ async function chooseBacking(driver, label) {
 
 export default {
   name: 'multiplex',
+  rows: ['2', '6', '7'],
 
   async seed({ configRoot }) {
     tls = createMockPlexTls(configRoot);
@@ -78,10 +87,23 @@ export default {
       machineIdentifier: 'machine-b',
       token: 'plex-token-b',
     });
-    seedConfig(configRoot, [
-      mockPlexSource(mockA, { id: 'plex-a' }),
-      mockPlexSource(mockB, { id: 'plex-b' }),
-    ]);
+    seedConfig(
+      configRoot,
+      [mockPlexSource(mockA, { id: 'plex-a' }), mockPlexSource(mockB, { id: 'plex-b' })],
+      {
+        // The mocks serve HTTPS under a private CA. Vela's own client trusts
+        // it through SSL_CERT_FILE (`environment` below); mpv's TLS (FFmpeg
+        // with GnuTLS) never reads that variable. So mpv is told about the
+        // same CA itself, and told to check the certificate, and BOTH players
+        // fetch the stream with verification on. Without these lines the
+        // embedded player's mpv (0.42, which verifies by default) refuses the
+        // stream and the play ends at once, while the system's mpv 0.41 (which
+        // does not verify by default) plays it without checking anything.
+        // Whether Vela itself should set either is the owner's question
+        // (.agents/plans/embedded-player.slice6-notes.md, the TLS findings).
+        mpv_extra_args: `${DISPLAYLESS_MPV_ARGS}\n--tls-verify=yes\n--tls-ca-file=${tls.ca}`,
+      },
+    );
   },
 
   environment() {
@@ -156,7 +178,59 @@ export default {
     );
     await screenshot('01-collapsed');
 
-    await playAndQuit(driver, () => chooseBacking(driver, 'Mock Plex A'));
+    // What the player was handed carries no credential either (row 7 of the
+    // embedded player's parity list): the stream's address and the title
+    // mpv shows, read from mpv itself. The stream's own request is checked on
+    // the wire by the mock (contractViolations, below).
+    let playedPath = null;
+    await playAndQuit(driver, () => chooseBacking(driver, 'Mock Plex A'), {
+      during: async (mpv) => {
+        playedPath = await mpv.getProp('path');
+        const title = await mpv.getProp('media-title');
+        for (const [what, value] of [['path', playedPath], ['media-title', title]]) {
+          assert.ok(!/token/i.test(value), `mpv's ${what} must carry no token: ${value}`);
+          assert.ok(!value.includes('plex-token-'), `mpv's ${what} must carry no token: ${value}`);
+        }
+        assert.equal(title, TITLE, 'mpv shows the title, nothing more');
+        // Nor the process the player runs in: mpv's own in the external
+        // player, Vela's in the embedded one. Its command line and its
+        // environment are readable by any process of the user. This check
+        // can fail only in the external player (guard finding atk-7): Vela's
+        // own command line and environment are fixed when it starts, before
+        // any token exists, so in the embedded player it cannot catch a leak.
+        // There row 7 rests on the path and title above and the wire below.
+        const pid = await mpv.getProp('pid');
+        for (const what of ['cmdline', 'environ']) {
+          const text = fs.readFileSync(`/proc/${pid}/${what}`, 'utf8');
+          assert.ok(!text.includes('plex-token-'), `the player's ${what} must carry no token`);
+          assert.ok(!/x-plex-token/i.test(text), `the player's ${what} must carry no token header`);
+        }
+      },
+    });
+    // On the wire: the player fetched the stream itself (GET; Vela's own
+    // check of it before the play is a HEAD), with the token in the header
+    // and not in the address. The mock answers anything else with a 401 and
+    // a contract violation (asserted at the end).
+    const parts = mockA.state.requests.filter((request) => request.path.startsWith('/library/parts/machine-a/'));
+    assert.ok(
+      mockA.state.served.some(
+        (request) =>
+          request.method === 'GET' &&
+          request.path.startsWith('/library/parts/machine-a/') &&
+          request.tokenMatches &&
+          [200, 206].includes(request.status),
+      ),
+      `the player fetched the stream with the token header: ${JSON.stringify(parts)}`,
+    );
+    assert.ok(
+      parts.every((request) => request.tokenMatches && !Object.keys(request.query).some((key) => /token|redacted/i.test(key))),
+      `every stream request carried the token in its header only: ${JSON.stringify(parts)}`,
+    );
+    assert.match(
+      playedPath,
+      new RegExp(`^https://127\\.0\\.0\\.1:${mockA.port}/library/parts/machine-a/`),
+      'the Plex A backing plays its own stream, over HTTPS',
+    );
     await pollUntil(
       () => readConfig(configRoot).merged_overrides?.[CANONICAL] === 'plex-a',
       `${CANONICAL} to prefer plex-a`,
@@ -180,7 +254,16 @@ export default {
       'Plex playback reporting must use the source token header',
     );
 
+    // Plex B has no media behind its part: Vela's check of the stream before
+    // it starts a player is answered 404, so this choice persists its
+    // override and is then refused on the page, before any player starts, in
+    // either player. Nothing covers the page afterwards.
     await chooseBacking(driver, 'Mock Plex B');
+    await driver.waitFor(
+      `return document.body.innerText.includes(${JSON.stringify(`Couldn't play “${TITLE}” — File not found on the server`)})`,
+      'the Plex B play to be refused on the page',
+    );
+    await waitForPageUncovered(driver, 'after the Plex B play was refused');
     await pollUntil(
       () => readConfig(configRoot).merged_overrides?.[CANONICAL] === 'plex-b',
       `${CANONICAL} to prefer plex-b`,
@@ -244,5 +327,7 @@ export default {
     assert.deepEqual(mockA.state.contractViolations, [], 'Plex A mock contract');
     assert.deepEqual(mockB.state.contractViolations, [], 'Plex B mock contract');
     await screenshot('02-independent-remove');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('2', '6', '7');
   },
 };

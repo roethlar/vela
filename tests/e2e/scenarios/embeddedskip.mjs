@@ -26,6 +26,7 @@ import {
   showPlayerBar,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
+import { shown } from '../proof.mjs';
 
 const TICKS_PER_MS = 10_000;
 let mock;
@@ -45,6 +46,9 @@ const active = (mpv) => mpv.getProp('user-data/vela-markers/active');
 export default {
   name: 'embeddedskip',
   onlyPlayer: 'embedded',
+  onlyPlayerWhy:
+    "the page's skip button exists only in the embedded player; the external player's button is drawn on mpv's own OSD, which markerbutton shows",
+  rows: ['8b'],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['skip.mp4']);
@@ -147,5 +151,7 @@ export default {
     }
     await pollUntil(async () => !(await accepting(socketPath)), 'the player to stop after q', { timeoutMs: 5000 });
     await driver.waitFor(`return !document.querySelector('.player')`, 'the player view to go away');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('8b');
   },
 };

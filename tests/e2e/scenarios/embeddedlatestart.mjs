@@ -84,6 +84,10 @@ const showTextCommands = () =>
 export default {
   name: 'embeddedlatestart',
   onlyPlayer: 'embedded',
+  onlyPlayerWhy:
+    'an embedded play that does not start in time carries on in the external player (decision D3); in the external player there is nothing to fall back from',
+  rows: [],
+  noRows: 'decision D3, a late embedded start; not a row of the inventory',
 
   async seed({ configRoot }) {
     logFile = path.join(configRoot, 'mpv-commands.log');

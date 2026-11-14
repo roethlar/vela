@@ -173,6 +173,10 @@ async function drawnAtPageSize(driver, mpv, what) {
 export default {
   name: 'embeddedcontrols',
   onlyPlayer: 'embedded',
+  onlyPlayerWhy:
+    "the player view's controls and keys exist only in the embedded player (the plan's inventory: embedded-only by nature)",
+  rows: [],
+  noRows: "the player view's controls; the stop they make is the embedded user's stop, which the scenarios of rows 1 to 6 use through stopPlayAsUser",
 
   async seed({ configRoot }) {
     const clip = makeClip(configRoot);

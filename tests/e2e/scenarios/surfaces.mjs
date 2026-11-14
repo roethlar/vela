@@ -10,6 +10,16 @@
 // which exercises the exact post-resolve / pre-success boundary. A merely bogus
 // `mpv_path` would not: resolve_mpv validates it and falls back to PATH. The edit
 // leg separately proves a watch-state failure stays on the edit's own line.
+//
+// In a run of the embedded player (`--embedded`) the same NUL alone fails
+// nothing: that player starts no program, and drops a line of the Advanced
+// options that is not an option, so the play would simply start. A play
+// there fails only when the embedded player cannot start it AND the external
+// player it then falls back to cannot either (decision D3; `start_player` in
+// playback.rs). So in that run the embedded start is also made to fail, by
+// the development-build seam `embeddedlatestart` uses: the embedded player
+// waits longer before loading than Vela waits for it. The fallback then meets
+// the NUL. Everything the page does with the failure is the same in both.
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
@@ -17,6 +27,7 @@ import { pollUntil, mockSource, seedConfig, openLibraryGrid } from "../helpers.m
 import { startMockJellyfin } from "../mockjf.mjs";
 
 let mock;
+const embedded = process.env.VELA_E2E_PLAYER === "embedded";
 
 const MOVIES = [
   { id: "m1", name: "Alpha One", year: 2001 },
@@ -51,6 +62,8 @@ async function ctxMenu(driver, prefix, label) {
 
 export default {
   name: "surfaces",
+  rows: [],
+  noRows: "where a failed Play is reported (per-surface status); a failed play is staged in each player only as a means",
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin({ movies: MOVIES });
@@ -59,6 +72,14 @@ export default {
       hidden_from_continue: ["jf:m1", "sentinel"],
       mpv_extra_args: "\0",
     });
+  },
+
+  environment() {
+    // See the note at the top: only the embedded player needs its start to
+    // fail as well. A released Vela ignores both variables.
+    return embedded
+      ? { VELA_EMBEDDED_LOAD_DELAY_MS: "8000", VELA_EMBEDDED_START_LIMIT_MS: "500" }
+      : {};
   },
 
   async cleanup() {
@@ -97,6 +118,14 @@ export default {
       (await detailError(driver)).includes("Couldn't play"),
       "the line must say WHAT failed, not just dump the backend's string: giving a writer its own line is only half the job if the line cannot be told apart from the grid's (owner playtest, 0.1.46 — with Plex both were the SAME sentence, twice)",
     );
+    if (embedded) {
+      // The failure came the embedded player's way: it was tried, then the
+      // external player was (D3), and the play failed only when both had.
+      assert.ok(
+        (await detailError(driver)).includes("The external player could not start either"),
+        `an embedded play fails only after its fallback has failed too — got ${JSON.stringify(await detailError(driver))}`,
+      );
+    }
     assert.equal(
       await banner(driver),
       null,

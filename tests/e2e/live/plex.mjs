@@ -23,6 +23,7 @@ import fs from "node:fs";
 import { createConnection } from "node:net";
 import { pollUntil, seedConfig } from "../helpers.mjs";
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from "../mpv.mjs";
+import { shown } from '../proof.mjs';
 
 const CREDS = "/tmp/vela-live-creds.json";
 const SECTION = "Movies";
@@ -657,6 +658,7 @@ async function restoreTargetWatchState(driver = null, fixtures = null) {
 
 export default {
   name: "live-plex",
+  rows: ["1", "4"],
 
   async seed({ configRoot }) {
     if (!fs.existsSync(CREDS)) throw new Error(`live: no credentials at ${CREDS}`);
@@ -867,5 +869,7 @@ export default {
     }
     if (restorationError) throw restorationError;
     if (primaryError) throw primaryError;
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('1', '4');
   },
 };

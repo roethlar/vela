@@ -7,6 +7,8 @@ import path from 'node:path';
 
 export default {
   name: 'smoke',
+  rows: [],
+  noRows: 'the first start on an empty configuration; plays nothing',
   async run({ driver, screenshot, repoRoot }) {
     await driver.waitFor(
       `return document.readyState === 'complete' && !!document.querySelector('h1,h2')`,

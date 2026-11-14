@@ -9,12 +9,16 @@ import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { Driver } from './driver.mjs';
+import { setScenarioConfigRoot } from './mpv.mjs';
+import { beginProof, endProof } from './proof.mjs';
+import { loadScenarios, proofProblems, recordedTree, runsIn } from './scenario-loader.mjs';
 
 const e2eDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(e2eDir, '../..');
 const artifactsDir = path.join(e2eDir, 'artifacts');
+const resultsDir = path.join(e2eDir, 'results');
 const appBinary = path.join(repoRoot, 'src-tauri/target/debug/vela');
 const driverPort = Number(process.env.VELA_E2E_PORT ?? 4444);
 const driverUrl = `http://127.0.0.1:${driverPort}`;
@@ -85,8 +89,13 @@ async function waitUntil(fn, what, timeoutMs = 10000) {
   }
 }
 
+// Returns { err, proof }: the error it failed with (null when it passed) and
+// what it reached (proof.mjs), which the results file records.
 async function runScenario(scenario, tauriDriverBin) {
+  let proof = { shown: [], routes: [] };
   const configRoot = fs.mkdtempSync(path.join(os.tmpdir(), `vela-e2e-${scenario.name}-`));
+  // A play's socket is the scenario's only when its app made it (mpv.mjs).
+  setScenarioConfigRoot(configRoot);
   // The app reads XDG_CONFIG_HOME=<configRoot>/config, so a seeded config
   // file belongs at <configRoot>/config/vela/config.json.
   if (scenario.seed) await scenario.seed({ configRoot, repoRoot });
@@ -140,6 +149,7 @@ async function runScenario(scenario, tauriDriverBin) {
   try {
     await waitUntil(driverListening, `tauri-driver on :${driverPort}`);
     await driver.newSession(appBinary);
+    beginProof();
     await scenario.run({
       driver,
       repoRoot,
@@ -158,10 +168,17 @@ async function runScenario(scenario, tauriDriverBin) {
         await driver.newSession(appBinary);
       },
     });
-    return null;
+    // What it reached must be what it declares (proof.mjs).
+    proof = endProof();
+    const problems = proofProblems(scenario, runPlayer, proof);
+    if (problems.length > 0) {
+      throw new Error(`e2e: ${scenario.name} does not do what it declares:\n  ${problems.join('\n  ')}`);
+    }
+    return { err: null, proof };
   } catch (err) {
-    return err;
+    return { err, proof };
   } finally {
+    endProof();
     if (runCleanup) await runCleanup().catch(() => {});
     if (runCleanup) activeCleanups.delete(runCleanup);
     await driver.deleteSession().catch(() => {});
@@ -173,6 +190,52 @@ async function runScenario(scenario, tauriDriverBin) {
     fs.rmSync(configRoot, { recursive: true, force: true });
   }
 }
+
+// LIVE runs load from tests/e2e/live/ instead: those drive REAL servers, so they are not
+// hermetic, they are not deterministic in the way the mocks are, and they must never gate
+// an ordinary change. They are opt-in (`npm run e2e:live`) and never part of the default
+// suite — a flaky test in the gate is worse than no test, because it teaches you to ignore
+// red.
+const live = argv.includes('--live');
+const scenarioDir = path.join(e2eDir, live ? 'live' : 'scenarios');
+// The same loader as the parity test's (scenario-loader.mjs): a scenario it
+// does not understand (an unknown key or player, a missing or unknown row, a
+// name that is not its file's) stops the run before anything starts, instead
+// of being skipped or run on a guess.
+let allScenarios;
+try {
+  allScenarios = await loadScenarios(scenarioDir, { prefix: live ? 'live-' : '' });
+} catch (err) {
+  console.error(err.message);
+  process.exit(1);
+}
+// A typo'd name must fail loudly, not silently shrink the run (eh-2).
+const unknown = nameFilter.filter((n) => !allScenarios.some((s) => s.name === n));
+if (unknown.length > 0) {
+  console.error(
+    `e2e: unknown scenario(s): ${unknown.join(', ')} — available: ${allScenarios.map((s) => s.name).join(', ')}`,
+  );
+  process.exit(1);
+}
+const scenarios =
+  nameFilter.length === 0 ? allScenarios : allScenarios.filter((s) => nameFilter.includes(s.name));
+if (scenarios.length === 0) {
+  console.error('e2e: no scenarios found');
+  process.exit(1);
+}
+
+// The commit this run is of, and whether the worktree was clean, read BEFORE
+// the build and the first scenario, for the results file below: read at the
+// end, a tree changed during the run (an injection restored before the end,
+// a commit landing mid-run) would be recorded as a clean run of a commit
+// whose code it did not run (review finding conf-1). Read again after every
+// scenario; any difference from the start marks the run dirty. (A change made
+// and undone within one scenario is not seen; the scenario modules themselves
+// were imported above, before this read.)
+const git = (args) => spawnSync('git', args, { cwd: repoRoot, encoding: 'utf8' }).stdout?.trim() ?? '';
+const readTree = () => ({ head: git(['rev-parse', 'HEAD']), status: git(['status', '--porcelain']) });
+const treeAtStart = readTree();
+const treeSamples = [];
 
 if (await driverListening()) {
   console.error(`e2e: something is already listening on :${driverPort} — stop it or set VELA_E2E_PORT`);
@@ -192,33 +255,6 @@ if (!fs.existsSync(appBinary)) {
 
 fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
-
-// LIVE runs load from tests/e2e/live/ instead: those drive REAL servers, so they are not
-// hermetic, they are not deterministic in the way the mocks are, and they must never gate
-// an ordinary change. They are opt-in (`npm run e2e:live`) and never part of the default
-// suite — a flaky test in the gate is worse than no test, because it teaches you to ignore
-// red.
-const live = argv.includes('--live');
-const scenarioDir = path.join(e2eDir, live ? 'live' : 'scenarios');
-const allScenarios = [];
-for (const file of fs.readdirSync(scenarioDir).filter((f) => f.endsWith('.mjs')).sort()) {
-  const { default: scenario } = await import(pathToFileURL(path.join(scenarioDir, file)).href);
-  allScenarios.push(scenario);
-}
-// A typo'd name must fail loudly, not silently shrink the run (eh-2).
-const unknown = nameFilter.filter((n) => !allScenarios.some((s) => s.name === n));
-if (unknown.length > 0) {
-  console.error(
-    `e2e: unknown scenario(s): ${unknown.join(', ')} — available: ${allScenarios.map((s) => s.name).join(', ')}`,
-  );
-  process.exit(1);
-}
-const scenarios =
-  nameFilter.length === 0 ? allScenarios : allScenarios.filter((s) => nameFilter.includes(s.name));
-if (scenarios.length === 0) {
-  console.error('e2e: no scenarios found');
-  process.exit(1);
-}
 
 // Default to a private Xvfb display: on the live Wayland session a test
 // window that opens unfocused/occluded stops getting frame callbacks and
@@ -269,7 +305,21 @@ if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
     // through WebDriver does not count. Once idle it never draws a window
     // that opens afterwards, so every later scenario of a long run hung at
     // its first screenshot. Hence no idle time at all.
-    ['--backend=headless', '--renderer=gl', `--socket=${socket}`, '--width=1280', '--height=800', '--idle-time=0'],
+    // --fake-seat: without a seat the compositor never activates the app's
+    // window, so the page never has focus (document.hasFocus() is false,
+    // :focus and :focus-visible never match), a state no user's desktop is
+    // ever in; GDK also logs three gdk_seat_get_keyboard criticals per start.
+    // WebDriver still types without one, because WebKitWebDriver injects its
+    // events inside the page, which is why only the focus styles showed it.
+    [
+      '--backend=headless',
+      '--fake-seat',
+      '--renderer=gl',
+      `--socket=${socket}`,
+      '--width=1280',
+      '--height=800',
+      '--idle-time=0',
+    ],
     { stdio: 'ignore' },
   );
   weston.on('error', () => {
@@ -300,13 +350,16 @@ if (!process.env.VELA_E2E_HEADED && runPlayer === 'embedded') {
 const tauriDriverBin = resolveTauriDriver();
 let failures = 0;
 let skipped = 0;
+// What each scenario did, for the results file below.
+const outcomes = {};
 for (const scenario of scenarios) {
   process.stdout.write(`e2e: ${scenario.name} … `);
   // A scenario may be about one player (`onlyPlayer`). The whole run is in
   // one player: the external one unless it was started with `--embedded`
   // (see README.md). In a run of the other player the scenario is skipped by
-  // name, never silently; asked for by name, it fails.
-  if (scenario.onlyPlayer && scenario.onlyPlayer !== runPlayer) {
+  // name, never silently; asked for by name, it fails. (The loader has
+  // already refused an `onlyPlayer` that names no player.)
+  if (!runsIn(scenario, runPlayer)) {
     const needs =
       scenario.onlyPlayer === 'external'
         ? 'needs a run of the external player (without --embedded)'
@@ -319,9 +372,12 @@ for (const scenario of scenarios) {
       skipped += 1;
       console.log(`SKIP (${needs})`);
     }
+    outcomes[scenario.name] = { status: 'skip' };
     continue;
   }
-  const err = await runScenario(scenario, tauriDriverBin);
+  const { err, proof } = await runScenario(scenario, tauriDriverBin);
+  treeSamples.push(readTree());
+  outcomes[scenario.name] = { status: err ? 'fail' : 'pass', error: err ? String(err?.message ?? err) : null, ...proof };
   if (err) {
     failures += 1;
     console.log('FAIL');
@@ -329,6 +385,32 @@ for (const scenario of scenarios) {
   } else {
     console.log('PASS');
   }
+}
+
+// The results of this run, for the parity verdict of two full runs, one of
+// each player (`npm run e2e:verdict`; parity-verdict.mjs). A live run counts
+// for neither player and writes none.
+if (!live) {
+  const tree = recordedTree(treeAtStart, [...treeSamples, readTree()]);
+  if (tree.changedDuringRun) console.error('e2e: the worktree changed during the run; its results are recorded as dirty');
+  fs.mkdirSync(resultsDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(resultsDir, `${runPlayer}.json`),
+    JSON.stringify(
+      {
+        player: runPlayer,
+        full: nameFilter.length === 0,
+        // Whether this run built the app it ran. With --skip-build the binary
+        // is whatever was built last, of any code; the verdict refuses it.
+        built: !skipBuild,
+        ...tree,
+        finishedAt: new Date().toISOString(),
+        scenarios: outcomes,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 const ran = scenarios.length - skipped;

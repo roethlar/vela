@@ -4,22 +4,36 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
-  goHome,
+  clickUnderPlay,
   holdsFor,
+  homeButton,
   logicalPlaybackInfoIds,
   makeClips,
   mockSource,
   pollUntil,
   seedConfig,
+  waitForPageUncovered,
 } from '../helpers.mjs';
 import { startMockJellyfin } from '../mockjf.mjs';
 import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from '../mpv.mjs';
+import { shown } from '../proof.mjs';
 
 let healthy;
 let unavailable;
 
 export default {
   name: 'serverplaylists',
+  rows: ['5'],
+  testOnly: [
+    {
+      row: '5',
+      player: 'embedded',
+      via: 'clickUnderPlay',
+      route: 'clickUnderPlay: going Home during the first server-playlist item',
+      proves: 'that the dispatcher repaints Home for the next item underneath the player view',
+      unproven: 'that a user can watch Home during the run: the player view covers the page',
+    },
+  ],
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, [
@@ -186,8 +200,11 @@ export default {
     await first.setProp('pause', true);
     // Establish Home before the intermediate EOF. A later navigation would
     // perform its own load and could not prove the dispatcher repainted the
-    // backend-owned successor.
-    await goHome(driver);
+    // backend-owned successor. In the embedded player the view covers the
+    // page during the run, so no user can go Home now; Home is reached there
+    // through the test-only route clickUnderPlay, and what is proven is the
+    // page's repaint underneath the view, not that a user sees it.
+    await clickUnderPlay(driver, await homeButton(driver), 'going Home during the first server-playlist item');
     await driver.waitFor(
       `return document.querySelector('[aria-label="Continue watching"] .flowcard.center')?.getAttribute('title') === 'Server First'`,
       'Server First rendered before server-playlist advancement',
@@ -256,5 +273,10 @@ export default {
       [],
       'an alternate configured server must never receive a rerouted playlist play',
     );
+    // A run stopped by owner loss leaves the user's page usable (the embedded
+    // player's view must not outlive its last play).
+    await waitForPageUncovered(driver, 'after owner loss stopped the server playlist');
+    // The end of its proof of its rows in this player (proof.mjs).
+    shown('5');
   },
 };

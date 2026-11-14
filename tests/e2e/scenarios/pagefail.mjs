@@ -241,6 +241,8 @@ async function scrollGridToEnd(driver) {
 
 export default {
   name: "pagefail",
+  rows: [],
+  noRows: "a failed page of a library; plays nothing",
 
   async seed({ configRoot }) {
     mock = await startMockJellyfin({

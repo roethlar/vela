@@ -210,6 +210,10 @@ async function leftAfterClose(driver, from, session, windowed) {
 export default {
   name: 'embeddedfullscreenend',
   onlyPlayer: 'embedded',
+  onlyPlayerWhy:
+    "the fullscreen Vela's window is put in for the player view, and left when a run of plays ends, exists only in the embedded player (the plan's inventory: the player view is embedded-only by nature)",
+  rows: [],
+  noRows: "the player view's fullscreen at the end of a run (review finding pc-2); not a row of the inventory",
 
   async seed({ configRoot }) {
     const mediaDir = makeClips(configRoot, ['one.mp4', 'two.mp4', 'three.mp4']);

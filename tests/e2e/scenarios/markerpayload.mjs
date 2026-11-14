@@ -95,6 +95,8 @@ async function armsWithoutWindow({ script, dir, name, draw }) {
 
 export default {
   name: 'markerpayload',
+  rows: [],
+  noRows: "the contract of vela-markers.lua, run in the system's mpv without the app; skipping in the app (row 8) is markers' and embeddedskip's",
 
   async run({ repoRoot, configRoot }) {
     const script = path.join(repoRoot, 'src-tauri/resources/mpv-scripts/vela-markers.lua');

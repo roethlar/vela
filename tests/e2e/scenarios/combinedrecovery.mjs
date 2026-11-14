@@ -18,6 +18,8 @@ function paths(configRoot) {
 
 export default {
   name: 'combinedrecovery',
+  rows: [],
+  noRows: 'recovery from a damaged pre-split settings file; plays nothing',
 
   seed({ configRoot }) {
     const files = paths(configRoot);
