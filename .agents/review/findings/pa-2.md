@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — row 9 is "Autocrop off / manual / auto". In the external player `autocrop` is the only scenario that stands for it, and it sets automatic mode and nothing else. A manual toggle that does nothing, or an Off that still crops, leaves the row shown and the verdict passing; the embedded player's scenario does exercise manual cropping, so the parity claimed is one-sided.
 **Status**: In progress
 **Branch**: —
-**Commit**: `9bcdfbc`
+**Commit**: `9bcdfbc`, `a9ed237`, `2a42345`
 
 ## Evidence
 
@@ -70,6 +70,9 @@ read and landed as one commit by the coordinating agent.
 - `tests/e2e/scenarios/autocrop.mjs`
 - `tests/e2e/scenarios/embeddedcrop.mjs`
 - `tests/e2e/README.md`
+- `tests/e2e/parity.mjs` (the follow-up)
+- `tests/e2e-parity.test.mjs` (the follow-up)
+- `tests/e2e/scenarios/cropscript.mjs` (the follow-up: one sentence naming the rows)
 
 ## Guard proof
 
@@ -103,9 +106,47 @@ On the committed content: 5 of 5 passing runs in each player by the
 author, 5 of 5 by the attacking helper, and both full suites on the merged
 content.
 
-No check that plain `node --test` can run fails when this fix is taken
-out. That part is being added as a follow-up commit before the fix goes to
-the reviewer, whose sandbox cannot run the end-to-end suite.
+The follow-up (`a9ed237`, `2a42345`). As first landed, nothing that plain
+`node --test` runs failed when this fix was taken out, and the reviewer's
+sandbox cannot run the end-to-end suite. Now row 9 of the parity list is
+split by mode, so the checks that already existed do the guarding:
+
+- `tests/e2e/parity.mjs` holds three rows in place of row 9: `9a` Off,
+  `9b` Manual, `9c` Auto, and `SPLITS` approves that split. The plan's
+  table keeps one row 9.
+- `autocrop` and `embeddedcrop` each declare the three rows and call
+  `shown()` for a mode at the end of that mode's legs. `autocrop`'s
+  test-only route is declared for row `9b`.
+- So: the parity test fails when a mode has no scenario in a player; the
+  runner fails a scenario that declares a mode and does not reach the end
+  of its legs; the verdict fails a run in which a mode was not shown; and
+  the test-only marking falls on Manual in the external player alone,
+  which closes the gap this record named.
+- New tests in `tests/e2e-parity.test.mjs`: with `autocrop`'s claim of 9a
+  taken away the parity check reports "row 9a is shown in the embedded
+  player but neither shown nor exempted in the external player", and the
+  same for `embeddedcrop` in the embedded player; with 9a deleted from the
+  inventory the inventory check reports the missing part; the test-only
+  marking is pinned for every row and player (only 9b in the external
+  player names `autocrop`); and each scenario's source must call
+  `shown()` exactly once for each row it declares, and for no other.
+
+Red-proofs of the follow-up, each restored from the commit: row 9 put
+back whole (the loader refused 9a, 9b and 9c); the whole split reverted
+(four tests failed); a 9a claim removed from either scenario; the fix
+itself taken out, `autocrop`'s Off leg deleted with its `shown('9a')` and
+its claim ("every row is shown in both players, or exempted where it is
+not" failed); the marking moved to 9c; a `shown('9a')` deleted, added a
+second time, or put before a `return`; `markers` made to call
+`shown('9a')`. Each failed a test that names it. End to end, the Off leg
+run with the mode `auto` failed in the Off leg, and its results file
+recorded no 9a. On the follow-up's content `autocrop` passed 3 of 3 in
+the external player and `embeddedcrop` 3 of 3 in the embedded one, each
+run recording all three modes.
+
+Made by a helper agent (Claude Opus 5.5) on a local branch, attacked by a
+second, repaired by a third, read by the coordinating agent, and landed
+one commit per helper commit, each with `npm run check` green.
 
 ## Coder dispute (if any)
 
@@ -122,6 +163,11 @@ the reviewer, whose sandbox cannot run the end-to-end suite.
   external player (the Manual leg, once in eleven runs, with mpv still
   alive 3 s after `quit`). Not seen in the forty runs since. It may be a
   defect of the product or of mpv; it is not this finding's.
+- A `shown()` call moved earlier inside its own leg is not seen by a unit
+  test: the test of the sources counts the calls, not where they stand.
+  The stronger form, the runner recording which rows are shown after a
+  route was taken, is not built.
+- That a leg really checks its mode rests on the end-to-end runs above.
 
 ## Reviewer comments
 

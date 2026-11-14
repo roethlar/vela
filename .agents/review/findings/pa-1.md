@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — `markers`, the only scenario that stands for automatic skipping (row 8a) in either player, waits up to 14 and 16 seconds for a running play to be past second 12. Ordinary playback gets there in that time, so the row is counted as shown, and the parity verdict passes, with automatic skipping broken.
 **Status**: In progress
 **Branch**: —
-**Commit**: `25287b6`
+**Commit**: `25287b6`, `17d415f`, `343707b`, `da7ef27`
 
 ## Evidence
 
@@ -55,6 +55,9 @@ as one commit by the coordinating agent.
 ## Files changed
 
 - `tests/e2e/scenarios/markers.mjs`
+- `tests/e2e/judge.mjs` (new, the follow-up)
+- `tests/e2e-judge.test.mjs` (new, the follow-up)
+- `package.json` (the new test file in the `check` script)
 
 ## Guard proof
 
@@ -80,10 +83,48 @@ On the committed content: 5 of 5 passing runs in each player by the
 repairing helper, 5 of 5 in each by the attacking one, and both full
 suites on the merged content.
 
-No check that plain `node --test` can run fails when this fix is taken
-out: a stricter end-to-end check, removed, makes nothing fail. That part
-is being added as a follow-up commit before the fix goes to the reviewer,
-whose sandbox cannot run the end-to-end suite.
+The follow-up (`17d415f`, `343707b`, `da7ef27`). As first landed, nothing
+that plain `node --test` runs failed when this fix was taken out: a
+stricter end-to-end check, removed, makes nothing fail, and the reviewer's
+sandbox cannot run the end-to-end suite. Now:
+
+- The judgement is a function of its own, `skipJumpVerdict` in the new
+  `tests/e2e/judge.mjs`, which only judges samples. `proveSkippedPast`
+  keeps the observing exactly as it was (pause, put the play at 1 s,
+  resume, sample every 100 ms) and asks the function after each sample.
+  The thresholds, the comparisons and the failure sentences are unchanged.
+- Unit tests in the new `tests/e2e-judge.test.mjs` (part of `npm run
+  check`) hold each rule: ordinary playback from 1 s fails at the first
+  sample at 3 s; the trace the first fix let through (a landing at 9 s,
+  later 11.96 s then 12.08 s) fails at the 9 s sample; one jump (1.92 s
+  then 12.0 s) passes and names both samples; a sample inside the margin
+  followed by the jump passes; exactly the range's end passes and exactly
+  start plus margin fails; null samples change nothing; a play stuck at
+  1 s, and a range that playback cannot reach, fail at the first sample
+  past 5000 ms and not before.
+- The scenario's use of the function is held too: `proveSkippedPast` is
+  exported, and tests drive it with a stand-in for mpv. A skip that lands
+  inside the range must reject with the in-range sentence; one jump must
+  resolve and log its line; a play held at 1 s must reject with "which
+  only a skip can do"; a skip landing at 7.5 s must reject.
+
+Red-proofs of the follow-up, each restored from the commit: the in-range
+check out (four tests failed, the 9 s trace among them, accepted as a
+pass); the window out; `>=` at the range's end and at the margin each made
+`>`; the scenario made to throw only the window's failure (the stand-in
+test failed; before `343707b` that injection hung the test file, which is
+why that commit exists); and the fix itself taken out, the scenario put
+back to the first fix's rule: "the markers scenario fails a skip that
+lands inside the range" failed with "Missing expected rejection". The
+attacking helper's sweep of mutations at the last commit: 39 caught, none
+survived. End to end, with the built script's seek sent to 3 s short of
+the end, `markers` failed in the external player with the in-range
+sentence thrown from the verdict. On the follow-up's content `markers`
+passed 3 of 3 in each player.
+
+Made by a helper agent (Claude Opus 5.5) on a local branch, attacked by a
+second, repaired by a third, read by the coordinating agent, and landed
+one commit per helper commit, each with `npm run check` green.
 
 ## Coder dispute (if any)
 
@@ -96,6 +137,8 @@ whose sandbox cannot run the end-to-end suite.
 - A skip that lands less than a sampling gap (about 0.1 s) short of the end
   can slip between two samples. Any landing 0.2 s or more short of the end,
   and at least 1 s past the start, is caught.
+- Still held only by end-to-end runs: the pause, the seek and the resume
+  against a real mpv, and that `run()` calls `proveSkippedPast` at all.
 
 ## Reviewer comments
 

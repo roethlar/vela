@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — row 2 includes the final stop. For Plex, `multiplex` waits for any timeline request and any progress request. With the final "stopped" timeline never sent, the periodic "playing" ones still satisfy it; the other scenario of row 2, `watchstate`, is Jellyfin's and cannot see it.
 **Status**: In progress
 **Branch**: —
-**Commit**: `17d9a81`
+**Commit**: `17d9a81`, `7e1dda5`, `f07fd8c`, `4906831`
 
 ## Evidence
 
@@ -56,6 +56,8 @@ Made, attacked, repaired, confirmed and landed as `pa-1` was.
 
 - `tests/e2e/scenarios/multiplex.mjs`
 - `tests/e2e/helpers.mjs`
+- `tests/e2e/judge.mjs` (the follow-up)
+- `tests/e2e-judge.test.mjs` (the follow-up)
 
 ## Guard proof
 
@@ -85,9 +87,46 @@ On the committed content: 5 of 5 passing runs in each player by the
 repairing helper, 5 of 5 in each by the attacking one, and both full
 suites on the merged content.
 
-No check that plain `node --test` can run fails when this fix is taken
-out. That part is being added as a follow-up commit before the fix goes to
-the reviewer, whose sandbox cannot run the end-to-end suite.
+The follow-up (`7e1dda5`, `f07fd8c`, `4906831`). As first landed, nothing
+that plain `node --test` runs failed when this fix was taken out, and the
+reviewer's sandbox cannot run the end-to-end suite. Now:
+
+- The rules are a function of their own, `plexStopProblems` in
+  `tests/e2e/judge.mjs`: one sentence per broken rule, none when all is
+  well. The rules are those listed above, unchanged.
+- What the scenario hands the rules is a function too, `assertPlexStopped`
+  in `multiplex.mjs` (exported): of all the requests Plex A received it
+  takes the `/:/timeline` ones, prints them, and requires no problem for
+  item 1, a 10000 ms duration, the 6000 ms seek and mpv's position just
+  before the stop. `run()` waits for the stopped report as before and
+  calls it.
+- Unit tests in `tests/e2e-judge.test.mjs` compare exact lists of
+  sentences: the list seen in passing runs gives none; the argument swap
+  the first fix let through (time 10000, duration 7458); a report 1 s
+  early, just over 500 ms early, and exactly 500 ms early (which passes);
+  more than 2 s late, and exactly 2 s late (passes); no stopped report,
+  two, one that is not last; a report that is not "playing" before it; a
+  wrong `ratingKey`; a wrong `key`; a "playing" report further on; a
+  position that was never read; a time that is no number; a stop at
+  exactly the seek; a duration written "10000.0". `assertPlexStopped` is
+  run on recorded requests, a passing set and the swap, and with a stop
+  short of the seek.
+
+Red-proofs of the follow-up, each restored from the commit: every rule of
+`plexStopProblems` taken out in turn (fourteen injections; each failed its
+own test, showing the missing sentence); the fix itself taken out (the
+bounds against mpv's position removed: the swap test failed); in
+`assertPlexStopped`, the position fixed at a constant, the filter widened,
+the print removed, the duration, the `ratingKey` and the `key` changed
+(each failed); the seek set to 0 at first SURVIVED, a hole in the guard
+that `4906831` closed (it then failed). End to end, with the stopped
+report's time and duration swapped in `start_tracking_plex` and the app
+built, `multiplex` failed at `assertPlexStopped` with the swap's two
+sentences; restored and rebuilt, it passed 3 of 3 in each player.
+
+Made by a helper agent (Claude Opus 5.5) on a local branch, attacked by a
+second, repaired by a third, read by the coordinating agent, and landed
+one commit per helper commit, each with `npm run check` green.
 
 ## Coder dispute (if any)
 
@@ -99,6 +138,9 @@ the reviewer, whose sandbox cannot run the end-to-end suite.
   (each would take a product change of its own).
 - The other scenarios that call `playAndQuit` were not run one by one after
   the helper changed; they ran in both full suites on the merged content.
+- Still held only by end-to-end runs: that `run()` calls
+  `assertPlexStopped`, that the position is read from mpv in `beforeStop`,
+  and the waits for the "playing" and the "stopped" report.
 
 ## Reviewer comments
 
