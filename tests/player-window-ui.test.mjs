@@ -40,7 +40,7 @@ test('the play path opens its window from the run or the setting, and hands it o
   // ...and the launch is given what it says when the run has no window yet.
   assert.match(
     commands,
-    /let \(inherited_window_state, inherited_screen_name\) = \{[\s\S]{0,300}opening_window\(current\.as_ref\(\), first_of_run\)/,
+    /let \(inherited_window_state, inherited_screen_name\) = \{[\s\S]{0,300}opening_window\(&current, first_of_run\)/,
     'the launch must open its window from the run, or else from the setting',
   );
   // It samples the record only once the stream is resolved, so a player that
@@ -50,7 +50,7 @@ test('the play path opens its window from the run or the setting, and hands it o
     /let resolved = match selection\.version_id[\s\S]*?\.map_err\(PlayFailure::unavailable\)\?;/,
   );
   const resolveEnd = playPath.indexOf('.map_err(PlayFailure::unavailable)?;', resolvedAt);
-  const sampledAt = playPath.indexOf('opening_window(current.as_ref(), first_of_run)');
+  const sampledAt = playPath.indexOf('opening_window(&current, first_of_run)');
   assert.ok(resolvedAt > 0 && resolveEnd > resolvedAt && sampledAt > 0);
   assert.ok(
     resolveEnd < sampledAt,
@@ -90,7 +90,7 @@ test('the play path opens its window from the run or the setting, and hands it o
   );
   assert.match(
     commands,
-    /if window_record\(current\)\.is_some\(\) \{[\s\S]{0,200}inherited_window_state\(current\)[\s\S]{0,200}\} else \{\s*first_of_run\s*\}/,
+    /if record\.last_external\(\)\.is_some\(\) \{[\s\S]{0,200}inherited_window_state\(record\)[\s\S]{0,200}\} else \{\s*first_of_run\s*\}/,
     'what this run observed must win over the setting',
   );
 
@@ -104,7 +104,7 @@ test('the play path opens its window from the run or the setting, and hands it o
   );
   assert.match(
     commands,
-    /if !recents_ready\.wait_succeeded\(\) \{[\s\S]{0,1600}let ended = window_to_remember\(\s*latest_window[\s\S]{0,200}&session_id,\s*\);\s*let _ = config::update\(move \|cfg\| \{[\s\S]{0,300}if let Some\(\(player, window, screen\)\) = ended \{\s*config::remember_mpv_window\(cfg, player, window, screen\.as_deref\(\)\);/,
+    /if !recents_ready\.wait_succeeded\(\) \{[\s\S]{0,1600}let ended = window_to_remember\(\s*&latest_window[\s\S]{0,200}&session_id,\s*\);\s*let _ = config::update\(move \|cfg\| \{[\s\S]{0,300}if let Some\(\(player, window, screen\)\) = ended \{\s*config::remember_mpv_window\(cfg, player, window, screen\.as_deref\(\)\);/,
     'the end of a play must hand its final window to the settings',
   );
   // Quitting Vela hands the latest play's window over too: a play still

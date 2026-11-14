@@ -126,11 +126,13 @@ pub struct AppState {
     /// Bounded, expiring source-choice requests. Resolved stream URLs,
     /// provider sessions, and auth headers never enter this store or its DTOs.
     pub(crate) playback_choices: AsyncMutex<commands::PlaybackChoiceRequests>,
-    /// Window-state observer for the latest successfully launched mpv session.
-    /// Every later play in this run snapshots it, manual or automatic. Shared
-    /// with each play's end callback, which remembers its window for the next
-    /// run only while it is still the latest.
-    pub(crate) playback_window_session: Arc<Mutex<Option<commands::PlaybackWindowSession>>>,
+    /// The window record of this run's plays: the latest play that started,
+    /// and the latest that started in mpv's own window
+    /// (`commands::PlaybackWindowRecord`). Every later play in this run opens
+    /// its window from the second, manual or automatic. Shared with each
+    /// play's end callback, which remembers its window for the next run only
+    /// while it is still the latest play.
+    pub(crate) playback_window_session: Arc<Mutex<commands::PlaybackWindowRecord>>,
     /// The Tauri app handle, set once at setup. Lets non-command code (the
     /// playback tracker tails) emit UI events such as `playback-ended`.
     pub app_handle: std::sync::OnceLock<tauri::AppHandle>,
@@ -172,7 +174,7 @@ impl AppState {
             embedded: Arc::new(player::EmbeddedHost::new()),
             playback_run: AsyncMutex::new(None),
             playback_choices: AsyncMutex::new(Default::default()),
-            playback_window_session: Arc::new(Mutex::new(None)),
+            playback_window_session: Arc::new(Mutex::new(Default::default())),
             app_handle: std::sync::OnceLock::new(),
             merged_snapshot: AsyncMutex::new(None),
             merged_children_snapshot: AsyncMutex::new(None),
@@ -229,7 +231,7 @@ pub fn run() {
         embedded: Arc::new(player::EmbeddedHost::new()),
         playback_run: AsyncMutex::new(None),
         playback_choices: AsyncMutex::new(Default::default()),
-        playback_window_session: Arc::new(Mutex::new(None)),
+        playback_window_session: Arc::new(Mutex::new(Default::default())),
         app_handle: std::sync::OnceLock::new(),
         merged_snapshot: AsyncMutex::new(None),
         merged_children_snapshot: AsyncMutex::new(None),

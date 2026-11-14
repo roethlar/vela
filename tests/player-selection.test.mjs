@@ -413,12 +413,12 @@ test('only a play that started writes the window record, in one place', () => {
   const production = commands.slice(0, commands.indexOf('\n#[cfg(test)]\nmod tests {'));
   const uses = (source, name) => [...source.matchAll(new RegExp(`\\b${name}\\b`, 'g'))].length;
   const reads = [
-    // Settings shows the display the last play observed.
-    /let observed = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\)\s+\.as_ref\(\)\s+\.map\(\|session\| session\.observation\.display_snapshot\(\)\);/g,
+    // Settings shows the display the latest play observed.
+    /let observed = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\)\s+\.latest\(\)\s+\.map\(\|session\| session\.observation\.display_snapshot\(\)\);/g,
     // A Compatible choice is made for that display.
-    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+compatibility_display\(current\.as_ref\(\), replace_session\)\s+\};/g,
+    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|error\| error\.into_inner\(\)\);\s+compatibility_display\(&current, replace_session\)\s+\};/g,
     // The launch opens its window from it.
-    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+opening_window\(current\.as_ref\(\), first_of_run\)\s+\};/g,
+    /let current = state\s+\.playback_window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+opening_window\(&current, first_of_run\)\s+\};/g,
     // The end callback hands the play's window to the settings.
     /let latest_window = state\.playback_window_session\.clone\(\);/g,
     // The one writer, given the slot.
@@ -436,23 +436,23 @@ test('only a play that started writes the window record, in one place', () => {
   assert.equal(uses(production, 'latest_window'), 2, 'the end callback only reads the record');
   assert.match(
     production,
-    /let ended = window_to_remember\(\s+latest_window\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.as_ref\(\),\s+&session_id,\s+\);/,
+    /let ended = window_to_remember\(\s+&latest_window\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\),\s+&session_id,\s+\);/,
   );
   const publish = functionBody(commands, 'fn publish_started_play<T>(', 'publish_started_play');
   assert.match(
     publish,
-    /after_successful_play\(played, \|\| \{\s+\*window_session\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\) = Some\(launched\);\s+on_success\(\);\s+\}\)/,
+    /after_successful_play\(played, \|\| \{\s+window_session\s+\.lock\(\)\s+\.unwrap_or_else\(\|e\| e\.into_inner\(\)\)\s+\.publish\(launched\);\s+on_success\(\);\s+\}\)/,
   );
   assert.equal(uses(production, 'window_session'), 2, 'publish_started_play writes it once');
   // Quitting Vela reads it once, to hand the latest window over.
   const onExit = functionBody(commands, 'fn remember_window_on_exit_with(', 'remember_window_on_exit_with');
   assert.equal(onExit.split('.lock()').length - 1, 1);
-  assert.match(onExit, /let latest = latest\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+latest\s+\.as_ref\(\)\s+\.and_then\(/);
+  assert.match(onExit, /let latest = latest\.lock\(\)\.unwrap_or_else\(\|e\| e\.into_inner\(\)\);\s+latest\s+\.latest\(\)\s+\.and_then\(/);
   assert.doesNotMatch(onExit, /\.take\(\)|=\s*(?:None|Some\()/);
   // In lib.rs: the field, its empty start (in the app, and in the state a
   // unit test builds), and that exit read.
   assert.equal(uses(lib, 'playback_window_session'), 4);
-  assert.equal([...lib.matchAll(/playback_window_session: Arc::new\(Mutex::new\(None\)\),/g)].length, 2);
+  assert.equal([...lib.matchAll(/playback_window_session: Arc::new\(Mutex::new\(Default::default\(\)\)\),/g)].length, 2);
   assert.equal(lib.split('pub(crate) fn for_tests() -> Self {').length - 1, 1);
   assert.match(lib, /commands::remember_window_on_exit\(&state\.playback_window_session\);/);
 });
