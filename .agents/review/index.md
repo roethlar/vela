@@ -14,7 +14,7 @@ Seven candidates, seven admitted, none declined. Record:
 | pw-4 | MEDIUM   | Quitting Vela waits, without limit, for the settings file to be written | `[x]`  | `5de1305` | codex/default/standard |
 | pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[x]`  | `cbd93ae` | codex/default/standard |
 | pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[x]`  | `55be8fc`, `0e5ea59` | codex/default/standard |
-| pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[~]`  | `ac25240` | codex/default/standard |
+| pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[~]`  | `ac25240`, `0ee2e0d` | codex/default/standard |
 
 **Embedded player Slice 6 review (the parity tests), 2026-11-14 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

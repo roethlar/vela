@@ -3,7 +3,7 @@
 **Severity**: LOW — the control is bound to the value being saved, and a failed save only shows the error. The select keeps showing a choice the backend does not hold, and playback follows the old one until a save succeeds.
 **Status**: In progress
 **Branch**: —
-**Commit**: `ac25240`
+**Commit**: `ac25240`, `0ee2e0d` (repair)
 
 ## Evidence
 
@@ -154,3 +154,79 @@ title: "A failed setting save leaves the unsaved mode selected". Reviewer's seve
 - Verdict: **reopened**. Comments, verbatim:
   - src/lib/Settings.svelte:282 — A pending load can overwrite a newer successful save: load reads remember, waits for playback preferences, fullscreen saves successfully, then load restores remember into both variables. A refused retry of fullscreen now restores remember although the backend holds fullscreen. Reproduced against both pins: base displays fullscreen after that retry; head displays remember. Prevent stale loads from overwriting newer confirmed saves and guard this interleaving.
   - tests/player-window-ui.test.mjs:203 — The guard bites at this head, but demonstrated two false passes with rollback removed: single-quoting the select ID triggers the early return; retaining the previous saver in a comment before its broken replacement makes functionSource execute the commented copy. Both variants compile and retain the real control. Parse the actual element and function declarations. The pinned source was restored, and all five tests passed.
+
+Orchestrator: a valid verdict, reopened on two comments, and both are
+right.
+
+### Repair (round 2), `0ee2e0d`
+
+**A load that is slower than a save.** Settings loads all its values in
+one go and applies them when the last has arrived. A save of the Player
+window mode confirmed in between was then overwritten, in the control and
+in the mode kept as "last confirmed", by the older value the load had read;
+a later refused save put the control back to that older value although
+Vela held the newer one. Now the component counts the saves of the mode
+that Vela confirmed (`playerWindowSaves`). `load()` notes the count before
+it asks, and applies the mode it read only if no save was confirmed since.
+A refused save changes nothing in Vela and does not count.
+
+How each order of events ends, the control and the confirmed mode on what
+Vela holds in every one:
+
+- A load pending while a save succeeds (the reviewer's case): the load
+  leaves the mode alone; the control keeps the saved mode; a later refused
+  save goes back to it.
+- A load pending while a save is refused: nothing was confirmed, so the
+  load applies what it read, which is what Vela holds.
+- A save pending while a load completes: the control briefly shows what
+  the load read, which is what Vela holds at that moment; the save's
+  answer then sets it (or, refused, puts it back to that).
+- A save started before a load and confirmed after it: whichever finishes
+  second leaves the confirmed mode.
+- Two loads: the older is dropped as before (`loadSeq`).
+
+**The test.** It no longer searches the component's text. The select and
+the button are found through the Svelte compiler's parser: exactly one
+`select` whose id is `player-window`, however quoted, bound to
+`playerWindowMode`; exactly one button in its section, which calls
+`savePlayerWindowMode` and is disabled while a save is under way. `load`
+and `savePlayerWindowMode` are found as function declarations through the
+TypeScript compiler's syntax tree, exactly one of each, so a copy left in
+a comment is never what runs. The control is required: the early return is
+gone, here and in the file's first test, which had the same one. A new
+test, "a load that read the mode before a save was confirmed does not put
+the older mode back", drives the reviewer's order of events and its
+mirrors against a made-up backend that holds answers back and lets them go
+one at a time.
+
+Files: `src/lib/Settings.svelte`, `tests/player-window-ui.test.mjs`.
+
+How it was made: one helper agent (Claude Opus 5.5) on a local branch; the
+coordinating agent read the change, made the first test of the file
+require the control as well, and landed it as one commit. No second helper
+attacked it: the change to the component is four lines.
+
+Red-proofs, each restored from the commit: the order check taken out, and
+the count not advanced on a confirmed save ("a load must not undo a save
+confirmed after it read": `remember` where `fullscreen` was expected); a
+refused save counted too; the rollback taken out; the rollback taken out
+with the select's id single-quoted, and with the old save function kept in
+a comment before a broken one (the reviewer's two false passes: both now
+fail, and both were seen to pass against the old test); the select bound
+to another variable; the button calling another save; the button never
+disabled; the control's id changed (the file's first test failed). On the
+code as it was, the new test fails as the reviewer described.
+
+Checks: `npm run check` (474 tests, no svelte-check error) and `npm run
+build` green before the commit.
+
+Not covered:
+
+- The other values Settings loads in the same go (Continue Playing, the
+  mpv path and advanced options, the playback preferences) can be
+  overwritten by a slow load in the same way, and their controls still
+  keep a refused choice. They are outside this finding.
+- The select itself stays usable while a save is under way; only the
+  button is disabled.
+- The test runs the component's functions and reads its parsed markup; it
+  does not mount the component.
