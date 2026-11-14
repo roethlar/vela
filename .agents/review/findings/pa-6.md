@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — the results file records `built` whenever `--skip-build` was not given. The build honours `CARGO_TARGET_DIR` from the environment (and a Cargo configuration's target directory), while the runner always starts `src-tauri/target/debug/vela`. With the build redirected, an older binary at that path is run, recorded as built from the checked-out commit, and accepted by the verdict.
 **Status**: In progress
 **Branch**: —
-**Commit**: `f00cdc4`
+**Commit**: `f00cdc4`, `8cf3a05` (repair)
 
 ## Evidence
 
@@ -155,3 +155,98 @@ title: "The build flag does not establish that the executed binary was built". R
   - tests/e2e/app-binary.mjs:49 — Metadata includes every workspace member, so counting all binary targets rejects unrelated helper executables. A two-package workspace successfully built the selected app from src-tauri, but this helper threw 'names 2 binary targets'. The new preflight therefore aborts valid workspace setups; restrict selection to the app package.
   - tests/e2e-harness.test.mjs:117 — The launch regex silently ignores nested calls. Replacing the first launch with newSession(path.resolve(path.join('/tmp', 'old-vela'))) left all five tests passing because the restart remained matched. Removing target-directory variables from the metadata environment also escaped the guards. The original fixed-path injections did fail, and restoration passed, but the wiring guarantee remains incomplete.
   - tests/e2e/README.md:18 — The stated default-path exceptions omit CARGO_BUILD_TARGET_DIR. Both relative and absolute values moved Cargo's output and the helper's selection in real probes without CARGO_TARGET_DIR or target-dir configuration. docs/development.md repeats this omission.
+
+Orchestrator: a valid verdict, reopened on five comments, and all five
+are right. The first fix worked out where the build would put the binary.
+Every rule of Cargo's that it did not rebuild was a way to start an older
+binary and still record `built: true`.
+
+### Repair (round 2), `8cf3a05`
+
+The runner no longer works the path out for a run that builds.
+
+- **A run that builds.** The build is asked for Cargo's own report: `npm
+  run tauri -- build --debug --no-bundle --
+  --message-format=json-render-diagnostics`. The Tauri CLI (2.11.4) passes
+  the argument on to its one `cargo build`, in `src-tauri/`, with the
+  front-end build and the `custom-protocol` feature unchanged; a logging
+  stand-in for `cargo` showed the call. Cargo prints a message for each
+  executable it produced or found fresh, with its path as Cargo itself
+  resolved it. The app is the executable of a binary target of the package
+  whose manifest is `src-tauri/Cargo.toml`; its path is used as printed.
+  No such message, more than one executable, a relative path, or no
+  "build-finished" message stops the run, and so does a build that fails,
+  also after Cargo has named the app.
+- **`built: true`** in a results file now means: the run ran the build and
+  started the executable Cargo reported for it. The file records the path
+  (`appBinary`) and where it came from (`appBinaryFrom`).
+- **A run with `--skip-build`** builds nothing, so nothing reports. It
+  still takes the place from `cargo metadata`, asked in `src-tauri/` with
+  the same environment: the app's own package only, its one binary, and
+  the path put together with a separator and nothing that changes what a
+  path with `..` means. It is recorded `built: false`, which the verdict
+  refuses. It does not follow a configuration file's `build.target`; the
+  README says so.
+- **One place.** `locateAppBinary` in `tests/e2e/app-binary.mjs` does all
+  of this, and the runner calls it once, with its own environment for the
+  build and for any question to Cargo alike. The driver is made with the
+  result and takes no path: `newSession()` starts that app and nothing
+  else, and refuses a file that is no longer the one found (its device,
+  inode, size and time of change are noted when it is found).
+
+Where each comment is held, in `tests/e2e-harness.test.mjs` (the tests of
+this finding carry "(pa-6)" in their names; there are fifteen):
+
+| Comment | Held by |
+| --- | --- |
+| 1, a configuration file's `build.target` | a real `cargo build` of a made-up crate with that setting and an "OLD" binary planted where the first fix looked: the path returned must print "NEW" |
+| 2, `..` through a symbolic link | the same with `CARGO_TARGET_DIR` set through a link: the path is Cargo's, unchanged |
+| 3, a workspace with another binary | a two-package workspace: the app's executable is taken, the other's does not stop the run |
+| 4, the wiring | the runner's text, by counting: every mention of `newSession` must be the one accepted call; one call of `locateAppBinary`; every use of the path one of the accepted forms; no `built` of the runner's own; the driver sends the path it was made with. And at run time the driver refuses a path given to `newSession` |
+| 5, `CARGO_BUILD_TARGET_DIR` | real builds with it relative and absolute; the README no longer lists what moves the default place for a run that builds, because nothing has to be listed |
+
+How it was made: a helper agent (Claude Opus 5.5) wrote the repair on a
+local branch (three commits), a second attacked it and found five things,
+and a third repaired them (five commits): a parameter that shadowed the
+path and started another one; a session started through a computed name,
+another driver module or a scenario's own call; a build that failed after
+naming the app and was still taken; parts of the checks that could be
+changed with every test green; and the reported file overwritten before
+the session. The third helper's own red-proofs then found two of its new
+guards empty (the inode and the size parts of the identity; a stand-in
+build whose output did not arrive in the sandbox) and fixed both. The
+coordinating agent read the three source files and landed the eight
+commits as one.
+
+Red-proofs, each restored from the commit afterwards: the build path made
+to return the prediction again (the `build.target` test failed with "is
+not the binary the build wrote"); a `--skip-build` run recorded as built;
+the exit status of the build ignored; the manifest match taken out; each
+accepted form of the runner's text broken in turn; a second `newSession`
+with a path; each part of the file's identity taken out on its own.
+
+Real runs, external player: a built run of `smoke` printed "e2e: running
+.../src-tauri/target/debug/vela (from cargo's report of this run's
+build)", passed, and its results file says `built: true` with that path;
+a built run with `CARGO_TARGET_DIR` moved compiled the whole app there
+and started that binary; `--skip-build smoke` passed and was recorded as
+not built; `--skip-build` with a `src-tauri/.cargo/config.toml` naming an
+empty directory stopped with "app binary missing" naming it.
+
+Checks: `npm run check` green before the commit (472 tests). The fifteen
+tests pass inside `codex sandbox` in workspace-write mode. Both full
+end-to-end suites are being run at `8cf3a05`, since the runner changed; the
+result goes into the plan's log.
+
+Not covered:
+
+- `--skip-build` does not follow a configuration file's `build.target`.
+- The file's identity is its device, inode, size and time of change, not
+  its contents: a replacement of the same size and time, one made between
+  Cargo writing the file and the note, and one made between the check and
+  the start are not seen. The README says so.
+- That `tauri build` passes the message format on rests on what
+  tauri-cli 2.11.4 was seen to do; a CLI that drops it stops the run ("the
+  build printed no report from Cargo").
+- The text test of the runner cannot catch a deliberate way round it that
+  uses none of the words it counts.
