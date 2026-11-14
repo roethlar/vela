@@ -1456,6 +1456,30 @@ test('the package check compares the set in the package with the pins, the set i
     });
   }
 
+  // The directories above the set have to be entered to reach it. A package
+  // installs them too, with the modes it gives them.
+  const above = {
+    'usr/lib closed': [{ 'usr/lib': 0o700 }, 'usr/lib', '---'],
+    'usr closed': [{ usr: 0o700 }, 'usr', '---'],
+    'usr/lib readable but not to be entered': [{ 'usr/lib': 0o744 }, 'usr/lib', 'r--'],
+    'usr and usr/lib both closed: the first is named': [{ usr: 0o700, 'usr/lib': 0o700 }, 'usr', '---'],
+  };
+  for (const [what, [modes, first, others]] of Object.entries(above)) {
+    await t.test(what, (t) => {
+      const run = checkPackageRun([packageWith(t, right, { modes }).file]);
+      assert.equal(run.status, 1, `${run.stdout}\n${run.stderr}`);
+      assert.deepEqual(run.stdout.match(/^FAIL access: .*$/gm), [
+        `FAIL access: ${first} cannot be entered by every user (other users have '${others}'), and the set is below it`,
+      ]);
+      assert.doesNotMatch(run.stdout, /^ok   access:/m);
+    });
+  }
+
+  await t.test('a directory above the set that every user may enter but not list is enough', (t) => {
+    const run = checkPackageRun([packageWith(t, right, { modes: { usr: 0o711, 'usr/lib': 0o711 } }).file]);
+    assert.match(run.stdout, /^ok   access: every user may read every file of the set$/m);
+  });
+
   await t.test("the builder's own umask is not taken for the package's permissions", (t) => {
     // Unpacking applies the umask. Under a strict one every file would come
     // out closed, and a good package would be blamed for the builder's shell.

@@ -33,7 +33,7 @@
 #   * the set is in the one directory the loader reads, and is really inside
 #     the package (no symbolic link leads there);
 #   * every user of the machine may read every file of it, not only the
-#     package's owner;
+#     package's owner, and may enter every directory above it;
 #   * with --set, its MANIFEST is that set's MANIFEST, not another set's
 #     (without --set this is not compared, and a "skip" line says so);
 #   * its components are the versions pinned in versions.txt;
@@ -254,6 +254,21 @@ unpack() {
   chmod -R u+rwX "$into/root" || return 1
 }
 
+# not_enterable ROOT DIR: of the directories from the top of DIR (a path
+# relative to ROOT) down to DIR itself, the first that not every user may
+# enter, printed; nothing when every user may enter them all.
+not_enterable() {
+  local root="$1" rest="$2" walked=""
+  while [ -n "$rest" ]; do
+    walked="${walked:+$walked/}${rest%%/*}"
+    case "$rest" in */*) rest="${rest#*/}" ;; *) rest="" ;; esac
+    if [ -z "$(find "$root/$walked" -maxdepth 0 -type d -perm -001 -print 2>/dev/null)" ]; then
+      printf '%s\n' "$walked"
+      return 0
+    fi
+  done
+}
+
 # The package must contain the set, whole, where Vela will look for it.
 check_with() {
   local package="$1" root="$2" set="$2/$SET_PATH"
@@ -286,6 +301,13 @@ check_with() {
   # The owner's own permissions are no longer the package's: unpacking opened
   # them (see unpack).
   closed=0
+  # Nor is a set below a directory that not every user may enter: usr and
+  # usr/lib are the package's too, with the modes it gives them.
+  path="$(not_enterable "$root" "${SET_PATH%/*/*}")"
+  if [ -n "$path" ]; then
+    fail "access: $path cannot be entered by every user (other users have '$(stat -c %A "$root/$path" | cut -c8-10)'), and the set is below it"
+    closed=1
+  fi
   while IFS= read -r -d '' path; do
     fail "access: ${path#"$root"/} cannot be read by every user (other users have '$(stat -c %A "$path" | cut -c8-10)')"
     closed=1

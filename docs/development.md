@@ -275,7 +275,8 @@ directory (nothing is installed) and requires that:
 
 - the set is in `usr/lib/Vela/libmpv`, as files of the package and not
   through a symbolic link;
-- every user may read every file of it. An installed package belongs to
+- every user may read every file of it, and may enter every directory
+  above it (`usr`, `usr/lib`). An installed package belongs to
   root and Vela runs as whoever starts it. Tauri's rpm bundler copies a
   resource's permissions from the build tree as they are (its deb bundler and
   the PKGBUILD set them), so a set copied under a strict umask makes an rpm
