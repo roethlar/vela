@@ -1,7 +1,7 @@
 # pw-3: a width and a height that were never reported together can be carried as the window's size
 
 **Severity**: MEDIUM — width and height arrive as two reports. Each new one is paired with the other's previous value, and when the pair that results is out of bounds the earlier, mixed pair is kept. After 800x450, a report of width 1024 followed by a height that is refused leaves 1024x450, which the window never was; the next play opens at that size, and in the default choice it is saved for the next run.
-**Status**: In progress
+**Status**: Verified
 **Branch**: —
 **Commit**: `2dd9eb7`
 
@@ -204,3 +204,24 @@ generation pass over `f1e0c9c..9815e10` with Slice 2 of the plan as its
 mandate, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`). Reviewer's
 title: "Invalid dimension reports preserve an invented window size". Reviewer's severity: MEDIUM.
+
+### Verification round 1, recorded 2026-11-14 11:41 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9d5-8af0-7911-9b92-1f132f2ef68c`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 11:33 UTC, finished 11:41 UTC.
+- Reviewed head `2dd9eb70661d0771fa2439b3ec5b68e1bc898bf8`, base
+  `0e5ea592532c476cafe6a1142dc6de68d2f57ef1` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **accepted**. Comments, verbatim:
+  - src-tauri/src/playback.rs:2902 — Injected pair mixing failed both regression guards. After restoration, all 44 playback tests passed, including the Unix-socket reader. Separate parser, candidate-preservation and subscription mutations also failed as intended.
+  - src-tauri/src/playback.rs:1024 — Source inspection found equivalent integer dimensions and resize notifications, with margins separate. Embedded rendering, E2E and HiDPI/Wayland behavior were inspected only, not exercised.
+  - src-tauri/src/playback.rs:156 — The known sub-second resize/fullscreen loss remains a pre-existing limitation of the approved settling rule, separate from pw-3.
+
+Orchestrator's acceptance: schema-valid payload, verdict in the enum, both
+SHAs equal the pins, both booleans literally true. Accepted. The fix is
+on `main`; the finding is closed.
