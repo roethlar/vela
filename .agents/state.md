@@ -86,21 +86,17 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       eight are FIXED on `main`, one commit each (`ade0278` to `9bcdfbc`,
       2026-11-14; tests only, no product code), and are going to codex for
       verification one by one (`.agents/review/index.md`). Where each
-      stands (2026-11-14): `pa-8` and `pa-3` accepted and closed. `pa-4`
-      reopened once; its repair (`be3f1f4`, the watch rebuilt on what Node
-      itself reports) is back with codex. `pa-5` reopened three times,
-      each time on a narrower point; its record says why it has not gone
-      to the owner and what the next repair is (one description of the
-      whole results file, shared by the runner and the verdict), which
-      waits for `pa-6`. `pa-6` reopened once; its repair is being built on
-      the local branch `pa6-repair` (the runner is to start the binary
-      Cargo reports for the build, not a path it works out). The three
-      that changed scenarios (`pa-1`, `pa-7`, `pa-2`) each get a follow-up
-      first, being built on the local branch `pa-follow` (worktrees under
-      `~/dev/vela-agent-keep/wt/`, not pushed): nothing that plain
-      `node --test` runs fails when one of those fixes is taken out, and
-      codex's sandbox cannot run the end-to-end suite, so it could not
-      see their guard fail. Notes kept
+      stands (2026-11-14, afternoon): `pa-8`, `pa-3` and `pa-2` accepted
+      and closed. The other five were reopened and repaired, each record
+      says on what: `pa-1` once (repair `716abc6` with codex), `pa-7` once
+      (repair `d504a1e` with codex), `pa-4` twice (second repair `cc85c2d`
+      with codex), `pa-5` three times (third repair `bf86854` with codex;
+      its record says why it did not go to the owner at the third reopen
+      and when it will), `pa-6` twice (its third repair is being written
+      by codex, see below). The three that changed scenarios (`pa-1`,
+      `pa-7`, `pa-2`) each got follow-up commits so that plain
+      `node --test` holds the fix (`17d415f` to `2a42345`): codex's sandbox
+      cannot run the end-to-end suite. Notes kept
       from the work: `.agents/plans/embedded-player.slice6-notes.md`.
     The owner's by-eye checks and the switch-on (Settings control, release
     notes, version bump) are NOT the agent's to do.
@@ -114,6 +110,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     session is started, for that session only. Reviews of record still go
     to codex, and no agent is cut short. Later the same day the owner
     asked that agents started from then on run on Opus 5.5.
+  - On 2026-11-14 the owner asked, in the session doing this work, for
+    coding tasks to be handed to codex (gpt-6-astra at max effort, which is
+    what a plain call resolves to on `continuum`) and reviewed by the
+    agent, "to see if we can make some progress by splitting effort".
+    Three are with codex, one at a time, each in a worktree of its own
+    under `~/dev/vela-agent-keep/wt/` (`cx-pw9a`, `cx-race`, `cx-pa6r3`),
+    uncommitted there: the first half of `pw-9`; the other end-to-end
+    scenarios checked for the race `pw-8` had, with the wait in one
+    helper; and `pa-6`'s third repair. Codex cannot be the reviewer of
+    code it wrote, so for these the agent reviews (reads the diff, runs
+    the checks and the end-to-end runs codex's sandbox cannot, red-proves
+    the tests) and lands them; their records will say so.
   After the embedded plan's slices came
   `.agents/plans/mpv-window-geometry.md` Slices 1-3, also approved: LANDED
   2026-11-14 at `9815e10` as one commit, Vela 1.0.64 (not released, not
@@ -131,25 +139,40 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   without limit for the settings file; an older window can be saved over a
   newer one; and three smaller ones. All seven are FIXED on `main`
   (`55be8fc` to `ac25240`, ten commits, 2026-11-14; no version change, no
-  release note) and are going to codex for verification one by one
-  (`.agents/review/index.md`). One fix departs on purpose from what was
-  first decided: what a play's end and Vela's exit save is the last
-  window of mpv's own, not the latest play's (`pw-6`'s record says why).
-  Do not release 1.0.64 before codex has accepted them.
-  OPEN, not yet a recorded finding: the end-to-end scenario
-  `windowsetting` fails about one external run in four, and did before
-  these fixes (three helpers measured it at the review's base and after).
-  It fails where the scenario changes fullscreen and at once ends the play
-  or quits Vela: what Vela then remembers is the window as it was before
-  the change. It is not a recorded known failure, so it fails a parity
-  verdict when it strikes. Whether the product loses a change mpv has
-  already reported, or the scenario asks for more than a user could do,
-  has not been settled; it is being settled on the local branch
-  `ws-flake` (to be recorded as finding `pw-8`). Both full suites at
-  `ac25240`, the last of the seven fixes: embedded 49 of 50 (`pagefail`,
-  recorded), external 45 of 48 (the two recorded failures and
-  `windowsetting`), so the parity verdict failed there on that scenario
-  alone; it is to be run again once `pw-8` is fixed.
+  release note). Where each stands with codex (2026-11-14, afternoon):
+  `pw-6`, `pw-5`, `pw-4` and `pw-3` accepted and closed. `pw-7` reopened
+  once (repair `0ee2e0d` with codex). `pw-1` and `pw-2` reopened, both on
+  which screen a Compatible copy is ranked for and opened on; one repair
+  for both is being built on the local branch `pw12-repair` (the screen
+  decided once, by name, before the copy is chosen). It changes two things
+  the plan's log had under "Left as they are": the first play of a run is
+  ranked for the saved screen it opens on, and a saved screen that is not
+  connected sends the first window to Vela's screen. It does NOT re-resolve
+  or relaunch a play when the screen changes during resolution or the
+  compositor places the window elsewhere; that goes to codex as a recorded
+  disagreement, and to the owner if codex insists. One fix departs on
+  purpose from what was first decided: what a play's end and Vela's exit
+  save is the last window of mpv's own, not the latest play's (`pw-6`'s
+  record says why). Do not release 1.0.64 before codex has accepted them.
+  Two findings were added after the review (its document, "Raised after
+  the intake"). `pw-8`: the scenario `windowsetting` failed about one
+  external run in four, and four of five full runs, and the parity verdict
+  with it. The cause was the scenario, which changed and ended a play
+  before Vela had connected to mpv; fixed at `26660a9`, with codex. `pw-9`,
+  OPEN: a play whose mpv ends before Vela has connected is not seen to
+  have ended for five seconds, and hands the next play no fullscreen
+  state. Its first half (seeding the opening state) is within the plan and
+  with codex as a coding task; its second half (the reader giving up
+  sooner) changes when tracking gives up for every play and waits for the
+  owner's word.
+  The parity verdict has not passed on `main` since the fixes began to
+  land. Full runs: at `8cf3a05` it failed on `windowsetting` alone; at
+  `26660a9` (with `pw-8` fixed) the external suite was clean but for the
+  two recorded failures, and the embedded one failed `completionhub` once
+  ("timed out waiting for local suppression with the server transition
+  still pending"), which had passed in every other embedded full run that
+  day. That failure has not been looked into; it was on a loaded machine.
+  A full run and verdict is owed once the open repairs have landed.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
