@@ -16,7 +16,7 @@ Seven candidates, seven admitted, none declined. Record:
 | pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[x]`  | `55be8fc`, `0e5ea59` | codex/default/standard |
 | pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[~]`  | `ac25240`, `0ee2e0d`, `1430f2e` | codex/default/standard esc:T5(ceiling) |
 | pw-8 | MEDIUM   | The end-to-end scenario for the player window fails about one external run in four, and the parity verdict with it (the scenario's fault) | `[~]`  | `26660a9` | codex/default/standard |
-| pw-9 | MEDIUM   | When mpv ends before Vela has connected to it, the play's end is held back five seconds, and the next play of a full-screen run opens windowed | `[ ]`  | — | — |
+| pw-9 | MEDIUM   | When mpv ends before Vela has connected to it, the play's end is held back five seconds, and the next play of a full-screen run opens windowed | `[~]`  | `0b313a2` (first half) | codex wrote it; reviewed by the agent |
 
 **Embedded player Slice 6 review (the parity tests), 2026-11-14 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;
