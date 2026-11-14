@@ -191,3 +191,68 @@ This change also answers part of the reviewer's third comment: the
 a wait under an unbraced `if (false)` fails it, and the helper the
 scenario calls is itself run by tests. It still does not run `play()`;
 the repair does that.
+
+### Repair (round 2): `0ae5b64` to `bb3b84e` (nine commits)
+
+By the reviewer's comment:
+
+1. *Vela's exit saves the window before its reader has read all that mpv
+   sent.* Fixed in the product (`0ae5b64`, `2efaac9`). When Vela quits,
+   the hand-over of the last external play's window first waits until
+   that play's window reader has FINISHED, for at most 500 ms
+   (`EXIT_READER_DRAIN_LIMIT`), inside the hand-over's own thread, so the
+   exit as a whole still waits at most the two seconds it did
+   (`EXIT_WINDOW_HANDOVER_LIMIT`, finding `pw-4`). The reader says it has
+   finished through the observation it shares with the record
+   (`ReaderProgress`), on every way out of its thread, by a guard that
+   acts on drop. The exit kills the player first, hands over second and
+   sets the stop flag third, so a connected reader reads what mpv had
+   sent and reaches the end of its connection; that order is held by a
+   test. No play in mpv's own window, or a reader already finished: no
+   wait. Tauri raises both of its exit events for one exit, so a reader
+   the exit has given up on once is not waited for a second time.
+2. *"The window-state reader has stopped by now" is untrue for a
+   cancelled play.* The comment now says that a cancelled play's reader
+   may still be running, with lines unread (`829972f`).
+3. *The guard did not run the scenario's wait.* `windowsetting`'s own
+   `play()` is now run by a test with stand-ins, and `run()` is held to
+   that `play()` and to `setFullscreen()` (`ca4ad24`, `bb3b84e`). The
+   scenario also waits, after a change of full screen, until mpv has
+   reported the change on the scenario's own connection (`7e40709`).
+
+Files: `src-tauri/src/commands.rs`, `src-tauri/src/playback.rs`,
+`src-tauri/src/lib.rs` (a comment), `tests/e2e/scenarios/windowsetting.mjs`,
+`tests/e2e/mpv.mjs`, `tests/e2e-judge.test.mjs`,
+`tests/player-window-ui.test.mjs`, `tests/e2e/README.md`.
+
+**How it was made and checked.** Three helper agents on Opus 5.5 (author,
+attacker, repairer; the attacker's four findings were fixed, each with a
+test). On the final content the helpers ran `windowsetting` ten times in
+the external player (10 of 10), `exitplay` twice in each player and
+`embeddedplay` once. The coordinating agent merged the nine commits onto
+`main`, ran the full check there (green: 690 Rust tests, 536 Node tests;
+the two audit commands exit as recorded) and, end to end, `windowsetting`
+three times, `exitplay`, `playlistplay` and `replaceplay` in the external
+player and `exitplay`, `embeddedplay` and `playlistplay` in the embedded
+one, all passing. It made no red-proofs of its own: the owner set work on
+tests aside that day.
+
+**What changes for a user.** Quitting Vela while a video shows in mpv's
+own window now saves a change of full screen or of size that mpv had
+already sent and Vela had not yet taken in. Quitting takes as long as
+before (about a tenth of a second in the venue), except that it can take
+up to half a second longer, once, when Vela quits within the first
+seconds of a play whose mpv it has not yet connected to, or when the
+configured mpv is a wrapper that leaves the real mpv running.
+
+Known gaps:
+
+- A play CANCELLED by a newer play stops its reader on the stop flag,
+  with lines it had already received unread. If no play in mpv's own
+  window follows, the window saved can be one change out of date. This is
+  taken up with the second half of `pw-9` (the reader's end), under the
+  owner's word of 2026-11-14 that what is obviously broken is fixed.
+- Between mpv reporting a change on the scenario's connection and on
+  Vela's lies mpv's own delivery; nothing measures it.
+- The wrapper case and the real exit handler running twice were not run;
+  they rest on Tauri's documentation and the code.
