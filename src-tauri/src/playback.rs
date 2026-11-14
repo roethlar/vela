@@ -1470,6 +1470,12 @@ fn spawn_end_watcher(
     Ok(())
 }
 
+/// What the command layer's tests use of this module's test stand-ins.
+#[cfg(test)]
+pub(crate) use tests::embedded_spec;
+#[cfg(all(test, unix))]
+pub(crate) use tests::{mpv_is, stand_in_for_mpv, FailingLauncher};
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1522,7 +1528,7 @@ mod tests {
     }
 
     /// A play for the embedded player with nothing optional.
-    fn embedded_spec() -> PlaySpec {
+    pub(crate) fn embedded_spec() -> PlaySpec {
         PlaySpec {
             player: crate::player::PlayerKind::Embedded,
             url: "https://media.invalid/never-played".to_string(),
@@ -1735,8 +1741,8 @@ mod tests {
 
     /// Stands in for an embedded launcher whose player will not start.
     #[cfg(unix)]
-    struct FailingLauncher {
-        asked: Arc<Mutex<Vec<String>>>,
+    pub(crate) struct FailingLauncher {
+        pub(crate) asked: Arc<Mutex<Vec<String>>>,
     }
 
     #[cfg(unix)]
@@ -1757,7 +1763,7 @@ mod tests {
     /// Have `play`, on this thread, find `found` when it looks for mpv, for
     /// as long as the returned guard lives.
     #[cfg(unix)]
-    fn mpv_is(found: impl Fn() -> Result<String, String> + 'static) -> impl Drop {
+    pub(crate) fn mpv_is(found: impl Fn() -> Result<String, String> + 'static) -> impl Drop {
         struct Restore;
         impl Drop for Restore {
             fn drop(&mut self) {
@@ -1771,7 +1777,7 @@ mod tests {
     /// A program that stands in for mpv: it writes down the arguments it was
     /// started with and then stays alive until it is killed.
     #[cfg(unix)]
-    fn stand_in_for_mpv(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    pub(crate) fn stand_in_for_mpv(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
         use std::os::unix::fs::PermissionsExt;
         let dir = std::env::temp_dir().join(format!("vela-test-{}-{name}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);

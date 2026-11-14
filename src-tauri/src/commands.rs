@@ -4970,6 +4970,22 @@ fn screen_for_play(
         })
 }
 
+/// The copy a play gets, and the output it is shown on: the candidates
+/// ranked by the policy (a Compatible ranking for `target`, the profile of
+/// the decided output), and that output. What `select_playback_version`
+/// ranks with, kept apart so that a test can run it (review finding pw-2).
+fn rank_and_place(
+    candidates: &mut [crate::selection::PlaybackCandidate],
+    policy: crate::selection::PlaybackSourcePolicy,
+    screen: &PlayScreen,
+    target: Option<crate::selection::CompatibilityTarget>,
+) -> Option<(crate::selection::PlaybackCandidate, Option<String>)> {
+    crate::selection::rank_candidates(candidates, policy, target);
+    candidates
+        .first()
+        .cloned()
+        .map(|winner| (winner, screen.name.clone()))
+}
 
 enum PlaybackSelectionOutcome {
     Ready {
@@ -5413,9 +5429,7 @@ async fn select_playback_version(
         }
         _ => None,
     };
-    crate::selection::rank_candidates(&mut candidates, policy, target);
-    let winner = candidates
-        .first()
+    let (winner, destination) = rank_and_place(&mut candidates, policy, &screen, target)
         .ok_or_else(|| PlayFailure::unavailable("no playable copy was found".to_string()))?;
     let version = versions
         .into_iter()
@@ -5436,7 +5450,7 @@ async fn select_playback_version(
             version_id: Some(version.version_id),
             item: selected_item,
             player: upcoming_player,
-            screen: screen.name,
+            screen: destination,
         }),
         ask_mode: policy == crate::selection::PlaybackSourcePolicy::Ask,
     })
@@ -9050,13 +9064,14 @@ mod tests {
         hdr: display::HdrState,
     ) -> (String, Option<String>) {
         let target = target_for(screen, screens, hdr);
-        let mut copies = two_copies();
-        crate::selection::rank_candidates(
-            &mut copies,
+        let (winner, destination) = rank_and_place(
+            &mut two_copies(),
             crate::selection::PlaybackSourcePolicy::Compatible,
+            screen,
             Some(target),
-        );
-        (copies[0].version_id.clone(), screen.name.clone())
+        )
+        .unwrap();
+        (winner.version_id, destination)
     }
 
     #[test]
@@ -9303,6 +9318,40 @@ mod tests {
     }
 
     #[test]
+    fn the_ranking_ranks_by_its_policy_and_places_on_the_decided_screen() {
+        // Review finding pw-2, comment 6: the ranking step of
+        // `select_playback_version`, on behaviour. A 1080p SDR screen.
+        use crate::selection::PlaybackSourcePolicy::{Best, Compatible, Fastest};
+        let screens = screens_with("HDMI-1", &two_screens());
+        let screen = screen_for_play(
+            &PlaybackWindowRecord::default(),
+            None,
+            crate::player::PlayerKind::External,
+            None,
+            &screens,
+        );
+        let target = Some(target_for(&screen, &screens, display::HdrState::Disabled));
+        let rank = |policy, target| {
+            let (winner, destination) = rank_and_place(&mut two_copies(), policy, &screen, target).unwrap();
+            (winner.version_id, destination)
+        };
+        let hdmi = Some("HDMI-1".to_string());
+        assert_eq!(rank(Compatible, target), ("1080p-sdr".to_string(), hdmi.clone()));
+        assert_eq!(rank(Best, target), ("4k-hdr".to_string(), hdmi.clone()));
+        assert_eq!(rank(Fastest, target), ("4k-hdr".to_string(), hdmi.clone()));
+        assert_eq!(
+            rank(Compatible, None),
+            ("4k-hdr".to_string(), hdmi),
+            "without its target a Compatible ranking is a Best one"
+        );
+        assert_eq!(
+            rank_and_place(&mut [], Compatible, &screen, target),
+            None,
+            "no copy, no choice"
+        );
+    }
+
+    #[test]
     fn an_embedded_play_is_ranked_for_the_screen_holding_velas_window() {
         // Review finding pw-2, the reviewer's case: the last play ran in
         // mpv's own window on DP-1, and the user's next play will run in the
@@ -9345,6 +9394,74 @@ mod tests {
         let choice = crate::player::choose(Embedded, &Ok(()));
         let screen = screen_for_play(&record, None, choice.kind, None, &screens);
         assert_eq!(screen.name.as_deref(), Some("HDMI-1"));
+    }
+
+    // Review finding pw-2, comment 5: an embedded play that could run and
+    // then cannot start. From the choice of player, through the decision of
+    // its screen and the ranking of its copy, to the mpv window `play` starts
+    // in its place, with stand-ins for the embedded player and for mpv.
+    #[cfg(unix)]
+    #[test]
+    fn a_play_the_embedded_player_cannot_start_opens_where_its_copy_was_ranked() {
+        use crate::playback::{embedded_spec, mpv_is, stand_in_for_mpv, FailingLauncher};
+        use crate::player::PlayerKind::{Embedded, External};
+        use std::sync::atomic::AtomicBool;
+        use std::sync::{Arc, Mutex};
+        // The last play ran in mpv's own window on DP-1; Vela's window is on
+        // HDMI-1; the embedded player can run.
+        let record = published([session_observed_on("last", External, &["DP-1"], Some((3840, 2160)))]);
+        let screens = screens_with("HDMI-1", &two_screens());
+        let choice = crate::player::choose(Embedded, &Ok(()));
+        assert_eq!(choice.kind, Embedded);
+        let screen = screen_for_play(&record, None, choice.kind, None, &screens);
+        let (copy, destination) = compatible_choice(&screen, &screens, display::HdrState::Disabled);
+        assert_eq!(copy, "1080p-sdr", "ranked for HDMI-1");
+        // The launch hands the play its carried screen (`selection.screen`).
+        let mut spec = embedded_spec();
+        spec.screen_name = destination;
+        spec.inherited_window_state = opening_window(&record, Default::default());
+        let launcher = FailingLauncher {
+            asked: Arc::new(Mutex::new(Vec::new())),
+        };
+        let (program, arguments) = stand_in_for_mpv("late-fallback-screen");
+        let found = program.to_string_lossy().into_owned();
+        let _mpv = mpv_is(move || Ok(found.clone()));
+        let slot = Arc::new(Mutex::new(None));
+        let result = playback::play(
+            &spec,
+            playback::ProgressTarget::None,
+            playback::Players {
+                slot: &slot,
+                shutting_down: &Arc::new(AtomicBool::new(false)),
+                embedded: Some(&launcher),
+            },
+            &Arc::new(PlaybackAdvance::default()),
+            "late-fallback".to_string(),
+            None,
+            None,
+        );
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !arguments.exists() && Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let started_with = std::fs::read_to_string(&arguments).unwrap_or_default();
+        // Whatever happened, leave nothing running.
+        if let Some(mut player) = slot.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            let _ = player.kill();
+        }
+        let _ = std::fs::remove_dir_all(program.parent().unwrap());
+        let started = result.unwrap_or_else(|reason| panic!("the play is not failed: {reason}"));
+        started.stop.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert_eq!(started.player, External, "the embedded player could not start it");
+        let screen_option = started_with
+            .lines()
+            .rev()
+            .find(|argument| argument.starts_with("--screen-name="));
+        assert_eq!(
+            screen_option,
+            Some("--screen-name=HDMI-1"),
+            "the mpv window opens on the screen the copy was ranked for: {started_with}"
+        );
     }
 
     #[test]

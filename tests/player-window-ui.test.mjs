@@ -168,10 +168,12 @@ test('the real launch seeds and shares the complete opening window state', () =>
 
 test('a play is shown on the one screen decided before its copy is chosen', () => {
   // Review findings pw-1 and pw-2. The rules are unit-tested in commands.rs
-  // (screen_for_play) and display.rs (profile_basis); this guards the wiring
+  // (screen_for_play, rank_and_place, and the late fallback through
+  // playback::play) and display.rs (profile_basis); this guards the wiring
   // they cannot reach, because select_playback_version and the play path
-  // need a running app: the screen is decided once, the copy is ranked for
-  // that screen's profile, and the launch asks for that screen and no other.
+  // need a running app: the screen is decided once, the real ranking ranks
+  // with the policy for that screen's profile, and the launch asks for that
+  // screen and no other.
   const bodyOf = (source, signature) => {
     const start = source.indexOf(`\n${signature}`);
     assert.notEqual(start, -1, `${signature} exists`);
@@ -191,12 +193,23 @@ test('a play is shown on the one screen decided before its copy is chosen', () =
   assert.ok(select.indexOf('let upcoming_player = crate::player::choose(') < decided, 'after the player is chosen');
   assert.ok(decided < select.indexOf('if versions.is_empty() {'), 'before any selection is made');
 
-  // The ranking: its target only for a Compatible choice, the profile of
-  // the decided screen.
+  // The real ranking: its target only for a Compatible choice, the profile
+  // of the decided screen; then rank_and_place with the policy, that screen
+  // and that target. Nothing else in the choice of copy ranks.
   assert.match(
     select,
-    /let target = match state\.app_handle\.get\(\) \{\s+Some\(app\) if policy == crate::selection::PlaybackSourcePolicy::Compatible => \{\s+Some\(compatibility_target\(app, &screen, &screens, &cfg\)\.await\?\)\s+\}\s+_ => None,\s+\};\s+crate::selection::rank_candidates\(&mut candidates, policy, target\);/,
-    'the copy is ranked for the decided screen',
+    /let target = match state\.app_handle\.get\(\) \{\s+Some\(app\) if policy == crate::selection::PlaybackSourcePolicy::Compatible => \{\s+Some\(compatibility_target\(app, &screen, &screens, &cfg\)\.await\?\)\s+\}\s+_ => None,\s+\};\s+let \(winner, destination\) = rank_and_place\(&mut candidates, policy, &screen, target\)\s+\.ok_or_else/,
+    'the copy is ranked by the policy, for the decided screen',
+  );
+  assert.equal(count(select, 'rank_and_place('), 1);
+  assert.doesNotMatch(select, /rank_candidates\(/, 'the choice of copy ranks only through rank_and_place');
+  const place = bodyOf(commands, 'fn rank_and_place(');
+  assert.match(place, /\) -> Option<[^{]*\{\s+crate::selection::rank_candidates\(candidates, policy, target\);\s+candidates\s+\.first\(\)\s+\.cloned\(\)\s+\.map\(\|winner\| \(winner, screen\.name\.clone\(\)\)\)$/);
+  // The only other ranking is the Ask prompt's, Best within each source.
+  assert.equal(count(production, 'rank_candidates('), 2, 'rank_and_place and the Ask prompt rank, nothing else');
+  assert.match(
+    production,
+    /crate::selection::rank_candidates\(\s+&mut source_candidates,\s+crate::selection::PlaybackSourcePolicy::Best,\s+None,\s+\);/,
   );
   const target = bodyOf(commands, 'async fn compatibility_target(');
   assert.match(
@@ -205,12 +218,10 @@ test('a play is shown on the one screen decided before its copy is chosen', () =
     'the profile is the decided screen\'s',
   );
 
-  // Both ready selections carry the decided screen.
-  assert.equal(
-    [...select.matchAll(/player: upcoming_player,\s+screen: screen\.name,\s+\}\),/g)].length,
-    2,
-    'both ready selections carry it',
-  );
+  // Both ready selections carry the decided screen: the ranked one as
+  // rank_and_place places it, the one with nothing to rank as decided.
+  assert.match(select, /player: upcoming_player,\s+screen: destination,\s+\}\),/, 'the ranked selection carries it');
+  assert.match(select, /player: upcoming_player,\s+screen: screen\.name,\s+\}\),/, 'an unranked one carries it too');
   assert.equal(count(select, 'screen: '), 2);
 
   // How it is decided: the screens are looked at before the record is
