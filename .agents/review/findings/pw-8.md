@@ -144,3 +144,20 @@ commit. Both full suites and the parity verdict are being run at
 Raised by: the coordinating agent, from end-to-end runs, 2026-11-14
 (`.agents/review/codereview-2026-11-14-player-window.md`, "Raised after
 the intake"). Not a codex finding; codex verifies the fix like any other.
+
+### Verification round 1, recorded 2026-11-14 13:33 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da3a-7807-7fc0-b7ca-d285a0c04d71`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 13:23 UTC, finished 13:33 UTC.
+- Reviewed head `26660a9547f0003923fae99d831fe7dda32d97a2`, base
+  `76952afbfada22811abf698deffbfbc6c8e42945` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/scenarios/windowsetting.mjs:120 — The connection wait leaves a real connected-reader exit race. Exit kills mpv and persists without waiting for the reader to drain. A deterministic Rust probe paused the connected reader after receiving a complete fullscreen=true event; exit persistence returned with fullscreen=false. The recorded 2 ms margin is no scheduling guarantee. This defect should not remain: bound the reader-drain wait before taking the exit snapshot.
+  - src-tauri/src/commands.rs:5925 — “The window-state reader has stopped by now” is false on cancellation. wait_tick and spawn_end_watcher can finish on stop_flag independently of done. The probe confirmed that the end callback can persist while the reader remains running. Qualify this claim.
+  - tests/e2e-judge.test.mjs:454 — The skipped-wait guard is incomplete: inserting an unbraced `if (false)` immediately before the await leaves both tests passing. Executing that play() with stubs confirmed it returns without calling acceptedConnections. Exercise the wait’s execution rather than only matching its text. Removing the wait and corrupting the count each failed as expected; restoring the pinned files passed.
