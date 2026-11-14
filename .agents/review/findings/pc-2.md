@@ -242,3 +242,22 @@ instead of the helper's own worktree (`src-tauri/src/lib.rs`), and was
 restored from the commit. While it stood it made a check run by the
 coordinating agent, for an unrelated commit, fail; that check was run again
 on a clean tree before anything was committed.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 04:02 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d828-f915-7ee1-bfee-2fe98d517e09`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 03:45 UTC, finished 03:57 UTC.
+- Reviewed head `c872dadba2526ba3bc52d8998aefde65bab6357f`, base
+  `712aac89147145d6fc0c7a3a6767dea87a6edfad` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src-tauri/src/commands.rs:4190 — A clean EOF reported after replacement failure still returns runOver=false. Cleanup emits nothing because that end was not yet noted; advance_playlist then returns Successor because cleanup cleared the active session. I reproduced both verdicts and replayed tracker-report → view-close → dispatcher-report through the page: fullscreen remains until the 50-second backstop. The claimed late-tracker fallback must handle clean ends too.
+  - src-tauri/src/commands.rs:4347 — current_child is not durable evidence that this launch announced a view: the reaper at lib.rs:238 can clear the ended handle before this read, including during transcode teardown. With the predecessor's clean report preceding installation, a failed replacement whose own view opened then produces no terminal report. A deterministic reaper interleaving and page replay reproduced the backstop. Preserve the opened-view identity independently of the reapable slot; the stand-in launch currently omits this interleaving.
+  - src-tauri/src/commands.rs:4337 — The acknowledged consecutive-failure gap remains this finding's failure. If B fails before A's tracker reports, then C installs, A reports runOver=false under C, and C fails, replaced is None and A's recorded end is ignored. The real helpers produced no terminal report; page replay retained fullscreen for 50 seconds in either close/report order. Preserve the outstanding terminal obligation across failed launches.
+  - src-tauri/src/commands.rs:4264 — The acknowledged fallback gap also remains a defect: an external fallback can inherit an embedded run's fullscreen. If its replacement fails after its tracker reports runOver=false, this Embedded-only filter suppresses the terminal outcome. Replaying the old embedded report, old view close, and external fallback's report leaves fullscreen until the backstop. Preserve embedded-run ownership through fallback while keeping ordinary external-only playback unaffected.
