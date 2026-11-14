@@ -384,3 +384,12 @@ accepted. The comment is correct.
 
 **No fifth round.** As recorded after round 3, the finding now goes to the
 owner: `.agents/review/ps-2.contested.md`.
+
+**Closed as it stands (2026-11-14).** What was in dispute is how far to
+harden a test that reads Rust source; the shipped code was never in
+dispute. The owner set tests aside that day until the app is done and a
+release is in view (`.agents/decisions.md`, 2026-11-14, "Tests are not a
+priority until the app is done and a release is in view"), which is
+choice A of `.agents/review/ps-2.contested.md`: the round-4 comment is a
+known limit of the JavaScript guard, and the Rust guard, which does not
+depend on how the source is written, stands.

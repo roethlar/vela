@@ -104,10 +104,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     product fix the test that shows it; spend no review round and no
     repair on a finding, or a reviewer's comment, that is about tests
     alone: write it into the record for the release's test pass.
-  - Active review loop: see `.agents/review/index.md`. Two findings are
-    with the owner: `ps-2`, contested after four reopens
-    (`.agents/review/ps-2.contested.md`), and `pc-2`, halted after three
-    (its record, "Halted for the owner").
+  - OWNER, 2026-11-14: WHAT IS OBVIOUSLY BROKEN IS FIXED WITHOUT ASKING
+    (`.agents/decisions.md`, that date, which also says what is still
+    brought to the owner). Under it these are being fixed, each of which
+    this file or a record had as waiting for a go: the second half of
+    `pw-9`; the external player idling at the end of a file under the
+    user's own mpv configuration; the order of events left open in `pc-2`;
+    the Arch package not installing `vela-markers.lua`; the lockfile-only
+    `npm audit fix`. Their entries under Blockers still say "needs a go":
+    read them with this point until each is fixed and its entry removed.
+  - Active review loop: see `.agents/review/index.md`. Nothing is waiting
+    for the owner there: `ps-2` closed as it stands (it is about a test),
+    and `pc-2` is being repaired under the point above.
   - On 2026-11-13 the owner switched on multi-agent workflows for the
     session that is doing this work. The agent reads that as the approval
     the 2026-08-20 constraint below asks for before more than one Claude

@@ -115,7 +115,7 @@ changes what the external player does. Record:
 | ID   | Severity | Impact (one line)                                                     | Status | Commit | Reviewer |
 |------|----------|-----------------------------------------------------------------------|--------|--------|----------|
 | ps-1 | MEDIUM   | The Rust suite fails at random: two tests delete each other's file     | `[x]`  | `4fbff87`, `1d7c405` | codex/default/standard |
-| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[!]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242`, `053cb36` | codex/default/standard esc:T5(ceiling); reopened four times on the guard; with the owner: `ps-2.contested.md` |
+| ps-2 | LOW      | A credential-in-arguments regression passes the JavaScript checks      | `[x]`  | `94d067e`, `bdecf65`, `b84baeb`, `2c50ae5`, `e1ff242`, `053cb36` | codex/default/standard esc:T5(ceiling); reopened four times on the guard; closed as it stands, 2026-11-14 (`ps-2.contested.md`, A) |
 
 **Embedded player Slice 0b review, 2026-11-13 (closed):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

@@ -2210,3 +2210,40 @@ For the time being, whatever in `.agents/repo-guidance.md`, "Guard
 discipline", would have a finding about tests alone repaired round after
 round. That section still governs the tests a change to product code
 gets.
+
+## 2026-11-14 - What is obviously broken is fixed without asking the owner
+
+Status: APPROVED (owner, 2026-11-14).
+
+Decision:
+Owner, 2026-11-14, asked whether a five-second hang should be fixed
+(`pw-9`, second half): "assume I will say "fix it" to everything obviously
+broken. don't ask for obvious ones like this."
+
+A fault in what Vela does, one a user can meet and nobody would call
+intended, is fixed without an owner gate, also when no approved plan names
+it. The fix goes through the usual review and is reported to the owner
+afterwards, not asked about first.
+
+Still brought to the owner (the working agent's reading of where
+"obviously broken" ends): a choice between two behaviours neither of
+which is plainly a fault; a fix that would take something away from some
+users (for example making the player refuse a server certificate it
+accepts today); releases and tags; showing the embedded player's choice to
+users; and `.github/workflows`, which the agent does not edit.
+
+Taken as covered that day, each recorded in `.agents/state.md` as waiting
+for a go until then: the second half of `pw-9`; the external player
+idling at the end of a file under the user's own mpv configuration; the
+order of events left open in `pc-2`; the Arch package not installing
+`vela-markers.lua`; and the lockfile-only `npm audit fix` that turns the
+dependency gate green again.
+
+Reason:
+The owner's, in their words above, said with "this has been going for a
+day, and I need to speed it up" earlier the same day.
+
+Supersedes:
+For obvious faults, "No code change without an approved plan" as this
+repo applied it to faults found outside a plan, and the notes "needs a
+go" on the entries named above.

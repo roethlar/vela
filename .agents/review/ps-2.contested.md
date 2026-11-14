@@ -1,6 +1,6 @@
 # ps-2 contested: how far to harden a test that reads Rust source
 
-**Status**: Awaiting the owner
+**Status**: Settled 2026-11-14: A (accepted as it stands), under the owner's word that tests are not a priority until a release is in view (`.agents/decisions.md`, that date)
 **Finding**: `.agents/review/findings/ps-2.md` (LOW)
 **Reviewed head**: `053cb36ea59d095a20e9ed5faf5145556c061b19`
 **Raised against**: Slice 1 of `.agents/plans/embedded-player.md`
