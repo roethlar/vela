@@ -89,7 +89,10 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
       stands (2026-11-14, afternoon): `pa-8`, `pa-3` and `pa-2` accepted
       and closed. The other five were reopened and repaired, each record
       says on what: `pa-1` twice (second repair `9dfad5e` with codex),
-      `pa-7` once (repair `d504a1e` with codex), `pa-4` three times, and
+      `pa-7` twice (its third repair is being built by helper agents on
+      the local branch `pa7-r3`: the play is paused and moved before it is
+      stopped, so that where it stopped does not depend on when anything
+      is read), `pa-4` three times, and
       HALTED FOR THE OWNER at the third (its record, "Halted for the
       owner": the rounds are not getting narrower; three ways on, the agent
       recommends taking it as it is), `pa-5` four times (its record says
@@ -117,12 +120,14 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     coding tasks to be handed to codex (gpt-6-astra at max effort, which is
     what a plain call resolves to on `continuum`) and reviewed by the
     agent, "to see if we can make some progress by splitting effort".
-    Four were handed over, one at a time, each in a worktree of its own
+    Five were handed over, one at a time, each in a worktree of its own
     under `~/dev/vela-agent-keep/wt/` (`cx-pw9a`, `cx-race`, `cx-pa6r3`,
-    `cx-pa5r5`), uncommitted there until the agent lands them: the first
-    half of `pw-9` (LANDED at `0b313a2`); the other end-to-end scenarios
-    checked for the race `pw-8` had, with the wait in one helper;
-    `pa-6`'s third repair; and `pa-5`'s fourth. Codex cannot be the
+    `cx-pa5r5`, `cx-pw7r4`), uncommitted there until the agent lands them:
+    the first half of `pw-9` (LANDED at `0b313a2`); the other end-to-end
+    scenarios checked for the race `pw-8` had, with the wait in one helper
+    (written; sixteen scenarios changed; it passes its unit tests on
+    current `main` and is in full end-to-end runs before it lands);
+    `pa-6`'s third repair; `pa-5`'s fourth; and `pw-7`'s fourth. Codex cannot be the
     reviewer of code it wrote, so for these the agent reviews (reads the
     diff, runs the checks and the end-to-end runs codex's sandbox cannot,
     red-proves the tests) and lands them; their records say so. Whether
@@ -147,16 +152,22 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   (`55be8fc` to `ac25240`, ten commits, 2026-11-14; no version change, no
   release note). Where each stands with codex (2026-11-14, afternoon):
   `pw-6`, `pw-5`, `pw-4` and `pw-3` accepted and closed. `pw-7` reopened
-  twice (second repair `1430f2e` with codex). `pw-1` and `pw-2` reopened, both on
+  three times: its second repair (`1430f2e`) let a late reply to a save
+  made by a Settings page that has since been closed overwrite a newer
+  choice. That fault is on `main`. Its fourth repair is with codex as a
+  coding task (its record says why it did not go to the owner at the
+  third reopen and when it will). `pw-1` and `pw-2` reopened, both on
   which screen a Compatible copy is ranked for and opened on; one repair
-  for both is being built on the local branch `pw12-repair` (the screen
-  decided once, by name, before the copy is chosen). It changes two things
-  the plan's log had under "Left as they are": the first play of a run is
-  ranked for the saved screen it opens on, and a saved screen that is not
-  connected sends the first window to Vela's screen. It does NOT re-resolve
-  or relaunch a play when the screen changes during resolution or the
-  compositor places the window elsewhere; that goes to codex as a recorded
-  disagreement, and to the owner if codex insists. One fix departs on
+  for both LANDED at `52138d0` to `eb2f1c2` (six commits) and is with
+  codex: the screen is decided once, by name, before the copy is chosen.
+  It changes what a user sees in several small ways, listed in `pw-1`'s
+  record ("What changes for a user"); two of them the plan's log had under
+  "Left as they are" (its entry of 2026-11-14 on this repair): the first
+  play of a run is ranked for the saved screen it opens on, and a screen
+  that is not connected sends the window to Vela's screen. It does NOT
+  re-resolve or relaunch a play when the screen changes during resolution
+  or the compositor places the window elsewhere; that is put to codex as a
+  recorded disagreement, and goes to the owner if codex insists. One fix departs on
   purpose from what was first decided: what a play's end and Vela's exit
   save is the last window of mpv's own, not the latest play's (`pw-6`'s
   record says why). Do not release 1.0.64 before codex has accepted them.
@@ -164,7 +175,12 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   the intake"). `pw-8`: the scenario `windowsetting` failed about one
   external run in four, and four of five full runs, and the parity verdict
   with it. The cause was the scenario, which changed and ended a play
-  before Vela had connected to mpv; fixed at `26660a9`, with codex. `pw-9`,
+  before Vela had connected to mpv; fixed at `26660a9`. Codex REOPENED it:
+  the scenario's wait leaves a fault in the product, which is that Vela,
+  when it quits, saves the window before its reader has read all that mpv
+  sent. Its repair is being built by helper agents on the local branch
+  `pw8-r2`: quitting waits, for at most half a second and inside the two
+  seconds it already allows, until the reader has finished. `pw-9`,
   HALF OPEN: a play whose mpv ends before Vela has connected is not seen
   to have ended for five seconds, and handed the next play no fullscreen
   state. Its first half (seeding the opening state, so the next play gets

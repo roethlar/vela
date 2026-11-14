@@ -358,3 +358,22 @@ Not covered:
 - `guard_confirmed`: true. `capability_ok`: true.
 - Verdict: **reopened**. Comments, verbatim:
   - src/lib/Settings.svelte:30 — Save replies are treated as backend write order. Reproduced against both pins: A applies fullscreen and closes with its reply pending; reopened B loads fullscreen, saves default, and receives confirmation; A's delayed reply then changes B's selection and confirmed mode to fullscreen although the backend holds default. A refused retry also restores fullscreen. The base keeps B on default. Serialize saves across component lifetimes or use backend-ordered revisions, and guard this sequence with write application separated from reply delivery; the current test backend combines them. All 10 existing tests pass after restoration.
+
+Orchestrator: a valid verdict, reopened on one comment, and it is right:
+the second repair itself brought this in (the reviewer notes that the base
+it was made on keeps the newer choice). It is the third reopen. The
+finding is not put to the owner at this point, for two reasons. The fault
+is in code that is on `main` and came with the last repair, so leaving it
+would leave `main` worse than it was before that repair. And what closes
+it is the reviewer's own prescription, not a choice between behaviours:
+saves serialized across the page's lifetimes, or revisions in the
+backend's order, with a test backend in which applying a write and
+delivering its reply are two steps.
+
+The fourth repair is therefore handed to codex as a coding task
+(2026-11-14, under the owner's request of that day to split the coding
+with codex), limited to `src/lib/Settings.svelte` and `tests/`, and will
+be reviewed and landed by the coordinating agent, whose review then stands
+in the record in place of a codex verification, because codex cannot
+verify code it wrote. If that repair turns out to need a change in the
+backend, or is found wanting once more, the finding goes to the owner.
