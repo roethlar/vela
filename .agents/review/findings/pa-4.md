@@ -3,7 +3,7 @@
 **Severity**: MEDIUM — the parity test says that importing a scenario does nothing, and that timers are among what it watches. It watches the global timer functions only. A scenario that imports `setTimeout` from `node:timers`, or awaits a delay from `node:timers/promises`, at import passes; a callback can then run later, in the runner or during another scenario.
 **Status**: In progress
 **Branch**: —
-**Commit**: `c294a09`, `be3f1f4` (repair)
+**Commit**: `c294a09`, `be3f1f4` (repair), `cc85c2d` (second repair)
 
 ## Evidence
 
@@ -276,3 +276,105 @@ Not covered:
 - The probes really act on this machine: temporary files, a lookup of
   `localhost`, sockets on 127.0.0.1 closed at once, a spawn of a file that
   does not exist, a worker, and one process that lives eight seconds.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 12:12 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1d9e9-bf65-7d33-9f2b-dd81819dfc87`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 11:55 UTC, finished 12:11 UTC.
+- Reviewed head `be3f1f428902c764722074af4dbad910aa6d71dc`, base
+  `550f2b42b142facfb61669430d7cb072c281a8f6` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - tests/e2e/import-watch.mjs:175 — The report precedes work scheduled during beforeExit. A scenario using process.prependOnceListener('beforeExit', async () => { await Promise.resolve(); fs.appendFileSync(...); }) removes its listener before comparison and writes after report serialization. Its report was completely clean. Injected into smoke.mjs, it passed all 26 tests and wrote the file from both processes. This ordinary lifecycle callback neither tampers with the watch nor falls within the README exclusions.
+  - tests/e2e/import-watch.mjs:120 — The documented process.binding refusal should not remain unrecorded. A scenario that catches process.binding('fs') failing and performs a write only when it succeeds received a clean report, but wrote during an ordinary import. Unlike fchmod, this silently refused call has no recording replacement. Audit mode also freezes node:path, another verified behavior change omitted from the README's stated exceptions.
+  - tests/e2e/import-check.mjs:40 — Normal completion cancels the deadline without cleaning up descendants. A scenario spawning an unreferenced, same-group child with stdio: 'ignore' was rejected, but its child remained running after both importWatched returned and the deadline passed. This requires no detached grandchild or interference with the watch. Clean up surviving group members on completion and guard that cleanup.
+  - tests/e2e-parity.test.mjs:336 — The deadline guard does not establish that children died. Replacing both SIGKILL sends with SIGTERM made this test report PASS in 5.02 seconds while one child remained running and another stopped; the suite required external termination after nine seconds. The after-deadline fallback resolves regardless of termination, and importWatched supplies the asserted SIGKILL text. Assert actual termination and bounded completion of the enclosing test process.
+  - tests/e2e-parity.test.mjs:100 — Guard proof confirmed: allowing Timeout caused the timer and scheduler-prototype guards to fail; restoration passed all 26 tests. Property, status, secret and parent-gate mutations also triggered their guards. The five original demonstrations are rejected by the restored implementation. Final verification passed with sockets refusing EPERM, and all modified source files were restored. The missing pre-dispatch attack left lifecycle, audit-equivalence and cleanup assumptions without independent challenge. Embedded playback/E2E and Node 26.12.1 remain untested here.
+
+Orchestrator: a valid verdict, reopened on four comments, and all four
+are right. The reviewer also says what the missing attack cost: the
+repair's assumptions about the end of the process, about what audit mode
+changes, and about cleaning up had not been challenged by anyone. It is the
+second reopen of this finding.
+
+### Repair (round 3), `cc85c2d`
+
+Made by the coordinating agent, without a helper.
+
+- **The report is made when the process ends.** It was made the first time
+  the event loop had nothing left to do, so a module's own `beforeExit`
+  listener that took itself off the list and wrote a moment later came
+  after it. Now the watch only notes, at `beforeExit`, that the loop was
+  seen idle, and writes the report at `exit`, the last moment there is.
+  What a module's listener does before that, or puts off again from there,
+  is in the report. A listener a module adds for `exit` itself runs after
+  the watch's and is still on the list when the watch looks, so it is
+  reported as a listener added; one it puts in front runs first and its
+  acts are seen. A process ended by `process.exit` before the import
+  finished, or without its loop ever having been seen idle, says so. A
+  module that takes the watch's `exit` listener away leaves no report,
+  which fails as before.
+- **`process.binding`.** The permission system refuses it in audit mode
+  with nothing published. It, and `process._linkedBinding`, now have
+  recording replacements, so a module that tries either is not cleared,
+  whether or not it goes on. The README now lists what audit mode changes:
+  these and the five descriptor calls (all recorded), and the `node:path`
+  module object being frozen (a module that assigns to it fails to import,
+  which fails the test).
+- **What the import leaves running.** The check ends the watch's process
+  group on every way out, a clean one too, and an import that left a
+  process there fails with "the import left a process running in the
+  watch's process group after the watch's own had ended; it was ended
+  (SIGKILL)".
+- **The kill is checked.** After the deadline's SIGKILL the check looks
+  whether the process ended, and says "had not ended a moment after it was
+  sent SIGKILL" if not. The deadline test requires, besides the check's
+  words, that the process had ended and that nothing of its group is left,
+  and every such test ends the group itself when it is done, so a broken
+  check fails the test and does not keep the file waiting.
+
+Files: `tests/e2e/import-watch.mjs`, `tests/e2e/import-check.mjs`,
+`tests/e2e-parity.test.mjs`, `tests/e2e/README.md`.
+
+Where each comment is held, in `tests/e2e-parity.test.mjs`:
+
+| Comment | Held by |
+| --- | --- |
+| 1, work at the end of the process | "the import watch sees what a module does when the process is about to end": the reviewer's listener (`prependOnceListener('beforeExit')`, an awaited promise, then a write), a `beforeExit` listener that starts a timer, an `exit` listener put in front that writes, and one added behind |
+| 2, `process.binding` | "the import watch records a call to process.binding, which the permission system refuses in silence" |
+| 3, a process left in the group | "a process the import leaves running in the watch's group is ended with the check" |
+| 4, the deadline's kill | "an import that keeps its process busy for good, or stops it, fails at the deadline", which now also requires `ended` and an empty group for each of its three cases |
+
+The forging test changed with the report's timing: a `process.exit(0)`
+during the import now gives "the process was ended (process.exit) before
+the import had finished"; `beforeExit` listeners removed gives "the process
+ended without its event loop having been seen with nothing left to do";
+a new case removes the `exit` listeners (no report arrives); and the case
+of a made-up secret now also keeps the watch from adding its own line, so
+that only the secret tells the forged line from a report.
+
+Red-proofs, the file put back and checked byte for byte after each: the
+report made at the first `beforeExit` again (the end-of-process test and
+the forging test failed); the two binding replacements taken out; the
+ending of the group on a clean way out taken out; every SIGKILL made
+SIGTERM, the reviewer's own mutation (the deadline test failed, and the
+file still finished); the idle check taken out; the failing of an import
+that left a process taken out. Each made its test fail. No process was left
+behind by the tests or by the red-proofs.
+
+Checks: `npm run check` green before the commit (477 tests); the whole
+parity test passes inside `codex sandbox` in workspace-write mode (35 of
+35).
+
+Not covered: as listed under round 2, less the two things closed here. An
+`exit` listener a module adds runs after the watch's report: that it was
+added is reported, what it then does is not seen. A process the import
+starts in a group of its own cannot be ended by the check; if it holds the
+check's pipes that is reported (round 2), and if it does not, the spawn
+itself is (the permission net).
