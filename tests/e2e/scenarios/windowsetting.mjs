@@ -39,6 +39,50 @@ async function openPlayerSettings(driver) {
   );
 }
 
+// What play() does outside the scenario's own process: the app's page, mpv's
+// sockets. tests/e2e-judge.test.mjs runs play() with stand-ins for these, and
+// with no socket and no display; a real run uses these.
+const APP_AND_MPV = {
+  openLibraryGrid,
+  mpvSocketSnapshot,
+  openDetailAndPlay,
+  waitForNewMpvSocket,
+  connectMpv: (socket) => MpvIpc.connect(socket),
+};
+
+// Start the movie from its detail page and wait until Vela has recorded
+// the start, so the end of this play can be told apart from the last.
+// `readConfigSafely` reads the scenario's config.json, null when unreadable.
+export async function play({ driver, readConfigSafely }, io = APP_AND_MPV) {
+  const previous = readConfigSafely()?.recents?.[0]?.session_id ?? null;
+  await io.openLibraryGrid(driver);
+  const before = io.mpvSocketSnapshot();
+  await io.openDetailAndPlay(driver, POSTER);
+  const socket = await io.waitForNewMpvSocket(before, { timeoutMs: 20000 });
+  const mpv = await io.connectMpv(socket);
+  await pollUntil(() => mpv.getProp('path').catch(() => null), 'the stream in mpv');
+  await mpv.setProp('pause', true);
+  const recent = await pollUntil(() => {
+    const head = readConfigSafely()?.recents?.[0];
+    return head && head.session_id !== previous && head.ended_at_ms === 0 ? head : null;
+  }, 'the recorded start of this play');
+  // Wait until Vela is watching this mpv before the play is changed or
+  // ended (review finding pw-8). Vela learns how the window is left only
+  // over its own connections to mpv's socket, and it opens them by
+  // trying every 100 ms; this scenario can reach mpv, change its window
+  // and quit it within a few milliseconds of the socket appearing, so
+  // now and then Vela was not yet connected and mpv ended without ever
+  // telling it anything. A person cannot be that quick: mpv's window is
+  // not even there yet. Nothing a user sees says Vela is connected, so
+  // this waits on the sockets themselves: mpv has accepted this
+  // scenario's connection and Vela's two (the end-of-file watcher and
+  // the reader of the window state, the only ones Vela opens for a play
+  // like this one, with no notice to show and no Automatic quality;
+  // playback::play, spawn_position_reader and spawn_eof_watcher).
+  await velaConnected(socket, 3);
+  return { mpv, session: recent.session_id };
+}
+
 export default {
   name: 'windowsetting',
   // The setting is about the external player's own window.
@@ -90,37 +134,7 @@ export default {
       }
     };
 
-    // Start the movie from its detail page and wait until Vela has recorded
-    // the start, so the end of this play can be told apart from the last.
-    async function play() {
-      const previous = readConfigSafely()?.recents?.[0]?.session_id ?? null;
-      await openLibraryGrid(driver);
-      const before = mpvSocketSnapshot();
-      await openDetailAndPlay(driver, POSTER);
-      const socket = await waitForNewMpvSocket(before, { timeoutMs: 20000 });
-      const mpv = await MpvIpc.connect(socket);
-      await pollUntil(() => mpv.getProp('path').catch(() => null), 'the stream in mpv');
-      await mpv.setProp('pause', true);
-      const recent = await pollUntil(() => {
-        const head = readConfigSafely()?.recents?.[0];
-        return head && head.session_id !== previous && head.ended_at_ms === 0 ? head : null;
-      }, 'the recorded start of this play');
-      // Wait until Vela is watching this mpv before the play is changed or
-      // ended (review finding pw-8). Vela learns how the window is left only
-      // over its own connections to mpv's socket, and it opens them by
-      // trying every 100 ms; this scenario can reach mpv, change its window
-      // and quit it within a few milliseconds of the socket appearing, so
-      // now and then Vela was not yet connected and mpv ended without ever
-      // telling it anything. A person cannot be that quick: mpv's window is
-      // not even there yet. Nothing a user sees says Vela is connected, so
-      // this waits on the sockets themselves: mpv has accepted this
-      // scenario's connection and Vela's two (the end-of-file watcher and
-      // the reader of the window state, the only ones Vela opens for a play
-      // like this one, with no notice to show and no Automatic quality;
-      // playback::play, spawn_position_reader and spawn_eof_watcher).
-      await velaConnected(socket, 3);
-      return { mpv, session: recent.session_id };
-    }
+    const world = { driver, readConfigSafely };
 
     async function setFullscreen(mpv, value) {
       await mpv.setProp('fullscreen', value);
@@ -145,7 +159,7 @@ export default {
     // Run 1, remember: the first play opens as the stored window says. The
     // stored screen is gone, so the play is sent to the screen holding
     // Vela's window instead (review finding pw-1), and it still starts.
-    const first = await play();
+    const first = await play(world);
     assert.equal(
       await first.mpv.getProp('fullscreen'),
       true,
@@ -171,7 +185,7 @@ export default {
 
     // The next play of the run opens as that one left the window, and still
     // has the size to return to when the user leaves fullscreen.
-    const next = await play();
+    const next = await play(world);
     assert.equal(await next.mpv.getProp('fullscreen'), true);
     assert.equal(
       await next.mpv.getProp('geometry'),
@@ -195,7 +209,7 @@ export default {
 
     // Quitting Vela while a video still plays keeps that play's window too:
     // the play never reaches its own end before the process goes.
-    const showing = await play();
+    const showing = await play(world);
     assert.equal(await showing.mpv.getProp('fullscreen'), false);
     await setFullscreen(showing.mpv, true);
     // Quit through the app's own exit, as its Exit Vela button does; ending
@@ -211,7 +225,7 @@ export default {
     showing.mpv.close();
     await restart();
     // Run 2, remember: the first play opens as that play was left.
-    const reopened = await play();
+    const reopened = await play(world);
     assert.equal(
       await reopened.mpv.getProp('fullscreen'),
       true,
@@ -247,7 +261,7 @@ export default {
     // Run 3, fullscreen: the first play opens fullscreen with nothing stored,
     // and leaving fullscreen is not remembered.
     await restart();
-    const second = await play();
+    const second = await play(world);
     assert.equal(
       await second.mpv.getProp('fullscreen'),
       true,
@@ -264,7 +278,7 @@ export default {
       config.mpv_window = { fullscreen: true };
       fs.writeFileSync(configFile, JSON.stringify(config));
     });
-    const third = await play();
+    const third = await play(world);
     assert.equal(
       await third.mpv.getProp('fullscreen'),
       false,

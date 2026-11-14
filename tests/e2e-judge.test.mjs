@@ -11,6 +11,7 @@ import { acceptedConnections, plexStopProblems, skipJumpVerdict } from './e2e/ju
 import { velaConnected } from './e2e/helpers.mjs';
 import { proveSkippedPast } from './e2e/scenarios/markers.mjs';
 import { assertPlexStopped } from './e2e/scenarios/multiplex.mjs';
+import { play as playInWindowsetting } from './e2e/scenarios/windowsetting.mjs';
 import { positionsWhile } from './e2e/helpers.mjs';
 
 // markers.mjs's rule: the play resumed from 1 s ahead of a range at 2-12 s,
@@ -737,31 +738,6 @@ test('pw-8: the connections a socket has accepted are counted from /proc/net/uni
   assert.equal(acceptedConnections('', one), 0);
 });
 
-// And the scenario's use of it: a play is handed back, to be changed or
-// ended, only after mpv has accepted three connections: the scenario's own
-// and Vela's two.
-test('pw-8: windowsetting hands a play back only once Vela is connected to its mpv', () => {
-  const source = fs.readFileSync(new URL('./e2e/scenarios/windowsetting.mjs', import.meta.url), 'utf8');
-  const start = source.indexOf('    async function play() {');
-  const end = source.indexOf('    async function setFullscreen(');
-  assert.ok(start > 0 && end > start, 'the scenario has its play() and what follows it');
-  const play = source.slice(start, end);
-  // The whole statement, as the step straight before the play is handed
-  // back: a wait that is there but skipped, or that asks for fewer, is not
-  // this text.
-  const lastStep =
-    '\n      await velaConnected(socket, 3);\n' +
-    '      return { mpv, session: recent.session_id };\n';
-  assert.equal(play.split(lastStep).length, 2, "play() waits for mpv's three accepted connections as its last step before it hands the play back");
-  const tree = ts.createSourceFile('play.mjs', play, ts.ScriptTarget.Latest, true, ts.ScriptKind.JS);
-  assert.deepEqual(tree.statements[0].body.statements.slice(-2).map((node) => node.getText(tree)), [
-    'await velaConnected(socket, 3);',
-    'return { mpv, session: recent.session_id };',
-  ], 'the last two executable statements are the unconditional wait and handoff');
-  assert.equal(play.split('return ').filter((part) => part.startsWith('{ mpv')).length, 1, 'by its one way out');
-  assert.equal(source.split('velaConnected(').length, 2, 'the wait is asked there and nowhere else');
-});
-
 const SOCKET = '/tmp/vela-test/mpv-1.sock';
 const procRow = (state, socket = SOCKET) => `0000000000000000: 00000003 00000000 00000000 0001 ${state} 123 ${socket}`;
 const procWithClients = (count) => [
@@ -803,6 +779,63 @@ test('pw-8: velaConnected times out naming the socket and required count', async
     velaConnected(SOCKET, 4, { readProcNetUnix: () => procWithClients(3), timeoutMs: 0, intervalMs: 1 }),
     { message: `timed out waiting for mpv at ${SOCKET} to accept 4 connections (Vela and the scenario)` },
   );
+});
+
+// And the scenario's use of it: a play is handed back, to be changed or
+// ended, only after mpv has accepted three connections: the scenario's own
+// and Vela's two. The scenario's own play() is run, with stand-ins for the
+// app's page and for mpv, and with the kernel's socket table made up: the
+// shared velaConnected the scenario imports reads it (no socket, no display).
+test('pw-8: windowsetting hands a play back only once Vela is connected to its mpv', async (t) => {
+  let connections = 0;
+  let tableReads = 0;
+  t.mock.method(fs, 'readFileSync', (file, encoding) => {
+    assert.deepEqual([file, encoding], ['/proc/net/unix', 'utf8'], 'play() reads the kernel socket table and nothing else');
+    tableReads++;
+    return procWithClients(connections);
+  });
+  let started = false;
+  const mpv = {
+    getProp: async (name) => (name === 'path' ? '/media/stream.mp4' : null),
+    setProp: async () => {},
+  };
+  const appAndMpv = {
+    openLibraryGrid: async () => {},
+    mpvSocketSnapshot: () => new Set(),
+    openDetailAndPlay: async () => {
+      started = true;
+    },
+    waitForNewMpvSocket: async () => SOCKET,
+    connectMpv: async (socket) => {
+      assert.equal(socket, SOCKET);
+      return mpv;
+    },
+  };
+  // The start of this play is recorded once the play has been started.
+  const readConfigSafely = () => ({
+    recents: [started ? { session_id: 'this play', ended_at_ms: 0 } : { session_id: 'the last play', ended_at_ms: 1 }],
+  });
+  let handedBack = null;
+  const playing = playInWindowsetting({ driver: {}, readConfigSafely }, appAndMpv).then((played) => {
+    handedBack = played;
+    return played;
+  });
+  for (const count of [0, 1, 2]) {
+    connections = count;
+    // The wait has looked at the table twice with this count, or the play
+    // has been handed back.
+    const before = tableReads;
+    const deadline = Date.now() + 5000;
+    while (tableReads < before + 2 && handedBack === null && Date.now() < deadline) {
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+    assert.equal(handedBack, null, `the play was handed back with ${count} of the three connections`);
+    assert.ok(tableReads >= before + 2, `the wait kept looking with ${count} connections`);
+  }
+  connections = 3;
+  const played = await playing;
+  assert.equal(played.mpv, mpv, 'the play is handed back once the three are there');
+  assert.equal(played.session, 'this play');
 });
 
 test('pw-8: velaConnected rejects invalid counts before reading the kernel table', async () => {
