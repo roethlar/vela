@@ -1753,4 +1753,3 @@ made: the whole packaging test file against a real `unsquashfs`
 (squashfs-tools 4.7.4, in a container), 188 of 188 with none skipped, and
 the real-squashfs test fails when the image is read from the wrong place.
 CI still runs none of these tests (`.agents/state.md`, Blockers).
-
