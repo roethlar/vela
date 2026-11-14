@@ -230,3 +230,19 @@ Not covered:
   button is disabled.
 - The test runs the component's functions and reads its parsed markup; it
   does not mount the component.
+
+### Verification round 2 (repair-delta redispatch), recorded 2026-11-14 13:01 UTC (this record is committed)
+
+- Reviewer: codex / host default / host default / standard
+  escalated: T5 (ceiling)
+- Harness: codex-cli 0.167.2, called plainly, in a fresh session (the
+  host's codex config resolves to gpt-6-astra @ max, the ceiling). Thread
+  `01a1da1d-d89f-7f43-a38c-b9349b04a1d5`, run in the disposable worktree
+  `~/dev/vela-probe-wt` at the head SHA; the stream ends in
+  `turn.completed`; dispatched 12:52 UTC, finished 13:01 UTC.
+- Reviewed head `0ee2e0d2c90c151d372ec10e98ddce8ac244924d`, base
+  `c3b044211d2ab44f71d2b44e4e70dd168b88612d` (both equal the dispatched
+  pins).
+- `guard_confirmed`: true. `capability_ok`: true.
+- Verdict: **reopened**. Comments, verbatim:
+  - src/lib/Settings.svelte:288 — The counter cannot protect a reopened component from an earlier instance’s pending save. Reproduced with two instances of the extracted component code: A sends fullscreen; reopened B reads remember; A’s save confirms fullscreen; B’s load applies remember because B’s counter remains zero. A refused retry in B then restores remember although the backend holds fullscreen. Closing remains enabled during saves, and reopening remounts Settings. Synchronize outstanding saves and confirmed state across component lifetimes, and guard this interleaving. The existing six tests pass after restoration.
