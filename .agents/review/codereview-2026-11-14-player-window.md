@@ -111,3 +111,19 @@ Per-finding records: `.agents/review/findings/pw-1.md` to `pw-7.md`.
   landing.
 - Not covered by the reviewer: a real mpv window (none can be drawn in its
   sandbox), and the end-to-end suite, which it read.
+
+## Raised after the intake
+
+Two findings were added on 2026-11-14 that the reviewer did not raise.
+Both came out of the end-to-end runs made while the seven fixes landed.
+
+- `pw-8`: the scenario `windowsetting` failed about one external run in
+  four, and the parity verdict with it. A helper traced it to the scenario
+  acting before Vela had connected to mpv; the scenario now waits for that.
+  Fixed at `26660a9`; it goes to the reviewer for verification like the
+  others.
+- `pw-9`: what the same traces showed in Vela itself: a play whose mpv ends
+  before Vela has connected is not seen to have ended for five seconds, and
+  hands on no fullscreen state. Open. One half is within the player-window
+  plan; the other changes when tracking gives up for every play and waits
+  for the owner's word.
