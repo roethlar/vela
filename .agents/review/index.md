@@ -8,13 +8,13 @@ Seven candidates, seven admitted, none declined. Record:
 
 | ID   | Severity | Impact (one line)                                                      | Status | Commit | Reviewer |
 |------|----------|------------------------------------------------------------------------|--------|--------|----------|
-| pw-1 | MEDIUM   | The copy is chosen for one screen and the window can open on another   | `[ ]`  | — | codex/default/standard |
-| pw-2 | MEDIUM   | A play in the embedded player is ranked for the previous mpv window's screen | `[ ]`  | — | codex/default/standard |
-| pw-3 | MEDIUM   | A width and a height never reported together can be carried as the window's size | `[ ]`  | — | codex/default/standard |
-| pw-4 | MEDIUM   | Quitting Vela waits, without limit, for the settings file to be written | `[ ]`  | — | codex/default/standard |
-| pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[ ]`  | — | codex/default/standard |
-| pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[ ]`  | — | codex/default/standard |
-| pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[ ]`  | — | codex/default/standard |
+| pw-1 | MEDIUM   | The copy is chosen for one screen and the window can open on another   | `[~]`  | `68d6211`, `7b34af2` | codex/default/standard |
+| pw-2 | MEDIUM   | A play in the embedded player is ranked for the previous mpv window's screen | `[~]`  | `6bb2db6`, `577fe5b` | codex/default/standard |
+| pw-3 | MEDIUM   | A width and a height never reported together can be carried as the window's size | `[~]`  | `2dd9eb7` | codex/default/standard |
+| pw-4 | MEDIUM   | Quitting Vela waits, without limit, for the settings file to be written | `[~]`  | `5de1305` | codex/default/standard |
+| pw-5 | MEDIUM   | An older play's window, or an earlier look at the current one, can be saved over a newer one | `[~]`  | `cbd93ae` | codex/default/standard |
+| pw-6 | MEDIUM   | After a play in the embedded player, the next mpv window is treated as the first of the run again | `[~]`  | `55be8fc`, `0e5ea59` | codex/default/standard |
+| pw-7 | LOW      | When saving the Player window setting fails, the control shows the choice that was not saved | `[~]`  | `ac25240` | codex/default/standard |
 
 **Embedded player Slice 6 review (the parity tests), 2026-11-14 (open):** codereview codex
 (called plainly; the host's codex config resolves to gpt-6-astra @ max;

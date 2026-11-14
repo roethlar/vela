@@ -120,15 +120,23 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Compatible policy can rank for a different screen than the window opens
   on; a size can be carried that the window never had; quitting waits
   without limit for the settings file; an older window can be saved over a
-  newer one; and three smaller ones. They are being fixed on two local
-  branches of this clone, `pw-core` and `pw-edge` (worktrees under
-  `~/dev/vela-agent-keep/wt/`), not on `main`, not pushed. Do not release
-  1.0.64 before they have landed. Seen once since (2026-11-14, a helper's
-  full external run, 1 failure in 5 runs of it): the scenario
-  `windowsetting` timed out waiting for the window of the play still
-  showing when Vela quit to appear in `config.json`. It is not a recorded
-  known failure, and it can fail a parity verdict. The write at exit is
-  what `pw-4` changes; look at it again when that fix lands.
+  newer one; and three smaller ones. All seven are FIXED on `main`
+  (`55be8fc` to `ac25240`, ten commits, 2026-11-14; no version change, no
+  release note) and are going to codex for verification one by one
+  (`.agents/review/index.md`). One fix departs on purpose from what was
+  first decided: what a play's end and Vela's exit save is the last
+  window of mpv's own, not the latest play's (`pw-6`'s record says why).
+  Do not release 1.0.64 before codex has accepted them.
+  OPEN, not yet a recorded finding: the end-to-end scenario
+  `windowsetting` fails about one external run in four, and did before
+  these fixes (three helpers measured it at the review's base and after).
+  It fails where the scenario changes fullscreen and at once ends the play
+  or quits Vela: what Vela then remembers is the window as it was before
+  the change. It is not a recorded known failure, so it fails a parity
+  verdict when it strikes. Whether the product loses a change mpv has
+  already reported, or the scenario asks for more than a user could do,
+  has not been settled; that is the next piece of work on the player
+  window.
   Rules the owner set for this run (decision `.agents/decisions.md`
   2026-11-12, "plans are approved"): every slice with repo code gets a
   `codereview codex` pass; push each commit; steps only the owner can do
