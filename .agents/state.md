@@ -36,6 +36,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   Player tab's seven Save buttons are gone; a setting added later gets
   none. What was checked, and one timeout that could not be repeated, are
   in the plan's log.
+- ALSO 2026-11-15: THE OWNER IS USING THE EMBEDDED PLAYER and reports
+  what the by-eye checks were for. First report: its Audio and Subtitles
+  lists closed the moment they opened while a video played; fixed at
+  `2a954d0` (they are drawn in the page now; the embedded player plan's
+  log, last entry). The package on `continuum` was rebuilt there. Expect
+  more such reports; each is fixed as it comes (decision of 2026-11-14
+  on what is obviously broken).
 - WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
   agent's part of both approved plans is done and every codex review of
   it is closed (`.agents/review/index.md` has no open finding). `main` at

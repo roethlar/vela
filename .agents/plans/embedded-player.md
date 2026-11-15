@@ -820,8 +820,8 @@ and removes nothing from it.
 How to try it (since 2026-11-15): install a package that carries the
 library, choose Settings, Player, Video player, "Vela's window
 (experimental)", save, and restart Vela. On `continuum` such a package,
-built from `b066dc0` by `scripts/build.sh --with-libmpv` and checked (the
-log's last entry says how), is
+built from `2a954d0` by `scripts/build.sh --with-libmpv` and checked (the
+log's last entries say how), is
 `~/dev/vela-agent-keep/pkg/vela-1.0.64-1-x86_64.pkg.tar.zst`; installing
 it is `sudo pacman -U` of that file, which is the owner's to run. A
 development build works as before: start it with `VELA_LIBMPV_DIR` naming
@@ -2054,3 +2054,46 @@ Settings check in the embedded player, and `playback`, `smoke`,
 earlier file at the same path (sha256 `c1829525...c48ea4`). The full run of
 both suites at that commit, with the development build, passed everything
 (external 48 of 48, embedded 50 of 50, parity verdict PASS).
+
+### 2026-11-15 — the owner's first report from a real desktop: the track lists; fixed at `2a954d0`
+
+The owner installed the package and reported, from KDE on Wayland: "in the
+embedded player, dropdown menus are unusable. they disappear instantly
+while video is playing." It is the first of the by-eye checks to come
+back ("open the audio and subtitle lists over the picture", From Slice 5).
+
+**Cause, as far as it is known.** The bar's Audio track and Subtitles
+controls were native selects, whose list in WebKitGTK is a native popup
+window. While a video plays the view re-renders their options on every
+`player-state` event, up to four a second, and the picture is a surface
+under Vela's window that is updated all the time. One of the two
+dismissed the popup as it opened. Which one was NOT established: nothing
+in the test venue can see a native popup, and the test clips had one
+audio track and no subtitles, so both controls were disabled in every
+scenario. That is why no test saw this.
+
+**Fix (`2a954d0`, written by codex, read and run by the working agent).**
+No native popup: each control is a button that opens a list drawn in the
+page, above the bar. It closes on a choice, on Escape, on a press outside
+and when focus leaves it, and on nothing else; the bar and the pointer
+stay shown while it is open; Escape closes the list only. The key rules
+are in `keyAction` with the others.
+
+**Checked.** `npm run check` (569 tests) and the build. A new scenario,
+`embeddedtracks`, with the first test clip that has two audio tracks and
+a subtitle: the Audio list opened while the video plays stays open for
+four seconds, across sixteen state events and past the bar's hide time;
+choosing sets mpv's `aid` and `sid`; Escape in fullscreen closes the list
+and nothing else. 3 runs of 3, with the other embedded scenarios beside
+it. A screenshot of the open list was looked at.
+
+**The package** at the path above was rebuilt at `2a954d0` (sha256
+`d7e2e655...2acca25`), which also carries the Settings change of the same day
+(`.agents/plans/settings-autosave.md`). The package check passed, and
+the unpacked package's own binary passed `embeddedtracks`,
+`embeddedcontrols`, `playback`, `sourcepolicy` and `continueoff` in the
+embedded player and `playback`, `smoke`, `sourcepolicy`, `continueoff`
+and `windowsetting` in the external one. The full run of both suites at `2a954d0`, each building its app, passed everything: external 48 of 48, embedded 51 of 51, parity verdict PASS (results on `continuum` in `~/dev/vela-agent-keep/full-2a954d0-e2e/`).
+
+**Not seen.** The owner's desktop with the fix; a list of thirty
+subtitle tracks (the clip has one).

@@ -101,5 +101,6 @@ working agent.
 - Not explained: the very first run of the one-off check in the embedded
   player timed out waiting for two display overrides to be stored. It did
   not happen again in 13 more runs or in the bursts.
-- Not done: both suites in full at this commit (they run with the next
-  change).
+- Both suites in full, at a954d0\ (this change and the embedded
+  player's track lists): external 48 of 48, embedded 51 of 51, parity
+  verdict PASS.
