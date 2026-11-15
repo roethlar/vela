@@ -21,6 +21,16 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   that package and the by-eye checks; the release workflow, which does
   not ship the library yet; the tag and release of 1.0.64; one step in
   `ci.yml` (Blockers).
+- ALSO 2026-11-15: `pagefail` IS FIXED (`b066dc0`), and no scenario is
+  allowed to fail any more (`tests/e2e/parity.mjs`, `KNOWN_FAILURES`, is
+  empty). The fix has two halves, both needed and each shown by taking it
+  out: the page no longer loads more for a browse grid that has left the
+  document, and the scenario's scroll helper sends one scroll event, not
+  two (the blocker's entry and what its diagnosis missed are in
+  `docs/history/state-archive.md`, rotated that day). The full run of both suites at `b066dc0`, each building its app, passed everything: external 48 of 48, embedded 50 of 50, parity verdict PASS (the first run with no failure at all; results kept on `continuum` in `~/dev/vela-agent-keep/full-b066dc0-e2e/`).
+  One known intermittent failure remains, `completionhub` in the embedded
+  player (Blockers); wherever the account below calls `pagefail` the one
+  recorded failure, that was true when it was written.
 - WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
   agent's part of both approved plans is done and every codex review of
   it is closed (`.agents/review/index.md` has no open finding). `main` at
@@ -421,39 +431,6 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 ## Blockers
 
 - No known product blocker.
-- E2E `pagefail` fails on `continuum` (x86_64, WebKitGTK 2.54.2), first seen
-  2026-11-12; it also fails on `2f283a2`, before the server-identity work.
-  Investigated 2026-11-12 with a throwaway probe scenario (not committed);
-  cause is a product race, not the harness or the host:
-  - `onScroll` in `src/routes/+page.svelte` runs
-    `if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) loadMore()`
-    with no check that the grid is still on screen.
-  - Opening a detail removes the grid from the DOM. WebKit can deliver a
-    queued, trusted `scroll` event to that element afterwards. Its
-    `scrollHeight`, `scrollTop` and `clientHeight` are then all 0, so the
-    test `0 < 600` passes and the next page is requested while the detail
-    is open.
-  - Evidence, 8 probe runs: in 6 a scroll event arrived with
-    `isConnected: false`, all three sizes 0 and `.detail` present, and a
-    second `StartIndex=60` request followed; in 2 the event arrived while
-    the grid was still connected (`scrollTop` 20) and no extra request was
-    made. The grid itself scrolls normally (`scrollHeight` 2823,
-    `clientHeight` 694, window 1280x800).
-  - In `pagefail` this refetches the page the scenario deliberately failed,
-    so its precondition "back on the truncated grid" sees 130 cards, not
-    60. The scroll comes from WebDriver scrolling the clicked card into
-    view; a mouse click during inertial scrolling could do the same.
-  - User-visible effect is small: a wasted background page request, and
-    more cards than expected on Back. No data loss.
-  - Unfixed as of `aaa01c1`. Proposed fix (needs a plan and a go): make
-    `onScroll` ignore an element that is not connected or has no height,
-    with a guard, then re-run `pagefail`. Whether the VM's older WebKit
-    simply never delivers the late event is an assumption, not verified.
-  - Seen again 2026-11-13 during the embedded-player run: `pagefail` passed
-    once (the full run at `3e91c63`, 39 of 39) and then failed 15 runs of 15
-    at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
-    precondition (120 cards instead of 60). None of those commits touches
-    the page; this is the race above, not a regression.
 - E2E `completionhub` fails now and then in the embedded player. First seen
   2026-11-15: once in the full embedded run at `3505387` (which therefore
   failed the parity verdict: 48 of 50), then in 2 of 49 runs of the scenario
@@ -506,7 +483,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   libarchive-tools` before `npm run check`); it is a change to `ci.yml`,
   which the agent does not make.
 - The `refresh` E2E flake remains recorded (1.0.59 full Linux run, 36/39,
-  with `continueon` and `playverbs`). One cause of the continuation flakes
+  with `continueon` and `playverbs`). A candidate cause, seen 2026-11-15 and not
+  acted on: `refresh.mjs` and `watchposition.mjs` scroll the grid with the
+  helper `pagefail` had until `b066dc0`, which moves the grid AND sends a
+  synthetic scroll event. That is two events, and the second can ask again
+  for a page whose request has just failed. One cause of the continuation flakes
   is gone since 2026-11-13: scenarios sought in a file the moment mpv named
   it, and mpv can answer that with "property unavailable" (seen in
   `continuetv` and `continueon`). The harness now waits until mpv reports a

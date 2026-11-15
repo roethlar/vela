@@ -4,6 +4,57 @@ Entries rotated verbatim out of `.agents/state.md` when they stopped being
 live (handoff pruning rule). Newest rotation first; each block keeps its
 original wording and internal chronology.
 
+## Rotated 2026-11-15 (the `pagefail` blocker, fixed at `b066dc0`)
+
+Context for readers: the entry below stood under Blockers from 2026-11-12
+and rotates here verbatim. Its diagnosis was right and incomplete. The
+late scroll event on a grid that has left the page is real, and the page
+now ignores it (`onScroll` and the two places that fill a grid that does
+not scroll yet). But with that guard alone the scenario still failed 8
+runs of 8: its own helper moved the grid and also sent a synthetic scroll
+event, and on this WebKit the real event arrives after the page the
+scenario fails on purpose has already failed, so the app, rightly, asked
+for that page again before the detail was even opened. The helper now
+sends one event per call. Runs on `continuum`, the app rebuilt for each
+variant: guard and helper, 10 of 10 (6 external, 4 embedded); the helper
+with the guard taken out again, external 7 of 8 and embedded 0 of 4. The
+entry's "needs a plan and a go" was overtaken by the owner's decision of
+2026-11-14 that what is obviously broken is fixed without asking.
+
+- E2E `pagefail` fails on `continuum` (x86_64, WebKitGTK 2.54.2), first seen
+  2026-11-12; it also fails on `2f283a2`, before the server-identity work.
+  Investigated 2026-11-12 with a throwaway probe scenario (not committed);
+  cause is a product race, not the harness or the host:
+  - `onScroll` in `src/routes/+page.svelte` runs
+    `if (el.scrollHeight - el.scrollTop - el.clientHeight < 600) loadMore()`
+    with no check that the grid is still on screen.
+  - Opening a detail removes the grid from the DOM. WebKit can deliver a
+    queued, trusted `scroll` event to that element afterwards. Its
+    `scrollHeight`, `scrollTop` and `clientHeight` are then all 0, so the
+    test `0 < 600` passes and the next page is requested while the detail
+    is open.
+  - Evidence, 8 probe runs: in 6 a scroll event arrived with
+    `isConnected: false`, all three sizes 0 and `.detail` present, and a
+    second `StartIndex=60` request followed; in 2 the event arrived while
+    the grid was still connected (`scrollTop` 20) and no extra request was
+    made. The grid itself scrolls normally (`scrollHeight` 2823,
+    `clientHeight` 694, window 1280x800).
+  - In `pagefail` this refetches the page the scenario deliberately failed,
+    so its precondition "back on the truncated grid" sees 130 cards, not
+    60. The scroll comes from WebDriver scrolling the clicked card into
+    view; a mouse click during inertial scrolling could do the same.
+  - User-visible effect is small: a wasted background page request, and
+    more cards than expected on Back. No data loss.
+  - Unfixed as of `aaa01c1`. Proposed fix (needs a plan and a go): make
+    `onScroll` ignore an element that is not connected or has no height,
+    with a guard, then re-run `pagefail`. Whether the VM's older WebKit
+    simply never delivers the late event is an assumption, not verified.
+  - Seen again 2026-11-13 during the embedded-player run: `pagefail` passed
+    once (the full run at `3e91c63`, 39 of 39) and then failed 15 runs of 15
+    at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
+    precondition (120 cards instead of 60). None of those commits touches
+    the page; this is the race above, not a regression.
+
 ## Rotated 2026-11-12 (drift pass — twelve landed entries, v1.0.63)
 
 Context for readers: twelve `## Now` entries had landed and had no queued work
