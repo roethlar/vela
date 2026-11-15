@@ -2323,3 +2323,26 @@ Agent's reading (not the owner's words), for how to work here:
 Updates:
 `.agents/repo-guidance.md` (Mission Detail); `.agents/plans/embedded-player.md`
 (Status and log); `.agents/state.md`.
+
+## 2026-11-15 - Settings save each change as it is made; no Save buttons
+
+Status: OWNER REQUEST (2026-11-15), settled in detail by the agent
+(`.agents/plans/settings-autosave.md`).
+
+Decision:
+The owner, of the Player tab's seven Save buttons: "all the Save buttons
+in settings- do we need them? can we not either auto-save settings
+changes or have one save button per page? these are making the setting
+page difficult to use." Settings now save each change as it is made
+(`5fc040f`): a choice the moment it changes, text when its field is left
+or Settings closes. One status in the dialog's header says Saving, Saved
+or Not saved; a refused save is explained in its own section.
+
+How to apply:
+A setting added later follows the same rule and the same mechanism in
+`src/lib/Settings.svelte` (`createSetting`, `createDraft`, the setting's
+queue). It gets no Save button. Buttons are for actions (Browse, Clear,
+install, connect), not for saving.
+
+Supersedes:
+Nothing recorded; the buttons had grown one section at a time.

@@ -23,6 +23,11 @@
   (mpv and your own options decide).
 - With the Prefer Compatible source policy, choose the copy for the screen the
   video will open on, which is now the screen of the previous player window.
+- Settings saves each change as you make it; the Save buttons on the Player
+  tab are gone. A choice is saved the moment it changes, and text (the mpv
+  path, the Advanced mpv options) when you leave its field or close Settings.
+  The header says "Saved", or "Not saved" with the reason in the section
+  concerned.
 - Add an experimental second player that shows the video inside Vela's own
   window, with Vela's own controls: Settings → Player → Video player. It runs
   on Linux in a Wayland session, takes effect after Vela is restarted, and is

@@ -31,6 +31,11 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   One known intermittent failure remains, `completionhub` in the embedded
   player (Blockers); wherever the account below calls `pagefail` the one
   recorded failure, that was true when it was written.
+- ALSO 2026-11-15: SETTINGS SAVE EACH CHANGE AS IT IS MADE (`5fc040f`;
+  plan `.agents/plans/settings-autosave.md`, decision of that day). The
+  Player tab's seven Save buttons are gone; a setting added later gets
+  none. What was checked, and one timeout that could not be repeated, are
+  in the plan's log.
 - WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
   agent's part of both approved plans is done and every codex review of
   it is closed (`.agents/review/index.md` has no open finding). `main` at
