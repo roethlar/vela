@@ -4,8 +4,9 @@
 
 APPROVED by the owner on 2026-11-14 (decision `.agents/decisions.md`, that
 date: "The player checks the server's certificate, with a setting to turn
-it off"). LANDED 2026-11-14 at `bc51d01`, its one slice whole. Not released;
-the release note and the version are still to be written (below).
+it off"). LANDED 2026-11-14 at `bc51d01`, its one slice whole. Not released.
+The release note and the user documentation were written on 2026-11-15
+(log, below); the version is 1.0.64's, which is the owner's to release.
 
 ## The fault
 
@@ -93,6 +94,11 @@ the working agent.
   in the venue); the notice in a real window; Windows and macOS (not
   compiled here).
 
-Still to do, at the next release: the release note (it changes what
-happens for a server whose certificate mpv does not accept) and the
-user-facing documentation of the setting.
+### 2026-11-15: the release note and the user documentation
+
+Written without waiting for the release, under the owner's ruling of that
+day that what is built is to be usable (`.agents/decisions.md`): a
+paragraph in `docs/usage.md` ("Player behavior notes") and an entry under
+"Unreleased", Fixes, in `RELEASE_NOTES.md`. Both say what changes for a
+server whose certificate mpv does not accept and the two ways on. Nothing
+of this plan is left for the agent.

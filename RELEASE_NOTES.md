@@ -31,6 +31,14 @@
 
 ## Fixes
 
+- Check the certificate of an HTTPS media server when playing. mpv's own
+  window did not check it, so the stream's sign-in token was sent without
+  knowing who received it. A server whose certificate mpv does not accept (a
+  self-signed one, or one signed by a private authority mpv does not know) no
+  longer plays until you name the authority to mpv with `tls-ca-file`
+  (Advanced options or your own mpv config) or turn the check off under
+  Settings → Player → mpv player → Skip server certificate checks. Plain
+  HTTP servers are not affected.
 - On Windows, make mpv exit when a file finishes. It previously stayed open and
   idle, so Continue Playing and playlists never advanced and the finished
   item's watched state and resume position were not saved.

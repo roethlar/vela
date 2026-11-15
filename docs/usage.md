@@ -109,6 +109,17 @@ even if you never open the setting. Going back to one of those releases
 after playing anything therefore stops at Settings recovery, where starting
 fresh settings resets every setting except your server connections.
 
+The player checks the certificate of an HTTPS media server, as Vela itself
+does when it browses the server. A server whose certificate mpv does not
+accept (a self-signed one, or one signed by a private authority that mpv does
+not know) does not play, and the notice for a video that ended before it
+started points at the certificate. There are two ways on. For a private
+authority, name its certificate file to mpv with `tls-ca-file` in the
+Advanced options or in your own mpv config; the check stays on. Or turn the
+check off with Settings → Player → mpv player → Skip server certificate
+checks; your sign-in token is then sent without knowing who receives it.
+Either applies to the next video. Plain HTTP servers are not affected.
+
 Black-bar cropping is Off by default. Manual mode runs on `Shift+C`; Automatic
 mode attempts every video. Automatic crop detection can be unreliable with HDR
 on some GPU/Wayland combinations and may occasionally hang mpv, so Manual is
