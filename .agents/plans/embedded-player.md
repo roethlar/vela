@@ -820,7 +820,7 @@ and removes nothing from it.
 How to try it (since 2026-11-15): install a package that carries the
 library, choose Settings, Player, Video player, "Vela's window
 (experimental)", save, and restart Vela. On `continuum` such a package,
-built from `3505387` by `scripts/build.sh --with-libmpv` and checked (the
+built from `b066dc0` by `scripts/build.sh --with-libmpv` and checked (the
 log's last entry says how), is
 `~/dev/vela-agent-keep/pkg/vela-1.0.64-1-x86_64.pkg.tar.zst`; installing
 it is `sudo pacman -U` of that file, which is the owner's to run. A
@@ -2044,3 +2044,13 @@ checks; the release workflow, which does not build or ship the library
 (`docs/development.md`, "Packaging the set", says what it needs), so a
 released 1.0.64 as the workflow stands would offer the choice and say the
 library is missing; the tag and the release.
+
+**The package was rebuilt the same day at `b066dc0`**, which adds the
+`pagefail` fix (the browse grid; `.agents/state.md`). Same checks, same
+results: the package check passed every line, and the unpacked package's
+own binary passed `playback`, `embeddedcontrols`, `pagefail` and the
+Settings check in the embedded player, and `playback`, `smoke`,
+`pagefail` and the Settings check in the external one. It replaced the
+earlier file at the same path (sha256 `c1829525...c48ea4`). The full run of
+both suites at that commit, with the development build, passed everything
+(external 48 of 48, embedded 50 of 50, parity verdict PASS).
