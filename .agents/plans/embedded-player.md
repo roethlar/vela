@@ -820,7 +820,7 @@ and removes nothing from it.
 How to try it (since 2026-11-15): install a package that carries the
 library, choose Settings, Player, Video player, "Vela's window
 (experimental)", save, and restart Vela. On `continuum` such a package,
-built from `2a954d0` by `scripts/build.sh --with-libmpv` and checked (the
+built from `e64efb3` by `scripts/build.sh --with-libmpv` and checked (the
 log's last entries say how), is
 `~/dev/vela-agent-keep/pkg/vela-1.0.64-1-x86_64.pkg.tar.zst`; installing
 it is `sudo pacman -U` of that file, which is the owner's to run. A
@@ -2100,3 +2100,31 @@ embedded 51 of 51, parity verdict PASS (results on `continuum` in
 
 **Not seen.** The owner's desktop with the fix; a list of thirty
 subtitle tracks (the clip has one).
+
+### 2026-11-15 — the owner's second report: double-click for fullscreen; fixed at `e64efb3`
+
+The owner: "double-click on the video in the embedded player doesn't
+switch to full screen". mpv's own window does it by a default binding;
+the embedded view took no mouse input on the picture. Now a double-click
+with the primary button on the picture does what the Fullscreen button
+and `f` do. The bar and everything in it, the Skip button and an open
+track list are not the picture, and a pair whose first press dismissed a
+list only dismisses it (`pictureDoubleClick` in `playerControls.ts`).
+Written by codex, read and run by the working agent: `npm run check`
+(570 tests), the build, and `embeddedcontrols`, which now sends real
+double-clicks through WebDriver, 3 runs of 3.
+
+mpv's other default mouse bindings are NOT in the embedded player and
+were not asked for: a right-click to pause, and the wheel (volume in the
+system's mpv 0.41). They were named to the owner.
+
+The owner also asked whether the embedded player scales the video to the
+window as the external one does. Answered from the code: neither player
+is given a scaling option, so both use mpv's default (fit inside the area
+drawn in, shape kept); the embedded player's area is all of Vela's
+window, which, unlike mpv's own window, does not take the video's shape.
+Not compared by eye.
+
+**The package** was rebuilt at `e64efb3` (sha256 `b27e7ce1...2b9b05e2`); its check
+passed, and the unpacked package's own binary passed `embeddedcontrols`,
+`embeddedtracks` and `playback` in the embedded player. The full run of both suites at that commit, each building its app, passed everything: external 48 of 48, embedded 51 of 51, parity verdict PASS.

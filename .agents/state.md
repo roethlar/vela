@@ -40,7 +40,9 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   what the by-eye checks were for. First report: its Audio and Subtitles
   lists closed the moment they opened while a video played; fixed at
   `2a954d0` (they are drawn in the page now; the embedded player plan's
-  log, last entry). The package on `continuum` was rebuilt there. Expect
+  log). Second report: a double-click on the picture did not toggle
+  fullscreen; fixed at `e64efb3`. The package on `continuum` is rebuilt
+  after each fix (the plan's "How to try it" names the commit). Expect
   more such reports; each is fixed as it comes (decision of 2026-11-14
   on what is obviously broken).
 - WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
