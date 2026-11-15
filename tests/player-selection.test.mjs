@@ -508,24 +508,14 @@ test('only a play that started writes the window record, in one place', () => {
   assert.match(lib, /commands::remember_window_on_exit\(&state\.playback_window_session\);/);
 });
 
-test('the player setting is validated, and not yet shown to users', () => {
+test('the player setting is validated and exposed through commands and Settings', () => {
   assert.match(
     config,
     /validate_optional_closed\("player", self\.player\.as_deref\(\), &\["external", "embedded"\]\)\?;/,
   );
-  // Owner, 2026-11-12: until the by-eye checks are done there is no Settings
-  // control for the embedded player. It can be tried only by editing the
-  // config file. Slice 6 of the plan removes this assertion on purpose.
-  assert.doesNotMatch(lib, /commands::(get|set)_player\b/, 'no command exposes the player setting');
-  assert.doesNotMatch(commands, /fn (get|set)_player\b/);
-  for (const file of ['src/lib/Settings.svelte', 'src/routes/+page.svelte', 'src/lib/types.ts']) {
-    assert.doesNotMatch(read(file), /embedded/i, `${file} must not mention the embedded player yet`);
+  for (const command of ['get_player', 'set_player']) {
+    assert.match(commands, new RegExp(`fn ${command}\\b`));
+    assert.match(lib, new RegExp(`commands::${command},`));
   }
-  for (const file of ['README.md', 'docs/usage.md', 'RELEASE_NOTES.md']) {
-    assert.doesNotMatch(
-      read(file),
-      /embedded player|"player"\s*:/i,
-      `${file} must not announce the embedded player yet`,
-    );
-  }
+  assert.match(read('src/lib/Settings.svelte'), /<select id="video-player"/);
 });

@@ -1,5 +1,6 @@
 <script module lang="ts">
   type PlayerWindowMode = "remember" | "fullscreen" | "default";
+  type VideoPlayer = { player: "external" | "embedded"; offered: boolean; note: string | null };
   type ContinuePlayingMode = import("$lib/types").ContinuePlayingMode;
   type PlaybackPreferences = import("$lib/types").PlaybackPreferences;
   type PlaybackSourcePolicy = import("$lib/types").PlaybackSourcePolicy;
@@ -128,6 +129,7 @@
   }
 
   const continuePlayingSetting = createSetting({ mode: "only-tv" as ContinuePlayingMode });
+  const videoPlayerSetting = createSetting<VideoPlayer>({ player: "external", offered: false, note: null });
   const mpvSetting = createSetting({ info: null as MpvInfo | null, path: "" });
   // A reopened select needs the catalog for its already-confirmed tier.
   let qualityTiers = $state<QualityTier[]>([]);
@@ -320,6 +322,11 @@
   onDestroy(continueDraft.unfollow);
   let continuePlayingBusy = $state(false);
 
+  const videoPlayerDraft = createDraft(videoPlayerSetting);
+  const videoPlayer = videoPlayerDraft.value;
+  onDestroy(videoPlayerDraft.unfollow);
+  let videoPlayerBusy = $state(false);
+
   // How the first mpv window after Vela starts opens. The control starts on
   // the mode the backend last confirmed to the app (see the module script).
   let playerWindowMode = $state<PlayerWindowMode>(playerWindowConfirmed.mode);
@@ -422,15 +429,17 @@
     const mpvRead = mpvSetting.beginLoad();
     const advancedRead = advancedSetting.beginLoad();
     const continueRead = continuePlayingSetting.beginLoad();
+    const videoPlayerRead = videoPlayerSetting.beginLoad();
     const playbackRead = playbackSetting.beginLoad();
     try {
-      const [s, mp, adv, continueMode, windowMode, playbackPrefs] = await Promise.all([
+      const [s, mp, adv, continueMode, windowMode, playbackPrefs, player] = await Promise.all([
         invoke<Source[]>("get_sources"),
         invoke<MpvInfo>("check_mpv"),
         invoke<MpvAdvanced>("get_mpv_advanced"),
         invoke<ContinuePlayingMode>("get_continue_playing"),
         invoke<PlayerWindowMode>("get_mpv_window_mode"),
         invoke<PlaybackPreferences>("get_playback_preferences"),
+        invoke<VideoPlayer>("get_player"),
       ]);
       if (seq !== loadSeq) return;
       sources = s;
@@ -445,6 +454,7 @@
       }
       showPlayerWindowConfirmed(playerWindowConfirmed.mode);
       playbackSetting.loaded(playbackValues(playbackPrefs), playbackRead);
+      videoPlayerSetting.loaded(player, videoPlayerRead);
     } catch (e) {
       if (seq === loadSeq) err = String(e);
     }
@@ -608,6 +618,33 @@
     } finally {
       continueDraft.finish(submitted);
       continuePlayingBusy = false;
+    }
+  }
+
+  async function saveVideoPlayer() {
+    if (videoPlayerBusy) return;
+    videoPlayerBusy = true;
+    err = null;
+    const submitted = videoPlayerDraft.capture();
+    const player = submitted.value.player;
+    try {
+      await videoPlayerSetting.queue(async () => {
+        try {
+          videoPlayerSetting.confirm(await invoke<VideoPlayer>("set_player", { player }));
+        } catch (e) {
+          // The save may have succeeded before its status check failed.
+          // Re-read while still owning the queue, just like the mpv path.
+          try {
+            videoPlayerSetting.confirm(await invoke<VideoPlayer>("get_player"));
+          } catch {}
+          throw e;
+        }
+      });
+    } catch (e) {
+      err = String(e);
+    } finally {
+      videoPlayerDraft.finish(submitted);
+      videoPlayerBusy = false;
     }
   }
 
@@ -863,6 +900,37 @@
         </div>
       </div>
     </section>
+
+    {#if videoPlayer.offered}
+    <section>
+      <h3>Video player <span class="badge experimental">Experimental</span></h3>
+      <div class="form">
+        <div class="field">
+          <label for="video-player">Videos play in</label>
+          <select id="video-player" bind:value={videoPlayer.player} onchange={() => videoPlayerDraft.edit("player")}>
+            <option value="external">mpv's own window</option>
+            <option value="embedded">Vela's window (experimental)</option>
+          </select>
+          <p class="muted small">
+            Vela's window shows video inside Vela with Vela's own controls,
+            using a copy of mpv that comes with Vela.
+            It is experimental and works only on Linux with Wayland; a change
+            takes effect the next time Vela starts.
+            When it cannot be used, videos play in mpv's own window and a line
+            on screen says why.
+          </p>
+          {#if videoPlayer.note}
+            <p class="muted small">{videoPlayer.note}</p>
+          {/if}
+        </div>
+        <div class="btnrow">
+          <button class="primary" disabled={videoPlayerBusy} onclick={saveVideoPlayer}>
+            {videoPlayerBusy ? "Saving…" : "Save video player"}
+          </button>
+        </div>
+      </div>
+    </section>
+    {/if}
 
     <section>
       <h3>Player window</h3>

@@ -1162,6 +1162,80 @@ pub fn get_mpv_window_mode() -> Result<String, String> {
         .map(|mode| mode.as_str().to_string())
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PlayerDto {
+    player: &'static str,
+    offered: bool,
+    note: Option<&'static str>,
+}
+
+#[tauri::command]
+pub async fn get_player(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PlayerDto, String> {
+    use crate::player::PlayerKind;
+    let saved = tauri::async_runtime::spawn_blocking(|| {
+        let cfg = config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
+        Ok::<_, String>(PlayerKind::from_setting(cfg.player.as_deref()))
+    })
+    .await
+    .map_err(|_| "could not read Vela settings".to_string())??;
+    #[cfg(target_os = "linux")]
+    let note = {
+        let probe_app = app.clone();
+        let known = tauri::async_runtime::spawn_blocking(move || {
+            crate::player::EmbeddedHost::known_availability(&probe_app)
+        })
+        .await
+        .map_err(|_| "could not check the video player".to_string())?;
+        // An external choice only checks what is known without loading the
+        // library. The real availability check may ask the window and load it.
+        let available = if saved == PlayerKind::Embedded {
+            crate::player::embedded_availability(&state.embedded, Some(&app)).await
+        } else {
+            Ok(())
+        };
+        crate::player::settings_note(
+            saved,
+            &crate::player::embedded::startup::decision(),
+            available,
+            known,
+        )
+    };
+    #[cfg(not(target_os = "linux"))]
+    let note = {
+        let _ = (app, state);
+        (saved == PlayerKind::Embedded)
+            .then(|| crate::player::EmbeddedUnavailable::NotOnThisSystem.settings_note())
+    };
+    Ok(PlayerDto { player: saved.as_str(), offered: cfg!(target_os = "linux"), note })
+}
+
+#[tauri::command]
+pub async fn set_player(
+    player: String,
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+) -> Result<PlayerDto, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        config::update(move |cfg| apply_player(cfg, &player))
+    })
+    .await
+    .map_err(|_| "could not save the video player".to_string())??;
+    get_player(app, state).await
+}
+
+fn apply_player(cfg: &mut config::AppConfig, player: &str) -> Result<(), String> {
+    cfg.player = match player {
+        "external" => None,
+        "embedded" => Some(player.to_string()),
+        _ => return Err("unknown video player".to_string()),
+    };
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_mpv_tls_verify() -> Result<bool, String> {
     let cfg = config::load_config().map_err(|_| "could not read Vela settings".to_string())?;
@@ -9394,6 +9468,28 @@ mod tests {
         )
         .unwrap();
         assert_eq!(settings.window().and_then(|window| window.fullscreen), Some(false));
+    }
+
+    #[test]
+    fn video_player_setting_stores_only_embedded_and_rejects_unknown_values() {
+        let dir = std::env::temp_dir().join(format!("vela-player-setting-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let lock = dir.join("config.lock");
+        for (player, expected) in [("embedded", Some("embedded")), ("external", None)] {
+            config::update_at(&path, &lock, |cfg| apply_player(cfg, player)).unwrap();
+            let saved: serde_json::Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+            assert_eq!(saved.get("player"), expected.map(serde_json::Value::from).as_ref());
+        }
+        let saved = std::fs::read(&path).unwrap();
+        for player in ["", "Embedded", "external ", "internal"] {
+            assert_eq!(
+                config::update_at(&path, &lock, |cfg| apply_player(cfg, player)),
+                Err("unknown video player".to_string())
+            );
+            assert_eq!(std::fs::read(&path).unwrap(), saved);
+        }
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]

@@ -86,6 +86,15 @@ pub(crate) fn decide(facts: Facts<'_>) -> Decision {
 }
 
 static DECISION: std::sync::OnceLock<Decision> = std::sync::OnceLock::new();
+// Keep the environment as the user supplied it: main may subsequently turn
+// WebKit's renderer off for today's window, which is not a user refusal.
+static SYSTEM_FACTS: std::sync::OnceLock<Facts<'static>> = std::sync::OnceLock::new();
+
+/// What would rule out choosing embedded mode on this system, independent
+/// of the saved choice and the one-start recovery marker. Reuses `decide`.
+pub(crate) fn system_refusal() -> Option<EmbeddedUnavailable> {
+    SYSTEM_FACTS.get().and_then(|facts| decide(*facts).refused)
+}
 
 /// This run's decision. Today's mode when nothing decided (tests, or a
 /// platform entry point that never asked).
@@ -230,6 +239,11 @@ pub(crate) fn prepare() -> WindowMode {
         renderer_turned_off_by_user: std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER")
             .is_some_and(|value| value != "0" && !value.is_empty()),
     };
+    let _ = SYSTEM_FACTS.set(Facts {
+        player_setting: Some("embedded"),
+        marker_left_behind: false,
+        ..facts
+    });
     let mut decision = decide(facts);
     if marker_left_behind {
         // Whatever this start is, the next one may try again.

@@ -272,6 +272,26 @@ impl Host {
         }
     }
 
+    /// What Settings can know even in today's window mode. This checks only
+    /// the startup facts and the file's existence; it never loads a library
+    /// or asks the window. Call on a thread that may do filesystem work.
+    pub(crate) fn known_availability(app: &tauri::AppHandle) -> Result<(), EmbeddedUnavailable> {
+        if let Some(reason) = startup::system_refusal() {
+            return Err(reason);
+        }
+        let resources = app.path().resource_dir().map_err(|_| EmbeddedUnavailable::LibraryMissing)?;
+        let directory = libmpv::set_directory(
+            &resources,
+            cfg!(debug_assertions),
+            std::env::var_os(DEVELOPMENT_SET_VARIABLE).as_deref(),
+        );
+        if directory.join(libmpv::LIBRARY_FILE).exists() {
+            Ok(())
+        } else {
+            Err(EmbeddedUnavailable::LibraryMissing)
+        }
+    }
+
     /// Everything that has to be true of this machine, checked in order of
     /// cost and stopping at the first that is not.
     fn check(app: &tauri::AppHandle) -> Result<Ready, EmbeddedUnavailable> {

@@ -16,6 +16,13 @@ pub(crate) enum PlayerKind {
 }
 
 impl PlayerKind {
+    pub(crate) fn as_str(self) -> &'static str {
+        match self {
+            Self::External => "external",
+            Self::Embedded => "embedded",
+        }
+    }
+
     /// The player the user's saved `player` setting asks for. Missing means the
     /// external player. Settings validation has already rejected every value
     /// but the two known ones, so anything else here is treated as missing.
@@ -82,6 +89,52 @@ impl EmbeddedUnavailable {
             EmbeddedUnavailable::StartFailed => "could not start",
         };
         format!("Embedded player: {why}")
+    }
+
+    /// A full sentence for Settings, using the names shown in its select.
+    /// No diagnostic detail from the machine belongs in this text.
+    pub(crate) fn settings_note(&self) -> &'static str {
+        match self {
+            Self::NotOnThisSystem => "Videos play in mpv's own window because video in Vela's window is only available on Linux.",
+            Self::NeedsRestart => "Videos play in mpv's own window until you restart Vela to use Vela's window.",
+            Self::FailedLastStart => "Videos play in mpv's own window because Vela did not finish starting with video in its window last time; this run started without it, and the next start tries again.",
+            Self::NotWayland => "Videos play in mpv's own window because video in Vela's window requires a Wayland session.",
+            Self::NvidiaDriver => "Videos play in mpv's own window because video in Vela's window does not support the NVIDIA proprietary driver yet.",
+            Self::RendererOff => "Videos play in mpv's own window because your environment disables the renderer needed for video in Vela's window.",
+            Self::LibraryMissing => "Videos play in mpv's own window because the library needed for video in Vela's window could not be loaded.",
+            Self::CompositorLacks => "Videos play in mpv's own window because this desktop cannot provide the video surface Vela's window needs.",
+            Self::NoGpuFormat => "Videos play in mpv's own window because this graphics driver cannot draw video in Vela's window.",
+            Self::WindowNotReady => "Videos play in mpv's own window because Vela's window is not ready to show video.",
+            Self::StartFailed => "Videos play in mpv's own window because a video failed to start in Vela's window earlier in this run; restarting Vela tries again.",
+        }
+    }
+}
+
+/// Settings explains the saved choice, this run, and what a restart could
+/// fix. A library that is absent can be explained more precisely than one
+/// that exists but failed to load; an already loaded library stays usable.
+#[cfg(target_os = "linux")]
+pub(crate) fn settings_note(
+    saved: PlayerKind,
+    started: &super::embedded::startup::Decision,
+    available: Result<(), EmbeddedUnavailable>,
+    known: Result<(), EmbeddedUnavailable>,
+) -> Option<&'static str> {
+    use super::embedded::startup::WindowMode;
+    let reason = if saved == PlayerKind::External {
+        known.err()?
+    } else if started.mode == WindowMode::Embedded {
+        match available {
+            Ok(()) => return Some("Videos play in Vela's window."),
+            Err(reason) => reason,
+        }
+    } else {
+        started.refused.or(known.err()).unwrap_or(EmbeddedUnavailable::NeedsRestart)
+    };
+    if reason == EmbeddedUnavailable::LibraryMissing && known == Err(reason) {
+        Some("Videos play in mpv's own window because this copy of Vela does not include the library needed for video in Vela's window.")
+    } else {
+        Some(reason.settings_note())
     }
 }
 
@@ -184,6 +237,61 @@ impl FallbackNotices {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn video_player_settings_note_explains_the_saved_choice_and_this_run() {
+        use super::super::embedded::startup::{Decision, WindowMode};
+        use EmbeddedUnavailable::*;
+        use PlayerKind::*;
+        let today = Decision { mode: WindowMode::Today, refused: None };
+        let active = Decision { mode: WindowMode::Embedded, refused: None };
+        let recovered = Decision { mode: WindowMode::Today, refused: Some(FailedLastStart) };
+        let missing = "Videos play in mpv's own window because this copy of Vela does not include the library needed for video in Vela's window.";
+        let restarting = "Videos play in mpv's own window until you restart Vela to use Vela's window.";
+        let failed_start = "Videos play in mpv's own window because Vela did not finish starting with video in its window last time; this run started without it, and the next start tries again.";
+        let mut cases = vec![
+            (External, today.clone(), Err(NeedsRestart), Ok(()), None),
+            (External, recovered.clone(), Err(FailedLastStart), Ok(()), None),
+            (External, active.clone(), Err(StartFailed), Ok(()), None),
+            (External, today.clone(), Err(NeedsRestart), Err(LibraryMissing), Some(missing)),
+            (Embedded, active.clone(), Ok(()), Ok(()), Some("Videos play in Vela's window.")),
+            // Removing the file cannot unload a library already in use.
+            (Embedded, active.clone(), Ok(()), Err(LibraryMissing), Some("Videos play in Vela's window.")),
+            (Embedded, today.clone(), Err(NeedsRestart), Ok(()), Some(restarting)),
+            (Embedded, today.clone(), Err(NeedsRestart), Err(LibraryMissing), Some(missing)),
+            (Embedded, active.clone(), Err(LibraryMissing), Err(LibraryMissing), Some(missing)),
+            // Recovery skips this run only, even when another problem is known.
+            (Embedded, recovered, Err(FailedLastStart), Err(LibraryMissing), Some(failed_start)),
+        ];
+        for (reason, expected) in [
+            (NotOnThisSystem, "Videos play in mpv's own window because video in Vela's window is only available on Linux."),
+            (NeedsRestart, restarting),
+            (FailedLastStart, failed_start),
+            (NotWayland, "Videos play in mpv's own window because video in Vela's window requires a Wayland session."),
+            (NvidiaDriver, "Videos play in mpv's own window because video in Vela's window does not support the NVIDIA proprietary driver yet."),
+            (RendererOff, "Videos play in mpv's own window because your environment disables the renderer needed for video in Vela's window."),
+            (LibraryMissing, "Videos play in mpv's own window because the library needed for video in Vela's window could not be loaded."),
+            (CompositorLacks, "Videos play in mpv's own window because this desktop cannot provide the video surface Vela's window needs."),
+            (NoGpuFormat, "Videos play in mpv's own window because this graphics driver cannot draw video in Vela's window."),
+            (WindowNotReady, "Videos play in mpv's own window because Vela's window is not ready to show video."),
+            (StartFailed, "Videos play in mpv's own window because a video failed to start in Vela's window earlier in this run; restarting Vela tries again."),
+        ] {
+            cases.push((Embedded, active.clone(), Err(reason), Ok(()), Some(expected)));
+            if matches!(reason, NotWayland | NvidiaDriver | RendererOff) {
+                cases.push((External, today.clone(), Err(NeedsRestart), Err(reason), Some(expected)));
+                cases.push((Embedded, today.clone(), Err(NeedsRestart), Err(reason), Some(expected)));
+                cases.push((Embedded, Decision { mode: WindowMode::Today, refused: Some(reason) }, Err(reason), Ok(()), Some(expected)));
+            }
+        }
+        for (saved, started, available, known, expected) in cases {
+            assert_eq!(
+                settings_note(saved, &started, available, known),
+                expected,
+                "{saved:?}, {started:?}, available={available:?}, known={known:?}"
+            );
+        }
+    }
 
     #[test]
     fn a_missing_or_external_setting_asks_for_the_external_player() {

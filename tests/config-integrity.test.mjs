@@ -33,6 +33,7 @@ const mockPlex = fs.readFileSync("tests/e2e/mockplex.mjs", "utf8");
 // against a backend whose write application and reply delivery are separate.
 // These are not mounted-webview tests.
 const settingsControls = [
+  { label: "Video player", id: "video-player", group: "videoPlayer", key: "player", initial: "embedded", choice: "external", newer: "embedded", save: "saveVideoPlayer" },
   { label: "Continue Playing", id: "continue-playing", group: "continuation", key: "mode", initial: "on", choice: "off", newer: "only-tv", save: "saveContinuePlaying" },
   { label: "mpv path (Save, Browse and Clear)", id: "mpv-path", group: "path", initial: "/stored/mpv", choice: "/chosen/mpv", newer: "/newer/mpv", save: "saveMpvPath" },
   { label: "Advanced mpv options", id: "mpv-extra", group: "advanced", key: "extraArgs", initial: "--profile=fast", choice: "--osd-level=3", newer: "--video-sync=display-resample", save: "saveMpvAdvanced" },
@@ -117,6 +118,7 @@ function settingsApp() {
 
 function settingsBackend(spec) {
   const state = {
+    videoPlayer: { player: "external", offered: true, note: null },
     path: "/stored/mpv", continuation: { mode: "only-tv" },
     advanced: {
       extraArgs: "", useOwnConfig: false, autocrop: "off", playbackQuality: "original",
@@ -140,6 +142,7 @@ function settingsBackend(spec) {
     if (command === "get_mpv_advanced") return Promise.resolve(structuredClone(state.advanced));
     if (command === "get_continue_playing") return Promise.resolve(state.continuation.mode);
     if (command === "get_mpv_window_mode") return Promise.resolve("remember");
+    if (command === "get_player") return Promise.resolve(structuredClone(state.videoPlayer));
     if (command === "get_playback_preferences") {
       if (backend.failDisplay) return Promise.reject(new Error("display refresh failed"));
       return Promise.resolve({ ...state.preferences, detectedDisplay: profile, effectiveDisplay: profile });
@@ -149,6 +152,11 @@ function settingsBackend(spec) {
         args, reply: undefined,
         apply() {
           if (command === "set_continue_playing") write.reply = state.continuation.mode = args.mode;
+          else if (command === "set_player") {
+            state.videoPlayer.player = backend.playerAnswer ?? args.player;
+            state.videoPlayer.note = state.videoPlayer.player === "embedded" ? "Restart Vela to start using it." : null;
+            write.reply = structuredClone(state.videoPlayer);
+          }
           else if (command === "set_mpv_advanced") Object.assign(state.advanced, args, { extraArgs: args.extraArgs.trim() });
           else if (command === "set_playback_preferences") Object.assign(state.preferences, args);
           else if (command === "set_mpv_path" || command === "install_mpv") {
@@ -263,6 +271,17 @@ for (const spec of settingsControls) {
       assert.match(b.err, /display refresh failed/);
       assert.equal(backend.value(), spec.newer);
       assert.equal(reopened.value, backend.value(), "a failed display refresh does not undo a successful write");
+    }
+    if (spec.group === "videoPlayer") {
+      backend.playerAnswer = "external";
+      reopened.edit("embedded");
+      await reopened.save();
+      assert.equal(reopened.value, "external", "the control shows the backend's answer, not the submitted choice");
+      backend.refuse = true;
+      reopened.edit("embedded");
+      await reopened.save();
+      assert.equal(reopened.value, backend.value(), "a refusal restores that backend answer");
+      assert.match(b.err, /save refused/);
     }
     if (spec.group === "path") {
       backend.refuse = true;

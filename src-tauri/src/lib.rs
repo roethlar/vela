@@ -418,6 +418,8 @@ pub fn run() {
             commands::set_continue_playing,
             commands::get_mpv_window_mode,
             commands::set_mpv_window_mode,
+            commands::get_player,
+            commands::set_player,
             commands::get_mpv_tls_verify,
             commands::set_mpv_tls_verify,
             commands::get_playback_preferences,

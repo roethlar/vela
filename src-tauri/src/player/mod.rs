@@ -18,6 +18,8 @@ pub(crate) mod report;
 mod select;
 
 pub(crate) use select::{choose, EmbeddedUnavailable, FallbackNotices, PlayerChoice, PlayerKind};
+#[cfg(target_os = "linux")]
+pub(crate) use select::settings_note;
 
 /// A started player, as the rest of the app holds it: the current player, and
 /// replaced players waiting to be reaped.
