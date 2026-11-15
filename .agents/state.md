@@ -454,6 +454,50 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
     at `3e91c63`, `b719a65`, `599c539` and `bc6e8a1`, always with the same
     precondition (120 cards instead of 60). None of those commits touches
     the page; this is the race above, not a regression.
+- E2E `completionhub` fails now and then in the embedded player. First seen
+  2026-11-15: once in the full embedded run at `3505387` (which therefore
+  failed the parity verdict: 48 of 50), then in 2 of 49 runs of the scenario
+  alone on the same build. A product race, older than the Settings control
+  landed that day (which touches none of this code), and with next to no
+  effect on a real user:
+  - When a play ends, the tracker thread emits `playback-ended` and only
+    then hands the completion to the dispatcher (`src-tauri/src/commands.rs`,
+    the play's end notify: `app.emit("playback-ended", ...)` before
+    `advance.mark_ended(...)`). The dispatcher (`src-tauri/src/lib.rs`)
+    then records the clean completion locally (`admit_clean_completion`:
+    the session leaves recents and its identities are tombstoned), writes
+    "played" to the servers, and emits a second `playback-ended`.
+  - On the first event the page's `loadHome` asks for three things at
+    once: `get_hubs` (the server), and `get_recents` and
+    `get_continue_tombstones` (local, answered at once). When those two
+    are answered before the dispatcher's admission is written, the page
+    merges the server's Continue Watching, which still lists the finished
+    episode, with local state that does not yet hide it.
+  - Evidence, from the scenario made to print what the page showed (not
+    committed): in the failing run, after the first Home response that
+    follows the end, the page showed "Hub Series, S1 · E1 – Completed
+    Episode" where the scenario expects nothing, with the server's
+    "played" request arrived and unanswered; 3.9 s later, after that
+    answer and the second refresh, it showed "S1 · E2 – Follow-up
+    Episode". In every passing run the first look showed nothing.
+  - User-visible effect: the finished item can stay in Continue Watching
+    until the server has recorded it as played and the second refresh
+    lands. With a real server that is a fraction of a second, and the
+    second refresh normally supersedes the first before it is shown. The
+    scenario delays the server's answer by five seconds to look at the
+    state in between.
+  - The external player runs the same code; it has not been seen to fail
+    there.
+  - Not fixed, on purpose: the effect is negligible and the ordering here
+    has a long review history (`tests/clean-eof-refresh-order.test.mjs`).
+    It waits for the release's test pass (decision of 2026-11-14 on
+    tests). Candidate fix: the page reads the two local lists after
+    `get_hubs` has answered, and the two local commands wait, bounded, for
+    a completion that has been handed to the dispatcher and not yet
+    admitted.
+  - Until then: an embedded run that fails the verdict on `completionhub`
+    alone is this race until shown otherwise; run the scenario again by
+    itself before reading it as a regression.
 - CI does not exercise the package check (2026-11-14, the owner has not
   been asked yet). `tests/libmpv-packaging.test.mjs` needs `bsdtar` to
   build and unpack its stand-in packages; GitHub's runner image does not
