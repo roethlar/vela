@@ -340,6 +340,23 @@ export function keyAction(input: KeyInput, ctx: KeyContext): KeyAction {
 }
 
 // ---------------------------------------------------------------------------
+// The picture.
+
+/**
+ * A primary double-click on the view itself toggles fullscreen, unless a
+ * track list is open, a press in the pair met an open list, or stop was sent.
+ * Both clicks must target the view, including when a control (such as Skip)
+ * disappears after the first click.
+ */
+export function pictureDoubleClick(
+  input: { button: number; target: unknown; currentTarget: unknown },
+  ctx: { firstClickTarget: unknown; listOpen: boolean; pressedWithList: boolean; stopped: boolean },
+): boolean {
+  return input.button === 0 && input.target === input.currentTarget && ctx.firstClickTarget === input.currentTarget &&
+    !ctx.listOpen && !ctx.pressedWithList && !ctx.stopped;
+}
+
+// ---------------------------------------------------------------------------
 // Time.
 
 function clock(seconds: number, hours: boolean): string {

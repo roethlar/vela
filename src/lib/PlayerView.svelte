@@ -25,6 +25,7 @@
     nextPlayerState,
     nextSeekBar,
     nextTrackHighlight,
+    pictureDoubleClick,
     seekBarValue,
     sendPlayerCommand,
     skipLabel,
@@ -77,6 +78,11 @@
   let lastActivity = $state(Date.now());
   let focusInBar = $state(false);
   let openList = $state<"audio" | "subtitles" | null>(null);
+  // Remember the list before pointerdown can dismiss it. Click's detail
+  // identifies the first click of a pair using the browser's own timing.
+  let pressedWithList = false;
+  let firstClickWithList = false;
+  let firstClickTarget: EventTarget | null = null;
   let highlightedTrack = $state<TrackId | null>(null);
   let listLeft = $state(0);
   let listBottom = $state(0);
@@ -164,6 +170,25 @@
     root.focus();
   }
 
+  function pictureClick(event: MouseEvent) {
+    if (event.detail % 2 === 1) {
+      firstClickWithList = pressedWithList;
+      firstClickTarget = event.target;
+    }
+    if (event.target !== root || stopped) return;
+    activity();
+    giveFocusBack();
+  }
+
+  function pictureDblClick(event: MouseEvent) {
+    if (pictureDoubleClick(event, {
+      firstClickTarget,
+      listOpen: openList !== null,
+      pressedWithList: firstClickWithList || pressedWithList,
+      stopped,
+    })) onfullscreen(!fullscreen);
+  }
+
   function seekInput(event: Event) {
     const value = Number((event.currentTarget as HTMLInputElement).value);
     seekBar = nextSeekBar(seekBar, { kind: "input", value });
@@ -241,6 +266,7 @@
   }
 
   function outsideTrackList(event: PointerEvent) {
+    pressedWithList = openList !== null;
     if (openList === null) return;
     const target = event.target;
     if (target instanceof Node && (
@@ -345,7 +371,8 @@
   });
 </script>
 
-<!-- svelte-ignore a11y_no_noninteractive_tabindex -->
+<!-- Fullscreen's keyboard equivalent is f, handled on the window above. -->
+<!-- svelte-ignore a11y_no_noninteractive_tabindex, a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
 <div
   class="player"
   class:idle={!shown}
@@ -354,6 +381,8 @@
   role="region"
   aria-label="Video"
   onpointermove={activity}
+  onclick={pictureClick}
+  ondblclick={pictureDblClick}
 >
   <div class="over">
     <p class="notice" role="status">{notice}</p>

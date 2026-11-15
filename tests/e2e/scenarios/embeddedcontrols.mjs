@@ -317,6 +317,54 @@ export default {
       assert.equal(await accepting(socketPath), true, 'Escape in fullscreen leaves the play running');
       assert.equal(await attr(driver, '.player button.fullscreen', 'aria-pressed'), 'false');
 
+      // 8a. A real double-click on the picture enters and leaves fullscreen;
+      //     the bar's time text does neither. Finish windowed for Space/q.
+      const beforeDoubleClick = await pageSize(driver);
+      const doubleClickState = async () => ({
+        size: await pageSize(driver),
+        pressed: await attr(driver, '.player button.fullscreen', 'aria-pressed'),
+      });
+      const waitForDoubleClick = async (on, what) => {
+        let seen;
+        try {
+          await pollUntil(async () => {
+            seen = await doubleClickState();
+            return seen.pressed === String(on) && (on
+              ? seen.size[1] > beforeDoubleClick[1]
+              : seen.size.every((value, i) => value === beforeDoubleClick[i]));
+          }, what, { timeoutMs: 5000 });
+        } catch (err) {
+          err.message += ` (before ${JSON.stringify(beforeDoubleClick)}, saw ${JSON.stringify(seen)})`;
+          throw err;
+        }
+      };
+      // Recompute after each resize; the upper quarter is well above the bar.
+      const doubleClickPicture = async () => {
+        const point = await driver.exec(`
+          const r = document.querySelector('.player').getBoundingClientRect();
+          return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 4)];
+        `);
+        await driver.doubleClick(...point);
+      };
+      await doubleClickPicture();
+      await waitForDoubleClick(true, 'a picture double-click to enter fullscreen');
+      await doubleClickPicture();
+      await waitForDoubleClick(false, 'a second picture double-click to leave fullscreen');
+      await showPlayerBar(driver);
+      const timePoint = await driver.exec(`
+        const r = document.querySelector('.player span.time').getBoundingClientRect();
+        return [Math.round(r.left + r.width / 2), Math.round(r.top + r.height / 2)];
+      `);
+      await driver.doubleClick(...timePoint);
+      // Give an unintended fullscreen request time to reach the compositor.
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      const afterTimeDoubleClick = await doubleClickState();
+      assert.deepEqual(
+        afterTimeDoubleClick,
+        { size: beforeDoubleClick, pressed: 'false' },
+        `time double-click leaves the window unchanged: saw ${JSON.stringify(afterTimeDoubleClick)}`,
+      );
+
       // 9. Space pauses as well as plays.
       await driver.pressKeys(KEY.Space);
       await pollUntil(() => mpv.getProp('pause'), 'Space to pause', { timeoutMs: 5000 });

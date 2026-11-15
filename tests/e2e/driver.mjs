@@ -165,6 +165,26 @@ export class Driver {
     ]);
   }
 
+  // Two primary presses at one viewport point, so the browser produces a
+  // real double-click using the same input path as movePointer.
+  async doubleClick(x, y) {
+    await this.#actions([
+      {
+        type: 'pointer',
+        id: 'mouse',
+        parameters: { pointerType: 'mouse' },
+        actions: [
+          { type: 'pointerMove', duration: 0, origin: 'viewport', x, y },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pointerUp', button: 0 },
+          { type: 'pause', duration: 100 },
+          { type: 'pointerDown', button: 0 },
+          { type: 'pointerUp', button: 0 },
+        ],
+      },
+    ]);
+  }
+
   async screenshotTo(filePath) {
     const b64 = await this.#cmd('GET', this.#s('/screenshot'));
     await fs.writeFile(filePath, Buffer.from(b64, 'base64'));

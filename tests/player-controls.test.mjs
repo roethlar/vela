@@ -21,6 +21,7 @@ import {
   nextPlayerState,
   nextSeekBar,
   nextTrackHighlight,
+  pictureDoubleClick,
   seekBarValue,
   skipLabel,
   spokenTime,
@@ -315,6 +316,34 @@ test('track highlights move within the live list without selecting a track', () 
   assert.equal(nextTrackHighlight([7, 4, 'no'], 4, 'next'), 'no', 'use the current order and track ID');
   assert.equal(nextTrackHighlight([], null, 'next'), null);
   assert.deepEqual(ids, ['no', 4, 7]);
+});
+
+// ---------------------------------------------------------------------------
+// The picture.
+
+test('only a primary double-click on the picture toggles fullscreen, without a list press or stop', () => {
+  const picture = {};
+  const input = { button: 0, target: picture, currentTarget: picture };
+  const context = { firstClickTarget: picture, listOpen: false, pressedWithList: false, stopped: false };
+  assert.equal(pictureDoubleClick(input, context), true, 'the picture toggles');
+  for (const control of ['bar', 'button', 'seek', 'volume', 'time', 'audio', 'subtitles', 'skip', 'track-list', 'track-option']) {
+    assert.equal(
+      pictureDoubleClick({ ...input, target: { control } }, context),
+      false,
+      `${control} does not toggle`,
+    );
+    assert.equal(
+      pictureDoubleClick(input, { ...context, firstClickTarget: { control } }),
+      false,
+      `${control} disappearing after the first click does not turn the pair into a picture double-click`,
+    );
+  }
+  assert.equal(pictureDoubleClick(input, { ...context, listOpen: true }), false, 'an open list owns the press');
+  assert.equal(pictureDoubleClick(input, { ...context, pressedWithList: true }), false, 'a dismissed list still owns the pair');
+  assert.equal(pictureDoubleClick(input, { ...context, stopped: true }), false, 'nothing after stop');
+  for (const button of [1, 2]) {
+    assert.equal(pictureDoubleClick({ ...input, button }, context), false, `button ${button} does not toggle`);
+  }
 });
 
 // ---------------------------------------------------------------------------
