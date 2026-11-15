@@ -25,6 +25,12 @@ agent wrote; the option text is the agent's, the choice is the owner's):
   by setting `player` in the config file. So Slice 4's "owner present"
   acceptance and Slice 6's switch-on (Settings control, default, release
   notes, docs, bump) are NOT performed by the agent.
+  **Superseded 2026-11-15** for the Settings control, the documents and
+  the release note: the owner ruled that the embedded player is to be
+  usable from the app (`.agents/decisions.md`, that date; this file's log,
+  last entry). The by-eye checks stay the owner's and no longer hold
+  anything back. The version, the tag and the release workflow are still
+  not the agent's.
 - **Review.** Each slice that lands repo code gets a `codereview codex`
   defect hunt over its pinned range (`.agents/playbooks/codereview.md`),
   codex called plainly per `.agents/machines.md`.
@@ -71,6 +77,8 @@ Decisions:
   not the owner's words: yes, a visible Settings control, since an option
   "marked experimental" has to be seen to be chosen. The exact label word
   ("Experimental" is what Settings already uses for Emby) is unconfirmed.
+  Built 2026-11-15 (`3046f83`): Settings, Player, "Video player", with the
+  "Experimental" mark.
 - **D3. What happens when embedded is selected but cannot start** (libmpv
   missing, X11 session, compositor lacks the needed protocols).
   ASSUMED: play with the external player and show one notice line
@@ -809,11 +817,15 @@ verified and what was not.
 Steps only the owner can do. The agent adds to this list as slices land
 and removes nothing from it.
 
-How to try it (nothing in the app offers it): build the library set or
-download CI's, put `"player": "embedded"` in `~/.config/vela/config.json`,
-and start a development build with `VELA_LIBMPV_DIR` naming the set
-(`docs/development.md`, "Trying the embedded player"). Restart after
-changing the setting.
+How to try it (since 2026-11-15): install a package that carries the
+library, choose Settings, Player, Video player, "Vela's window
+(experimental)", save, and restart Vela. On `continuum` such a package,
+built from `3505387` by `scripts/build.sh --with-libmpv` and checked (the
+log's last entry says how), is
+`~/dev/vela-agent-keep/pkg/vela-1.0.64-1-x86_64.pkg.tar.zst`; installing
+it is `sudo pacman -U` of that file, which is the owner's to run. A
+development build works as before: start it with `VELA_LIBMPV_DIR` naming
+the set (`docs/development.md`, "Trying the embedded player").
 
 From Slice 3 (the picture exists; SDR only until Slice 4):
 
@@ -1298,7 +1310,9 @@ Each can be overturned; none has shipped to users.
    --with-libmpv` makes such a package and checks it; a plain build makes
    exactly today's. Turning it on for releases is yours, together with
    the Settings control; `docs/development.md`, "Packaging the set", lists
-   what the release workflow needs.
+   what the release workflow needs. (2026-11-15: the Settings control now
+   exists, and says so when the copy of Vela it runs in has no library.
+   The release workflow is unchanged.)
 8. **Escape closes the embedded player when the window is not
    fullscreen.** (Slice 5 design.) In fullscreen it leaves fullscreen
    first, as in mpv. mpv's own Escape never closes its window; `q` does,
@@ -1964,3 +1978,69 @@ outstanding" and "For the owner" in this log, unchanged: the by-eye
 checks, and the switch-on (Settings control, release notes, version). The
 embedded player is still chosen only by `"player": "embedded"` in the
 configuration file.
+
+### 2026-11-15 — the Settings control: landed at `3046f83`; the embedded player is offered
+
+**The ruling.** The agent's closing report called the embedded player
+"hidden" and said it would stay so until the owner's by-eye checks. The
+owner: "what users are you not showing it to? I'm the only user." Asked
+whether to add the control: "so you're asking me, apparently for a second
+time, whether I want the thing I asked you to build days ago to actually
+be usable?" Recorded in `.agents/decisions.md` (2026-11-15) with what it
+supersedes.
+
+**What landed.**
+
+- `3046f83`: Settings, Player, "Video player" (marked Experimental, before
+  "Player window"): "Videos play in" mpv's own window or Vela's window
+  (experimental), with its own Save. Commands `get_player` and
+  `set_player`; "external" is stored as no value, so going back to the
+  default leaves a file older Velas open. Under the choice, one sentence
+  says what is true on this machine: in use; restart needed; or why it
+  cannot be used, including, before the user chooses, what can be known
+  without loading the library (X11, the NVIDIA driver, the renderer turned
+  off, this copy of Vela carrying no library). The section is absent off
+  Linux. A play's choice of player and a start's choice of window mode are
+  unchanged. Written by codex as a coding task and closed by the working
+  agent's review (decision of 2026-11-14).
+- `3505387`: the documents. `docs/usage.md` has "Playing in Vela's own
+  window (experimental)"; `docs/development.md`, `README.md` (Known
+  limitations, and the licence paragraph Slice 6 asked for) and
+  `RELEASE_NOTES.md` (Unreleased) say it is offered and that released
+  packages do not carry the library yet.
+
+**What was checked.**
+
+- The full check at the landed code: 696 Rust tests, 563 Node tests, both
+  clippy runs, the 1.89 check, the build, `npm audit`. `cargo audit` is
+  not installed on `continuum` and was not run.
+- The real window, by a one-off scenario that is not in the repository,
+  with the development build in each player: under X11 the section says a
+  Wayland session is required; saving "Vela's window" writes
+  `"player": "embedded"`; a reopened page shows it; a choice not saved is
+  gone; saving "mpv's own window" removes the field. In a run started in
+  the embedded player it says "Videos play in Vela's window.", and again
+  after switching away and back. A screenshot was looked at.
+- **The packaged app.** `scripts/build.sh --with-libmpv` at `3505387`
+  built the Arch package (18 MB) and its package check passed every line.
+  That package was then unpacked, not installed, and its own binary run
+  through the end-to-end harness: in the embedded player, under the
+  headless Wayland compositor, Settings said "Videos play in Vela's
+  window." (so the library loaded from the package's own
+  `usr/lib/Vela/libmpv`), and `playback`, `embeddedcontrols` and the
+  Settings check passed; in the external player `playback`, `smoke` and
+  the Settings check passed. This is the first time a packaged build, not
+  a development build, was seen to play embedded. `embeddedplay` fails
+  with a packaged build, and should: it relies on a two-second delay that
+  only a development build honours.
+
+**Not checked.** A real desktop (KWin) with the installed package: that
+is the owner's first by-eye check. Windows and macOS were not compiled.
+The sentence for a copy of Vela without the library is held by the unit
+test only; nothing ran a Wayland session without the library.
+
+**Still not the agent's.** Installing the package (`sudo`); the by-eye
+checks; the release workflow, which does not build or ship the library
+(`docs/development.md`, "Packaging the set", says what it needs), so a
+released 1.0.64 as the workflow stands would offer the choice and say the
+library is missing; the tag and the release.

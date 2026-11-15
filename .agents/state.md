@@ -9,6 +9,18 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
 
 ## Now
 
+- THE EMBEDDED PLAYER IS OFFERED IN SETTINGS (2026-11-15). The owner
+  ruled that day that what is built is to be usable from the app, and
+  that the owner is Vela's only user (`.agents/decisions.md`; read it
+  before describing anything as held back from users). Settings, Player,
+  "Video player" landed at `3046f83`, its documents at `3505387`, and
+  the certificate setting's documents at `efd6421`. The embedded player
+  plan's log (last entry) has what was checked, including the packaged
+  app playing embedded from its own library, and where on `continuum`
+  the package built with the library is. Left for the owner: installing
+  that package and the by-eye checks; the release workflow, which does
+  not ship the library yet; the tag and release of 1.0.64; one step in
+  `ci.yml` (Blockers).
 - WHERE THE RUN OF 2026-11-12 TO 14 ENDED (2026-11-14, evening). The
   agent's part of both approved plans is done and every codex review of
   it is closed (`.agents/review/index.md` has no open finding). `main` at
@@ -17,13 +29,13 @@ Machine-specific facts (host paths, tool quirks, the E2E venue) live in
   `continuum` and was not run) and the parity verdict (each suite run in
   full and building its app: external 47 of 48, embedded 49 of 50, the
   one failure in each the recorded `pagefail`). GitHub CI is green again.
-  Nothing is released or tagged: 1.0.64 waits for the owner. What is
-  left is the owner's: the by-eye checks and the switch-on of the
-  embedded player (its plan's "Owner checks outstanding" and "For the
-  owner"), the acceptance steps of the player-window plan on real
-  desktops, the release note and documentation for the certificate
-  setting at the next release (`.agents/plans/tls-verify.md`), and one
-  step in `ci.yml` (Blockers). Three owner decisions of 2026-11-14 change
+  Nothing is released or tagged: 1.0.64 waits for the owner. What was
+  left then was the owner's: the by-eye checks of the embedded player
+  (its plan's "Owner checks outstanding" and "For the owner"), the
+  acceptance steps of the player-window plan on real desktops, and one
+  step in `ci.yml` (Blockers); the embedded player's Settings control
+  and the certificate setting's documents, also listed here then, were
+  done on 2026-11-15 (entry above). Three owner decisions of 2026-11-14 change
   how to work here; read them in `.agents/decisions.md` before doing
   anything: tests are not a priority until a release is in view; what is
   obviously broken is fixed without asking; a repair codex wrote is
