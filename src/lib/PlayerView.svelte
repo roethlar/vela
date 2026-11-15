@@ -11,7 +11,7 @@
   // ($lib/playerControls holds the list and every rule of the controls).
   import { invoke } from "@tauri-apps/api/core";
   import { listen } from "@tauri-apps/api/event";
-  import { onMount } from "svelte";
+  import { onMount, tick } from "svelte";
   import Icon from "$lib/Icon.svelte";
   import {
     SEEK_IDLE,
@@ -24,6 +24,7 @@
     keyAction,
     nextPlayerState,
     nextSeekBar,
+    nextTrackHighlight,
     seekBarValue,
     sendPlayerCommand,
     skipLabel,
@@ -33,6 +34,8 @@
     type PlayerState,
     type PlayerTrack,
     type SeekBar,
+    type TrackId,
+    type TrackListAction,
   } from "$lib/playerControls";
 
   // `sessionId`: the playback session this view belongs to; every command
@@ -54,6 +57,9 @@
 
   let root: HTMLDivElement;
   let bar: HTMLDivElement;
+  let audioButton: HTMLButtonElement;
+  let subtitleButton: HTMLButtonElement;
+  let trackList = $state<HTMLDivElement>();
 
   // The last `player-state` of this view's play; null until the first one.
   let player = $state<PlayerState | null>(null);
@@ -70,14 +76,26 @@
   let now = $state(Date.now());
   let lastActivity = $state(Date.now());
   let focusInBar = $state(false);
+  let openList = $state<"audio" | "subtitles" | null>(null);
+  let highlightedTrack = $state<TrackId | null>(null);
+  let listLeft = $state(0);
+  let listBottom = $state(0);
+  let listMaxHeight = $state(0);
   let shown = $derived(
-    barShown({ now, lastActivity, paused: player?.paused ?? null, focusInBar }),
+    barShown({ now, lastActivity, paused: player?.paused ?? null, focusInBar, listOpen: openList !== null }),
   );
 
   let seekValue = $derived(seekBarValue(seekBar, player?.position ?? null, now));
   let volumeValue = $derived(seekBarValue(volumeBar, player?.volume ?? null, now));
-  let selectedSubtitle = $derived(
-    player?.subtitleTracks.find((t) => t.selected)?.id ?? "no",
+  let selectedAudio = $derived(player?.audioTracks.find((t) => t.selected));
+  let selectedSubtitle = $derived(player?.subtitleTracks.find((t) => t.selected));
+  let audioLabel = $derived(selectedAudio ? trackLabel(selectedAudio) : "Audio track");
+  let subtitleLabel = $derived(selectedSubtitle ? trackLabel(selectedSubtitle) : "Off");
+  let listTracks = $derived<(Omit<PlayerTrack, "id"> & { id: TrackId })[]>(
+    openList === "audio" ? player?.audioTracks ?? [] : [
+      { id: "no", title: "Off", lang: "", selected: !selectedSubtitle },
+      ...player?.subtitleTracks ?? [],
+    ],
   );
 
   function reportRect() {
@@ -120,6 +138,7 @@
     activity();
     const action = keyAction(event, {
       focus: focusKind(document.activeElement),
+      listOpen: openList !== null,
       hasState: player !== null,
       stopped,
       skip: player?.skip != null,
@@ -131,11 +150,12 @@
     event.stopPropagation();
     if (action.kind === "command") send(action.command);
     else if (action.kind === "fullscreen") onfullscreen(action.on);
+    else if (action.kind === "track-list") actOnTrackList(action.action);
   }
 
   // A pointer press must not leave focus on a button, or Space would click it
-  // again. Buttons only: on a range it would stop the drag, on a select the
-  // popup.
+  // again. List options also keep focus on their listbox; ranges keep the
+  // default press so that they can be dragged.
   function keepFocus(event: MouseEvent) {
     event.preventDefault();
   }
@@ -178,36 +198,115 @@
     }
   }
 
-  function audioChange(event: Event) {
-    const value = Number((event.currentTarget as HTMLSelectElement).value);
-    send({ name: "set-audio-track", args: [value] });
+  function toggleTrackList(kind: "audio" | "subtitles") {
+    if (openList === kind) {
+      closeTrackList();
+      return;
+    }
+    const tracks = kind === "audio" ? player?.audioTracks ?? [] : player?.subtitleTracks ?? [];
+    highlightedTrack = tracks.find((t) => t.selected)?.id ?? (kind === "audio" ? tracks[0]?.id ?? null : "no");
+    openList = kind;
+    activity();
+  }
+
+  function closeTrackList() {
+    openList = null;
+    activity();
     giveFocusBack();
   }
 
-  function subtitleChange(event: Event) {
-    const value = (event.currentTarget as HTMLSelectElement).value;
-    send({ name: "set-subtitle-track", args: [value === "no" ? "no" : Number(value)] });
-    giveFocusBack();
+  function chooseTrack(id: TrackId) {
+    if (openList === "audio" && typeof id === "number") {
+      send({ name: "set-audio-track", args: [id] });
+    } else if (openList === "subtitles") {
+      send({ name: "set-subtitle-track", args: [id] });
+    }
+    closeTrackList();
   }
 
-  // A select that loses focus to nothing (its popup closed) gives it back;
-  // one left by Tab keeps the order.
-  function selectBlur(event: FocusEvent) {
-    if (event.relatedTarget === null) giveFocusBack();
+  function revealHighlight() {
+    tick().then(() => {
+      trackList?.querySelector(".highlighted")?.scrollIntoView({ block: "nearest" });
+    });
+  }
+
+  function actOnTrackList(action: TrackListAction) {
+    if (action === "close") closeTrackList();
+    else if (action === "choose") {
+      if (highlightedTrack !== null) chooseTrack(highlightedTrack);
+    } else {
+      highlightedTrack = nextTrackHighlight(listTracks.map((t) => t.id), highlightedTrack, action);
+      revealHighlight();
+    }
+  }
+
+  function outsideTrackList(event: PointerEvent) {
+    if (openList === null) return;
+    const target = event.target;
+    if (target instanceof Node && (
+      trackList?.contains(target) ||
+      (!audioButton.disabled && audioButton.contains(target)) ||
+      (!subtitleButton.disabled && subtitleButton.contains(target))
+    )) return;
+    // Dismissing by press leaves focus on the view, even over a range.
+    event.preventDefault();
+    closeTrackList();
+  }
+
+  function trackListFocusOut() {
+    // Wait for the browser's focus transfer (including Tab) before returning
+    // focus to the view. State updates never move focus out of the listbox.
+    queueMicrotask(() => {
+      if (openList !== null && !trackList?.contains(document.activeElement)) closeTrackList();
+    });
+  }
+
+  function positionTrackList() {
+    if (openList === null || !trackList) return;
+    const button = openList === "audio" ? audioButton : subtitleButton;
+    const top = bar.getBoundingClientRect().top - 6;
+    listLeft = Math.max(8, Math.min(button.getBoundingClientRect().left, window.innerWidth - trackList.offsetWidth - 8));
+    listBottom = window.innerHeight - top;
+    listMaxHeight = Math.max(0, top - 8);
   }
 
   function barFocusOut(event: FocusEvent) {
     focusInBar = event.relatedTarget instanceof Node && bar.contains(event.relatedTarget);
   }
 
-  function trackLabel(track: PlayerTrack): string {
+  function trackLabel(track: Omit<PlayerTrack, "id"> & { id: TrackId }): string {
     if (track.title && track.lang) return `${track.title} (${track.lang})`;
     return track.title || track.lang || `Track ${track.id}`;
   }
 
+  // Focus and positioning change on opening, never on a playback tick.
+  $effect(() => {
+    const kind = openList;
+    if (kind === null) return;
+    const observer = new ResizeObserver(positionTrackList);
+    observer.observe(root);
+    observer.observe(bar);
+    tick().then(() => {
+      if (openList !== kind) return;
+      positionTrackList();
+      trackList?.focus();
+      revealHighlight();
+    });
+    return () => observer.disconnect();
+  });
+
+  // Keep the same highlighted ID across state/selection updates and track
+  // reordering. Only removal of that track needs a replacement highlight.
+  $effect(() => {
+    if (openList !== null && !listTracks.some((t) => t.id === highlightedTrack)) {
+      highlightedTrack = listTracks[0]?.id ?? null;
+      revealHighlight();
+    }
+  });
+
   // The bar hides when the time since the last activity runs out.
   $effect(() => {
-    const at = barHideAt({ now, lastActivity, paused: player?.paused ?? null, focusInBar });
+    const at = barHideAt({ now, lastActivity, paused: player?.paused ?? null, focusInBar, listOpen: openList !== null });
     if (at === null) return;
     const timer = setTimeout(() => (now = Date.now()), Math.max(at - Date.now(), 0) + 20);
     return () => clearTimeout(timer);
@@ -220,6 +319,7 @@
     observer.observe(root);
     root.focus();
     window.addEventListener("keydown", onkey, true);
+    window.addEventListener("pointerdown", outsideTrackList, true);
     // The view may be gone before `listen` resolves; the listener is then
     // dropped as soon as it exists.
     let gone = false;
@@ -238,6 +338,7 @@
       observer.disconnect();
       document.documentElement.classList.remove("player-open");
       window.removeEventListener("keydown", onkey, true);
+      window.removeEventListener("pointerdown", outsideTrackList, true);
       gone = true;
       unlistenState?.();
     };
@@ -331,29 +432,36 @@
       oninput={volumeInput}
       onchange={volumeChange}
     />
-    <select
+    <button
       class="audio"
+      type="button"
+      bind:this={audioButton}
       aria-label="Audio track"
+      aria-haspopup="listbox"
+      aria-expanded={openList === "audio"}
+      aria-controls={openList === "audio" ? "player-track-list" : undefined}
+      title={audioLabel}
       disabled={!player || player.audioTracks.length < 2}
-      onchange={audioChange}
-      onblur={selectBlur}
+      onmousedown={keepFocus}
+      onclick={() => toggleTrackList("audio")}
     >
-      {#each player?.audioTracks ?? [] as track (track.id)}
-        <option value={track.id} selected={track.selected}>{trackLabel(track)}</option>
-      {/each}
-    </select>
-    <select
+      <span class="track-label">{audioLabel}</span><span aria-hidden="true">▴</span>
+    </button>
+    <button
       class="subtitles"
+      type="button"
+      bind:this={subtitleButton}
       aria-label="Subtitles"
+      aria-haspopup="listbox"
+      aria-expanded={openList === "subtitles"}
+      aria-controls={openList === "subtitles" ? "player-track-list" : undefined}
+      title={subtitleLabel}
       disabled={!player || player.subtitleTracks.length === 0}
-      onchange={subtitleChange}
-      onblur={selectBlur}
+      onmousedown={keepFocus}
+      onclick={() => toggleTrackList("subtitles")}
     >
-      <option value="no" selected={selectedSubtitle === "no"}>Off</option>
-      {#each player?.subtitleTracks ?? [] as track (track.id)}
-        <option value={track.id} selected={track.selected}>{trackLabel(track)}</option>
-      {/each}
-    </select>
+      <span class="track-label">{subtitleLabel}</span><span aria-hidden="true">▴</span>
+    </button>
     {#if player && player.crop !== null}
       <button
         class="crop"
@@ -391,6 +499,39 @@
       <Icon name="close" />
     </button>
   </div>
+  {#if openList !== null}
+    <div
+      class="track-list"
+      id="player-track-list"
+      bind:this={trackList}
+      role="listbox"
+      tabindex="-1"
+      aria-label={openList === "audio" ? "Audio track" : "Subtitles"}
+      aria-activedescendant={highlightedTrack === null ? undefined : `player-track-${highlightedTrack}`}
+      style:left="{listLeft}px"
+      style:bottom="{listBottom}px"
+      style:max-height="{listMaxHeight}px"
+      onfocusout={trackListFocusOut}
+    >
+      {#each listTracks as track (track.id)}
+        <div
+          class="track-option"
+          class:highlighted={highlightedTrack === track.id}
+          id="player-track-{track.id}"
+          role="option"
+          aria-selected={track.selected}
+          tabindex="-1"
+          title={trackLabel(track)}
+          onmousedown={keepFocus}
+          onclick={() => chooseTrack(track.id)}
+          onkeydown={onkey}
+        >
+          <span class="track-mark" aria-hidden="true">{track.selected ? "✓" : ""}</span>
+          <span>{trackLabel(track)}</span>
+        </div>
+      {/each}
+    </div>
+  {/if}
 </div>
 
 <style>
@@ -401,7 +542,7 @@
     /* Nothing is painted here: this is where the picture shows through. */
     background: transparent;
     outline: none;
-    /* Native ranges and selects render dark over the picture in every theme. */
+    /* Native ranges and the list's scrollbar render dark in every theme. */
     color-scheme: dark;
     color: #fff;
   }
@@ -500,8 +641,12 @@
   .volume {
     accent-color: #fff;
   }
-  .bar select {
+  .bar .audio,
+  .bar .subtitles {
+    width: 10rem;
     max-width: 10rem;
+    min-width: 0;
+    gap: 0.4rem;
     padding: 0.3rem;
     border: 1px solid rgb(255 255 255 / 0.35);
     border-radius: 0.4rem;
@@ -509,5 +654,47 @@
     color: #fff;
     font: inherit;
     font-size: 0.9rem;
+  }
+  .track-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-align: left;
+  }
+  .track-list {
+    position: fixed;
+    z-index: 1;
+    box-sizing: border-box;
+    width: min(20rem, calc(100vw - 1rem));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 0.25rem;
+    border: 1px solid rgb(255 255 255 / 0.5);
+    border-radius: 0.5rem;
+    background: #181818;
+    color: #fff;
+    box-shadow: 0 0.3rem 1rem rgb(0 0 0 / 0.6);
+    font-size: 0.9rem;
+  }
+  .track-option {
+    display: flex;
+    gap: 0.5rem;
+    padding: 0.45rem;
+    border: 1px solid transparent;
+    border-radius: 0.25rem;
+    overflow-wrap: anywhere;
+    cursor: pointer;
+  }
+  .track-option:hover {
+    background: #333;
+  }
+  .track-option.highlighted {
+    border-color: #fff;
+    background: #333;
+  }
+  .track-mark {
+    flex: 0 0 1em;
   }
 </style>

@@ -179,7 +179,7 @@ export function skipLabel(kind: SkipKind): string {
 // Keys.
 
 /** What has keyboard focus inside the view when a key arrives. */
-export type FocusKind = "none" | "button" | "select" | "volume" | "seek";
+export type FocusKind = "none" | "button" | "volume" | "seek";
 
 /** Of an element, what the key map needs: its tag (upper case, as HTML has it) and classes. */
 export type FocusedElement = {
@@ -194,7 +194,6 @@ export type FocusedElement = {
 export function focusKindOf(element: FocusedElement | null): FocusKind {
   if (element === null) return "none";
   if (element.tagName === "BUTTON") return "button";
-  if (element.tagName === "SELECT") return "select";
   if (element.tagName === "INPUT") return element.classList.contains("volume") ? "volume" : "seek";
   return "none";
 }
@@ -209,6 +208,8 @@ export type KeyInput = {
 
 export type KeyContext = {
   focus: FocusKind;
+  /** A track list owns the keys, independently of DOM focus. */
+  listOpen: boolean;
   /** Whether a `player-state` has arrived yet. */
   hasState: boolean;
   /** Whether this view has sent `stop`. */
@@ -227,7 +228,25 @@ export type KeyAction =
   /** The page's key, with nothing to do now: kept from everyone else. */
   | { kind: "swallow" }
   | { kind: "command"; command: PlayerCommand }
+  | { kind: "track-list"; action: TrackListAction }
   | { kind: "fullscreen"; on: boolean };
+
+export type TrackListMove = "previous" | "next" | "first" | "last";
+export type TrackListAction = TrackListMove | "choose" | "close";
+export type TrackId = number | "no";
+
+/** Move the highlight without changing the selected track. */
+export function nextTrackHighlight(
+  ids: readonly TrackId[],
+  current: TrackId | null,
+  move: TrackListMove,
+): TrackId | null {
+  if (ids.length === 0) return null;
+  const index = Math.max(0, ids.findIndex((id) => id === current));
+  if (move === "first") return ids[0];
+  if (move === "last") return ids[ids.length - 1];
+  return ids[Math.min(ids.length - 1, Math.max(0, index + (move === "next" ? 1 : -1)))];
+}
 
 const PASS: KeyAction = { kind: "pass" };
 const SWALLOW: KeyAction = { kind: "swallow" };
@@ -237,6 +256,10 @@ const SEEKS: Record<string, number> = {
   ArrowRight: 5,
   ArrowUp: 60,
   ArrowDown: -60,
+};
+
+const TRACK_LIST_MOVES: Record<string, TrackListMove> = {
+  ArrowUp: "previous", ArrowDown: "next", Home: "first", End: "last",
 };
 
 const MODIFIERS = new Set([
@@ -269,16 +292,25 @@ export function keyAction(input: KeyInput, ctx: KeyContext): KeyAction {
   if (input.ctrlKey || input.altKey || input.metaKey) return PASS;
   if (key === "Unidentified" || key === "Dead" || MODIFIERS.has(key)) return PASS;
 
+  // The in-page list gets first refusal, even if a button still has focus
+  // during opening. Tab can leave it; q remains the player's close key.
+  if (ctx.listOpen) {
+    if (key === "Tab") return PASS;
+    if (ctx.stopped) return SWALLOW;
+    const move = TRACK_LIST_MOVES[key];
+    if (move) return { kind: "track-list", action: move };
+    if (input.repeat) return SWALLOW;
+    if (key === "Escape") return { kind: "track-list", action: "close" };
+    if (key === " " || key === "Enter") return { kind: "track-list", action: "choose" };
+    if (key === "q") return { kind: "command", command: { name: "stop", args: [] } };
+    return SWALLOW;
+  }
+
   // What belongs to the focused control.
   if (ctx.focus === "button" && (key === " " || key === "Enter")) return PASS;
-  if (ctx.focus === "select" && (key === " " || key === "Enter" || key === "Tab")) return PASS;
   if (ctx.focus === "volume" && key in SEEKS) return PASS;
 
-  if (!isPlayerKey(key)) {
-    // A closed select picks a track by type-ahead: no letter reaches it.
-    if (ctx.focus === "select" && key.length === 1) return SWALLOW;
-    return PASS;
-  }
+  if (!isPlayerKey(key)) return PASS;
 
   if (ctx.stopped) return SWALLOW;
   const seek = SEEKS[key];
@@ -301,9 +333,8 @@ export function keyAction(input: KeyInput, ctx: KeyContext): KeyAction {
       : { kind: "command", command: { name: "toggle-pause", args: [] } };
   }
   if (key === "m") return { kind: "command", command: { name: "toggle-mute", args: [] } };
-  // `C`, as it arrives with or without Shift held. Without a crop script it
-  // is not the page's key, except that a select must not type-ahead on it.
-  if (ctx.crop === null) return ctx.focus === "select" ? SWALLOW : PASS;
+  // `C`, as it arrives with or without Shift held.
+  if (ctx.crop === null) return PASS;
   if (ctx.crop === "measuring") return SWALLOW;
   return { kind: "command", command: { name: "toggle-autocrop", args: [] } };
 }
@@ -364,17 +395,19 @@ export type BarInput = {
   paused: boolean | null;
   /** Whether a control in the bar has keyboard focus. */
   focusInBar: boolean;
+  /** An open track list keeps both the bar and pointer visible. */
+  listOpen: boolean;
 };
 
 /** Whether the bar shows: while paused or focused, else for a while after activity. */
 export function barShown(input: BarInput): boolean {
-  if (input.paused !== false || input.focusInBar) return true;
+  if (input.paused !== false || input.focusInBar || input.listOpen) return true;
   return input.now - input.lastActivity < BAR_LINGER_MS;
 }
 
 /** When the bar should be looked at again, or null when nothing will hide it. */
 export function barHideAt(input: BarInput): number | null {
-  if (!barShown(input) || input.paused !== false || input.focusInBar) return null;
+  if (!barShown(input) || input.paused !== false || input.focusInBar || input.listOpen) return null;
   return input.lastActivity + BAR_LINGER_MS;
 }
 

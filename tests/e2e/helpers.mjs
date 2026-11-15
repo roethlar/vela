@@ -11,15 +11,31 @@ import { MpvIpc, mpvSocketSnapshot, waitForNewMpvSocket } from './mpv.mjs';
 import { testOnlyRoute } from './proof.mjs';
 import { acceptedConnections } from './judge.mjs';
 
-// Generate 10s test clips into <configRoot>/media; returns the dir. The
-// clips back the mock servers' Range-capable /Videos/{id}/stream routes.
-export function makeClips(configRoot, clipNames) {
+// Generate 10s test clips into <configRoot>/media; returns the dir. With
+// withTracks, make 60s clips with two named audio tracks and one subtitle
+// (use a Matroska filename). These back the mock servers' stream routes.
+export function makeClips(configRoot, clipNames, { withTracks = false } = {}) {
   const mediaDir = path.join(configRoot, 'media');
   fs.mkdirSync(mediaDir, { recursive: true });
+  const seconds = withTracks ? 60 : 10;
+  const subtitles = path.join(mediaDir, 'tracks.srt');
+  if (withTracks) {
+    fs.writeFileSync(subtitles, '1\n00:00:00,000 --> 00:01:00,000\nTrack selection test\n');
+  }
   for (const name of clipNames) {
     const ff = spawnSync('ffmpeg', [
-      '-f', 'lavfi', '-i', 'testsrc=duration=10:size=320x180:rate=24',
-      '-f', 'lavfi', '-i', 'sine=frequency=440:duration=10',
+      '-f', 'lavfi', '-i', `testsrc=duration=${seconds}:size=320x180:rate=24`,
+      '-f', 'lavfi', '-i', `sine=frequency=440:duration=${seconds}`,
+      ...(withTracks ? [
+        '-f', 'lavfi', '-i', `sine=frequency=880:duration=${seconds}`,
+        '-i', subtitles,
+        '-map', '0:v:0', '-map', '1:a:0', '-map', '2:a:0', '-map', '3:s:0',
+        '-metadata:s:a:0', 'title=Main audio', '-metadata:s:a:0', 'language=eng',
+        '-metadata:s:a:1', 'title=Commentary', '-metadata:s:a:1', 'language=deu',
+        '-metadata:s:s:0', 'title=Test subtitles', '-metadata:s:s:0', 'language=eng',
+        '-disposition:a:0', 'default', '-disposition:a:1', '0', '-disposition:s:0', '0',
+        '-c:s', 'srt',
+      ] : []),
       '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-shortest',
       path.join(mediaDir, name),
     ], { stdio: 'ignore' });

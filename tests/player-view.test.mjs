@@ -118,10 +118,10 @@ test('the player view tells the backend where it is, and drives the play only th
 test('every key reaches the key map first, and the view acts on what it says', () => {
   // Capture phase on the window while the view is mounted, removed with it.
   assert.match(view, /onMount\(\(\) => \{[\s\S]*?window\.addEventListener\("keydown", onkey, true\);[\s\S]*?return \(\) => \{[\s\S]*?window\.removeEventListener\("keydown", onkey, true\);/);
-  assert.equal(view.split('addEventListener(').length - 1, 1);
+  assert.equal(view.split('addEventListener(').length - 1, 2, 'keys and outside pointer presses');
   assert.match(
     view,
-    /function onkey\(event: KeyboardEvent\) \{\s+activity\(\);\s+const action = keyAction\(event, \{\s+focus: focusKind\(document\.activeElement\),\s+hasState: player !== null,\s+stopped,\s+skip: player\?\.skip != null,\s+crop: player\?\.crop \?\? null,\s+fullscreen,\s+\}\);\s+if \(action\.kind === "pass"\) return;\s+event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+if \(action\.kind === "command"\) send\(action\.command\);\s+else if \(action\.kind === "fullscreen"\) onfullscreen\(action\.on\);\s+\}/,
+    /function onkey\(event: KeyboardEvent\) \{\s+activity\(\);\s+const action = keyAction\(event, \{\s+focus: focusKind\(document\.activeElement\),\s+listOpen: openList !== null,\s+hasState: player !== null,\s+stopped,\s+skip: player\?\.skip != null,\s+crop: player\?\.crop \?\? null,\s+fullscreen,\s+\}\);\s+if \(action\.kind === "pass"\) return;\s+event\.preventDefault\(\);\s+event\.stopPropagation\(\);\s+if \(action\.kind === "command"\) send\(action\.command\);\s+else if \(action\.kind === "fullscreen"\) onfullscreen\(action\.on\);\s+else if \(action\.kind === "track-list"\) actOnTrackList\(action\.action\);\s+\}/,
   );
   // Nothing is sent after stop, and stopping tells the page.
   assert.match(
@@ -131,33 +131,35 @@ test('every key reaches the key map first, and the view acts on what it says', (
   assert.equal([...view.matchAll(/stopped = true/g)].length, 1);
 });
 
-test("the controls keep focus off buttons only, and the view takes only its own play's state", () => {
+test("the controls return focus to the view, and the view takes only its own play's state", () => {
   const markup = view.slice(view.indexOf('</script>'), view.indexOf('<style>'));
   const buttons = openingTags(markup, 'button');
-  // Skip, play/pause, mute, crop, fullscreen, close.
-  assert.equal(buttons.length, 6, `the view's buttons: ${buttons.length}`);
+  // Skip, play/pause, mute, Audio, Subtitles, crop, fullscreen, close.
+  assert.equal(buttons.length, 8, `the view's buttons: ${buttons.length}`);
   for (const button of buttons) {
     assert.ok(button.endsWith('>') && !button.endsWith('=>'), button);
     assert.match(button, /onmousedown=\{keepFocus\}/, button);
     assert.match(button, /aria-label=|class="skip"/, `${button} has a name`);
   }
-  const others = [...openingTags(markup, 'input'), ...openingTags(markup, 'select')];
-  assert.equal(others.length, 4, 'the seek bar, the volume, and the two track lists');
+  assert.equal(openingTags(markup, 'select').length, 0, 'no native track popups');
+  const others = openingTags(markup, 'input');
+  assert.equal(others.length, 2, 'the seek bar and the volume');
   for (const other of others) {
     assert.doesNotMatch(other, /onmousedown/, `${other} keeps its pointer press`);
   }
-  // And nowhere else: one per button.
-  assert.equal(markup.split('onmousedown').length - 1, buttons.length);
+  // The list options keep focus on their listbox too.
+  const option = openingTags(markup, 'div').find((tag) => tag.includes('role="option"'));
+  assert.match(option, /onmousedown=\{keepFocus\}/);
+  assert.equal(markup.split('onmousedown').length - 1, buttons.length + 1);
   assert.match(view, /function keepFocus\(event: MouseEvent\) \{\s+event\.preventDefault\(\);\s+\}/);
-  // A select hands focus back on change; a range when the pointer moved it.
-  assert.equal(markup.split('onchange={audioChange}').length - 1, 1);
+  // Every list close hands focus back; a range only when the pointer moved it.
   assert.match(
     view,
-    /function audioChange\(event: Event\) \{\s+const value = [^;]+;\s+send\(\{ name: "set-audio-track", args: \[value\] \}\);\s+giveFocusBack\(\);\s+\}/,
-  );
-  assert.match(
-    view,
-    /function subtitleChange\(event: Event\) \{\s+const value = [^;]+;\s+send\(\{ name: "set-subtitle-track", args: \[[^\]]+\] \}\);\s+giveFocusBack\(\);\s+\}/,
+    shape(`function closeTrackList() {
+      openList = null;
+      activity();
+      giveFocusBack();
+    }`),
   );
   assert.match(
     view,
@@ -204,8 +206,10 @@ test("the controls keep focus off buttons only, and the view takes only its own 
     /function rangeDone\(input: HTMLInputElement\) \{\s+if \(pointerRange === input\) \{\s+pointerRange = null;\s+giveFocusBack\(\);\s+\}\s+\}/,
   );
   assert.match(view, /function giveFocusBack\(\) \{\s+root\.focus\(\);\s+\}/);
-  assert.match(view, /function selectBlur\(event: FocusEvent\) \{\s+if \(event\.relatedTarget === null\) giveFocusBack\(\);\s+\}/);
-  assert.equal(markup.split('onblur={selectBlur}').length - 1, 2, 'both selects');
+  const list = openingTags(markup, 'div').find((tag) => tag.includes('role="listbox"'));
+  assert.match(list, /onfocusout=\{trackListFocusOut\}/);
+  assert.match(view, /window\.addEventListener\("pointerdown", outsideTrackList, true\)/);
+  assert.match(view, /window\.removeEventListener\("pointerdown", outsideTrackList, true\)/);
   // Close stops this view's play.
   assert.match(markup, /class="close"[\s\S]*?onclick=\{\(\) => send\(\{ name: "stop", args: \[\] \}\)\}/);
   // The skip button sends the script's skip, and nothing else.
@@ -234,8 +238,33 @@ test('each control is wired to what it shows and what it sends', () => {
   // "Off" is "no"; a track is its number.
   assert.match(
     view,
-    shape(`send({ name: "set-subtitle-track", args: [value === "no" ? "no" : Number(value)] });`),
+    shape(`function chooseTrack(id: TrackId) {
+      if (openList === "audio" && typeof id === "number") {
+        send({ name: "set-audio-track", args: [id] });
+      } else if (openList === "subtitles") {
+        send({ name: "set-subtitle-track", args: [id] });
+      }
+      closeTrackList();
+    }`),
   );
+  assert.match(view, shape('{ id: "no", title: "Off", lang: "", selected: !selectedSubtitle }'));
+  for (const [kind, label, disabled] of [
+    ['audio', 'Audio track', '!player || player.audioTracks.length < 2'],
+    ['subtitles', 'Subtitles', '!player || player.subtitleTracks.length === 0'],
+  ]) {
+    const button = tag('button', kind);
+    assert.match(button, shape(`aria-label="${label}"`));
+    assert.match(button, shape('aria-haspopup="listbox"'));
+    assert.match(button, shape(`aria-expanded={openList === "${kind}"}`));
+    assert.match(button, shape(`disabled={${disabled}}`));
+    assert.match(button, shape(`onclick={() => toggleTrackList("${kind}")}`));
+    assert.match(button, /title=\{(?:audio|subtitle)Label\}/);
+  }
+  assert.match(markup, shape('{#each listTracks as track (track.id)}'));
+  const option = tag('div', 'track-option');
+  assert.match(option, shape('role="option" aria-selected={track.selected}'));
+  assert.match(option, shape('onclick={() => chooseTrack(track.id)}'));
+  assert.match(markup, shape('{track.selected ? "✓" : ""}'));
   // The crop control: only with a crop script, and not while measuring.
   assert.match(markup, shape('{#if player && player.crop !== null} <button class="crop"'));
   assert.match(tag('button', 'crop'), /disabled=\{player\.crop === "measuring"\}/);
@@ -278,8 +307,9 @@ test('the bar and the pointer hide by the rule, and a hidden control takes no cl
   assert.match(bar, /class:hidden=\{!shown\}/);
   assert.match(
     view,
-    /let shown = \$derived\(\s+barShown\(\{ now, lastActivity, paused: player\?\.paused \?\? null, focusInBar \}\),\s+\);/,
+    /let shown = \$derived\(\s+barShown\(\{ now, lastActivity, paused: player\?\.paused \?\? null, focusInBar, listOpen: openList !== null \}\),\s+\);/,
   );
+  assert.match(view, shape('barHideAt({ now, lastActivity, paused: player?.paused ?? null, focusInBar, listOpen: openList !== null })'));
   // Faded out, then out of reach: `visibility: hidden` after the fade.
   assert.match(
     view,

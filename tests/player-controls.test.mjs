@@ -20,6 +20,7 @@ import {
   keyAction,
   nextPlayerState,
   nextSeekBar,
+  nextTrackHighlight,
   seekBarValue,
   skipLabel,
   spokenTime,
@@ -116,6 +117,7 @@ const key = (k, extra = {}) => ({
 });
 const ctx = (extra = {}) => ({
   focus: 'none',
+  listOpen: false,
   hasState: true,
   stopped: false,
   skip: false,
@@ -176,9 +178,9 @@ test('keys with Ctrl, Alt or Meta, Unidentified keys and bare modifiers are not 
     }
   }
   // Typing a shifted C delivers `C` and then a key named Unidentified.
-  assert.deepEqual(keyAction(key('Unidentified'), ctx({ focus: 'select' })), PASS);
+  assert.deepEqual(keyAction(key('Unidentified'), ctx({ listOpen: true })), PASS);
   for (const k of ['Shift', 'Control', 'Alt', 'Meta', 'AltGraph', 'CapsLock']) {
-    assert.deepEqual(keyAction(key(k), ctx({ focus: 'select' })), PASS, k);
+    assert.deepEqual(keyAction(key(k), ctx({ listOpen: true })), PASS, k);
   }
 });
 
@@ -195,15 +197,6 @@ test('a focused control keeps its own keys and no others', () => {
   assert.deepEqual(keyAction(key(' '), ctx({ focus: 'button' })), PASS);
   assert.deepEqual(keyAction(key('Enter'), ctx({ focus: 'button' })), PASS);
   assert.deepEqual(keyAction(key('ArrowLeft'), ctx({ focus: 'button' })), command('seek-relative', [-5]));
-  // A select: Space, Enter and Tab; never a letter (type-ahead would pick a
-  // track) and never an arrow (it would step the choice).
-  assert.deepEqual(keyAction(key(' '), ctx({ focus: 'select' })), PASS);
-  assert.deepEqual(keyAction(key('Enter'), ctx({ focus: 'select' })), PASS);
-  assert.deepEqual(keyAction(key('Tab'), ctx({ focus: 'select' })), PASS);
-  assert.deepEqual(keyAction(key('ArrowDown'), ctx({ focus: 'select' })), command('seek-relative', [-60]));
-  assert.deepEqual(keyAction(key('f'), ctx({ focus: 'select' })), { kind: 'fullscreen', on: true });
-  assert.deepEqual(keyAction(key('x'), ctx({ focus: 'select' })), SWALLOW);
-  assert.deepEqual(keyAction(key('C'), ctx({ focus: 'select' })), SWALLOW);
   // The volume slider: the arrows step it.
   for (const k of ['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown']) {
     assert.deepEqual(keyAction(key(k), ctx({ focus: 'volume' })), PASS, k);
@@ -213,7 +206,7 @@ test('a focused control keeps its own keys and no others', () => {
   assert.deepEqual(keyAction(key('ArrowLeft'), ctx({ focus: 'seek' })), command('seek-relative', [-5]));
   assert.deepEqual(keyAction(key('ArrowUp'), ctx({ focus: 'seek' })), command('seek-relative', [60]));
   // f, m, q, C and Escape everywhere.
-  for (const focus of ['button', 'select', 'volume', 'seek']) {
+  for (const focus of ['button', 'volume', 'seek']) {
     assert.deepEqual(keyAction(key('m'), ctx({ focus })), command('toggle-mute'), focus);
     assert.deepEqual(keyAction(key('q'), ctx({ focus })), command('stop'), focus);
     assert.deepEqual(keyAction(key('Escape'), ctx({ focus })), command('stop'), focus);
@@ -230,8 +223,8 @@ test("the key map is told which of the view's controls has focus", () => {
   assert.equal(focusKindOf(null), 'none');
   assert.equal(focusKindOf(element('BUTTON', 'playpause')), 'button');
   assert.equal(focusKindOf(element('BUTTON', 'close')), 'button');
-  assert.equal(focusKindOf(element('SELECT', 'audio')), 'select');
-  assert.equal(focusKindOf(element('SELECT', 'subtitles')), 'select');
+  assert.equal(focusKindOf(element('BUTTON', 'audio')), 'button');
+  assert.equal(focusKindOf(element('BUTTON', 'subtitles')), 'button');
   assert.equal(focusKindOf(element('INPUT', 'volume')), 'volume');
   assert.equal(focusKindOf(element('INPUT', 'seek')), 'seek');
   assert.equal(focusKindOf(element('DIV', 'player')), 'none');
@@ -263,6 +256,67 @@ test('after stop nothing acts', () => {
   assert.deepEqual(keyAction(key('Escape'), { ...gone, fullscreen: true }), SWALLOW);
 });
 
+test('an open track list owns navigation, selection and Escape before focused controls', () => {
+  const actions = {
+    ArrowUp: 'previous', ArrowDown: 'next', Home: 'first', End: 'last',
+    Enter: 'choose', ' ': 'choose', Escape: 'close',
+  };
+  for (const focus of ['none', 'button', 'seek', 'volume']) {
+    for (const fullscreen of [false, true]) {
+      const open = ctx({ focus, fullscreen, listOpen: true, skip: true });
+      for (const [k, action] of Object.entries(actions)) {
+        assert.deepEqual(keyAction(key(k), open), { kind: 'track-list', action }, `${focus}: ${k}`);
+      }
+      assert.deepEqual(keyAction(key('Tab'), open), PASS, 'Tab may move focus out');
+      for (const k of ['ArrowUp', 'ArrowDown', 'Home', 'End']) {
+        assert.deepEqual(keyAction(key(k, { repeat: true }), open), {
+          kind: 'track-list', action: actions[k],
+        });
+      }
+      for (const k of ['Enter', ' ', 'Escape']) {
+        assert.deepEqual(keyAction(key(k, { repeat: true }), open), SWALLOW);
+      }
+    }
+  }
+});
+
+test('an open track list suppresses player shortcuts except q', () => {
+  for (const crop of [null, 'off', 'on', 'measuring']) {
+    const open = ctx({ listOpen: true, crop, fullscreen: true, skip: true });
+    for (const k of ['ArrowLeft', 'ArrowRight', 'm', 'f', 'C', 'x']) {
+      assert.deepEqual(keyAction(key(k), open), SWALLOW, k);
+    }
+    assert.deepEqual(keyAction(key('q'), open), command('stop'));
+    assert.deepEqual(keyAction(key('q', { repeat: true }), open), SWALLOW);
+    assert.deepEqual(keyAction(key('q'), { ...open, stopped: true }), SWALLOW);
+  }
+});
+
+test('closing a track list restores the ordinary Escape and Space rules', () => {
+  for (const fullscreen of [false, true]) {
+    const open = ctx({ listOpen: true, fullscreen });
+    assert.deepEqual(keyAction(key('Escape'), open), { kind: 'track-list', action: 'close' });
+    const closed = { ...open, listOpen: false };
+    assert.deepEqual(keyAction(key('Escape', { repeat: true }), closed), SWALLOW);
+    assert.deepEqual(keyAction(key('Escape'), closed), fullscreen
+      ? { kind: 'fullscreen', on: false } : command('stop'));
+    assert.deepEqual(keyAction(key(' '), closed), command('toggle-pause'));
+  }
+});
+
+test('track highlights move within the live list without selecting a track', () => {
+  const ids = ['no', 4, 7];
+  assert.equal(nextTrackHighlight(ids, 4, 'previous'), 'no');
+  assert.equal(nextTrackHighlight(ids, 4, 'next'), 7);
+  assert.equal(nextTrackHighlight(ids, 4, 'first'), 'no');
+  assert.equal(nextTrackHighlight(ids, 'no', 'last'), 7);
+  assert.equal(nextTrackHighlight(ids, 'no', 'previous'), 'no');
+  assert.equal(nextTrackHighlight(ids, 7, 'next'), 7);
+  assert.equal(nextTrackHighlight([7, 4, 'no'], 4, 'next'), 'no', 'use the current order and track ID');
+  assert.equal(nextTrackHighlight([], null, 'next'), null);
+  assert.deepEqual(ids, ['no', 4, 7]);
+});
+
 // ---------------------------------------------------------------------------
 // Time.
 
@@ -292,7 +346,7 @@ test('time reads m:ss, h:mm:ss from an hour, and --:-- without a duration', () =
 // The bar.
 
 test('the bar hides three seconds after the last activity, only while playing', () => {
-  const at = (now, extra = {}) => ({ now, lastActivity: 1000, paused: false, focusInBar: false, ...extra });
+  const at = (now, extra = {}) => ({ now, lastActivity: 1000, paused: false, focusInBar: false, listOpen: false, ...extra });
   assert.equal(barShown(at(1000)), true);
   assert.equal(barShown(at(3999)), true);
   assert.equal(barShown(at(4000)), false);
@@ -305,6 +359,17 @@ test('the bar hides three seconds after the last activity, only while playing', 
   }
   // Activity brings it back.
   assert.equal(barShown(at(60_000, { lastActivity: 59_000 })), true);
+});
+
+test('an open track list keeps the bar shown with no hide deadline', () => {
+  for (const now of [1000, 4000, 60_000, 3_600_000]) {
+    const open = { now, lastActivity: 1000, paused: false, focusInBar: false, listOpen: true };
+    assert.equal(barShown(open), true);
+    assert.equal(barHideAt(open), null);
+    const closed = { ...open, listOpen: false };
+    assert.equal(barShown(closed), now < 4000);
+    assert.equal(barHideAt(closed), now < 4000 ? 4000 : null);
+  }
 });
 
 // ---------------------------------------------------------------------------
