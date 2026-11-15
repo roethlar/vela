@@ -67,6 +67,50 @@ share an implementation, and it has been exercised against Jellyfin only. It
 may work on Emby; nothing here asserts that it does. Please open an issue with
 what you see if you run Emby — a report is more useful than a guess.
 
+## Playing in Vela's own window (experimental)
+
+Settings → Player → Video player chooses where videos play:
+
+- **mpv's own window** (the default): Vela starts the mpv installed on your
+  system, in a window of its own. The rest of this page describes that
+  player unless it says otherwise.
+- **Vela's window (experimental)**: the video plays inside Vela's window,
+  through a copy of mpv's library that comes with Vela. This is the embedded
+  player.
+
+The embedded player runs on Linux in a Wayland session, and not yet with the
+NVIDIA proprietary driver. A change of player takes effect the next time Vela
+starts. Whenever the embedded player cannot be used, the video plays in mpv's
+own window instead and one line on screen says why; Settings shows the reason
+under the choice.
+
+It has its own control bar over the picture (pause, seeking, volume, audio
+and subtitle tracks, cropping, full screen, close) and a skip button for
+intros, credits and commercials. Its keys are `Space` (pause, or skip while
+the skip button shows), the arrow keys (5 and 60 seconds), `m`, `f`, `C` for
+cropping, `q` to close, and `Escape`, which leaves full screen and otherwise
+closes the player. Full screen is Vela's own window going full screen, and it
+stays that way from one video to the next.
+
+What is different from mpv's own window, and why it is marked experimental:
+
+- The picture is drawn by a different mpv renderer (`gpu`, where mpv's own
+  window uses `gpu-next`). HDR is passed through on a display and compositor
+  that offer it, but it can look different.
+- Black-bar cropping is done by a script of Vela's own, and it does not crop
+  HDR video.
+- With "Use my own mpv config" on, it applies your `mpv.conf` but not your
+  mpv scripts, per-script option files or key bindings.
+- The Player window setting below is about mpv's own window and does not
+  apply to it.
+- Its library has to be in the package you installed. A package built with
+  `scripts/build.sh --with-libmpv` carries it
+  ([docs/development.md](development.md#packaging-the-set)); the released
+  packages do not yet. Settings says so when the library is missing.
+
+The embedded player's library is an LGPL build of mpv and of the libraries it
+needs, shipped as separate shared libraries with their licence texts.
+
 ## Player behavior notes
 
 By default Vela uses a predictable `--no-config` mpv profile. On macOS, that

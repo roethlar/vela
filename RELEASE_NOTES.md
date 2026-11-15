@@ -23,6 +23,15 @@
   (mpv and your own options decide).
 - With the Prefer Compatible source policy, choose the copy for the screen the
   video will open on, which is now the screen of the previous player window.
+- Add an experimental second player that shows the video inside Vela's own
+  window, with Vela's own controls: Settings → Player → Video player. It runs
+  on Linux in a Wayland session, takes effect after Vela is restarted, and is
+  off by default; mpv's own window stays the default everywhere. Whenever it
+  cannot be used, the video plays in mpv's own window and a line on screen
+  says why. It needs its mpv library in the package: a package built with
+  `scripts/build.sh --with-libmpv` carries it, the released packages do not
+  yet, and Settings says so when it is missing. Details are in
+  `docs/usage.md`.
 - Going back to an earlier Vela after playing anything in this version stops
   at Settings recovery. The player window is saved in `config.json` after the
   first video you play, even if you never open the new setting, and Vela

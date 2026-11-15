@@ -111,10 +111,12 @@ place after it was found.
 
 ## The shipped libmpv set
 
-This is build infrastructure for an embedded player that is still in
-development. No released Vela loads it; playback runs the system's `mpv`
-program as described under Architecture. A development build can try the
-embedded player: see "Trying the embedded player" below.
+This is the library behind the experimental embedded player, which
+Settings → Player → Video player offers. No released package carries it yet,
+so by default playback runs the system's `mpv` program as described under
+Architecture. A package you build yourself can carry it, and a development
+build can be pointed at it: see "Trying the embedded player" and "Packaging
+the set" below.
 
 The embedded player will not use whichever mpv library a machine happens to
 have. Vela builds one pinned set of libraries (mpv, FFmpeg, libplacebo,
@@ -179,14 +181,13 @@ packaging/libmpv/check-in-container.sh registry.fedoraproject.org/fedora:latest
 
 ### Trying the embedded player
 
-Experimental, Linux on Wayland only, and not offered anywhere in the app:
-there is no Settings control for it and no released package ships its
-library. A package you build yourself can carry it; see "Packaging the set"
-below. The plan and its state are in `.agents/plans/embedded-player.md`.
+Experimental and Linux on Wayland only. Settings → Player → Video player
+offers it, and says why when it cannot be used; no released package ships its
+library yet. A package you build yourself can carry it; see "Packaging the
+set" below. The plan and its state are in `.agents/plans/embedded-player.md`.
 
 1. Build the set (above), or download CI's.
-2. Add `"player": "embedded"` to `~/.config/vela/config.json`.
-3. Start a development build with the set's directory named:
+2. Start a development build with the set's directory named:
 
    ```bash
    VELA_LIBMPV_DIR="$PWD/.libmpv/out/libmpv" npm run tauri dev
@@ -194,6 +195,10 @@ below. The plan and its state are in `.agents/plans/embedded-player.md`.
 
    Only a development build reads that variable. A release build loads the
    library from its own resource directory and nowhere else.
+3. In Settings → Player → Video player choose "Vela's window
+   (experimental)", save, and restart Vela. The choice is stored as
+   `"player": "embedded"` in `~/.config/vela/config.json`; choosing mpv's own
+   window removes the field.
 
 The setting is read when Vela starts, because it decides how the window is
 created: with `"player": "embedded"` the window is transparent, so that video
